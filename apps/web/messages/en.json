@@ -385,6 +385,10 @@
       "resultsIn": "Results for “{query}” in {category}"
     },
     "badges": {
+      "claimed": "Claimed by owner",
+      "claimedTitle": "A verified owner of this server manages its listing on SourceWeft",
+      "deprecated": "Deprecated",
+      "deprecatedTitle": "The owner says this server is no longer maintained",
       "verification": {
         "official": "Official",
         "verified": "Verified",
@@ -472,6 +476,9 @@
       }
     },
     "detail": {
+      "documentation": "Documentation",
+      "claimLink": "Do you publish this server? Claim it",
+      "manageListingLink": "Manage this listing",
       "metaFallback": "MCP Server",
       "metaTitle": "{name} MCP Server",
       "metaDescriptionOverview": "{name}: {summary}",
@@ -3817,6 +3824,139 @@
       "report": {
         "description": "Tell the SourceWeft market admins about a problem with this skill: a copied work, unsafe behavior, spam, or something broken."
       }
+    }
+  },
+  "dashboardMcpClaim": {
+    "page": {
+      "title": "Claim an MCP server",
+      "back": "Back to MCP servers",
+      "intro": "If you publish this server, claim it to manage how it appears on SourceWeft: its logo, descriptions, links, deprecation notice and tool list.",
+      "missingIdentifier": "Open this page from a server's public page: it needs the server's identifier.",
+      "signedOut": "Sign in to claim a server.",
+      "notFound": "No server on SourceWeft has this identifier.",
+      "loadFailed": "The claim could not be loaded.",
+      "retry": "Retry",
+      "claimedByYou": "You are a verified owner of this server.",
+      "claimedBySomeone": "Another owner has already claimed this server. A market admin can review a claim that looks wrong.",
+      "methodsTitle": "Prove you publish this server",
+      "noMethods": "This entry is published under neither a GitHub account nor a domain, so it cannot be claimed here yet.",
+      "github": {
+        "title": "With your GitHub account",
+        "body": "For a server published under a GitHub account or organization: we check that your linked GitHub account is that account, or an admin or owner of that organization. Nothing is written to GitHub.",
+        "owner": "Published under GitHub account {owner}.",
+        "action": "Claim with GitHub account",
+        "notLinked": "Link the GitHub account that publishes this server first.",
+        "link": "Link GitHub account",
+        "orgScope": "To check your role in the organization, SourceWeft needs permission to read your organization memberships (read:org). Grant it, then claim again.",
+        "grantOrg": "Grant organization read access"
+      },
+      "domain": {
+        "title": "With your domain",
+        "body": "For a server published under a domain: publish a token we issue, either in a DNS TXT record or at a well-known URL on the domain. The token is tied to you and this server and stays valid for seven days.",
+        "domain": "Domain: {domain}",
+        "dns": "DNS TXT record",
+        "wellKnown": "Well-known file"
+      },
+      "instructions": {
+        "title": "Publish this token",
+        "onceNote": "Copy the token now. It is shown only this once and cannot be retrieved later; if you lose it, start a new claim.",
+        "dnsTitle": "Add a DNS TXT record",
+        "wellKnownTitle": "Serve a well-known file",
+        "recordName": "Record name",
+        "recordValue": "Record value",
+        "url": "URL",
+        "body": "Exact body",
+        "expires": "Valid until {date}.",
+        "dnsHint": "DNS changes can take a while to propagate; verify once the record is visible.",
+        "verify": "Verify now",
+        "copy": "Copy",
+        "copied": "Copied",
+        "copyFailed": "Copy failed"
+      },
+      "claims": {
+        "title": "Your claims",
+        "none": "You have not started a claim on this server yet.",
+        "tokenHidden": "The token was shown when the claim started and cannot be shown again. If you lost it, start a new claim.",
+        "expires": "Expires {date}",
+        "expired": "Expired {date}",
+        "lastError": "Last attempt: {error}",
+        "verify": "Verify",
+        "method": {
+          "github": "GitHub account",
+          "dns_txt": "DNS TXT record",
+          "well_known": "Well-known file"
+        },
+        "status": {
+          "pending": "Pending",
+          "verified": "Verified",
+          "revoked": "Revoked"
+        }
+      },
+      "toasts": {
+        "verified": "Server claimed. Its listing is now yours to manage.",
+        "started": "Claim started. Publish the token, then verify.",
+        "stillPending": "The token was not found yet. Check the record or file and try again."
+      }
+    },
+    "owner": {
+      "title": "Manage listing",
+      "intro": "What you set here is shown on the server's public page over the registry's data. Clear a field to show the registry's value again.",
+      "form": {
+        "iconUrl": "Logo URL",
+        "summary": "Short description",
+        "summaryHint": "Up to 300 characters; shown in cards and the page header.",
+        "description": "Long description",
+        "descriptionHint": "Up to 5,000 characters; shown in the Overview.",
+        "documentationUrl": "Documentation URL",
+        "homepageUrl": "Homepage URL",
+        "repoUrl": "Repository URL",
+        "deprecated": "Mark as deprecated",
+        "deprecatedHint": "Tells visitors this server is no longer maintained. It stays listed.",
+        "urlInvalid": "Enter a full URL starting with http:// or https://.",
+        "tooLong": "At most {max} characters.",
+        "save": "Save",
+        "saved": "Listing saved.",
+        "saveFailed": "The listing could not be saved."
+      },
+      "tools": {
+        "title": "Tool list",
+        "none": "No owner-submitted tool list. The page shows the tools the registry or a probe found.",
+        "count": "{count, plural, one {1 tool} other {# tools}} submitted {date}.",
+        "cliHint": "Submit the list from your own machine with the SourceWeft CLI. The commands below connect to your server with your credentials there; credentials never reach SourceWeft, only the tool list does.",
+        "remove": "Remove tool list",
+        "confirmTitle": "Remove the submitted tool list?",
+        "confirmBody": "The page goes back to showing the tools the registry or a probe found. You can submit a list again from the CLI.",
+        "confirm": "Remove",
+        "cancel": "Cancel",
+        "removed": "Tool list removed.",
+        "removeFailed": "The tool list could not be removed."
+      },
+      "revoke": {
+        "action": "Give up claim",
+        "hint": "Your corrections stay stored but stop being shown until the server is claimed again.",
+        "confirmTitle": "Give up your claim on this server?",
+        "confirmBody": "The “Claimed by owner” mark comes off {name} and your corrections stop being shown. You can claim it again later.",
+        "confirm": "Give up claim",
+        "cancel": "Cancel",
+        "revoked": "Claim given up.",
+        "revokeFailed": "The claim could not be given up."
+      }
+    },
+    "errors": {
+      "MCP_CLAIM_ENTRY_NOT_FOUND": "No server on SourceWeft has this identifier.",
+      "MCP_CLAIM_METHOD_UNAVAILABLE": "This server cannot be claimed that way.",
+      "MCP_CLAIM_GITHUB_NOT_LINKED": "Link the GitHub account that publishes this server first.",
+      "MCP_CLAIM_GITHUB_ACCOUNT_MISMATCH": "Your linked GitHub account is not the one this server is published under.",
+      "MCP_CLAIM_GITHUB_ORG_ROLE": "Your linked GitHub account is a member of the organization but not an admin or owner of it.",
+      "MCP_CLAIM_GITHUB_ORG_SCOPE": "SourceWeft cannot read your organization role yet. Grant organization read access and try again.",
+      "MCP_CLAIM_GITHUB_UNAVAILABLE": "GitHub could not be reached. Try again in a moment.",
+      "MCP_CLAIM_NOT_FOUND": "This claim was not found.",
+      "MCP_CLAIM_NOT_PENDING": "This claim is no longer pending.",
+      "MCP_CLAIM_EXPIRED": "This claim's token has expired. Start a new claim.",
+      "MCP_CLAIM_TOKEN_NOT_FOUND": "The token was not found at the record or URL, or does not match. DNS changes can take time to propagate; try again later.",
+      "MCP_CLAIM_LOOKUP_FAILED": "The DNS record or site could not be reached. Try again in a moment.",
+      "MCP_CLAIM_REQUIRED": "Only a verified owner of this server can do this.",
+      "fallback": "Something went wrong. Try again."
     }
   },
   "dashboardSkillsClaim": {

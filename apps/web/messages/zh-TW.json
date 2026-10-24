@@ -385,6 +385,10 @@
       "resultsIn": "在 {category} 中「{query}」的搜尋結果"
     },
     "badges": {
+      "claimed": "擁有者已認領",
+      "claimedTitle": "此服務的已驗證擁有者在 SourceWeft 上管理其列表資訊",
+      "deprecated": "已棄用",
+      "deprecatedTitle": "擁有者表示此服務已不再維護",
       "verification": {
         "official": "官方",
         "verified": "已驗證",
@@ -472,6 +476,9 @@
       }
     },
     "detail": {
+      "documentation": "文件",
+      "claimLink": "這個服務是你發布的嗎？認領它",
+      "manageListingLink": "管理此列表資訊",
       "metaFallback": "MCP 服務",
       "metaTitle": "{name} MCP 服務",
       "metaDescriptionOverview": "{name}：{summary}",
@@ -3817,6 +3824,139 @@
       "report": {
         "description": "向 SourceWeft 市場管理員回報此技能的問題：抄襲他人作品、存在不安全行為、垃圾內容或無法正常使用。"
       }
+    }
+  },
+  "dashboardMcpClaim": {
+    "page": {
+      "title": "認領 MCP 服務",
+      "back": "返回 MCP 服務",
+      "intro": "如果這個服務是你發布的，認領它即可管理它在 SourceWeft 上的呈現方式：圖示、描述、連結、棄用提示和工具列表。",
+      "missingIdentifier": "請從服務的公開頁面開啟此頁：它需要服務的識別碼。",
+      "signedOut": "請登入後再認領服務。",
+      "notFound": "SourceWeft 上沒有使用此識別碼的服務。",
+      "loadFailed": "無法載入認領資訊。",
+      "retry": "重試",
+      "claimedByYou": "你是此服務的已驗證擁有者。",
+      "claimedBySomeone": "另一位擁有者已認領此服務。如果認領看起來有誤，市場管理員可以進行複核。",
+      "methodsTitle": "證明你是此服務的發布者",
+      "noMethods": "此條目既不是以 GitHub 帳號發布，也不是以域名發布，因此暫時無法在此認領。",
+      "github": {
+        "title": "使用你的 GitHub 帳號",
+        "body": "適用於以 GitHub 帳號或組織發布的服務：我們會檢查你連結的 GitHub 帳號是否就是該帳號，或者是該組織的管理員或擁有者。不會向 GitHub 寫入任何內容。",
+        "owner": "以 GitHub 帳號 {owner} 發布。",
+        "action": "使用 GitHub 帳號認領",
+        "notLinked": "請先連結發布此服務的 GitHub 帳號。",
+        "link": "連結 GitHub 帳號",
+        "orgScope": "要檢查你在組織中的角色，SourceWeft 需要讀取你的組織成員身份的權限（read:org）。授予後再重新認領。",
+        "grantOrg": "授予組織讀取權限"
+      },
+      "domain": {
+        "title": "使用你的域名",
+        "body": "適用於以域名發布的服務：將我們簽發的權杖發布到 DNS TXT 記錄中，或該域名下的 well-known 地址。權杖與你和此服務綁定，有效期七天。",
+        "domain": "域名：{domain}",
+        "dns": "DNS TXT 記錄",
+        "wellKnown": "Well-known 檔案"
+      },
+      "instructions": {
+        "title": "發布此權杖",
+        "onceNote": "請立即複製權杖。它只顯示這一次，之後無法再次取得；如果遺失，請重新發起認領。",
+        "dnsTitle": "新增 DNS TXT 記錄",
+        "wellKnownTitle": "提供 well-known 檔案",
+        "recordName": "記錄名稱",
+        "recordValue": "記錄值",
+        "url": "URL",
+        "body": "檔案內容（需完全一致）",
+        "expires": "有效期至 {date}。",
+        "dnsHint": "DNS 變更可能需要一段時間才會生效；待記錄可見後再驗證。",
+        "verify": "立即驗證",
+        "copy": "複製",
+        "copied": "已複製",
+        "copyFailed": "複製失敗"
+      },
+      "claims": {
+        "title": "你的認領",
+        "none": "你還沒有對此服務發起認領。",
+        "tokenHidden": "權杖在發起認領時已顯示過，無法再次顯示。如果遺失，請重新發起認領。",
+        "expires": "{date} 到期",
+        "expired": "已於 {date} 過期",
+        "lastError": "上次嘗試：{error}",
+        "verify": "驗證",
+        "method": {
+          "github": "GitHub 帳號",
+          "dns_txt": "DNS TXT 記錄",
+          "well_known": "Well-known 檔案"
+        },
+        "status": {
+          "pending": "待驗證",
+          "verified": "已驗證",
+          "revoked": "已撤銷"
+        }
+      },
+      "toasts": {
+        "verified": "服務已認領，現在由你管理它的列表資訊。",
+        "started": "認領已發起。請發布權杖，然後進行驗證。",
+        "stillPending": "還沒有找到權杖。請檢查記錄或檔案後重試。"
+      }
+    },
+    "owner": {
+      "title": "管理列表資訊",
+      "intro": "你在此設定的內容會覆蓋註冊中心的資料，顯示在服務的公開頁面上。清空某個欄位即可恢復顯示註冊中心的值。",
+      "form": {
+        "iconUrl": "圖示 URL",
+        "summary": "簡短描述",
+        "summaryHint": "最多 300 個字元；顯示在卡片和頁面標題處。",
+        "description": "詳細描述",
+        "descriptionHint": "最多 5000 個字元；顯示在概覽中。",
+        "documentationUrl": "文件 URL",
+        "homepageUrl": "首頁 URL",
+        "repoUrl": "儲存庫 URL",
+        "deprecated": "標記為已棄用",
+        "deprecatedHint": "告知訪客此服務已不再維護。它仍會保留在列表中。",
+        "urlInvalid": "請輸入以 http:// 或 https:// 開頭的完整 URL。",
+        "tooLong": "最多 {max} 個字元。",
+        "save": "儲存",
+        "saved": "列表資訊已儲存。",
+        "saveFailed": "無法儲存列表資訊。"
+      },
+      "tools": {
+        "title": "工具列表",
+        "none": "沒有擁有者提交的工具列表。頁面顯示的是註冊中心或探測發現的工具。",
+        "count": "{count, plural, other {# 個工具}}，提交於 {date}。",
+        "cliHint": "請在你自己的機器上使用 SourceWeft CLI 提交列表。下面的命令會在本機用你的憑證連接到你的服務；憑證不會傳送到 SourceWeft，只有工具列表會。",
+        "remove": "移除工具列表",
+        "confirmTitle": "移除已提交的工具列表？",
+        "confirmBody": "頁面將恢復顯示註冊中心或探測發現的工具。你可以隨後通過 CLI 重新提交。",
+        "confirm": "移除",
+        "cancel": "取消",
+        "removed": "工具列表已移除。",
+        "removeFailed": "無法移除工具列表。"
+      },
+      "revoke": {
+        "action": "放棄認領",
+        "hint": "你的修改會繼續儲存，但在服務再次被認領之前不會顯示。",
+        "confirmTitle": "放棄對此服務的認領？",
+        "confirmBody": "{name} 的「擁有者已認領」標記將被移除，你的修改也不再顯示。之後你可以再次認領。",
+        "confirm": "放棄認領",
+        "cancel": "取消",
+        "revoked": "已放棄認領。",
+        "revokeFailed": "無法放棄認領。"
+      }
+    },
+    "errors": {
+      "MCP_CLAIM_ENTRY_NOT_FOUND": "SourceWeft 上沒有使用此識別碼的服務。",
+      "MCP_CLAIM_METHOD_UNAVAILABLE": "此服務不能以這種方式認領。",
+      "MCP_CLAIM_GITHUB_NOT_LINKED": "請先連結發布此服務的 GitHub 帳號。",
+      "MCP_CLAIM_GITHUB_ACCOUNT_MISMATCH": "你連結的 GitHub 帳號不是發布此服務的帳號。",
+      "MCP_CLAIM_GITHUB_ORG_ROLE": "你連結的 GitHub 帳號是該組織的成員，但不是管理員或擁有者。",
+      "MCP_CLAIM_GITHUB_ORG_SCOPE": "SourceWeft 還無法讀取你在組織中的角色。請授予組織讀取權限後重試。",
+      "MCP_CLAIM_GITHUB_UNAVAILABLE": "無法連接到 GitHub，請稍後重試。",
+      "MCP_CLAIM_NOT_FOUND": "找不到此認領。",
+      "MCP_CLAIM_NOT_PENDING": "此認領已不在待驗證狀態。",
+      "MCP_CLAIM_EXPIRED": "此認領的權杖已過期，請重新發起認領。",
+      "MCP_CLAIM_TOKEN_NOT_FOUND": "在記錄或 URL 處找不到權杖，或權杖不符。DNS 變更可能需要一段時間才會生效，請稍後重試。",
+      "MCP_CLAIM_LOOKUP_FAILED": "無法存取 DNS 記錄或站點，請稍後重試。",
+      "MCP_CLAIM_REQUIRED": "只有此服務的已驗證擁有者才能執行此操作。",
+      "fallback": "出了點問題，請重試。"
     }
   },
   "dashboardSkillsClaim": {

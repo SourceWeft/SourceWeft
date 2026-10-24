@@ -62,6 +62,8 @@ import {
   McpCardGrid,
   mcpCategoryLabel,
   mcpCategoryNames,
+  McpClaimedBadge,
+  McpDeprecatedBadge,
   mcpDetailSeoDescription,
   mcpPath,
   McpRuntimeBadge,
@@ -75,6 +77,7 @@ import {
   verificationLabel,
 } from "../_components/mcp-display";
 import { remoteMcpClientConfig } from "../_components/mcp-install";
+import { mcpClaimHref } from "../../../../lib/mcp-claims";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
@@ -427,6 +430,8 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
               <McpVerificationBadge item={item} />
+              {item.claimed ? <McpClaimedBadge /> : null}
+              {item.deprecated ? <McpDeprecatedBadge /> : null}
               <McpTransportBadge transport={manifest.transport} />
               <McpRuntimeBadge item={item} />
               {item.categories.map((category) => (
@@ -508,6 +513,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <ExternalTextLink href={homepageUrl}>
                   {t("homepage")}
                 </ExternalTextLink>
+                <ExternalTextLink href={manifest.documentationUrl}>
+                  {t("documentation")}
+                </ExternalTextLink>
                 <ExternalTextLink href={repoUrl}>
                   {t("repository")}
                 </ExternalTextLink>
@@ -515,6 +523,21 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   {t("source")}
                 </ExternalTextLink>
               </div>
+              {/* The publisher's way in (Issue #367, W7); members only, as
+                  the claim page needs a session anyway. */}
+              {authState.isSignedIn ? (
+                <p className="mt-4 border-t border-zinc-200 pt-3 text-xs dark:border-white/10">
+                  <LocaleLink
+                    className="text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
+                    data-testid="mcp-claim-link"
+                    href={mcpClaimHref(item.identifier)}
+                    prefetch={false}
+                    rel="nofollow"
+                  >
+                    {item.claimed ? t("manageListingLink") : t("claimLink")}
+                  </LocaleLink>
+                </p>
+              ) : null}
             </aside>
 
             <aside className="order-4 space-y-5 lg:order-none lg:sticky lg:top-20">
