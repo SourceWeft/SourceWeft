@@ -57,11 +57,11 @@ export type ShellInvocation = {
 export function shellInvocation(
   command: string,
   platform: NodeJS.Platform = process.platform,
-  comspec: string | undefined = process.env[COMSPEC_VARIABLE],
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): ShellInvocation {
   if (platform === "win32") {
     return {
-      file: comspec || "cmd.exe",
+      file: env[COMSPEC_VARIABLE] || "cmd.exe",
       args: ["/d", "/s", "/c", `"${command}"`],
       windowsVerbatimArguments: true,
     };

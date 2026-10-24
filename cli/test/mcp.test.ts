@@ -51,12 +51,12 @@ function listen(server: Server): Promise<string> {
 describe("shell invocation", () => {
   it("runs a command through sh -c on POSIX, unchanged", () => {
     const command = `"/opt/node dir/node" "/tmp/my server.js" --flag 'a b'`;
-    assert.deepEqual(shellInvocation(command, "linux", undefined), {
+    assert.deepEqual(shellInvocation(command, "linux", {}), {
       file: "sh",
       args: ["-c", command],
       windowsVerbatimArguments: false,
     });
-    assert.deepEqual(shellInvocation(command, "darwin", undefined), {
+    assert.deepEqual(shellInvocation(command, "darwin", {}), {
       file: "sh",
       args: ["-c", command],
       windowsVerbatimArguments: false,
@@ -70,7 +70,7 @@ describe("shell invocation", () => {
     const invocation = shellInvocation(
       command,
       "win32",
-      "C:\\Windows\\System32\\cmd.exe",
+      { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
     );
     assert.equal(invocation.file, "C:\\Windows\\System32\\cmd.exe");
     assert.deepEqual(invocation.args, ["/d", "/s", "/c", `"${command}"`]);
@@ -80,8 +80,8 @@ describe("shell invocation", () => {
   });
 
   it("falls back to cmd.exe when ComSpec is unset", () => {
-    assert.equal(shellInvocation("node s.js", "win32", undefined).file, "cmd.exe");
-    assert.equal(shellInvocation("node s.js", "win32", "").file, "cmd.exe");
+    assert.equal(shellInvocation("node s.js", "win32", {}).file, "cmd.exe");
+    assert.equal(shellInvocation("node s.js", "win32", { ComSpec: "" }).file, "cmd.exe");
   });
 });
 
