@@ -614,6 +614,8 @@
       "followRepo": "Follow the launch instructions in the <link>repository</link>.",
       "readmeHeading": "README",
       "toolsHeading": "Tools",
+      "toolsListedByOwner": "Tools listed by the owner",
+      "toolsListedByOwnerHint": "The server's verified owner submitted this list from their own session. SourceWeft shows it as provided and treats every tool as having unknown risk.",
       "versionsHeading": "Version history",
       "latest": "Latest",
       "serverDetails": "Server details",
@@ -3933,6 +3935,10 @@
       "retry": "Retry",
       "claimedByYou": "You are a verified owner of this server.",
       "claimedBySomeone": "Another owner has already claimed this server. A market admin can review a claim that looks wrong.",
+      "blocked": {
+        "title": "Claiming is closed for you on this server",
+        "body": "A SourceWeft admin blocked your account from claiming this server. If you think that was a mistake, write to support@sourceweft.com."
+      },
       "methodsTitle": "Prove you publish this server",
       "noMethods": "This entry is published under neither a GitHub account nor a domain, so it cannot be claimed here yet.",
       "github": {
@@ -3984,8 +3990,7 @@
         "status": {
           "pending": "Pending",
           "verified": "Verified",
-          "revoked": "Revoked",
-          "blocked": "Blocked by an admin"
+          "revoked": "Revoked"
         }
       },
       "toasts": {
@@ -4053,7 +4058,8 @@
       "MCP_CLAIM_LOOKUP_FAILED": "The DNS record or site could not be reached. Try again in a moment.",
       "MCP_CLAIM_REQUIRED": "Only a verified owner of this server can do this.",
       "fallback": "Something went wrong. Try again.",
-      "MCP_CLAIM_BLOCKED": "A SourceWeft admin revoked your claim on this server. Write to support@sourceweft.com if you believe that was wrong."
+      "MCP_CLAIM_BLOCKED": "A SourceWeft admin revoked your claim on this server. Write to support@sourceweft.com if you believe that was wrong.",
+      "MCP_CLAIM_RATE_LIMITED": "Too many attempts. Wait a little and try again."
     }
   },
   "dashboardSkillsClaim": {

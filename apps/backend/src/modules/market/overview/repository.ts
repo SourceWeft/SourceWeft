@@ -33,21 +33,22 @@ import {
 import type { McpOverviewAttempt, McpOverviewSourceRow } from "./source";
 
 // A verified owner's corrections (Issue #367, W7), joined in so the overview
-// reads the manifest as the catalog shows it; null without any. As on the
-// public reads, they count only while their author holds a verified claim.
+// reads the manifest as the catalog shows it. The row comes with who wrote
+// each field and who holds a verified claim; `effectiveOwnerOverrides` keeps
+// what those members wrote, as the public reads do.
 const ownerOverridesJoin = sql`left join ${marketMcpOwnerOverrides} oo
-  on oo.server_id = s.id
-  and exists (
-    select 1 from ${marketMcpClaims} oc
-    where oc.server_id = s.id
-      and oc.user_id = oo.updated_by
-      and oc.status = 'verified'
-  )`;
+  on oo.server_id = s.id`;
 const ownerOverridesColumn = sql`case when oo.server_id is not null then jsonb_build_object(
   'overridesJson', oo.overrides_json,
+  'authorsJson', oo.authors_json,
   'toolsJson', oo.tools_json,
   'toolsSubmittedAt', oo.tools_submitted_at,
-  'updatedAt', oo.updated_at
+  'updatedAt', oo.updated_at,
+  'verifiedUsers', (
+    select coalesce(jsonb_agg(oc.user_id), '[]'::jsonb)
+    from ${marketMcpClaims} oc
+    where oc.server_id = s.id and oc.status = 'verified'
+  )
 ) end`;
 
 /**

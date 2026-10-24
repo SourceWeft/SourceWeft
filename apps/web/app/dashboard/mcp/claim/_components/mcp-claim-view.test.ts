@@ -34,6 +34,7 @@ function overview(patch: Partial<McpClaimOverview>): McpClaimOverview {
     name: "Example",
     claimed: false,
     claimedByYou: false,
+    blocked: false,
     viewerClaims: [],
     methods: {
       github: { available: false, owner: null, reason: "not_github_entry" },
@@ -53,6 +54,15 @@ describe("claim page view", () => {
       kind: "claimedBySomeone",
     });
     expect(claimPageView(overview({}))).toEqual({ kind: "open" });
+  });
+
+  it("gives a blocked viewer the notice whatever else is true", () => {
+    expect(claimPageView(overview({ blocked: true }))).toEqual({
+      kind: "blocked",
+    });
+    expect(claimPageView(overview({ blocked: true, claimed: true }))).toEqual({
+      kind: "blocked",
+    });
   });
 
   it("finds the verified claim and orders the list", () => {

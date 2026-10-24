@@ -7,8 +7,12 @@ import {
 import {
   applyOwnerOverridesToItem,
   applyOwnerOverridesToManifest,
+  clearAuthoredBy,
+  effectiveOwnerOverrides,
+  mergeAuthoredFields,
   ownerLayerOf,
   ownerSubmittedTools,
+  visibleOwnerOverrides,
   type McpOwnerOverridesSource,
 } from "./overrides";
 
@@ -186,5 +190,107 @@ describe("owner layer", () => {
     expect(layer.fields).toEqual(["summary"]);
     expect(layer.deprecated).toBe(false);
     expect(layer.toolsSubmittedAt).toBeNull();
+  });
+});
+
+describe("field authorship", () => {
+  const stored = (extra: Partial<McpOwnerOverridesSource> = {}): McpOwnerOverridesSource => ({
+    overridesJson: { iconUrl: "https://a.example/a.png", summary: "B summary" },
+    authorsJson: { iconUrl: "a", summary: "b", tools: "b" },
+    toolsJson: [{ name: "b_tool" }],
+    toolsSubmittedAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-21T00:00:00.000Z",
+    ...extra,
+  });
+
+  test("a field shows only while its author holds a verified claim", () => {
+    const both = visibleOwnerOverrides(stored(), new Set(["a", "b"]));
+    expect(both?.overridesJson).toEqual({
+      iconUrl: "https://a.example/a.png",
+      summary: "B summary",
+    });
+    expect(both?.toolsJson).toEqual([{ name: "b_tool" }]);
+
+    const onlyA = visibleOwnerOverrides(stored(), new Set(["a"]));
+    expect(onlyA?.overridesJson).toEqual({ iconUrl: "https://a.example/a.png" });
+    expect(onlyA?.toolsJson).toBeNull();
+    expect(onlyA?.toolsSubmittedAt).toBeNull();
+
+    expect(visibleOwnerOverrides(stored(), new Set())).toBeNull();
+    // A field nobody is recorded as having written is not shown.
+    expect(
+      visibleOwnerOverrides(stored({ authorsJson: {} }), new Set(["a", "b"]))?.overridesJson,
+    ).toEqual({});
+  });
+
+  test("a raw row carries its verified members, and is filtered the same way", () => {
+    const raw = stored({ verifiedUsers: ["a"] });
+    expect(effectiveOwnerOverrides(raw)?.overridesJson).toEqual({
+      iconUrl: "https://a.example/a.png",
+    });
+    expect(effectiveOwnerOverrides(stored({ verifiedUsers: [] }))).toBeNull();
+    // Already filtered rows pass through.
+    const filtered = stored();
+    expect(effectiveOwnerOverrides(filtered)).toBe(filtered);
+    expect(effectiveOwnerOverrides(null)).toBeNull();
+  });
+
+  test("a save keeps the author of what it left alone and takes what it changed", () => {
+    const merged = mergeAuthoredFields({
+      previousValues: { iconUrl: "https://a.example/a.png", summary: "old" },
+      previousAuthors: { iconUrl: "a", summary: "a", tools: "a" },
+      next: { iconUrl: "https://a.example/a.png", summary: "new", homepageUrl: "https://h.example" },
+      userId: "b",
+      verified: new Set(["a", "b"]),
+    });
+    expect(merged.values).toEqual({
+      iconUrl: "https://a.example/a.png",
+      summary: "new",
+      homepageUrl: "https://h.example",
+    });
+    expect(merged.authors).toEqual({
+      iconUrl: "a",
+      summary: "b",
+      homepageUrl: "b",
+      tools: "a",
+    });
+  });
+
+  test("a save drops the visible fields it no longer sends, and spares hidden ones", () => {
+    const merged = mergeAuthoredFields({
+      previousValues: { iconUrl: "https://a.example/a.png", summary: "from c" },
+      previousAuthors: { iconUrl: "a", summary: "c" },
+      next: {},
+      userId: "a",
+      verified: new Set(["a"]),
+    });
+    // a's own icon is cleared by a's save; c (no claim now) keeps theirs.
+    expect(merged.values).toEqual({ summary: "from c" });
+    expect(merged.authors).toEqual({ summary: "c" });
+  });
+
+  test("writing a hidden field's value yourself makes it yours", () => {
+    const merged = mergeAuthoredFields({
+      previousValues: { summary: "same" },
+      previousAuthors: { summary: "c" },
+      next: { summary: "same" },
+      userId: "a",
+      verified: new Set(["a"]),
+    });
+    expect(merged.authors).toEqual({ summary: "a" });
+  });
+
+  test("blocking a member clears the fields and the tool list they wrote", () => {
+    expect(clearAuthoredBy(stored(), "b")).toEqual({
+      overridesJson: { iconUrl: "https://a.example/a.png" },
+      authorsJson: { iconUrl: "a" },
+      clearTools: true,
+    });
+    expect(clearAuthoredBy(stored(), "a")).toEqual({
+      overridesJson: { summary: "B summary" },
+      authorsJson: { summary: "b", tools: "b" },
+      clearTools: false,
+    });
+    expect(clearAuthoredBy(stored(), "nobody")).toBeNull();
   });
 });

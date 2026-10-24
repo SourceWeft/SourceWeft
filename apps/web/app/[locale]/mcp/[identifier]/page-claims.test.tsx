@@ -80,6 +80,8 @@ function manifestResponse(input: {
   claimed?: boolean;
   deprecated?: boolean;
   documentationUrl?: string;
+  ownerTools?: boolean;
+  toolSource?: string;
 }) {
   return getMarketMcpManifestResponseSchema.parse({
     item: {
@@ -100,12 +102,24 @@ function manifestResponse(input: {
       schemaVersion: 1,
       summary: "An example server.",
       endpointUrl: "https://example.com/mcp",
-      tools: [{ name: "ping" }],
+      tools: [
+        { name: "ping", ...(input.toolSource ? { source: input.toolSource } : {}) },
+      ],
       transport: "streamable_http",
       version: "1.0.0",
       homepageUrl: "https://example.com",
       ...(input.documentationUrl
         ? { documentationUrl: input.documentationUrl }
+        : {}),
+      ...(input.ownerTools
+        ? {
+            owner: {
+              source: "owner",
+              fields: ["tools"],
+              toolsSubmittedAt: "2026-10-20T00:00:00.000Z",
+              updatedAt: "2026-10-20T00:00:00.000Z",
+            },
+          }
         : {}),
     },
     version: { manifestJson: {}, status: "published", version: "1.0.0" },
@@ -198,6 +212,33 @@ describe("public MCP detail page owner layer", () => {
       expect(html).not.toContain("javascript:");
       expect(html).not.toContain("data:text/html");
     }
+  });
+
+  it("says beside the tool list that the owner submitted it", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      manifestResponse({
+        claimed: true,
+        ownerTools: true,
+        toolSource: "owner-submitted",
+      }),
+    );
+    const html = await render();
+    expect(html).toContain("Tools listed by the owner");
+    expect(html).toContain(
+      "treats every tool as having unknown risk.",
+    );
+    expect(html.indexOf(">Tools<")).toBeLessThan(
+      html.indexOf("Tools listed by the owner"),
+    );
+  });
+
+  it("does not say it for a registry or probed tool list", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      manifestResponse({ claimed: true, toolSource: "remote-probe" }),
+    );
+    expect(await render()).not.toContain("Tools listed by the owner");
+    market.getPublicMcpManifest.mockResolvedValue(manifestResponse({}));
+    expect(await render()).not.toContain("Tools listed by the owner");
   });
 
   it("offers a signed-in member the claim page, worded by the server's standing", async () => {

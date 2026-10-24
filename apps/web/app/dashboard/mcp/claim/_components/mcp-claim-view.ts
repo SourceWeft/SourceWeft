@@ -12,12 +12,15 @@ export function normalizeClaimIdentifier(value: string | null | undefined) {
 }
 
 export type McpClaimPageView =
+  | { kind: "blocked" }
   | { kind: "owner" }
   | { kind: "claimedBySomeone" }
   | { kind: "open" };
 
-/** Which of the page's three bodies an overview gets. */
+/** Which of the page's bodies an overview gets. */
 export function claimPageView(overview: McpClaimOverview): McpClaimPageView {
+  // A block outranks everything: the viewer gets no method and no list.
+  if (overview.blocked) return { kind: "blocked" };
   if (overview.claimedByYou) return { kind: "owner" };
   if (overview.claimed) return { kind: "claimedBySomeone" };
   return { kind: "open" };

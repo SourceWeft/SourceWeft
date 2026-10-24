@@ -24,6 +24,7 @@ import { McpClaimMethods } from "./mcp-claim-methods";
  * Claiming an unclaimed server: the method chooser, the one-time publishing
  * instructions of a domain claim just started, and the viewer's claims with
  * their Verify buttons. `onChanged` reloads the overview after each request.
+ * A viewer an admin blocked on this server gets a notice card instead.
  */
 export function McpClaimFlow({
   onChanged,
@@ -93,6 +94,23 @@ export function McpClaimFlow({
       callbackURL: window.location.href,
       ...(scopes ? { scopes } : {}),
     });
+  }
+
+  if (overview.blocked) {
+    return (
+      <section
+        className="rounded-2xl border border-border bg-background p-5 shadow-xs"
+        data-testid="mcp-claim-blocked"
+        role="status"
+      >
+        <h2 className="text-sm font-semibold text-foreground">
+          {t("page.blocked.title")}
+        </h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {t("page.blocked.body")}
+        </p>
+      </section>
+    );
   }
 
   return (

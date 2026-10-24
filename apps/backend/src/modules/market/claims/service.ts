@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   McpClaim,
   McpClaimAdminRow,
+  McpClaimBlock,
   McpClaimOverview,
   McpOwnerOverrides,
   McpOwnerOverridesInput,
@@ -28,27 +29,38 @@ import {
   type LinkedGithubAccount,
   type OrgMembershipAnswer,
 } from "./github";
-import { ownerOverrideValues, ownerSubmittedTools } from "./overrides";
 import {
-  findBlockedClaim,
+  TOOLS_AUTHOR_KEY,
+  mergeAuthoredFields,
+  ownerOverrideValues,
+  ownerSubmittedTools,
+  visibleOwnerOverrides,
+} from "./overrides";
+import {
+  blockMember,
   findClaimById,
   findClaimableServer,
   findOwnerOverridesRow,
+  findServerByIdentifier,
   findServerIdentifier,
   findVerifiedClaim,
   hasVerifiedClaim,
   insertVerifiedClaim,
+  isMemberBlocked,
+  listBlocksForAdmin,
   listClaimsForAdmin,
+  listVerifiedUserIds,
   listViewerClaims,
-  markClaimEnded,
-  markClaimUnblocked,
+  markClaimRevoked,
   markClaimVerified,
   recordClaimError,
   replacePendingClaim,
-  revokeOtherOpenClaims,
+  reserveClaimAttempt,
+  unblockMember,
   upsertOwnerOverrideValues,
   upsertOwnerTools,
   type ClaimableServer,
+  type McpClaimBlockRow,
   type McpClaimRow,
 } from "./repository";
 import {
@@ -69,7 +81,12 @@ import type { McpOwnerOverridesRow } from "./overrides";
  * live answer, a domain claim by what the domain actually publishes. Several
  * members may each verify a claim on the same server (an organization's
  * admins, say); each of them may then correct the listing, and the last
- * write wins. A market admin can revoke any claim.
+ * write to a field wins. Who wrote each field is kept: a field shows only
+ * while its author holds a verified claim.
+ *
+ * A market admin can revoke a claim, which also blocks the member on that
+ * server — a block that stands whether or not they hold a claim row — and
+ * clears what they wrote. Starting and verifying are throttled per member.
  */
 
 export type McpClaimGitHub = {
@@ -162,6 +179,15 @@ function toOverrides(
   };
 }
 
+/** The stored layer as the verified members' work: what the page shows. */
+async function visibleRow(serverId: string): Promise<McpOwnerOverridesRow | null> {
+  const [row, verified] = await Promise.all([
+    findOwnerOverridesRow(serverId),
+    listVerifiedUserIds(serverId),
+  ]);
+  return row ? visibleOwnerOverrides(row, new Set(verified)) : null;
+}
+
 async function requireServer(identifier: string): Promise<ClaimableServer> {
   const server = await findClaimableServer(identifier);
   if (!server) throw entryNotFound();
@@ -175,18 +201,20 @@ export async function getMcpClaimOverview(
 ): Promise<McpClaimOverview> {
   const server = await requireServer(input.identifier);
   const targets = claimTargetsFor(server);
-  const [viewerClaims, claimed, linked] = await Promise.all([
+  const [viewerClaims, claimed, linked, blocked] = await Promise.all([
     listViewerClaims(server.id, input.userId),
     hasVerifiedClaim(server.id),
     targets.github ? deps.github.getLinkedAccount(input.userId) : null,
+    isMemberBlocked(server.id, input.userId),
   ]);
   const verified = viewerClaims.find((row) => row.status === "verified");
-  const overridesRow = verified ? await findOwnerOverridesRow(server.id) : null;
+  const overridesRow = verified ? await visibleRow(server.id) : null;
   return {
     identifier: server.identifier,
     name: server.name,
     claimed,
     claimedByYou: Boolean(verified),
+    blocked,
     viewerClaims: viewerClaims.map((row) => toClaim(row, server.identifier)),
     methods: {
       github: targets.github
@@ -290,18 +318,28 @@ export async function startMcpClaim(
   deps: McpClaimDeps = defaultMcpClaimDeps,
 ): Promise<StartMcpClaimResponse> {
   const server = await requireServer(input.identifier);
+  // A block outlives every claim row: it is checked before anything else.
+  if (await isMemberBlocked(server.id, input.userId)) throw claimBlocked();
   const existing = await findVerifiedClaim(server.id, input.userId);
   if (existing) {
     return { claim: toClaim(existing, server.identifier), instructions: null };
   }
-  if (await findBlockedClaim(server.id, input.userId)) throw claimBlocked();
   const targets = claimTargetsFor(server);
   const now = deps.now();
+  // Refused for what cannot work before an attempt is spent on it.
+  if (input.method === "github" ? !targets.github : !targets.domain) {
+    throw methodUnavailable(input.method === "github" ? "GitHub" : "domain");
+  }
+  await reserveClaimAttempt({
+    userId: input.userId,
+    serverId: server.id,
+    kind: "start",
+    now,
+  });
 
   if (input.method === "github") {
-    if (!targets.github) throw methodUnavailable("GitHub");
     await assertGithubOwnership(
-      { userId: input.userId, owner: targets.github.owner },
+      { userId: input.userId, owner: targets.github!.owner },
       deps.github,
     );
     let row: McpClaimRow;
@@ -312,7 +350,7 @@ export async function startMcpClaim(
         userId: input.userId,
         method: "github",
         status: "verified",
-        target: targets.github.owner,
+        target: targets.github!.owner,
         createdAt: now,
         verifiedAt: now,
       });
@@ -328,7 +366,7 @@ export async function startMcpClaim(
     return { claim: toClaim(row, server.identifier), instructions: null };
   }
 
-  if (!targets.domain) throw methodUnavailable("domain");
+  const domain = targets.domain!;
   const token = newClaimToken();
   const expiresAt = claimTokenExpiry(now);
   const row = await replacePendingClaim({
@@ -337,7 +375,7 @@ export async function startMcpClaim(
     userId: input.userId,
     method: input.method,
     status: "pending",
-    target: targets.domain,
+    target: domain,
     tokenHash: hashClaimToken(token),
     expiresAt,
     createdAt: now,
@@ -346,10 +384,10 @@ export async function startMcpClaim(
     claim: toClaim(row, server.identifier),
     instructions: {
       token,
-      domain: targets.domain,
-      dnsRecordName: dnsRecordName(targets.domain),
+      domain,
+      dnsRecordName: dnsRecordName(domain),
       dnsRecordValue: token,
-      wellKnownUrl: wellKnownUrl(targets.domain),
+      wellKnownUrl: wellKnownUrl(domain),
       wellKnownBody: token,
       expiresAt: expiresAt.toISOString(),
     },
@@ -405,6 +443,10 @@ export async function verifyMcpClaim(
   deps: McpClaimDeps = defaultMcpClaimDeps,
 ): Promise<VerifyMcpClaimResponse> {
   const { row, identifier } = await requireOwnClaim(input.claimId, input.userId);
+  // A block applies to the member on this server, whichever claim they try
+  // to finish with and whatever state it is in: a blocked member is told so
+  // (403), not that their claim is "not pending" (409).
+  if (await isMemberBlocked(row.serverId, input.userId)) throw claimBlocked();
   if (row.status === "verified") return { claim: toClaim(row, identifier) };
   if (row.status !== "pending" || !row.tokenHash) {
     throw new McpClaimError(
@@ -413,9 +455,6 @@ export async function verifyMcpClaim(
       "This claim is not waiting for verification",
     );
   }
-  // A block applies to the member on this server, whichever claim they
-  // try to finish with.
-  if (await findBlockedClaim(row.serverId, input.userId)) throw claimBlocked();
   const now = deps.now();
   if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
     await recordClaimError(row.id, "expired");
@@ -425,6 +464,13 @@ export async function verifyMcpClaim(
       "This claim's token has expired; start the claim again for a new one",
     );
   }
+  // From here on the lookup reaches DNS or the publisher's domain.
+  await reserveClaimAttempt({
+    userId: input.userId,
+    serverId: row.serverId,
+    kind: "verify",
+    now,
+  });
   let verdict: "verified" | "not_found";
   try {
     verdict =
@@ -464,16 +510,19 @@ export async function verifyMcpClaim(
   return { claim: toClaim(verified, identifier) };
 }
 
-/** The owner gives a claim up (pending or verified). Overrides stay stored. */
+/**
+ * The owner gives a claim up (pending or verified). What they wrote stays
+ * stored but stops showing while they hold no claim; claiming again brings
+ * it back.
+ */
 export async function revokeMcpClaim(
   input: { userId: string; claimId: string },
   deps: McpClaimDeps = defaultMcpClaimDeps,
 ): Promise<RevokeMcpClaimResponse> {
   const { row, identifier } = await requireOwnClaim(input.claimId, input.userId);
   const revoked =
-    (await markClaimEnded({
+    (await markClaimRevoked({
       claimId: row.id,
-      status: "revoked",
       revokedBy: input.userId,
       now: deps.now(),
     })) ?? row;
@@ -482,11 +531,21 @@ export async function revokeMcpClaim(
 
 // --- Admin -----------------------------------------------------------------
 
+function toBlock(row: McpClaimBlockRow, identifier: string): McpClaimBlock {
+  return {
+    identifier,
+    userId: row.userId,
+    blockedBy: row.blockedBy,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 /**
- * A market admin revokes a claim. The claim is left `blocked`: the member
- * cannot claim this server again until an admin lifts the block, and the
- * corrections they wrote stop showing at once (the read layer shows only
- * corrections whose author holds a verified claim).
+ * A market admin revokes a claim, and with it blocks the member on that
+ * server: the block is written whatever state the claim is in (one the
+ * member already gave up included), the member's other open claims there
+ * end, and what they wrote on the listing is cleared while a co-owner's
+ * stays. Lifted by `adminUnblockMcpMember`.
  */
 export async function adminRevokeMcpClaim(
   input: { adminUserId: string; claimId: string },
@@ -495,35 +554,64 @@ export async function adminRevokeMcpClaim(
   const row = await findClaimById(input.claimId);
   if (!row) throw claimNotFound();
   const identifier = await identifierOf(row.serverId);
-  const now = deps.now();
-  const blocked =
-    (await markClaimEnded({
-      claimId: row.id,
-      status: "blocked",
-      revokedBy: input.adminUserId,
-      now,
-    })) ?? row;
-  // The member's other open claims on this server end with it: a pending
-  // domain claim beside the blocked one is not a way back in.
-  await revokeOtherOpenClaims({
+  await blockMember({
     serverId: row.serverId,
     userId: row.userId,
-    exceptClaimId: row.id,
-    revokedBy: input.adminUserId,
-    now,
+    adminUserId: input.adminUserId,
+    now: deps.now(),
   });
-  return { claim: toClaim(blocked, identifier) };
+  const current = (await findClaimById(row.id)) ?? row;
+  return { claim: toClaim(current, identifier) };
 }
 
-/** Lifts an admin's block; the member may claim the server again. */
-export async function adminUnblockMcpClaim(input: {
-  claimId: string;
-}): Promise<RevokeMcpClaimResponse> {
-  const row = await findClaimById(input.claimId);
-  if (!row) throw claimNotFound();
-  const identifier = await identifierOf(row.serverId);
-  const unblocked = (await markClaimUnblocked(row.id)) ?? row;
-  return { claim: toClaim(unblocked, identifier) };
+/**
+ * Blocks a member on a server without needing any claim row of theirs: for a
+ * member who gave their claim up first, or never held one.
+ */
+export async function adminBlockMcpMember(
+  input: { adminUserId: string; identifier: string; userId: string },
+  deps: McpClaimDeps = defaultMcpClaimDeps,
+): Promise<McpClaimBlock> {
+  const server = await findServerByIdentifier(input.identifier);
+  if (!server) throw entryNotFound();
+  const block = await blockMember({
+    serverId: server.id,
+    userId: input.userId,
+    adminUserId: input.adminUserId,
+    now: deps.now(),
+  });
+  return toBlock(block, server.identifier);
+}
+
+/** Lifts a block; the member may claim the server again. */
+export async function adminUnblockMcpMember(input: {
+  identifier: string;
+  userId: string;
+}): Promise<{ unblocked: boolean }> {
+  const server = await findServerByIdentifier(input.identifier);
+  if (!server) throw entryNotFound();
+  return {
+    unblocked: await unblockMember({ serverId: server.id, userId: input.userId }),
+  };
+}
+
+export async function listMcpClaimBlocksForAdmin(input: {
+  identifier?: string | null;
+}): Promise<McpClaimBlock[]> {
+  let serverId: string | null = null;
+  if (input.identifier) {
+    const server = await findServerByIdentifier(input.identifier);
+    if (!server) return [];
+    serverId = server.id;
+  }
+  const rows = await listBlocksForAdmin({ serverId, limit: ADMIN_LIST_LIMIT });
+  const identifiers = new Map<string, string>();
+  for (const row of rows) {
+    if (!identifiers.has(row.serverId)) {
+      identifiers.set(row.serverId, await identifierOf(row.serverId));
+    }
+  }
+  return rows.map((row) => toBlock(row, identifiers.get(row.serverId) ?? ""));
 }
 
 export async function listMcpClaimsForAdmin(input: {
@@ -561,39 +649,58 @@ async function requireVerifiedOwner(input: {
   return server;
 }
 
+/** The corrections as the members holding a claim see them. */
 export async function getMcpOwnerOverrides(input: {
   userId: string;
   identifier: string;
 }): Promise<McpOwnerOverrides> {
   const server = await requireVerifiedOwner(input);
-  return toOverrides(server, await findOwnerOverridesRow(server.id));
+  return toOverrides(server, await visibleRow(server.id));
 }
 
-/** Replaces the owner's field corrections; null or absent clears a field. */
+/**
+ * Replaces the fields the saver's form shows; null or absent clears a field.
+ * Each field keeps its author: one the saver left as it was stays its
+ * author's, one they changed is theirs. Fields the saver cannot see (their
+ * author holds no claim now) are left as they were.
+ */
 export async function setMcpOwnerOverrides(
   input: { userId: string; identifier: string; values: McpOwnerOverridesInput },
   deps: McpClaimDeps = defaultMcpClaimDeps,
 ): Promise<McpOwnerOverrides> {
   const server = await requireVerifiedOwner(input);
-  const values: Record<string, unknown> = {};
+  const next: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input.values)) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && !value.trim()) continue;
-    values[key] = value;
+    next[key] = value;
   }
+  const [previous, verified] = await Promise.all([
+    findOwnerOverridesRow(server.id),
+    listVerifiedUserIds(server.id),
+  ]);
+  const merged = mergeAuthoredFields({
+    previousValues: previous?.overridesJson ?? {},
+    previousAuthors: previous?.authorsJson ?? {},
+    next,
+    userId: input.userId,
+    verified: new Set(verified),
+  });
   const row = await upsertOwnerOverrideValues({
     serverId: server.id,
     userId: input.userId,
-    values,
+    values: merged.values,
+    authors: merged.authors,
     now: deps.now(),
   });
-  return toOverrides(server, row);
+  return toOverrides(server, visibleOwnerOverrides(row, new Set(verified)));
 }
 
 /**
  * Stores the tool list the owner generated on their own machine. Only the
  * tools and the file's non-secret facts are kept; the tools are shown with
- * `risk: "unknown"` and `source: "owner-submitted"` (see ./overrides.ts).
+ * `risk: "unknown"` and `source: "owner-submitted"` (see ./overrides.ts). The
+ * saver becomes the list's author.
  */
 export async function setMcpOwnerTools(
   input: {
@@ -616,14 +723,7 @@ export async function setMcpOwnerTools(
   const meta: Record<string, unknown> = {};
   if (input.submission.generatedAt) meta.generatedAt = input.submission.generatedAt;
   if (input.submission.serverInfo) meta.serverInfo = input.submission.serverInfo;
-  const row = await upsertOwnerTools({
-    serverId: server.id,
-    userId: input.userId,
-    tools: tools.length > 0 ? tools : null,
-    meta: tools.length > 0 ? meta : null,
-    now: deps.now(),
-  });
-  return toOverrides(server, row);
+  return writeTools(server, input.userId, tools, meta, deps);
 }
 
 export async function clearMcpOwnerTools(
@@ -631,12 +731,30 @@ export async function clearMcpOwnerTools(
   deps: McpClaimDeps = defaultMcpClaimDeps,
 ): Promise<McpOwnerOverrides> {
   const server = await requireVerifiedOwner(input);
+  return writeTools(server, input.userId, [], {}, deps);
+}
+
+async function writeTools(
+  server: ClaimableServer,
+  userId: string,
+  tools: unknown[],
+  meta: Record<string, unknown>,
+  deps: McpClaimDeps,
+): Promise<McpOwnerOverrides> {
+  const [previous, verified] = await Promise.all([
+    findOwnerOverridesRow(server.id),
+    listVerifiedUserIds(server.id),
+  ]);
+  const authors = { ...(previous?.authorsJson ?? {}) };
+  if (tools.length > 0) authors[TOOLS_AUTHOR_KEY] = userId;
+  else delete authors[TOOLS_AUTHOR_KEY];
   const row = await upsertOwnerTools({
     serverId: server.id,
-    userId: input.userId,
-    tools: null,
-    meta: null,
+    userId,
+    tools: tools.length > 0 ? tools : null,
+    meta: tools.length > 0 ? meta : null,
+    authors,
     now: deps.now(),
   });
-  return toOverrides(server, row);
+  return toOverrides(server, visibleOwnerOverrides(row, new Set(verified)));
 }

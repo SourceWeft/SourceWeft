@@ -137,6 +137,7 @@ function ClaimPage() {
                 ) : null}
               </div>
             ) : overview && view ? (
+              // A blocked viewer gets the flow's notice card, not its methods.
               view.kind === "owner" ? (
                 <McpOwnerPanel onChanged={load} overview={overview} />
               ) : view.kind === "claimedBySomeone" ? (

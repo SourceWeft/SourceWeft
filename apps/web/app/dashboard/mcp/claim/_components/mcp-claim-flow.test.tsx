@@ -51,6 +51,7 @@ function overview(patch: Partial<McpClaimOverview> = {}): McpClaimOverview {
     name: "Example",
     claimed: false,
     claimedByYou: false,
+    blocked: false,
     viewerClaims: [],
     methods: {
       github: { available: true, owner: "example", reason: null },
@@ -228,6 +229,43 @@ test("explains a token that was not found and keeps the claim verifiable", async
     "DNS changes can take time to propagate",
   );
   expect(onChanged).toHaveBeenCalled();
+});
+
+test("shows a rate-limited verify as a wait-and-retry message", async () => {
+  api.verifyMcpClaim.mockRejectedValue({
+    code: "MCP_CLAIM_RATE_LIMITED",
+    status: 429,
+  });
+  await render(overview({ viewerClaims: [claim()] }));
+  await click(button("Verify"));
+  expect(container.textContent).toContain(
+    "Too many attempts. Wait a little and try again.",
+  );
+  expect(onChanged).toHaveBeenCalled();
+});
+
+test("replaces the whole flow with a notice for a blocked viewer", async () => {
+  await render(
+    overview({
+      blocked: true,
+      // Even a lingering pending claim offers no action.
+      viewerClaims: [claim()],
+    }),
+  );
+  const notice = container.querySelector('[data-testid="mcp-claim-blocked"]')!;
+  expect(notice.textContent).toContain(
+    "Claiming is closed for you on this server",
+  );
+  expect(notice.textContent).toContain(
+    "A SourceWeft admin blocked your account from claiming this server. If you think that was a mistake, write to support@sourceweft.com.",
+  );
+  expect(container.querySelector("button")).toBeNull();
+  expect(container.querySelector('[data-testid="mcp-claim-list"]')).toBeNull();
+  expect(
+    container.querySelector('[data-testid="mcp-claim-domain"]'),
+  ).toBeNull();
+  expect(container.textContent).not.toContain("Prove you publish this server");
+  expect(api.startMcpClaim).not.toHaveBeenCalled();
 });
 
 test("offers no Verify for an expired pending claim", async () => {

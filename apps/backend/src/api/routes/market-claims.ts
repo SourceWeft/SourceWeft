@@ -1,17 +1,20 @@
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
+  mcpClaimBlockRequestSchema,
   setMcpOwnerOverridesRequestSchema,
   startMcpClaimRequestSchema,
 } from "@sourceweft/contracts";
 import { submitMarketMcpOwnerToolsRequestSchema } from "@sourceweft/market-contracts";
 import { isMarketAdmin } from "../../modules/market/admin";
 import {
+  adminBlockMcpMember,
   adminRevokeMcpClaim,
-  adminUnblockMcpClaim,
+  adminUnblockMcpMember,
   clearMcpOwnerTools,
   getMcpClaimOverview,
   getMcpOwnerOverrides,
+  listMcpClaimBlocksForAdmin,
   listMcpClaimsForAdmin,
   revokeMcpClaim,
   setMcpOwnerOverrides,
@@ -199,14 +202,39 @@ export function registerMarketClaimRoutes(app: Hono) {
     return ApiResponse.success(c, result);
   });
 
-  app.post("/v1/market/admin/mcp/claims/:claimId/unblock", async (c) => {
+  // Blocks a member on a server whatever claim rows they have: for one who
+  // gave their claim up first, or never held one. What they wrote on the
+  // listing is cleared; a co-owner's stays.
+  app.post("/v1/market/admin/mcp/blocks", async (c) => {
     const adminUserId = await requireMarketAdminId(c);
-    const result = await adminUnblockMcpClaim({ claimId: c.req.param("claimId") });
-    logger.info("MCP catalog claim block lifted by a market admin", {
+    const body = await parseBody(c, mcpClaimBlockRequestSchema);
+    const block = await adminBlockMcpMember({ adminUserId, ...body });
+    logger.info("MCP catalog member blocked by a market admin", {
       adminUserId,
-      claimId: result.claim.id,
-      identifier: result.claim.identifier,
+      identifier: block.identifier,
+      userId: block.userId,
+    });
+    return ApiResponse.success(c, { block }, 201);
+  });
+
+  app.post("/v1/market/admin/mcp/blocks/unblock", async (c) => {
+    const adminUserId = await requireMarketAdminId(c);
+    const body = await parseBody(c, mcpClaimBlockRequestSchema);
+    const result = await adminUnblockMcpMember(body);
+    logger.info("MCP catalog member block lifted by a market admin", {
+      adminUserId,
+      identifier: body.identifier,
+      userId: body.userId,
+      unblocked: result.unblocked,
     });
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/v1/market/admin/mcp/blocks", async (c) => {
+    await requireMarketAdminId(c);
+    const identifier = c.req.query("identifier")?.trim() || null;
+    return ApiResponse.success(c, {
+      items: await listMcpClaimBlocksForAdmin({ identifier }),
+    });
   });
 }

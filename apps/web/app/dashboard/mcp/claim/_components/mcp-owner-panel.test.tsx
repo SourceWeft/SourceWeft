@@ -36,6 +36,7 @@ function overview(patch: Partial<McpClaimOverview> = {}): McpClaimOverview {
     name: "Example",
     claimed: true,
     claimedByYou: true,
+    blocked: false,
     viewerClaims: [
       {
         id: "claim-1",

@@ -35,7 +35,124 @@ export type McpOwnerOverridesSource = Pick<
 > & {
   toolsSubmittedAt: Date | string | null;
   updatedAt: Date | string;
+  /** Who wrote each field (and the tool list, under "tools"): name → user id. */
+  authorsJson?: Record<string, string> | null;
+  /**
+   * The members holding a verified claim, on a raw row that has not been
+   * filtered yet (the overview's SQL). `effectiveOwnerOverrides` applies it.
+   */
+  verifiedUsers?: readonly string[] | null;
 };
+
+export type AuthorMap = Record<string, string>;
+/** The tool list's key in an authors map. */
+export const TOOLS_AUTHOR_KEY = "tools";
+
+/**
+ * What of the stored layer is shown: a field, or the tool list, only while
+ * the member who wrote it holds a verified claim. A co-owner's fields stay
+ * when another owner is revoked or blocked; a field with no recorded author
+ * is not shown. Null when nobody holds a claim.
+ */
+export function visibleOwnerOverrides<T extends McpOwnerOverridesSource>(
+  row: T,
+  verified: ReadonlySet<string>,
+): T | null {
+  if (verified.size === 0) return null;
+  const authors = row.authorsJson ?? {};
+  const shown: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row.overridesJson ?? {})) {
+    const author = authors[key];
+    if (author && verified.has(author)) shown[key] = value;
+  }
+  const toolsAuthor = authors[TOOLS_AUTHOR_KEY];
+  const showTools = Boolean(toolsAuthor && verified.has(toolsAuthor));
+  const { verifiedUsers: _verifiedUsers, ...rest } = row;
+  return {
+    ...rest,
+    overridesJson: shown,
+    toolsJson: showTools ? row.toolsJson : null,
+    toolsSubmittedAt: showTools ? row.toolsSubmittedAt : null,
+  } as unknown as T;
+}
+
+/** A row that may still carry its verified members: filtered to what shows. */
+export function effectiveOwnerOverrides(
+  row: McpOwnerOverridesSource | null | undefined,
+): McpOwnerOverridesSource | null {
+  if (!row) return null;
+  if (!row.verifiedUsers) return row;
+  return visibleOwnerOverrides(row, new Set(row.verifiedUsers));
+}
+
+/**
+ * The stored fields and authors after `userId` saves `next` (the whole set,
+ * as their form shows it). A value the saver left as it was keeps its author
+ * while that author still holds a claim; anything else is the saver's. Fields
+ * the saver cannot see (their author holds no claim now) are kept as they
+ * were — a save never wipes or takes over another member's quarantined
+ * work — unless the saver writes that field themselves. The tool list's
+ * author is untouched.
+ */
+export function mergeAuthoredFields(input: {
+  previousValues: Record<string, unknown>;
+  previousAuthors: AuthorMap;
+  next: Record<string, unknown>;
+  userId: string;
+  verified: ReadonlySet<string>;
+}): { values: Record<string, unknown>; authors: AuthorMap } {
+  const values: Record<string, unknown> = {};
+  const authors: AuthorMap = {};
+  for (const [key, value] of Object.entries(input.previousValues)) {
+    const author = input.previousAuthors[key];
+    const hidden = !(author && input.verified.has(author));
+    if (hidden && !(key in input.next)) {
+      values[key] = value;
+      if (author) authors[key] = author;
+    }
+  }
+  for (const [key, value] of Object.entries(input.next)) {
+    const previousAuthor = input.previousAuthors[key];
+    const unchanged =
+      key in input.previousValues && input.previousValues[key] === value;
+    values[key] = value;
+    authors[key] =
+      unchanged && previousAuthor && input.verified.has(previousAuthor)
+        ? previousAuthor
+        : input.userId;
+  }
+  const toolsAuthor = input.previousAuthors[TOOLS_AUTHOR_KEY];
+  if (toolsAuthor) authors[TOOLS_AUTHOR_KEY] = toolsAuthor;
+  return { values, authors };
+}
+
+/**
+ * What blocking `userId` removes from the stored layer: every field they
+ * wrote, and the tool list if they wrote it. Null when they wrote nothing.
+ */
+export function clearAuthoredBy(
+  row: Pick<McpOwnerOverridesSource, "overridesJson" | "authorsJson">,
+  userId: string,
+): { overridesJson: Record<string, unknown>; authorsJson: AuthorMap; clearTools: boolean } | null {
+  const authors = row.authorsJson ?? {};
+  const overridesJson: Record<string, unknown> = {};
+  const authorsJson: AuthorMap = {};
+  let changed = false;
+  for (const [key, value] of Object.entries(row.overridesJson ?? {})) {
+    if (authors[key] === userId) {
+      changed = true;
+      continue;
+    }
+    overridesJson[key] = value;
+    if (authors[key]) authorsJson[key] = authors[key]!;
+  }
+  const clearTools = authors[TOOLS_AUTHOR_KEY] === userId;
+  if (authors[TOOLS_AUTHOR_KEY] && !clearTools) {
+    authorsJson[TOOLS_AUTHOR_KEY] = authors[TOOLS_AUTHOR_KEY]!;
+  }
+  if (!changed && !clearTools) return null;
+  return { overridesJson, authorsJson, clearTools };
+}
 
 function isoOf(value: Date | string | null | undefined): string | null {
   if (!value) return null;

@@ -614,6 +614,8 @@
       "followRepo": "參照 <link>儲存庫</link> 中的啟動說明。",
       "readmeHeading": "README",
       "toolsHeading": "工具",
+      "toolsListedByOwner": "工具列表由擁有者提供",
+      "toolsListedByOwnerHint": "此列表由該服務已驗證的擁有者在其自己的工作階段中提交。SourceWeft 按其提供的內容原樣展示，並將每個工具的風險視為未知。",
       "versionsHeading": "版本歷史",
       "latest": "最新",
       "serverDetails": "服務詳細資訊",
@@ -3933,6 +3935,10 @@
       "retry": "重試",
       "claimedByYou": "你是此服務的已驗證擁有者。",
       "claimedBySomeone": "另一位擁有者已認領此服務。如果認領看起來有誤，市場管理員可以進行複核。",
+      "blocked": {
+        "title": "你已無法認領此服務",
+        "body": "SourceWeft 管理員已禁止你的帳號認領此服務。如果你認為有誤，請寫信至 support@sourceweft.com。"
+      },
       "methodsTitle": "證明你是此服務的發布者",
       "noMethods": "此條目既不是以 GitHub 帳號發布，也不是以網域發布，因此暫時無法在此認領。",
       "github": {
@@ -3984,8 +3990,7 @@
         "status": {
           "pending": "待驗證",
           "verified": "已驗證",
-          "revoked": "已撤銷",
-          "blocked": "已被管理員封禁"
+          "revoked": "已撤銷"
         }
       },
       "toasts": {
@@ -4053,7 +4058,8 @@
       "MCP_CLAIM_LOOKUP_FAILED": "無法存取 DNS 記錄或站點，請稍後重試。",
       "MCP_CLAIM_REQUIRED": "只有此服務的已驗證擁有者才能執行此操作。",
       "fallback": "出了點問題，請重試。",
-      "MCP_CLAIM_BLOCKED": "SourceWeft 管理員撤銷了你對此服務的認領。如果你認為有誤，請寫信至 support@sourceweft.com。"
+      "MCP_CLAIM_BLOCKED": "SourceWeft 管理員撤銷了你對此服務的認領。如果你認為有誤，請寫信至 support@sourceweft.com。",
+      "MCP_CLAIM_RATE_LIMITED": "嘗試次數過多，請稍等片刻後重試。"
     }
   },
   "dashboardSkillsClaim": {

@@ -281,9 +281,7 @@ export const mcpServerVersionAnalysis = pgTable(
 // ---------------------------------------------------------------------------
 
 type McpClaimMethod = "github" | "dns_txt" | "well_known";
-// `blocked`: revoked by a market admin; the member may not claim this server
-// again until an admin lifts it.
-type McpClaimStatus = "pending" | "verified" | "revoked" | "blocked";
+type McpClaimStatus = "pending" | "verified" | "revoked";
 
 export const marketMcpClaims = pgTable(
   "market_mcp_claims",
@@ -318,7 +316,7 @@ export const marketMcpClaims = pgTable(
     ),
     check(
       "market_mcp_claims_status_check",
-      sql`${table.status} in ('pending', 'verified', 'revoked', 'blocked')`,
+      sql`${table.status} in ('pending', 'verified', 'revoked')`,
     ),
     // A member holds at most one verified and one pending claim per server.
     uniqueIndex("market_mcp_claims_verified_uq")
@@ -342,13 +340,83 @@ export const marketMcpClaims = pgTable(
  * submitted from their own machine (`sourceweft mcp inspect`), kept apart
  * because it is large. One row per server, whoever of its owners wrote last.
  */
+/**
+ * A market admin's block: this member may not claim this server, whatever
+ * state their claim rows are in (a member who gave their claim up first is
+ * blocked all the same). Lifted only by an admin.
+ */
+export const marketMcpClaimBlocks = pgTable(
+  "market_mcp_claim_blocks",
+  {
+    serverId: text("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    blockedBy: text("blocked_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.serverId, table.userId],
+      name: "market_mcp_claim_blocks_pk",
+    }),
+  ],
+);
+
+/**
+ * Claim and verify attempts, kept for a day: the throttle counts these (one
+ * verify per member and server per 30 seconds, ten attempts per member per
+ * hour). Every attempt can make an outbound request to GitHub, DNS or the
+ * publisher's domain.
+ */
+export const marketMcpClaimAttempts = pgTable(
+  "market_mcp_claim_attempts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    serverId: text("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"start" | "verify">().notNull(),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "market_mcp_claim_attempts_kind_check",
+      sql`${table.kind} in ('start', 'verify')`,
+    ),
+    index("market_mcp_claim_attempts_user_idx").on(
+      table.userId,
+      table.attemptedAt,
+    ),
+    index("market_mcp_claim_attempts_user_server_idx").on(
+      table.userId,
+      table.serverId,
+      table.kind,
+      table.attemptedAt,
+    ),
+  ],
+);
+
 export const marketMcpOwnerOverrides = pgTable("market_mcp_owner_overrides", {
   serverId: text("server_id")
     .primaryKey()
     .references(() => mcpServers.id, { onDelete: "cascade" }),
+  // The member who wrote last; which member wrote each field is `authorsJson`.
   updatedBy: text("updated_by").notNull(),
   overridesJson: jsonb("overrides_json")
     .$type<Record<string, unknown>>()
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+  // Who wrote each field (and the tool list, under "tools"): field name →
+  // user id. A field shows only while its author holds a verified claim, and
+  // blocking a member clears the fields they wrote.
+  authorsJson: jsonb("authors_json")
+    .$type<Record<string, string>>()
     .notNull()
     .default(sql`'{}'::jsonb`),
   toolsJson: jsonb("tools_json").$type<unknown[]>(),

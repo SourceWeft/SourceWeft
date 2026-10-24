@@ -6,6 +6,7 @@ import {
 import type { RegistryServerJson } from "../types";
 import {
   applyOwnerOverridesToManifest,
+  effectiveOwnerOverrides,
   type McpOwnerOverridesSource,
 } from "../claims/overrides";
 import {
@@ -59,9 +60,11 @@ export function storedManifest(
   value: unknown,
   ownerOverrides: McpOwnerOverridesSource | null = null,
 ): MarketMcpManifest | null {
+  // A raw row carries its verified members: only what they wrote shows.
+  const effective = effectiveOwnerOverrides(ownerOverrides);
   const layered =
-    ownerOverrides && isRecord(value)
-      ? applyOwnerOverridesToManifest(value, ownerOverrides)
+    effective && isRecord(value)
+      ? applyOwnerOverridesToManifest(value, effective)
       : value;
   const parsed = marketMcpManifestSchema.safeParse(layered);
   return parsed.success ? parsed.data : null;

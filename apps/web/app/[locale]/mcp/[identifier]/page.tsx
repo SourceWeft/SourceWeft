@@ -16,6 +16,7 @@ import {
   Layers,
   LockKeyhole,
 } from "lucide-react";
+import { MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED } from "@sourceweft/market-contracts";
 import type {
   MarketItemSummary,
   MarketMcpProductGroup,
@@ -320,6 +321,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   // A stdio package the sandbox could not list tools for says so in place
   // of "0 tools": in the facts, the section nav and the empty tool list.
   const toolsValidation = mcpToolsValidation(item, versions);
+  // The verified owner listed the tools from their own session (Issue #367,
+  // W7): said beside the list, since the registry/probe did not find them.
+  const toolsListedByOwner =
+    Boolean(manifest.owner?.fields.includes("tools")) ||
+    manifest.tools.some(
+      (tool) => tool.source === MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED,
+    );
   const toolsValidationReason = toolsValidation
     ? tValidation(
         `reason.${mcpToolsValidationReasonKey(toolsValidation.reason)}`,
@@ -880,6 +888,17 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <SectionHeading count={manifest.tools.length} icon={Code2}>
                   {t("toolsHeading")}
                 </SectionHeading>
+                {toolsListedByOwner ? (
+                  <p
+                    className="mb-3 text-sm text-zinc-600 dark:text-zinc-400"
+                    data-testid="mcp-tools-listed-by-owner"
+                  >
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      {t("toolsListedByOwner")}
+                    </span>{" "}
+                    {t("toolsListedByOwnerHint")}
+                  </p>
+                ) : null}
                 <McpToolRows
                   tools={manifest.tools}
                   validation={toolsValidation}

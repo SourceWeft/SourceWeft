@@ -20,14 +20,7 @@ import { z } from "zod";
 export const mcpClaimMethodSchema = z.enum(["github", "dns_txt", "well_known"]);
 export type McpClaimMethod = z.infer<typeof mcpClaimMethodSchema>;
 
-// `blocked`: a market admin revoked it, and that member may not claim this
-// server again until an admin lifts the block.
-export const mcpClaimStatusSchema = z.enum([
-  "pending",
-  "verified",
-  "revoked",
-  "blocked",
-]);
+export const mcpClaimStatusSchema = z.enum(["pending", "verified", "revoked"]);
 export type McpClaimStatus = z.infer<typeof mcpClaimStatusSchema>;
 
 /** The DNS record name and well-known path a domain claim uses. */
@@ -135,6 +128,9 @@ export const mcpClaimOverviewSchema = z.object({
   claimed: z.boolean(),
   // The viewer is one of its verified owners.
   claimedByYou: z.boolean(),
+  // A market admin blocked the viewer from claiming this server (the block
+  // outlives any claim row): no method is offered.
+  blocked: z.boolean(),
   // The viewer's own claims on it, pending and verified, newest first.
   viewerClaims: z.array(mcpClaimSchema),
   methods: z.object({
@@ -167,8 +163,8 @@ export const verifyMcpClaimResponseSchema = z.object({
 export type VerifyMcpClaimResponse = z.infer<typeof verifyMcpClaimResponseSchema>;
 
 // POST /v1/market/mcp-claims/:claimId/revoke (the owner's own). An admin's
-// POST /v1/market/admin/mcp/claims/:claimId/revoke leaves the claim `blocked`
-// (the member cannot claim this server again) and `.../unblock` lifts that.
+// POST /v1/market/admin/mcp/claims/:claimId/revoke also blocks the member on
+// that server (see the block routes below).
 export const revokeMcpClaimResponseSchema = z.object({
   claim: mcpClaimSchema,
 });
@@ -192,6 +188,50 @@ export type ListMcpClaimsAdminResponse = z.infer<
   typeof listMcpClaimsAdminResponseSchema
 >;
 
+/**
+ * A market admin's block of one member on one server. It does not depend on
+ * any claim row: a member who gave their claim up first is blocked all the
+ * same. While it stands the member cannot start or verify a claim there, and
+ * what they wrote on the listing is gone.
+ */
+export const mcpClaimBlockSchema = z.object({
+  identifier: z.string(),
+  userId: z.string(),
+  blockedBy: z.string(),
+  createdAt: z.string(),
+});
+export type McpClaimBlock = z.infer<typeof mcpClaimBlockSchema>;
+
+// POST /v1/market/admin/mcp/blocks and POST .../blocks/unblock
+export const mcpClaimBlockRequestSchema = z
+  .object({
+    identifier: z.string().trim().min(1).max(512),
+    userId: z.string().trim().min(1).max(256),
+  })
+  .strict();
+export type McpClaimBlockRequest = z.infer<typeof mcpClaimBlockRequestSchema>;
+
+export const blockMcpMemberResponseSchema = z.object({
+  block: mcpClaimBlockSchema,
+});
+export type BlockMcpMemberResponse = z.infer<typeof blockMcpMemberResponseSchema>;
+
+export const unblockMcpMemberResponseSchema = z.object({
+  // False when the member was not blocked.
+  unblocked: z.boolean(),
+});
+export type UnblockMcpMemberResponse = z.infer<
+  typeof unblockMcpMemberResponseSchema
+>;
+
+// GET /v1/market/admin/mcp/blocks[?identifier=]
+export const listMcpClaimBlocksResponseSchema = z.object({
+  items: z.array(mcpClaimBlockSchema),
+});
+export type ListMcpClaimBlocksResponse = z.infer<
+  typeof listMcpClaimBlocksResponseSchema
+>;
+
 /** Every error code the claim routes answer with, for the web's messages. */
 export const MCP_CLAIM_ERROR_CODES = [
   "MCP_CLAIM_ENTRY_NOT_FOUND",
@@ -208,5 +248,7 @@ export const MCP_CLAIM_ERROR_CODES = [
   "MCP_CLAIM_LOOKUP_FAILED",
   "MCP_CLAIM_REQUIRED",
   "MCP_CLAIM_BLOCKED",
+  // Too many claim or verify attempts; try again later.
+  "MCP_CLAIM_RATE_LIMITED",
 ] as const;
 export type McpClaimErrorCode = (typeof MCP_CLAIM_ERROR_CODES)[number];

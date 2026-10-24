@@ -167,6 +167,12 @@ export default function McpOwnersPage() {
           </p>
         </SubSection>
         <p>
+          Starting and verifying a claim are limited so that they cannot be
+          used to probe other systems: one verification per server every 30
+          seconds, and ten claim attempts per account per hour. When you hit a
+          limit, the page tells you how long to wait.
+        </p>
+        <p>
           Verification reads exactly that DNS record or that file and nothing
           else on your domain. Once verified, you can remove the record or the
           file. The token is shown once, when the claim starts; if you lose it,
@@ -262,17 +268,22 @@ sourceweft mcp inspect --stdio "npx -y @example/mcp-server"`}</CodeBlock>
         </BulletList>
       </Section>
 
-      <Section id="revoke" title="Giving a claim up">
+      <Section id="revoke" title="Giving a claim up, and revoked claims">
         <p>
-          You can give a claim up from the listing settings at any time. While
-          no verified owner is left, your corrections stop showing and the
-          registry&rsquo;s data is shown again; they are kept, so a later
-          verified owner finds them. SourceWeft may also revoke a claim that
-          turns out to be wrong; write to{" "}
+          You can give a claim up from the listing settings at any time. What
+          you wrote stops showing while you hold no claim, and comes back if
+          you claim again. What a co-owner wrote is not affected.
+        </p>
+        <p>
+          SourceWeft may also revoke a claim that turns out to be wrong. That
+          blocks the account from claiming the server again, even if it had
+          already given its claim up, and removes the fields and the tool list
+          that account wrote; fields written by other owners stay. If a server
+          you publish was claimed by someone else, write to{" "}
           <a href="mailto:support@sourceweft.com" className="underline">
             support@sourceweft.com
-          </a>{" "}
-          if a server you publish was claimed by someone else.
+          </a>
+          .
         </p>
       </Section>
     </main>

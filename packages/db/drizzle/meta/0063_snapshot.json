@@ -1,5 +1,5 @@
 {
-  "id": "2e3458d7-d81b-475b-a391-92a4b1d0644c",
+  "id": "248659bd-5698-4117-b257-19425905e7a8",
   "prevId": "b5fe10b1-5982-4771-a285-53787e37d337",
   "version": "7",
   "dialect": "postgresql",
@@ -17327,6 +17327,184 @@
       },
       "isRLSEnabled": false
     },
+    "public.market_mcp_claim_attempts": {
+      "name": "market_mcp_claim_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempted_at": {
+          "name": "attempted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "market_mcp_claim_attempts_user_idx": {
+          "name": "market_mcp_claim_attempts_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "attempted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "market_mcp_claim_attempts_user_server_idx": {
+          "name": "market_mcp_claim_attempts_user_server_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "attempted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "market_mcp_claim_attempts_server_id_mcp_servers_id_fk": {
+          "name": "market_mcp_claim_attempts_server_id_mcp_servers_id_fk",
+          "tableFrom": "market_mcp_claim_attempts",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "market_mcp_claim_attempts_kind_check": {
+          "name": "market_mcp_claim_attempts_kind_check",
+          "value": "\"market_mcp_claim_attempts\".\"kind\" in ('start', 'verify')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.market_mcp_claim_blocks": {
+      "name": "market_mcp_claim_blocks",
+      "schema": "",
+      "columns": {
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "blocked_by": {
+          "name": "blocked_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "market_mcp_claim_blocks_server_id_mcp_servers_id_fk": {
+          "name": "market_mcp_claim_blocks_server_id_mcp_servers_id_fk",
+          "tableFrom": "market_mcp_claim_blocks",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "server_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "market_mcp_claim_blocks_pk": {
+          "name": "market_mcp_claim_blocks_pk",
+          "columns": [
+            "server_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.market_mcp_claims": {
       "name": "market_mcp_claims",
       "schema": "",
@@ -17519,7 +17697,7 @@
         },
         "market_mcp_claims_status_check": {
           "name": "market_mcp_claims_status_check",
-          "value": "\"market_mcp_claims\".\"status\" in ('pending', 'verified', 'revoked', 'blocked')"
+          "value": "\"market_mcp_claims\".\"status\" in ('pending', 'verified', 'revoked')"
         }
       },
       "isRLSEnabled": false
@@ -17542,6 +17720,13 @@
         },
         "overrides_json": {
           "name": "overrides_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "authors_json": {
+          "name": "authors_json",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,

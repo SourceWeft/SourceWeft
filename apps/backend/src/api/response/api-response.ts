@@ -99,8 +99,17 @@ export function toApiError(error: unknown): ApiError {
     return new ApiError(error.statusCode, error.code, error.message);
   }
 
-  if (isContentError(error) || isMcpClaimError(error)) {
+  if (isContentError(error)) {
     return new ApiError(error.statusCode, error.code, error.message);
+  }
+
+  if (isMcpClaimError(error)) {
+    return new ApiError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
   }
 
   if (isConnectorError(error)) {
