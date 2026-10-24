@@ -71,12 +71,12 @@ export function getPricingConfig(
     {
       id: "pro",
       name: "Pro",
-      monthlyPrice: cents(env.NEXT_PUBLIC_PRICING_PRO_MONTHLY, 2000),
-      yearlyPrice: cents(env.NEXT_PUBLIC_PRICING_PRO_YEARLY, 20000),
+      monthlyPrice: cents(env.NEXT_PUBLIC_PRICING_PRO_MONTHLY, 990),
+      yearlyPrice: cents(env.NEXT_PUBLIC_PRICING_PRO_YEARLY, 9900),
       description: "For power users who need more capacity",
       features: [
         "6,000 pages / month",
-        "20,000 credits / month",
+        "8,000 credits / month",
         "All features included",
         "Browser extension + desktop app",
         "Agent observability",

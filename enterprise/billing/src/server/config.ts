@@ -217,11 +217,11 @@ export function readBillingConfig(
     catalog: {
       individualProMonthlyAmountCents: parsePositiveNumber(
         env.BILLING_PRICE_INDIVIDUAL_PRO_MONTHLY_CENTS,
-        1200,
+        990,
       ),
       individualProYearlyAmountCents: parsePositiveNumber(
         env.BILLING_PRICE_INDIVIDUAL_PRO_YEARLY_CENTS,
-        9600,
+        9900,
       ),
       teamStandardMonthlyAmountCents: parsePositiveNumber(
         env.BILLING_PRICE_TEAM_STANDARD_MONTHLY_CENTS,

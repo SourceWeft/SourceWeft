@@ -33,8 +33,7 @@ const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
 /**
  * The quota a single member receives. Grants are per-member now (one
  * `billing_accounts` row per user), so this is one seat's worth regardless of
- * how many seats the team has — a `team_standard` seat is an `individual_pro`
- * allocation. `getPlanQuota` (seat-scaled team total) is only for pricing/catalog.
+ * how many seats the team has. `getPlanQuota` (seat-scaled team total) is only for pricing/catalog.
  */
 function resolvePerSeatQuota(
   runtimeConfig: BillingRuntimeConfig,

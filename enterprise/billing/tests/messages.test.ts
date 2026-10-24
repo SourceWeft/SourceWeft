@@ -194,3 +194,18 @@ test("formatCopy replaces placeholders and keeps unknown ones", () => {
     "0 seats remaining",
   );
 });
+
+test("pro copy shows 8,000 credits while team copy keeps 20,000 per seat", () => {
+  for (const catalogue of [en, zhCN, zhTW]) {
+    const { plans } = catalogue;
+    expect(plans.pro.features.some((line) => line.includes("8,000"))).toBe(
+      true,
+    );
+    expect(plans.pro.features.some((line) => line.includes("20,000"))).toBe(
+      false,
+    );
+    expect(plans.team.features.some((line) => line.includes("20,000"))).toBe(
+      true,
+    );
+  }
+});
