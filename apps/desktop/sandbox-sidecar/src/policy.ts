@@ -55,17 +55,15 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
  * The sidecar-lifetime srt config: network policy, read-only filesystem access (the whole
  * home directory denied, then the workspace roots and read roots re-allowed as literal
  * paths), and helper binary paths. Grants no filesystem write access — that is always added
- * per command by `perCommandConfig`. `own` (the host's own interface addresses) is accepted
- * for symmetry with `deniedReason` and future use; srt's own network config has no per-host
- * notion of "own addresses" to wire it into here.
+ * per command by `perCommandConfig`. The host's own interface addresses (what `deniedReason`
+ * calls `own`) play no part here — srt's own network config has no per-host notion of "own
+ * addresses" to wire it into; Task 3's server applies them only in the ask callback, via
+ * `deniedReason` directly.
  *
  * @throws {PolicyInvalidError} if `init.home`, or any entry of `init.workspaceRoots` or
  * `init.readRoots`, is not an absolute path.
  */
-export function buildConfig(
-  init: InitConfig,
-  own: ReadonlySet<string>,
-): SandboxRuntimeConfig {
+export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
   assertAbsolute("home", init.home);
   init.workspaceRoots.forEach((path, i) =>
     assertAbsolute(`workspaceRoots[${i}]`, path),

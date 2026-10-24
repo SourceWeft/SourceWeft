@@ -18,17 +18,14 @@ function validInit(overrides: Partial<Parameters<typeof buildConfig>[0]> = {}) {
 }
 
 test("denies home, re-allows workspace and read roots as literals", () => {
-  const c = buildConfig(
-    {
-      platform: "linux",
-      home: "/home/u",
-      workspaceRoots: ["/home/u/ws [1]"],
-      readRoots: ["/home/u/.nvm/versions/node/v22.1.0"],
-      helpers: { ripgrep: "/opt/sw/rg", applySeccomp: "/opt/sw/apply-seccomp" },
-      bwrapPath: "/opt/sourceweft/libexec/bwrap",
-    },
-    new Set(),
-  );
+  const c = buildConfig({
+    platform: "linux",
+    home: "/home/u",
+    workspaceRoots: ["/home/u/ws [1]"],
+    readRoots: ["/home/u/.nvm/versions/node/v22.1.0"],
+    helpers: { ripgrep: "/opt/sw/rg", applySeccomp: "/opt/sw/apply-seccomp" },
+    bwrapPath: "/opt/sourceweft/libexec/bwrap",
+  });
   assert.deepEqual(c.filesystem.denyRead, [{ path: "/home/u", literal: true }]);
   assert.deepEqual(c.filesystem.allowRead, [
     { path: "/home/u/ws [1]", literal: true },
@@ -65,7 +62,7 @@ test("per-command write root is the workspace only", () =>
 // matching SidecarErrorCode).
 test("rejects a relative home", () => {
   assert.throws(
-    () => buildConfig(validInit({ home: "home/u" }), new Set()),
+    () => buildConfig(validInit({ home: "home/u" })),
     (error) => {
       assert.ok(error instanceof PolicyInvalidError);
       assert.equal(error.code, "POLICY_INVALID");
@@ -75,7 +72,7 @@ test("rejects a relative home", () => {
 });
 test("rejects a relative workspaceRoots entry", () => {
   assert.throws(
-    () => buildConfig(validInit({ workspaceRoots: ["ws"] }), new Set()),
+    () => buildConfig(validInit({ workspaceRoots: ["ws"] })),
     (error) => {
       assert.ok(error instanceof PolicyInvalidError);
       assert.equal(error.code, "POLICY_INVALID");
@@ -85,7 +82,7 @@ test("rejects a relative workspaceRoots entry", () => {
 });
 test("rejects a relative readRoots entry", () => {
   assert.throws(
-    () => buildConfig(validInit({ readRoots: ["../ro"] }), new Set()),
+    () => buildConfig(validInit({ readRoots: ["../ro"] })),
     (error) => {
       assert.ok(error instanceof PolicyInvalidError);
       assert.equal(error.code, "POLICY_INVALID");

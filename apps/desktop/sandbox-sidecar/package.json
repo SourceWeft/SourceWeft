@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "bun run scripts/build.ts",
     "check-types": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },

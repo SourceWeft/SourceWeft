@@ -1,0 +1,440 @@
+/**
+ * The sidecar's server loop: reads `Request` lines from `input`, writes matching `Response`
+ * lines to `output`, and drives srt (through the `SrtLike` subset of `SandboxManager` that
+ * this process actually uses) to build the sidecar-lifetime sandbox config on `init` and to
+ * wrap each later command on `wrap`. See `src/protocol.ts` for the wire shapes (kept in sync
+ * with the Rust client at `apps/desktop/src-tauri/src/local_host/sidecar.rs`) and
+ * `src/policy.ts` for how an `InitConfig` becomes a `SandboxRuntimeConfig`.
+ */
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createInterface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
+import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import { deniedReason } from "./address-guard.js";
+import { buildConfig, perCommandConfig, PolicyInvalidError } from "./policy.js";
+import type { InitConfig, Request, Response, SidecarErrorCode, WrapResult } from "./protocol.js";
+
+/**
+ * The subset of `SandboxManager` (from `@anthropic-ai/sandbox-runtime`) this server actually
+ * calls. Kept narrow so tests can drive the server with a fake that implements only this,
+ * rather than the whole `ISandboxManager` surface. `main.ts` passes the real `SandboxManager`
+ * singleton, which satisfies this structurally.
+ */
+export type SrtLike = {
+  initialize(
+    runtimeConfig: SandboxRuntimeConfig,
+    sandboxAskCallback?: (
+      params: { host: string; port: number | undefined },
+    ) => Promise<boolean | { allow: false; reason: string }>,
+    enableLogMonitor?: boolean,
+  ): Promise<void>;
+  wrapWithSandboxArgv(
+    command: string,
+    binShell?: string,
+    customConfig?: Partial<SandboxRuntimeConfig>,
+    abortSignal?: AbortSignal,
+    cwd?: string,
+    options?: { commandId?: string },
+  ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }>;
+  annotateStderrWithSandboxFailures(commandIdOrCommand: string, stderr: string): string;
+  cleanupAfterCommand(): void;
+  reset(): Promise<void>;
+  /**
+   * Present (and `true`) on srt releases that understand an ask callback's
+   * `{ allow: false, reason }` answer; absent on older releases, which read any truthy
+   * answer (including that object) as an allow. Checked before ever returning that shape —
+   * see `askCallback` below.
+   */
+  readonly askCallbackDenyReason?: true;
+};
+
+export type ServerDeps = {
+  srt: SrtLike;
+  ownAddresses: () => Set<string>;
+};
+
+const KNOWN_ERROR_CODES: readonly SidecarErrorCode[] = [
+  "NOT_INITIALIZED",
+  "HELPER_MISSING",
+  "SANDBOX_UNAVAILABLE",
+  "POLICY_INVALID",
+  "BAD_REQUEST",
+];
+
+function isSidecarErrorCode(value: unknown): value is SidecarErrorCode {
+  return (
+    typeof value === "string" &&
+    (KNOWN_ERROR_CODES as readonly string[]).includes(value)
+  );
+}
+
+/** An error that already carries the exact `SidecarErrorCode` to report on the wire. */
+class SidecarError extends Error {
+  constructor(
+    readonly code: SidecarErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SidecarError";
+  }
+}
+
+function notInitialized(): SidecarError {
+  return new SidecarError("NOT_INITIALIZED", "sidecar has not received init yet");
+}
+
+/** How long a cached `ownAddresses()` snapshot is reused for the ask callback. */
+const OWN_ADDRESSES_TTL_MS = 30_000;
+
+/** How long `probe` waits for the wrapped `true` to exit before giving up. */
+const PROBE_TIMEOUT_MS = 20_000;
+
+type InitializedState = {
+  config: InitConfig;
+  runtimeConfig: SandboxRuntimeConfig;
+};
+
+/**
+ * Checks every helper path named in `config` — `helpers.ripgrep` always, `helpers.applySeccomp`
+ * and `helpers.javaAgentJar` when given, and `bwrapPath` when given — against the filesystem,
+ * and throws `HELPER_MISSING` naming the first one that does not exist.
+ */
+function checkHelpersExist(config: InitConfig): void {
+  const candidates: string[] = [config.helpers.ripgrep];
+  if (config.helpers.applySeccomp !== undefined) candidates.push(config.helpers.applySeccomp);
+  if (config.helpers.javaAgentJar !== undefined) candidates.push(config.helpers.javaAgentJar);
+  if (config.bwrapPath !== undefined) candidates.push(config.bwrapPath);
+
+  for (const path of candidates) {
+    if (!existsSync(path)) {
+      throw new SidecarError("HELPER_MISSING", `sandbox helper not found at ${path}`);
+    }
+  }
+}
+
+/**
+ * Merges `perCommandConfig(workspaceRoot)` onto `base` by concatenating `filesystem.allowWrite`
+ * — the one field a per-command overlay is allowed to widen — and passing every other field
+ * (network, the rest of filesystem, ripgrep, bwrapPath, seccomp, the java agent jar) straight
+ * through from `base` unchanged. The result is a *complete* `SandboxRuntimeConfig`, suitable as
+ * `wrapWithSandboxArgv`'s `customConfig`: srt reads each `customConfig` field in preference to
+ * the one `initialize` was given only when the former is defined, so handing it a complete
+ * config (rather than just the overlay) guarantees nothing from `base` is lost to that.
+ */
+function mergedConfigFor(base: SandboxRuntimeConfig, workspaceRoot: string): SandboxRuntimeConfig {
+  const overlay = perCommandConfig(workspaceRoot);
+  return {
+    ...base,
+    filesystem: {
+      ...base.filesystem,
+      allowWrite: [...base.filesystem.allowWrite, ...(overlay.filesystem?.allowWrite ?? [])],
+    },
+  };
+}
+
+/** Drops `undefined` values so `NodeJS.ProcessEnv` fits the wire's `Record<string, string>`. */
+function cleanEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+/** Runs `argv` (no shell) with `env` in `cwd`, collecting stderr, bounded by `PROBE_TIMEOUT_MS`. */
+function runProbe(
+  argv: readonly string[],
+  env: Record<string, string>,
+  cwd: string,
+): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const [command, ...args] = argv;
+    if (command === undefined) {
+      reject(new Error("probe produced an empty argv"));
+      return;
+    }
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      timeout: PROBE_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.once("error", (error) => reject(error));
+    child.once("close", (code) => resolve({ code, stderr }));
+  });
+}
+
+/**
+ * Reads `Request` lines from `input` and writes matching `Response` lines to `output` until a
+ * `shutdown` request is handled or `input` ends. Never rejects: every per-request failure is
+ * reported on the wire as that request's `Response`, never thrown out of this function.
+ */
+export async function startServer(
+  input: Readable,
+  output: Writable,
+  deps: ServerDeps,
+): Promise<void> {
+  let state: InitializedState | null = null;
+  let ownAddressesCache: Set<string> | null = null;
+  let ownAddressesCachedAt = 0;
+
+  function getOwnAddresses(): Set<string> {
+    const now = Date.now();
+    if (ownAddressesCache === null || now - ownAddressesCachedAt >= OWN_ADDRESSES_TTL_MS) {
+      ownAddressesCache = deps.ownAddresses();
+      ownAddressesCachedAt = now;
+    }
+    return ownAddressesCache;
+  }
+
+  async function askCallback(params: {
+    host: string;
+    port: number | undefined;
+  }): Promise<boolean | { allow: false; reason: string }> {
+    const reason = deniedReason(params.host, getOwnAddresses());
+    if (reason === null) return true;
+    // See `SrtLike.askCallbackDenyReason`'s doc: only return the `{ allow: false, reason }`
+    // shape when srt is known to understand it; otherwise a plain `false` is the only safe
+    // deny, since some releases read any truthy answer (including that object) as an allow.
+    if (deps.srt.askCallbackDenyReason !== true) return false;
+    return { allow: false, reason: `public internet only: ${reason}` };
+  }
+
+  async function handleInit(config: InitConfig): Promise<null> {
+    checkHelpersExist(config);
+    const runtimeConfig = buildConfig(config);
+    ownAddressesCache = deps.ownAddresses();
+    ownAddressesCachedAt = Date.now();
+    try {
+      await deps.srt.initialize(runtimeConfig, askCallback);
+    } catch (error) {
+      throw new SidecarError(
+        "SANDBOX_UNAVAILABLE",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    state = { config, runtimeConfig };
+    return null;
+  }
+
+  async function handleWrap(request: {
+    commandId: string;
+    command: string;
+    cwd: string;
+    workspaceRoot: string;
+  }): Promise<WrapResult> {
+    if (state === null) throw notInitialized();
+    const customConfig = mergedConfigFor(state.runtimeConfig, request.workspaceRoot);
+    try {
+      const { argv, env } = await deps.srt.wrapWithSandboxArgv(
+        request.command,
+        undefined,
+        customConfig,
+        undefined,
+        request.cwd,
+        { commandId: request.commandId },
+      );
+      return { argv, env: cleanEnv(env) };
+    } catch (error) {
+      throw new SidecarError(
+        "SANDBOX_UNAVAILABLE",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  function handleViolations(request: { commandId: string; stderr: string }): string {
+    if (state === null) throw notInitialized();
+    return deps.srt.annotateStderrWithSandboxFailures(request.commandId, request.stderr);
+  }
+
+  function handleCleanup(): null {
+    if (state === null) throw notInitialized();
+    deps.srt.cleanupAfterCommand();
+    return null;
+  }
+
+  async function handleProbe(): Promise<true> {
+    if (state === null) throw notInitialized();
+    const workspaceRoot = state.config.workspaceRoots[0];
+    if (workspaceRoot === undefined) {
+      throw new SidecarError("SANDBOX_UNAVAILABLE", "init had no workspaceRoots to probe with");
+    }
+    const customConfig = mergedConfigFor(state.runtimeConfig, workspaceRoot);
+    let argv: string[];
+    let env: Record<string, string>;
+    try {
+      const wrapped = await deps.srt.wrapWithSandboxArgv(
+        "true",
+        undefined,
+        customConfig,
+        undefined,
+        workspaceRoot,
+        { commandId: "probe" },
+      );
+      argv = wrapped.argv;
+      env = cleanEnv(wrapped.env);
+    } catch (error) {
+      throw new SidecarError(
+        "SANDBOX_UNAVAILABLE",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const { code, stderr } = await runProbe(argv, env, workspaceRoot);
+    if (code !== 0) {
+      throw new SidecarError(
+        "SANDBOX_UNAVAILABLE",
+        stderr.length > 0 ? stderr : `sandbox probe exited with code ${String(code)}`,
+      );
+    }
+    return true;
+  }
+
+  async function handleShutdown(): Promise<null> {
+    if (state !== null) {
+      await deps.srt.reset();
+    }
+    return null;
+  }
+
+  async function dispatch(request: Request): Promise<unknown> {
+    switch (request.op) {
+      case "init":
+        return handleInit(request.config);
+      case "wrap":
+        return handleWrap(request);
+      case "violations":
+        return handleViolations(request);
+      case "cleanup":
+        return handleCleanup();
+      case "probe":
+        return handleProbe();
+      case "shutdown":
+        return handleShutdown();
+    }
+  }
+
+  function write(response: Response): void {
+    output.write(`${JSON.stringify(response)}\n`);
+  }
+
+  const rl = createInterface({ input, terminal: false });
+  try {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (trimmed === "") continue;
+
+      let id = "?";
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (error) {
+        write({
+          id,
+          ok: false,
+          error: {
+            code: "BAD_REQUEST",
+            message: `invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        });
+        continue;
+      }
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "id" in parsed &&
+        typeof (parsed as { id: unknown }).id === "string"
+      ) {
+        id = (parsed as { id: string }).id;
+      }
+
+      try {
+        const request = asRequest(parsed, id);
+        const result = await dispatch(request);
+        write({ id: request.id, ok: true, result });
+        if (request.op === "shutdown") {
+          break;
+        }
+      } catch (error) {
+        const code = isSidecarErrorCode((error as { code?: unknown } | undefined)?.code)
+          ? (error as { code: SidecarErrorCode }).code
+          : "SANDBOX_UNAVAILABLE";
+        const message = error instanceof Error ? error.message : String(error);
+        write({ id, ok: false, error: { code, message } });
+      }
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Validates that `parsed` has the shape of a `Request` and returns it as one, or throws
+ * `BAD_REQUEST` naming what is wrong. `id` is the already-extracted id (or `"?"`), used only
+ * for the thrown error's wire id via the caller — this function itself never needs it beyond
+ * requiring `parsed.id` to be that same string.
+ */
+function asRequest(parsed: unknown, id: string): Request {
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new SidecarError("BAD_REQUEST", "request line must decode to a JSON object");
+  }
+  const value = parsed as Record<string, unknown>;
+  if (typeof value.id !== "string" || value.id !== id) {
+    throw new SidecarError("BAD_REQUEST", "request must have a string \"id\"");
+  }
+  if (typeof value.op !== "string") {
+    throw new SidecarError("BAD_REQUEST", "request must have a string \"op\"");
+  }
+
+  switch (value.op) {
+    case "init":
+      if (typeof value.config !== "object" || value.config === null) {
+        throw new SidecarError("BAD_REQUEST", "\"init\" request must have a \"config\" object");
+      }
+      return { id, op: "init", config: value.config as InitConfig };
+    case "wrap":
+      if (
+        typeof value.commandId !== "string" ||
+        typeof value.command !== "string" ||
+        typeof value.cwd !== "string" ||
+        typeof value.workspaceRoot !== "string"
+      ) {
+        throw new SidecarError(
+          "BAD_REQUEST",
+          "\"wrap\" request must have string commandId, command, cwd and workspaceRoot",
+        );
+      }
+      return {
+        id,
+        op: "wrap",
+        commandId: value.commandId,
+        command: value.command,
+        cwd: value.cwd,
+        workspaceRoot: value.workspaceRoot,
+      };
+    case "violations":
+      if (typeof value.commandId !== "string" || typeof value.stderr !== "string") {
+        throw new SidecarError(
+          "BAD_REQUEST",
+          "\"violations\" request must have string commandId and stderr",
+        );
+      }
+      return { id, op: "violations", commandId: value.commandId, stderr: value.stderr };
+    case "cleanup":
+      if (typeof value.commandId !== "string") {
+        throw new SidecarError("BAD_REQUEST", "\"cleanup\" request must have a string commandId");
+      }
+      return { id, op: "cleanup", commandId: value.commandId };
+    case "probe":
+      return { id, op: "probe" };
+    case "shutdown":
+      return { id, op: "shutdown" };
+    default:
+      throw new SidecarError("BAD_REQUEST", `unknown op ${JSON.stringify(value.op)}`);
+  }
+}
