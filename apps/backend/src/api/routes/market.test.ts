@@ -132,6 +132,51 @@ test("the detail answer carries the latest version's README", async () => {
   assert.equal(mocks.findMcp.mock.calls[0]?.[0], "io.github.acme/weather");
 });
 
+test("the detail answer carries the product group as the read model gives it", async () => {
+  const relatedProduct = {
+    domain: "notion.com",
+    brand: "notion",
+    officialIdentifier: "com.notion/mcp",
+    members: [
+      {
+        identifier: "com.notion/mcp",
+        name: "Notion",
+        publisherMatch: true,
+        toolsCount: 19,
+      },
+      {
+        identifier: "io.github.o/better-notion",
+        name: "Better Notion",
+        publisherMatch: false,
+        toolsCount: 8,
+      },
+    ],
+  };
+  mocks.findMcp.mockResolvedValue({
+    item: { id: "i" },
+    versions: [],
+    readme: null,
+    aiOverview: null,
+    searchIndexable: true,
+    relatedProduct,
+  });
+  const response = await createTestApp().request("/v1/mcp/com.notion%2Fmcp");
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).relatedProduct, relatedProduct);
+
+  // No official server for the brand: null, not absent.
+  mocks.findMcp.mockResolvedValue({
+    item: { id: "i" },
+    versions: [],
+    readme: null,
+    aiOverview: null,
+    searchIndexable: true,
+    relatedProduct: null,
+  });
+  const ungrouped = await createTestApp().request("/v1/mcp/io.github.o%2Fx");
+  assert.equal((await ungrouped.json()).relatedProduct, null);
+});
+
 test("an identifier is decoded once: %2F is a slash, and a literal % is a name that is not found", async () => {
   mocks.findMcp.mockResolvedValue(null);
   mocks.findMcpVersion.mockResolvedValue(null);

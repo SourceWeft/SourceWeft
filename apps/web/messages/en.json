@@ -530,7 +530,8 @@
         "tools": "Tools ({count})",
         "toolsNotValidated": "Tools (not validated)",
         "versions": "Versions ({count})",
-        "related": "Related"
+        "related": "Related",
+        "integrations": "{brand} integrations ({count})"
       },
       "overviewHeading": "Overview",
       "riskSummary": "Risk summary: ",
@@ -560,6 +561,8 @@
       "securityHeading": "Security note",
       "securityBody": "MCP servers receive tool arguments from a conversation and may perform external actions. Unverified listings are allowed, but SourceWeft marks them so you can review the server before enabling it.",
       "relatedHeading": "More servers like {name}",
+      "integrationsHeading": "Other {brand} integrations",
+      "officialPointer": "The publisher's own server: <link>{name}</link>",
       "breadcrumb": "Breadcrumb",
       "sections": "Sections",
       "copy": "Copy",

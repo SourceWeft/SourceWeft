@@ -473,6 +473,146 @@ describe("MCP catalog on the mcp_* tables", () => {
     });
   });
 
+  // Issue #367 W8: the servers integrating one product, grouped behind the
+  // product's own server. The brand is a token of its own (`${tag}x`), so the
+  // other rows of this file, whose names carry `${tag}`, stay out.
+  test("a detail carries its product group, the publisher's own server first", async () => {
+    const brand = `${tag}x`;
+    const domain = `${brand}.com`;
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    const official = manifest("official", {
+      identifier: `com.${brand}/mcp`,
+      name: "Mcp",
+      summary: `Official ${brand} MCP server`,
+      endpointUrl: `https://mcp.${domain}/mcp`,
+      repoUrl: undefined,
+      sourceUrl: undefined,
+      tools: ["search", "create-page"].map((name) => ({
+        name,
+        inputSchema: {},
+        annotations: {},
+        risk: "unknown" as const,
+      })),
+    });
+    const integrations = [
+      manifest("better", {
+        identifier: `io.github.aviate/better-${brand}`,
+        name: `Better ${brand}`,
+        summary: "Markdown-first integration.",
+      }),
+      manifest("smithery", {
+        identifier: `ai.smithery/smithery-${brand}`,
+        name: `Smithery ${brand}`,
+        summary: "Hosted integration.",
+      }),
+      manifest("camel", {
+        identifier: "io.github.suekou/server",
+        name: `${brand.charAt(0).toUpperCase()}${brand.slice(1)}MCP`,
+        summary: "A camelCase name, a slug that says nothing.",
+      }),
+    ];
+    // Mentions the product only in its summary: not an integration of it.
+    const mention = manifest("mention", {
+      identifier: `io.github.${tag}/notes`,
+      name: `${tag} notes`,
+      summary: `Notes that sync to ${brand} and Slack.`,
+    });
+    // Carries the brand inside a longer word.
+    const longer = manifest("longer", {
+      identifier: `io.github.${tag}/${brand}ally`,
+      name: `${brand}ally`,
+      summary: "Unrelated.",
+    });
+    for (const entry of [official, ...integrations, mention, longer]) {
+      await ingest.upsertMarketMcp({ ...federated, manifest: entry });
+    }
+    // W2 writes the publisher on sync; this catalog copy sets it directly.
+    await data.db
+      .update(data.mcpServers)
+      .set({
+        metadataJson: sql`${data.mcpServers.metadataJson} || ${JSON.stringify({
+          publisher: {
+            domain,
+            source: "registry-namespace",
+            endpointMatch: true,
+          },
+        })}::jsonb`,
+      })
+      .where(eq(data.mcpServers.identifier, official.identifier));
+
+    const detail = async (identifier: string) => {
+      const response = await app.request(
+        `/v1/mcp/${encodeURIComponent(identifier)}`,
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        relatedProduct: {
+          domain: string;
+          brand: string;
+          officialIdentifier: string;
+          members: {
+            identifier: string;
+            name: string;
+            publisherMatch: boolean;
+            toolsCount: number;
+          }[];
+        } | null;
+      };
+    };
+
+    const onOfficial = (await detail(official.identifier)).relatedProduct;
+    expect(onOfficial).toMatchObject({
+      domain,
+      brand,
+      officialIdentifier: official.identifier,
+    });
+    const members = onOfficial!.members;
+    // The official server first, then the integrations newest first.
+    expect(members.map((member) => member.identifier)).toEqual([
+      official.identifier,
+      integrations[2]!.identifier,
+      integrations[1]!.identifier,
+      integrations[0]!.identifier,
+    ]);
+    expect(members[0]).toMatchObject({
+      name: "Mcp",
+      publisherMatch: true,
+      toolsCount: 2,
+    });
+    expect(members.slice(1).every((member) => !member.publisherMatch)).toBe(
+      true,
+    );
+    expect(members[1]).toMatchObject({
+      name: integrations[2]!.name,
+      toolsCount: 0,
+    });
+
+    // Every member's page shows the same group.
+    for (const integration of integrations) {
+      expect((await detail(integration.identifier)).relatedProduct).toEqual(
+        onOfficial,
+      );
+    }
+    // A summary mention and a longer word are not members, and have no group.
+    expect((await detail(mention.identifier)).relatedProduct).toBeNull();
+    expect((await detail(longer.identifier)).relatedProduct).toBeNull();
+
+    // Without an official server the brand has no group at all.
+    await data.db
+      .update(data.mcpServers)
+      .set({ metadataJson: sql`${data.mcpServers.metadataJson} - 'publisher'` })
+      .where(eq(data.mcpServers.identifier, official.identifier));
+    expect((await detail(official.identifier)).relatedProduct).toBeNull();
+    expect(
+      (await detail(integrations[0]!.identifier)).relatedProduct,
+    ).toBeNull();
+  });
+
   test("a flagged submission waits for review, then publishes", async () => {
     const risky = manifest("risky");
     state.parse.mockResolvedValue({

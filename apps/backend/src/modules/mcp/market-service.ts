@@ -85,6 +85,7 @@ export class MarketService {
       versions: record.versions,
       readme: record.readme,
       aiOverview: record.aiOverview,
+      relatedProduct: record.relatedProduct,
     };
   }
 

@@ -5,6 +5,7 @@ import {
   type MarketItemVersion,
   type MarketMcpAiOverview,
   type MarketMcpLocale,
+  type MarketMcpProductGroup,
   type MarketMcpReadme,
   type MarketMcpToolsValidation,
   type McpRuntime,
@@ -24,6 +25,8 @@ import {
   readMcpOverviewLocales,
   readMcpOverviews,
 } from "./overview/repository";
+import { findProductGroupMembers, productGroupEntryOf } from "./grouping/query";
+import { isOfficialEntry } from "./grouping/product-group";
 import { latestPublishedVersionOf } from "./latest-version";
 import { readMcpReadme } from "./readme/readme-repository";
 import { mcpReadmeView } from "./readme/readme-state";
@@ -37,6 +40,11 @@ type MarketMcpRecord = {
   aiOverview: MarketMcpAiOverview | null;
   /** False when the page stays out of search: see `mcpReadmeSharedOf`. */
   searchIndexable: boolean;
+  /**
+   * The servers integrating the same product, the product's own server first
+   * (Issue #367, W8); null when no official server exists for the brand.
+   */
+  relatedProduct: MarketMcpProductGroup | null;
 };
 
 /**
@@ -668,6 +676,50 @@ export async function countMcpByCategory(input: {
 }
 
 /**
+ * The product group `row` belongs to, its members mapped as listing items
+ * (with the AI summary in `locale`) and flagged by whether their own
+ * publisher runs their endpoint. The row itself is among the members.
+ */
+async function relatedProductOf(
+  row: typeof mcpServers.$inferSelect,
+  locale: MarketMcpLocale,
+): Promise<MarketMcpProductGroup | null> {
+  const found = await findProductGroupMembers(row);
+  if (!found) {
+    return null;
+  }
+  const { group, rows } = found;
+  const itemIds = rows.map((member) => member.id);
+  const [categoryMap, latestVersionMap] = await Promise.all([
+    categoriesByItemIds(itemIds),
+    latestVersionsByItemIds(itemIds),
+  ]);
+  const overviewFields = await overviewFieldsByVersionIds(
+    [...latestVersionMap.values()].map((latest) => latest.id),
+    locale,
+  );
+  return {
+    domain: group.domain,
+    brand: group.brand,
+    officialIdentifier: group.officialIdentifier,
+    members: rows.map((member) => {
+      const latest = latestVersionMap.get(member.id);
+      return {
+        ...mapItemRow({
+          row: member,
+          categories: categoryMap.get(member.id) ?? [],
+          latestManifestJson: latest?.manifestJson,
+          latestProvenanceJson: latest?.provenanceJson,
+          latestVersion: latest?.version ?? null,
+        }),
+        ...overviewFields(latest?.id),
+        publisherMatch: isOfficialEntry(productGroupEntryOf(member)),
+      };
+    }),
+  };
+}
+
+/**
  * A published, public server with its published versions (newest first),
  * the latest one's README, and its AI overview in `locale` (English when not
  * given, and the fallback when that language has none or it is hidden).
@@ -704,18 +756,22 @@ export async function findMcp(
     const categoryMap = await categoriesByItemIds([row.id]);
     const latest = versions[0];
     const locale = options.locale ?? "en";
-    const [readme, overviews, overviewLocales, readmeShared] = latest
-      ? await Promise.all([
-          readMcpReadme(latest.id),
-          readMcpOverviews({ versionIds: [latest.id], locale }),
-          readMcpOverviewLocales([latest.id]),
-          db
-            .execute<{
-              shared: boolean;
-            }>(sql`select ${mcpReadmeSharedOf(latest.id)} as shared`)
-            .then((result) => result.rows[0]?.shared === true),
-        ])
-      : [null, null, null, false];
+    const [[readme, overviews, overviewLocales, readmeShared], relatedProduct] =
+      await Promise.all([
+        latest
+          ? Promise.all([
+              readMcpReadme(latest.id),
+              readMcpOverviews({ versionIds: [latest.id], locale }),
+              readMcpOverviewLocales([latest.id]),
+              db
+                .execute<{
+                  shared: boolean;
+                }>(sql`select ${mcpReadmeSharedOf(latest.id)} as shared`)
+                .then((result) => result.rows[0]?.shared === true),
+            ])
+          : ([null, null, null, false] as const),
+        relatedProductOf(row, locale),
+      ]);
     const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
     return {
       item: {
@@ -747,6 +803,7 @@ export async function findMcp(
           }
         : null,
       searchIndexable: !readmeShared,
+      relatedProduct,
     };
   }
   return null;
