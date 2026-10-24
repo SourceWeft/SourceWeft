@@ -5,6 +5,7 @@ import {
   SANDBOX_CREATE_WORST_CASE_MS,
   SANDBOX_CREATING_STALE_MS,
   SANDBOX_CREATING_WAIT_TIMEOUT_MS,
+  SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT,
   resolveSandboxToolOperationReplay,
   stableSandboxRequestJson,
 } from "../../src/runtime/sandbox-manager";
@@ -12,6 +13,8 @@ import { sandboxRequestFingerprint } from "../../src/runtime/redaction";
 import {
   SandboxProviderError,
   SANDBOX_PROVIDER_ERROR_CODES,
+  SANDBOX_REPLACED_NOTICE,
+  SANDBOX_RESTARTED_NOTICE,
 } from "../../src/runtime/errors";
 import type {
   SandboxOperationStore,
@@ -1083,7 +1086,7 @@ test("a generation terminated after a timeout before accepting any operation is 
     true,
   );
   // The notice reaches the model exactly once.
-  assert.equal(manager.consumeReplacementNotice(), true);
+  assert.equal(manager.consumeReplacementNotice(), SANDBOX_REPLACED_NOTICE);
   assert.equal(manager.consumeReplacementNotice(), false);
 
   // Late results for the old generation are still rejected, and the
@@ -1757,3 +1760,135 @@ for (const fence of ["cancelExecution", "renew failure"] as const)
     assert.ok(executeInputs.length > 0);
     assert.ok(executeInputs.every((input) => !("idempotent" in input)));
   });
+
+// ── Provider-side container replacement mid-run (Issue #323 follow-up) ────
+
+function lostInstanceError() {
+  return new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+    "SANDBOX_NOT_FOUND_OR_EXPIRED: the sandbox identity stamp was missing or did not match when the command started; the container was replaced and the command did not run.",
+    "execute",
+  );
+}
+
+test("a generation the provider replaced mid-run is fenced, expired and replaced once reported, although it accepted operations", async () => {
+  const { context, store, manager, logs, created } = replacementFixture();
+  const first = await manager.getOrCreateThreadSandbox(context);
+  // The model already relied on this generation: a succeeded execute.
+  await manager.completeToolOperation({
+    operationId: "execute-1",
+    sandboxId: first.id,
+    status: "succeeded",
+    result: { exitCode: 0 },
+  });
+
+  const verdict = await manager.reportLostGeneration(
+    first,
+    context,
+    lostInstanceError(),
+  );
+  assert.equal(verdict?.code, "SANDBOX_REPLACED");
+  assert.match(verdict?.message ?? "", /replaced by the provider/u);
+  assert.match(verdict?.message ?? "", /this operation did not run/u);
+  // The row is expired in this one place, with the generation pinned.
+  assert.equal(store.calls.expired, 1);
+  // Late results from siblings still running on the old container are
+  // rejected, and their staging stops.
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(first, context),
+    "instance_changed",
+  );
+  // A sibling reporting the same loss gets the same verdict, no second expiry.
+  assert.strictEqual(
+    await manager.reportLostGeneration(first, context, lostInstanceError()),
+    verdict,
+  );
+  assert.equal(store.calls.expired, 1);
+
+  // The old initializationRuns entry no longer pins the run: the next
+  // acquisition is the replacement the report already prefetched.
+  const second = await manager.getOrCreateThreadSandbox(context);
+  assert.equal(second.providerSandboxId, "remote-2");
+  assert.notEqual(second.id, first.id);
+  assert.equal(created(), 2);
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(second, context),
+    "accepted",
+  );
+  // The first result on the replacement says why, once.
+  assert.equal(manager.consumeReplacementNotice(), SANDBOX_RESTARTED_NOTICE);
+  assert.equal(manager.consumeReplacementNotice(), false);
+  assert.ok(logs.some((log) => log.event === "sandbox.generation.lost"));
+  assert.ok(
+    logs.some(
+      (log) =>
+        log.event === "sandbox.generation.replaced" &&
+        log.meta.phase === "lost",
+    ),
+  );
+});
+
+test("a provider-side replacement beyond the per-turn limit fails closed with SANDBOX_INSTANCE_CHANGED and creates nothing more", async () => {
+  const { context, store, manager, created } = replacementFixture();
+  let current = await manager.getOrCreateThreadSandbox(context);
+  for (
+    let loss = 1;
+    loss <= SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT;
+    loss += 1
+  ) {
+    const verdict = await manager.reportLostGeneration(
+      current,
+      context,
+      lostInstanceError(),
+    );
+    assert.equal(verdict?.code, "SANDBOX_REPLACED");
+    current = await manager.getOrCreateThreadSandbox(context);
+    assert.equal(current.providerSandboxId, `remote-${loss + 1}`);
+    assert.equal(manager.consumeReplacementNotice(), SANDBOX_RESTARTED_NOTICE);
+  }
+
+  const verdict = await manager.reportLostGeneration(
+    current,
+    context,
+    lostInstanceError(),
+  );
+  assert.equal(verdict?.code, "SANDBOX_INSTANCE_CHANGED");
+  assert.match(verdict?.message ?? "", /replaced by the provider again/u);
+  assert.match(
+    verdict?.message ?? "",
+    /unavailable for the rest of this turn/u,
+  );
+  assert.equal(
+    store.calls.expired,
+    SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT + 1,
+  );
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (error: unknown) =>
+      (error as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(created(), SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT + 1);
+  assert.equal(manager.consumeReplacementNotice(), false);
+});
+
+test("a loss reported on a generation a cancellation already fenced leaves that fence in charge", async () => {
+  const { context, store, manager, created } = replacementFixture();
+  const first = await manager.getOrCreateThreadSandbox(context);
+  await manager.cancelExecution({
+    sandbox: first,
+    executionId: "execution-1",
+    reason: "user_cancelled",
+  });
+  const expired = store.calls.expired;
+
+  assert.equal(
+    await manager.reportLostGeneration(first, context, lostInstanceError()),
+    null,
+  );
+  assert.equal(store.calls.expired, expired);
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(first, context),
+    "sandbox_terminated",
+  );
+  assert.equal(created(), 1);
+});
