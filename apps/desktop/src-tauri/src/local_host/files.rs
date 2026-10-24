@@ -602,7 +602,20 @@ fn rename_noreplace(
         )
     };
     if renamed != 0 {
-        return Err(std::io::Error::last_os_error());
+        let error = std::io::Error::last_os_error();
+        // Some filesystems (certain FUSE mounts, older NFS) and old kernels do not implement
+        // RENAME_NOREPLACE; say so instead of a bare "Invalid argument". There is deliberately
+        // no fallback to a plain rename, which could replace a file that appeared concurrently.
+        return Err(match error.raw_os_error() {
+            Some(libc::EINVAL | libc::ENOSYS) if !exists => std::io::Error::new(
+                error.kind(),
+                format!(
+                    "this folder's filesystem does not support creating a file without \
+                     replacing one (renameat2 RENAME_NOREPLACE): {error}"
+                ),
+            ),
+            _ => error,
+        });
     }
     Ok(())
 }

@@ -121,32 +121,72 @@ mod tests {
     #[test]
     fn run_wrapped_kills_group_on_cancel() {
         let cancel = Arc::new(AtomicBool::new(false));
-        let trigger = cancel.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
-            trigger.store(true, Ordering::SeqCst);
-        });
         let temp = tempfile::tempdir().unwrap();
+        // The shell records its own pid (the process group run_wrapped created, since it is the
+        // group leader) and its backgrounded child's, then becomes the foreground `sleep`. The
+        // background child does not hold the output pipes, so run_wrapped returns as soon as the
+        // leader dies and a background survivor would still be there to find. Cancel only once
+        // both pids are recorded, however slowly the shell starts under load.
         let argv = vec![
             "/bin/sh".to_string(),
             "-c".to_string(),
-            "sleep 30 & sleep 30".to_string(),
+            "echo $$ > group.tmp && mv group.tmp group; sleep 30 </dev/null >/dev/null 2>&1 & \
+             echo $! > background.tmp && mv background.tmp background; exec sleep 30"
+                .to_string(),
         ];
+        {
+            let trigger = cancel.clone();
+            let ready = temp.path().join("background");
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                while !ready.exists() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                trigger.store(true, Ordering::SeqCst);
+            });
+        }
         let result = run_wrapped(&argv, &[], temp.path(), 10_000, 1000, cancel).unwrap();
         assert!(result.cancelled, "expected cancellation to be reported");
         assert_eq!(result.exit_code, 124);
 
-        // Give the process table a moment to settle, then make sure neither `sleep 30`
-        // (the `sh` child nor its own backgrounded sibling) survived the group kill.
-        std::thread::sleep(Duration::from_millis(200));
-        let ps = Command::new("ps")
-            .args(["-eo", "command"])
-            .output()
-            .unwrap();
-        let listing = String::from_utf8_lossy(&ps.stdout);
+        let read_pid = |name: &str| -> i32 {
+            std::fs::read_to_string(temp.path().join(name))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap()
+        };
+        let group = read_pid("group");
+        let background = read_pid("background");
+        // Only this test's own process group is inspected (final review M6): a system-wide
+        // `ps` text match flaked on unrelated `sleep 30` processes. A killed member that its
+        // new parent has not reaped yet shows as a zombie (`Z`), which is dead, not alive.
+        let alive_in_group = || -> Vec<String> {
+            let ps = Command::new("ps")
+                .args(["-A", "-o", "pid=,pgid=,stat="])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&ps.stdout)
+                .lines()
+                .filter(|line| {
+                    let fields: Vec<&str> = line.split_whitespace().collect();
+                    fields.len() == 3
+                        && fields[1].parse::<i32>() == Ok(group)
+                        && !fields[2].starts_with('Z')
+                })
+                .map(str::to_string)
+                .collect()
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut survivors = alive_in_group();
+        while !survivors.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+            survivors = alive_in_group();
+        }
         assert!(
-            !listing.contains("sleep 30"),
-            "leftover sleep process(es) after cancel: {listing}"
+            survivors.is_empty(),
+            "process group {group} (background sleep {background}) survived the cancel: {survivors:?}"
         );
     }
 

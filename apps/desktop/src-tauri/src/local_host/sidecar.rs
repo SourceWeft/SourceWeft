@@ -118,6 +118,11 @@ struct WrapResult {
 
 /// The five sidecar-defined error codes; anything else the sidecar sends is reported as
 /// `SANDBOX_UNAVAILABLE` rather than propagating an unrecognized code to the rest of the host.
+///
+/// The host adds one code of its own that the sidecar never sends: `INVALID_PATH`, returned
+/// before any request is written when a path the host would put on the wire (bundle, cwd,
+/// workspace root, granted folder) is not valid UTF-8, since the JSON protocol carries paths
+/// as strings. It reaches the backend like any other `HostError` code.
 fn map_error_code(code: &str) -> &'static str {
     match code {
         "NOT_INITIALIZED" => "NOT_INITIALIZED",
