@@ -307,12 +307,27 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const overviewLocale = mcpOverviewLocale(locale);
   const [
     authState,
-    result,
+    { result, relatedMarket },
     { aiOverview, readme, relatedProduct, score, versions },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadMcp(decodedIdentifier),
+    // The related read needs only the manifest's categories, so it starts the
+    // moment the manifest resolves instead of after the whole batch (#389).
+    // A manifest failure (notFound / market outage) rejects this branch
+    // before any related read starts, with the same semantics as before.
+    loadMcp(decodedIdentifier).then(async (loaded) => ({
+      result: loaded,
+      relatedMarket:
+        loaded.item.categories.length > 0
+          ? await listPublicMcp({
+              category: loaded.item.categories.join(","),
+              includeDesktopOnly: true,
+              limit: 12,
+              locale: overviewLocale,
+            })
+          : { items: [] },
+    })),
     getPublicMcpDetail(decodedIdentifier, overviewLocale),
     listPublicMcpCategories(locale),
   ]);
@@ -334,15 +349,6 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       )
     : null;
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
-  const relatedMarket =
-    item.categories.length > 0
-      ? await listPublicMcp({
-          category: item.categories.join(","),
-          includeDesktopOnly: true,
-          limit: 12,
-          locale: overviewLocale,
-        })
-      : { items: [] };
   const relatedItems = relatedMcpItems({
     categories: item.categories,
     currentIdentifier: item.identifier,

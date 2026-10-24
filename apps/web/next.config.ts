@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import { FILE_VIEWER_ASSET_VERSION } from "../../packages/preview/src/asset-base.mjs";
 
 // Points next-intl at our request config (which reads the proxy-set locale header).
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
@@ -48,6 +49,21 @@ function getAllowedDevOrigins() {
   return [...origins];
 }
 
+const versionedPreviewAssets = `/file-viewer/${FILE_VIEWER_ASSET_VERSION}/:path*`;
+// Unversioned files from public/. Next serves them with `max-age=0`; the CDN
+// in front can hold them, browsers revalidate hourly.
+const publicStaticAssets = [
+  "/icons/:path*",
+  "/connectors/:path*",
+  "/download/:path*",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon.svg",
+  "/apple-touch-icon.png",
+  "/logo.svg",
+  "/logo-white-bg.svg",
+];
+
 const nextConfig: NextConfig = {
   // Separate build output lets an isolated E2E server share this checkout.
   distDir: process.env.SOURCEWEFT_NEXT_DIST_DIR ?? ".next",
@@ -79,6 +95,27 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // The URL carries the @file-viewer asset versions
+        // (packages/preview/src/asset-base.mjs), so these never change.
+        source: versionedPreviewAssets,
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      ...publicStaticAssets.map((source) => ({
+        source,
+        headers: [
+          {
+            key: "Cache-Control",
+            value:
+              "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+          },
+        ],
+      })),
       {
         // Not under /api: those route handlers set their own, stricter values
         // (`/api/source-file` a `sandbox` CSP, `/api/artifact-file` its own
