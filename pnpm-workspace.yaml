@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - apps/desktop/sandbox-sidecar
   - packages/*
   - enterprise/*
   - cli
