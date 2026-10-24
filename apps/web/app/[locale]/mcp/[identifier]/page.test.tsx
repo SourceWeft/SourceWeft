@@ -449,6 +449,45 @@ describe("public MCP detail page product group", () => {
   });
 });
 
+describe("public MCP detail page publisher", () => {
+  function header(html: string) {
+    return /<h1[\s\S]*?<\/h1>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? "";
+  }
+
+  // Issue #367: the registry-verified domain next to the provider name.
+  it("says who published the server, from its registry namespace", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: {
+          ...manifestResponse.item,
+          identifier: "com.notion/mcp",
+          providerName: "com.notion",
+          publisher: {
+            domain: "notion.com",
+            source: "registry-namespace",
+            endpointMatch: true,
+          },
+        },
+      }),
+    );
+    const line = header(await render());
+    expect(line).toContain(">com.notion</span>");
+    expect(line).toContain(
+      '<span data-publisher-domain="notion.com">Published by notion.com</span>',
+    );
+    expect(line.indexOf("com.notion</span>")).toBeLessThan(
+      line.indexOf("Published by"),
+    );
+  });
+
+  it("says nothing about a publisher for a GitHub-namespace server", async () => {
+    const html = await render();
+    expect(html).not.toContain("Published by");
+    expect(html).not.toContain("data-publisher-domain");
+  });
+});
+
 describe("public MCP detail page Auth field", () => {
   function authField(html: string) {
     return html.match(/<dt[^>]*>Auth<\/dt><dd[^>]*>([^<]*)<\/dd>/)?.[1];

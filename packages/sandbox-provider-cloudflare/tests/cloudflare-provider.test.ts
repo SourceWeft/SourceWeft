@@ -4,9 +4,22 @@ import {
   isSandboxInstanceMissingError,
 } from "@sourceweft/builtin-tool-sandbox";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, test } from "node:test";
 import {
   EXEC_HEARTBEAT_MARKER,
+  EXEC_STAMP_GUARD_EXIT_CODE,
+  EXEC_STAMP_MISMATCH_MARKER,
   CLOUDFLARE_SANDBOX_PATH_POLICY,
   CloudflareBridgeHttpError,
   CloudflareSandboxProvider,
@@ -134,6 +147,84 @@ function readyCreateRoutes(
   ];
 }
 
+/**
+ * Every exec line starts with the identity guard (EXEC_STAMP_GUARD_EXIT_CODE):
+ * `[ "$(cat '<stamp>' 2>/dev/null)" = '<id>' ] || { printf '%s' '<marker><nonce>'; exit 203; }; `.
+ * Returns the argv with that prefix removed, asserting it was there.
+ */
+const STAMP_GUARD_PREFIX =
+  /^\[ "\$\(cat '\/workspace\/\.sourceweft-sandbox-id' 2>\/dev\/null\)" = '[^']*' \] \|\| \{ printf '%s' '[^']*'; exit 203; \}; /u;
+
+function withoutStampGuard(argv: string[]) {
+  const line = argv[2] ?? "";
+  assert.match(line, STAMP_GUARD_PREFIX);
+  return [...argv.slice(0, 2), line.replace(STAMP_GUARD_PREFIX, "")];
+}
+
+/**
+ * A bridge whose exec route runs the shell line FOR REAL: `/workspace` is
+ * rewritten to a temp directory standing in for the container filesystem,
+ * so the identity guard, `cd` and the command go through `sh` exactly as the
+ * bridge runs them. `restart()` is the SDK's "assuming stopped" restart — a
+ * fresh container behind the same name with an empty filesystem. File GETs
+ * are served from the same directory (a 404 for anything absent).
+ */
+function createContainerBridge(sandboxId = "sb-1") {
+  const root = mkdtempSync(join(tmpdir(), "sourceweft-cf-container-"));
+  const stampPath = join(root, ".sourceweft-sandbox-id");
+  const ran: string[] = [];
+  const rewrite = (line: string) => line.split("/workspace").join(root);
+  const bridge = {
+    root,
+    ran,
+    rewrite,
+    boot: (id = sandboxId) => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(stampPath, id);
+    },
+    restart: () => {
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(root, { recursive: true });
+    },
+    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    exec: ((request) => {
+      const { argv } = JSON.parse(String(request.body)) as { argv: string[] };
+      const line = rewrite(argv[2] ?? "");
+      ran.push(line);
+      const result = spawnSync("sh", ["-c", line], { encoding: "utf8" });
+      return sseResponse([
+        ...(result.stdout
+          ? [
+              {
+                event: "stdout",
+                data: Buffer.from(result.stdout).toString("base64"),
+              },
+            ]
+          : []),
+        ...(result.stderr
+          ? [
+              {
+                event: "stderr",
+                data: Buffer.from(result.stderr).toString("base64"),
+              },
+            ]
+          : []),
+        { event: "exit", data: JSON.stringify({ exit_code: result.status }) },
+      ]);
+    }) satisfies RouteHandler,
+    file: ((request) => {
+      const relative = decodeURIComponent(
+        new URL(request.url).pathname.split("/file/workspace/")[1] ?? "",
+      );
+      const path = join(root, relative);
+      return existsSync(path)
+        ? new Response(readFileSync(path))
+        : new Response("not found", { status: 404 });
+    }) satisfies RouteHandler,
+  };
+  return bridge;
+}
+
 function methodsOf(requests: RecordedRequest[]) {
   return requests.map(
     (request) => `${request.method} ${new URL(request.url).pathname}`,
@@ -254,7 +345,7 @@ describe("CloudflareSandboxProvider", () => {
       argv: string[];
       timeout_ms: number;
     };
-    assert.deepEqual(probe.argv, ["sh", "-lc", "true"]);
+    assert.deepEqual(withoutStampGuard(probe.argv), ["sh", "-lc", "true"]);
     assert.equal(probe.timeout_ms, READINESS_PROBE_COMMAND_TIMEOUT_MS);
     assert.deepEqual(sleeps, []);
   });
@@ -352,7 +443,11 @@ describe("CloudflareSandboxProvider", () => {
       argv: string[];
       timeout_ms: number;
     };
-    assert.deepEqual(body.argv, ["sh", "-lc", "echo 'hello world'"]);
+    assert.deepEqual(withoutStampGuard(body.argv), [
+      "sh",
+      "-lc",
+      "echo 'hello world'",
+    ]);
     assert.equal(body.timeout_ms, 30_000);
   });
 
@@ -370,7 +465,10 @@ describe("CloudflareSandboxProvider", () => {
     });
 
     const body = JSON.parse(String(requests[0]?.body)) as { argv: string[] };
-    assert.equal(body.argv[2], "cd '/workspace/in put' && ls");
+    assert.equal(
+      withoutStampGuard(body.argv)[2],
+      "cd '/workspace/in put' && ls",
+    );
   });
 
   test("wraps long-budget commands with a heartbeat and filters the marker", async () => {
@@ -412,7 +510,7 @@ describe("CloudflareSandboxProvider", () => {
       maxOutputChars: 100,
     });
     const body = JSON.parse(String(requests[0]?.body)) as { argv: string[] };
-    assert.equal(body.argv[2], "quick-job");
+    assert.equal(withoutStampGuard(body.argv)[2], "quick-job");
   });
 
   test("returns non-zero exit codes as normal command results", async () => {
@@ -520,6 +618,8 @@ describe("CloudflareSandboxProvider", () => {
 
   test("maps missing downloads to SANDBOX_FILE_NOT_FOUND", async () => {
     const { provider } = createProvider([
+      // The stamp is intact, so the miss is the file's, not the container's.
+      [STAMP_ROUTE, () => new Response("sb-1\n")],
       [/^GET /, () => new Response("nope", { status: 404 })],
     ]);
     await assert.rejects(
@@ -582,7 +682,10 @@ describe("CloudflareSandboxProvider", () => {
       directory: "/workspace/out put's",
     });
     const body = JSON.parse(String(requests[0]?.body)) as { argv: string[] };
-    assert.equal(body.argv[2], `mkdir -p '/workspace/out put'\\''s'`);
+    assert.equal(
+      withoutStampGuard(body.argv)[2],
+      `mkdir -p '/workspace/out put'\\''s'`,
+    );
   });
 
   test("ensureDirectory maps mkdir failures", async () => {
@@ -1170,7 +1273,10 @@ describe("unavailable retry", () => {
   test("never retries a missing download", async () => {
     const { clock, sleeps } = createFakeClock();
     const { provider, requests } = createProvider(
-      [[/^GET /, () => new Response("nope", { status: 404 })]],
+      [
+        [STAMP_ROUTE, () => new Response("sb-1\n")],
+        [/^GET /, () => new Response("nope", { status: 404 })],
+      ],
       10_000,
       clock,
     );
@@ -1182,7 +1288,12 @@ describe("unavailable retry", () => {
       }),
       hasCode(SANDBOX_PROVIDER_ERROR_CODES.fileMissing),
     );
-    assert.equal(requests.length, 1);
+    // One file GET, then the stamp read that proves the container is still
+    // ours (see "a download miss checks the stamp"); no retry of either.
+    assert.deepEqual(methodsOf(requests), [
+      "GET /v1/sandbox/sb-1/file/workspace/output/missing.txt",
+      "GET /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+    ]);
     assert.deepEqual(sleeps, []);
   });
 
@@ -1677,7 +1788,7 @@ describe("ambiguous empty download metadata", () => {
     assert.equal(requests.length, 2);
     const body = JSON.parse(String(requests[1]!.body));
     assert(body.timeout_ms > 0 && body.timeout_ms <= 1234);
-    assert.match(body.argv[2], /^python3 -c /);
+    assert.match(withoutStampGuard(body.argv)[2] ?? "", /^python3 -c /);
   });
   test("a confirmed empty regular file remains a real zero-byte file", async () => {
     const { provider, requests } = createProvider([
@@ -1887,32 +1998,42 @@ describe("ambiguous empty download metadata", () => {
   test("quoted metadata paths cannot execute shell substitutions", async () => {
     const { execFileSync } = await import("node:child_process");
     const path = "/workspace/a' ; printf PWNED ; #$(printf INJECTED)\nΩ.txt";
-    const { provider, requests } = createProvider([
-      [/^GET /, () => new Response(new Uint8Array())],
-      [
-        /^POST .*\/exec$/,
-        (request) => {
-          const { argv } = JSON.parse(String(request.body));
-          const output = execFileSync("/bin/sh", ["-c", argv[2]], {
-            encoding: "utf8",
-          });
-          assert.doesNotMatch(output, /PWNED|INJECTED/);
-          assert.deepEqual(JSON.parse(output), missing);
-          return sseResponse([
-            { event: "stdout", data: Buffer.from(output).toString("base64") },
-            { event: "exit", data: "0" },
-          ]);
-        },
-      ],
-    ]);
-    await assert.rejects(
-      provider.downloadFile({ providerSandboxId: "sb-1", sandboxPath: path }),
-      (error: unknown) =>
-        error instanceof SandboxProviderError &&
-        error.code === SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
-    );
-    assert(requests[0]!.url.includes("%23"));
-    assert(requests[0]!.url.includes("%0A"));
+    // The shell line runs for real, so the stamp guard needs a container
+    // filesystem that carries the stamp (otherwise it refuses to run).
+    const container = createContainerBridge();
+    container.boot();
+    try {
+      const { provider, requests } = createProvider([
+        [/^GET /, () => new Response(new Uint8Array())],
+        [
+          /^POST .*\/exec$/,
+          (request) => {
+            const { argv } = JSON.parse(String(request.body));
+            const output = execFileSync(
+              "/bin/sh",
+              ["-c", container.rewrite(argv[2])],
+              { encoding: "utf8" },
+            );
+            assert.doesNotMatch(output, /PWNED|INJECTED/);
+            assert.deepEqual(JSON.parse(output), missing);
+            return sseResponse([
+              { event: "stdout", data: Buffer.from(output).toString("base64") },
+              { event: "exit", data: "0" },
+            ]);
+          },
+        ],
+      ]);
+      await assert.rejects(
+        provider.downloadFile({ providerSandboxId: "sb-1", sandboxPath: path }),
+        (error: unknown) =>
+          error instanceof SandboxProviderError &&
+          error.code === SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+      );
+      assert(requests[0]!.url.includes("%23"));
+      assert(requests[0]!.url.includes("%0A"));
+    } finally {
+      container.cleanup();
+    }
   });
   test("cancellation after the empty response prevents a metadata command", async () => {
     const controller = new AbortController();
@@ -1982,5 +2103,211 @@ describe("ambiguous empty download metadata", () => {
     } finally {
       Date.now = originalNow;
     }
+  });
+});
+
+describe("mid-run container replacement (Issue #323 follow-up)", () => {
+  const instanceMissing = hasCode(SANDBOX_PROVIDER_ERROR_CODES.instanceMissing);
+
+  test("exports the guard contract", () => {
+    assert.equal(EXEC_STAMP_GUARD_EXIT_CODE, 203);
+    assert.equal(
+      EXEC_STAMP_MISMATCH_MARKER,
+      "\u001f[sourceweft-stamp-mismatch]\u001f",
+    );
+  });
+
+  test('a container the SDK restarts between two successful commands ("assuming stopped") is refused by the next exec, which never runs the command', async () => {
+    const container = createContainerBridge();
+    container.boot();
+    try {
+      const { provider, requests } = createProvider([
+        [EXEC_ROUTE, container.exec],
+        [/^GET .*\/file\/workspace\//, container.file],
+      ]);
+      const run = (command: string) =>
+        provider.execute({
+          providerSandboxId: "sb-1",
+          command,
+          cwd: "/workspace",
+          timeoutMs: 5_000,
+          maxOutputChars: 1_000,
+        });
+
+      const first = await run("echo first > marker.txt && echo ran");
+      assert.deepEqual(first, {
+        output: "ran\n",
+        exitCode: 0,
+        truncated: false,
+      });
+      assert.ok(existsSync(join(container.root, "marker.txt")));
+
+      // The Worker logged "Failed to check container status, assuming
+      // stopped" and the SDK started a fresh container behind the same name.
+      container.restart();
+      await assert.rejects(
+        run("echo second > marker.txt && echo ran"),
+        (error: unknown) =>
+          instanceMissing(error) &&
+          /container was replaced and the command did not run/u.test(
+            (error as Error).message,
+          ),
+      );
+      // The guard exits before `cd` and the command: nothing ran on the
+      // fresh container, and it took no extra round trip (one exec each).
+      assert.equal(existsSync(join(container.root, "marker.txt")), false);
+      assert.deepEqual(methodsOf(requests), [
+        "POST /v1/sandbox/sb-1/exec",
+        "POST /v1/sandbox/sb-1/exec",
+      ]);
+      // The acquisition-time check agrees with the in-exec guard.
+      await assert.rejects(
+        provider.checkSandboxHealth("sb-1"),
+        instanceMissing,
+      );
+    } finally {
+      container.cleanup();
+    }
+  });
+
+  test("a stamp that names another sandbox is a replaced container too", async () => {
+    const container = createContainerBridge();
+    container.boot("sb-other");
+    try {
+      const { provider } = createProvider([[EXEC_ROUTE, container.exec]]);
+      await assert.rejects(
+        provider.execute({
+          providerSandboxId: "sb-1",
+          command: "echo ran",
+          timeoutMs: 5_000,
+          maxOutputChars: 1_000,
+        }),
+        instanceMissing,
+      );
+    } finally {
+      container.cleanup();
+    }
+  });
+
+  test("the guard precedes the heartbeat wrapper of a long-budget command", async () => {
+    const container = createContainerBridge();
+    container.boot();
+    container.restart();
+    try {
+      const { provider } = createProvider([[EXEC_ROUTE, container.exec]]);
+      await assert.rejects(
+        provider.execute({
+          providerSandboxId: "sb-1",
+          command: "sleep 30",
+          timeoutMs: 130_000,
+          maxOutputChars: 1_000,
+        }),
+        instanceMissing,
+      );
+      assert.ok(container.ran[0]?.includes(EXEC_HEARTBEAT_MARKER));
+      assert.ok(
+        container.ran[0]!.indexOf(".sourceweft-sandbox-id") <
+          container.ran[0]!.indexOf(EXEC_HEARTBEAT_MARKER),
+      );
+    } finally {
+      container.cleanup();
+    }
+  });
+
+  test("a command that merely prints the mismatch marker is an ordinary result", async () => {
+    const container = createContainerBridge();
+    container.boot();
+    try {
+      const { provider } = createProvider([[EXEC_ROUTE, container.exec]]);
+      const result = await provider.execute({
+        providerSandboxId: "sb-1",
+        command: `printf '%s' '${EXEC_STAMP_MISMATCH_MARKER}forged'; exit ${EXEC_STAMP_GUARD_EXIT_CODE}`,
+        timeoutMs: 5_000,
+        maxOutputChars: 1_000,
+      });
+      assert.equal(result.exitCode, EXEC_STAMP_GUARD_EXIT_CODE);
+      assert.equal(result.output, `${EXEC_STAMP_MISMATCH_MARKER}forged`);
+    } finally {
+      container.cleanup();
+    }
+  });
+
+  test("system commands (ensureDirectory, the empty-download stat) carry the same guard", async () => {
+    const container = createContainerBridge();
+    container.boot();
+    container.restart();
+    try {
+      const { provider } = createProvider([
+        [EXEC_ROUTE, container.exec],
+        [/^GET /, () => new Response(new Uint8Array())],
+      ]);
+      await assert.rejects(
+        provider.ensureDirectory({
+          providerSandboxId: "sb-1",
+          directory: "/workspace/out",
+        }),
+        instanceMissing,
+      );
+      assert.equal(existsSync(join(container.root, "out")), false);
+      // An HTTP 200 + zero bytes download is confirmed by a stat exec, which
+      // the guard turns into the instance verdict instead of "missing file".
+      await assert.rejects(
+        provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/output/report.pdf",
+        }),
+        instanceMissing,
+      );
+    } finally {
+      container.cleanup();
+    }
+  });
+
+  test("a download miss checks the stamp: a replaced container is the instance missing, not the file", async () => {
+    const stampGone = createProvider([
+      [
+        /^GET .*\/file\/workspace\//,
+        () => new Response("nope", { status: 404 }),
+      ],
+    ]);
+    await assert.rejects(
+      stampGone.provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/output/report.pdf",
+      }),
+      instanceMissing,
+    );
+    assert.deepEqual(methodsOf(stampGone.requests), [
+      "GET /v1/sandbox/sb-1/file/workspace/output/report.pdf",
+      "GET /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+    ]);
+
+    // Stamp intact: the file really is missing, as before.
+    const stampOk = createProvider([
+      [STAMP_ROUTE, () => new Response("sb-1\n")],
+      [/^GET /, () => new Response("nope", { status: 404 })],
+    ]);
+    await assert.rejects(
+      stampOk.provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/output/report.pdf",
+      }),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.fileMissing),
+    );
+
+    // A hit never pays for a stamp read.
+    const hit = createProvider([[/^GET /, () => new Response("bytes")]]);
+    assert.equal(
+      (
+        await hit.provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/output/report.pdf",
+        })
+      ).toString(),
+      "bytes",
+    );
+    assert.deepEqual(methodsOf(hit.requests), [
+      "GET /v1/sandbox/sb-1/file/workspace/output/report.pdf",
+    ]);
   });
 });

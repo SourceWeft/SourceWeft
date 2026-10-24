@@ -75,9 +75,17 @@ export function isSandboxReadinessProbeFailure(error: unknown): boolean {
  */
 export class SandboxInstanceChangedError extends Error {
   readonly code = "SANDBOX_INSTANCE_CHANGED";
-  constructor() {
+  /**
+   * `detail` replaces the default (timeout) explanation when the generation
+   * was lost another way — today only when the provider replaced the container
+   * more often than the manager is willing to rebuild the workspace.
+   */
+  constructor(detail?: string) {
     super(
-      "SANDBOX_INSTANCE_CHANGED: The sandbox used earlier in this run was terminated after a timeout and had already accepted operations, so it cannot be replaced silently. Sandbox tools are unavailable for the rest of this turn; explain the situation to the user and continue in the next message.",
+      `SANDBOX_INSTANCE_CHANGED: ${
+        detail ??
+        "The sandbox used earlier in this run was terminated after a timeout and had already accepted operations, so it cannot be replaced silently."
+      } Sandbox tools are unavailable for the rest of this turn; explain the situation to the user and continue in the next message.`,
     );
     this.name = "SandboxInstanceChangedError";
   }
@@ -93,14 +101,34 @@ export const SANDBOX_REPLACED_NOTICE =
   "The previous sandbox was terminated after a timeout before it accepted any operation. A fresh sandbox is ready but its /workspace is empty: run prepare_sandbox_workspace again before continuing.";
 
 /**
- * Thrown by hosts that cannot render SANDBOX_REPLACED_NOTICE inside a tool
- * result. This package renders the notice in execute/prepare/collect results
- * instead of throwing, so the class exists for the fallback path only.
+ * The same one-shot notice for a replacement that followed a container the
+ * PROVIDER replaced mid-run (Issue #323 follow-up): the lost generation had
+ * accepted operations, so unlike SANDBOX_REPLACED_NOTICE this one says that
+ * earlier outputs are gone too. /skills is re-staged by the platform as part
+ * of acquiring the replacement, so the model must not rebuild it by hand.
+ */
+export const SANDBOX_RESTARTED_NOTICE =
+  "The previous sandbox container was replaced by the provider mid-run, so everything written to its /workspace earlier is gone. This is a fresh sandbox with /skills re-staged by the platform: run prepare_sandbox_workspace again for any input files and regenerate earlier outputs before continuing.";
+
+/**
+ * What the call that DETECTED a provider-side container replacement reports.
+ * The detecting operation never ran (the Cloudflare adapter checks the stamp
+ * inside the same exec, before the command, and on a download miss), so the
+ * hint can say so; the replacement is acquired in the background and the
+ * first result on it carries SANDBOX_RESTARTED_NOTICE.
+ */
+export const SANDBOX_RESTART_DETECTED_MESSAGE =
+  "The sandbox container was replaced by the provider while this run was in progress: everything under /workspace and the staged /skills were lost, and this operation did not run. A fresh sandbox with /skills re-staged is being prepared. Run prepare_sandbox_workspace again for any input files, regenerate earlier outputs, then retry this operation in a new tool call. Do not copy skill files by hand.";
+
+/**
+ * Raised when a sandbox generation was dropped and the caller must repeat its
+ * preparation. Execute, prepare and collect render the message inside their
+ * (recoverable) tool results; file tools and hosts that cannot do so throw it.
  */
 export class SandboxReplacedError extends Error {
   readonly code = "SANDBOX_REPLACED";
-  constructor() {
-    super(`SANDBOX_REPLACED: ${SANDBOX_REPLACED_NOTICE}`);
+  constructor(notice: string = SANDBOX_REPLACED_NOTICE) {
+    super(`SANDBOX_REPLACED: ${notice}`);
     this.name = "SandboxReplacedError";
   }
 }

@@ -326,6 +326,105 @@ describe("MCP catalog on the mcp_* tables", () => {
     expect((await categoriesOf(tools.identifier)).slugs).toEqual(["databases"]);
   });
 
+  test("issue #367: a search puts the server its publisher runs first and lists the publisher", async () => {
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    const term = `${tag}notion`;
+    // Three servers matching "<tag>notion": a third-party one published
+    // later (so first in publication order), the publisher's own served from
+    // its domain, and the publisher's other server hosted elsewhere.
+    const community = manifest(`${term}-community`, {
+      identifier: `io.github.${tag}/${term}-community`,
+      endpointUrl: `https://${term}.fly.dev/mcp`,
+    });
+    const own = manifest(`${term}-own`, {
+      identifier: `com.${term}/mcp`,
+      name: `${tag} Notion`,
+      endpointUrl: `https://mcp.${term}.com/mcp`,
+      publisher: {
+        domain: `${term}.com`,
+        source: "registry-namespace",
+        endpointMatch: true,
+      },
+    });
+    const hosted = manifest(`${term}-hosted`, {
+      identifier: `com.${term}/hosted`,
+      endpointUrl: `https://${term}.example.net/mcp`,
+      publisher: {
+        domain: `${term}.com`,
+        source: "registry-namespace",
+        endpointMatch: false,
+      },
+    });
+    for (const entry of [hosted, own, community]) {
+      await ingest.upsertMarketMcp({ ...federated, manifest: entry });
+      // Distinct publication instants, in this order.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    const list = await app.request(`/v1/mcp?query=${term}`);
+    expect(list.status).toBe(200);
+    const listed = (await list.json()) as {
+      items: { identifier: string; publisher: unknown }[];
+    };
+    expect(listed.items.map((item) => item.identifier)).toEqual([
+      own.identifier,
+      community.identifier,
+      hosted.identifier,
+    ]);
+    expect(listed.items[0]!.publisher).toEqual(own.publisher);
+    expect(listed.items[1]!.publisher).toBeNull();
+    expect(listed.items[2]!.publisher).toEqual(hosted.publisher);
+
+    // Paged, the ranked row stays first and the cursor continues after it.
+    const firstPage = await app.request(`/v1/mcp?query=${term}&limit=1`);
+    const first = (await firstPage.json()) as {
+      items: { identifier: string }[];
+      nextCursor: string;
+    };
+    expect(first.items.map((item) => item.identifier)).toEqual([
+      own.identifier,
+    ]);
+    const secondPage = await app.request(
+      `/v1/mcp?query=${term}&limit=2&cursor=${encodeURIComponent(first.nextCursor)}`,
+    );
+    const second = (await secondPage.json()) as {
+      items: { identifier: string }[];
+      nextCursor: string | null;
+    };
+    expect(second.items.map((item) => item.identifier)).toEqual([
+      community.identifier,
+      hosted.identifier,
+    ]);
+    expect(second.nextCursor).toBeNull();
+
+    // Without a query, publication order stands.
+    const browse = await app.request(`/v1/mcp?limit=100`);
+    const browsed = (await browse.json()) as {
+      items: { identifier: string }[];
+    };
+    const ours = browsed.items
+      .map((item) => item.identifier)
+      .filter((identifier) => identifier.includes(term));
+    expect(ours).toEqual([
+      community.identifier,
+      own.identifier,
+      hosted.identifier,
+    ]);
+
+    const detail = await app.request(
+      `/v1/mcp/${encodeURIComponent(own.identifier)}`,
+    );
+    expect(
+      ((await detail.json()) as { item: { publisher: unknown } }).item
+        .publisher,
+    ).toEqual(own.publisher);
+  });
+
   describe("updated_at follows listed content, not sync runs", () => {
     const federated = {
       status: "published" as const,

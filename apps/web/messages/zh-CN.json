@@ -395,6 +395,8 @@
     },
     "card": {
       "auth": "鉴权",
+      "officialPublisher": "官方发布者",
+      "officialPublisherTitle": "由 {domain} 发布，该域名同时运行此服务的端点。",
       "tools": "{count, plural, other {# 个工具}}",
       "viewAll": "查看全部"
     },
@@ -503,6 +505,7 @@
       "metaDescriptionOverview": "{name}：{summary}",
       "breadcrumbHome": "首页",
       "breadcrumbServers": "MCP 服务",
+      "publishedBy": "由 {domain} 发布",
       "updated": "更新于 {date}",
       "tools": "工具",
       "auth": "鉴权",

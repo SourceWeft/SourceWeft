@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import {
   AlertTriangle,
   ArrowRight,
+  BadgeCheck,
   CheckCircle2,
   Code2,
   ExternalLink,
@@ -233,6 +234,25 @@ export function mcpDetailSeoDescription(input: {
   );
 }
 
+/**
+ * A small mark that the server's publisher (its verified registry namespace)
+ * also runs its endpoint. Not the "Official" badge, which is the manual
+ * first-party flag.
+ */
+export async function McpOfficialPublisherMark({ domain }: { domain: string }) {
+  const t = await getTranslations("mcp.card");
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 font-medium text-emerald-700 dark:text-emerald-300"
+      data-official-publisher={domain}
+      title={t("officialPublisherTitle", { domain })}
+    >
+      <BadgeCheck aria-hidden="true" className="size-3.5" />
+      {t("officialPublisher")}
+    </span>
+  );
+}
+
 export async function McpMarketCard({
   categoryNames,
   highlightCategory,
@@ -288,8 +308,13 @@ export async function McpMarketCard({
           <h3 className="truncate text-base font-semibold leading-6 text-zinc-950 dark:text-white">
             {item.name}
           </h3>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">
-            {item.providerName ?? item.identifier}
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
+            <span className="truncate">
+              {item.providerName ?? item.identifier}
+            </span>
+            {item.publisher?.endpointMatch ? (
+              <McpOfficialPublisherMark domain={item.publisher.domain} />
+            ) : null}
           </p>
         </div>
         <McpVerificationBadge item={item} />

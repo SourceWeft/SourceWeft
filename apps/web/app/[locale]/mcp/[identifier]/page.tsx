@@ -498,6 +498,11 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       {providerName}
                     </span>
                   ) : null}
+                  {item.publisher ? (
+                    <span data-publisher-domain={item.publisher.domain}>
+                      {t("publishedBy", { domain: item.publisher.domain })}
+                    </span>
+                  ) : null}
                   <span>v{version.version}</span>
                   <span>
                     {t("updated", { date: formatDate(item.updatedAt) })}
