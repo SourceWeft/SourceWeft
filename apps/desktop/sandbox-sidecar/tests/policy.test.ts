@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildConfig, perCommandConfig } from "../src/policy.js";
+import {
+  buildConfig,
+  perCommandConfig,
+  PolicyInvalidError,
+} from "../src/policy.js";
+
+function validInit(overrides: Partial<Parameters<typeof buildConfig>[0]> = {}) {
+  return {
+    platform: "linux" as const,
+    home: "/home/u",
+    workspaceRoots: ["/home/u/ws"],
+    readRoots: ["/home/u/.nvm/versions/node/v22.1.0"],
+    helpers: { ripgrep: "/opt/sw/rg" },
+    ...overrides,
+  };
+}
 
 test("denies home, re-allows workspace and read roots as literals", () => {
   const c = buildConfig(
@@ -44,3 +59,37 @@ test("per-command write root is the workspace only", () =>
   assert.deepEqual(perCommandConfig("/home/u/ws [1]").filesystem?.allowWrite, [
     { path: "/home/u/ws [1]", literal: true },
   ]));
+
+// Ruling R7 (fix round 1 review): buildConfig must reject a non-absolute home,
+// workspaceRoots[] or readRoots[] entry with a PolicyInvalidError (code POLICY_INVALID, the
+// matching SidecarErrorCode).
+test("rejects a relative home", () => {
+  assert.throws(
+    () => buildConfig(validInit({ home: "home/u" }), new Set()),
+    (error) => {
+      assert.ok(error instanceof PolicyInvalidError);
+      assert.equal(error.code, "POLICY_INVALID");
+      return true;
+    },
+  );
+});
+test("rejects a relative workspaceRoots entry", () => {
+  assert.throws(
+    () => buildConfig(validInit({ workspaceRoots: ["ws"] }), new Set()),
+    (error) => {
+      assert.ok(error instanceof PolicyInvalidError);
+      assert.equal(error.code, "POLICY_INVALID");
+      return true;
+    },
+  );
+});
+test("rejects a relative readRoots entry", () => {
+  assert.throws(
+    () => buildConfig(validInit({ readRoots: ["../ro"] }), new Set()),
+    (error) => {
+      assert.ok(error instanceof PolicyInvalidError);
+      assert.equal(error.code, "POLICY_INVALID");
+      return true;
+    },
+  );
+});

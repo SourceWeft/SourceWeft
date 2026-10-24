@@ -6,98 +6,118 @@
  * unique-local range, the unspecified address, and — via `own` — every address bound to the
  * sandbox host's own network interfaces.
  *
- * `host` may be a bare hostname, a bare IPv4/IPv6 literal, or a bracketed IPv6 literal
- * (`[::1]`). A hostname that is not `localhost`/`*.localhost` is left alone here — the caller
- * resolves it and re-checks the resolved address (srt's `deniedResolvedAddresses` is the
- * last line of defense for that).
+ * `host` may be a bare hostname, a bare IPv4/IPv6 literal, a bracketed IPv6 literal
+ * (`[::1]`), an IPv6 literal with a zone id (`fe80::1%en0`), or any of those written with a
+ * trailing dot (the absolute-DNS-name form, e.g. `localhost.`, `127.0.0.1.`) or mixed case.
+ * Range membership is decided by `node:net`'s `BlockList`, which does its own numeric IPv6
+ * parsing (expanding `::` compression, handling zone ids, and matching embedded-IPv4 forms
+ * against IPv6 subnets added in that same embedded notation) — so this module never need
+ * parse IPv6 text itself; it only has to construct the right denied ranges, in both their
+ * plain and IPv4-embedded forms, once at module load. A hostname that is not
+ * `localhost`/`*.localhost` is left alone here — the caller resolves it and re-checks the
+ * resolved address (srt's `deniedResolvedAddresses` is the last line of defense for that).
  */
 import { BlockList, isIP } from "node:net";
 
-function addV4(blockList: BlockList, address: string, prefix?: number): void {
-  if (prefix === undefined) blockList.addAddress(address, "ipv4");
+function addV4(blockList: BlockList, address: string, prefix: number): void {
+  if (prefix === 32) blockList.addAddress(address, "ipv4");
   else blockList.addSubnet(address, prefix, "ipv4");
 }
 
-function addV6(blockList: BlockList, address: string, prefix?: number): void {
-  if (prefix === undefined) blockList.addAddress(address, "ipv6");
+function addV6(blockList: BlockList, address: string, prefix: number): void {
+  if (prefix === 128) blockList.addAddress(address, "ipv6");
   else blockList.addSubnet(address, prefix, "ipv6");
 }
 
-const LOOPBACK_V4 = new BlockList();
-addV4(LOOPBACK_V4, "127.0.0.0", 8);
+/**
+ * Adds `v4Address/v4Prefix` to `blockList`, plus its IPv4-mapped (`::ffff:<v4Address>`) and
+ * deprecated IPv4-compatible (`::<v4Address>`) IPv6 equivalents at the corresponding
+ * `96 + v4Prefix` IPv6 prefix length. `BlockList.check` tells these two forms apart from each
+ * other (and from unrelated IPv6 addresses) correctly — confirmed empirically: a `::ffff:...`
+ * literal only matches the mapped entry, a plain `::...` (no `ffff`) only matches the
+ * compatible entry, and `::`/`::1` match neither (both are excluded by the `96 + v4Prefix`
+ * mask, since their last-32-bits-as-IPv4 reading is `0.0.0.0`/`0.0.0.1`, outside every real
+ * `v4Address/v4Prefix` this function is called with).
+ */
+function addV4WithEmbedded(
+  blockList: BlockList,
+  v4Address: string,
+  v4Prefix: number,
+): void {
+  addV4(blockList, v4Address, v4Prefix);
+  const v6Prefix = 96 + v4Prefix;
+  addV6(blockList, `::ffff:${v4Address}`, v6Prefix);
+  addV6(blockList, `::${v4Address}`, v6Prefix);
+}
 
-const LOOPBACK_V6 = new BlockList();
-addV6(LOOPBACK_V6, "::1", 128);
+const UNSPECIFIED = new BlockList();
+addV4WithEmbedded(UNSPECIFIED, "0.0.0.0", 32);
+addV6(UNSPECIFIED, "::", 128); // redundant with the compatible-form entry above; kept explicit
+
+const LOOPBACK = new BlockList();
+addV4WithEmbedded(LOOPBACK, "127.0.0.0", 8);
+addV6(LOOPBACK, "::1", 128);
 
 const RFC1918 = new BlockList();
-addV4(RFC1918, "10.0.0.0", 8);
-addV4(RFC1918, "172.16.0.0", 12);
-addV4(RFC1918, "192.168.0.0", 16);
+addV4WithEmbedded(RFC1918, "10.0.0.0", 8);
+addV4WithEmbedded(RFC1918, "172.16.0.0", 12);
+addV4WithEmbedded(RFC1918, "192.168.0.0", 16);
 
 const CGNAT = new BlockList();
-addV4(CGNAT, "100.64.0.0", 10);
+addV4WithEmbedded(CGNAT, "100.64.0.0", 10);
 
-const LINK_LOCAL_V4 = new BlockList();
-addV4(LINK_LOCAL_V4, "169.254.0.0", 16);
+const LINK_LOCAL = new BlockList();
+addV4WithEmbedded(LINK_LOCAL, "169.254.0.0", 16);
+addV6(LINK_LOCAL, "fe80::", 10);
 
-const LINK_LOCAL_V6 = new BlockList();
-addV6(LINK_LOCAL_V6, "fe80::", 10);
+const MULTICAST = new BlockList();
+addV4WithEmbedded(MULTICAST, "224.0.0.0", 4);
+addV6(MULTICAST, "ff00::", 8);
 
-const MULTICAST_V4 = new BlockList();
-addV4(MULTICAST_V4, "224.0.0.0", 4);
+const CLOUD_METADATA = new BlockList();
+addV4WithEmbedded(CLOUD_METADATA, "169.254.169.254", 32); // AWS/GCP/Azure/etc. (also link-local)
+addV4WithEmbedded(CLOUD_METADATA, "100.100.100.200", 32); // Alibaba Cloud (also CGNAT)
+addV4WithEmbedded(CLOUD_METADATA, "168.63.129.16", 32); // Azure host endpoint
+addV4WithEmbedded(CLOUD_METADATA, "192.0.0.192", 32); // Oracle Cloud
+addV6(CLOUD_METADATA, "fd00:ec2::", 32); // AWS IPv6 metadata
 
-const MULTICAST_V6 = new BlockList();
-addV6(MULTICAST_V6, "ff00::", 8);
+// fc00::/7 (unique local) has no IPv4-mapped/compatible form of its own — it is already an
+// IPv6-only range, so it covers fd00:ec2::/32 above only incidentally (both are checked).
+const UNIQUE_LOCAL = new BlockList();
+addV6(UNIQUE_LOCAL, "fc00::", 7);
 
-// fc00::/7 (unique local) — also covers the fd00:ec2::/32 AWS metadata range below, kept as
-// its own explicit entry for clarity rather than relying only on the wider range.
-const UNIQUE_LOCAL_V6 = new BlockList();
-addV6(UNIQUE_LOCAL_V6, "fc00::", 7);
+const DENIED_RANGES: ReadonlyArray<readonly [BlockList, string]> = [
+  [UNSPECIFIED, "is the unspecified address"],
+  [LOOPBACK, "is a loopback address"],
+  [RFC1918, "is a private (RFC1918) address"],
+  [CGNAT, "is a CGNAT (100.64.0.0/10) address"],
+  [LINK_LOCAL, "is a link-local address"],
+  [MULTICAST, "is a multicast address"],
+  [CLOUD_METADATA, "is a well-known cloud metadata address"],
+  [UNIQUE_LOCAL, "is a unique-local (fc00::/7) address"],
+];
 
-const CLOUD_METADATA_V4 = new BlockList();
-addV4(CLOUD_METADATA_V4, "169.254.169.254"); // AWS/GCP/Azure/etc. (also link-local)
-addV4(CLOUD_METADATA_V4, "100.100.100.200"); // Alibaba Cloud (also CGNAT)
-addV4(CLOUD_METADATA_V4, "168.63.129.16"); // Azure host endpoint
-addV4(CLOUD_METADATA_V4, "192.0.0.192"); // Oracle Cloud
+/** Strips one pair of enclosing `[...]` brackets, if present. */
+function stripBrackets(host: string): string {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+}
 
-const CLOUD_METADATA_V6 = new BlockList();
-addV6(CLOUD_METADATA_V6, "fd00:ec2::", 32); // AWS IPv6 metadata
-
-const UNSPECIFIED_V4 = new BlockList();
-addV4(UNSPECIFIED_V4, "0.0.0.0");
-
-const UNSPECIFIED_V6 = new BlockList();
-addV6(UNSPECIFIED_V6, "::", 128);
-
-function hexGroupToBytes(group: string): [number, number] {
-  const value = Number.parseInt(group, 16);
-  return [(value >> 8) & 0xff, value & 0xff];
+/** Strips a `%zone` suffix (an IPv6 zone id, e.g. `fe80::1%en0` → `fe80::1`), if present. */
+function stripZone(address: string): string {
+  const percent = address.indexOf("%");
+  return percent === -1 ? address : address.slice(0, percent);
 }
 
 /**
- * Maps `::ffff:a.b.c.d`, `::ffff:XXXX:XXXX` (IPv4-mapped) and `::a.b.c.d` (the deprecated
- * IPv4-compatible form) to their IPv4 dotted-quad equivalent. Returns `null` for any other
- * IPv6 literal (including plain `::1`, which is not one of these forms).
+ * Normalizes `host` the same way for every check below: strip one pair of enclosing
+ * brackets, lowercase, then strip trailing dot(s) (the absolute-DNS-name form — a resolver
+ * treats `localhost.` and `127.0.0.1.` exactly like `localhost` and `127.0.0.1`). Case and
+ * the trailing dot are normalized here, once, rather than relying on every downstream check
+ * (the localhost-name comparison, `isIP`, `BlockList.check`) to each tolerate them the same
+ * way.
  */
-function mapIPv4EmbeddedAddress(ip: string): string | null {
-  const dotted = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(ip);
-  if (dotted) return dotted[1] as string;
-
-  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ip);
-  if (hex) {
-    const [a, b] = hexGroupToBytes(hex[1] as string);
-    const [c, d] = hexGroupToBytes(hex[2] as string);
-    return `${a}.${b}.${c}.${d}`;
-  }
-
-  const compat = /^::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(ip);
-  if (compat) return compat[1] as string;
-
-  return null;
-}
-
-function stripBrackets(host: string): string {
-  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+function normalizeHost(host: string): string {
+  return stripBrackets(host).toLowerCase().replace(/\.+$/, "");
 }
 
 /**
@@ -109,65 +129,33 @@ export function deniedReason(
   host: string,
   own: ReadonlySet<string>,
 ): string | null {
-  const stripped = stripBrackets(host);
-  const lower = stripped.toLowerCase();
+  const normalized = normalizeHost(host);
 
-  if (lower === "localhost" || lower.endsWith(".localhost")) {
+  if (normalized === "localhost" || normalized.endsWith(".localhost")) {
     return `'${host}' is localhost or a *.localhost name`;
   }
 
-  const family = isIP(stripped);
+  const family = isIP(normalized);
   if (family === 0) {
     // Not an IP literal: a public name (or a name that merely contains an IP-shaped
     // substring, e.g. a nip.io name). The resolved-address check handles this.
     return null;
   }
+  const familyName = family === 4 ? "ipv4" : "ipv6";
 
-  let address = stripped;
-  let isV4 = family === 4;
-  if (family === 6) {
-    const mapped = mapIPv4EmbeddedAddress(stripped);
-    if (mapped !== null) {
-      address = mapped;
-      isV4 = true;
-    }
-  }
-
+  // `own` holds plain addresses (no zone id); strip one from `host` before comparing so
+  // `fe80::1%en0` still matches an own address of `fe80::1`.
+  const compareAddress = family === 6 ? stripZone(normalized) : normalized;
   for (const addr of own) {
-    if (addr.toLowerCase() === address.toLowerCase()) {
+    if (addr.toLowerCase() === compareAddress) {
       return `'${host}' is an address of the sandbox host's own network interfaces`;
     }
   }
 
-  if (isV4) {
-    if (UNSPECIFIED_V4.check(address, "ipv4"))
-      return `'${host}' is the unspecified address`;
-    if (LOOPBACK_V4.check(address, "ipv4"))
-      return `'${host}' is a loopback address`;
-    if (RFC1918.check(address, "ipv4"))
-      return `'${host}' is a private (RFC1918) address`;
-    if (CGNAT.check(address, "ipv4"))
-      return `'${host}' is a CGNAT (100.64.0.0/10) address`;
-    if (LINK_LOCAL_V4.check(address, "ipv4"))
-      return `'${host}' is a link-local address`;
-    if (MULTICAST_V4.check(address, "ipv4"))
-      return `'${host}' is a multicast address`;
-    if (CLOUD_METADATA_V4.check(address, "ipv4"))
-      return `'${host}' is a well-known cloud metadata address`;
-    return null;
+  for (const [blockList, reason] of DENIED_RANGES) {
+    if (blockList.check(normalized, familyName)) {
+      return `'${host}' ${reason}`;
+    }
   }
-
-  if (UNSPECIFIED_V6.check(address, "ipv6"))
-    return `'${host}' is the unspecified address`;
-  if (LOOPBACK_V6.check(address, "ipv6"))
-    return `'${host}' is a loopback address`;
-  if (LINK_LOCAL_V6.check(address, "ipv6"))
-    return `'${host}' is a link-local address`;
-  if (MULTICAST_V6.check(address, "ipv6"))
-    return `'${host}' is a multicast address`;
-  if (CLOUD_METADATA_V6.check(address, "ipv6"))
-    return `'${host}' is a well-known cloud metadata address`;
-  if (UNIQUE_LOCAL_V6.check(address, "ipv6"))
-    return `'${host}' is a unique-local (fc00::/7) address`;
   return null;
 }

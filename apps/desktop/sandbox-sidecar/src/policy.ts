@@ -6,8 +6,38 @@
  * access to exactly that command's workspace root — the caller (Task 3's server) merges the
  * two before handing the result to srt.
  */
+import { isAbsolute } from "node:path/posix";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { InitConfig } from "./protocol.js";
+
+/**
+ * Thrown by `buildConfig` when an `InitConfig` path field is not absolute. `code` is always
+ * `'POLICY_INVALID'`, the matching `SidecarErrorCode` — Task 3's server catches this and
+ * reports it on the wire verbatim, rather than letting a relative path reach srt.
+ */
+export class PolicyInvalidError extends Error {
+  readonly code = "POLICY_INVALID" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PolicyInvalidError";
+  }
+}
+
+/**
+ * `home`/`workspaceRoots`/`readRoots` are passed straight into srt's filesystem policy as
+ * `literal: true` paths — srt does not resolve them against a cwd, so a relative entry would
+ * silently fail to deny/allow what the caller intended. Both platforms `InitConfig.platform`
+ * allows (`linux`, `darwin`) are POSIX, so "absolute" is checked with POSIX semantics
+ * regardless of the host OS this sidecar happens to run its tests on.
+ */
+function assertAbsolute(field: string, path: string): void {
+  if (!isAbsolute(path)) {
+    throw new PolicyInvalidError(
+      `${field} must be an absolute path, got ${JSON.stringify(path)}`,
+    );
+  }
+}
 
 // Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer
 // behind `address-guard.ts`'s pre-resolution checks on the literal host string. Loopback,
@@ -28,11 +58,20 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
  * per command by `perCommandConfig`. `own` (the host's own interface addresses) is accepted
  * for symmetry with `deniedReason` and future use; srt's own network config has no per-host
  * notion of "own addresses" to wire it into here.
+ *
+ * @throws {PolicyInvalidError} if `init.home`, or any entry of `init.workspaceRoots` or
+ * `init.readRoots`, is not an absolute path.
  */
 export function buildConfig(
   init: InitConfig,
   own: ReadonlySet<string>,
 ): SandboxRuntimeConfig {
+  assertAbsolute("home", init.home);
+  init.workspaceRoots.forEach((path, i) =>
+    assertAbsolute(`workspaceRoots[${i}]`, path),
+  );
+  init.readRoots.forEach((path, i) => assertAbsolute(`readRoots[${i}]`, path));
+
   const config: SandboxRuntimeConfig = {
     network: {
       allowedDomains: [],

@@ -35,3 +35,23 @@ for (const h of [
 ])
   test(`allows ${h} (names are left to the resolved-address check)`, () =>
     assert.equal(deniedReason(h, own), null));
+
+// Fix round 1 (review): IPv4-compatible IPv6 in hex-group form, zone ids, and
+// trailing-dot/uppercase hostnames must not bypass the guard; `::` and `::1` (bare, not
+// bracketed) must stay denied too.
+for (const h of [
+  "::7f00:1", // IPv4-compatible (deprecated) hex-group form of 127.0.0.1
+  "0:0:0:0:0:0:7f00:1", // same, fully expanded (no "::" compression)
+  "[::7f00:1]", // same, bracketed
+  "::ffff:0a00:0001", // IPv4-mapped hex-group form of 10.0.0.1 (RFC1918)
+  "fe80::1%en0", // link-local with a zone id
+  "localhost.", // trailing-dot absolute name
+  "LOCALHOST.", // uppercase + trailing dot
+  "api.localhost.", // *.localhost + trailing dot
+  "127.0.0.1.", // IPv4 literal + trailing dot
+  "::FFFF:7F00:1", // uppercase IPv4-mapped hex-group form
+  "::", // bare IPv6 unspecified address
+  "::1", // bare IPv6 loopback address
+])
+  test(`denies ${h} (fix round 1 regression)`, () =>
+    assert.notEqual(deniedReason(h, own), null));
