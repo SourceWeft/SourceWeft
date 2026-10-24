@@ -8,11 +8,6 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  MARKET_MCP_INSPECT_LIMITS,
-  marketMcpInspectFileSchema,
-  submitMarketMcpOwnerToolsRequestSchema,
-} from "@sourceweft/market-contracts";
-import {
   mcpInspectCommand,
   mcpSubmitToolsCommand,
   parseHeaderOption,
@@ -23,6 +18,11 @@ import {
   boundServerInfo,
   reduceTargetUrl,
 } from "../src/mcp/bound";
+import {
+  MARKET_MCP_INSPECT_LIMITS,
+  inspectFileSchema as marketMcpInspectFileSchema,
+  submitToolsRequestSchema as submitMarketMcpOwnerToolsRequestSchema,
+} from "../src/mcp/contract";
 import { parseSseData } from "../src/mcp/http";
 import { createRegistryClient } from "../src/registry/client";
 

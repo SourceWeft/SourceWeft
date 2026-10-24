@@ -1,4 +1,4 @@
-import { MARKET_MCP_INSPECT_LIMITS } from "@sourceweft/market-contracts";
+import { MARKET_MCP_INSPECT_LIMITS } from "./contract";
 import { McpInspectError } from "../errors";
 import { isRecord, type McpTransport } from "./jsonrpc";
 

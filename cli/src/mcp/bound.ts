@@ -1,7 +1,5 @@
-import {
-  MARKET_MCP_INSPECT_LIMITS,
-  type MarketMcpInspectedTool,
-} from "@sourceweft/market-contracts";
+import type { MarketMcpInspectedTool } from "@sourceweft/market-contracts";
+import { MARKET_MCP_INSPECT_LIMITS } from "./contract";
 import { isRecord } from "./jsonrpc";
 
 /**

@@ -1,11 +1,9 @@
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import {
-  marketMcpInspectFileSchema,
-  submitMarketMcpOwnerToolsRequestSchema,
-  type MarketMcpInspectFile,
-  type SubmitMarketMcpOwnerToolsRequest,
+import type {
+  MarketMcpInspectFile,
+  SubmitMarketMcpOwnerToolsRequest,
 } from "@sourceweft/market-contracts";
 import { McpInspectError, UsageError } from "../errors";
 import {
@@ -13,6 +11,7 @@ import {
   boundServerInfo,
   reduceTargetUrl,
 } from "../mcp/bound";
+import { inspectFileSchema, submitToolsRequestSchema } from "../mcp/contract";
 import { createHttpTransport } from "../mcp/http";
 import { inspectServer } from "../mcp/inspect";
 import { createStdioTransport } from "../mcp/stdio";
@@ -134,7 +133,7 @@ export async function mcpInspectCommand(
   const truncated = listed.truncated || bounded.truncated;
   const serverInfo = boundServerInfo(listed.serverInfo);
 
-  const file = marketMcpInspectFileSchema.parse({
+  const file = inspectFileSchema.parse({
     schemaVersion: 1,
     generatedBy: `sourceweft-cli/${ctx.version}`,
     generatedAt: new Date().toISOString(),
@@ -201,7 +200,7 @@ export async function readInspectFile(
   } catch {
     throw new McpInspectError(`${path} is not JSON.`);
   }
-  const parsed = marketMcpInspectFileSchema.safeParse(data);
+  const parsed = inspectFileSchema.safeParse(data);
   if (!parsed.success) {
     throw new McpInspectError(
       `${path} is not a file written by \`sourceweft mcp inspect\`.`,
@@ -221,7 +220,7 @@ export async function readInspectFile(
 export function toSubmitRequest(
   file: MarketMcpInspectFile,
 ): SubmitMarketMcpOwnerToolsRequest {
-  return submitMarketMcpOwnerToolsRequestSchema.parse({
+  return submitToolsRequestSchema.parse({
     tools: file.tools,
     generatedAt: file.generatedAt,
     ...(file.serverInfo !== undefined ? { serverInfo: file.serverInfo } : {}),
