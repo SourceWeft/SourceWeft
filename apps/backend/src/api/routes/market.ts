@@ -37,10 +37,7 @@ import {
   MarketSubmissionError,
   submitMcpFromGitHub,
 } from "../../modules/market/submission";
-import {
-  getSessionUserId,
-  requireSession,
-} from "../middleware/auth-session";
+import { getSessionUserId, requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 import { cachedJson } from "../response/cached-json";
 import { parseLocaleQuery } from "./query-params";
@@ -112,7 +109,10 @@ export function registerMarketRoutes(app: Hono) {
       marketMcpLocaleSchema,
       c.req.query("locale"),
     );
-    const record = await findMcp(c.req.param("identifier"), { locale });
+    const record = await findMcp(c.req.param("identifier"), {
+      locale,
+      relatedProduct: true,
+    });
     if (!record) {
       throw ApiError.notFound("MCP item not found");
     }
@@ -124,6 +124,7 @@ export function registerMarketRoutes(app: Hono) {
         readme: record.readme,
         aiOverview: record.aiOverview,
         searchIndexable: record.searchIndexable,
+        relatedProduct: record.relatedProduct,
         score: record.score,
       },
       { maxAge: 60 },
@@ -170,9 +171,12 @@ export function registerMarketRoutes(app: Hono) {
     const body = (await c.req.json().catch(() => null)) as {
       repoUrl?: unknown;
     } | null;
-    const repoUrl = typeof body?.repoUrl === "string" ? body.repoUrl.trim() : "";
+    const repoUrl =
+      typeof body?.repoUrl === "string" ? body.repoUrl.trim() : "";
     if (!repoUrl) {
-      throw ApiError.validation({ repoUrl: ["A GitHub repository URL is required"] });
+      throw ApiError.validation({
+        repoUrl: ["A GitHub repository URL is required"],
+      });
     }
     try {
       const result = await submitMcpFromGitHub({ repoUrl, userId });
@@ -209,7 +213,9 @@ export function registerMarketRoutes(app: Hono) {
       "published",
     );
     if (!result) {
-      throw ApiError.notFound("No submission awaiting review for that identifier");
+      throw ApiError.notFound(
+        "No submission awaiting review for that identifier",
+      );
     }
     return ApiResponse.success(c, result);
   });
@@ -225,9 +231,7 @@ export function registerMarketRoutes(app: Hono) {
   // attempts counted, and a fetch job queued for it.
   app.post("/v1/market/admin/mcp/:identifier/readme/refetch", async (c) => {
     await requireMarketAdmin(c);
-    const result = await requestMcpReadmeRefetch(
-      c.req.param("identifier"),
-    );
+    const result = await requestMcpReadmeRefetch(c.req.param("identifier"));
     if (!result) {
       throw ApiError.notFound(
         "No published public MCP server with that identifier",
@@ -251,9 +255,7 @@ export function registerMarketRoutes(app: Hono) {
   // generation state.
   app.get("/v1/market/admin/mcp/:identifier/overview", async (c) => {
     await requireMarketAdmin(c);
-    const state = await findMcpOverviewAdminState(
-      c.req.param("identifier"),
-    );
+    const state = await findMcpOverviewAdminState(c.req.param("identifier"));
     if (!state) {
       throw ApiError.notFound("No MCP server with that identifier");
     }
@@ -335,7 +337,9 @@ export function registerMarketRoutes(app: Hono) {
       "archived",
     );
     if (!result) {
-      throw ApiError.notFound("No submission awaiting review for that identifier");
+      throw ApiError.notFound(
+        "No submission awaiting review for that identifier",
+      );
     }
     return ApiResponse.success(c, result);
   });

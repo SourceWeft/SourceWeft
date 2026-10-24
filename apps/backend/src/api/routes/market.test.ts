@@ -132,6 +132,51 @@ test("the detail answer carries the latest version's README", async () => {
   assert.equal(mocks.findMcp.mock.calls[0]?.[0], "io.github.acme/weather");
 });
 
+test("the detail answer carries the product group as the read model gives it", async () => {
+  const relatedProduct = {
+    domain: "notion.com",
+    brand: "notion",
+    officialIdentifier: "com.notion/mcp",
+    members: [
+      {
+        identifier: "com.notion/mcp",
+        name: "Notion",
+        publisherMatch: true,
+        toolsCount: 19,
+      },
+      {
+        identifier: "io.github.o/better-notion",
+        name: "Better Notion",
+        publisherMatch: false,
+        toolsCount: 8,
+      },
+    ],
+  };
+  mocks.findMcp.mockResolvedValue({
+    item: { id: "i" },
+    versions: [],
+    readme: null,
+    aiOverview: null,
+    searchIndexable: true,
+    relatedProduct,
+  });
+  const response = await createTestApp().request("/v1/mcp/com.notion%2Fmcp");
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).relatedProduct, relatedProduct);
+
+  // No official server for the brand: null, not absent.
+  mocks.findMcp.mockResolvedValue({
+    item: { id: "i" },
+    versions: [],
+    readme: null,
+    aiOverview: null,
+    searchIndexable: true,
+    relatedProduct: null,
+  });
+  const ungrouped = await createTestApp().request("/v1/mcp/io.github.o%2Fx");
+  assert.equal((await ungrouped.json()).relatedProduct, null);
+});
+
 test("the detail answer carries the latest version's score", async () => {
   const score = {
     grade: "F",
@@ -309,12 +354,15 @@ test("the detail answer carries the AI overview in the asked-for locale", async 
   assert.deepEqual(body.item.overviewLocales, ["en", "zh-TW"]);
   assert.deepEqual(mocks.findMcp.mock.calls[0], [
     "io.github.acme/weather",
-    { locale: "zh-TW" },
+    { locale: "zh-TW", relatedProduct: true },
   ]);
 
   // English when not asked; a language the market does not write is refused.
   await createTestApp().request("/v1/mcp/io.github.acme%2Fweather");
-  assert.deepEqual(mocks.findMcp.mock.calls[1]?.[1], { locale: undefined });
+  assert.deepEqual(mocks.findMcp.mock.calls[1]?.[1], {
+    locale: undefined,
+    relatedProduct: true,
+  });
   const invalid = await createTestApp().request(
     "/v1/mcp/io.github.acme%2Fweather?locale=fr",
   );
