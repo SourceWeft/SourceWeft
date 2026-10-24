@@ -11,6 +11,7 @@ import {
   type MarketMcpLocale,
   type MarketMcpProductGroup,
   type MarketMcpReadme,
+  type MarketMcpScore,
   type MarketCategoryCountsResponse,
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
@@ -127,6 +128,9 @@ export type PublicMcpDetail = {
   // The servers integrating the same product, the product's own server
   // first (#367 W8); null when there is no such group or it cannot be read.
   relatedProduct: MarketMcpProductGroup | null;
+  // The latest version's quality scorecard (Issue #367, W6); null when the
+  // market has none or cannot be read, and the page shows no Score section.
+  score: MarketMcpScore | null;
 };
 
 // A hidden or regenerated overview shows within about two minutes: this
@@ -145,6 +149,7 @@ const cachedMcpDetail = unstable_cache(
       overviewLocales: detail.item.overviewLocales ?? [],
       readme: readMcpReadme(detail),
       relatedProduct: detail.relatedProduct ?? null,
+      score: detail.score ?? null,
       searchIndexable: detail.searchIndexable ?? true,
       versions: detail.versions,
     };
@@ -170,6 +175,7 @@ export async function getPublicMcpDetail(
       overviewLocales: [],
       readme: null,
       relatedProduct: null,
+      score: null,
       searchIndexable: true,
       versions: [],
     };

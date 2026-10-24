@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Code2,
   FileText,
+  Gauge,
   History,
   KeyRound,
   Layers,
@@ -22,7 +23,7 @@ import type {
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
-import { publicMcpFacts } from "../../../../lib/mcp-facts";
+import { mcpDocumentationUrl, publicMcpFacts } from "../../../../lib/mcp-facts";
 import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -83,6 +84,7 @@ import {
 } from "../_components/mcp-display";
 import { remoteMcpClientConfig } from "../_components/mcp-install";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
+import { McpScoreCard } from "../_components/mcp-score";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
 // is injected at container start, so a build-time render would bake in the
@@ -295,13 +297,14 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const t = await getTranslations("mcp.detail");
   const tAuth = await getTranslations("mcp.authMethod");
   const tValidation = await getTranslations("mcp.toolsValidation");
+  const tScore = await getTranslations("mcp.score");
   const decodedIdentifier = decodeURIComponent(identifier);
   // AI text in the visitor's language, English when there is none in it.
   const overviewLocale = mcpOverviewLocale(locale);
   const [
     authState,
     result,
-    { aiOverview, readme, relatedProduct, versions },
+    { aiOverview, readme, relatedProduct, score, versions },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
@@ -343,6 +346,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const sourceUrl = manifest.sourceUrl ?? item.sourceUrl;
   const repoUrl = manifest.repoUrl ?? item.repoUrl;
   const homepageUrl = manifest.homepageUrl ?? item.homepageUrl;
+  // The endpoint's own documentation link, from its protected-resource
+  // metadata (W1); the facts panel shows it, and it is one of the server's
+  // addresses. Never fetched.
+  const documentationUrl = mcpDocumentationUrl(version.provenanceJson);
   const clientConfig = remoteMcpClientConfig(manifest);
   // The hero already shows the summary; only a longer description adds
   // anything. An AI overview, when there is one, takes the description's
@@ -370,6 +377,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     ...(versions.length > 0
       ? [["versions", t("nav.versions", { count: versions.length })]]
       : []),
+    ...(score ? [["score", tScore("nav")]] : []),
     ...(productGroup && productGroup.others.length > 0
       ? [
           [
@@ -410,7 +418,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       "@type": "Organization",
       name: providerName ?? "SourceWeft MCP Market",
     },
-    sameAs: [homepageUrl, repoUrl, sourceUrl].filter(Boolean),
+    sameAs: [homepageUrl, repoUrl, sourceUrl, documentationUrl].filter(Boolean),
     softwareVersion: version.version,
     url: `${SITE_URL}${mcpPath(item.identifier)}`,
   };
@@ -882,6 +890,15 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       </li>
                     ))}
                   </ol>
+                </section>
+              ) : null}
+
+              {score ? (
+                <section className="scroll-mt-32" id="score">
+                  <SectionHeading icon={Gauge}>
+                    {tScore("heading")}
+                  </SectionHeading>
+                  <McpScoreCard score={score} />
                 </section>
               ) : null}
 

@@ -125,6 +125,7 @@ export function registerMarketRoutes(app: Hono) {
         aiOverview: record.aiOverview,
         searchIndexable: record.searchIndexable,
         relatedProduct: record.relatedProduct,
+        score: record.score,
       },
       { maxAge: 60 },
     );

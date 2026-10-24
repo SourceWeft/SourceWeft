@@ -95,6 +95,7 @@ describe("getPublicMcpDetail", () => {
         overviewLocales: ["en", "zh-CN"],
         readme: { markdown: "# Weather", source, status: "ok" },
         relatedProduct: null,
+        score: null,
         searchIndexable: true,
         versions,
       },
@@ -111,6 +112,7 @@ describe("getPublicMcpDetail", () => {
       overviewLocales: [],
       readme: null,
       relatedProduct: null,
+      score: null,
       searchIndexable: true,
       versions,
     });
@@ -127,6 +129,18 @@ describe("getPublicMcpDetail", () => {
     client.getMcp.mockResolvedValue({ item: {}, versions, relatedProduct });
     await expect(getPublicMcpDetail("x", "en")).resolves.toMatchObject({
       relatedProduct,
+    });
+  });
+
+  it("passes on the latest version's score", async () => {
+    const score = {
+      grade: "B",
+      percentage: 60,
+      items: [{ key: "reachable", weight: 20, required: true, met: true }],
+    };
+    client.getMcp.mockResolvedValue({ item: {}, versions, score });
+    await expect(getPublicMcpDetail("x", "en")).resolves.toMatchObject({
+      score,
     });
   });
 
@@ -148,6 +162,7 @@ describe("getPublicMcpDetail", () => {
       overviewLocales: [],
       readme: null,
       relatedProduct: null,
+      score: null,
       // An outage never deindexes a page.
       searchIndexable: true,
       versions: [],

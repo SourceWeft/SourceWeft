@@ -177,6 +177,30 @@ test("the detail answer carries the product group as the read model gives it", a
   assert.equal((await ungrouped.json()).relatedProduct, null);
 });
 
+test("the detail answer carries the latest version's score", async () => {
+  const score = {
+    grade: "F",
+    percentage: 48,
+    items: [{ key: "hasDescription", weight: 10, required: true, met: false }],
+  };
+  mocks.findMcp.mockResolvedValue({
+    item: { id: "i" },
+    versions: [],
+    readme: null,
+    score,
+  });
+
+  const response = await createTestApp().request("/v1/mcp/com.notion%2Fmcp");
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    item: { id: "i" },
+    versions: [],
+    readme: null,
+    score,
+  });
+});
+
 test("an identifier is decoded once: %2F is a slash, and a literal % is a name that is not found", async () => {
   mocks.findMcp.mockResolvedValue(null);
   mocks.findMcpVersion.mockResolvedValue(null);
