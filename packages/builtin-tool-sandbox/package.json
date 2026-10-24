@@ -18,7 +18,7 @@
     "@sourceweft/contracts": "workspace:*",
     "deepagents": "1.13.1",
     "langchain": "^1.5.10",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@sourceweft/capability-runtime": "workspace:*",
