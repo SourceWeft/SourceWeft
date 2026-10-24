@@ -6,7 +6,7 @@
  * access to exactly that command's workspace root — the caller (Task 3's server) merges the
  * two before handing the result to srt.
  */
-import { isAbsolute } from "node:path/posix";
+import { isAbsolute, normalize as normalizePosix } from "node:path/posix";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { InitConfig } from "./protocol.js";
 
@@ -104,7 +104,8 @@ export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
  * The per-command overlay: write access to exactly `workspaceRoot`, nothing else. Merge this
  * on top of `buildConfig`'s result (e.g. by concatenating `filesystem.allowWrite`) for each
  * wrapped command — never widen `buildConfig`'s own `allowWrite`, which stays empty for the
- * sidecar's whole lifetime.
+ * sidecar's whole lifetime. `workspaceRoot` is expected to already have been through
+ * `assertWorkspaceRootAllowed` (fix round 1 review: this function itself does not validate it).
  */
 export function perCommandConfig(
   workspaceRoot: string,
@@ -116,4 +117,76 @@ export function perCommandConfig(
       denyWrite: [],
     },
   };
+}
+
+/**
+ * Normalizes an already-absolute POSIX `path` — collapsing `.`/`..` segments and duplicate
+ * separators purely lexically (never resolving against a cwd, unlike `node:path.resolve`) —
+ * so a `..`-traversal attempt in a caller-supplied path is defanged before it is compared
+ * against anything or handed to srt. Throws `PolicyInvalidError` first if `path` is not
+ * absolute to begin with.
+ */
+function normalizedAbsolute(field: string, path: string): string {
+  assertAbsolute(field, path);
+  return normalizePosix(path);
+}
+
+/**
+ * True when `child` is `parent` itself, or lexically nested inside it. Both arguments must
+ * already be normalized absolute paths (see `normalizedAbsolute`) — this does only a string
+ * comparison, with a `/` boundary so `/a/b` is not mistaken for being inside `/a/bc`.
+ */
+function isWithin(parent: string, child: string): boolean {
+  if (child === parent) return true;
+  const prefix = parent.endsWith("/") ? parent : `${parent}/`;
+  return child.startsWith(prefix);
+}
+
+/**
+ * Validates a `wrap`/`probe` request's `workspaceRoot` — the one path a per-command overlay is
+ * ever allowed to widen write access to — against `init.workspaceRoots`: it must be absolute
+ * and equal to, or nested inside, one of them. Returns the normalized path, which is the only
+ * form that should ever reach `perCommandConfig`/srt from here on (fix round 1 review: without
+ * this check, a relative or out-of-tree `workspaceRoot` on the wire — including one built with
+ * a `..` traversal — would reach srt's literal-path filesystem policy unchecked, since srt
+ * never resolves a literal path against a cwd on its own).
+ *
+ * @throws {PolicyInvalidError} if `workspaceRoot` is not absolute, or is not one of
+ * `initWorkspaceRoots` nor nested inside one of them.
+ */
+export function assertWorkspaceRootAllowed(
+  workspaceRoot: string,
+  initWorkspaceRoots: readonly string[],
+): string {
+  const normalized = normalizedAbsolute("workspaceRoot", workspaceRoot);
+  const allowed = initWorkspaceRoots.some((root) =>
+    isWithin(normalizePosix(root), normalized),
+  );
+  if (!allowed) {
+    throw new PolicyInvalidError(
+      `workspaceRoot ${JSON.stringify(workspaceRoot)} is not one of init's workspaceRoots, nor nested inside one`,
+    );
+  }
+  return normalized;
+}
+
+/**
+ * Validates a `wrap` request's `cwd` against its (already-`assertWorkspaceRootAllowed`-ed)
+ * `workspaceRoot`: it must be absolute and equal to, or nested inside, that workspace root.
+ * Returns the normalized path. See `assertWorkspaceRootAllowed`'s doc for why this matters —
+ * srt resolves a relative `cwd` against the sidecar process's own `process.cwd()`, not the
+ * command's intended working directory, so an unchecked `cwd` could point the wrapped command
+ * somewhere entirely outside the write access it was actually granted.
+ *
+ * @throws {PolicyInvalidError} if `cwd` is not absolute, or is not `workspaceRoot` itself nor
+ * nested inside it.
+ */
+export function assertCwdWithinWorkspace(cwd: string, workspaceRoot: string): string {
+  const normalized = normalizedAbsolute("cwd", cwd);
+  if (!isWithin(workspaceRoot, normalized)) {
+    throw new PolicyInvalidError(
+      `cwd ${JSON.stringify(cwd)} is not workspaceRoot ${JSON.stringify(workspaceRoot)}, nor nested inside it`,
+    );
+  }
+  return normalized;
 }

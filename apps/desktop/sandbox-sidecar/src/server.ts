@@ -12,7 +12,12 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { deniedReason } from "./address-guard.js";
-import { buildConfig, perCommandConfig, PolicyInvalidError } from "./policy.js";
+import {
+  assertCwdWithinWorkspace,
+  assertWorkspaceRootAllowed,
+  buildConfig,
+  perCommandConfig,
+} from "./policy.js";
 import type { InitConfig, Request, Response, SidecarErrorCode, WrapResult } from "./protocol.js";
 
 /**
@@ -89,6 +94,26 @@ const OWN_ADDRESSES_TTL_MS = 30_000;
 
 /** How long `probe` waits for the wrapped `true` to exit before giving up. */
 const PROBE_TIMEOUT_MS = 20_000;
+
+/** How long shutdown (explicit or EOF-triggered) waits for `srt.reset()` before giving up on it. */
+const RESET_TIMEOUT_MS = 5_000;
+
+/** Rejects with a timeout error if `promise` has not settled within `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 type InitializedState = {
   config: InitConfig;
@@ -229,14 +254,23 @@ export async function startServer(
     workspaceRoot: string;
   }): Promise<WrapResult> {
     if (state === null) throw notInitialized();
-    const customConfig = mergedConfigFor(state.runtimeConfig, request.workspaceRoot);
+    // Fix round 1 review: `workspaceRoot` is the only input that widens write access, and
+    // `cwd` is what srt resolves a relative literal path against — neither is otherwise
+    // constrained, so a bad value here (relative, outside every init workspace root, or
+    // escaping one via `..`) must never reach srt's filesystem policy unchecked.
+    const workspaceRoot = assertWorkspaceRootAllowed(
+      request.workspaceRoot,
+      state.config.workspaceRoots,
+    );
+    const cwd = assertCwdWithinWorkspace(request.cwd, workspaceRoot);
+    const customConfig = mergedConfigFor(state.runtimeConfig, workspaceRoot);
     try {
       const { argv, env } = await deps.srt.wrapWithSandboxArgv(
         request.command,
         undefined,
         customConfig,
         undefined,
-        request.cwd,
+        cwd,
         { commandId: request.commandId },
       );
       return { argv, env: cleanEnv(env) };
@@ -295,10 +329,27 @@ export async function startServer(
     return true;
   }
 
-  async function handleShutdown(): Promise<null> {
-    if (state !== null) {
-      await deps.srt.reset();
+  // Fix round 1 review: the sidecar must never outlive its parent with srt's proxy/listener
+  // machinery still running. `handleShutdown` is the *explicit* path (an orderly `shutdown`
+  // request), but a parent that crashes or is killed closes `input` without ever sending one
+  // — so `input` ending (EOF) is treated exactly like `shutdown` below, via this same
+  // best-effort, bounded teardown, guarded so it only ever runs once no matter which path
+  // reaches it first.
+  let tornDown = false;
+  async function teardown(): Promise<void> {
+    if (tornDown) return;
+    tornDown = true;
+    if (state === null) return;
+    try {
+      await withTimeout(deps.srt.reset(), RESET_TIMEOUT_MS);
+    } catch {
+      // Best effort: a hung or throwing `reset()` must not block shutdown (explicit or EOF)
+      // any further — there is nothing more this process can do about it either way.
     }
+  }
+
+  async function handleShutdown(): Promise<null> {
+    await teardown();
     return null;
   }
 
@@ -370,6 +421,10 @@ export async function startServer(
     }
   } finally {
     rl.close();
+    // Reached either because `shutdown` broke the loop (where `handleShutdown` already ran
+    // `teardown()`, so this is a no-op) or because `input` ended without one — the EOF case
+    // `teardown()`'s own doc comment above describes.
+    await teardown();
   }
 }
 

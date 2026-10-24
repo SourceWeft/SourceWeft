@@ -7,6 +7,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
+import { buildConfig } from "../src/policy.js";
 import type { InitConfig, Request, Response } from "../src/protocol.js";
 import { startServer } from "../src/server.js";
 import type { SrtLike } from "../src/server.js";
@@ -225,6 +226,37 @@ test("init surfaces an srt.initialize throw as SANDBOX_UNAVAILABLE", async () =>
   await harness.stop();
 });
 
+/** The merged config srt should see for any command wrapped under `workspaceRoot` against
+ * `linuxInit()`: everything `buildConfig` itself produces, untouched, plus exactly
+ * `workspaceRoot` added to `allowWrite`. Used by the review-round-1 merge-invariant tests for
+ * both `wrap` and `probe` below, so a future change can't silently widen (or narrow) anything
+ * beyond that one field. */
+function expectedMergedConfig(root: string) {
+  const base = buildConfig(linuxInit());
+  return {
+    denyRead: base.filesystem.denyRead,
+    allowRead: base.filesystem.allowRead,
+    network: base.network,
+    allowWrite: [{ path: root, literal: true }],
+  };
+}
+
+function assertMergeInvariant(customConfig: unknown, root: string): void {
+  const config = customConfig as {
+    filesystem: {
+      denyRead: unknown;
+      allowRead: unknown;
+      allowWrite: Array<{ path: string; literal: true }>;
+    };
+    network: unknown;
+  };
+  const expected = expectedMergedConfig(root);
+  assert.deepEqual(config.filesystem.denyRead, expected.denyRead);
+  assert.deepEqual(config.filesystem.allowRead, expected.allowRead);
+  assert.deepEqual(config.network, expected.network);
+  assert.deepEqual(config.filesystem.allowWrite, expected.allowWrite);
+}
+
 test("wrap passes the workspace as the only write root", async () => {
   const srt = makeFakeSrt();
   const harness = await initHarness(srt);
@@ -243,6 +275,33 @@ test("wrap passes the workspace as the only write root", async () => {
   await harness.stop();
 });
 
+// Fix round 1 review: pin the whole merge invariant, not just `allowWrite` — `wrap` and
+// `probe` must each hand srt a config whose `denyRead`/`allowRead`/`network` are untouched
+// from `buildConfig(init)`, with `allowWrite` widened to exactly the one workspace root.
+test("wrap's merged config keeps denyRead/allowRead/network from buildConfig untouched", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  assertMergeInvariant(srt.lastCustomConfig, workspaceRoot);
+  await harness.stop();
+});
+
+test("probe's merged config keeps denyRead/allowRead/network from buildConfig untouched", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const response = await harness.send({ op: "probe" });
+  assert.equal(response.ok, true, `probe failed: ${JSON.stringify(response)}`);
+  assertMergeInvariant(srt.lastCustomConfig, workspaceRoot);
+  await harness.stop();
+});
+
 test("wrap surfaces an srt.wrapWithSandboxArgv throw as SANDBOX_UNAVAILABLE", async () => {
   const srt = makeFakeSrt();
   srt.wrapError = new Error("proxy failed to start");
@@ -256,6 +315,89 @@ test("wrap surfaces an srt.wrapWithSandboxArgv throw as SANDBOX_UNAVAILABLE", as
   });
   expectError(response, "SANDBOX_UNAVAILABLE");
   if (!response.ok) assert.match(response.error.message, /proxy failed to start/);
+  await harness.stop();
+});
+
+// Fix round 1 review: `workspaceRoot` (the only input that widens write access) and `cwd`
+// (what srt resolves a relative literal against) must be validated against `init`'s own
+// `workspaceRoots`, not handed to srt as-is.
+test("wrap with a relative workspaceRoot is POLICY_INVALID", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot: "relative/ws",
+  });
+  expectError(response, "POLICY_INVALID");
+  await harness.stop();
+});
+
+test("wrap with a workspaceRoot outside every init workspace root is POLICY_INVALID", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const outside = join(tmpRoot, "not-the-workspace");
+  mkdirSync(outside, { recursive: true });
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: outside,
+    workspaceRoot: outside,
+  });
+  expectError(response, "POLICY_INVALID");
+  await harness.stop();
+});
+
+test("wrap with a workspaceRoot that escapes via .. traversal is POLICY_INVALID", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const escaping = `${workspaceRoot}/../escaped`;
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: escaping,
+    workspaceRoot: escaping,
+  });
+  expectError(response, "POLICY_INVALID");
+  await harness.stop();
+});
+
+test("wrap with a cwd outside workspaceRoot is POLICY_INVALID", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const outsideCwd = join(tmpRoot, "not-the-workspace-either");
+  mkdirSync(outsideCwd, { recursive: true });
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: outsideCwd,
+    workspaceRoot,
+  });
+  expectError(response, "POLICY_INVALID");
+  await harness.stop();
+});
+
+test("wrap with a workspaceRoot nested inside an init workspace root is ok", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const nested = join(workspaceRoot, "nested", "deeper");
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: nested,
+    workspaceRoot: nested,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  const customConfig = srt.lastCustomConfig as {
+    filesystem: { allowWrite: Array<{ path: string; literal: true }> };
+  };
+  assert.deepEqual(customConfig.filesystem.allowWrite, [{ path: nested, literal: true }]);
   await harness.stop();
 });
 
@@ -353,6 +495,25 @@ test("shutdown calls srt.reset and ends the server", async () => {
   assert.equal(response.ok, true);
   assert.equal(srt.resetCalls, 1);
   await harness.stop();
+});
+
+// Fix round 1 review: a crashed/killed parent never sends `shutdown` — it just closes the
+// sidecar's stdin, so EOF alone must tear srt down (`startServer`'s `teardown`), exactly as
+// an explicit `shutdown` would, or a dead parent orphans a sidecar with its sandbox proxies
+// still open.
+test("ending input without a shutdown request still calls srt.reset (EOF teardown)", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.equal(srt.resetCalls, 0, "reset must not run before input ends");
+  await harness.stop(); // ends `input` (EOF) without ever sending "shutdown"
+  assert.equal(srt.resetCalls, 1);
+});
+
+test("ending input before init never calls srt.reset (nothing to tear down)", async () => {
+  const srt = makeFakeSrt();
+  const harness = startHarness(srt);
+  await harness.stop();
+  assert.equal(srt.resetCalls, 0);
 });
 
 test("a malformed JSON line is BAD_REQUEST with id \"?\"", async () => {

@@ -7,6 +7,15 @@
  * `--print-env` is test-only: it skips starting the server and instead prints, as a JSON
  * array, the names of whatever proxy variables are still in `process.env` after stripping
  * (expected to always be empty) — see `tests/server.test.ts`'s `main strips proxy variables`.
+ *
+ * `startServer` already runs `srt.reset()` (best effort) when its own request loop ends,
+ * whether that was an explicit `shutdown` or `input` simply hitting EOF (see `server.ts`'s
+ * `teardown`) — but `reset()` tearing down srt's state does not guarantee every socket/proxy
+ * listener it started is gone, and any one of those left open would keep Node's event loop
+ * alive indefinitely. So this process calls `process.exit(0)` itself right after `startServer`
+ * resolves, rather than letting the event loop decide whether the process gets to exit: a
+ * parent (the Tauri host) that crashed or was killed without sending `shutdown` must not be
+ * left with an orphaned sidecar still holding sandbox proxies open (fix round 1 review).
  */
 import * as os from "node:os";
 
@@ -58,6 +67,10 @@ async function main(): Promise<void> {
     srt: SandboxManager,
     ownAddresses,
   });
+
+  // See the module doc comment: force the exit rather than rely on the event loop draining,
+  // since srt's own listeners can keep it alive after `startServer` has already resolved.
+  process.exit(0);
 }
 
 main().catch((error: unknown) => {
