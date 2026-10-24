@@ -4,6 +4,8 @@ mod preview_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod secret_store;
 mod tray_locale;
 mod window_chrome;
 mod updater;
@@ -141,14 +143,18 @@ fn main() {
             }
         })
         .setup(|app| {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
                 let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
                     &app.path().app_data_dir()?,
                 )?);
                 app.manage(
-                    remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
-                        .map_err(std::io::Error::other)?,
+                    remote_host::RemoteHost::new(
+                        host.clone(),
+                        app.config().identifier.clone(),
+                        app.handle().clone(),
+                    )
+                    .map_err(std::io::Error::other)?,
                 );
                 app.manage(host);
             }
