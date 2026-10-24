@@ -417,6 +417,60 @@
         "unsupportedPackage": "该软件包类型无法在沙箱中运行"
       }
     },
+    "score": {
+      "heading": "评分",
+      "nav": "评分",
+      "gradeLabel": "评级 {grade}",
+      "percentage": "已满足 {percentage}% 的收录检查项",
+      "intro": "该评分衡量此收录条目的完整程度，依据注册中心条目、端点与公开来源计算得出。它不是对服务器本身的评价，也不包含安装量或用户评价。",
+      "gradeExplain": {
+        "A": "完整的收录：所有必需检查项均通过，且已满足至少 80% 的权重。",
+        "B": "良好的收录：所有必需检查项均通过，且已满足至少 60% 的权重。",
+        "F": "不完整的收录：某项必需检查未通过，或已满足的权重不足 60%。"
+      },
+      "required": "必需",
+      "met": "已满足",
+      "notMet": "未满足",
+      "weight": "{weight} 分",
+      "items": {
+        "reachable": {
+          "label": "可连通",
+          "hint": "请保持端点能够响应 MCP 握手；SourceWeft 每 30 天探测一次。"
+        },
+        "authDeclared": {
+          "label": "已声明认证方式",
+          "hint": "请在注册中心条目中声明服务器是否需要凭据（请求头或 OAuth）。"
+        },
+        "hasTools": {
+          "label": "已列出工具",
+          "hint": "请让服务器在无凭据时响应 tools/list，或发布可在沙箱中无凭据启动的软件包。"
+        },
+        "hasDescription": {
+          "label": "描述",
+          "hint": "请在注册中心条目中填写至少 40 个字符的描述。"
+        },
+        "hasLogo": {
+          "label": "图标",
+          "hint": "请在注册中心条目中发布图标。"
+        },
+        "hasDocs": {
+          "label": "文档",
+          "hint": "请声明包含 README 的 GitHub 仓库，或在 OAuth 受保护资源元数据中提供 resource_documentation。"
+        },
+        "hasLicense": {
+          "label": "许可证",
+          "hint": "请在仓库或注册中心条目中声明许可证。"
+        },
+        "officialPublisher": {
+          "label": "官方发布者",
+          "hint": "请使用与端点主机名匹配的域名命名空间（例如 com.example）发布。"
+        },
+        "claimed": {
+          "label": "所有者已认领",
+          "hint": "所有者认领尚未开放；待所有者认领此服务器后，此项即视为满足。"
+        }
+      }
+    },
     "faq": {
       "eyebrow": "MCP 常见问答",
       "heading": "MCP 服务基础",

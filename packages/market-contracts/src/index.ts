@@ -306,6 +306,49 @@ export const marketMcpReadmeSchema = z.object({
   source: marketMcpReadmeSourceSchema.nullable(),
 });
 
+// ---------------------------------------------------------------------------
+// Quality scorecard (Issue #367, W6). A deterministic reading of how complete
+// a catalog entry is, computed from the stored manifest, provenance and
+// README state on every detail read: no model, no stored column. Modelled on
+// LobeHub's public score (weighted items, required items, A/B/F) with the
+// required items conditional on the kind of entry: a remote endpoint must be
+// reachable and declare its auth, tools are required only where the server
+// can be listed without a credential, a description is always required.
+// ---------------------------------------------------------------------------
+
+export const marketMcpScoreItemKeySchema = z.enum([
+  "reachable",
+  "authDeclared",
+  "hasTools",
+  "hasDescription",
+  "hasLogo",
+  "hasDocs",
+  "hasLicense",
+  "officialPublisher",
+  "claimed",
+]);
+
+// F when a required item is not met, else by the share of the total weight
+// that is met: A from 80 %, B from 60 %, F below.
+export const marketMcpScoreGradeSchema = z.enum(["A", "B", "F"]);
+
+export const marketMcpScoreItemSchema = z.object({
+  key: marketMcpScoreItemKeySchema,
+  weight: z.number().int().min(0),
+  // Required for THIS entry: a remote's reachability, say, but not a stdio
+  // package's.
+  required: z.boolean(),
+  met: z.boolean(),
+});
+
+export const marketMcpScoreSchema = z.object({
+  grade: marketMcpScoreGradeSchema,
+  // Met weight as a share of the total weight, 0–100, whole number.
+  percentage: z.number().int().min(0).max(100),
+  // Every item, in the definition's order, whether met or not.
+  items: z.array(marketMcpScoreItemSchema),
+});
+
 export const getMarketMcpResponseSchema = z.object({
   item: marketItemSummarySchema,
   versions: z.array(marketItemVersionSchema),
@@ -320,6 +363,10 @@ export const getMarketMcpResponseSchema = z.object({
   // sitemap): its README is one file that many servers show. Absent means
   // true, for answers from before it existed.
   searchIndexable: z.boolean().optional(),
+  // The latest version's quality scorecard (see `marketMcpScoreSchema`); null
+  // when the server has no published version to score. Optional for answers
+  // from before it existed.
+  score: marketMcpScoreSchema.nullable().optional(),
 });
 
 export const getMarketMcpManifestResponseSchema = z.object({
@@ -376,6 +423,10 @@ export type MarketMcpValidation = z.infer<typeof marketMcpValidationSchema>;
 export type MarketMcpToolsValidation = z.infer<
   typeof marketMcpToolsValidationSchema
 >;
+export type MarketMcpScoreItemKey = z.infer<typeof marketMcpScoreItemKeySchema>;
+export type MarketMcpScoreGrade = z.infer<typeof marketMcpScoreGradeSchema>;
+export type MarketMcpScoreItem = z.infer<typeof marketMcpScoreItemSchema>;
+export type MarketMcpScore = z.infer<typeof marketMcpScoreSchema>;
 export type MarketMcpLocale = z.infer<typeof marketMcpLocaleSchema>;
 export type MarketMcpAiOverview = z.infer<typeof marketMcpAiOverviewSchema>;
 export type GetMarketMcpResponse = z.infer<typeof getMarketMcpResponseSchema>;

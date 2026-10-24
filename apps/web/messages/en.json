@@ -426,6 +426,60 @@
         "unsupportedPackage": "the package type cannot run in the sandbox"
       }
     },
+    "score": {
+      "heading": "Score",
+      "nav": "Score",
+      "gradeLabel": "Grade {grade}",
+      "percentage": "{percentage}% of the listing checks met",
+      "intro": "How complete this listing is, computed from the registry entry, the endpoint and public sources. Not a rating of the server, and no installs or reviews go into it.",
+      "gradeExplain": {
+        "A": "Complete listing: every required check passes and at least 80% of the weight is met.",
+        "B": "Good listing: every required check passes and at least 60% of the weight is met.",
+        "F": "Incomplete listing: a required check fails, or less than 60% of the weight is met."
+      },
+      "required": "Required",
+      "met": "Met",
+      "notMet": "Not met",
+      "weight": "{weight} pts",
+      "items": {
+        "reachable": {
+          "label": "Reachable",
+          "hint": "Keep the endpoint answering the MCP handshake; SourceWeft probes it every 30 days."
+        },
+        "authDeclared": {
+          "label": "Auth declared",
+          "hint": "Declare in the registry entry whether the server needs a credential (headers or OAuth)."
+        },
+        "hasTools": {
+          "label": "Tools listed",
+          "hint": "Answer tools/list without a credential, or ship a package that starts in a sandbox without one."
+        },
+        "hasDescription": {
+          "label": "Description",
+          "hint": "Write a description of at least 40 characters in the registry entry."
+        },
+        "hasLogo": {
+          "label": "Logo",
+          "hint": "Publish an icon in the registry entry."
+        },
+        "hasDocs": {
+          "label": "Documentation",
+          "hint": "Declare a GitHub repository with a README, or serve resource_documentation in the OAuth protected-resource metadata."
+        },
+        "hasLicense": {
+          "label": "License",
+          "hint": "Declare a license in the repository or the registry entry."
+        },
+        "officialPublisher": {
+          "label": "Official publisher",
+          "hint": "Publish under a domain namespace, such as com.example, that matches the endpoint's host."
+        },
+        "claimed": {
+          "label": "Claimed by owner",
+          "hint": "Owner claims are not open yet; this check will be met once the owner claims the server."
+        }
+      }
+    },
     "faq": {
       "eyebrow": "MCP FAQ",
       "heading": "MCP server basics",
