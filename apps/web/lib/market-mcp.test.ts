@@ -94,6 +94,7 @@ describe("getPublicMcpDetail", () => {
         aiOverview,
         overviewLocales: ["en", "zh-CN"],
         readme: { markdown: "# Weather", source, status: "ok" },
+        relatedProduct: null,
         searchIndexable: true,
         versions,
       },
@@ -109,8 +110,23 @@ describe("getPublicMcpDetail", () => {
       aiOverview: null,
       overviewLocales: [],
       readme: null,
+      relatedProduct: null,
       searchIndexable: true,
       versions,
+    });
+  });
+
+  // Issue #367 W8: the product group travels with the detail.
+  it("passes on the product group as the market gives it", async () => {
+    const relatedProduct = {
+      domain: "notion.com",
+      brand: "notion",
+      officialIdentifier: "com.notion/mcp",
+      members: [],
+    };
+    client.getMcp.mockResolvedValue({ item: {}, versions, relatedProduct });
+    await expect(getPublicMcpDetail("x", "en")).resolves.toMatchObject({
+      relatedProduct,
     });
   });
 
@@ -131,6 +147,7 @@ describe("getPublicMcpDetail", () => {
       aiOverview: null,
       overviewLocales: [],
       readme: null,
+      relatedProduct: null,
       // An outage never deindexes a page.
       searchIndexable: true,
       versions: [],
