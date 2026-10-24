@@ -16,7 +16,7 @@
     "@langchain/quickjs": "0.6.1",
     "deepagents": "1.13.1",
     "langchain": "^1.5.10",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

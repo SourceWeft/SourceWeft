@@ -53,7 +53,7 @@ function patchedDependency(parent, name, version) {
   throw new Error("Could not identify installed package " + name);
 }
 
-const uri = patchedDependency(ajv, "fast-uri", "3.1.8");
+const uri = patchedDependency(ajv, "fast-uri", "3.1.9");
 for (const value of [
   "http://[::not-valid]/private",
   "http://[fc00::not-hex]/private",
@@ -223,10 +223,12 @@ for (const [version, expand] of braceExpansionLines) {
   ]);
 }
 
-// GHSA-3wwx-pv8p-q78v: the WebSocket crash is not safely reproducible here, so
-// both undici lines are held to their reviewed patch releases.
-patchedDependency(backend, "undici", "6.28.1");
-patchedDependency(dotenvx, "undici", "7.29.1");
+// GHSA-3wwx-pv8p-q78v (WebSocket crash), GHSA-xjj6-f33q-929c (unhandled error
+// on excessive content-encodings) and GHSA-4qv8-2p9j-2685 (unbounded
+// EventSource parser memory) are not safely reproducible here, so both undici
+// lines are held to their reviewed patch releases.
+patchedDependency(backend, "undici", "6.29.1");
+patchedDependency(dotenvx, "undici", "7.30.1");
 
 const qs = patchedDependency(express, "qs", "6.16.0");
 assert.throws(
