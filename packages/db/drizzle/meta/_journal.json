@@ -442,6 +442,13 @@
       "when": 1792763698634,
       "tag": "0062_catalog_duplicate_lookups",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1792809274098,
+      "tag": "0063_market_mcp_claims",
+      "breakpoints": true
     }
   ]
 }

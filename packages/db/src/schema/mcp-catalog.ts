@@ -269,3 +269,98 @@ export const mcpServerVersionAnalysis = pgTable(
   },
   (table) => catalogAnalysisConstraints("mcp_server_version_analysis", table),
 );
+
+// ---------------------------------------------------------------------------
+// Owner claims (Issue #367, W7). A member claims a catalog server by proving
+// control of the identity it is published under: their linked GitHub account
+// or organization for `io.github.*` entries and declared GitHub repositories,
+// or a token published in DNS or at a well-known path for a domain namespace.
+// A verified claimant's corrections live in `market_mcp_owner_overrides`,
+// apart from the federated rows, and are applied on read — a re-sync can
+// never overwrite them.
+// ---------------------------------------------------------------------------
+
+type McpClaimMethod = "github" | "dns_txt" | "well_known";
+type McpClaimStatus = "pending" | "verified" | "revoked";
+
+export const marketMcpClaims = pgTable(
+  "market_mcp_claims",
+  {
+    id: text("id").primaryKey(),
+    serverId: text("server_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    method: text("method").$type<McpClaimMethod>().notNull(),
+    status: text("status").$type<McpClaimStatus>().notNull().default("pending"),
+    // What is proven: the GitHub login (lowercased), or the domain.
+    target: text("target").notNull(),
+    // sha256 of the token a DNS record or well-known file must contain; null
+    // for the GitHub method, whose proof is the account link itself.
+    tokenHash: text("token_hash"),
+    // When a pending token stops working.
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true, mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    revokedBy: text("revoked_by"),
+    // Why the last verification attempt did not succeed.
+    lastError: text("last_error"),
+  },
+  (table) => [
+    check(
+      "market_mcp_claims_method_check",
+      sql`${table.method} in ('github', 'dns_txt', 'well_known')`,
+    ),
+    check(
+      "market_mcp_claims_status_check",
+      sql`${table.status} in ('pending', 'verified', 'revoked')`,
+    ),
+    // A member holds at most one verified and one pending claim per server.
+    uniqueIndex("market_mcp_claims_verified_uq")
+      .on(table.serverId, table.userId)
+      .where(sql`${table.status} = 'verified'`),
+    uniqueIndex("market_mcp_claims_pending_uq")
+      .on(table.serverId, table.userId)
+      .where(sql`${table.status} = 'pending'`),
+    index("market_mcp_claims_server_status_idx").on(
+      table.serverId,
+      table.status,
+    ),
+    index("market_mcp_claims_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * What a verified owner set for a server. `overridesJson` holds the field
+ * corrections (`iconUrl`, `summary`, `description`, `documentationUrl`,
+ * `homepageUrl`, `repoUrl`, `deprecated`); `toolsJson` the tool list they
+ * submitted from their own machine (`sourceweft mcp inspect`), kept apart
+ * because it is large. One row per server, whoever of its owners wrote last.
+ */
+export const marketMcpOwnerOverrides = pgTable("market_mcp_owner_overrides", {
+  serverId: text("server_id")
+    .primaryKey()
+    .references(() => mcpServers.id, { onDelete: "cascade" }),
+  updatedBy: text("updated_by").notNull(),
+  overridesJson: jsonb("overrides_json")
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+  toolsJson: jsonb("tools_json").$type<unknown[]>(),
+  // What the tool list said about itself: the inspect file's target and
+  // serverInfo, for the owner's own reference. Never credentials.
+  toolsMetaJson: jsonb("tools_meta_json").$type<Record<string, unknown>>(),
+  toolsSubmittedAt: timestamp("tools_submitted_at", {
+    withTimezone: true,
+    mode: "date",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});

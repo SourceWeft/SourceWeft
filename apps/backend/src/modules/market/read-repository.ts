@@ -24,6 +24,11 @@ import {
   readMcpOverviewLocales,
   readMcpOverviews,
 } from "./overview/repository";
+import {
+  applyOwnerOverridesToItem,
+  applyOwnerOverridesToManifest,
+} from "./claims/overrides";
+import { findOwnerLayersByServerIds } from "./claims/repository";
 import { latestPublishedVersionOf } from "./latest-version";
 import { readMcpReadme } from "./readme/readme-repository";
 import { mcpReadmeView } from "./readme/readme-state";
@@ -593,20 +598,28 @@ export async function listMcp(input: {
   const itemIds = pageRows.map((row) => row.id);
   const categoryMap = await categoriesByItemIds(itemIds);
   const latestVersionMap = await latestVersionsByItemIds(itemIds);
-  const overviewFields = await overviewFieldsByVersionIds(
-    [...latestVersionMap.values()].map((latest) => latest.id),
-    input.locale ?? "en",
-  );
+  const [overviewFields, ownerLayers] = await Promise.all([
+    overviewFieldsByVersionIds(
+      [...latestVersionMap.values()].map((latest) => latest.id),
+      input.locale ?? "en",
+    ),
+    findOwnerLayersByServerIds(itemIds),
+  ]);
   const items = pageRows.map((row) => {
     const latest = latestVersionMap.get(row.id);
+    // A verified owner's corrections sit on top of the federated data
+    // (Issue #367, W7; ./claims/overrides.ts).
     return {
-      ...mapItemRow({
-        row,
-        categories: categoryMap.get(row.id) ?? [],
-        latestManifestJson: latest?.manifestJson,
-        latestProvenanceJson: latest?.provenanceJson,
-        latestVersion: latest?.version ?? null,
-      }),
+      ...applyOwnerOverridesToItem(
+        mapItemRow({
+          row,
+          categories: categoryMap.get(row.id) ?? [],
+          latestManifestJson: latest?.manifestJson,
+          latestProvenanceJson: latest?.provenanceJson,
+          latestVersion: latest?.version ?? null,
+        }),
+        ownerLayers.get(row.id) ?? { row: null, claimed: false },
+      ),
       ...overviewFields(latest?.id),
     };
   });
@@ -701,7 +714,11 @@ export async function findMcp(
         desc(mcpServerVersions.publishedAt),
         desc(mcpServerVersions.createdAt),
       );
-    const categoryMap = await categoriesByItemIds([row.id]);
+    const [categoryMap, ownerLayers] = await Promise.all([
+      categoriesByItemIds([row.id]),
+      findOwnerLayersByServerIds([row.id]),
+    ]);
+    const ownerLayer = ownerLayers.get(row.id) ?? { row: null, claimed: false };
     const latest = versions[0];
     const locale = options.locale ?? "en";
     const [readme, overviews, overviewLocales, readmeShared] = latest
@@ -717,19 +734,31 @@ export async function findMcp(
         ])
       : [null, null, null, false];
     const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
+    // The owner's corrections (Issue #367, W7) are the top layer of the item
+    // and of every published version's manifest, so the manifest route and
+    // the page agree whichever version is asked for.
     return {
       item: {
-        ...mapItemRow({
-          row,
-          categories: categoryMap.get(row.id) ?? [],
-          latestManifestJson: latest?.manifestJson,
-          latestProvenanceJson: latest?.provenanceJson,
-          latestVersion: latest?.version ?? null,
-        }),
+        ...applyOwnerOverridesToItem(
+          mapItemRow({
+            row,
+            categories: categoryMap.get(row.id) ?? [],
+            latestManifestJson: latest?.manifestJson,
+            latestProvenanceJson: latest?.provenanceJson,
+            latestVersion: latest?.version ?? null,
+          }),
+          ownerLayer,
+        ),
         aiSummary: aiOverview?.overview.summary ?? null,
         overviewLocales: latest ? (overviewLocales?.get(latest.id) ?? []) : [],
       },
-      versions: versions.map(mapVersionRow),
+      versions: versions.map((version) => ({
+        ...mapVersionRow(version),
+        manifestJson: applyOwnerOverridesToManifest(
+          version.manifestJson,
+          ownerLayer.row,
+        ),
+      })),
       readme: readme
         ? mcpReadmeView({ repoUrl: row.repoUrl, ...readme })
         : null,

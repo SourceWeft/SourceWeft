@@ -99,7 +99,14 @@ export default function CliPage() {
         </p>
         <p className="leading-7">
           Installing public marketplace skills needs no account and no token.
-          There is nothing to sign in to.
+          There is nothing to sign in to. The one exception is{" "}
+          <Code>mcp submit-tools</Code>, which publishes a tool list on a
+          claimed MCP server&rsquo;s page and takes an API key of the account
+          that holds the claim; see{" "}
+          <Link href="/mcp-owners" className="underline">
+            Claim your MCP server
+          </Link>
+          .
         </p>
       </header>
 

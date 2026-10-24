@@ -2,6 +2,8 @@ import { eq, sql } from "drizzle-orm";
 import {
   CATALOG_OVERVIEW_LOCALES,
   db,
+  marketMcpClaims,
+  marketMcpOwnerOverrides,
   mcpCategories,
   mcpServerCategories,
   mcpServers,
@@ -29,6 +31,22 @@ import {
   MCP_OVERVIEW_TAXONOMY_VERSION,
 } from "./prompt";
 import type { McpOverviewAttempt, McpOverviewSourceRow } from "./source";
+
+// A verified owner's corrections (Issue #367, W7), joined in so the overview
+// reads the manifest as the catalog shows it; null without any. As on the
+// public reads, they count only while some owner holds a verified claim.
+const ownerOverridesJoin = sql`left join ${marketMcpOwnerOverrides} oo
+  on oo.server_id = s.id
+  and exists (
+    select 1 from ${marketMcpClaims} oc
+    where oc.server_id = s.id and oc.status = 'verified'
+  )`;
+const ownerOverridesColumn = sql`case when oo.server_id is not null then jsonb_build_object(
+  'overridesJson', oo.overrides_json,
+  'toolsJson', oo.tools_json,
+  'toolsSubmittedAt', oo.tools_submitted_at,
+  'updatedAt', oo.updated_at
+) end`;
 
 /**
  * Storage for MCP server AI overviews on the catalog overview engine's
@@ -235,9 +253,11 @@ export async function findMcpOverviewSubjectRow(
       v.provenance_json as "provenanceJson",
       v.readme_status as "readmeStatus",
       v.readme_sha256 as "readmeSha256",
-      case when v.readme_status = 'ok' then v.readme_md end as "readmeMd"
+      case when v.readme_status = 'ok' then v.readme_md end as "readmeMd",
+      ${ownerOverridesColumn} as "ownerOverrides"
     from ${mcpServerVersions} v
     join ${mcpServers} s on s.id = v.server_id
+    ${ownerOverridesJoin}
     where v.id = ${versionId}
   `);
   const row = result.rows[0];
@@ -341,11 +361,13 @@ export async function findMcpOverviewAttempts(input: {
         where o.mcp_server_version_id = v.id
         order by o.locale
         limit 1
-      ) as "overviewSha256"
+      ) as "overviewSha256",
+      ${ownerOverridesColumn} as "ownerOverrides"
     from ${mcpServerVersions} v
     join ${mcpServers} s on s.id = v.server_id
     join ${mcpServerVersionAnalysis} a on a.mcp_server_version_id = v.id
     left join installed i on i.identifier = s.identifier
+    ${ownerOverridesJoin}
     where ${eligibleSettled}
       and a.status not in ('pending', 'running')
       and v.id > ${input.after}

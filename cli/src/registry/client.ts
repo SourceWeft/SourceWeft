@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { SubmitMarketMcpOwnerToolsRequest } from "@sourceweft/market-contracts";
 import {
   searchResponseSchema,
   referenceResponseSchema,
@@ -6,6 +7,8 @@ import {
   skillResponseSchema,
   type SearchResponse,
   type SkillResponse,
+  mcpOwnerOverridesResponseSchema,
+  type McpOwnerOverridesResponse,
 } from "./schema";
 
 /** The production marketplace API. `--registry` overrides it. */
@@ -64,13 +67,29 @@ export class RegistryUnreachableError extends Error {
 export class RegistryError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The error body's `details`, when it has them (a validation error does). */
+  readonly details: unknown;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
     this.name = "RegistryError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
+}
+
+/**
+ * The fields of an error body. The API answers `{ code, message, details? }`;
+ * an `{ error: { … } }` envelope is read the same way.
+ */
+function errorFields(body: unknown): Record<string, unknown> {
+  if (typeof body !== "object" || body === null) return {};
+  const outer = body as Record<string, unknown>;
+  const inner = outer.error;
+  return typeof inner === "object" && inner !== null && !Array.isArray(inner)
+    ? (inner as Record<string, unknown>)
+    : outer;
 }
 
 /** The registry answered 200 with something the CLI cannot use. */
@@ -94,14 +113,37 @@ export class RegistryClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  private async get<S extends z.ZodType>(
+  private get<S extends z.ZodType>(
     path: string,
+    schema: S,
+  ): Promise<z.infer<S>> {
+    return this.request("GET", path, {}, schema);
+  }
+
+  /**
+   * One request to the registry, with the body JSON-encoded and the extra
+   * headers (an API key, say) sent as given. The response is parsed with
+   * `schema`; an error status becomes a `RegistryError` carrying the body's
+   * code, message and details.
+   */
+  private async request<S extends z.ZodType>(
+    method: "GET" | "PUT" | "POST",
+    path: string,
+    init: { body?: unknown; headers?: Record<string, string> },
     schema: S,
   ): Promise<z.infer<S>> {
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        headers: { accept: "application/json" },
+        method,
+        headers: {
+          accept: "application/json",
+          ...(init.body !== undefined
+            ? { "content-type": "application/json" }
+            : {}),
+          ...init.headers,
+        },
+        ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
       });
     } catch (error) {
       // A network failure surfaces from `fetch` as a bare "fetch failed".
@@ -115,16 +157,14 @@ export class RegistryClient {
       } catch {
         body = undefined;
       }
-      const fields =
-        typeof body === "object" && body !== null
-          ? (body as Record<string, unknown>)
-          : {};
+      const fields = errorFields(body);
       throw new RegistryError(
         response.status,
         typeof fields.code === "string" ? fields.code : "HTTP_ERROR",
         typeof fields.message === "string"
           ? fields.message
           : response.statusText || "Registry request failed",
+        fields.details,
       );
     }
 
@@ -171,6 +211,24 @@ export class RegistryClient {
     if (params.limit !== undefined) query.set("limit", String(params.limit));
     const suffix = query.size > 0 ? `?${query}` : "";
     return this.get(`/v1/skills${suffix}`, searchResponseSchema);
+  }
+
+  /**
+   * Uploads an owner's tool list for a catalog MCP server. The identifier
+   * holds a slash (`com.notion/mcp`) and travels as one path segment. The key
+   * goes in the `x-api-key` header and nowhere else.
+   */
+  submitMcpOwnerTools(
+    identifier: string,
+    body: SubmitMarketMcpOwnerToolsRequest,
+    apiKey: string,
+  ): Promise<McpOwnerOverridesResponse> {
+    return this.request(
+      "PUT",
+      `/v1/market/mcp/${encodeURIComponent(identifier)}/owner-overrides/tools`,
+      { body, headers: { "x-api-key": apiKey } },
+      mcpOwnerOverridesResponseSchema,
+    );
   }
 }
 

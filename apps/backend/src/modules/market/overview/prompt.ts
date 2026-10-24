@@ -289,6 +289,9 @@ function renderFacts(
     `Name: ${facts.name}`,
     ...(facts.provider ? [`Provider: ${facts.provider}`] : []),
     ...(facts.homepage ? [`Homepage: ${facts.homepage}`] : []),
+    ...(facts.documentation
+      ? [`Documentation (publisher-declared link): ${facts.documentation}`]
+      : []),
     `Transport: ${facts.transport}`,
     `Runs as: ${runsAs.join("; and ") || "unknown"}`,
     `Desktop only: ${yesNo(facts.desktopOnly)}`,

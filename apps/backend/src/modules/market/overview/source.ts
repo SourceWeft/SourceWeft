@@ -5,6 +5,10 @@ import {
 } from "@sourceweft/market-contracts";
 import type { RegistryServerJson } from "../types";
 import {
+  applyOwnerOverridesToManifest,
+  type McpOwnerOverridesSource,
+} from "../claims/overrides";
+import {
   buildMcpOverviewInput,
   type McpOverviewInput,
   type McpOverviewSource,
@@ -23,11 +27,25 @@ export type McpOverviewSourceRow = {
   provenanceJson: unknown;
   readmeStatus: McpReadmeStatus;
   readmeSha256: string | null;
+  /**
+   * A verified owner's corrections (Issue #367, W7), when the row carries
+   * them: they are the top layer of the manifest the overview reads, so the
+   * owner's description, documentation link and tool list are its input and
+   * part of its fingerprint.
+   */
+  ownerOverrides?: McpOwnerOverridesSource | null;
 };
 
 /** The stored manifest, or null when it no longer parses. */
-export function storedManifest(value: unknown): MarketMcpManifest | null {
-  const parsed = marketMcpManifestSchema.safeParse(value);
+export function storedManifest(
+  value: unknown,
+  ownerOverrides: McpOwnerOverridesSource | null = null,
+): MarketMcpManifest | null {
+  const layered =
+    ownerOverrides && isRecord(value)
+      ? applyOwnerOverridesToManifest(value, ownerOverrides)
+      : value;
+  const parsed = marketMcpManifestSchema.safeParse(layered);
   return parsed.success ? parsed.data : null;
 }
 
@@ -65,7 +83,7 @@ export function readableReadme(row: {
 export function mcpOverviewSource(
   row: McpOverviewSourceRow & { readmeMd: string | null },
 ): McpOverviewSource | null {
-  const manifest = storedManifest(row.manifestJson);
+  const manifest = storedManifest(row.manifestJson, row.ownerOverrides ?? null);
   if (!manifest) return null;
   const readme =
     row.readmeMd !== null && readableReadme({ ...row, hasReadmeText: true })
@@ -100,7 +118,7 @@ export function mcpOverviewInputOf(
 export function mcpOverviewFingerprint(
   row: McpOverviewSourceRow & { hasReadmeText: boolean },
 ): string | null {
-  const manifest = storedManifest(row.manifestJson);
+  const manifest = storedManifest(row.manifestJson, row.ownerOverrides ?? null);
   if (!manifest) return null;
   return buildMcpOverviewInput({
     manifest,
