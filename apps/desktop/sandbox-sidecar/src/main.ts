@@ -16,8 +16,45 @@
  * resolves, rather than letting the event loop decide whether the process gets to exit: a
  * parent (the Tauri host) that crashed or was killed without sending `shutdown` must not be
  * left with an orphaned sidecar still holding sandbox proxies open (fix round 1 review).
+ *
+ * Fix round 2 review: that `process.exit(0)` can itself drop the very last line written to
+ * `process.stdout` — the `shutdown` ack, or the last `wrap`/`probe` reply before EOF. When
+ * stdout is a pipe (as it is under the real Rust host, never a TTY), `Writable.write()`
+ * queues the chunk and returns before the data has actually reached the OS; `process.exit()`
+ * tears the process down immediately, with no guarantee that queued write has gone out yet.
+ * `flushStdout` (below) is called, and awaited, before every `process.exit(0)` in this file
+ * for exactly this reason.
  */
 import * as os from "node:os";
+
+/** Bounds how long `flushStdout` waits for `process.stdout` to drain before giving up on it. */
+const STDOUT_FLUSH_GRACE_MS = 2_000;
+
+/**
+ * Waits until every write already queued on `process.stdout` has actually been handed to the
+ * underlying resource, bounded by `graceMs` (after which it gives up and resolves anyway,
+ * rather than hang a process that must exit either way). Writable streams invoke their write
+ * callbacks in the same order the writes were queued, so queuing one more, zero-length write
+ * and waiting for *its* callback is a reliable barrier: by the time it fires, every write
+ * queued before it — in particular, whatever `startServer`'s final `output.write(...)` call
+ * just queued — has already been handed off too. (`writableNeedDrain`/`'drain'` would cover
+ * the same backpressure case, but this barrier covers it as well, without needing to branch
+ * on whether backpressure actually occurred.)
+ */
+function flushStdout(graceMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, graceMs);
+    timer.unref?.();
+    process.stdout.write("", finish);
+  });
+}
 
 const PROXY_VAR_NAMES = new Set(["http_proxy", "https_proxy", "all_proxy", "no_proxy"]);
 
@@ -54,6 +91,7 @@ async function main(): Promise<void> {
 
   if (process.argv.includes("--print-env")) {
     process.stdout.write(`${JSON.stringify(remainingProxyVarNames(process.env))}\n`);
+    await flushStdout(STDOUT_FLUSH_GRACE_MS);
     process.exit(0);
     return;
   }
@@ -68,8 +106,11 @@ async function main(): Promise<void> {
     ownAddresses,
   });
 
-  // See the module doc comment: force the exit rather than rely on the event loop draining,
-  // since srt's own listeners can keep it alive after `startServer` has already resolved.
+  // See the module doc comment: flush the last queued write (the `shutdown` ack, or whatever
+  // was written right before EOF) before forcing the exit — forcing it is still necessary,
+  // since srt's own listeners can keep the event loop alive after `startServer` has already
+  // resolved, but it must not race the pipe write that resolution just queued.
+  await flushStdout(STDOUT_FLUSH_GRACE_MS);
   process.exit(0);
 }
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -565,3 +565,73 @@ test("main strips proxy variables", () => {
   const remaining = JSON.parse(result.stdout.trim()) as string[];
   assert.deepEqual(remaining, []);
 });
+
+// Fix round 2 review: `process.exit(0)` right after `startServer` resolves can race the
+// pipe write of the last response line (the `shutdown` ack here) and drop it. This spawns the
+// real `main.ts` entry point — real `srt`, real `SandboxManager.initialize`/`reset` — over a
+// real stdin/stdout pipe (as the Rust host uses, never a TTY), the one place that race can
+// actually happen; a `PassThrough`-driven `startServer` test, unlike this one, can't exercise
+// it. `SandboxManager` always sandboxes for the actual host OS, not `InitConfig.platform`, so
+// this only exercises a real sandbox session where that host OS has one srt supports — on
+// this Mac, that's `sandbox-exec` on darwin; skipped elsewhere rather than failing on an
+// environment this test was never meant to assert anything about.
+test(
+  "main flushes the shutdown ack to stdout before exiting (real srt)",
+  { skip: process.platform === "darwin" ? false : `requires real srt sandboxing on darwin; running on ${process.platform}` },
+  async () => {
+    const mainTmpRoot = mkdtempSync(join(tmpdir(), "srt-sidecar-main-flush-"));
+    const mainWorkspaceRoot = join(mainTmpRoot, "ws");
+    mkdirSync(mainWorkspaceRoot, { recursive: true });
+
+    const child = spawn(join(packageRoot, "node_modules/.bin/tsx"), ["src/main.ts"], {
+      cwd: packageRoot,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const exited = new Promise<number | null>((resolve) => {
+      child.once("exit", (code) => resolve(code));
+    });
+
+    const initRequest = {
+      id: "1",
+      op: "init",
+      config: {
+        platform: "darwin",
+        home: join(mainTmpRoot, "home"),
+        workspaceRoots: [mainWorkspaceRoot],
+        readRoots: [],
+        // Never actually executed by `init` — only `fs.existsSync`-checked — so any real file
+        // stands in for ripgrep here.
+        helpers: { ripgrep: process.execPath },
+      },
+    };
+    // Both lines are written back to back, without waiting for the init reply first: the
+    // server loop still processes them one at a time, and this maximizes the chance of
+    // catching the race (the shorter the gap between the last write and `process.exit(0)`,
+    // the more likely an unfixed version is to lose it).
+    child.stdin.write(`${JSON.stringify(initRequest)}\n`);
+    child.stdin.write(`${JSON.stringify({ id: "2", op: "shutdown" })}\n`);
+    child.stdin.end();
+
+    const code = await exited;
+    assert.equal(code, 0, `main.ts exited with ${String(code)}; stderr: ${stderr}`);
+
+    const lines = stdout
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => JSON.parse(line) as Response);
+    assert.equal(lines.length, 2, `expected exactly 2 response lines, got: ${JSON.stringify(lines)}`);
+    assert.equal(lines[0]?.id, "1");
+    assert.equal(lines[0]?.ok, true, `init failed: ${JSON.stringify(lines[0])}`);
+    assert.equal(lines[1]?.id, "2");
+    assert.equal(lines[1]?.ok, true, `shutdown failed: ${JSON.stringify(lines[1])}`);
+  },
+);
