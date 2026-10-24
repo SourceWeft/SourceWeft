@@ -13,7 +13,7 @@ CREATE TABLE "market_mcp_claims" (
 	"revoked_by" text,
 	"last_error" text,
 	CONSTRAINT "market_mcp_claims_method_check" CHECK ("market_mcp_claims"."method" in ('github', 'dns_txt', 'well_known')),
-	CONSTRAINT "market_mcp_claims_status_check" CHECK ("market_mcp_claims"."status" in ('pending', 'verified', 'revoked'))
+	CONSTRAINT "market_mcp_claims_status_check" CHECK ("market_mcp_claims"."status" in ('pending', 'verified', 'revoked', 'blocked'))
 );
 --> statement-breakpoint
 CREATE TABLE "market_mcp_owner_overrides" (

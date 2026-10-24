@@ -32,7 +32,10 @@ export async function findOwnerLayersByServerIds(
       .from(marketMcpOwnerOverrides)
       .where(inArray(marketMcpOwnerOverrides.serverId, ids)),
     db
-      .selectDistinct({ serverId: marketMcpClaims.serverId })
+      .selectDistinct({
+        serverId: marketMcpClaims.serverId,
+        userId: marketMcpClaims.userId,
+      })
       .from(marketMcpClaims)
       .where(
         and(
@@ -42,13 +45,17 @@ export async function findOwnerLayersByServerIds(
       ),
   ]);
   const claimedIds = new Set(claimed.map((row) => row.serverId));
+  // Corrections apply only while the member who wrote them holds a verified
+  // claim on the server: a revoked or blocked owner's layer stays stored
+  // (quarantined) but stops showing, whoever else may hold a claim.
+  const authors = new Set(
+    claimed.map((row) => `${row.serverId}\u0000${row.userId}`),
+  );
   for (const id of ids) {
     map.set(id, { row: null, claimed: claimedIds.has(id) });
   }
-  // Corrections apply only while some owner holds a verified claim: a
-  // revoked owner's layer stays stored but stops showing.
   for (const row of overrides) {
-    if (!claimedIds.has(row.serverId)) continue;
+    if (!authors.has(`${row.serverId}\u0000${row.updatedBy}`)) continue;
     map.set(row.serverId, { row, claimed: true });
   }
   return map;
@@ -140,6 +147,25 @@ export async function findVerifiedClaim(
   return row ?? null;
 }
 
+/** A market admin blocked this member from claiming this server. */
+export async function findBlockedClaim(
+  serverId: string,
+  userId: string,
+): Promise<McpClaimRow | null> {
+  const [row] = await db
+    .select()
+    .from(marketMcpClaims)
+    .where(
+      and(
+        eq(marketMcpClaims.serverId, serverId),
+        eq(marketMcpClaims.userId, userId),
+        eq(marketMcpClaims.status, "blocked"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function hasVerifiedClaim(serverId: string): Promise<boolean> {
   const [row] = await db
     .select({ one: sql`1` })
@@ -204,23 +230,43 @@ export async function recordClaimError(
     .where(eq(marketMcpClaims.id, claimId));
 }
 
-export async function markClaimRevoked(input: {
+/**
+ * Ends a claim: `revoked` when the owner gives it up, `blocked` when a
+ * market admin revokes it (the member may not claim this server again until
+ * an admin lifts the block). An already ended claim is left as it is.
+ */
+export async function markClaimEnded(input: {
   claimId: string;
+  status: "revoked" | "blocked";
   revokedBy: string;
   now: Date;
 }): Promise<McpClaimRow | null> {
   const [row] = await db
     .update(marketMcpClaims)
     .set({
-      status: "revoked",
+      status: input.status,
       revokedAt: input.now,
       revokedBy: input.revokedBy,
     })
     .where(
       and(
         eq(marketMcpClaims.id, input.claimId),
-        ne(marketMcpClaims.status, "revoked"),
+        inArray(marketMcpClaims.status, ["pending", "verified"]),
       ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/** Lifts an admin's block: the claim becomes an ordinary revoked one. */
+export async function markClaimUnblocked(
+  claimId: string,
+): Promise<McpClaimRow | null> {
+  const [row] = await db
+    .update(marketMcpClaims)
+    .set({ status: "revoked" })
+    .where(
+      and(eq(marketMcpClaims.id, claimId), eq(marketMcpClaims.status, "blocked")),
     )
     .returning();
   return row ?? null;

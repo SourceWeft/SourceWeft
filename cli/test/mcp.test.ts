@@ -131,14 +131,18 @@ describe("bounding what a server lists", () => {
     }
   });
 
-  it("records a URL as origin and path only", () => {
+  it("records a URL as its origin only: hosted servers put secrets in the path", () => {
     assert.equal(
       reduceTargetUrl("https://user:pw@mcp.example.com/v1/mcp?key=abc#frag"),
-      "https://mcp.example.com/v1/mcp",
+      "https://mcp.example.com",
+    );
+    assert.equal(
+      reduceTargetUrl("https://mcp.zapier.com/api/mcp/s/NjQyMzQ1-secret/mcp"),
+      "https://mcp.zapier.com",
     );
     assert.equal(
       reduceTargetUrl("http://127.0.0.1:8080/?token=x"),
-      "http://127.0.0.1:8080/",
+      "http://127.0.0.1:8080",
     );
   });
 
@@ -404,9 +408,10 @@ describe("mcp inspect over Streamable HTTP", () => {
     );
     const text = await readFile(join(dir, "http.json"), "utf8");
     assert.deepEqual(marketMcpInspectFileSchema.parse(JSON.parse(text)), file);
-    assert.deepEqual(file.target, { kind: "url", url: `${base}/mcp` });
+    assert.deepEqual(file.target, { kind: "url", url: base });
     assert.ok(!text.includes("secret"));
     assert.ok(!text.includes("abc"));
+    assert.ok(!text.includes("/mcp"), "the path is not written either");
     assert.deepEqual(
       file.tools.map((tool) => tool.name),
       ["one", "two"],
@@ -569,10 +574,12 @@ describe("mcp submit-tools against a local registry", () => {
     assert.ok(!("headers" in body));
     assert.ok(!("generatedBy" in body));
     assert.ok(!("schemaVersion" in body));
+    // Never the target: the endpoint or command the owner inspected.
+    assert.ok(!("target" in body));
+    assert.ok(!call?.body?.includes("mcp.example.com"));
     assert.deepEqual(Object.keys(body).sort(), [
       "generatedAt",
       "serverInfo",
-      "target",
       "tools",
     ]);
     assert.deepEqual(lines, ["Submitted 2 tools for com.example/demo"]);

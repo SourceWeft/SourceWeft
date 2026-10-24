@@ -30,6 +30,7 @@ import {
 } from "./github";
 import { ownerOverrideValues, ownerSubmittedTools } from "./overrides";
 import {
+  findBlockedClaim,
   findClaimById,
   findClaimableServer,
   findOwnerOverridesRow,
@@ -39,7 +40,8 @@ import {
   insertVerifiedClaim,
   listClaimsForAdmin,
   listViewerClaims,
-  markClaimRevoked,
+  markClaimEnded,
+  markClaimUnblocked,
   markClaimVerified,
   recordClaimError,
   replacePendingClaim,
@@ -291,6 +293,13 @@ export async function startMcpClaim(
   if (existing) {
     return { claim: toClaim(existing, server.identifier), instructions: null };
   }
+  if (await findBlockedClaim(server.id, input.userId)) {
+    throw new McpClaimError(
+      403,
+      "MCP_CLAIM_BLOCKED",
+      "A market admin revoked your claim on this server; write to support if you believe that was wrong",
+    );
+  }
   const targets = claimTargetsFor(server);
   const now = deps.now();
 
@@ -300,16 +309,27 @@ export async function startMcpClaim(
       { userId: input.userId, owner: targets.github.owner },
       deps.github,
     );
-    const row = await insertVerifiedClaim({
-      id: randomUUID(),
-      serverId: server.id,
-      userId: input.userId,
-      method: "github",
-      status: "verified",
-      target: targets.github.owner,
-      createdAt: now,
-      verifiedAt: now,
-    });
+    let row: McpClaimRow;
+    try {
+      row = await insertVerifiedClaim({
+        id: randomUUID(),
+        serverId: server.id,
+        userId: input.userId,
+        method: "github",
+        status: "verified",
+        target: targets.github.owner,
+        createdAt: now,
+        verifiedAt: now,
+      });
+    } catch (error) {
+      // Two requests racing: the partial unique index let one through, and
+      // that one is the member's claim.
+      const raced = isUniqueViolation(error)
+        ? await findVerifiedClaim(server.id, input.userId)
+        : null;
+      if (!raced) throw error;
+      row = raced;
+    }
     return { claim: toClaim(row, server.identifier), instructions: null };
   }
 
@@ -339,6 +359,17 @@ export async function startMcpClaim(
       expiresAt: expiresAt.toISOString(),
     },
   };
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function methodUnavailable(kind: string): McpClaimError {
@@ -434,8 +465,9 @@ export async function revokeMcpClaim(
 ): Promise<RevokeMcpClaimResponse> {
   const { row, identifier } = await requireOwnClaim(input.claimId, input.userId);
   const revoked =
-    (await markClaimRevoked({
+    (await markClaimEnded({
       claimId: row.id,
+      status: "revoked",
       revokedBy: input.userId,
       now: deps.now(),
     })) ?? row;
@@ -444,6 +476,12 @@ export async function revokeMcpClaim(
 
 // --- Admin -----------------------------------------------------------------
 
+/**
+ * A market admin revokes a claim. The claim is left `blocked`: the member
+ * cannot claim this server again until an admin lifts the block, and the
+ * corrections they wrote stop showing at once (the read layer shows only
+ * corrections whose author holds a verified claim).
+ */
 export async function adminRevokeMcpClaim(
   input: { adminUserId: string; claimId: string },
   deps: McpClaimDeps = defaultMcpClaimDeps,
@@ -451,13 +489,25 @@ export async function adminRevokeMcpClaim(
   const row = await findClaimById(input.claimId);
   if (!row) throw claimNotFound();
   const identifier = await identifierOf(row.serverId);
-  const revoked =
-    (await markClaimRevoked({
+  const blocked =
+    (await markClaimEnded({
       claimId: row.id,
+      status: "blocked",
       revokedBy: input.adminUserId,
       now: deps.now(),
     })) ?? row;
-  return { claim: toClaim(revoked, identifier) };
+  return { claim: toClaim(blocked, identifier) };
+}
+
+/** Lifts an admin's block; the member may claim the server again. */
+export async function adminUnblockMcpClaim(input: {
+  claimId: string;
+}): Promise<RevokeMcpClaimResponse> {
+  const row = await findClaimById(input.claimId);
+  if (!row) throw claimNotFound();
+  const identifier = await identifierOf(row.serverId);
+  const unblocked = (await markClaimUnblocked(row.id)) ?? row;
+  return { claim: toClaim(unblocked, identifier) };
 }
 
 export async function listMcpClaimsForAdmin(input: {
@@ -546,9 +596,9 @@ export async function setMcpOwnerTools(
     seen.add(tool.name);
     return true;
   });
+  // Never the endpoint or command: hosted servers carry secrets in paths.
   const meta: Record<string, unknown> = {};
   if (input.submission.generatedAt) meta.generatedAt = input.submission.generatedAt;
-  if (input.submission.target) meta.target = input.submission.target;
   if (input.submission.serverInfo) meta.serverInfo = input.submission.serverInfo;
   const row = await upsertOwnerTools({
     serverId: server.id,

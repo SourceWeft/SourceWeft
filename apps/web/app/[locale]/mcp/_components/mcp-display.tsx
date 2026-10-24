@@ -596,13 +596,27 @@ async function McpToolParameterList({
   );
 }
 
+/** Only http(s) links are ever rendered; anything else is not a link. */
+export function safeExternalHref(href: string | null | undefined) {
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function ExternalTextLink({
   children,
-  href,
+  href: rawHref,
 }: {
   children: React.ReactNode;
   href?: string | null;
 }) {
+  const href = safeExternalHref(rawHref);
   if (!href) return null;
   return (
     <a

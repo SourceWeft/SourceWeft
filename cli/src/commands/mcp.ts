@@ -166,7 +166,7 @@ export async function mcpInspectCommand(
     }`,
   );
   ctx.out(
-    "The file holds the tool list and the endpoint without its query string; no header, token or environment variable is in it.",
+    "The file holds the tool list and the endpoint's origin only; no path, header, token or environment variable is in it.",
   );
   ctx.out(
     `Submit it with: sourceweft mcp submit-tools <identifier> ${
@@ -213,14 +213,17 @@ export async function readInspectFile(
   return parsed.data;
 }
 
-/** The request body: the file's tools and provenance, and nothing else. */
+/**
+ * The request body: the file's tools, when they were listed and what the
+ * server called itself — never its `target` (the endpoint or command the
+ * owner inspected, which may carry a secret).
+ */
 export function toSubmitRequest(
   file: MarketMcpInspectFile,
 ): SubmitMarketMcpOwnerToolsRequest {
   return submitMarketMcpOwnerToolsRequestSchema.parse({
     tools: file.tools,
     generatedAt: file.generatedAt,
-    target: file.target,
     ...(file.serverInfo !== undefined ? { serverInfo: file.serverInfo } : {}),
   });
 }

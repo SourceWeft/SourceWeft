@@ -187,6 +187,19 @@ describe("public MCP detail page owner layer", () => {
     );
   });
 
+  it("never renders a documentation link with a non-http scheme", async () => {
+    // The server refuses these; the page filters anyway (defence in depth).
+    for (const documentationUrl of ["javascript:alert(1)", "data:text/html,hi"]) {
+      market.getPublicMcpManifest.mockResolvedValue(
+        manifestResponse({ documentationUrl }),
+      );
+      const html = await render();
+      expect(html).not.toContain(">Documentation<");
+      expect(html).not.toContain("javascript:");
+      expect(html).not.toContain("data:text/html");
+    }
+  });
+
   it("offers a signed-in member the claim page, worded by the server's standing", async () => {
     auth.isSignedIn = true;
     let link = claimLink(await render());

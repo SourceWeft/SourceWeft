@@ -120,6 +120,30 @@ describe("owner layer", () => {
     expect(item.owner?.fields).toEqual([]);
   });
 
+  test("stored links that are not https are dropped, never rendered", () => {
+    const item = applyOwnerOverridesToItem(federatedItem, {
+      row: {
+        overridesJson: {
+          iconUrl: "javascript:alert(1)",
+          homepageUrl: "data:text/html,hi",
+          repoUrl: "http://github.com/x/y",
+          documentationUrl: "https://u:p@docs.example/",
+          summary: "kept",
+        },
+        toolsJson: null,
+        toolsSubmittedAt: null,
+        updatedAt: new Date(0),
+      },
+      claimed: true,
+    });
+    expect(item.iconUrl).toBe("https://registry.example/icon.png");
+    expect(item.homepageUrl).toBe("https://registry.example/home");
+    expect(item.repoUrl).toBeNull();
+    expect(item.owner?.documentationUrl).toBeNull();
+    expect(item.summary).toBe("kept");
+    expect(item.owner?.fields).toEqual(["summary"]);
+  });
+
   test("the manifest gains the owner's fields, tools and the source record", () => {
     const layered = applyOwnerOverridesToManifest(federatedManifest, row);
     const manifest = marketMcpManifestSchema.parse(layered);

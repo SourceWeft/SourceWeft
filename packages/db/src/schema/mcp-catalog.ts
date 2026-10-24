@@ -281,7 +281,9 @@ export const mcpServerVersionAnalysis = pgTable(
 // ---------------------------------------------------------------------------
 
 type McpClaimMethod = "github" | "dns_txt" | "well_known";
-type McpClaimStatus = "pending" | "verified" | "revoked";
+// `blocked`: revoked by a market admin; the member may not claim this server
+// again until an admin lifts it.
+type McpClaimStatus = "pending" | "verified" | "revoked" | "blocked";
 
 export const marketMcpClaims = pgTable(
   "market_mcp_claims",
@@ -316,7 +318,7 @@ export const marketMcpClaims = pgTable(
     ),
     check(
       "market_mcp_claims_status_check",
-      sql`${table.status} in ('pending', 'verified', 'revoked')`,
+      sql`${table.status} in ('pending', 'verified', 'revoked', 'blocked')`,
     ),
     // A member holds at most one verified and one pending claim per server.
     uniqueIndex("market_mcp_claims_verified_uq")
@@ -350,8 +352,9 @@ export const marketMcpOwnerOverrides = pgTable("market_mcp_owner_overrides", {
     .notNull()
     .default(sql`'{}'::jsonb`),
   toolsJson: jsonb("tools_json").$type<unknown[]>(),
-  // What the tool list said about itself: the inspect file's target and
-  // serverInfo, for the owner's own reference. Never credentials.
+  // What the tool list said about itself: when it was generated and the
+  // server's `initialize` self-description. Never the endpoint or command the
+  // owner inspected (hosted servers carry secrets in their paths).
   toolsMetaJson: jsonb("tools_meta_json").$type<Record<string, unknown>>(),
   toolsSubmittedAt: timestamp("tools_submitted_at", {
     withTimezone: true,

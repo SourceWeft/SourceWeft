@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import {
   setMcpOwnerOverridesRequestSchema,
   startMcpClaimRequestSchema,
@@ -7,6 +8,7 @@ import { submitMarketMcpOwnerToolsRequestSchema } from "@sourceweft/market-contr
 import { isMarketAdmin } from "../../modules/market/admin";
 import {
   adminRevokeMcpClaim,
+  adminUnblockMcpClaim,
   clearMcpOwnerTools,
   getMcpClaimOverview,
   getMcpOwnerOverrides,
@@ -18,7 +20,7 @@ import {
   verifyMcpClaim,
 } from "../../modules/market/claims/service";
 import { logger } from "../../shared/logger";
-import { getSessionUserId, requireSession } from "../middleware/auth-session";
+import { requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 
 /**
@@ -34,8 +36,25 @@ import { ApiError, ApiResponse } from "../response/api-response";
 
 async function requireUserId(c: Context): Promise<string> {
   const session = await requireSession(c);
-  if (!session) throw ApiError.unauthorized();
-  return getSessionUserId(session);
+  // An organization API key resolves to a session without a user: a claim is
+  // a person's, so that is not signed in here.
+  const userId = session?.user?.id;
+  if (!userId) throw ApiError.unauthorized();
+  return userId;
+}
+
+// Corrections are a few short fields; a tool list is at most 200 tools of
+// 32 KiB each plus the server's self-description.
+const OVERRIDES_BODY_LIMIT = 64 * 1024;
+const TOOLS_BODY_LIMIT = 8 * 1024 * 1024;
+
+function limitBody(maxSize: number) {
+  return bodyLimit({
+    maxSize,
+    onError: () => {
+      throw new ApiError(413, "PAYLOAD_TOO_LARGE", "Request body is too large");
+    },
+  });
 }
 
 async function requireMarketAdminId(c: Context): Promise<string> {
@@ -120,7 +139,7 @@ export function registerMarketClaimRoutes(app: Hono) {
     );
   });
 
-  app.put("/v1/market/mcp/:identifier/owner-overrides", async (c) => {
+  app.put("/v1/market/mcp/:identifier/owner-overrides", limitBody(OVERRIDES_BODY_LIMIT), async (c) => {
     const userId = await requireUserId(c);
     const values = await parseBody(c, setMcpOwnerOverridesRequestSchema);
     const identifier = c.req.param("identifier");
@@ -135,7 +154,7 @@ export function registerMarketClaimRoutes(app: Hono) {
 
   // The tool list the owner generated on their own machine
   // (`sourceweft mcp inspect`), uploaded by `sourceweft mcp submit-tools`.
-  app.put("/v1/market/mcp/:identifier/owner-overrides/tools", async (c) => {
+  app.put("/v1/market/mcp/:identifier/owner-overrides/tools", limitBody(TOOLS_BODY_LIMIT), async (c) => {
     const userId = await requireUserId(c);
     const submission = await parseBody(c, submitMarketMcpOwnerToolsRequestSchema);
     const identifier = c.req.param("identifier");
@@ -173,6 +192,17 @@ export function registerMarketClaimRoutes(app: Hono) {
       claimId: c.req.param("claimId"),
     });
     logger.info("MCP catalog claim revoked by a market admin", {
+      adminUserId,
+      claimId: result.claim.id,
+      identifier: result.claim.identifier,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/v1/market/admin/mcp/claims/:claimId/unblock", async (c) => {
+    const adminUserId = await requireMarketAdminId(c);
+    const result = await adminUnblockMcpClaim({ claimId: c.req.param("claimId") });
+    logger.info("MCP catalog claim block lifted by a market admin", {
       adminUserId,
       claimId: result.claim.id,
       identifier: result.claim.identifier,

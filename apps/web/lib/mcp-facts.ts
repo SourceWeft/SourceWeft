@@ -105,9 +105,11 @@ export function publicMcpFacts({
     authExplanation: mcpAuthExplanation(manifest.auth, item.requiresAuth),
     toolCount: manifest.tools.length,
     // A verified owner's documentation link (Issue #367, W7) over the
-    // server's own protected-resource metadata.
+    // server's own protected-resource metadata; http(s) only, like the latter.
     documentationUrl:
-      manifest.documentationUrl ?? mcpDocumentationUrl(provenanceJson),
+      (manifest.documentationUrl && mcpEndpointHost(manifest.documentationUrl)
+        ? manifest.documentationUrl.trim()
+        : null) ?? mcpDocumentationUrl(provenanceJson),
     repoUrl: manifest.repoUrl ?? item.repoUrl ?? null,
     homepageUrl: manifest.homepageUrl ?? item.homepageUrl ?? null,
   };

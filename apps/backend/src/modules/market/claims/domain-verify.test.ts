@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   DomainLookupError,
   WELL_KNOWN_LIMITS,
+  controlledDomainFetch,
   verifyDnsTxt,
   verifyWellKnown,
   type DomainLookup,
@@ -11,11 +12,16 @@ import { hashClaimToken, newClaimToken } from "./targets";
 const token = newClaimToken();
 const hash = hashClaimToken(token);
 
-function lookup(parts: Partial<DomainLookup>): DomainLookup {
+function lookup(
+  parts: Partial<{
+    resolveTxt: DomainLookup["resolveTxt"];
+    fetch: typeof globalThis.fetch;
+  }>,
+): DomainLookup {
+  const fetch = parts.fetch ?? (async () => new Response("", { status: 404 }));
   return {
-    resolveTxt: vi.fn(async () => []),
-    fetch: vi.fn(async () => new Response("", { status: 404 })),
-    ...parts,
+    resolveTxt: parts.resolveTxt ?? (async () => []),
+    openFetch: () => ({ fetch, close: async () => undefined }),
   };
 }
 
@@ -112,6 +118,47 @@ describe("well-known verification", () => {
         }),
       ),
     ).resolves.toBe("not_found");
+  });
+
+  test("closes its request scope whichever way the lookup ends", async () => {
+    const close = vi.fn(async () => undefined);
+    const scoped: DomainLookup = {
+      resolveTxt: async () => [],
+      openFetch: () => ({ fetch: async () => new Response(token), close }),
+    };
+    await expect(verifyWellKnown("notion.com", hash, scoped)).resolves.toBe("verified");
+    const failing: DomainLookup = {
+      resolveTxt: async () => [],
+      openFetch: () => ({
+        fetch: async () => {
+          throw new TypeError("fetch failed");
+        },
+        close,
+      }),
+    };
+    await expect(verifyWellKnown("notion.com", hash, failing)).rejects.toBeInstanceOf(
+      DomainLookupError,
+    );
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+
+  test("a domain pointing at a private address is denied before any request", async () => {
+    // The default scope: the platform's controlled fetch with the public
+    // endpoint policy, here with a resolver that answers a private address.
+    const scoped: DomainLookup = {
+      resolveTxt: async () => [],
+      openFetch: () =>
+        controlledDomainFetch(
+          { enforceAddressChecks: true, allowedInternalOrigins: [] },
+          async () => [{ address: "10.0.0.8", family: 4 }],
+        ),
+    };
+    await expect(
+      verifyWellKnown("intranet-looking.example", hash, scoped),
+    ).rejects.toMatchObject({
+      name: "DomainLookupError",
+      message: expect.stringContaining("is not an address this service may fetch"),
+    });
   });
 
   test("a network failure is a lookup failure, not a verdict", async () => {

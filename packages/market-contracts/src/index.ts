@@ -737,24 +737,55 @@ export const MARKET_MCP_INSPECT_LIMITS = Object.freeze({
   nameChars: 128,
   titleChars: 200,
   descriptionChars: 2_000,
+  // One schema, as the CLI bounds it before writing the file.
   schemaBytes: 16 * 1024,
+  // A tool's schemas and annotations together, as the platform accepts them
+  // (the same figure the remote probe allows per tool).
+  toolBytes: 32 * 1024,
+  // The server's `initialize` self-description.
+  serverInfoBytes: 4 * 1024,
 });
 
-export const marketMcpInspectedToolSchema = z.object({
-  name: z.string().min(1).max(MARKET_MCP_INSPECT_LIMITS.nameChars),
-  title: z.string().max(MARKET_MCP_INSPECT_LIMITS.titleChars).optional(),
-  description: z
-    .string()
-    .max(MARKET_MCP_INSPECT_LIMITS.descriptionChars)
-    .optional(),
-  inputSchema: z.record(z.string(), z.unknown()).default({}),
-  outputSchema: z.record(z.string(), z.unknown()).optional(),
-  annotations: z.record(z.string(), z.unknown()).default({}),
-});
+function jsonBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
+}
+
+export const marketMcpInspectedToolSchema = z
+  .object({
+    name: z.string().min(1).max(MARKET_MCP_INSPECT_LIMITS.nameChars),
+    title: z.string().max(MARKET_MCP_INSPECT_LIMITS.titleChars).optional(),
+    description: z
+      .string()
+      .max(MARKET_MCP_INSPECT_LIMITS.descriptionChars)
+      .optional(),
+    inputSchema: z.record(z.string(), z.unknown()).default({}),
+    outputSchema: z.record(z.string(), z.unknown()).optional(),
+    annotations: z.record(z.string(), z.unknown()).default({}),
+  })
+  .refine(
+    (tool) =>
+      jsonBytes(tool.inputSchema) +
+        jsonBytes(tool.outputSchema) +
+        jsonBytes(tool.annotations) <=
+      MARKET_MCP_INSPECT_LIMITS.toolBytes,
+    {
+      message: `A tool's schemas and annotations may take at most ${MARKET_MCP_INSPECT_LIMITS.toolBytes} bytes together`,
+    },
+  );
+
+const marketMcpInspectServerInfoSchema = z
+  .record(z.string(), z.unknown())
+  .refine(
+    (value) => jsonBytes(value) <= MARKET_MCP_INSPECT_LIMITS.serverInfoBytes,
+    { message: `serverInfo may take at most ${MARKET_MCP_INSPECT_LIMITS.serverInfoBytes} bytes` },
+  );
 export type MarketMcpInspectedTool = z.infer<typeof marketMcpInspectedToolSchema>;
 
+// What the file says it inspected, for the owner's own reference. The URL is
+// the ORIGIN only: hosted MCP servers put per-user secrets in the path
+// (`/api/mcp/s/<secret>/mcp`), and the query string and userinfo may carry a
+// key. The command may carry a token too. Neither is ever uploaded.
 export const marketMcpInspectTargetSchema = z.discriminatedUnion("kind", [
-  // Origin and path only: the query string and userinfo may carry a key.
   z.object({ kind: z.literal("url"), url: z.string().url() }),
   z.object({ kind: z.literal("stdio"), command: z.string().min(1) }),
 ]);
@@ -765,14 +796,15 @@ export const marketMcpInspectFileSchema = z.object({
   generatedAt: z.string(),
   target: marketMcpInspectTargetSchema,
   protocolVersion: z.string().optional(),
-  serverInfo: z.record(z.string(), z.unknown()).optional(),
+  serverInfo: marketMcpInspectServerInfoSchema.optional(),
   tools: z.array(marketMcpInspectedToolSchema).max(MARKET_MCP_INSPECT_LIMITS.tools),
 });
 export type MarketMcpInspectFile = z.infer<typeof marketMcpInspectFileSchema>;
 
 // PUT /v1/market/mcp/:identifier/owner-overrides/tools — the owner's tool
-// list, as `sourceweft mcp inspect` wrote it (the file minus nothing: it has
-// no secrets). The platform stores the tools with `risk: "unknown"` and
+// list from `sourceweft mcp inspect`: the tools, when they were listed and
+// what the server called itself. The file's `target` stays on the owner's
+// machine. The platform stores the tools with `risk: "unknown"` and
 // `source: "owner-submitted"`.
 export const submitMarketMcpOwnerToolsRequestSchema = z
   .object({
@@ -780,8 +812,7 @@ export const submitMarketMcpOwnerToolsRequestSchema = z
       .array(marketMcpInspectedToolSchema)
       .max(MARKET_MCP_INSPECT_LIMITS.tools),
     generatedAt: z.string().optional(),
-    target: marketMcpInspectTargetSchema.optional(),
-    serverInfo: z.record(z.string(), z.unknown()).optional(),
+    serverInfo: marketMcpInspectServerInfoSchema.optional(),
   })
   .strict();
 export type SubmitMarketMcpOwnerToolsRequest = z.infer<

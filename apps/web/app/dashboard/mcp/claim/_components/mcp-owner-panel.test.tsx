@@ -135,7 +135,7 @@ test("sends the deprecation switch and refuses a malformed URL", async () => {
   await click(button("Save"));
   expect(api.setMcpOwnerOverrides).not.toHaveBeenCalled();
   expect(container.textContent).toContain(
-    "Enter a full URL starting with http:// or https://.",
+    "Enter a full URL starting with https://.",
   );
 
   typeInto(field("homepageUrl"), "https://example.com");

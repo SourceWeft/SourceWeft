@@ -3927,7 +3927,8 @@
         "status": {
           "pending": "Pending",
           "verified": "Verified",
-          "revoked": "Revoked"
+          "revoked": "Revoked",
+          "blocked": "Blocked by an admin"
         }
       },
       "toasts": {
@@ -3950,7 +3951,7 @@
         "repoUrl": "Repository URL",
         "deprecated": "Mark as deprecated",
         "deprecatedHint": "Tells visitors this server is no longer maintained. It stays listed.",
-        "urlInvalid": "Enter a full URL starting with http:// or https://.",
+        "urlInvalid": "Enter a full URL starting with https://.",
         "tooLong": "At most {max} characters.",
         "save": "Save",
         "saved": "Listing saved.",
@@ -3994,7 +3995,8 @@
       "MCP_CLAIM_TOKEN_NOT_FOUND": "The token was not found at the record or URL, or does not match. DNS changes can take time to propagate; try again later.",
       "MCP_CLAIM_LOOKUP_FAILED": "The DNS record or site could not be reached. Try again in a moment.",
       "MCP_CLAIM_REQUIRED": "Only a verified owner of this server can do this.",
-      "fallback": "Something went wrong. Try again."
+      "fallback": "Something went wrong. Try again.",
+      "MCP_CLAIM_BLOCKED": "A SourceWeft admin revoked your claim on this server. Write to support@sourceweft.com if you believe that was wrong."
     }
   },
   "dashboardSkillsClaim": {

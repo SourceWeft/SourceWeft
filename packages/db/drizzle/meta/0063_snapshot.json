@@ -1,5 +1,5 @@
 {
-  "id": "95ab502b-ad46-42a1-81ae-b5eaaa4a628d",
+  "id": "2e3458d7-d81b-475b-a391-92a4b1d0644c",
   "prevId": "b5fe10b1-5982-4771-a285-53787e37d337",
   "version": "7",
   "dialect": "postgresql",
@@ -17519,7 +17519,7 @@
         },
         "market_mcp_claims_status_check": {
           "name": "market_mcp_claims_status_check",
-          "value": "\"market_mcp_claims\".\"status\" in ('pending', 'verified', 'revoked')"
+          "value": "\"market_mcp_claims\".\"status\" in ('pending', 'verified', 'revoked', 'blocked')"
         }
       },
       "isRLSEnabled": false

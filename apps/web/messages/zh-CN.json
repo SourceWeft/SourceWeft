@@ -177,7 +177,11 @@
         "request": "起草一份项目简报",
         "context": "研究笔记 + 项目目标",
         "result": "包含建议的简报草稿",
-        "agents": ["研究来源资料", "整理关键发现", "起草项目简报"],
+        "agents": [
+          "研究来源资料",
+          "整理关键发现",
+          "起草项目简报"
+        ],
         "review": "请进一步补充建议部分的细节。",
         "reply": "简报已修订。你可以对照来源笔记，检查建议部分。",
         "artifact": "项目简报 · 修订稿"
@@ -204,7 +208,12 @@
       "card": {
         "title": "为连接知识而生",
         "subtitle": "来源进，带引用的成果出",
-        "items": ["连接的来源", "行内引用", "学习指南与常见问答", "音频概览"],
+        "items": [
+          "连接的来源",
+          "行内引用",
+          "学习指南与常见问答",
+          "音频概览"
+        ],
         "footnote": "每一项成果都力求紧贴塑造它的文档、笔记与连接来源。"
       }
     },
@@ -3918,7 +3927,8 @@
         "status": {
           "pending": "待验证",
           "verified": "已验证",
-          "revoked": "已撤销"
+          "revoked": "已撤销",
+          "blocked": "已被管理员封禁"
         }
       },
       "toasts": {
@@ -3941,7 +3951,7 @@
         "repoUrl": "仓库 URL",
         "deprecated": "标记为已弃用",
         "deprecatedHint": "告知访客此服务已不再维护。它仍会保留在列表中。",
-        "urlInvalid": "请输入以 http:// 或 https:// 开头的完整 URL。",
+        "urlInvalid": "请输入以 https:// 开头的完整网址。",
         "tooLong": "最多 {max} 个字符。",
         "save": "保存",
         "saved": "列表信息已保存。",
@@ -3985,7 +3995,8 @@
       "MCP_CLAIM_TOKEN_NOT_FOUND": "在记录或 URL 处未找到令牌，或令牌不匹配。DNS 变更可能需要一段时间才会生效，请稍后重试。",
       "MCP_CLAIM_LOOKUP_FAILED": "无法访问 DNS 记录或站点，请稍后重试。",
       "MCP_CLAIM_REQUIRED": "只有此服务的已验证所有者才能执行此操作。",
-      "fallback": "出了点问题，请重试。"
+      "fallback": "出了点问题，请重试。",
+      "MCP_CLAIM_BLOCKED": "SourceWeft 管理员撤销了你对此服务的认领。如果你认为有误，请写信至 support@sourceweft.com。"
     }
   },
   "dashboardSkillsClaim": {

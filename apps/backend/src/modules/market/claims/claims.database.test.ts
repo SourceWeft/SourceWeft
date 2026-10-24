@@ -68,13 +68,16 @@ vi.mock("./domain-verify", async (importOriginal) => {
       if (!records) throw Object.assign(new Error("ENODATA"), { code: "ENODATA" });
       return records;
     },
-    fetch: async (input) => {
-      if (state.lookupFailure) throw new TypeError("fetch failed");
-      const body = state.wellKnown.get(String(input));
-      return body === undefined
-        ? new Response("", { status: 404 })
-        : new Response(body, { status: 200 });
-    },
+    openFetch: () => ({
+      fetch: async (input: RequestInfo | URL) => {
+        if (state.lookupFailure) throw new TypeError("fetch failed");
+        const body = state.wellKnown.get(String(input));
+        return body === undefined
+          ? new Response("", { status: 404 })
+          : new Response(body, { status: 200 });
+      },
+      close: async () => undefined,
+    }),
   };
   return { ...original, defaultDomainLookup: lookup };
 });
@@ -388,12 +391,23 @@ describe("MCP owner claims", () => {
             { name: "delete_page", annotations: { destructiveHint: true } },
           ],
           generatedAt: "2026-10-24T10:00:00.000Z",
-          target: { kind: "url", url: `https://mcp.${tag}.com/mcp` },
+          serverInfo: { name: "demo", version: "1.0" },
         },
         "/tools",
       );
       expect(submitted.status).toBe(200);
       expect((await json(submitted)).tools).toMatchObject({ count: 2 });
+      // Nothing about where the owner inspected is stored: hosted servers
+      // carry secrets in their paths.
+      const [overridesRow] = await data.db
+        .select({ meta: data.marketMcpOwnerOverrides.toolsMetaJson })
+        .from(data.marketMcpOwnerOverrides)
+        .innerJoin(data.mcpServers, eq(data.mcpServers.id, data.marketMcpOwnerOverrides.serverId))
+        .where(eq(data.mcpServers.identifier, DOMAIN_ID));
+      expect(overridesRow?.meta).toEqual({
+        generatedAt: "2026-10-24T10:00:00.000Z",
+        serverInfo: { name: "demo", version: "1.0" },
+      });
 
       const check = async () => {
         const detail = (await json(await app.request(`/v1/mcp/${enc(DOMAIN_ID)}`))) as {
@@ -501,6 +515,38 @@ describe("MCP owner claims", () => {
       expect((await put({ iconUrl: "not a url" })).status).toBe(400);
       expect((await put({ unknownField: true })).status).toBe(400);
       expect((await put({ tools: "nope" }, "/tools")).status).toBe(400);
+      // A direct request past the web form: only https links are accepted.
+      for (const iconUrl of [
+        "javascript:alert(1)",
+        "data:text/html,hi",
+        "http://insecure.example/logo.png",
+        "https://user:secret@cdn.example/logo.png",
+      ]) {
+        const refused = await put({ iconUrl });
+        expect(refused.status, iconUrl).toBe(400);
+      }
+      expect((await put({ documentationUrl: "javascript:void(0)" })).status).toBe(400);
+      // The file's target (an endpoint or a command) is not part of the body.
+      expect(
+        (await put({ tools: [], target: { kind: "url", url: "https://x.example/mcp" } }, "/tools"))
+          .status,
+      ).toBe(400);
+      // A tool's schemas are capped; so is the server's self-description.
+      const huge = { type: "object", description: "x".repeat(33 * 1024) };
+      expect((await put({ tools: [{ name: "big", inputSchema: huge }] }, "/tools")).status).toBe(400);
+      expect(
+        (await put({ tools: [], serverInfo: { blob: "y".repeat(5 * 1024) } }, "/tools")).status,
+      ).toBe(400);
+    });
+
+    test("refuses an oversize body outright", async () => {
+      state.userId = "carol";
+      const refused = await app.request(path, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: "x".repeat(70 * 1024) }),
+      });
+      expect(refused.status).toBe(413);
     });
   });
 
@@ -530,7 +576,7 @@ describe("MCP owner claims", () => {
         method: "POST",
       });
       expect(revoked.status).toBe(200);
-      expect((await json(revoked)).claim).toMatchObject({ status: "revoked" });
+      expect((await json(revoked)).claim).toMatchObject({ status: "blocked" });
 
       state.userId = "carol";
       const refused = await app.request(`/v1/market/mcp/${enc(DOMAIN_ID)}/owner-overrides`, {
@@ -539,6 +585,19 @@ describe("MCP owner claims", () => {
         body: JSON.stringify({ summary: "again" }),
       });
       expect(refused.status).toBe(403);
+      // The block is sticky: carol cannot claim the server again, by any
+      // method, until an admin lifts it.
+      const reclaim = await app.request(`/v1/market/mcp/${enc(DOMAIN_ID)}/claims`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method: "dns_txt" }),
+      });
+      expect(reclaim.status).toBe(403);
+      expect((await json(reclaim)).code).toBe("MCP_CLAIM_BLOCKED");
+      const seen = (await json(await app.request(`/v1/market/mcp/${enc(DOMAIN_ID)}/claim`))) as unknown as {
+        viewerClaims: Array<{ status: string }>;
+      };
+      expect(seen.viewerClaims.map((claim) => claim.status)).toContain("blocked");
       // With no verified owner left, the mark goes and the corrections stop
       // applying (they stay stored for a future owner): the registry's own
       // data shows again.
@@ -559,6 +618,52 @@ describe("MCP owner claims", () => {
       expect(stored?.market_mcp_owner_overrides.overridesJson).toMatchObject({
         iconUrl: `https://${tag}.com/logo.png`,
       });
+
+      // Lifting the block lets carol claim again (a fresh pending claim).
+      state.userId = "market-admin";
+      const unblocked = await app.request(`/v1/market/admin/mcp/claims/${carols!.id}/unblock`, {
+        method: "POST",
+      });
+      expect(unblocked.status).toBe(200);
+      expect((await json(unblocked)).claim).toMatchObject({ status: "revoked" });
+      state.userId = "carol";
+      const again = await app.request(`/v1/market/mcp/${enc(DOMAIN_ID)}/claims`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ method: "dns_txt" }),
+      });
+      expect(again.status).toBe(201);
+    });
+
+    test("a correction shows only while its author holds a verified claim", async () => {
+      const identifier = `com.${tag}two/mcp`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      // Two verified owners; the second writes the corrections.
+      for (const user of ["owner-a", "owner-b"]) {
+        const started = await service.startMcpClaim(
+          { userId: user, identifier, method: "well_known" },
+          deps(),
+        );
+        state.wellKnown.set(
+          `https://${tag}two.com/.well-known/sourceweft-claim`,
+          started.instructions!.token,
+        );
+        await service.verifyMcpClaim({ userId: user, claimId: started.claim.id }, deps());
+      }
+      await service.setMcpOwnerOverrides(
+        { userId: "owner-b", identifier, values: { summary: "B's summary" } },
+        deps(),
+      );
+      const shown = async () =>
+        ((await json(await app.request(`/v1/mcp/${enc(identifier)}`))) as { item: { summary: string; claimed: boolean } }).item;
+      expect(await shown()).toMatchObject({ summary: "B's summary", claimed: true });
+
+      // An admin revokes owner-b: the server stays claimed (owner-a), but
+      // owner-b's corrections stop showing.
+      const rows = await service.listMcpClaimsForAdmin({ identifier });
+      const b = rows.find((row) => row.userId === "owner-b" && row.status === "verified")!;
+      await service.adminRevokeMcpClaim({ adminUserId: "market-admin", claimId: b.id }, deps());
+      expect(await shown()).toMatchObject({ summary: "Registry summary", claimed: true });
     });
 
     test("an owner can give up their own claim", async () => {

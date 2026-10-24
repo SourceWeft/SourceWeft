@@ -20,7 +20,14 @@ import { z } from "zod";
 export const mcpClaimMethodSchema = z.enum(["github", "dns_txt", "well_known"]);
 export type McpClaimMethod = z.infer<typeof mcpClaimMethodSchema>;
 
-export const mcpClaimStatusSchema = z.enum(["pending", "verified", "revoked"]);
+// `blocked`: a market admin revoked it, and that member may not claim this
+// server again until an admin lifts the block.
+export const mcpClaimStatusSchema = z.enum([
+  "pending",
+  "verified",
+  "revoked",
+  "blocked",
+]);
 export type McpClaimStatus = z.infer<typeof mcpClaimStatusSchema>;
 
 /** The DNS record name and well-known path a domain claim uses. */
@@ -74,15 +81,35 @@ export const mcpClaimDomainMethodSchema = z.object({
   domain: z.string().nullable(),
 });
 
+/**
+ * A link a verified owner may set: https only, no credentials. Checked here,
+ * on the server, whatever a client sent — the values end up as `href`s and
+ * `src`s on the public page.
+ */
+export const mcpOwnerUrlSchema = z
+  .url({ protocol: /^https$/, hostname: /^[^\s]+$/ })
+  .max(2_048)
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(value);
+        return !url.username && !url.password;
+      } catch {
+        return false;
+      }
+    },
+    { message: "URL must not carry credentials" },
+  );
+
 /** What a verified owner may set; every field optional, null clears it. */
 export const mcpOwnerOverridesInputSchema = z
   .object({
-    iconUrl: z.string().url().max(2_048).nullable().optional(),
+    iconUrl: mcpOwnerUrlSchema.nullable().optional(),
     summary: z.string().trim().max(300).nullable().optional(),
     description: z.string().trim().max(5_000).nullable().optional(),
-    documentationUrl: z.string().url().max(2_048).nullable().optional(),
-    homepageUrl: z.string().url().max(2_048).nullable().optional(),
-    repoUrl: z.string().url().max(2_048).nullable().optional(),
+    documentationUrl: mcpOwnerUrlSchema.nullable().optional(),
+    homepageUrl: mcpOwnerUrlSchema.nullable().optional(),
+    repoUrl: mcpOwnerUrlSchema.nullable().optional(),
     deprecated: z.boolean().optional(),
   })
   .strict();
@@ -139,7 +166,9 @@ export const verifyMcpClaimResponseSchema = z.object({
 });
 export type VerifyMcpClaimResponse = z.infer<typeof verifyMcpClaimResponseSchema>;
 
-// POST /v1/market/mcp-claims/:claimId/revoke (the owner's own, or an admin's)
+// POST /v1/market/mcp-claims/:claimId/revoke (the owner's own). An admin's
+// POST /v1/market/admin/mcp/claims/:claimId/revoke leaves the claim `blocked`
+// (the member cannot claim this server again) and `.../unblock` lifts that.
 export const revokeMcpClaimResponseSchema = z.object({
   claim: mcpClaimSchema,
 });
@@ -178,5 +207,6 @@ export const MCP_CLAIM_ERROR_CODES = [
   "MCP_CLAIM_TOKEN_NOT_FOUND",
   "MCP_CLAIM_LOOKUP_FAILED",
   "MCP_CLAIM_REQUIRED",
+  "MCP_CLAIM_BLOCKED",
 ] as const;
 export type McpClaimErrorCode = (typeof MCP_CLAIM_ERROR_CODES)[number];

@@ -75,12 +75,12 @@ export function boundInspectedTools(raw: readonly unknown[]): {
 }
 
 /**
- * The endpoint as the file records it: origin and path only. The query
- * string, fragment and userinfo may carry a key and are never written.
+ * The endpoint as the file records it: the origin only. Hosted MCP servers
+ * put per-user secrets in the path (`/api/mcp/s/<secret>/mcp`), and the
+ * query string, fragment and userinfo may carry a key; none of it is written.
  */
 export function reduceTargetUrl(input: string): string {
-  const url = new URL(input);
-  return url.origin + url.pathname;
+  return new URL(input).origin;
 }
 
 /**

@@ -124,7 +124,7 @@ export type OwnerFormProblem =
   | { field: OwnerTextField; kind: "url" }
   | { field: OwnerTextField; kind: "tooLong"; max: number };
 
-/** Client-side checks matching the contract: http(s) URLs, length limits. */
+/** Client-side checks matching the contract: https URLs, length limits. */
 export function ownerOverridesProblems(
   form: OwnerOverridesForm,
 ): OwnerFormProblem[] {
@@ -148,7 +148,7 @@ export function ownerOverridesProblems(
 function isHttpUrl(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    return url.protocol === "https:" && !url.username && !url.password;
   } catch {
     return false;
   }
