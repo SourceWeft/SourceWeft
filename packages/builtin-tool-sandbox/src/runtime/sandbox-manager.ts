@@ -3,7 +3,11 @@ import {
   isSandboxInstanceMissingError,
   isSandboxProviderUnavailableError,
   isSandboxReadinessProbeFailure,
+  SANDBOX_REPLACED_NOTICE,
+  SANDBOX_RESTART_DETECTED_MESSAGE,
+  SANDBOX_RESTARTED_NOTICE,
   SandboxInstanceChangedError,
+  SandboxReplacedError,
   sandboxErrorDiagnostic,
 } from "./errors";
 import type {
@@ -131,6 +135,14 @@ export const SANDBOX_OPERATION_STALE_GRACE_MS = 30 * 1000;
 export const SANDBOX_RELEASE_LEASE_GRACE_MS = 5 * 60 * 1000;
 export const SANDBOX_OPERATION_STALE_RELEASED_CODE =
   "SANDBOX_OPERATION_STALE_RELEASED";
+/**
+ * How many times one turn rebuilds its workspace after the provider replaced
+ * the container underneath it (reportLostGeneration). Each rebuild costs a
+ * create, a full re-stage and a repeat of the model's preparation, so a
+ * container that keeps flapping fails closed instead of churning: the third
+ * loss in a turn is SANDBOX_INSTANCE_CHANGED.
+ */
+export const SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT = 2;
 const REQUEST_FINGERPRINT_FIELD = "_sourceweftRequestFingerprint";
 
 type BeginToolOperationResult =
@@ -404,11 +416,34 @@ export class SandboxManager {
   /** Record id → providerSandboxId for every generation this manager handed out. */
   private readonly generationsBySandboxId = new Map<string, string>();
   /**
-   * Set when a terminated stateless generation was forgotten so the next
-   * acquisition creates a fresh one; consumed once by the first model-visible
-   * tool result that runs on the replacement (see consumeReplacementNotice).
+   * providerSandboxId → the memoized initialization that produced it, so a
+   * generation reported lost mid-operation (reportLostGeneration) can drop
+   * exactly its own `initializationRuns` entry and never a successor's.
    */
-  private pendingReplacementNotice = false;
+  private readonly generationInitializations = new Map<
+    string,
+    { key: string; initialization: Promise<SandboxRef> }
+  >();
+  /**
+   * Generations a provider operation proved gone, with the verdict handed to
+   * the detecting caller: one verdict per generation, however many siblings
+   * report the same loss.
+   */
+  private readonly lostGenerations = new Map<
+    string,
+    SandboxReplacedError | SandboxInstanceChangedError
+  >();
+  private lostGenerationReplacements = 0;
+  /** Set once the loss limit is hit: no generation is replaced after that. */
+  private replacementsExhausted = false;
+  /**
+   * Set when a generation was forgotten so the next acquisition creates a
+   * fresh one: the notice text the first model-visible tool result on the
+   * replacement carries (see consumeReplacementNotice). Which text depends on
+   * why the generation went — a timed-out stateless one (SANDBOX_REPLACED_NOTICE)
+   * or one the provider replaced underneath the run (SANDBOX_RESTARTED_NOTICE).
+   */
+  private pendingReplacementNotice: string | null = null;
   private latestRequiredAssetResolutions: RuntimeAssetResolution[] | null =
     null;
   private latestSkillResolutions: RuntimeAssetResolution[] | null = null;
@@ -429,14 +464,7 @@ export class SandboxManager {
     context: SandboxRuntimeContext,
     options: SandboxAcquisitionOptions = {},
   ): Promise<SandboxRef> {
-    const key = JSON.stringify([
-      this.input.provider.id,
-      context.teamId,
-      context.workspaceId,
-      context.threadId,
-      context.runId,
-      context.userId,
-    ]);
+    const key = this.initializationKey(context);
     throwIfAborted(options.signal);
     // At most one replacement per call: a generation that is fenced again
     // right after being recreated is not a cold-start casualty.
@@ -463,6 +491,10 @@ export class SandboxManager {
         ? await initialization
         : await raceWithSignal(initialization, options.signal);
       this.generationsBySandboxId.set(sandbox.id, sandbox.providerSandboxId);
+      this.generationInitializations.set(sandbox.providerSandboxId, {
+        key,
+        initialization,
+      });
       if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
         if (
           replacements > 0 ||
@@ -522,6 +554,9 @@ export class SandboxManager {
    * when the generation accepted operations: the model may rely on files in
    * that /workspace, so it must fail closed instead. The old id stays in
    * `invalidatedSandboxes`; late results from it are still rejected.
+   * (A generation the PROVIDER replaced is forgotten even though it accepted
+   * operations — see reportLostGeneration — but never once the loss limit
+   * has been spent.)
    */
   private forgetStatelessGeneration(input: {
     key: string;
@@ -531,17 +566,40 @@ export class SandboxManager {
     phase: "fence" | "renew";
   }): boolean {
     const generation = input.sandbox.providerSandboxId;
-    if (this.acceptedOperations.has(generation)) return false;
+    if (this.replacementsExhausted || this.acceptedOperations.has(generation)) {
+      return false;
+    }
+    this.forgetGeneration({ ...input, notice: SANDBOX_REPLACED_NOTICE });
+    return true;
+  }
+
+  /**
+   * The one place a generation leaves this manager's acquisition memo: its
+   * initialization entry, staging state and resolutions go, so the next
+   * acquisition creates a fresh generation and stages it again, and the first
+   * model-visible result on that replacement carries `notice`. The old id
+   * stays in `invalidatedSandboxes`; late results from it are still rejected.
+   */
+  private forgetGeneration(input: {
+    key: string;
+    initialization: Promise<SandboxRef>;
+    sandbox: SandboxRef;
+    context: SandboxRuntimeContext;
+    phase: "fence" | "renew" | "lost";
+    notice: string;
+  }) {
+    const generation = input.sandbox.providerSandboxId;
     if (this.initializationRuns.get(input.key) === input.initialization) {
       this.initializationRuns.delete(input.key);
     }
+    this.generationInitializations.delete(generation);
     this.stopSkillStaging(generation);
     this.skillStagingStates.delete(generation);
     this.requiredAssetStagingRuns.delete(generation);
     // Conservative until the replacement stages again: /skills stays denied.
     this.latestSkillResolutions = null;
     this.latestRequiredAssetResolutions = null;
-    this.pendingReplacementNotice = true;
+    this.pendingReplacementNotice = input.notice;
     this.input.logWarn?.("sandbox.generation.replaced", {
       phase: input.phase,
       provider: this.input.provider.id,
@@ -550,7 +608,6 @@ export class SandboxManager {
       providerSandboxId: generation,
       disposition: this.invalidatedSandboxes.get(generation),
     });
-    return true;
   }
 
   /**
@@ -586,15 +643,129 @@ export class SandboxManager {
   }
 
   /**
-   * True exactly once after a stateless generation was replaced. Tool code
-   * attaches the replacement notice to the result it is about to return, so
-   * the model learns that /workspace is empty from the call that first ran on
-   * the fresh generation rather than from a confusing "No such file".
+   * The replacement notice, exactly once after a generation was replaced
+   * (`false` otherwise). Tool code attaches it to the result it is about to
+   * return, so the model learns that /workspace is empty from the call that
+   * first ran on the fresh generation rather than from a confusing "No such
+   * file". The text says why the previous generation went: a timed-out
+   * stateless one, or one the provider replaced underneath the run.
    */
-  consumeReplacementNotice(): boolean {
+  consumeReplacementNotice(): string | false {
     const pending = this.pendingReplacementNotice;
-    this.pendingReplacementNotice = false;
-    return pending;
+    this.pendingReplacementNotice = null;
+    return pending ?? false;
+  }
+
+  /**
+   * A provider operation on `sandbox` proved that its instance is gone while
+   * this run still holds it: the Cloudflare adapter found the identity stamp
+   * missing or mismatched inside the exec (before the command ran) or behind
+   * a download miss; Daytona answered 404. The SDK restarts a container it
+   * believes stopped ("Failed to check container status, assuming stopped"),
+   * and the fresh one has an empty /workspace and /skills, so running on it
+   * silently would hand the model a workspace it believes is populated
+   * (Issue #323, 2026-10-23).
+   *
+   * One place decides what happens next, whatever operation detected it:
+   * - the generation is fenced (late results from siblings still running on
+   *   the old container are rejected, its skill staging stops) and its row
+   *   expired, so no other worker hands it out again;
+   * - while the turn is under SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT, the
+   *   generation is forgotten — even though it accepted operations, because
+   *   nothing on it survived anyway — the replacement is acquired in the
+   *   background (which re-runs required-asset and skill staging), and the
+   *   caller gets SandboxReplacedError to render: the detecting operation did
+   *   not run, and the first result on the replacement will carry
+   *   SANDBOX_RESTARTED_NOTICE;
+   * - past the limit the run fails closed: SandboxInstanceChangedError, and
+   *   no further generation is created this turn.
+   *
+   * Returns null when the generation was already fenced for another reason
+   * (a cancellation deleted it, and a sibling then saw it missing); the
+   * caller reports its own error, and the existing fence governs the rest.
+   * Idempotent per generation: siblings that report the same loss get the
+   * same verdict without a second expiry or replacement.
+   */
+  async reportLostGeneration(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+    cause: unknown,
+  ): Promise<SandboxReplacedError | SandboxInstanceChangedError | null> {
+    const generation = sandbox.providerSandboxId;
+    const known = this.lostGenerations.get(generation);
+    if (known) return known;
+    if (this.invalidatedSandboxes.has(generation)) return null;
+    const replaced =
+      !this.replacementsExhausted &&
+      this.lostGenerationReplacements <
+        SANDBOX_LOST_GENERATION_REPLACEMENT_LIMIT;
+    const verdict = replaced
+      ? new SandboxReplacedError(SANDBOX_RESTART_DETECTED_MESSAGE)
+      : new SandboxInstanceChangedError(
+          `The sandbox container was replaced by the provider again (${this.lostGenerationReplacements} replacement${this.lostGenerationReplacements === 1 ? "" : "s"} already in this run), so the workspace cannot keep being rebuilt.`,
+        );
+    this.lostGenerations.set(generation, verdict);
+    // Fence before anything async: a sibling command whose result arrives
+    // from the old container while the row is being expired is rejected.
+    this.invalidateGeneration(generation, "instance_changed");
+    this.input.logWarn?.("sandbox.generation.lost", {
+      provider: this.input.provider.id,
+      ...context,
+      sandboxId: sandbox.id,
+      providerSandboxId: generation,
+      replacements: this.lostGenerationReplacements,
+      replaced,
+      error: sandboxErrorDiagnostic(cause),
+    });
+    try {
+      await this.input.sandboxStore.markSandboxExpired({
+        sandboxId: sandbox.id,
+        providerSandboxId: generation,
+        expectedStatus: "ready",
+      });
+    } catch (error) {
+      // The in-memory fence already keeps this manager off the generation;
+      // another worker that still sees the row ready expires it on its own
+      // stamp check. Not a reason to withhold the verdict.
+      this.input.logWarn?.("sandbox.generation.lost", {
+        phase: "expire",
+        provider: this.input.provider.id,
+        ...context,
+        sandboxId: sandbox.id,
+        providerSandboxId: generation,
+        error: sandboxErrorDiagnostic(error),
+      });
+    }
+    if (!replaced) {
+      this.replacementsExhausted = true;
+      return verdict;
+    }
+    this.lostGenerationReplacements += 1;
+    const memo = this.generationInitializations.get(generation);
+    this.forgetGeneration({
+      key: memo?.key ?? this.initializationKey(context),
+      initialization: memo?.initialization ?? Promise.resolve(sandbox),
+      sandbox,
+      context,
+      phase: "lost",
+      notice: SANDBOX_RESTARTED_NOTICE,
+    });
+    // Same shape as the turn-start prefetch: the replacement's cold start
+    // and staging overlap the model's next decision instead of being charged
+    // to its next sandbox call. Its failure is that call's to re-report.
+    void this.getOrCreateThreadSandbox(context).catch(() => undefined);
+    return verdict;
+  }
+
+  private initializationKey(context: SandboxRuntimeContext) {
+    return JSON.stringify([
+      this.input.provider.id,
+      context.teamId,
+      context.workspaceId,
+      context.threadId,
+      context.runId,
+      context.userId,
+    ]);
   }
 
   private async initializeThreadSandbox(

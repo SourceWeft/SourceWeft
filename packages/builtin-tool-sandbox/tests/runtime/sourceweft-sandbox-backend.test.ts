@@ -4,6 +4,7 @@ import { SourceWeftSandboxBackend } from "../../src/runtime/sourceweft-sandbox-b
 import {
   SandboxProviderError,
   SANDBOX_PROVIDER_ERROR_CODES,
+  SANDBOX_RESTARTED_NOTICE,
 } from "../../src/runtime/errors";
 import { SandboxManager } from "../../src/runtime/sandbox-manager";
 import {
@@ -2630,11 +2631,10 @@ test("SourceWeftSandboxBackend preserves provider read failures and never upload
       "provider network unavailable",
       "download",
     ),
-    new SandboxProviderError(
-      SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
-      "sandbox identity lost",
-      "download",
-    ),
+    // A SANDBOX_NOT_FOUND_OR_EXPIRED read is no longer passed through: the
+    // manager turns a lost instance into SANDBOX_REPLACED (see "a file tool
+    // on a replaced container ..." below, which also checks that nothing is
+    // uploaded).
     new SandboxProviderError(
       SANDBOX_PROVIDER_ERROR_CODES.unknown,
       "provider unknown error",
@@ -2760,4 +2760,265 @@ test("SourceWeftSandboxBackend reports an exhausted tool budget instead of spawn
   // Without a host deadline the command simply runs.
   await backend.execute("node /workspace/a.js");
   assert.equal(provider.executeInputs.length, 1);
+});
+
+// ── Provider-side container replacement mid-run (Issue #323 follow-up) ────
+
+test("a container replaced between two successful commands is caught by the next execute: the run moves to a fresh sandbox, /skills is re-staged and the model is told", async () => {
+  const { provider } = createProvider();
+  let created = 0;
+  provider.createSandbox = async () => {
+    created += 1;
+    return { id: `provider-sandbox-${created}` };
+  };
+  // Once the SDK restarted the container behind an id, the Cloudflare stamp
+  // guard refuses every exec on it before the command runs.
+  const replacedIds = new Set<string>();
+  provider.execute = async (input) => {
+    if (replacedIds.has(input.providerSandboxId)) {
+      throw new SandboxProviderError(
+        SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+        "SANDBOX_NOT_FOUND_OR_EXPIRED: the sandbox identity stamp was missing or did not match when the command started; the container was replaced and the command did not run.",
+        "execute",
+      );
+    }
+    provider.executeInputs.push(input);
+    provider.executed.push(input.command);
+    return { output: "ran", exitCode: 0, truncated: false };
+  };
+  const rows: Array<{ id: string; providerSandboxId: string; status: string }> =
+    [];
+  const sandboxStore = {
+    ...createSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      const row = [...rows]
+        .reverse()
+        .find((r) => r.status === "ready" || r.status === "creating");
+      return row
+        ? {
+            id: row.id,
+            provider: "fake",
+            providerSandboxId: row.providerSandboxId,
+            teamId: context.teamId,
+            workspaceId: context.workspaceId,
+            threadId: context.threadId,
+            userId: context.userId,
+            status: row.status as "ready" | "creating",
+            updatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 3600_000),
+          }
+        : null;
+    },
+    async insertCreatingSandbox(input) {
+      rows.push({
+        id: input.sandboxId,
+        providerSandboxId: input.providerSandboxId,
+        status: "creating",
+      });
+      return true;
+    },
+    async markSandboxReady(input) {
+      const row = rows.find((r) => r.id === input.sandboxId)!;
+      row.status = "ready";
+      row.providerSandboxId = input.providerSandboxId;
+      return true;
+    },
+    async markSandboxExpired(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row || (input.expectedStatus && row.status !== input.expectedStatus))
+        return false;
+      row.status = "expired";
+      return true;
+    },
+    async touchSandbox(input) {
+      return rows.find((r) => r.id === input.sandboxId)?.status === "ready";
+    },
+  } satisfies SandboxStore;
+  const operationStore = createOperationStore();
+  const plansCalls = { count: 0 };
+  const logs: string[] = [];
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore,
+    operationStore,
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    logWarn: (event) => logs.push(event),
+    skillStaging: {
+      plans: async () => {
+        plansCalls.count += 1;
+        return [
+          {
+            name: "report",
+            version: "sv-1",
+            platform: "any",
+            sha256: "a".repeat(64),
+            archive: "zip" as const,
+            entrypoint: "SKILL.md",
+            installDir: "/skills/report",
+            loadContent: async () => new Uint8Array([1, 2, 3]),
+          },
+        ];
+      },
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+    toolApprovalEnabled: true,
+  });
+  const command =
+    "python3 /skills/report/scripts/build.py /workspace/report-v2";
+
+  const first = await backend.execute(command);
+  assert.equal(first.output, "ran");
+  assert.equal(
+    provider.executeInputs[0]?.providerSandboxId,
+    "provider-sandbox-1",
+  );
+  const uploadsForFirst = provider.uploadedFiles.length;
+  assert.ok(
+    uploadsForFirst >= 1,
+    "the bundle was staged into the first sandbox",
+  );
+
+  // 20:20:16Z "Failed to check container status, assuming stopped": the SDK
+  // replaced the container; the backend still holds the same row.
+  replacedIds.add("provider-sandbox-1");
+  const second = await backend.execute(command);
+  assert.equal(second.exitCode, 1);
+  assert.match(
+    second.output,
+    /^SANDBOX_REPLACED: The sandbox container was replaced by the provider while this run was in progress/u,
+  );
+  assert.match(second.output, /this operation did not run/u);
+  assert.match(second.output, /Hint: .*prepare_sandbox_workspace/u);
+  assert.match(second.output, /Do not copy skill files by hand/u);
+  assert.match(second.output, /failureCode=SANDBOX_REPLACED/u);
+  assert.doesNotMatch(second.output, /change the approach/u);
+  // Nothing ran on the fresh container under the old id, the row is expired
+  // (not left ready), and the operation is recorded with the single code.
+  assert.equal(provider.executeInputs.length, 1);
+  assert.equal(
+    rows.find((row) => row.providerSandboxId === "provider-sandbox-1")?.status,
+    "expired",
+  );
+  assert.equal(operationStore.completed.at(-1)?.status, "succeeded");
+  assert.equal(
+    operationStore.completed.at(-1)?.result?.errorCode,
+    "SANDBOX_REPLACED",
+  );
+  assert.ok(logs.includes("sandbox.generation.lost"));
+  // Not the fail-closed B1 code: the run continues.
+  assert.doesNotMatch(second.output, /SANDBOX_INSTANCE_CHANGED/u);
+
+  // The next call runs on a replacement that was re-staged (the /skills
+  // command waited for that staging), and carries the one-shot notice.
+  const third = await backend.execute(command);
+  assert.equal(created, 2);
+  assert.equal(
+    provider.executeInputs.at(-1)?.providerSandboxId,
+    "provider-sandbox-2",
+  );
+  assert.equal(third.exitCode, 0);
+  assert.equal(
+    third.output,
+    `ran\nDiagnostics: sandbox replaced. ${SANDBOX_RESTARTED_NOTICE}`,
+  );
+  assert.ok(plansCalls.count >= 2, "the replacement's staging read the plans");
+  assert.equal(provider.uploadedFiles.length, uploadsForFirst * 2);
+  assert.equal(manager.skillScriptsStaged(), true);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+
+  const fourth = await backend.execute("echo again");
+  assert.equal(fourth.output, "ran");
+  assert.equal(created, 2);
+});
+
+test("a file tool on a replaced container reports SANDBOX_REPLACED instead of a bare missing file", async () => {
+  const { provider } = createProvider();
+  let created = 0;
+  provider.createSandbox = async () => {
+    created += 1;
+    return { id: `provider-sandbox-${created}` };
+  };
+  const replacedIds = new Set<string>(["provider-sandbox-1"]);
+  provider.downloadFile = async (input) => {
+    if (replacedIds.has(input.providerSandboxId)) {
+      throw new SandboxProviderError(
+        SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+        "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox identity stamp was not found.",
+        "download",
+      );
+    }
+    return Buffer.from("hello");
+  };
+  const rows: Array<{ id: string; providerSandboxId: string; status: string }> =
+    [];
+  const sandboxStore = {
+    ...createSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      const row = [...rows]
+        .reverse()
+        .find((r) => r.status === "ready" || r.status === "creating");
+      return row
+        ? {
+            id: row.id,
+            provider: "fake",
+            providerSandboxId: row.providerSandboxId,
+            teamId: context.teamId,
+            workspaceId: context.workspaceId,
+            threadId: context.threadId,
+            userId: context.userId,
+            status: row.status as "ready" | "creating",
+            updatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 3600_000),
+          }
+        : null;
+    },
+    async insertCreatingSandbox(input) {
+      rows.push({
+        id: input.sandboxId,
+        providerSandboxId: input.providerSandboxId,
+        status: "creating",
+      });
+      return true;
+    },
+    async markSandboxReady(input) {
+      const row = rows.find((r) => r.id === input.sandboxId)!;
+      row.status = "ready";
+      row.providerSandboxId = input.providerSandboxId;
+      return true;
+    },
+    async markSandboxExpired(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row) return false;
+      row.status = "expired";
+      return true;
+    },
+    async touchSandbox(input) {
+      return rows.find((r) => r.id === input.sandboxId)?.status === "ready";
+    },
+  } satisfies SandboxStore;
+  const { backend } = createBackendWithProvider(provider, sandboxStore);
+
+  // write's existence check is the operation that finds the instance gone:
+  // the verdict replaces the provider error, and nothing is uploaded.
+  await assert.rejects(
+    backend.write("/workspace/never-written.txt", "data"),
+    (error: unknown) =>
+      (error as { code?: string }).code === "SANDBOX_REPLACED" &&
+      /replaced by the provider/u.test((error as Error).message),
+  );
+  assert.deepEqual(provider.uploadedFiles, []);
+  assert.deepEqual(provider.ensuredDirectories, []);
+  assert.equal(rows[0]?.status, "expired");
+  // The replacement serves the next call.
+  const read = await backend.readRaw("/workspace/output/report.md");
+  assert.equal(read.data?.content, "hello");
+  assert.equal(created, 2);
 });

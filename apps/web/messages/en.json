@@ -404,6 +404,8 @@
     },
     "card": {
       "auth": "Auth",
+      "officialPublisher": "Official publisher",
+      "officialPublisherTitle": "Published by {domain}, which also runs this server's endpoint.",
       "tools": "{count, plural, one {# tool} other {# tools}}",
       "viewAll": "View all"
     },
@@ -566,6 +568,7 @@
       "metaDescriptionOverview": "{name}: {summary}",
       "breadcrumbHome": "Home",
       "breadcrumbServers": "MCP Servers",
+      "publishedBy": "Published by {domain}",
       "updated": "Updated {date}",
       "tools": "Tools",
       "auth": "Auth",
