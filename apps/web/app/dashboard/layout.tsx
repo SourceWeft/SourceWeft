@@ -10,6 +10,7 @@ import "@fontsource-variable/noto-sans-thai";
 import type { Metadata, Viewport } from "next";
 import type * as React from "react";
 
+import { ClientMessagesProvider } from "../_components/client-messages-provider";
 import { DashboardLayoutClient } from "./dashboard-layout-client";
 import { DesktopUpdateRuntime } from "./_components/desktop-update-runtime";
 import { DesktopRecovery } from "./_components/desktop-recovery";
@@ -33,10 +34,10 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <ClientMessagesProvider area="dashboard">
       <DesktopUpdateRuntime />
       <DesktopRecovery />
       <DashboardLayoutClient>{children}</DashboardLayoutClient>
-    </>
+    </ClientMessagesProvider>
   );
 }
