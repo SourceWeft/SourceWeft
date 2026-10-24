@@ -1,8 +1,9 @@
 /**
  * The citable passages of an MCP overview's input (#152): the registry
- * description, the README excerpt and the tool and variable descriptions,
- * cut into short passages and numbered in place, so a category's evidence is
- * a passage ID the model picks rather than text it has to copy exactly.
+ * description, the server's own instructions, the README excerpt and the
+ * tool and variable descriptions, cut into short passages and numbered in
+ * place, so a category's evidence is a passage ID the model picks rather
+ * than text it has to copy exactly.
  *
  * Text is cut into paragraphs at blank lines; within one, a list item,
  * heading, blockquote or table row starts a new item and other lines are the
@@ -36,6 +37,8 @@ export type PassageLevel = "sentence" | "item";
  */
 export type McpOverviewPassageSources = {
   description: string | null;
+  // The server's own instructions (#367 W1); absent on older inputs.
+  instructions?: string | null;
   readme: string | null;
   tools: Array<string | null>;
   variables: Array<string | null>;
@@ -43,7 +46,9 @@ export type McpOverviewPassageSources = {
 
 /** Each text with its passage IDs in place, and every passage by ID. */
 export type NumberedMcpOverviewSources = McpOverviewPassageSources & {
-  // The description's, then the README's, the tools' and the variables'.
+  instructions: string | null;
+  // The description's, then the instructions', the README's, the tools' and
+  // the variables'.
   passages: McpOverviewPassage[];
 };
 
@@ -53,21 +58,25 @@ export type NumberedMcpOverviewSources = McpOverviewPassageSources & {
 
 /**
  * Numbers the passages of every source in place: `[D1]` and on in the
- * description, `[R1]` and on across the README excerpt, `[T{n}.{k}]` in the
- * n-th tool's description and `[V{n}.{k}]` in the n-th variable's, where n is
- * the tool's or variable's position in the prompt (from 1).
+ * description, `[I1]` and on in the server's instructions, `[R1]` and on
+ * across the README excerpt, `[T{n}.{k}]` in the n-th tool's description and
+ * `[V{n}.{k}]` in the n-th variable's, where n is the tool's or variable's
+ * position in the prompt (from 1).
  *
  * At most `maxPassages` are numbered. Over that, the README is numbered by
- * whole items instead of sentences; still over, the description, tools and
- * variables are numbered first, in that order, and the README's items get
- * what is left, in document order. What is not numbered is shown unchanged.
+ * whole items instead of sentences; still over, the description,
+ * instructions, tools and variables are numbered first, in that order, and
+ * the README's items get what is left, in document order. What is not
+ * numbered is shown unchanged.
  */
 export function numberMcpOverviewPassages(
   sources: McpOverviewPassageSources,
   maxPassages = MCP_OVERVIEW_MAX_PASSAGES,
 ): NumberedMcpOverviewSources {
+  const instructions = sources.instructions ?? null;
   const others = [
     { prefix: "D", text: sources.description },
+    { prefix: "I", text: instructions },
     ...sources.tools.map((text, index) => ({ prefix: `T${index + 1}.`, text })),
     ...sources.variables.map((text, index) => ({
       prefix: `V${index + 1}.`,
@@ -110,11 +119,16 @@ export function numberMcpOverviewPassages(
     });
     return rendered + text.slice(at);
   };
-  const [description, ...rest] = others;
+  const [description, instructionsSource, ...rest] = others;
   const numberedDescription = number(
     description!.text,
     description!.prefix,
     description!.spans,
+  );
+  const numberedInstructions = number(
+    instructionsSource!.text,
+    instructionsSource!.prefix,
+    instructionsSource!.spans,
   );
   const numberedReadme = number(readme, "R", readmeSpans);
   const numberedRest = rest.map((source) =>
@@ -122,6 +136,7 @@ export function numberMcpOverviewPassages(
   );
   return {
     description: numberedDescription,
+    instructions: numberedInstructions,
     readme: numberedReadme,
     tools: numberedRest.slice(0, sources.tools.length),
     variables: numberedRest.slice(sources.tools.length),

@@ -1,9 +1,12 @@
 import {
+  marketMcpIconSourceSchema,
+  marketMcpPublisherSchema,
   marketMcpToolsValidationSchema,
   mcpTransportSchema,
   type MarketItemSummary,
   type MarketItemVersion,
   type MarketMcpAiOverview,
+  type MarketMcpIconSource,
   type MarketMcpLocale,
   type MarketMcpReadme,
   type MarketMcpToolsValidation,
@@ -20,6 +23,7 @@ import {
   mcpServers,
   mcpServerVersions,
 } from "@sourceweft/db";
+import { githubAvatarUrl, githubOwner } from "./icons/chain";
 import {
   readMcpOverviewLocales,
   readMcpOverviews,
@@ -120,6 +124,16 @@ function transportMeta(
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * The item's domain publisher (`metadata_json.publisher`, from the latest
+ * manifest), when it is well-formed; null for a server without one or from
+ * before it was derived.
+ */
+function publisherMeta(value: Record<string, unknown> | null | undefined) {
+  const parsed = marketMcpPublisherSchema.safeParse(value?.publisher);
+  return parsed.success ? parsed.data : null;
+}
+
 function toManifestMeta(value: Record<string, unknown> | null | undefined) {
   const official = value?.official;
   const verified = value?.verified;
@@ -188,44 +202,37 @@ function verificationStatusFor(input: {
   return input.verified ? "verified" : "unverified";
 }
 
-// The upstream registry ships an icon for only a small fraction of entries, so
-// most cards fall back to the generic glyph. Nearly every entry is GitHub-hosted
-// (io.github.<owner>/<repo>), so derive the owner's avatar as a real logo when no
-// upstream icon exists. The <img> follows github.com's redirect to the avatar CDN
-// and the client falls back to the glyph on load error, so a wrong guess is safe.
-function githubOwner(
-  repoUrl: string | null,
-  identifier: string,
-): string | null {
-  if (repoUrl) {
-    try {
-      const url = new URL(repoUrl);
-      if (
-        url.hostname === "github.com" ||
-        url.hostname.endsWith(".github.com")
-      ) {
-        const owner = url.pathname.split("/").filter(Boolean)[0];
-        if (owner) {
-          return owner;
-        }
-      }
-    } catch {
-      // Fall through to the identifier-based derivation below.
-    }
-  }
-  const namespace = identifier.split("/")[0] ?? "";
-  const match = namespace.match(/^io\.github\.(.+)$/i);
-  return match?.[1] ?? null;
-}
-
-function deriveIconUrl(input: {
+/**
+ * The item's logo and where it came from. A manifest the icon chain wrote
+ * (`icons/chain.ts`, federation since #367) carries both. Older manifests
+ * carry at most a registry icon, so a missing logo is derived the way the
+ * chain's third step would: the GitHub avatar of the `io.github.<owner>`
+ * namespace or of the declared repository's owner. The <img> follows
+ * github.com's redirect to the avatar CDN and the client falls back to the
+ * placeholder on load error, so a wrong guess is safe.
+ */
+export function itemIcon(input: {
+  meta: Record<string, unknown>;
   repoUrl: string | null;
   identifier: string;
-}): string | null {
-  const owner = githubOwner(input.repoUrl, input.identifier);
+}): { iconUrl: string | null; iconSource: MarketMcpIconSource } {
+  const iconUrl = stringMeta(input.meta, "iconUrl");
+  const stored = marketMcpIconSourceSchema.safeParse(input.meta.iconSource);
+  if (stored.success) {
+    return iconUrl
+      ? { iconUrl, iconSource: stored.data }
+      : { iconUrl: null, iconSource: "placeholder" };
+  }
+  if (iconUrl) {
+    return { iconUrl, iconSource: "registry" };
+  }
+  const owner = githubOwner({
+    namespace: input.identifier.split("/")[0] ?? input.identifier,
+    repositoryUrl: input.repoUrl,
+  });
   return owner
-    ? `https://github.com/${encodeURIComponent(owner)}.png?size=80`
-    : null;
+    ? { iconUrl: githubAvatarUrl(owner), iconSource: "github-avatar" }
+    : { iconUrl: null, iconSource: "placeholder" };
 }
 
 function mapItemRow(input: {
@@ -247,12 +254,11 @@ function mapItemRow(input: {
     summary: input.row.summary,
     providerName: stringMeta(mergedMeta, "providerName") ?? input.row.owner,
     homepageUrl: stringMeta(mergedMeta, "homepageUrl"),
-    iconUrl:
-      stringMeta(mergedMeta, "iconUrl") ??
-      deriveIconUrl({
-        repoUrl: input.row.repoUrl,
-        identifier: input.row.identifier,
-      }),
+    ...itemIcon({
+      meta: mergedMeta,
+      repoUrl: input.row.repoUrl,
+      identifier: input.row.identifier,
+    }),
     sourceUrl: input.row.sourceUrl,
     repoUrl: input.row.repoUrl,
     license: stringMeta(mergedMeta, "license"),
@@ -278,6 +284,7 @@ function mapItemRow(input: {
     createdAt: input.row.createdAt.toISOString(),
     updatedAt: input.row.updatedAt.toISOString(),
     publishedAt: iso(input.row.publishedAt),
+    publisher: publisherMeta(mergedMeta),
   };
 }
 
@@ -476,35 +483,67 @@ export function mcpSharedReadmeServerIds(): SQL {
   )`;
 }
 
-// Keyset cursor over the (publishedAt desc, id desc) ordering. Opaque to
-// callers; encodes the last row of the previous page so the next page is a plain
-// indexed range scan rather than an offset that grows with the catalog.
-function encodeListCursor(publishedAt: Date | null, id: string): string {
-  const millis = publishedAt ? publishedAt.getTime() : 0;
-  return Buffer.from(`${millis}|${id}`).toString("base64url");
+/**
+ * 1 when the server's publisher also runs its endpoint
+ * (`metadata_json.publisher.endpointMatch`), else 0. A search ranks these
+ * first: for "notion", the server com.notion publishes at mcp.notion.com
+ * stands above every third-party Notion server. Read from the promoted
+ * metadata rather than a column: it only orders the rows a query already
+ * matched, which is never the whole catalog.
+ */
+export function publisherEndpointMatchRank() {
+  return sql<number>`(case when (${mcpServers.metadataJson} #>> '{publisher,endpointMatch}')::boolean then 1 else 0 end)`;
 }
 
-function decodeListCursor(
+type ListCursor = { endpointMatch: 0 | 1; publishedAt: Date; id: string };
+
+// Keyset cursor over the (endpointMatch desc, publishedAt desc, id desc)
+// ordering; without a query the first key is a constant 0 and the browse
+// index serves the rest. Opaque to callers; encodes the last row of the
+// previous page so the next page is a plain range scan rather than an offset
+// that grows with the catalog.
+export function encodeListCursor(
+  endpointMatch: 0 | 1,
+  publishedAt: Date | null,
+  id: string,
+): string {
+  const millis = publishedAt ? publishedAt.getTime() : 0;
+  return Buffer.from(`${endpointMatch}|${millis}|${id}`).toString("base64url");
+}
+
+export function decodeListCursor(
   cursor: string | undefined,
-): { publishedAt: Date; id: string } | null {
+): ListCursor | null {
   if (!cursor) {
     return null;
   }
   try {
     const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    const separator = decoded.indexOf("|");
-    if (separator < 0) {
+    const parts = decoded.split("|");
+    // A cursor from before the rank key had two parts; its page continues
+    // among the unranked rows, which it was already among.
+    const [endpointMatch, millisText, id] =
+      parts.length === 2 ? ["0", parts[0], parts[1]] : parts;
+    if (parts.length < 2 || parts.length > 3) {
       return null;
     }
-    const millis = Number(decoded.slice(0, separator));
-    const id = decoded.slice(separator + 1);
+    const millis = Number(millisText);
     // Beyond ±8.64e15 ms, new Date() is an Invalid Date, which the pg driver
     // serializes into a literal Postgres rejects — a crafted cursor 500. Treat
     // out-of-range like malformed base64: fall back to page one.
-    if (!Number.isFinite(millis) || Math.abs(millis) > 8.64e15 || !id) {
+    if (
+      (endpointMatch !== "0" && endpointMatch !== "1") ||
+      !Number.isFinite(millis) ||
+      Math.abs(millis) > 8.64e15 ||
+      !id
+    ) {
       return null;
     }
-    return { publishedAt: new Date(millis), id };
+    return {
+      endpointMatch: endpointMatch === "1" ? 1 : 0,
+      publishedAt: new Date(millis),
+      id,
+    };
   } catch {
     return null;
   }
@@ -571,12 +610,18 @@ export async function listMcp(input: {
       ),
     );
   }
+  // A search ranks servers whose publisher runs the endpoint first; the
+  // default browse stays in publication order, which its index serves.
+  const rank = query ? publisherEndpointMatchRank() : null;
   const cursor = decodeListCursor(input.cursor);
   if (cursor) {
-    // Next page in the (publishedAt desc, id desc) ordering: rows strictly after
-    // the cursor row, via a row-value comparison the browse index can serve.
+    // Next page in the (rank desc, publishedAt desc, id desc) ordering: rows
+    // strictly after the cursor row, via a row-value comparison the browse
+    // index can serve when there is no rank key.
     conditions.push(
-      sql`(${mcpServers.publishedAt}, ${mcpServers.id}) < (${cursor.publishedAt}, ${cursor.id})`,
+      rank
+        ? sql`(${rank}, ${mcpServers.publishedAt}, ${mcpServers.id}) < (${cursor.endpointMatch}, ${cursor.publishedAt}, ${cursor.id})`
+        : sql`(${mcpServers.publishedAt}, ${mcpServers.id}) < (${cursor.publishedAt}, ${cursor.id})`,
     );
   }
 
@@ -585,7 +630,11 @@ export async function listMcp(input: {
     .select()
     .from(mcpServers)
     .where(and(...conditions))
-    .orderBy(desc(mcpServers.publishedAt), desc(mcpServers.id))
+    .orderBy(
+      ...(rank ? [desc(rank)] : []),
+      desc(mcpServers.publishedAt),
+      desc(mcpServers.id),
+    )
     .limit(limit + 1);
 
   const hasMore = dbRows.length > limit;
@@ -612,7 +661,13 @@ export async function listMcp(input: {
   });
   const last = pageRows[pageRows.length - 1];
   const nextCursor =
-    hasMore && last ? encodeListCursor(last.publishedAt, last.id) : null;
+    hasMore && last
+      ? encodeListCursor(
+          query && publisherMeta(last.metadataJson)?.endpointMatch ? 1 : 0,
+          last.publishedAt,
+          last.id,
+        )
+      : null;
   return { items, nextCursor };
 }
 

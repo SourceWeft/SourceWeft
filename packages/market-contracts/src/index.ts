@@ -79,6 +79,22 @@ export const marketMcpAuthRequirementSchema = z.object({
   methods: z.array(marketMcpAuthMethodSchema).optional(),
 });
 
+/**
+ * Where an MCP server's logo came from, first hit of the chain: the registry's
+ * own `icons`, the server's `initialize` answer (`serverInfo.icons`), the
+ * GitHub avatar of the namespace owner or the declared repository's owner, the
+ * GitHub MCP Registry's owner avatar, the namespace domain's favicon fetched
+ * at sync and served from our own storage, or none (a monogram placeholder).
+ */
+export const marketMcpIconSourceSchema = z.enum([
+  "registry",
+  "server-info",
+  "github-avatar",
+  "github-registry",
+  "favicon",
+  "placeholder",
+]);
+
 export const marketMcpToolManifestSchema = z.object({
   name: z.string(),
   title: z.string().optional(),
@@ -87,6 +103,21 @@ export const marketMcpToolManifestSchema = z.object({
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   annotations: z.record(z.string(), z.unknown()).default({}),
   risk: mcpRiskLevelSchema.default("unknown"),
+});
+
+/**
+ * Who publishes a server, derived from its registry namespace. The official
+ * registry verifies DNS or HTTP ownership of a reverse-DNS namespace
+ * (`com.notion` → notion.com) before accepting a publish, so the domain is a
+ * trustworthy identity; `io.github.*` namespaces are GitHub accounts and have
+ * no publisher. `endpointMatch` is true when the server's remote endpoint is
+ * on that domain or a subdomain of it (mcp.notion.com under notion.com): the
+ * publisher also runs the server.
+ */
+export const marketMcpPublisherSchema = z.object({
+  domain: z.string(),
+  source: z.literal("registry-namespace"),
+  endpointMatch: z.boolean(),
 });
 
 export const marketMcpManifestSchema = z.object({
@@ -99,6 +130,8 @@ export const marketMcpManifestSchema = z.object({
   providerName: z.string().optional(),
   homepageUrl: z.string().url().optional(),
   iconUrl: z.string().url().optional(),
+  // Absent on manifests written before the icon chain existed.
+  iconSource: marketMcpIconSourceSchema.optional(),
   license: z.string().optional(),
   language: z.string().optional(),
   transport: mcpTransportSchema,
@@ -118,7 +151,58 @@ export const marketMcpManifestSchema = z.object({
   sourceUrl: z.string().url().optional(),
   repoUrl: z.string().url().optional(),
   lastIndexedAt: z.string().optional(),
+  // Absent on manifests written before it existed and on servers without a
+  // domain publisher.
+  publisher: marketMcpPublisherSchema.optional(),
 });
+
+// ---------------------------------------------------------------------------
+// What a remote MCP server said about itself (Issue #367, W1). Kept in the
+// version's provenance, never in the manifest; `tools/list` goes to
+// `manifest.tools`. Third-party text: render it as untrusted.
+// ---------------------------------------------------------------------------
+
+// An icon the server offers in its `serverInfo`: the MCP `Icon` shape, `src`
+// an https URL.
+export const marketMcpServerIconSchema = z.object({
+  src: z.string().url(),
+  mimeType: z.string().optional(),
+  sizes: z.array(z.string()).optional(),
+});
+
+export const marketMcpServerInfoSchema = z.object({
+  name: z.string(),
+  title: z.string().optional(),
+  version: z.string().optional(),
+  description: z.string().optional(),
+  websiteUrl: z.string().url().optional(),
+  icons: z.array(marketMcpServerIconSchema).optional(),
+});
+
+// `source` says who asked: "remote-probe" is federation's unauthenticated
+// `initialize` of the remote endpoint; a sandboxed stdio start writes its own.
+export const marketMcpSelfDescriptionSchema = z.object({
+  source: z.string(),
+  recordedAt: z.string(),
+  serverInfo: marketMcpServerInfoSchema.optional(),
+  instructions: z.string().optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+});
+
+// The human fields of the RFC 9728 protected-resource metadata an endpoint
+// answering 401 points at. `resourceDocumentation` is shown as a link and
+// never fetched.
+export const marketMcpAuthMetadataSchema = z.object({
+  resourceName: z.string().optional(),
+  resourceDocumentation: z.string().url().optional(),
+});
+
+export type MarketMcpServerIcon = z.infer<typeof marketMcpServerIconSchema>;
+export type MarketMcpServerInfo = z.infer<typeof marketMcpServerInfoSchema>;
+export type MarketMcpSelfDescription = z.infer<
+  typeof marketMcpSelfDescriptionSchema
+>;
+export type MarketMcpAuthMetadata = z.infer<typeof marketMcpAuthMetadataSchema>;
 
 // Languages MCP servers' AI overviews are written in.
 export const marketMcpLocaleSchema = z.enum(["en", "zh-CN", "zh-TW"]);
@@ -186,6 +270,9 @@ export const marketItemSummarySchema = z.object({
   providerName: z.string().nullable().default(null),
   homepageUrl: z.string().url().nullable().default(null),
   iconUrl: z.string().url().nullable().default(null),
+  // Where `iconUrl` came from; `placeholder` when it is null. Optional for
+  // answers from before it existed.
+  iconSource: marketMcpIconSourceSchema.optional(),
   sourceUrl: z.string().url().nullable().default(null),
   repoUrl: z.string().url().nullable().default(null),
   license: z.string().nullable().default(null),
@@ -215,6 +302,9 @@ export const marketItemSummarySchema = z.object({
   // Languages the latest version has a visible AI overview in, without
   // fallback. Optional for answers from before it existed.
   overviewLocales: z.array(marketMcpLocaleSchema).optional(),
+  // The latest version's domain publisher; null when it has none. Optional
+  // for answers from before it existed.
+  publisher: marketMcpPublisherSchema.nullable().optional(),
   // The latest version's failed stdio validation while it has no tools (see
   // `marketMcpValidationSchema`); null when it has tools or was never tried.
   // Optional for answers from before it existed.
@@ -331,6 +421,7 @@ export type MarketItemVisibility = z.infer<typeof marketItemVisibilitySchema>;
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
 export type McpAuthType = z.infer<typeof mcpAuthTypeSchema>;
 export type McpAuthPosture = z.infer<typeof mcpAuthPostureSchema>;
+export type MarketMcpIconSource = z.infer<typeof marketMcpIconSourceSchema>;
 export type MarketMcpAuthMethod = z.infer<typeof marketMcpAuthMethodSchema>;
 export type McpRiskLevel = z.infer<typeof mcpRiskLevelSchema>;
 export type McpRuntime = z.infer<typeof mcpRuntimeSchema>;
@@ -338,6 +429,7 @@ export type McpVerificationStatus = z.infer<typeof mcpVerificationStatusSchema>;
 export type MarketMcpAuthRequirement = z.infer<
   typeof marketMcpAuthRequirementSchema
 >;
+export type MarketMcpPublisher = z.infer<typeof marketMcpPublisherSchema>;
 export type MarketMcpToolManifest = z.infer<typeof marketMcpToolManifestSchema>;
 export type MarketMcpManifest = z.infer<typeof marketMcpManifestSchema>;
 export type MarketItemSummary = z.infer<typeof marketItemSummarySchema>;

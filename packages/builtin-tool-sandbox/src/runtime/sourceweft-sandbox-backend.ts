@@ -1,8 +1,9 @@
 import {
+  isSandboxInstanceMissingError,
   SandboxInstanceChangedError,
   SandboxProviderError,
+  SandboxReplacedError,
   SANDBOX_PROVIDER_ERROR_CODES,
-  SANDBOX_REPLACED_NOTICE,
 } from "./errors";
 import { executeAgentTool } from "../agent-tool-defs";
 import { randomUUID } from "node:crypto";
@@ -68,6 +69,7 @@ const EXECUTE_TOOL_NAME = "execute";
 const READ_FILE_BINARY_UNSUPPORTED_CODE = "READ_FILE_BINARY_UNSUPPORTED";
 const MAX_RECOVERABLE_TOOL_OUTPUT_CHARS = 2_000;
 const SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE = "SANDBOX_TOOL_BUDGET_EXHAUSTED";
+const SANDBOX_REPLACED_CODE = "SANDBOX_REPLACED";
 const RECOVERABLE_EXECUTE_ERROR_CODES = new Set([
   "SANDBOX_EXECUTE_COMMAND_DENIED",
   "SANDBOX_EXECUTE_CWD_DENIED",
@@ -77,6 +79,9 @@ const RECOVERABLE_EXECUTE_ERROR_CODES = new Set([
   // retrying the same command; the instance itself is still current.
   SANDBOX_PROVIDER_ERROR_CODES.unavailable,
   SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE,
+  // The provider replaced the container mid-run; the manager is acquiring a
+  // replacement and the model must repeat its preparation on it.
+  SANDBOX_REPLACED_CODE,
 ]);
 /**
  * Execute errors after which the thread lease is shortened to the release
@@ -336,6 +341,9 @@ function recoverableExecuteFailureHint(
   if (errorCode === SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE) {
     return "The tool budget was spent acquiring the sandbox, which is now ready. Retry the same command in a new tool call.";
   }
+  if (errorCode === SANDBOX_REPLACED_CODE) {
+    return "The sandbox was replaced, so its /workspace is empty again and /skills is re-staged by the platform. Repeat prepare_sandbox_workspace for the input files this command needs, regenerate any earlier outputs it depends on, then retry it in a new tool call. Do not copy skill files by hand and do not change the content of the work because of this error.";
+  }
   if (
     localRoot &&
     [
@@ -556,11 +564,11 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
   /** Attach the one-shot replacement notice to a model-visible result. */
   private withReplacementDiagnostics<
     T extends { output: string; exitCode: number | null; truncated: boolean },
-  >(result: T, replaced: boolean): T {
+  >(result: T, replaced: string | false): T {
     if (!replaced) return result;
     return {
       ...result,
-      output: `${result.output}${result.output.endsWith("\n") || result.output === "" ? "" : "\n"}Diagnostics: sandbox replaced. ${SANDBOX_REPLACED_NOTICE}`,
+      output: `${result.output}${result.output.endsWith("\n") || result.output === "" ? "" : "\n"}Diagnostics: sandbox replaced. ${replaced}`,
     };
   }
 
@@ -1311,16 +1319,20 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         : undefined,
       { midExecution: input.midExecution === true },
     )}`;
-    // Transient classes (outage, spent budget) are retried by design, so the
-    // input-failure escalation does not apply; an outage that outlasts its
-    // retries REPLACES the retry hint rather than contradicting it.
+    // Transient classes (outage, spent budget, replaced sandbox) are retried
+    // by design, so the input-failure escalation does not apply; an outage
+    // that outlasts its retries REPLACES the retry hint rather than
+    // contradicting it. A sandbox replaced too often escalates in the manager
+    // (SANDBOX_INSTANCE_CHANGED), not here.
     const guidance = unavailable
       ? repeatCount > SANDBOX_UNAVAILABLE_MAX_ATTEMPTS
         ? [
             `Hint: The sandbox provider stayed unavailable across ${repeatCount} attempts. Stop retrying; tell the user the sandbox is unavailable right now.`,
           ]
         : [hint]
-      : failureCode === SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE || repeatCount <= 1
+      : failureCode === SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE ||
+          failureCode === SANDBOX_REPLACED_CODE ||
+          repeatCount <= 1
         ? [hint]
         : [
             hint,
@@ -1349,7 +1361,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     error: unknown;
     operationId: string;
     startedAt: number;
-    replaced?: boolean;
+    replaced?: string | false;
     midExecution?: boolean;
   }) {
     const failure = this.recoverableExecuteFailureResult({
@@ -1359,7 +1371,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     });
     failure.result = this.withReplacementDiagnostics(
       failure.result,
-      input.replaced === true,
+      input.replaced ?? false,
     );
     await this.input.manager.completeToolOperation({
       operationId: input.operationId,
@@ -1404,9 +1416,10 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     if (claim.kind === "replay") {
       return replayExecuteResult(claim.result);
     }
+    let acquired: SandboxRef | null = null;
     let sandboxId: string | null = null;
     let executionId: string | null = null;
-    let replaced = false;
+    let replaced: string | false = false;
     try {
       // Two-phase path policy (docs/architecture/sandbox-skill-staging.md D2):
       // /files and /kb fail fast here; a /skills-referencing command is
@@ -1438,6 +1451,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         this.input.context,
         { ...(options.signal ? { signal: options.signal } : {}) },
       );
+      acquired = sandbox;
       sandboxId = sandbox.id;
       replaced = this.input.manager.consumeReplacementNotice();
       if (skillsDeferred) {
@@ -1623,7 +1637,33 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       } finally {
         abortWait.dispose();
       }
-    } catch (error) {
+    } catch (caught) {
+      let error: unknown = caught;
+      if (
+        acquired &&
+        !options.signal?.aborted &&
+        isSandboxInstanceMissingError(caught)
+      ) {
+        // The provider proved the instance gone underneath the run (the
+        // Cloudflare stamp guard runs before the command, so it did not
+        // start). The manager decides between a replacement and failing
+        // closed; a replacement is a recoverable result with the hint.
+        const verdict = await this.input.manager.reportLostGeneration(
+          acquired,
+          this.input.context,
+          caught,
+        );
+        if (verdict instanceof SandboxReplacedError) {
+          return await this.completeRecoverableExecuteFailure({
+            command,
+            error: verdict,
+            operationId: claim.operationId,
+            startedAt,
+            replaced,
+          });
+        }
+        error = verdict ?? caught;
+      }
       if (
         !options.signal?.aborted &&
         recoverableExecuteErrorCode(error) ===

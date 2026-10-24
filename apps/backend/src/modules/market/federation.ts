@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
 import {
+  marketMcpAuthMetadataSchema,
   marketMcpManifestSchema,
+  marketMcpSelfDescriptionSchema,
   marketMcpToolManifestSchema,
+  type MarketMcpAuthMetadata,
   type MarketMcpAuthMethod,
   type MarketMcpAuthRequirement,
   type MarketMcpManifest,
+  type MarketMcpSelfDescription,
   type MarketMcpToolManifest,
   type McpTransport,
 } from "@sourceweft/market-contracts";
@@ -13,6 +17,7 @@ import { logger } from "../../shared/logger";
 import {
   probeMcpEndpointAuth,
   type McpEndpointAuthProbe,
+  type McpEndpointProbe,
 } from "../../shared/mcp-auth-probe";
 import {
   boundedMcpListedTools,
@@ -21,13 +26,17 @@ import {
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
 import { applyGithubRegistryToManifest } from "./github-registry/manifest";
 import { findStoredGithubRegistryRecords } from "./github-registry/repository";
+import { firstHttpsIconSrc, type ResolvedIcon } from "./icons/chain";
+import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
 import {
   findStoredEndpointProbes,
+  findStoredIconProvenance,
   upsertMarketMcp,
   type StoredEndpointProbes,
 } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
+import { publisherFromRegistryName } from "./publisher";
 import { registryServerProvenance } from "./registry-server";
 
 /**
@@ -160,21 +169,9 @@ function displayName(server: RegistryServer, identifier: string) {
   return genericFallbackName(identifier) ?? humanize(tail);
 }
 
+/** The registry's first usable icon: the same rule as the logo chain's step 1. */
 function registryIconUrl(server: RegistryServer) {
-  for (const icon of server.icons ?? []) {
-    if (!icon || typeof icon !== "object") continue;
-    const src = (icon as { src?: unknown }).src;
-    if (typeof src !== "string") continue;
-    try {
-      const url = new URL(src);
-      if (url.protocol === "https:") {
-        return url.toString();
-      }
-    } catch {
-      // Ignore malformed upstream icon entries and try the next candidate.
-    }
-  }
-  return undefined;
+  return firstHttpsIconSrc(server.icons);
 }
 
 /**
@@ -346,6 +343,9 @@ export function mapRegistryServerToManifest(
   options: {
     verified: boolean;
     authProbe?: McpEndpointAuthProbe;
+    // The logo chain's answer for this entry (`icons/`); without it the
+    // manifest keeps the registry icon alone and no source.
+    icon?: ResolvedIcon;
     /** What the endpoint listed to an anonymous client; none when unlisted. */
     tools?: MarketMcpToolManifest[];
   } = {
@@ -388,7 +388,8 @@ export function mapRegistryServerToManifest(
     description: server.description?.trim() || undefined,
     providerName: providerFromIdentifier(identifier),
     homepageUrl: server.websiteUrl,
-    iconUrl: registryIconUrl(server),
+    iconUrl: options.icon ? options.icon.iconUrl : registryIconUrl(server),
+    iconSource: options.icon?.iconSource,
     transport,
     endpointUrl: hasRemote ? remote?.url : undefined,
     desktopOnly: !hasRemote,
@@ -403,6 +404,11 @@ export function mapRegistryServerToManifest(
     tools: hasRemote ? (options.tools ?? []) : [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,
+    // The publisher's domain is only as trustworthy as the registry that
+    // verified the namespace: a source we do not trust mints none.
+    publisher: options.verified
+      ? publisherFromRegistryName(identifier, hasRemote ? remote?.url : undefined)
+      : undefined,
   };
 
   const parsed = marketMcpManifestSchema.safeParse(candidate);
@@ -485,7 +491,48 @@ const AUTH_PROBE_CONCURRENCY = 8;
 // An endpoint's auth can change without a new registry version.
 const AUTH_PROBE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-type AuthProbe = { result: McpEndpointAuthProbe; probedAt: Date };
+/**
+ * One probe of an endpoint as the catalog keeps it, fresh or reused from the
+ * version's stored one: the auth classification and, with it, what the
+ * endpoint gave away while being classified (Issue #367 W1) — the
+ * `selfDescription` its `initialize` answered, the 401 path's `authMetadata`
+ * and the origin's `serverCard`. The tools it lists are the tool listing's.
+ */
+type AuthProbe = {
+  result: McpEndpointAuthProbe;
+  probedAt: Date;
+  selfDescription?: MarketMcpSelfDescription;
+  authMetadata?: MarketMcpAuthMetadata;
+  serverCard?: Record<string, unknown>;
+};
+
+const SELF_DESCRIPTION_SOURCE = "remote-probe";
+
+function definedEntries<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+}
+
+/** A fresh probe as the catalog keeps it. */
+export function endpointProbeRecord(
+  probe: McpEndpointProbe,
+  probedAt: Date,
+): AuthProbe {
+  return definedEntries({
+    result: probe.result,
+    probedAt,
+    selfDescription: probe.selfDescription
+      ? {
+          source: SELF_DESCRIPTION_SOURCE,
+          recordedAt: probedAt.toISOString(),
+          ...probe.selfDescription,
+        }
+      : undefined,
+    authMetadata: probe.authMetadata,
+    serverCard: probe.serverCard,
+  });
+}
 
 function endpointSha256(endpointUrl: string) {
   return createHash("sha256").update(endpointUrl).digest("hex");
@@ -516,6 +563,7 @@ export function storedAuthProbe(
   value: unknown,
   endpointUrl: string,
   now: Date,
+  maxAgeMs = AUTH_PROBE_MAX_AGE_MS,
 ): AuthProbe | undefined {
   if (!value || typeof value !== "object") return undefined;
   const stored = value as {
@@ -533,14 +581,43 @@ export function storedAuthProbe(
   const age = now.getTime() - probedAt.getTime();
   return stored.endpointSha256 === endpointSha256(endpointUrl) &&
     age >= 0 &&
-    age < AUTH_PROBE_MAX_AGE_MS
+    age < maxAgeMs
     ? { result, probedAt }
     : undefined;
 }
 
+/**
+ * What the version's stored probe kept besides its classification, each
+ * piece only when well-formed and the remote probe's own (a
+ * `selfDescription` another source wrote is not reused here).
+ */
+export function storedProbePieces(
+  stored: StoredEndpointProbes | undefined,
+): Pick<AuthProbe, "selfDescription" | "authMetadata" | "serverCard"> {
+  const selfDescription = marketMcpSelfDescriptionSchema.safeParse(
+    stored?.selfDescription,
+  );
+  const authMetadata = marketMcpAuthMetadataSchema.safeParse(
+    stored?.authMetadata,
+  );
+  const card = stored?.serverCard;
+  return definedEntries({
+    selfDescription:
+      selfDescription.success &&
+      selfDescription.data.source === SELF_DESCRIPTION_SOURCE
+        ? selfDescription.data
+        : undefined,
+    authMetadata: authMetadata.success ? authMetadata.data : undefined,
+    serverCard:
+      card && typeof card === "object" && !Array.isArray(card)
+        ? (card as Record<string, unknown>)
+        : undefined,
+  });
+}
+
 async function probeRegistryEndpoint(
   endpointUrl: string,
-): Promise<McpEndpointAuthProbe> {
+): Promise<McpEndpointProbe> {
   // Registry endpoints are third-party input: the same endpoint policy as an
   // install's requests, checked on every connection.
   const requests = createControlledFetch({
@@ -548,7 +625,11 @@ async function probeRegistryEndpoint(
     allowedInternalOrigins: config.mcpAllowedInternalOrigins ?? [],
   });
   try {
-    return await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    const probe = await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    // The probe swallows failures of its follow-up requests (the well-known
+    // lookups, the server card); a policy denial among them fails the probe.
+    requests.throwIfDenied();
+    return probe;
   } catch (error) {
     requests.throwIfDenied();
     throw error;
@@ -608,9 +689,12 @@ async function eachConcurrently<T>(
 
 /**
  * The endpoint auth probe of each target: the one stored for that version
- * when it probed the same endpoint within 30 days of `now`, else a fresh one.
- * A probe that fails is left out (the entry is mapped from its declared
- * headers alone) and retried on the next sync.
+ * when it probed the same endpoint within 30 days of `now`, else a fresh one
+ * — so what the endpoint says about itself refreshes with its auth
+ * classification. A probe that fails keeps the version's stored one whatever
+ * its age (a transient failure does not empty the entry), or, without one,
+ * is left out (the entry is mapped from its declared headers alone); either
+ * way it is retried on the next sync.
  */
 async function registryAuthProbes(
   targets: EndpointTarget[],
@@ -619,26 +703,38 @@ async function registryAuthProbes(
 ) {
   const probes = new Map<RegistryEntry, AuthProbe>();
   const pending: EndpointTarget[] = [];
-  for (const target of targets) {
-    const reused = storedAuthProbe(
-      stored.get(target.versionId)?.authProbe,
+  const previous = (target: EndpointTarget, maxAgeMs?: number) => {
+    const row = stored.get(target.versionId);
+    const probe = storedAuthProbe(
+      row?.authProbe,
       target.endpointUrl,
       now,
+      maxAgeMs,
     );
+    return probe ? { ...probe, ...storedProbePieces(row) } : undefined;
+  };
+  for (const target of targets) {
+    const reused = previous(target);
     if (reused) probes.set(target.entry, reused);
     else pending.push(target);
   }
   let failed = 0;
   await eachConcurrently(pending, async (target) => {
     try {
-      probes.set(target.entry, {
-        result: await probeRegistryEndpoint(target.endpointUrl),
-        probedAt: now,
-      });
+      probes.set(
+        target.entry,
+        endpointProbeRecord(
+          await probeRegistryEndpoint(target.endpointUrl),
+          now,
+        ),
+      );
     } catch (error) {
       failed += 1;
+      const kept = previous(target, Number.POSITIVE_INFINITY);
+      if (kept) probes.set(target.entry, kept);
       logger.warn("Registry federation auth probe failed", {
         identifier: target.identifier,
+        keptStoredProbe: Boolean(kept),
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -816,6 +912,12 @@ type IngestCounters = {
   authProbeFailed: number;
   toolsListed: number;
   toolsListFailed: number;
+  /** Favicon domains fetched, hits among them, fetches that failed. */
+  faviconFetched: number;
+  faviconHits: number;
+  faviconFailed: number;
+  /** Entries whose favicon step did not run (no public storage, or stopped). */
+  faviconSkipped: number;
 };
 
 /**
@@ -835,6 +937,10 @@ async function ingestRegistryEntries(
     authProbeFailed: 0,
     toolsListed: 0,
     toolsListFailed: 0,
+    faviconFetched: 0,
+    faviconHits: 0,
+    faviconFailed: 0,
+    faviconSkipped: 0,
   };
   const now = new Date();
   const latestEntries = entries.filter(isLatestEntry).slice(0, limit);
@@ -853,6 +959,11 @@ async function ingestRegistryEntries(
   );
   counters.toolsListed = toolListings.listed;
   counters.toolsListFailed = toolListings.failed;
+  const icons = await registryEntryIcons(latestEntries, now);
+  counters.faviconFetched = icons.faviconFetched;
+  counters.faviconHits = icons.faviconHits;
+  counters.faviconFailed = icons.faviconFailed;
+  counters.faviconSkipped = icons.faviconSkipped;
   // The GitHub MCP Registry enrichment (`github-registry/`) runs apart from
   // this sync and writes on the version's provenance, which the upsert below
   // replaces whole: its record is carried over, and the manifest changes it
@@ -876,11 +987,19 @@ async function ingestRegistryEntries(
       continue;
     }
     const authProbe = authProbes.probes.get(entry);
+    const server: RegistryServer = entry.server ?? entry;
+    const icon = icons.icons.get(
+      mcpServerVersionId(
+        server.name?.trim() ?? "",
+        server.version?.trim() ?? "",
+      ),
+    );
     const toolsListing = toolListings.listings.get(entry);
     const mapped = mapRegistryServerToManifest(entry, {
       verified: input.verified,
       authProbe: authProbe?.result,
       tools: toolsListing?.tools,
+      icon,
     });
     if (!mapped) {
       counters.skipped += 1;
@@ -922,7 +1041,6 @@ async function ingestRegistryEntries(
                   authProbe.probedAt,
                 )
               : undefined,
-          githubRegistry,
           // When the endpoint last listed the manifest's tools to an
           // anonymous client, kept so syncs within 30 days reuse them.
           toolsListing:
@@ -933,6 +1051,23 @@ async function ingestRegistryEntries(
                   toolsListing.listedAt,
                 )
               : undefined,
+          // The namespace domain's favicon fetch and when it was made, kept
+          // so syncs reuse a hit and retry a miss only after 30 days.
+          iconProbe: icon?.iconProbe,
+          // What the endpoint said about itself while being probed (Issue
+          // #367 W1), kept with the probe so it refreshes with it; validated
+          // when it both described itself and listed its tools.
+          selfDescription: authProbe?.selfDescription,
+          authMetadata: authProbe?.authMetadata,
+          serverCard: authProbe?.serverCard,
+          validatedAt:
+            authProbe?.selfDescription && toolsListing
+              ? toolsListing.listedAt.toISOString()
+              : undefined,
+          // What the GitHub MCP Registry's daily pass (W5) stored for the
+          // version, carried over as it was found: the pass, not the sync,
+          // refreshes it.
+          githubRegistry,
         },
       });
       counters.ingested += 1;
@@ -961,6 +1096,34 @@ export type RegistryIngestResult = IngestCounters & {
 };
 
 /**
+ * The logo chain of each entry (`icons/registry-icons.ts`), keyed by version
+ * id: steps 1–3 from the entry and the version's stored provenance, then a
+ * favicon fetch for the namespace domain when they found nothing and no
+ * outcome is cached for it.
+ */
+async function registryEntryIcons(entries: RegistryEntry[], now: Date) {
+  const targets: IconTarget[] = entries.flatMap((entry) => {
+    const server: RegistryServer = entry.server ?? entry;
+    const identifier = server.name?.trim();
+    const version = server.version?.trim();
+    if (!identifier || !version) return [];
+    const repositoryUrl = server.repository?.url?.trim();
+    return [
+      {
+        key: mcpServerVersionId(identifier, version),
+        identifier,
+        registryIconUrl: registryIconUrl(server),
+        repositoryUrl: repositoryUrl || undefined,
+      },
+    ];
+  });
+  return registryIcons(targets, {
+    now,
+    stored: await findStoredIconProvenance(targets.map((t) => t.key)),
+  });
+}
+
+/**
  * Pull every server from an upstream registry and upsert it into the catalog as
  * origin=upstream. Returns counts for observability. `maxServers` bounds a run;
  * `cursor` resumes a partial one from where it stopped.
@@ -984,6 +1147,10 @@ export async function ingestFromRegistry(input: {
   let authProbeFailed = 0;
   let toolsListed = 0;
   let toolsListFailed = 0;
+  let faviconFetched = 0;
+  let faviconHits = 0;
+  let faviconFailed = 0;
+  let faviconSkipped = 0;
   let partial = false;
   let error: string | undefined;
 
@@ -1029,6 +1196,10 @@ export async function ingestFromRegistry(input: {
     authProbeFailed += counters.authProbeFailed;
     toolsListed += counters.toolsListed;
     toolsListFailed += counters.toolsListFailed;
+    faviconFetched += counters.faviconFetched;
+    faviconHits += counters.faviconHits;
+    faviconFailed += counters.faviconFailed;
+    faviconSkipped += counters.faviconSkipped;
     cursor = page.metadata?.nextCursor ?? undefined;
     if (!cursor) {
       break;
@@ -1044,6 +1215,10 @@ export async function ingestFromRegistry(input: {
     authProbeFailed,
     toolsListed,
     toolsListFailed,
+    faviconFetched,
+    faviconHits,
+    faviconFailed,
+    faviconSkipped,
     partial,
   });
   return {
@@ -1054,6 +1229,10 @@ export async function ingestFromRegistry(input: {
     authProbeFailed,
     toolsListed,
     toolsListFailed,
+    faviconFetched,
+    faviconHits,
+    faviconFailed,
+    faviconSkipped,
     partial,
     error,
     nextCursor,
@@ -1094,6 +1273,10 @@ export async function federateRegistryEntry(input: {
       authProbeFailed: 0,
       toolsListed: 0,
       toolsListFailed: 0,
+      faviconFetched: 0,
+      faviconHits: 0,
+      faviconFailed: 0,
+      faviconSkipped: 0,
     };
   }
   const counters = await ingestRegistryEntries(entries.slice(0, 1), source, 1);
@@ -1125,6 +1308,10 @@ async function ingestSourceWithResume(
     authProbeFailed: 0,
     toolsListed: 0,
     toolsListFailed: 0,
+    faviconFetched: 0,
+    faviconHits: 0,
+    faviconFailed: 0,
+    faviconSkipped: 0,
   };
   let cursor: string | undefined;
   let resumes = 0;
@@ -1146,6 +1333,10 @@ async function ingestSourceWithResume(
     total.authProbeFailed += run.authProbeFailed;
     total.toolsListed += run.toolsListed;
     total.toolsListFailed += run.toolsListFailed;
+    total.faviconFetched += run.faviconFetched;
+    total.faviconHits += run.faviconHits;
+    total.faviconFailed += run.faviconFailed;
+    total.faviconSkipped += run.faviconSkipped;
     if (!run.partial || resumes >= resume.maxResumes) {
       return {
         ...total,

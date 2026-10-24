@@ -10,8 +10,9 @@ import { CatalogAiOverview } from "./catalog-ai-overview";
 
 /**
  * An MCP server's AI overview, in the shared catalog overview block with the
- * MCP wording: labelled as AI-generated, cautions set apart, and a note when
- * it is shown in English because there is none in the language asked for.
+ * MCP wording: labelled as AI-generated, "what you can do" as bullets (one
+ * per line of `whatItDoes`, #367 W4), cautions set apart, and a note when it
+ * is shown in English because there is none in the language asked for.
  * The overview text is model output from third-party content and is shown as
  * plain text only.
  */
@@ -40,6 +41,7 @@ export function McpAiOverviewView({
         whenToUse: t("whenToUse"),
         requirements: t("requirements"),
       }}
+      lists={{ whatItDoes: true }}
       notice={fellBack ? t("englishFallback") : null}
       overview={overview}
     />

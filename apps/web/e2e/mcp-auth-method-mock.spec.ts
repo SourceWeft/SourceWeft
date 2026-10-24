@@ -12,11 +12,18 @@ import { resolve } from "node:path";
  * The mock records which credential every MCP request carried, so each Test
  * is checked against what actually reached the server. Runs against the
  * isolated skill test deployment with its seeded accounts (e2e/README.md).
+ *
+ * Issue #367 W1: the same mock also serves an open MCP server, and names a
+ * documentation page in its protected-resource metadata, so what federation
+ * keeps from the probe is checked on the public catalog too: the open
+ * server's tools, the 401 server's "Documentation" link.
  */
 const api = process.env.SKILL_E2E_API_URL ?? "http://localhost:3311";
 const web = process.env.SKILL_E2E_WEB_URL ?? "http://localhost:3310";
 const identifier = "io.github.sourceweft-e2e/mock-oauth-or-key";
+const openIdentifier = "io.github.sourceweft-e2e/mock-open";
 const API_KEY = "mock_sk_live_e2e";
+const DOCUMENTATION_URL = "https://docs.example.com/mock-mcp";
 const detailPath = `/dashboard/mcp/${encodeURIComponent(identifier)}`;
 const evidenceDir = resolve("../../output/playwright/mcp-auth-method-mock");
 const accounts = JSON.parse(
@@ -137,17 +144,21 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async ({ browser }) => {
   mkdirSync(evidenceDir, { recursive: true });
   mockOrigin = await startMock();
-  execFileSync(
-    "pnpm",
-    [
-      "exec",
-      "tsx",
-      "scripts/federate-registry-entry-e2e.ts",
-      identifier,
-      mockOrigin,
-    ],
-    { cwd: resolve("../backend"), stdio: "inherit" },
-  );
+  // The OAuth-or-key entry first: the first request the mock records must be
+  // its probe. The open entry's requests are not recorded.
+  for (const entry of [identifier, openIdentifier]) {
+    execFileSync(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        "scripts/federate-registry-entry-e2e.ts",
+        entry,
+        mockOrigin,
+      ],
+      { cwd: resolve("../backend"), stdio: "inherit" },
+    );
+  }
   session = await signIn(browser);
 });
 
@@ -179,6 +190,71 @@ test("the catalog probes the mock and declares both methods", async ({
   expect((await credentialsSeen())[0]).toEqual({
     method: "initialize",
     credential: "none",
+  });
+});
+
+test("issue #367: the open mock's self-description comes from the probe", async ({
+  page,
+  request,
+}) => {
+  const response = await request.get(
+    `${api}/v1/mcp/${encodeURIComponent(openIdentifier)}/manifest`,
+  );
+  const { manifest, version } = await response.json();
+  expect(manifest.auth).toMatchObject({ type: "none", required: false });
+  expect(version.provenanceJson.authProbe.result).toBe("open");
+  expect(version.provenanceJson.selfDescription).toMatchObject({
+    source: "remote-probe",
+    serverInfo: { name: "mock-open", title: "Mock open MCP" },
+    instructions: "Search before you delete.",
+  });
+  expect(version.provenanceJson.serverCard).toMatchObject({
+    serverInfo: { name: "mock-open" },
+  });
+  // The catalog lists tools anonymously from https endpoints only (an http
+  // or query-carrying URL may be one account's), so the mock's plain-http
+  // open server is described but not listed, and so not validated.
+  expect(manifest.tools).toEqual([]);
+  expect(version.provenanceJson.toolsListing).toBeUndefined();
+  expect(version.provenanceJson.validatedAt).toBeUndefined();
+
+  await page.goto(`/mcp/${encodeURIComponent(openIdentifier)}`, {
+    timeout: 180_000,
+  });
+  await expect(page.locator("#tools")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("link", { name: /^Documentation/ })).toHaveCount(
+    0,
+  );
+  await page.screenshot({
+    path: `${evidenceDir}/0-open-described.png`,
+    fullPage: true,
+  });
+});
+
+test("issue #367: the 401 mock's documentation link is shown, never fetched", async ({
+  page,
+  request,
+}) => {
+  const response = await request.get(
+    `${api}/v1/mcp/${encodeURIComponent(identifier)}/manifest`,
+  );
+  const { manifest, version } = await response.json();
+  expect(manifest.tools).toEqual([]);
+  expect(version.provenanceJson.authMetadata).toEqual({
+    resourceName: "Mock OAuth-or-key MCP",
+    resourceDocumentation: DOCUMENTATION_URL,
+  });
+  expect(version.provenanceJson.validatedAt).toBeUndefined();
+
+  await page.goto(`/mcp/${encodeURIComponent(identifier)}`, {
+    timeout: 180_000,
+  });
+  const link = page.getByRole("link", { name: /^Documentation/ });
+  await expect(link).toBeVisible({ timeout: 60_000 });
+  await expect(link).toHaveAttribute("href", DOCUMENTATION_URL);
+  await page.screenshot({
+    path: `${evidenceDir}/0-documentation-link.png`,
+    fullPage: true,
   });
 });
 

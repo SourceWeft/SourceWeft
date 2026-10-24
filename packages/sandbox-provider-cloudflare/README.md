@@ -50,6 +50,24 @@ everything else SourceWeft-specific lives client-side in this package).
   container that slept and lost its filesystem) surfaces as
   `SANDBOX_NOT_FOUND_OR_EXPIRED`, which makes the sandbox manager expire the
   DB row and recreate — the existing recovery path.
+- **The stamp is re-checked on every operation, not only at acquisition.**
+  The `@cloudflare/containers` runtime can restart a container whose status
+  probe fails transiently (`Failed to check container status, assuming
+stopped`), and the fresh container behind the same name has an empty
+  `/workspace` and `/skills` (observed mid-run on 2026-10-23, Issue #323).
+  Every exec therefore starts with an identity guard in the same shell line:
+  `[ "$(cat /workspace/.sourceweft-sandbox-id)" = '<id>' ] || { printf
+'<marker><nonce>'; exit 203; }` — no extra round trip, and the command never
+  runs on a replaced container. The client maps exactly that outcome to
+  `SANDBOX_NOT_FOUND_OR_EXPIRED`; downloads check the stamp behind a 404 only
+  (a fresh container has no files). The sandbox manager then fences and
+  expires the generation once, acquires a replacement in the background
+  (re-staging `/skills`), and answers the detecting call with
+  `SANDBOX_REPLACED` plus a hint to repeat `prepare_sandbox_workspace`; after
+  two such replacements in one turn it fails closed with
+  `SANDBOX_INSTANCE_CHANGED`. Uploads are not guarded on their own: prepare
+  runs a guarded `mkdir -p` before each upload, and an upload that lands on a
+  fresh container is caught by the next command.
 - **Execute streams SSE.** The bridge's exec endpoint emits
   `stdout`/`stderr`/`exit`/`error` events (stdout/stderr data is the raw
   base64 of the chunk); the provider accumulates output up to `maxOutputChars`

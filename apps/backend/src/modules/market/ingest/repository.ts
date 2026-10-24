@@ -80,10 +80,13 @@ function metadataFromManifest(manifest: MarketMcpManifest) {
     providerName: manifest.providerName,
     homepageUrl: manifest.homepageUrl,
     iconUrl: manifest.iconUrl,
+    iconSource: manifest.iconSource,
     license: manifest.license,
     language: manifest.language,
     toolsCount: manifest.tools.length,
     lastIndexedAt: manifest.lastIndexedAt ?? new Date().toISOString(),
+    // Promoted so the listing can rank by `publisher.endpointMatch` in SQL.
+    publisher: manifest.publisher,
   };
 }
 
@@ -155,6 +158,12 @@ export type StoredEndpointProbes = {
   toolsListing?: unknown;
   /** `manifestJson.tools`, the listing's tools. */
   tools?: unknown;
+  /** What the probe kept of the endpoint's own `initialize` answer (W1). */
+  selfDescription?: unknown;
+  /** The 401 path's protected-resource metadata human fields (W1). */
+  authMetadata?: unknown;
+  /** The origin's server card (W1). */
+  serverCard?: unknown;
 };
 
 /**
@@ -174,6 +183,9 @@ export async function findStoredEndpointProbes(
       toolsListing: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'toolsListing'`,
       // Only versions with a listing carry tools worth reading back.
       tools: sql<unknown>`case when ${mcpServerVersions.provenanceJson} ? 'toolsListing' then ${mcpServerVersions.manifestJson} -> 'tools' end`,
+      selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
+      authMetadata: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authMetadata'`,
+      serverCard: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'serverCard'`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
@@ -188,6 +200,9 @@ export async function findStoredEndpointProbes(
                 authProbe: row.authProbe ?? undefined,
                 toolsListing: row.toolsListing ?? undefined,
                 tools: row.tools ?? undefined,
+                selfDescription: row.selfDescription ?? undefined,
+                authMetadata: row.authMetadata ?? undefined,
+                serverCard: row.serverCard ?? undefined,
               },
             ] as const,
           ],
@@ -201,6 +216,44 @@ export async function findStoredEndpointProbes(
  * registry entry) call this; they differ only in origin/source/owner and the
  * provenance blob.
  */
+/**
+ * The stored provenance the icon chain reads for each version: the server's
+ * self-description (`selfDescription`, W1), the GitHub MCP Registry match
+ * (`githubRegistry`, W5) and the cached favicon outcome (`iconProbe`). Each
+ * is absent until written.
+ */
+export async function findStoredIconProvenance(
+  versionIds: string[],
+): Promise<
+  Map<
+    string,
+    { selfDescription?: unknown; githubRegistry?: unknown; iconProbe?: unknown }
+  >
+> {
+  if (versionIds.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      id: mcpServerVersions.id,
+      selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
+      githubRegistry: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'githubRegistry'`,
+      iconProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconProbe'`,
+    })
+    .from(mcpServerVersions)
+    .where(inArray(mcpServerVersions.id, versionIds));
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      {
+        selfDescription: row.selfDescription ?? undefined,
+        githubRegistry: row.githubRegistry ?? undefined,
+        iconProbe: row.iconProbe ?? undefined,
+      },
+    ]),
+  );
+}
+
 export async function upsertMarketMcp(input: {
   manifest: MarketMcpManifest;
   status: McpServerStatus;

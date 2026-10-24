@@ -39,14 +39,20 @@ export function mcpOverviewLocale(
 
 /**
  * What a card says about an MCP server: the AI summary when the market has
- * one, else the registry's own summary. Plain text either way.
+ * one, else the registry's own summary — or, given the server's template
+ * description (#367 W4, `mcpTemplateDescription`), that template where the
+ * registry summary is not longer than it. Plain text either way.
  */
 export function mcpCardText(
   item: Pick<MarketItemSummary, "summary" | "aiSummary">,
+  template?: string | null,
 ): { text: string; ai: boolean } {
-  const summary = item.aiSummary?.trim();
-  return summary
-    ? { text: summary, ai: true }
+  const aiSummary = item.aiSummary?.trim();
+  if (aiSummary) return { text: aiSummary, ai: true };
+  const summary = item.summary.trim();
+  const fallback = template?.trim();
+  return fallback && summary.length <= fallback.length
+    ? { text: fallback, ai: false }
     : { text: item.summary, ai: false };
 }
 

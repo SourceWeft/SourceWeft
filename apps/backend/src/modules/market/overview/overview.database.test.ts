@@ -14,6 +14,7 @@ import {
 import type { RegistryServerJson } from "../types";
 import { createRouteTestApp } from "../../../test/hono";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
+import { MCP_OVERVIEW_PROMPT_VERSION } from "./prompt";
 import { genesis402Evidence, genesis402ModelAnswer } from "./test-answer";
 import {
   carrerliftRegistryServer,
@@ -436,7 +437,7 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     // Evidence cited by passage ID is stored as the passage's text.
     expect(analysis).toMatchObject({
       status: "ready",
-      promptVersion: "3",
+      promptVersion: MCP_OVERVIEW_PROMPT_VERSION,
       classification: {
         status: "ready",
         categories: [

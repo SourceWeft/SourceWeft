@@ -7,14 +7,45 @@ const mocks = vi.hoisted(() => ({
     async (_versionIds: string[]) =>
       new Map<
         string,
-        { authProbe?: unknown; toolsListing?: unknown; tools?: unknown }
+        {
+          authProbe?: unknown;
+          toolsListing?: unknown;
+          tools?: unknown;
+          selfDescription?: unknown;
+          authMetadata?: unknown;
+          serverCard?: unknown;
+        }
       >(),
+  ),
+  storedIconProvenance: vi.fn(
+    async (_versionIds: string[]) =>
+      new Map<
+        string,
+        {
+          selfDescription?: unknown;
+          githubRegistry?: unknown;
+          iconProbe?: unknown;
+        }
+      >(),
+  ),
+  // The favicon step's storage, injected so no test depends on the ambient
+  // PUBLIC_S3_* environment (the test setup loads dotenv).
+  storeConfigured: false,
+  storeIcon: vi.fn(
+    async (input: { domain: string; bytes: Buffer; contentType: string }) => ({
+      url: `https://assets.test/market/mcp-icons/${input.domain}/stored.png`,
+    }),
   ),
 }));
 
+vi.mock("./icons/store", () => ({
+  canStoreMcpIcons: () => mocks.storeConfigured,
+  storeMcpIcon: mocks.storeIcon,
+}));
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
   findStoredEndpointProbes: mocks.storedProbes,
+  findStoredIconProvenance: mocks.storedIconProvenance,
 }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -23,6 +54,7 @@ vi.mock("../../shared/logger", () => ({
 import {
   authProbeRecord,
   DEFAULT_REGISTRY_PAGE_RETRY,
+  endpointProbeRecord,
   federateRegistryEntry,
   ingestFromRegistry,
   mapRegistryServerToManifest,
@@ -30,6 +62,7 @@ import {
   registryRepositoryProvenance,
   runMarketFederation,
   storedAuthProbe,
+  storedProbePieces,
   storedToolsListing,
   toolsListingRecord,
 } from "./federation";
@@ -49,6 +82,7 @@ function serverEntry(id: number) {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  mocks.storeConfigured = false;
 });
 
 test("a mid-pagination fetch failure keeps the partial run instead of discarding it", async () => {
@@ -200,7 +234,13 @@ test("runMarketFederation resumes a partial walk from its cursor instead of star
   vi.stubGlobal("fetch", fetch);
 
   const [result] = await runMarketFederation(
-    [{ source: "registry.test", baseUrl: "https://registry.test", verified: true }],
+    [
+      {
+        source: "registry.test",
+        baseUrl: "https://registry.test",
+        verified: true,
+      },
+    ],
     { retry: noWaitRetry(2), resume: { maxResumes: 3, delayMs: 0 } },
   );
 
@@ -235,7 +275,13 @@ test("runMarketFederation gives up after the resume budget and reports the parti
   );
 
   const [result] = await runMarketFederation(
-    [{ source: "registry.test", baseUrl: "https://registry.test", verified: true }],
+    [
+      {
+        source: "registry.test",
+        baseUrl: "https://registry.test",
+        verified: true,
+      },
+    ],
     { retry: noWaitRetry(1), resume: { maxResumes: 2, delayMs: 0 } },
   );
 
@@ -281,7 +327,11 @@ test("federateRegistryEntry federates the latest version of one identifier, now"
 
   const result = await federateRegistryEntry({
     identifier: "io.github.acme/server-7",
-    source: { source: "registry.test", baseUrl: "https://registry.test", verified: true },
+    source: {
+      source: "registry.test",
+      baseUrl: "https://registry.test",
+      verified: true,
+    },
   });
 
   assert.equal(result.found, true);
@@ -307,7 +357,11 @@ test("federateRegistryEntry reports an identifier the registry does not have", a
 
   const result = await federateRegistryEntry({
     identifier: "io.github.acme/server-7",
-    source: { source: "registry.test", baseUrl: "https://registry.test", verified: true },
+    source: {
+      source: "registry.test",
+      baseUrl: "https://registry.test",
+      verified: true,
+    },
   });
 
   assert.equal(result.found, false);
@@ -439,16 +493,8 @@ test("the registry's repository, subfolder included, is kept in provenance", asy
       },
     },
   ];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ servers: entries, metadata: { nextCursor: null } }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    ),
-  );
+  // The registry page; the endpoints answer nothing.
+  stubRegistryAndEndpoints(entries, () => new Response(null, { status: 404 }));
 
   await ingestFromRegistry({
     source: "registry.test",
@@ -524,16 +570,8 @@ test("the registry's packages and remotes are kept in provenance by name and fla
       server: { name: "io.github.acme/bare", version: "1.0.0" },
     },
   ];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ servers: entries, metadata: { nextCursor: null } }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    ),
-  );
+  // The registry page; the endpoints answer nothing.
+  stubRegistryAndEndpoints(entries, () => new Response(null, { status: 404 }));
 
   await ingestFromRegistry({
     source: "registry.test",
@@ -666,6 +704,13 @@ function oauthChallenge() {
 function endpointCalls(fetch: ReturnType<typeof vi.fn>) {
   return fetch.mock.calls.filter(
     ([input]) => !requestUrl(input).startsWith("https://registry.test/"),
+  );
+}
+
+/** The `initialize` probes of Arcmira's endpoint itself. */
+function initializeCalls(fetch: ReturnType<typeof vi.fn>) {
+  return fetch.mock.calls.filter(
+    ([input]) => requestUrl(input) === ARCMIRA_ENDPOINT,
   );
 }
 
@@ -1060,7 +1105,7 @@ test("a stored probe 30 days old, or without a probe time, is probed again", asy
       verified: true,
     });
 
-    assert.equal(endpointCalls(fetch).length, 1, JSON.stringify(record));
+    assert.equal(initializeCalls(fetch).length, 1, JSON.stringify(record));
     assert.equal(result.authProbed, 1);
     const input = mocks.upsert.mock.calls[0]?.[0];
     assert.equal(input.manifest.auth.type, "oauth");
@@ -1134,7 +1179,7 @@ test("a stored probe of another endpoint is probed again", async () => {
     verified: true,
   });
 
-  assert.equal(endpointCalls(fetch).length, 1);
+  assert.equal(initializeCalls(fetch).length, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "oauth");
 });
 
@@ -1161,7 +1206,8 @@ test("a bare 401 with well-known protected-resource metadata is federated as OAu
     verified: true,
   });
 
-  assert.equal(endpointCalls(fetch).length, 2);
+  // initialize, the path-specific metadata, the origin's server card.
+  assert.equal(endpointCalls(fetch).length, 3);
   const input = mocks.upsert.mock.calls[0]?.[0];
   assert.equal(input.manifest.auth.type, "oauth");
   assert.equal(input.provenanceJson.authProbe.result, "oauth");
@@ -1215,6 +1261,80 @@ test("a registry endpoint on a private address is never probed", async () => {
   assert.equal(endpointCalls(fetch).length, 0);
   assert.equal(result.authProbeFailed, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "none");
+});
+
+// The official registry's own entry for Notion, as read on 2026-10-24: no
+// title, no repository, two remotes on mcp.notion.com.
+const NOTION_REGISTRY_ENTRY = {
+  server: {
+    name: "com.notion/mcp",
+    description: "Official Notion MCP server",
+    repository: {},
+    version: "1.0.1",
+    remotes: [
+      { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+      { type: "sse", url: "https://mcp.notion.com/sse" },
+    ],
+  },
+  _meta: {
+    "io.modelcontextprotocol.registry/official": {
+      status: "active",
+      isLatest: true,
+    },
+  },
+};
+
+test("issue #367: a domain namespace is mapped to its publisher, matched against the endpoint", () => {
+  const notion = mapRegistryServerToManifest(NOTION_REGISTRY_ENTRY, {
+    verified: true,
+  });
+  assert.ok(notion);
+  assert.deepEqual(notion.publisher, {
+    domain: "notion.com",
+    source: "registry-namespace",
+    endpointMatch: true,
+  });
+  // The publisher is a new field beside the existing ones, which keep their
+  // meaning: the namespace stays the provider name, the registry's
+  // verification stays `verified`, and `official` stays the manual flag.
+  assert.equal(notion.providerName, "com.notion");
+  assert.equal(notion.verified, true);
+  assert.equal(notion.official, false);
+
+  const elsewhere = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "com.notion/community",
+        version: "1.0.0",
+        remotes: [{ type: "streamable-http", url: "https://notion-mcp.fly.dev/mcp" }],
+      },
+    },
+    { verified: true },
+  );
+  assert.deepEqual(elsewhere?.publisher, {
+    domain: "notion.com",
+    source: "registry-namespace",
+    endpointMatch: false,
+  });
+});
+
+test("issue #367: a source that is not namespace-verified mints no publisher", () => {
+  const manifest = mapRegistryServerToManifest(NOTION_REGISTRY_ENTRY, {
+    verified: false,
+  });
+  assert.ok(manifest);
+  assert.equal(manifest.publisher, undefined);
+  assert.equal(manifest.verified, false);
+});
+
+test("issue #367: GitHub-namespace entries carry no publisher", () => {
+  const manifest = mapRegistryServerToManifest(serverEntry(1), {
+    verified: true,
+  });
+  assert.ok(manifest);
+  assert.equal(manifest.publisher, undefined);
+  // Stored as JSON, where an undefined field is no field at all.
+  assert.equal("publisher" in JSON.parse(JSON.stringify(manifest)), false);
 });
 
 const OPEN_ENDPOINT = "https://mcp.open.test/mcp";
@@ -1337,7 +1457,9 @@ test("an endpoint that asks for a credential is not listed", async () => {
 
   const result = await ingestTestRegistry();
 
-  assert.equal(endpointCalls(fetch).length, 1);
+  // The probe's one initialize of the endpoint; no listing handshake after it
+  // (its metadata and server-card lookups go to other URLs).
+  assert.equal(initializeCalls(fetch).length, 1);
   assert.equal(result.toolsListed, 0);
   const input = mocks.upsert.mock.calls[0]?.[0];
   assert.deepEqual(input.manifest.tools, []);
@@ -1497,4 +1619,586 @@ test("a stdio-only entry gets no tools even when some are passed", () => {
     },
   );
   assert.deepEqual(manifest?.tools, []);
+});
+
+test("issue #367: the logo chain labels an io.github entry github-avatar and keeps a registry icon as registry", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  stubRegistryAndEndpoints(
+    [
+      serverEntry(1),
+      {
+        server: {
+          name: "com.acme/mcp",
+          version: "1.0.0",
+          icons: [{ src: "https://cdn.acme.test/icon.png" }],
+          remotes: [{ type: "streamable-http", url: "https://acme.test/mcp" }],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 2);
+  const manifests = mocks.upsert.mock.calls.map((call) => call[0].manifest);
+  const acme = manifests.find(
+    (m) => m.identifier === "io.github.acme/server-1",
+  );
+  assert.equal(acme?.iconUrl, "https://github.com/acme.png?size=128");
+  assert.equal(acme?.iconSource, "github-avatar");
+  const registry = manifests.find((m) => m.identifier === "com.acme/mcp");
+  assert.equal(registry?.iconUrl, "https://cdn.acme.test/icon.png");
+  assert.equal(registry?.iconSource, "registry");
+  assert.equal(result.faviconFetched, 0);
+});
+
+test("issue #367: without public storage a domain entry stays a placeholder and no favicon service is called", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  // No public storage (the mocked store says so): the favicon step is skipped
+  // and counted rather than fetched.
+  mocks.storeConfigured = false;
+  const fetch = stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          repository: {},
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.faviconSkipped, 1);
+  assert.equal(result.faviconFetched, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.iconUrl, undefined);
+  assert.equal(input.manifest.iconSource, "placeholder");
+  assert.equal(input.provenanceJson.iconProbe, undefined);
+  for (const call of fetch.mock.calls) {
+    assert.doesNotMatch(requestUrl(call[0]), /google|duckduckgo/);
+  }
+});
+
+test("issue #367: a cached favicon hit in provenance is reused, served from our URL and written back", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const hit = {
+    domain: "notion.com",
+    result: "hit",
+    probedAt: new Date().toISOString(),
+    url: "https://assets.test/market/mcp-icons/notion.com/abc.png",
+    service: "google",
+  };
+  mocks.storedIconProvenance.mockResolvedValueOnce(
+    new Map([
+      [mcpServerVersionId("com.notion/mcp", "1.0.1"), { iconProbe: hit }],
+    ]),
+  );
+  stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.iconUrl, hit.url);
+  assert.equal(input.manifest.iconSource, "favicon");
+  assert.deepEqual(input.provenanceJson.iconProbe, hit);
+});
+
+test("issue #367: with public storage a domain entry's favicon is fetched, stored and served from our URL", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  mocks.storeConfigured = true;
+  const png = () =>
+    new Response(new Uint8Array(Buffer.alloc(2048, 1)), {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    });
+  const fetch = stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    (url) =>
+      url.startsWith("https://www.google.com/s2/favicons")
+        ? png()
+        : new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.faviconFetched, 1);
+  assert.equal(result.faviconHits, 1);
+  assert.equal(result.faviconSkipped, 0);
+  const faviconCalls = fetch.mock.calls
+    .map((call) => requestUrl(call[0]))
+    .filter((url) => /google|duckduckgo/.test(url));
+  assert.deepEqual(faviconCalls, [
+    "https://www.google.com/s2/favicons?domain=notion.com&sz=128",
+  ]);
+  assert.equal(mocks.storeIcon.mock.calls.length, 1);
+  assert.equal(mocks.storeIcon.mock.calls[0]?.[0].domain, "notion.com");
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(
+    input.manifest.iconUrl,
+    "https://assets.test/market/mcp-icons/notion.com/stored.png",
+  );
+  assert.equal(input.manifest.iconSource, "favicon");
+  assert.equal(input.provenanceJson.iconProbe.result, "hit");
+  assert.equal(input.provenanceJson.iconProbe.domain, "notion.com");
+  assert.equal(input.provenanceJson.iconProbe.service, "google");
+});
+
+test("issue #367: the registry icon the chain keeps is the first https one without credentials", () => {
+  const manifest = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "com.acme/mcp",
+        version: "1.0.0",
+        icons: [
+          { src: "https://user:pw@cdn.acme.test/secret.png" },
+          { src: "https://cdn.acme.test/icon.png" },
+        ],
+        remotes: [{ type: "streamable-http", url: "https://acme.test/mcp" }],
+      },
+    },
+    { verified: true },
+  );
+  assert.equal(manifest?.iconUrl, "https://cdn.acme.test/icon.png");
+});
+
+// ---------------------------------------------------------------------------
+// Issue #367 W1: what the endpoint says about itself.
+// ---------------------------------------------------------------------------
+
+const OPEN_ORIGIN = new URL(OPEN_ENDPOINT).origin;
+const OPEN_INITIALIZE = {
+  protocolVersion: "2025-06-18",
+  capabilities: { tools: { listChanged: false } },
+  serverInfo: {
+    name: "acme-open",
+    title: "Acme Open",
+    version: "2.0.0",
+    websiteUrl: "https://acme.test/",
+    icons: [{ src: "https://acme.test/icon.svg", mimeType: "image/svg+xml" }],
+  },
+  instructions: "Search first.",
+};
+const OPEN_TOOLS = [
+  {
+    name: "search",
+    title: "Search",
+    description: "Find documents.",
+    inputSchema: { type: "object", properties: { q: { type: "string" } } },
+    annotations: { readOnlyHint: true },
+  },
+  { name: "delete_doc", inputSchema: { type: "object" } },
+  { name: "run", annotations: { readOnlyHint: false, destructiveHint: false } },
+];
+const SERVER_CARD = {
+  serverInfo: { name: "acme-open", version: "2.0.0" },
+  protocolVersion: "2025-06-18",
+};
+// As the tool listing keeps them: the server's hints stay, the risk is never
+// theirs (`delete_doc`, or a `readOnlyHint` on anything, is the server's own
+// claim about itself).
+const EXPECTED_TOOLS = [
+  {
+    name: "search",
+    title: "Search",
+    description: "Find documents.",
+    inputSchema: { type: "object", properties: { q: { type: "string" } } },
+    annotations: { readOnlyHint: true },
+    risk: "unknown",
+  },
+  {
+    name: "delete_doc",
+    inputSchema: { type: "object" },
+    annotations: {},
+    risk: "unknown",
+  },
+  {
+    name: "run",
+    inputSchema: {},
+    annotations: { readOnlyHint: false, destructiveHint: false },
+    risk: "unknown",
+  },
+];
+
+function jsonResponse(body: unknown, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json", ...headers },
+  });
+}
+
+/**
+ * The registry page with `entries`, and `mcp` for every other request, given
+ * the request itself (method, headers and body). `requests` keeps a readable
+ * copy of each request the endpoints saw.
+ */
+function stubRegistryAndMcp(
+  entries: unknown[],
+  mcp: (request: Request) => Response | Promise<Response>,
+) {
+  const requests: Request[] = [];
+  const fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+    const request =
+      input instanceof Request ? input : new Request(String(input), init);
+    if (request.url.startsWith("https://registry.test/")) {
+      return jsonResponse({ servers: entries, metadata: { nextCursor: null } });
+    }
+    requests.push(request.clone());
+    return mcp(request);
+  });
+  vi.stubGlobal("fetch", fetch);
+  return { fetch, requests };
+}
+
+/**
+ * An open MCP server at `OPEN_ENDPOINT` that both the probe and the tool
+ * listing's client talk to; `tools` answers `tools/list`.
+ */
+function openMcp(options: { tools?: () => Response; card?: boolean } = {}) {
+  return async (request: Request) => {
+    if (request.url === `${OPEN_ORIGIN}/.well-known/mcp/server-card.json`) {
+      return options.card
+        ? jsonResponse(SERVER_CARD)
+        : new Response(null, { status: 404 });
+    }
+    if (request.url !== OPEN_ENDPOINT) {
+      return new Response(null, { status: 404 });
+    }
+    if (request.method === "DELETE") return new Response(null, { status: 200 });
+    assert.equal(request.headers.get("authorization"), null);
+    const message = (await request.json()) as { id?: number; method?: string };
+    if (message.id === undefined) return new Response(null, { status: 202 });
+    if (message.method === "initialize") {
+      return jsonResponse(
+        { jsonrpc: "2.0", id: message.id, result: OPEN_INITIALIZE },
+        { "mcp-session-id": "open-1" },
+      );
+    }
+    if (message.method === "tools/list") {
+      return options.tools
+        ? options.tools()
+        : jsonResponse({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { tools: OPEN_TOOLS },
+          });
+    }
+    return jsonResponse({
+      jsonrpc: "2.0",
+      id: message.id,
+      error: { code: -32601, message: "Method not found" },
+    });
+  };
+}
+
+async function postedMethods(requests: Request[]) {
+  return Promise.all(
+    requests
+      .filter((request) => request.method === "POST")
+      .map(
+        async (request) =>
+          ((await request.json()) as { method: string }).method,
+      ),
+  );
+}
+
+test("issue #367: an open endpoint's self-description is kept with the probe, validated by its listing", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const startedAt = Date.now();
+  const { requests } = stubRegistryAndMcp([openEntry], openMcp({ card: true }));
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.authProbed, 1);
+  assert.equal(result.toolsListed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.ok(input);
+  assert.equal(input.manifest.auth.type, "none");
+  assert.deepEqual(input.manifest.tools, EXPECTED_TOOLS);
+  const probedAt = new Date(input.provenanceJson.authProbe.probedAt);
+  assert.ok(
+    probedAt.getTime() >= startedAt && probedAt.getTime() <= Date.now(),
+  );
+  assert.equal(input.provenanceJson.authProbe.result, "open");
+  assert.deepEqual(input.provenanceJson.selfDescription, {
+    source: "remote-probe",
+    recordedAt: probedAt.toISOString(),
+    serverInfo: OPEN_INITIALIZE.serverInfo,
+    instructions: OPEN_INITIALIZE.instructions,
+    capabilities: OPEN_INITIALIZE.capabilities,
+  });
+  // Described and listed in the same run: validated at the listing's time.
+  assert.equal(
+    input.provenanceJson.validatedAt,
+    input.provenanceJson.toolsListing.listedAt,
+  );
+  assert.deepEqual(input.provenanceJson.serverCard, SERVER_CARD);
+  assert.equal(input.provenanceJson.authMetadata, undefined);
+  // The probe's one initialize and the card lookup, then the listing's own
+  // client handshake; nothing carried a credential.
+  assert.deepEqual(await postedMethods(requests), [
+    "initialize",
+    "initialize",
+    "notifications/initialized",
+    "tools/list",
+  ]);
+  assert.ok(
+    requests.some(
+      (request) =>
+        request.method === "GET" &&
+        request.url === `${OPEN_ORIGIN}/.well-known/mcp/server-card.json`,
+    ),
+  );
+});
+
+test("issue #367: a failed listing leaves the entry described but unvalidated, with no tools", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  stubRegistryAndMcp(
+    [openEntry],
+    openMcp({ tools: () => new Response("oops", { status: 500 }) }),
+  );
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.toolsListFailed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, []);
+  assert.equal(input.provenanceJson.validatedAt, undefined);
+  assert.equal(input.provenanceJson.toolsListing, undefined);
+  assert.equal(
+    input.provenanceJson.selfDescription.serverInfo.name,
+    "acme-open",
+  );
+  assert.equal(input.provenanceJson.authProbe.result, "open");
+});
+
+test("issue #367: a 401's protected-resource metadata keeps its documentation link, never fetched", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = stubRegistryAndEndpoints([arcmiraEntry], (url) =>
+    url === ARCMIRA_ENDPOINT
+      ? oauthChallenge()
+      : url === "https://mcp.arcmira.com/.well-known/oauth-protected-resource"
+        ? jsonResponse({
+            resource: ARCMIRA_ENDPOINT,
+            authorization_servers: ["https://auth.arcmira.com"],
+            resource_name: "Arcmira MCP",
+            resource_documentation: "https://docs.arcmira.com/mcp",
+          })
+        : new Response(null, { status: 404 }),
+  );
+
+  await ingestTestRegistry();
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.auth.type, "oauth");
+  assert.deepEqual(input.manifest.tools, []);
+  assert.deepEqual(input.provenanceJson.authMetadata, {
+    resourceName: "Arcmira MCP",
+    resourceDocumentation: "https://docs.arcmira.com/mcp",
+  });
+  assert.equal(input.provenanceJson.selfDescription, undefined);
+  assert.equal(input.provenanceJson.validatedAt, undefined);
+  assert.equal(
+    fetch.mock.calls.some(([input]) =>
+      requestUrl(input).startsWith("https://docs.arcmira.com/"),
+    ),
+    false,
+  );
+});
+
+test("issue #367: a reused stored probe brings its self-description, metadata and card along", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const probedAt = daysAgo(10);
+  const stored = endpointProbeRecord(
+    {
+      result: "open",
+      selfDescription: {
+        serverInfo: OPEN_INITIALIZE.serverInfo,
+        instructions: OPEN_INITIALIZE.instructions,
+      },
+      authMetadata: { resourceName: "Acme" },
+      serverCard: SERVER_CARD,
+    },
+    probedAt,
+  );
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          authProbe: authProbeRecord(OPEN_ENDPOINT, "open", probedAt),
+          selfDescription: stored.selfDescription,
+          authMetadata: stored.authMetadata,
+          serverCard: stored.serverCard,
+          toolsListing: toolsListingRecord(OPEN_ENDPOINT, 3, probedAt),
+          tools: EXPECTED_TOOLS,
+        },
+      ],
+    ]),
+  );
+  const { requests } = stubRegistryAndMcp([openEntry], () => {
+    throw new Error("the endpoint must not be contacted");
+  });
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(requests.length, 0);
+  assert.equal(result.authProbed, 0);
+  assert.equal(result.toolsListed, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, EXPECTED_TOOLS);
+  assert.deepEqual(
+    input.provenanceJson.selfDescription,
+    stored.selfDescription,
+  );
+  assert.equal(input.provenanceJson.validatedAt, probedAt.toISOString());
+  assert.deepEqual(input.provenanceJson.authMetadata, { resourceName: "Acme" });
+  assert.deepEqual(input.provenanceJson.serverCard, SERVER_CARD);
+});
+
+test("issue #367: stored pieces are reused only when well-formed and the probe's own", () => {
+  assert.deepEqual(
+    storedProbePieces({
+      // Another source's self-description (the sandboxed stdio start) is not
+      // the remote probe's.
+      selfDescription: {
+        source: "stdio-sandbox",
+        recordedAt: "2026-10-24T00:00:00.000Z",
+        serverInfo: { name: "x" },
+      },
+      authMetadata: { resourceDocumentation: "not a url" },
+      serverCard: ["not", "an", "object"],
+    }),
+    {},
+  );
+  assert.deepEqual(storedProbePieces(undefined), {});
+  const kept = {
+    selfDescription: {
+      source: "remote-probe",
+      recordedAt: "2026-10-24T00:00:00.000Z",
+      instructions: "hi",
+    },
+    authMetadata: { resourceName: "Acme" },
+    serverCard: SERVER_CARD,
+  };
+  assert.deepEqual(storedProbePieces(kept), kept);
+});
+
+test("issue #367: a fresh probe without an initialize answer stores no self-description", () => {
+  const at = new Date("2026-10-24T00:00:00.000Z");
+  assert.deepEqual(endpointProbeRecord({ result: "credential" }, at), {
+    result: "credential",
+    probedAt: at,
+  });
+  assert.deepEqual(
+    endpointProbeRecord(
+      { result: "open", selfDescription: { instructions: "hi" } },
+      at,
+    ),
+    {
+      result: "open",
+      probedAt: at,
+      selfDescription: {
+        source: "remote-probe",
+        recordedAt: at.toISOString(),
+        instructions: "hi",
+      },
+    },
+  );
+});
+
+test("issue #367: a failed fresh probe keeps the version's stored one, however old", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const probedAt = daysAgo(45);
+  const stored = endpointProbeRecord(
+    {
+      result: "open",
+      selfDescription: { serverInfo: OPEN_INITIALIZE.serverInfo },
+    },
+    probedAt,
+  );
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          authProbe: authProbeRecord(OPEN_ENDPOINT, "open", probedAt),
+          selfDescription: stored.selfDescription,
+          toolsListing: toolsListingRecord(OPEN_ENDPOINT, 3, probedAt),
+          tools: EXPECTED_TOOLS,
+        },
+      ],
+    ]),
+  );
+  stubRegistryAndMcp([openEntry], () => {
+    throw new TypeError("fetch failed");
+  });
+
+  const result = await ingestTestRegistry();
+
+  // The stale probe and listing were retried (and failed); the entry kept
+  // what it had, and keeps its old times so both are retried next sync.
+  assert.equal(result.authProbeFailed, 1);
+  assert.equal(result.toolsListFailed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, EXPECTED_TOOLS);
+  assert.deepEqual(
+    input.provenanceJson.selfDescription,
+    stored.selfDescription,
+  );
+  assert.equal(input.provenanceJson.validatedAt, probedAt.toISOString());
+  assert.equal(input.provenanceJson.authProbe.probedAt, probedAt.toISOString());
+  assert.equal(
+    input.provenanceJson.toolsListing.listedAt,
+    probedAt.toISOString(),
+  );
 });
