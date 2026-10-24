@@ -183,6 +183,61 @@ test("short and generic labels key no group", () => {
   }
 });
 
+test("generic dictionary words never form a group; real brands still do", () => {
+  const generic = [
+    "docs",
+    "notes",
+    "office",
+    "time",
+    "file",
+    "files",
+    "sync",
+    "data",
+    "search",
+    "chat",
+    "cloud",
+    "tools",
+    "agent",
+    "agents",
+    "server",
+    "servers",
+    "client",
+    "platform",
+    "studio",
+    "hub",
+    "pro",
+    "mail",
+    "task",
+    "link",
+    "page",
+    "base",
+  ];
+  for (const word of generic) {
+    assert.ok(BRAND_STOP_LIST.has(word), word);
+    assert.equal(brandOfDomain(`${word}.com`), null, word);
+    assert.equal(brandOfDomain(`mcp.${word}.io`), null, word);
+    assert.equal(
+      productGroupOf({
+        identifier: `com.${word}/mcp`,
+        repoUrl: null,
+        publisher: publisher(`${word}.com`, true),
+      }),
+      null,
+      word,
+    );
+  }
+  for (const brand of ["notion", "slack", "linear"]) {
+    assert.ok(!BRAND_STOP_LIST.has(brand), brand);
+    assert.equal(brandOfDomain(`${brand}.com`), brand);
+    const group = productGroupOf({
+      identifier: `com.${brand}/mcp`,
+      repoUrl: null,
+      publisher: publisher(`${brand}.com`, true),
+    });
+    assert.equal(group?.brand, brand);
+  }
+});
+
 test("whole-token brand matching on name or identifier tail", () => {
   const group = productGroupOf(NOTION_OFFICIAL)!;
   for (const [identifier, name] of [

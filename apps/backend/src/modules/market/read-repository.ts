@@ -29,7 +29,11 @@ import {
   readMcpOverviewLocales,
   readMcpOverviews,
 } from "./overview/repository";
-import { findProductGroupMembers, productGroupEntryOf } from "./grouping/query";
+import {
+  findBrandPublisherDomains,
+  findProductGroupMembers,
+  productGroupEntryOf,
+} from "./grouping/query";
 import { isOfficialEntry } from "./grouping/product-group";
 import { publisherMeta } from "./publisher";
 import { latestPublishedVersionOf } from "./latest-version";
@@ -494,11 +498,36 @@ export function mcpSharedReadmeServerIds(): SQL {
  * metadata rather than a column: it only orders the rows a query already
  * matched, which is never the whole catalog.
  */
-export function publisherEndpointMatchRank() {
-  return sql<number>`(case when ${mcpServers.metadataJson} #>> '{publisher,endpointMatch}' = 'true' then 1 else 0 end)`;
+export function publisherEndpointMatchRank(
+  brandDomains: readonly string[] = [],
+) {
+  if (brandDomains.length === 0) {
+    return sql<number>`(case when ${mcpServers.metadataJson} #>> '{publisher,endpointMatch}' = 'true' then 1 else 0 end)`;
+  }
+  const domains = sql.join(
+    brandDomains.map((domain) => sql`${domain}`),
+    sql`, `,
+  );
+  return sql<number>`(case when ${mcpServers.metadataJson} #>> '{publisher,endpointMatch}' = 'true' then (case when ${mcpServers.metadataJson} #>> '{publisher,domain}' in (${domains}) then 2 else 1 end) else 0 end)`;
 }
 
-type ListCursor = { endpointMatch: 0 | 1; publishedAt: Date; id: string };
+/**
+ * The rank `publisherEndpointMatchRank(brandDomains)` gives a row, computed
+ * in code for the cursor: 2 for an endpoint-matched server published under a
+ * domain whose brand is the query, 1 for any other endpoint-matched one.
+ */
+export function publisherRankOf(
+  metadataJson: Record<string, unknown> | null | undefined,
+  brandDomains: readonly string[],
+): 0 | 1 | 2 {
+  const publisher = publisherMeta(metadataJson);
+  if (!publisher?.endpointMatch) {
+    return 0;
+  }
+  return brandDomains.includes(publisher.domain) ? 2 : 1;
+}
+
+type ListCursor = { endpointMatch: 0 | 1 | 2; publishedAt: Date; id: string };
 
 // Keyset cursor over the (endpointMatch desc, publishedAt desc, id desc)
 // ordering; without a query the first key is a constant 0 and the browse
@@ -506,7 +535,7 @@ type ListCursor = { endpointMatch: 0 | 1; publishedAt: Date; id: string };
 // previous page so the next page is a plain range scan rather than an offset
 // that grows with the catalog.
 export function encodeListCursor(
-  endpointMatch: 0 | 1,
+  endpointMatch: 0 | 1 | 2,
   publishedAt: Date | null,
   id: string,
 ): string {
@@ -535,7 +564,9 @@ export function decodeListCursor(
     // serializes into a literal Postgres rejects — a crafted cursor 500. Treat
     // out-of-range like malformed base64: fall back to page one.
     if (
-      (endpointMatch !== "0" && endpointMatch !== "1") ||
+      (endpointMatch !== "0" &&
+        endpointMatch !== "1" &&
+        endpointMatch !== "2") ||
       !Number.isFinite(millis) ||
       Math.abs(millis) > 8.64e15 ||
       !id
@@ -543,7 +574,7 @@ export function decodeListCursor(
       return null;
     }
     return {
-      endpointMatch: endpointMatch === "1" ? 1 : 0,
+      endpointMatch: endpointMatch === "2" ? 2 : endpointMatch === "1" ? 1 : 0,
       publishedAt: new Date(millis),
       id,
     };
@@ -613,9 +644,12 @@ export async function listMcp(input: {
       ),
     );
   }
-  // A search ranks servers whose publisher runs the endpoint first; the
-  // default browse stays in publication order, which its index serves.
-  const rank = query ? publisherEndpointMatchRank() : null;
+  // A search ranks servers whose publisher runs the endpoint first, those
+  // among them published under the queried brand's own domain above the
+  // rest; the default browse stays in publication order, which its index
+  // serves.
+  const brandDomains = query ? await findBrandPublisherDomains(query) : [];
+  const rank = query ? publisherEndpointMatchRank(brandDomains) : null;
   const cursor = decodeListCursor(input.cursor);
   if (cursor) {
     // Next page in the (rank desc, publishedAt desc, id desc) ordering: rows
@@ -666,7 +700,7 @@ export async function listMcp(input: {
   const nextCursor =
     hasMore && last
       ? encodeListCursor(
-          query && publisherMeta(last.metadataJson)?.endpointMatch ? 1 : 0,
+          query ? publisherRankOf(last.metadataJson, brandDomains) : 0,
           last.publishedAt,
           last.id,
         )
