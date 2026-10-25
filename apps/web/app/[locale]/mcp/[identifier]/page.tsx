@@ -64,6 +64,7 @@ import {
 } from "../../../../lib/mcp-auth-method";
 import { mcpToolsStatus } from "../../../../lib/mcp-tools-status";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
+import { McpAgentPrompt } from "../_components/mcp-agent-prompt";
 import { McpFactsPanel } from "../_components/mcp-facts-panel";
 import {
   ExternalTextLink,
@@ -873,6 +874,14 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       </p>
                     ) : null}
                   </div>
+
+                  {clientConfig ? (
+                    <McpAgentPrompt
+                      className={panelClassName}
+                      identifier={item.identifier}
+                      siteUrl={SITE_URL}
+                    />
+                  ) : null}
 
                   {clientConfig ? (
                     <div className={panelClassName}>
