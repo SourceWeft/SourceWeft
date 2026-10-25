@@ -22,6 +22,12 @@ pub fn privileged_setup_command() -> String {
     format!("pkexec /bin/sh -c '{SETUP_SCRIPT}' {SCRIPT_NAME} install")
 }
 
+/// The `pkexec` that is spawned: an absolute path, so a `pkexec` earlier on the app's `PATH`
+/// can never stand in for the real one in a flow that asks for the admin password. (The command
+/// shown to the user says plain `pkexec`; a terminal resolves it with the user's own `PATH`.)
+#[cfg(any(target_os = "linux", test))]
+const PKEXEC_PATH: &str = "/usr/bin/pkexec";
+
 /// The argv `run_privileged_setup` passes to `pkexec`: no shell string, the script is one
 /// argument.
 #[cfg(any(target_os = "linux", test))]
@@ -42,7 +48,7 @@ fn run_setup_with(program: &str) -> Result<(), String> {
         .map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 format!(
-                    "{program} was not found. Install polkit, or run the setup command in a terminal as root."
+                    "pkexec (polkit) is not installed ({program} was not found). Install polkit, or run the setup command shown in the app in a terminal as root."
                 )
             } else {
                 format!("failed to start {program}: {error}")
@@ -69,7 +75,7 @@ fn run_setup_with(program: &str) -> Result<(), String> {
 /// from a blocking context.
 #[cfg(target_os = "linux")]
 pub fn run_privileged_setup() -> Result<(), String> {
-    run_setup_with("pkexec")
+    run_setup_with(PKEXEC_PATH)
 }
 
 #[cfg(test)]
@@ -95,6 +101,12 @@ mod tests {
         );
         assert!(command.starts_with("pkexec /bin/sh -c '#!/bin/sh\n"));
         assert!(command.ends_with("' sourceweft-sandbox-setup install"));
+    }
+
+    #[test]
+    fn pkexec_is_spawned_by_absolute_path() {
+        assert_eq!(PKEXEC_PATH, "/usr/bin/pkexec");
+        assert!(std::path::Path::new(PKEXEC_PATH).is_absolute());
     }
 
     #[test]
@@ -169,7 +181,11 @@ mod tests {
         #[test]
         fn a_missing_program_says_so() {
             let error = run_setup_with("/definitely/not/a/pkexec").unwrap_err();
-            assert!(error.contains("was not found"), "{error}");
+            assert!(
+                error.starts_with("pkexec (polkit) is not installed (/definitely/not/a/pkexec was not found)"),
+                "{error}"
+            );
+            assert!(error.contains("in a terminal as root"), "{error}");
         }
     }
 }

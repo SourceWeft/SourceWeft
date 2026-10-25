@@ -19,7 +19,7 @@
 //! 5. swap the staging directory in for `current` (the old one is moved aside first and put
 //!    back if anything goes wrong), then delete the old one.
 use super::{
-    readiness::{ReadinessCache, SandboxReadiness},
+    readiness::{settled_readiness, ReadinessCache, SandboxReadiness},
     sidecar::SANDBOX_PROTOCOL_VERSION,
     HostError, LocalHost, Result,
 };
@@ -921,8 +921,30 @@ impl LocalHost {
     pub fn install_sandbox_runtime(&self) -> Result<SandboxReadiness> {
         let spec = InstallSpec::release()?;
         let fetch = HttpsFetch::new()?;
-        self.install_sandbox_runtime_with(&spec, &fetch)?;
-        Ok(self.sandbox_readiness())
+        self.install_and_probe_with(&spec, &fetch)
+    }
+
+    /// Installs, then returns a real readiness: any probe still in flight from before the
+    /// install is waited out (it does not cache its stale answer), so the result is never the
+    /// transient "checking" placeholder.
+    pub(crate) fn install_and_probe_with(
+        &self,
+        spec: &InstallSpec,
+        fetch: &dyn Fetch,
+    ) -> Result<SandboxReadiness> {
+        self.install_sandbox_runtime_with(spec, fetch)?;
+        self.invalidate_sandbox_readiness();
+        settled_readiness(
+            || self.sandbox_readiness(),
+            Duration::from_millis(50),
+            Duration::from_secs(120),
+        )
+        .ok_or_else(|| {
+            HostError::new(
+                SANDBOX_INSTALL_FAILED,
+                "The runtime was installed, but the readiness check did not finish.",
+            )
+        })
     }
 
     /// The install half of [`LocalHost::install_sandbox_runtime`], with the spec and downloader
@@ -1891,6 +1913,29 @@ mod tests {
         host.install_sandbox_runtime_with(&spec, &MemFetch::fixture(&spec))
             .unwrap();
         assert!(ReadinessCache::cached_for_test(&host.sandbox_readiness_cache).is_none());
+    }
+
+    #[test]
+    fn the_install_result_is_a_real_readiness_and_installing_is_over() {
+        let app_data = tempfile::tempdir().unwrap();
+        let host = host(app_data.path());
+        let spec = spec();
+        let readiness = host
+            .install_and_probe_with(&spec, &MemFetch::fixture(&spec))
+            .unwrap();
+        assert_ne!(readiness, SandboxReadiness::installing());
+        assert_ne!(readiness, SandboxReadiness::checking());
+        // A failed install is an error, not a readiness.
+        let broken = MemFetch {
+            bodies: HashMap::new(),
+            requests: RefCell::new(vec![]),
+        };
+        assert_eq!(
+            host.install_and_probe_with(&spec, &broken)
+                .unwrap_err()
+                .code,
+            SANDBOX_DOWNLOAD_FAILED
+        );
     }
 
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]

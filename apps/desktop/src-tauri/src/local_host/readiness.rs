@@ -139,6 +139,11 @@ impl SandboxReadiness {
     /// means there is no package to reinstall, so the user runs the setup script through
     /// `pkexec` instead.
     fn bwrap_setup(code: SetupCode, reason: impl Into<String>, appimage: bool) -> Self {
+        // The only two situations a package reinstall or the privileged setup can fix.
+        debug_assert!(matches!(
+            code,
+            SetupCode::BwrapMissing | SetupCode::UserNamespaceRestricted
+        ));
         if appimage {
             Self::NeedsSetup {
                 code,
@@ -201,6 +206,27 @@ fn without_unavailable_download(readiness: SandboxReadiness, published: bool) ->
             SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
         }
         other => other,
+    }
+}
+
+/// Waits (bounded) until `read` stops answering with the transient "checking" placeholder, which
+/// it does while a probe from another thread is still in flight. Install uses this so its result
+/// is a real state. `None` when the wait ran out.
+pub(crate) fn settled_readiness(
+    mut read: impl FnMut() -> SandboxReadiness,
+    poll: Duration,
+    limit: Duration,
+) -> Option<SandboxReadiness> {
+    let deadline = Instant::now() + limit;
+    loop {
+        let current = read();
+        if current != SandboxReadiness::checking() {
+            return Some(current);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(poll);
     }
 }
 
@@ -1071,6 +1097,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_package_reinstall_is_only_ever_offered_for_a_missing_or_refused_bwrap() {
+        let messages = [
+            "",
+            "Operation not permitted",
+            "sandbox probe exited with code 1",
+            "bwrap: Can't mount proc on /newroot/proc: Operation not permitted",
+            "bwrap: Can't find source path /nope: No such file or directory",
+            "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted",
+            "bwrap: setting up uid map: Permission denied",
+            "bwrap: No permissions to create new namespace",
+            "bwrap: Creating new namespace failed: Operation not permitted",
+            "unexpected EOF from the sidecar",
+        ];
+        let codes = [
+            "BUNDLE_STALE",
+            "BUNDLE_NEWER",
+            "HELPER_MISSING",
+            "SANDBOX_UNAVAILABLE",
+            "POLICY_INVALID",
+            "SIDECAR_TIMEOUT",
+            "",
+        ];
+        for appimage in [false, true] {
+            for code in codes {
+                for message in messages {
+                    if let SandboxReadiness::NeedsSetup {
+                        code: setup_code,
+                        remedy,
+                        ..
+                    } = classify_probe_failure(code, message, appimage)
+                    {
+                        assert_eq!(
+                            remedy == Remedy::ReinstallPackage,
+                            !appimage
+                                && matches!(
+                                    setup_code,
+                                    SetupCode::BwrapMissing | SetupCode::UserNamespaceRestricted
+                                ),
+                            "{code} / {message} / appimage={appimage}"
+                        );
+                        if setup_code == SetupCode::SandboxFailed {
+                            assert_eq!(remedy, Remedy::None, "{code} / {message}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn settled_readiness_waits_out_the_checking_placeholder() {
+        let mut answers = vec![
+            SandboxReadiness::checking(),
+            SandboxReadiness::checking(),
+            SandboxReadiness::bundle_missing(),
+        ]
+        .into_iter();
+        let result = settled_readiness(
+            || answers.next().unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        );
+        assert_eq!(result, Some(SandboxReadiness::bundle_missing()));
+        // Gives up (None) instead of returning the placeholder.
+        assert_eq!(
+            settled_readiness(
+                SandboxReadiness::checking,
+                Duration::from_millis(1),
+                Duration::from_millis(20)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_probe_in_flight_during_an_install_never_becomes_the_install_result() {
+        use std::sync::{mpsc, Arc};
+        let cache = Arc::new(Mutex::new(ReadinessCache::default()));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        // A probe that began before the install and is still running.
+        let in_flight = {
+            let cache = cache.clone();
+            std::thread::spawn(move || {
+                ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    SandboxReadiness::bundle_missing() // stale: the runtime is installed now
+                })
+            })
+        };
+        started_rx.recv().unwrap();
+        drop(ReadinessCache::begin_install(&cache).unwrap()); // the install ends, cache invalidated
+
+        let now = ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || unreachable!());
+        assert_eq!(now, SandboxReadiness::checking(), "the placeholder, while it runs");
+
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            release_tx.send(()).unwrap();
+        });
+        let fresh = SandboxReadiness::Ready {
+            toolchain_path: Some(ToolchainPath::System),
+        };
+        let result = settled_readiness(
+            || {
+                ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || fresh.clone())
+            },
+            Duration::from_millis(5),
+            Duration::from_secs(10),
+        );
+        releaser.join().unwrap();
+        in_flight.join().unwrap();
+        assert_eq!(result, Some(fresh.clone()), "a fresh probe, not the placeholder or the stale answer");
+        assert_eq!(ReadinessCache::cached_for_test(&cache), Some(fresh));
     }
 
     #[cfg(unix)]
