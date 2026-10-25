@@ -17,7 +17,9 @@ import type {
  * Modelled on LobeHub's public score: weighted items, some required, graded
  * A (≥ 80 % of the weight met), B (≥ 60 %) or F; a required item not met is
  * F whatever the percentage. The difference is that which items are required
- * depends on the kind of entry (see each rule's `requiredWhen`).
+ * and which apply at all depend on the kind of entry (see each rule's
+ * `requiredWhen` and `applicableWhen`). The grade stays on the API for
+ * existing readers; the public page shows the percentage and the checklist.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -45,10 +47,6 @@ export type McpScoreSource = {
   iconUrl?: string | null;
   /** Where that icon came from (the summary's `iconSource`, W3). */
   iconSource?: string | null;
-  /** The entry's domain publisher as the catalog resolved it (the summary's `publisher`, W2). */
-  publisher?: unknown;
-  /** The owner claimed the entry and the claim was verified (W7). */
-  claimed?: boolean;
   /** When the score is computed; freshness is measured from here. */
   now?: Date;
 };
@@ -76,13 +74,18 @@ type McpScoreFacts = {
   hasResourceDocumentation: boolean;
   hasOwnerDocumentation: boolean;
   licenseKnown: boolean;
-  endpointMatch: boolean;
-  claimed: boolean;
+  /**
+   * A remote endpoint with no package or repository to run or read: the
+   * license of such a service is not the listing's to declare.
+   */
+  hostedOnly: boolean;
 };
 
 type McpScoreRule = {
   key: MarketMcpScoreItemKey;
   weight: number;
+  /** False when the item does not apply to this entry; it then leaves the total. */
+  applicableWhen: (facts: McpScoreFacts) => boolean;
   requiredWhen: (facts: McpScoreFacts) => boolean;
   met: (facts: McpScoreFacts) => boolean;
 };
@@ -90,17 +93,23 @@ type McpScoreRule = {
 const ALWAYS = () => true;
 const NEVER = () => false;
 
-/** The items, in the order the page lists them. Weights sum to 100. */
+/**
+ * The items, in the order the page lists them. Weights sum to 100. Identity
+ * (the claim, the publisher's domain) is shown as badges and is not here:
+ * the score is how complete the listing's data is.
+ */
 export const MCP_SCORE_RULES: readonly McpScoreRule[] = [
   {
     key: "reachable",
-    weight: 20,
+    weight: 25,
+    applicableWhen: ALWAYS,
     requiredWhen: (facts) => facts.hasRemoteEndpoint,
     met: (facts) => facts.probeFresh || facts.validationFresh,
   },
   {
     key: "authDeclared",
     weight: 10,
+    applicableWhen: ALWAYS,
     requiredWhen: (facts) => facts.hasRemoteEndpoint,
     // A posture alone says little: federation writes one for every remote,
     // "none" included, so it counts only when something backs it — a probe
@@ -112,13 +121,15 @@ export const MCP_SCORE_RULES: readonly McpScoreRule[] = [
   {
     key: "hasTools",
     weight: 15,
+    applicableWhen: ALWAYS,
     requiredWhen: (facts) =>
       facts.listableAnonymously || facts.validatedStdioPackage,
     met: (facts) => facts.toolCount >= 1,
   },
   {
     key: "hasDescription",
-    weight: 10,
+    weight: 15,
+    applicableWhen: ALWAYS,
     requiredWhen: ALWAYS,
     met: (facts) =>
       facts.descriptionChars >= MCP_SCORE_MIN_DESCRIPTION_CHARS ||
@@ -127,13 +138,15 @@ export const MCP_SCORE_RULES: readonly McpScoreRule[] = [
   },
   {
     key: "hasLogo",
-    weight: 8,
+    weight: 10,
+    applicableWhen: ALWAYS,
     requiredWhen: NEVER,
     met: (facts) => facts.hasIcon,
   },
   {
     key: "hasDocs",
-    weight: 10,
+    weight: 15,
+    applicableWhen: ALWAYS,
     requiredWhen: NEVER,
     met: (facts) =>
       facts.readmeFetched ||
@@ -142,21 +155,12 @@ export const MCP_SCORE_RULES: readonly McpScoreRule[] = [
   },
   {
     key: "hasLicense",
-    weight: 7,
+    weight: 10,
+    // A hosted service is used under its provider's terms, not a license the
+    // listing could carry: not applicable, so it neither earns nor costs.
+    applicableWhen: (facts) => !facts.hostedOnly,
     requiredWhen: NEVER,
     met: (facts) => facts.licenseKnown,
-  },
-  {
-    key: "officialPublisher",
-    weight: 10,
-    requiredWhen: NEVER,
-    met: (facts) => facts.endpointMatch,
-  },
-  {
-    key: "claimed",
-    weight: 10,
-    requiredWhen: NEVER,
-    met: (facts) => facts.claimed,
   },
 ];
 
@@ -209,13 +213,40 @@ function visibleChars(value: string) {
   return value.replace(/\s+/g, " ").trim().length;
 }
 
+/**
+ * True when the registry entry lists remotes and nothing to install or read:
+ * no package, no repository. Read from what the entry says about how it is
+ * delivered; an entry that says nothing (a submission, a row from before
+ * `registryServer` was kept) is not hosted-only, so the license applies.
+ */
+function isHostedOnly(input: {
+  manifest: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+  registryServer: Record<string, unknown> | null;
+}): boolean {
+  const { manifest, provenance, registryServer } = input;
+  if (!registryServer) return false;
+  const remotes = Array.isArray(registryServer.remotes)
+    ? registryServer.remotes
+    : [];
+  const packages = Array.isArray(registryServer.packages)
+    ? registryServer.packages
+    : [];
+  if (remotes.length === 0 || packages.length > 0) return false;
+  return !(
+    text(record(provenance.repository)?.url) !== null ||
+    isHttpUrl(manifest.repoUrl)
+  );
+}
+
 export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
   const now = source.now ?? new Date();
   const manifest = record(source.manifestJson) ?? {};
   const provenance = record(source.provenanceJson) ?? {};
   const auth = record(manifest.auth);
   const authProbe = record(provenance.authProbe);
-  const publisher = record(source.publisher) ?? record(manifest.publisher);
+  const owner = record(manifest.owner);
+  const registryServer = record(provenance.registryServer);
   const authMetadata = record(provenance.authMetadata);
   const githubRegistry = record(provenance.githubRegistry);
   const tools = Array.isArray(manifest.tools) ? manifest.tools : [];
@@ -253,20 +284,24 @@ export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
     toolCount: tools.length,
     descriptionChars: visibleChars(description),
     hasAiOverview: source.hasAiOverview === true,
-    // An owner-written description arrives with owner claims (W7).
-    hasOwnerDescription: false,
+    // The manifest the read passes already carries the verified owner's
+    // corrections (W7): a description they wrote counts however short.
+    hasOwnerDescription:
+      Array.isArray(owner?.fields) &&
+      owner.fields.includes("description") &&
+      description.length > 0,
     hasIcon:
       (iconSource !== null && iconSource !== "placeholder") ||
       isHttpUrl(manifest.iconUrl) ||
       isHttpUrl(source.iconUrl),
     readmeFetched: source.readmeStatus === "ok",
     hasResourceDocumentation: isHttpUrl(authMetadata?.resourceDocumentation),
-    // An owner-set documentation link arrives with owner claims (W7).
-    hasOwnerDocumentation: false,
+    hasOwnerDocumentation: isHttpUrl(manifest.documentationUrl),
     licenseKnown:
       text(manifest.license) !== null || text(githubRegistry?.license) !== null,
-    endpointMatch: publisher?.endpointMatch === true,
-    claimed: source.claimed === true,
+    hostedOnly:
+      hasRemoteEndpoint &&
+      isHostedOnly({ manifest, provenance, registryServer }),
   };
 }
 
@@ -277,20 +312,33 @@ export function mcpScoreGrade(percentage: number): MarketMcpScoreGrade {
   return "F";
 }
 
-/** The scorecard of one catalog entry; see the module comment. */
+/**
+ * The scorecard of one catalog entry; see the module comment. The percentage
+ * is the weight met of the weight that applies: an item that does not apply
+ * to the entry is listed, marked, and left out of both.
+ */
 export function scoreMcp(source: McpScoreSource): MarketMcpScore {
   const facts = mcpScoreFacts(source);
-  const items: MarketMcpScoreItem[] = MCP_SCORE_RULES.map((rule) => ({
-    key: rule.key,
-    weight: rule.weight,
-    required: rule.requiredWhen(facts),
-    met: rule.met(facts),
-  }));
+  const items: MarketMcpScoreItem[] = MCP_SCORE_RULES.map((rule) => {
+    const applicable = rule.applicableWhen(facts);
+    return {
+      key: rule.key,
+      weight: rule.weight,
+      applicable,
+      required: applicable && rule.requiredWhen(facts),
+      met: applicable && rule.met(facts),
+    };
+  });
+  const applicableWeight = items.reduce(
+    (sum, item) => sum + (item.applicable ? item.weight : 0),
+    0,
+  );
   const metWeight = items.reduce(
     (sum, item) => sum + (item.met ? item.weight : 0),
     0,
   );
-  const percentage = Math.round((metWeight / MCP_SCORE_TOTAL_WEIGHT) * 100);
+  const percentage =
+    applicableWeight > 0 ? Math.round((metWeight / applicableWeight) * 100) : 0;
   const requiredMet = items.every((item) => item.met || !item.required);
   return {
     grade: requiredMet ? mcpScoreGrade(percentage) : "F",

@@ -53,6 +53,24 @@ export function mcpPublisherDomain(source: unknown): string | null {
 }
 
 /**
+ * The GitHub account a registry namespace names (`io.github.arcmira/mcp` →
+ * `arcmira`), for a server with no domain publisher. The registry checks the
+ * account against GitHub; it does not show the account makes the product, so
+ * this is a neutral label and never an "official" mark. Null for any other
+ * namespace or when the server has a domain publisher.
+ */
+export function mcpGithubAccount(source: {
+  identifier: string;
+  publisher?: unknown;
+}): string | null {
+  if (mcpPublisherDomain(source)) return null;
+  const match = /^io\.github\.([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\//i.exec(
+    source.identifier,
+  );
+  return match?.[1] ?? null;
+}
+
+/**
  * The documentation a server points to from its protected-resource metadata
  * (RFC 9728 `resource_documentation`, kept by W1 as
  * `provenance.authMetadata.resourceDocumentation`). Shown as a link, never
@@ -67,6 +85,18 @@ export function mcpDocumentationUrl(provenanceJson: unknown): string | null {
   return mcpEndpointHost(url) ? url.trim() : null;
 }
 
+/**
+ * When the endpoint was last probed (`provenance.authProbe.probedAt`), an ISO
+ * time; null without a probe or when the value is not a date.
+ */
+export function mcpProbedAt(provenanceJson: unknown): string | null {
+  if (!isRecord(provenanceJson)) return null;
+  const probe = provenanceJson.authProbe;
+  if (!isRecord(probe)) return null;
+  const at = probe.probedAt;
+  return typeof at === "string" && Number.isFinite(Date.parse(at)) ? at : null;
+}
+
 /** What a public server page's facts panel and template are built from. */
 export type McpPublicFacts = {
   name: string;
@@ -79,6 +109,7 @@ export type McpPublicFacts = {
   documentationUrl: string | null;
   repoUrl: string | null;
   homepageUrl: string | null;
+  probedAt: string | null;
 };
 
 /**
@@ -112,5 +143,6 @@ export function publicMcpFacts({
         : null) ?? mcpDocumentationUrl(provenanceJson),
     repoUrl: manifest.repoUrl ?? item.repoUrl ?? null,
     homepageUrl: manifest.homepageUrl ?? item.homepageUrl ?? null,
+    probedAt: mcpProbedAt(provenanceJson),
   };
 }

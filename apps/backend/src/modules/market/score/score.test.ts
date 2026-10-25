@@ -75,10 +75,18 @@ test("the weights sum to 100 so the percentage is the met weight", () => {
       "hasLogo",
       "hasDocs",
       "hasLicense",
-      "officialPublisher",
-      "claimed",
     ],
   );
+  assert.deepEqual(
+    MCP_SCORE_RULES.map((rule) => rule.weight),
+    [25, 10, 15, 15, 10, 15, 10],
+  );
+});
+
+test("identity is not scored: no item for the claim or the publisher", () => {
+  const keys = scoreMcp(remote()).items.map((entry) => entry.key) as string[];
+  assert.equal(keys.includes("claimed"), false);
+  assert.equal(keys.includes("officialPublisher"), false);
 });
 
 test("grade thresholds: 59 F, 60 B, 79 B, 80 A", () => {
@@ -276,13 +284,13 @@ test("an authenticated remote without tools is not failed for the tools", () => 
       { authProbe: { result: "oauth", probedAt: FRESH } },
     ),
   );
-  assert.equal(score.grade, "F", "40 % of the weight");
+  assert.equal(score.grade, "F", "50 % of the weight");
   assert.deepEqual(
     score.items.filter((entry) => entry.required && !entry.met),
     [],
     "but no required item is unmet",
   );
-  assert.equal(score.percentage, 40);
+  assert.equal(score.percentage, 50);
 });
 
 test("a stdio package without validation and without tools is unmet, not failed", () => {
@@ -429,57 +437,125 @@ test("hasLicense: the manifest's license, or the GitHub registry's", () => {
   assert.equal(item(remote(), "hasLicense").required, false);
 });
 
-// --- officialPublisher --------------------------------------------------------
+// --- Owner corrections --------------------------------------------------------
 
-test("officialPublisher: the publisher's endpoint match, strictly true", () => {
+test("an owner's short description counts: the manifest the read passes carries the layer", () => {
+  const owner = (fields: string[]) => ({ source: "owner", fields });
   assert.equal(
     item(
-      remote({
-        publisher: { domain: "example.com", source: "registry-namespace", endpointMatch: true },
-      }),
-      "officialPublisher",
+      remote({ description: "Notion MCP", owner: owner(["description"]) }),
+      "hasDescription",
     ).met,
     true,
   );
   assert.equal(
-    item(remote({ publisher: { domain: "example.com", endpointMatch: false } }), "officialPublisher")
-      .met,
+    item(remote({ description: "Notion MCP" }), "hasDescription").met,
     false,
+    "the same text without the owner's layer",
   );
   assert.equal(
-    item(remote({ publisher: { domain: "example.com", endpointMatch: "true" } }), "officialPublisher")
-      .met,
+    item(
+      remote({ description: "Notion MCP", owner: owner(["summary"]) }),
+      "hasDescription",
+    ).met,
     false,
+    "an owner who corrected another field",
   );
-  assert.equal(
-    item(
-      remote({}, {}, {
-        publisher: { domain: "example.com", source: "registry-namespace", endpointMatch: true },
-      }),
-      "officialPublisher",
-    ).met,
-    true,
-    "the publisher the catalog resolved",
-  );
-  assert.equal(
-    item(
-      remote({ publisher: { domain: "example.com", endpointMatch: true } }, {}, { publisher: null }),
-      "officialPublisher",
-    ).met,
-    true,
-    "a null resolved publisher falls back to the manifest's",
-  );
-  assert.equal(item(remote(), "officialPublisher").met, false);
-  assert.equal(item(remote(), "officialPublisher").required, false);
 });
 
-// --- claimed ------------------------------------------------------------------
+test("an owner's documentation link counts as documentation", () => {
+  assert.equal(
+    item(
+      remote({ documentationUrl: "https://docs.example.com/mcp" }),
+      "hasDocs",
+    ).met,
+    true,
+  );
+  assert.equal(
+    item(remote({ documentationUrl: "docs" }), "hasDocs").met,
+    false,
+  );
+});
 
-test("claimed: only the verified owner claim the read passes in", () => {
-  assert.equal(item(remote({}, {}, { claimed: true }), "claimed").met, true);
-  assert.equal(item(remote({}, { claim: { verified: true } }), "claimed").met, false);
-  assert.equal(item(remote(), "claimed").met, false);
-  assert.equal(item(remote(), "claimed").required, false);
+// --- Applicability: hosted-only entries ---------------------------------------
+
+/** What the registry said of a hosted-only entry: remotes, no package. */
+const HOSTED = { registryServer: { remotes: [{ type: "streamable-http" }] } };
+
+test("hasLicense does not apply to a hosted-only entry and leaves the denominator", () => {
+  const hosted = scoreMcp(remote({}, HOSTED));
+  const license = hosted.items.find((entry) => entry.key === "hasLicense");
+  assert.deepEqual(license, {
+    key: "hasLicense",
+    weight: 10,
+    applicable: false,
+    required: false,
+    met: false,
+  });
+  // Every other item applies.
+  assert.ok(
+    hosted.items
+      .filter((entry) => entry.key !== "hasLicense")
+      .every((entry) => entry.applicable),
+  );
+});
+
+test("a hosted-only percentage is the met weight over the applicable weight, with no automatic license points", () => {
+  const facts = {
+    description: LONG_DESCRIPTION,
+    auth: { type: "none", posture: "none" },
+    iconSource: "registry",
+  };
+  const probe = { authProbe: { result: "credential", probedAt: FRESH } };
+  // 25 + 10 + 15 + 10 = 60 of 100 where the license applies.
+  const applicable = scoreMcp(remote(facts, probe));
+  assert.equal(applicable.percentage, 60);
+  // The same 60 of the 90 that apply: 67, and a license changes nothing.
+  const hosted = scoreMcp(remote(facts, { ...probe, ...HOSTED }));
+  assert.equal(hosted.percentage, 67);
+  assert.equal(
+    scoreMcp(remote({ ...facts, license: "MIT" }, { ...probe, ...HOSTED }))
+      .percentage,
+    67,
+    "a license on a hosted-only entry earns nothing",
+  );
+});
+
+test("delivery that is not known to be hosted-only keeps the license applicable", () => {
+  const cases: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
+    ["no registry record at all", {}, {}],
+    ["a registry record without remotes", {}, { registryServer: { title: "x" } }],
+    [
+      "a package beside the remote",
+      {},
+      {
+        registryServer: {
+          remotes: [{ type: "streamable-http" }],
+          packages: [{ registryType: "npm", identifier: "x" }],
+        },
+      },
+    ],
+    [
+      "a repository in the registry entry",
+      {},
+      { ...HOSTED, repository: { url: "https://github.com/acme/x" } },
+    ],
+    ["a repository on the manifest", { repoUrl: "https://github.com/acme/x" }, HOSTED],
+  ];
+  for (const [label, manifest, provenance] of cases) {
+    assert.equal(
+      item(remote(manifest, provenance), "hasLicense").applicable,
+      true,
+      label,
+    );
+  }
+});
+
+test("a stdio package's license always applies", () => {
+  assert.equal(
+    item(stdio({}, { registryServer: { remotes: [{}] } }), "hasLicense").applicable,
+    true,
+  );
 });
 
 // --- Defensive reading --------------------------------------------------------
@@ -494,7 +570,7 @@ test("absent, null or malformed rows score as nothing met", () => {
     const score = scoreMcp({ ...source, now: NOW });
     assert.equal(score.percentage, 0);
     assert.equal(score.grade, "F");
-    assert.equal(score.items.length, 9);
+    assert.equal(score.items.length, 7);
     assert.ok(score.items.every((entry) => !entry.met));
     // Not a remote, never listed: only the description is required.
     assert.deepEqual(
@@ -515,7 +591,7 @@ test("the same rows at the same time give the same score", () => {
 
 // --- Grades over whole entries ------------------------------------------------
 
-/** A reachable, declared remote with a description: the 40 % every graded remote starts from. */
+/** A reachable, declared remote with a description: the 50 % every graded remote starts from. */
 function gradedRemote(extra: Record<string, unknown> = {}, source: Partial<McpScoreSource> = {}) {
   return remote(
     {
@@ -528,41 +604,30 @@ function gradedRemote(extra: Record<string, unknown> = {}, source: Partial<McpSc
   );
 }
 
-test("grade boundaries over whole entries: 58 F, 60 B, 78 B, 80 A", () => {
-  // 40 + logo 8 + docs 10 = 58.
-  const f = scoreMcp(gradedRemote({ iconSource: "registry" }, { readmeStatus: "ok" }));
-  assert.equal(f.percentage, 58);
+test("grade boundaries over whole entries: 50 F, 60 B, 75 B, 80 A", () => {
+  const f = scoreMcp(gradedRemote());
+  assert.equal(f.percentage, 50);
   assert.equal(f.grade, "F");
-  // 40 + logo 8 + docs 10 + license 7 = 65 would skip 60; 40 + 10 + 10 = 60.
-  const b = scoreMcp(
-    gradedRemote({
-      publisher: { domain: "example.com", endpointMatch: true },
-    }, { readmeStatus: "ok" }),
-  );
+  // 50 + logo 10 = 60.
+  const b = scoreMcp(gradedRemote({ iconSource: "registry" }));
   assert.equal(b.percentage, 60);
   assert.equal(b.grade, "B");
-  // 40 + logo 8 + docs 10 + publisher 10 + claimed 10 = 78.
+  // 50 + logo 10 + tools 15 = 75.
   const b2 = scoreMcp(
-    gradedRemote(
-      { iconSource: "registry", publisher: { domain: "example.com", endpointMatch: true } },
-      { readmeStatus: "ok", claimed: true },
-    ),
+    gradedRemote({ iconSource: "registry", tools: [{ name: "a" }] }),
   );
-  assert.equal(b2.percentage, 78);
+  assert.equal(b2.percentage, 75);
   assert.equal(b2.grade, "B");
-  // 40 + logo 8 + license 7 + tools 15 + docs 10 = 80.
+  // 50 + tools 15 + docs 15 = 80.
   const a = scoreMcp(
-    gradedRemote(
-      { iconSource: "registry", license: "MIT", tools: [{ name: "a" }] },
-      { readmeStatus: "ok" },
-    ),
+    gradedRemote({ tools: [{ name: "a" }] }, { readmeStatus: "ok" }),
   );
   assert.equal(a.percentage, 80);
   assert.equal(a.grade, "A");
 });
 
 test("a required item unmet is F whatever the percentage", () => {
-  // Everything but the description: 90 %.
+  // Everything but the description: 85 %.
   const score = scoreMcp(
     remote(
       {
@@ -571,33 +636,33 @@ test("a required item unmet is F whatever the percentage", () => {
         tools: [{ name: "search" }],
         iconSource: "favicon",
         license: "MIT",
-        publisher: { domain: "example.com", endpointMatch: true },
       },
       { authProbe: { result: "oauth", probedAt: FRESH } },
-      { readmeStatus: "ok", claimed: true },
+      { readmeStatus: "ok" },
     ),
   );
-  assert.equal(score.percentage, 90);
+  assert.equal(score.percentage, 85);
   assert.equal(score.grade, "F");
 });
 
 // --- Fixtures -----------------------------------------------------------------
 
-test("fixture: com.notion/mcp-like — an OAuth remote, no tools, a 26-char description — is F until described or claimed", () => {
-  const notion = remote(
-    {
-      identifier: "com.notion/mcp",
-      endpointUrl: "https://mcp.notion.com/mcp",
-      summary: "Notion MCP Server (Hosted)",
-      description: "Notion MCP Server (Hosted)",
-      auth: { type: "oauth", required: true, posture: "required" },
-      tools: [],
-      iconSource: "favicon",
-      publisher: { domain: "notion.com", source: "registry-namespace", endpointMatch: true },
-    },
-    { authProbe: { result: "oauth", probedAt: FRESH } },
-  );
-  const score = scoreMcp(notion);
+const NOTION = remote(
+  {
+    identifier: "com.notion/mcp",
+    endpointUrl: "https://mcp.notion.com/mcp",
+    summary: "Notion MCP Server (Hosted)",
+    description: "Notion MCP Server (Hosted)",
+    auth: { type: "oauth", required: true, posture: "required" },
+    tools: [],
+    iconSource: "favicon",
+    publisher: { domain: "notion.com", source: "registry-namespace", endpointMatch: true },
+  },
+  { authProbe: { result: "oauth", probedAt: FRESH }, ...HOSTED },
+);
+
+test("fixture: com.notion/mcp-like — a hosted OAuth remote, no tools, a 26-char description — is F until described", () => {
+  const score = scoreMcp(NOTION);
   assert.equal(score.grade, "F");
   assert.deepEqual(
     score.items.filter((entry) => entry.required && !entry.met).map((entry) => entry.key),
@@ -608,20 +673,45 @@ test("fixture: com.notion/mcp-like — an OAuth remote, no tools, a 26-char desc
     false,
     "an OAuth remote is not failed for listing no tools",
   );
-  // 20 + 10 + 8 + 10 = 48 of the weight is met.
-  assert.equal(score.percentage, 48);
-  // An AI overview (W4) or an owner description (W7) lifts the requirement.
-  assert.equal(scoreMcp({ ...notion, hasAiOverview: true }).grade, "F", "48 % stays F");
-  assert.equal(
-    scoreMcp({
-      ...notion,
-      hasAiOverview: true,
-      claimed: true,
-      readmeStatus: "ok",
-    }).grade,
-    "B",
-    "68 % with the overview, a claim and documentation",
+  // The license does not apply to a hosted service: 25 + 10 + 10 = 45 of 90.
+  assert.equal(score.items.find((entry) => entry.key === "hasLicense")?.applicable, false);
+  assert.equal(score.percentage, 50);
+  // An AI overview (W4) or an owner description (W7) lifts the requirement
+  // (60 of 90), and documentation lifts the percentage (75 of 90).
+  assert.equal(scoreMcp({ ...NOTION, hasAiOverview: true }).percentage, 67);
+  assert.equal(scoreMcp({ ...NOTION, hasAiOverview: true }).grade, "B");
+  const described = scoreMcp({ ...NOTION, hasAiOverview: true, readmeStatus: "ok" });
+  assert.equal(described.percentage, 83);
+  assert.equal(described.grade, "A");
+});
+
+test("fixture: arcmira-like — an io.github remote with a repository — scores its data, not who published it", () => {
+  const arcmira = remote(
+    {
+      identifier: "io.github.arcmira/mcp",
+      endpointUrl: "https://mcp.arcmira.com/mcp",
+      description: LONG_DESCRIPTION,
+      auth: { type: "api_key_header", required: true, posture: "required", headerName: "X-Api-Key" },
+      iconSource: "github",
+      repoUrl: "https://github.com/arcmira/mcp",
+    },
+    { authProbe: { result: "credential", probedAt: FRESH }, ...HOSTED },
+    { readmeStatus: "ok" },
   );
+  // reachable 25 + auth 10 + description 15 + logo 10 + docs 15; the license
+  // applies (a repository is delivered) and is unmet.
+  const score = scoreMcp(arcmira);
+  assert.equal(score.percentage, 75);
+  assert.equal(score.grade, "B");
+  // Neither a domain publisher nor a claim changes the number.
+  const identified = scoreMcp({
+    ...arcmira,
+    manifestJson: {
+      ...(arcmira.manifestJson as Record<string, unknown>),
+      publisher: { domain: "arcmira.com", source: "registry-namespace", endpointMatch: true },
+    },
+  });
+  assert.deepEqual(identified, score);
 });
 
 test("fixture: an open remote that lists tools, with docs, a logo and a license, is A", () => {
@@ -644,9 +734,26 @@ test("fixture: an open remote that lists tools, with docs, a logo and a license,
     ),
   );
   assert.equal(score.grade, "A");
-  assert.equal(score.percentage, 80);
+  assert.equal(score.percentage, 100);
   assert.deepEqual(
     score.items.filter((entry) => !entry.met).map((entry) => entry.key),
-    ["officialPublisher", "claimed"],
+    [],
   );
+});
+
+test("fixture: a validated stdio package requires its tools and has a license to declare", () => {
+  const pkg = stdio(
+    { description: LONG_DESCRIPTION, license: "MIT" },
+    {
+      validatedAt: FRESH,
+      registryServer: { packages: [{ registryType: "npm", identifier: "x" }] },
+    },
+  );
+  const score = scoreMcp(pkg);
+  const tools = score.items.find((entry) => entry.key === "hasTools");
+  assert.equal(tools?.required, true);
+  assert.equal(tools?.met, false);
+  assert.equal(score.grade, "F");
+  const license = score.items.find((entry) => entry.key === "hasLicense");
+  assert.deepEqual([license?.applicable, license?.met], [true, true]);
 });
