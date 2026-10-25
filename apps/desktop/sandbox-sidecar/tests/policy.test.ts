@@ -171,24 +171,33 @@ test("credential denies are absolute paths under home", () => {
 // Linux: bubblewrap makes an empty placeholder on the host for every ABSENT denyWrite path under
 // a writable root (a granted $HOME), so buildConfig adds none and perWrapWriteDenies adds only the
 // credential paths that exist (checked per command), keeping the real home free of placeholders.
-test("linux denyWrite: no credential paths statically, only existing ones per wrap", () => {
+test("linux denyWrite: no credential paths statically, only existing ones inside the workspace per wrap", () => {
   const init = validInit({ home: "/home/u" });
   assert.deepEqual(buildConfig(init).filesystem.denyWrite, [{ path: "/tmp/claude", literal: true }]);
-  const present = new Set(["/home/u/.ssh", "/home/u/.npmrc"]);
-  assert.deepEqual(
-    perWrapWriteDenies(init, (path) => present.has(path)),
-    ["/home/u/.npmrc", "/home/u/.ssh"],
-  );
-  assert.deepEqual(perWrapWriteDenies(init, () => false), []);
+  const present = new Set(["/home/u/.ssh", "/home/u/.npmrc", "/home/u/.cargo/credentials.toml"]);
+  const exists = (path: string) => present.has(path);
+  // A granted $HOME workspace: the existing credential paths inside it are denied.
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u", exists), [
+    "/home/u/.cargo/credentials.toml",
+    "/home/u/.npmrc",
+    "/home/u/.ssh",
+  ]);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u", () => false), []);
+  // A workspace elsewhere (the cargo read root is not writable): bwrap would fail to bind a mount
+  // point inside a read-only root, and a deny where nothing is writable protects nothing.
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u/project", exists), []);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u/.cargo", exists), ["/home/u/.cargo/credentials.toml"]);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u/.cargo/bin", exists), []);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/uu", exists), []);
   // Trailing-slash homes are spelled the same as in the read denies.
   assert.deepEqual(
-    perWrapWriteDenies(validInit({ home: "/home/u/" }), (path) => path === "/home/u/.aws"),
+    perWrapWriteDenies(validInit({ home: "/home/u/" }), "/home/u", (path) => path === "/home/u/.aws"),
     ["/home/u/.aws"],
   );
 });
 
 test("darwin has no per-wrap write denies: they are all static and unconditional", () => {
-  assert.deepEqual(perWrapWriteDenies(validInit({ platform: "darwin", home: "/home/u" }), () => true), []);
+  assert.deepEqual(perWrapWriteDenies(validInit({ platform: "darwin", home: "/home/u" }), "/home/u", () => true), []);
 });
 
 // srt binds its bridge sockets from the sidecar's runtime directory before its filesystem

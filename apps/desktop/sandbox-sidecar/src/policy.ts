@@ -212,7 +212,11 @@ function existsNoFollow(path: string): boolean {
  * darwin: all of them, unconditionally (`buildConfig`) — Seatbelt matches a path rule whether or
  * not the path exists and creates nothing on the host.
  *
- * linux: only the ones that exist right now (`perWrapWriteDenies`, per command). For an absent
+ * linux: only the ones that exist right now AND lie inside (or equal) `workspaceRoot`
+ * (`perWrapWriteDenies`, per command). The workspace root is the only writable root, so a write
+ * deny elsewhere protects nothing; worse, a credential path inside a read-only toolchain root
+ * (`~/.cargo/credentials.toml` under the `~/.cargo` read root) makes bubblewrap try to bind or
+ * create a mount point in a read-only filesystem and the command fails to start. For an absent
  * deny path under a writable root, bubblewrap first creates an empty placeholder on the host
  * (the first missing component — for `~/.aws` an empty FILE, for `~/.config/gh/hosts.yml` a
  * `~/.config` directory) and removes it after the command. In a granted `$HOME` that would
@@ -222,10 +226,14 @@ function existsNoFollow(path: string): boolean {
  */
 export function perWrapWriteDenies(
   init: Pick<InitConfig, "platform" | "home">,
+  workspaceRoot: string,
   exists: (path: string) => boolean = existsNoFollow,
 ): string[] {
   if (init.platform === "darwin") return [];
-  return credentialDenies(init.platform, init.home).filter(exists);
+  const root = normalizePosix(workspaceRoot);
+  return credentialDenies(init.platform, init.home).filter(
+    (path) => isWithin(root, normalizePosix(path)) && exists(path),
+  );
 }
 
 // Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer

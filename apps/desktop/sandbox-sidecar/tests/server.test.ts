@@ -745,37 +745,54 @@ test("darwin wrap keeps the credential denyWrite entries from buildConfig", asyn
   await harness.stop();
 });
 
-test("linux wrap and probe add write denies only for credential paths that exist at that moment", async () => {
+test("linux wrap and probe add write denies only for existing credential paths inside the wrap's workspace", async () => {
   const home = mkdtempSync(join(tmpRoot, "linux-home-"));
   mkdirSync(join(home, ".ssh"));
-  const init = linuxInit({ home });
+  // The user granted $HOME itself (a second root is a normal workspace; ~/.cargo style read
+  // roots are not writable and must never get a write deny, or bwrap cannot bind them).
+  mkdirSync(join(home, ".cargo"));
+  writeFileSync(join(home, ".cargo", "credentials.toml"), "x");
+  const init = linuxInit({ home, workspaceRoots: [home, workspaceRoot], readRoots: [join(home, ".cargo")] });
   const srt = makeFakeSrt();
   const harness = await initHarness(srt, undefined, init);
   const denyWrite = () =>
     (srt.lastCustomConfig as { filesystem: { denyWrite: Array<{ path: string }> } }).filesystem.denyWrite.map(
       (entry) => entry.path,
     );
-  const wrap = async () => {
+  const wrap = async (root: string) => {
     const response = await harness.send({
       op: "wrap",
       commandId: "c".repeat(22),
       command: "echo hi",
-      cwd: workspaceRoot,
-      workspaceRoot,
+      cwd: root,
+      workspaceRoot: root,
     });
     assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
   };
-  await wrap();
-  // The static entry survives; the existing directory is added; absent paths (which srt would
-  // otherwise create as placeholders in the real home) are not.
-  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".ssh")]);
+  await wrap(home);
+  // The static entry survives; existing credential paths inside the writable home are added;
+  // absent paths (which srt would otherwise create as placeholders in the real home) are not.
+  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".cargo/credentials.toml"), join(home, ".ssh")]);
   // Checked per command: a path that appears later is covered by the next wrap.
   mkdirSync(join(home, ".aws"));
-  await wrap();
-  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".ssh"), join(home, ".aws")]);
-  assert.deepEqual(perWrapWriteDenies(init), [join(home, ".ssh"), join(home, ".aws")]);
+  await wrap(home);
+  assert.deepEqual(denyWrite(), [
+    "/tmp/claude",
+    join(home, ".cargo/credentials.toml"),
+    join(home, ".ssh"),
+    join(home, ".aws"),
+  ]);
+  // A wrap in another workspace root: nothing writable contains the credential paths.
+  await wrap(workspaceRoot);
+  assert.deepEqual(denyWrite(), ["/tmp/claude"]);
   const probe = await harness.send({ op: "probe" });
   assert.equal(probe.ok, true, `probe failed: ${JSON.stringify(probe)}`);
-  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".ssh"), join(home, ".aws")]);
+  // probe wraps init's first workspace root (here the granted home).
+  assert.deepEqual(denyWrite(), [
+    "/tmp/claude",
+    join(home, ".cargo/credentials.toml"),
+    join(home, ".ssh"),
+    join(home, ".aws"),
+  ]);
   await harness.stop();
 });

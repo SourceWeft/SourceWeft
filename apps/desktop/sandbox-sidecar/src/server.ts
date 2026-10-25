@@ -301,7 +301,7 @@ export async function startServer(
       state.runtimeConfig,
       state.wrapReadRoots,
       workspaceRoot,
-      perWrapWriteDenies(state.config),
+      perWrapWriteDenies(state.config, workspaceRoot),
     );
     try {
       const { argv, env } = await deps.srt.wrapWithSandboxArgv(
@@ -342,7 +342,7 @@ export async function startServer(
       state.runtimeConfig,
       state.wrapReadRoots,
       workspaceRoot,
-      perWrapWriteDenies(state.config),
+      perWrapWriteDenies(state.config, workspaceRoot),
     );
     let argv: string[];
     let env: Record<string, string>;
