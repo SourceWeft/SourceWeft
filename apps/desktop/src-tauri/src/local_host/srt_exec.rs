@@ -237,7 +237,9 @@ pub(crate) fn darwin_read_roots(
 /// The developer directory the macOS `/usr/bin` xcode-select tool shims (`git`, `cc`, `clang`,
 /// `make`, `/usr/bin/python3`) are pinned to inside the sandbox, via `DEVELOPER_DIR` in the child
 /// env (`child_env`). Returns the canonical Command Line Tools path when `command_line_tools` is an
-/// existing directory, else `None`.
+/// existing directory holding a usable toolchain (`usr/bin/git` or `usr/bin/clang`, the binaries
+/// the shims resolve to), else `None`. A bare or half-removed directory is therefore not pinned:
+/// pointing the shims at it would break tools that work under the active developer directory.
 ///
 /// A *full* `Xcode.app` cannot act as the in-sandbox developer directory: its shims make `xcrun`
 /// resolve each tool by writing a lookup cache in the per-user Darwin temp dir — which the
@@ -257,7 +259,10 @@ pub(crate) fn darwin_read_roots(
 ///     shims stay unsupported — no safe mechanism can run a full Xcode in the sandbox).
 fn darwin_developer_dir(command_line_tools: &str) -> Option<String> {
     let canonical = Path::new(command_line_tools).canonicalize().ok()?;
-    if !canonical.is_dir() {
+    let usable = ["usr/bin/git", "usr/bin/clang"]
+        .iter()
+        .any(|tool| canonical.join(tool).is_file());
+    if !canonical.is_dir() || !usable {
         return None;
     }
     canonical.to_str().map(str::to_string)
@@ -457,8 +462,10 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
 /// `developer_dir` is set only on macOS (`Some` from `darwin_developer_dir`), and pins
 /// `DEVELOPER_DIR` so the `/usr/bin` xcode-select tool shims resolve against the Command Line Tools
 /// toolchain, which works under the tight sandbox where a full `Xcode.app` cannot. It is `None` on
-/// Linux and on a macOS host with no Command Line Tools, leaving the inherited developer dir
-/// untouched.
+/// Linux and on a macOS host without usable Command Line Tools, leaving the inherited developer
+/// dir untouched. When `Some`, the pin overrides a `DEVELOPER_DIR` the user's own environment
+/// carries (the `wrapped` value is replaced): a full Xcode selected that way cannot run its shims
+/// in the sandbox anyway (see `darwin_developer_dir`).
 fn child_env(
     root: &Path,
     wrapped: Vec<(String, String)>,
@@ -1003,16 +1010,29 @@ mod tests {
     }
 
     #[test]
-    fn darwin_developer_dir_detects_an_existing_directory() {
+    fn darwin_developer_dir_requires_a_usable_toolchain() {
         let dir = tempfile::tempdir().unwrap();
         let dir = dir.path().canonicalize().unwrap();
-        // An existing directory: returned as its canonical path.
         let clt = dir.join("CommandLineTools");
         fs::create_dir(&clt).unwrap();
-        assert_eq!(
-            darwin_developer_dir(clt.to_str().unwrap()),
-            Some(clt.to_str().unwrap().to_string())
-        );
+        // An existing directory without usr/bin/git or usr/bin/clang is not usable: None.
+        assert_eq!(darwin_developer_dir(clt.to_str().unwrap()), None);
+        fs::create_dir_all(clt.join("usr/bin")).unwrap();
+        assert_eq!(darwin_developer_dir(clt.to_str().unwrap()), None);
+        // A directory standing in for the tool is not a tool.
+        fs::create_dir(clt.join("usr/bin/git")).unwrap();
+        assert_eq!(darwin_developer_dir(clt.to_str().unwrap()), None);
+        fs::remove_dir(clt.join("usr/bin/git")).unwrap();
+        // Either tool makes it usable; the canonical path is returned.
+        for tool in ["git", "clang"] {
+            fs::write(clt.join("usr/bin").join(tool), "x").unwrap();
+            assert_eq!(
+                darwin_developer_dir(clt.to_str().unwrap()),
+                Some(clt.to_str().unwrap().to_string()),
+                "usr/bin/{tool} must make the directory usable"
+            );
+            fs::remove_file(clt.join("usr/bin").join(tool)).unwrap();
+        }
         // A path that does not exist: None.
         assert_eq!(darwin_developer_dir(dir.join("absent").to_str().unwrap()), None);
         // A file, not a directory: None.
