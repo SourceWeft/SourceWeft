@@ -143,14 +143,16 @@ const DARWIN_SYSTEM_READ_ROOTS: readonly string[] = [
 ];
 
 /**
- * Ruling R25 (final review I2): credential files under the home directory that a toolchain read
- * root (Ruling R13: `~/.cargo/bin` on `PATH` re-allows `~/.cargo`), or a granted folder that
- * contains them, could otherwise expose. Each is a literal `denyRead` entry, which srt keeps
- * denied inside an `allowRead` directory. They are listed unconditionally rather than only when
+ * Ruling R25 (final review I2): credential files and directories under the home directory that a
+ * toolchain read root (Ruling R13: `~/.cargo/bin` on `PATH` re-allows `~/.cargo`), or a granted
+ * folder that is or contains `$HOME`, could otherwise expose. `.ssh`, `.aws` and `.gnupg` are
+ * directories (private keys, cloud credentials, keyrings; Ruling R10 of the final review): a
+ * literal `denyRead` of a directory denies everything below it. Each is a literal `denyRead`
+ * entry, which srt keeps denied inside an `allowRead` directory. They are listed unconditionally rather than only when
  * their parent happens to be readable: an entry whose parent is denied or absent mounts nothing
  * (srt skips it), so the unconditional list is the same policy with no case to get wrong.
  */
-const HOME_CREDENTIAL_FILES: readonly string[] = [
+const HOME_CREDENTIAL_PATHS: readonly string[] = [
   ".cargo/credentials",
   ".cargo/credentials.toml",
   ".docker/config.json",
@@ -159,6 +161,9 @@ const HOME_CREDENTIAL_FILES: readonly string[] = [
   ".netrc",
   ".git-credentials",
   ".config/gh/hosts.yml",
+  ".ssh",
+  ".aws",
+  ".gnupg",
 ];
 
 /**
@@ -175,7 +180,7 @@ const HOME_CREDENTIAL_FILES: readonly string[] = [
 const DARWIN_CREDENTIAL_DIRS: readonly string[] = ["Library/Keychains"];
 
 /**
- * `HOME_CREDENTIAL_FILES` (both platforms) plus, on darwin, `DARWIN_CREDENTIAL_DIRS`, as absolute
+ * `HOME_CREDENTIAL_PATHS` (both platforms) plus, on darwin, `DARWIN_CREDENTIAL_DIRS`, as absolute
  * paths under `home`. srt keeps a literal `denyRead` entry denied even inside an `allowRead`
  * directory, so these survive a granted parent.
  */
@@ -183,8 +188,8 @@ function credentialDenies(platform: InitConfig["platform"], home: string): strin
   const base = home.endsWith("/") ? home.slice(0, -1) : home;
   const relatives =
     platform === "darwin"
-      ? [...HOME_CREDENTIAL_FILES, ...DARWIN_CREDENTIAL_DIRS]
-      : HOME_CREDENTIAL_FILES;
+      ? [...HOME_CREDENTIAL_PATHS, ...DARWIN_CREDENTIAL_DIRS]
+      : HOME_CREDENTIAL_PATHS;
   return relatives.map((relative) => `${base}/${relative}`);
 }
 

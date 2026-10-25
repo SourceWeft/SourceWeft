@@ -28,6 +28,9 @@ const CREDENTIAL_FILES = [
   ".netrc",
   ".git-credentials",
   ".config/gh/hosts.yml",
+  ".ssh",
+  ".aws",
+  ".gnupg",
 ];
 const CREDENTIALS = CREDENTIAL_FILES.map((relative) => ({
   path: `/home/u/${relative}`,
@@ -156,6 +159,7 @@ test("credential denies are absolute paths under home", () => {
   const c = buildConfig(validInit({ home: "/home/u/" }));
   const denied = pathsOf(c.filesystem.denyRead);
   assert.ok(denied.includes("/home/u/.cargo/credentials.toml"));
+  for (const dir of [".ssh", ".aws", ".gnupg"]) assert.ok(denied.includes(`/home/u/${dir}`));
   assert.ok(denied.every((path) => !path.includes("//")));
 });
 

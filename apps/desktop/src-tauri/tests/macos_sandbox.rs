@@ -183,6 +183,58 @@ fn keychains_are_unreadable() {
 
 #[test]
 #[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn granted_home_hides_credential_directories() {
+    // A user may grant a folder that IS `$HOME`: it then becomes the workspace root and is
+    // re-allowed over the home deny. The credential entries (`~/Library/Keychains`, `~/.ssh`,
+    // `~/.aws`, `~/.gnupg`) are literal denies that survive that grant. A fake `$HOME` (set before
+    // the sidecar starts, restored on drop) keeps the real one out of the test.
+    let fake_home = tempfile::tempdir().unwrap();
+    let home_path = fake_home.path().canonicalize().unwrap();
+    let _home = EnvVarGuard::set("HOME", home_path.to_str().unwrap());
+    let planted = [
+        ("Library/Keychains/x", "kc-secret-1"),
+        (".ssh/id_test", "ssh-secret-2"),
+        (".aws/credentials", "aws-secret-3"),
+        (".gnupg/x", "gpg-secret-4"),
+    ];
+    for (relative, secret) in planted {
+        let file = home_path.join(relative);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, secret).unwrap();
+    }
+    fs::write(home_path.join("sibling.txt"), "sibling-ok").unwrap();
+
+    let (_app, host) = host_with_bundle();
+    let (grant, root) = host.grant_directory("owner", &home_path).unwrap();
+    assert_eq!(root, home_path);
+    let workspace = host
+        .ensure_workspace_with_grant("owner", "thread", Some(&grant))
+        .unwrap();
+    let result = execute_denied(
+        &host,
+        "granted-home",
+        &workspace,
+        // Each probe prints READ:<path> or DENIED:<path>; the sibling is the positive control.
+        "for f in Library/Keychains/x .ssh/id_test .aws/credentials .gnupg/x; do \
+           if cat \"$f\" >/dev/null 2>&1; then echo \"READ:$f\"; else echo \"DENIED:$f\"; fi; done; \
+         cat sibling.txt; echo; cat .ssh/id_test .aws/credentials .gnupg/x Library/Keychains/x 2>&1",
+    );
+    let text = output(&result);
+    for (relative, secret) in planted {
+        assert!(
+            text.contains(&format!("DENIED:{relative}")),
+            "{relative} was readable from a granted home: {result}"
+        );
+        assert!(!text.contains(secret), "{relative} content leaked: {result}");
+    }
+    assert!(
+        text.contains("sibling-ok"),
+        "positive control: a sibling file in the granted home must stay readable: {result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
 fn tmp_symlink_workspace() {
     // A workspace whose real location is reached through macOS's firmlinks: `/tmp`→`/private/tmp`
     // (app data created under `/tmp`) and `/var`→`/private/var` (the default `$TMPDIR` app data,
