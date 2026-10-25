@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { isBillingError } from "@sourceweft/contracts/billing-runtime";
 import { isConnectorError } from "../../modules/connectors/errors";
 import { isContentError } from "../../modules/content/errors";
+import { isMcpClaimError } from "../../modules/market/claims/errors";
 import { isMcpError } from "../../modules/mcp/errors";
 import { PreviewAccessError } from "../../modules/preview/errors";
 
@@ -100,6 +101,15 @@ export function toApiError(error: unknown): ApiError {
 
   if (isContentError(error)) {
     return new ApiError(error.statusCode, error.code, error.message);
+  }
+
+  if (isMcpClaimError(error)) {
+    return new ApiError(
+      error.statusCode,
+      error.code,
+      error.message,
+      error.details,
+    );
   }
 
   if (isConnectorError(error)) {

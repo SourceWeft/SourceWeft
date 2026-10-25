@@ -37,6 +37,31 @@ The registry defaults to `https://api.sourceweft.com`; `--registry` points the
 command at another one. `list` and `doctor` are local. `remove` uses stored references locally; resolving a new alias for an older installation can query its original registry. `update`
 talks to the registry each skill was installed from.
 
+## MCP owners
+
+If you publish an MCP server listed in the SourceWeft catalog and have claimed
+it there, you can supply its tool list yourself. The list is generated on your
+machine with your own credentials, so the platform never handles them.
+
+```
+sourceweft mcp inspect --url https://mcp.example.com/mcp --header "Authorization: Bearer <token>"
+sourceweft mcp inspect --stdio "npx -y @example/mcp-server"
+sourceweft mcp submit-tools com.example/mcp mcp-tools.json --api-key <key>
+```
+
+`inspect` connects to the server (Streamable HTTP with `--url`, or a command
+started through your shell with `--stdio`, which sees your environment), lists
+its tools and writes `./mcp-tools.json` (`--out <file>` to choose, `--force` to
+overwrite, `--json` to also print it). `--header` can be repeated and is sent to
+the server only: the file records the tools, the endpoint without its query
+string (or the command), and the server's name and version. No header, token or
+environment variable is written.
+
+`submit-tools` uploads that file for a catalog entry you hold a verified claim
+on. It needs a user API key from SourceWeft → Settings → API keys belonging to
+the same account; pass it with `--api-key` (it is never read from the
+environment). The platform shows the submitted tools as owner-provided.
+
 ## Where skills go
 
 | Agent            | `--scope user`               | `--scope project`  |

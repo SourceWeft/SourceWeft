@@ -16,6 +16,7 @@ import {
   Layers,
   LockKeyhole,
 } from "lucide-react";
+import { MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED } from "@sourceweft/market-contracts";
 import type {
   MarketItemSummary,
   MarketMcpProductGroup,
@@ -70,6 +71,8 @@ import {
   McpCardGrid,
   mcpCategoryLabel,
   mcpCategoryNames,
+  McpClaimedBadge,
+  McpDeprecatedBadge,
   mcpDetailSeoDescription,
   mcpPath,
   McpRuntimeBadge,
@@ -83,6 +86,7 @@ import {
   verificationLabel,
 } from "../_components/mcp-display";
 import { remoteMcpClientConfig } from "../_components/mcp-install";
+import { mcpClaimHref } from "../../../../lib/mcp-claims";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 import { McpScoreCard } from "../_components/mcp-score";
 
@@ -317,6 +321,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   // A stdio package the sandbox could not list tools for says so in place
   // of "0 tools": in the facts, the section nav and the empty tool list.
   const toolsValidation = mcpToolsValidation(item, versions);
+  // The verified owner listed the tools from their own session (Issue #367,
+  // W7): said beside the list, since the registry/probe did not find them.
+  const toolsListedByOwner =
+    Boolean(manifest.owner?.fields.includes("tools")) ||
+    manifest.tools.some(
+      (tool) => tool.source === MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED,
+    );
   const toolsValidationReason = toolsValidation
     ? tValidation(
         `reason.${mcpToolsValidationReasonKey(toolsValidation.reason)}`,
@@ -541,6 +552,8 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             ) : null}
             <div className="mt-6 flex flex-wrap gap-2">
               <McpVerificationBadge item={item} />
+              {item.claimed ? <McpClaimedBadge /> : null}
+              {item.deprecated ? <McpDeprecatedBadge /> : null}
               <McpTransportBadge transport={manifest.transport} />
               <McpRuntimeBadge item={item} />
               {item.categories.map((category) => (
@@ -622,6 +635,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <ExternalTextLink href={homepageUrl}>
                   {t("homepage")}
                 </ExternalTextLink>
+                <ExternalTextLink href={manifest.documentationUrl}>
+                  {t("documentation")}
+                </ExternalTextLink>
                 <ExternalTextLink href={repoUrl}>
                   {t("repository")}
                 </ExternalTextLink>
@@ -629,6 +645,21 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   {t("source")}
                 </ExternalTextLink>
               </div>
+              {/* The publisher's way in (Issue #367, W7); members only, as
+                  the claim page needs a session anyway. */}
+              {authState.isSignedIn ? (
+                <p className="mt-4 border-t border-zinc-200 pt-3 text-xs dark:border-white/10">
+                  <LocaleLink
+                    className="text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
+                    data-testid="mcp-claim-link"
+                    href={mcpClaimHref(item.identifier)}
+                    prefetch={false}
+                    rel="nofollow"
+                  >
+                    {item.claimed ? t("manageListingLink") : t("claimLink")}
+                  </LocaleLink>
+                </p>
+              ) : null}
             </aside>
 
             <aside className="order-4 space-y-5 lg:order-none lg:sticky lg:top-20">
@@ -857,6 +888,17 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <SectionHeading count={manifest.tools.length} icon={Code2}>
                   {t("toolsHeading")}
                 </SectionHeading>
+                {toolsListedByOwner ? (
+                  <p
+                    className="mb-3 text-sm text-zinc-600 dark:text-zinc-400"
+                    data-testid="mcp-tools-listed-by-owner"
+                  >
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      {t("toolsListedByOwner")}
+                    </span>{" "}
+                    {t("toolsListedByOwnerHint")}
+                  </p>
+                ) : null}
                 <McpToolRows
                   tools={manifest.tools}
                   validation={toolsValidation}

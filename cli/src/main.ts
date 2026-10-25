@@ -13,6 +13,7 @@ import {
   type ManageContext,
 } from "./commands/manage";
 import { agentsCommand } from "./commands/agents";
+import { mcpInspectCommand, mcpSubmitToolsCommand } from "./commands/mcp";
 import { findAgent } from "./install/agents";
 import { EXIT, toFailure, UsageError } from "./errors";
 import { createRegistryClient, normalizeRegistry } from "./registry/client";
@@ -23,9 +24,9 @@ const VERSION = pkg.version;
 
 const HELP = `sourceweft ${VERSION}
 
-Usage: sourceweft skills <command> [options]
+Usage: sourceweft <group> <command> [options]
 
-Commands:
+Skills:
   skills search [query]     Search the marketplace
   skills info <reference>        Show a skill and where it comes from
   skills install <reference>     Install a skill for a coding agent
@@ -34,6 +35,13 @@ Commands:
   skills update [slug]      Update installed skills to the registry's version
   skills remove <slug>      Remove an installed skill
   skills doctor             Check installed skills for problems
+
+MCP server owners:
+  mcp inspect (--url <url> [--header "Name: value"]... | --stdio "<command>")
+                            List your server's tools with your own credentials
+                            and write them to a file (default ./mcp-tools.json)
+  mcp submit-tools <identifier> <file> --api-key <key>
+                            Upload that file for a catalog server you have claimed
 
 Options:
   --skill <name>     Select a skill within owner/repo
@@ -48,6 +56,11 @@ Options:
   --category <slug>  Filter search by category
   --sort <sort>      recommended, popular, new or name
   --limit <n>        Number of search results
+  --url <url>        MCP Streamable HTTP endpoint to inspect
+  --header <line>    "Name: value" sent on every request to --url (repeatable)
+  --stdio <command>  Shell command that starts an MCP server on stdio
+  --out <file>       Where inspect writes the tool list (default ./mcp-tools.json)
+  --api-key <key>    Your SourceWeft API key (Settings → API keys), for submit-tools
   --json             Machine-readable output
   -v, --version      Print the version
   -h, --help         Print this help
@@ -72,6 +85,11 @@ async function run(argv: string[]): Promise<number> {
         category: { type: "string" },
         sort: { type: "string" },
         limit: { type: "string" },
+        url: { type: "string" },
+        header: { type: "string", multiple: true },
+        stdio: { type: "string" },
+        out: { type: "string" },
+        "api-key": { type: "string" },
         json: { type: "boolean", default: false },
         version: { type: "boolean", short: "v", default: false },
         help: { type: "boolean", short: "h", default: false },
@@ -93,10 +111,60 @@ async function run(argv: string[]): Promise<number> {
     console.log(HELP);
     return group || values.help ? EXIT.ok : EXIT.usage;
   }
-  if (group !== "skills" || !command) {
+  if (!["skills", "mcp"].includes(group) || !command) {
     throw new UsageError(
       `Unknown command '${positionals.join(" ")}'. Run with --help.`,
     );
+  }
+
+  const out = (line: string) => console.log(line);
+
+  if (group === "mcp") {
+    switch (command) {
+      case "inspect": {
+        if (args.length > 0) {
+          throw new UsageError(
+            'Usage: sourceweft mcp inspect (--url <url> [--header "Name: value"]... | --stdio "<command>") [--out <file>] [--force] [--json]',
+          );
+        }
+        await mcpInspectCommand(
+          { out, version: VERSION },
+          {
+            ...(values.url !== undefined ? { url: values.url } : {}),
+            ...(values.header !== undefined ? { headers: values.header } : {}),
+            ...(values.stdio !== undefined ? { stdio: values.stdio } : {}),
+            ...(values.out !== undefined ? { out: values.out } : {}),
+            force: values.force,
+            json: values.json,
+          },
+        );
+        return EXIT.ok;
+      }
+      case "submit-tools": {
+        const [identifier, file] = args;
+        if (!identifier || !file || args.length > 2) {
+          throw new UsageError(
+            "Usage: sourceweft mcp submit-tools <identifier> <file> --api-key <key>",
+          );
+        }
+        const apiKey = values["api-key"];
+        if (!apiKey) {
+          throw new UsageError(
+            "--api-key is required. Create a user API key in SourceWeft → Settings → API keys; it must belong to the account that holds the verified claim on the server.",
+          );
+        }
+        const registry = normalizeRegistry(values.registry);
+        await mcpSubmitToolsCommand(
+          { client: createRegistryClient(registry), json: values.json, out },
+          { identifier, file, apiKey },
+        );
+        return EXIT.ok;
+      }
+      default:
+        throw new UsageError(
+          `Unknown command 'mcp ${command}'. Run with --help.`,
+        );
+    }
   }
 
   if (
@@ -112,7 +180,6 @@ async function run(argv: string[]): Promise<number> {
   )
     throw new UsageError("--skill requires an owner/repo reference.");
 
-  const out = (line: string) => console.log(line);
   const registryContext = (): CommandContext => {
     const registry = normalizeRegistry(values.registry);
     return {

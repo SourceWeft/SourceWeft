@@ -13,6 +13,7 @@ export * from "./files";
 export * from "./stream";
 export * from "./skills";
 export * from "./skill-claims";
+export * from "./mcp-claims";
 export * from "./skill-market-events";
 export * from "./skill-reports";
 export * from "./skill-reviews";

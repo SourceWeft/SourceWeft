@@ -82,3 +82,27 @@ export const referenceResponseSchema = z.object({
   ),
 });
 export type ReferenceResponse = z.infer<typeof referenceResponseSchema>;
+
+/**
+ * What `PUT /v1/market/mcp/:identifier/owner-overrides/tools` answers: the
+ * owner's stored overrides with the tool list's standing
+ * (`McpOwnerOverrides` in the platform's contracts). Accepted bare or under
+ * a `data` envelope, so either shape of the server works.
+ */
+const mcpOwnerOverrides = z.looseObject({
+  identifier: z.string(),
+  tools: z
+    .looseObject({
+      count: z.number().int().nonnegative(),
+      submittedAt: z.string(),
+    })
+    .nullable(),
+  updatedAt: z.string().nullable().optional(),
+});
+export const mcpOwnerOverridesResponseSchema = z.union([
+  z
+    .looseObject({ data: mcpOwnerOverrides })
+    .transform((envelope) => envelope.data),
+  mcpOwnerOverrides,
+]);
+export type McpOwnerOverridesResponse = z.infer<typeof mcpOwnerOverrides>;

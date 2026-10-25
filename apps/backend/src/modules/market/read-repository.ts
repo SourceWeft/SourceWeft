@@ -30,6 +30,11 @@ import {
   readMcpOverviews,
 } from "./overview/repository";
 import {
+  applyOwnerOverridesToItem,
+  applyOwnerOverridesToManifest,
+} from "./claims/overrides";
+import { findOwnerLayersByServerIds } from "./claims/repository";
+import {
   findBrandPublisherDomains,
   findProductGroupMembers,
   productGroupEntryOf,
@@ -679,20 +684,28 @@ export async function listMcp(input: {
   const itemIds = pageRows.map((row) => row.id);
   const categoryMap = await categoriesByItemIds(itemIds);
   const latestVersionMap = await latestVersionsByItemIds(itemIds);
-  const overviewFields = await overviewFieldsByVersionIds(
-    [...latestVersionMap.values()].map((latest) => latest.id),
-    input.locale ?? "en",
-  );
+  const [overviewFields, ownerLayers] = await Promise.all([
+    overviewFieldsByVersionIds(
+      [...latestVersionMap.values()].map((latest) => latest.id),
+      input.locale ?? "en",
+    ),
+    findOwnerLayersByServerIds(itemIds),
+  ]);
   const items = pageRows.map((row) => {
     const latest = latestVersionMap.get(row.id);
+    // A verified owner's corrections sit on top of the federated data
+    // (Issue #367, W7; ./claims/overrides.ts).
     return {
-      ...mapItemRow({
-        row,
-        categories: categoryMap.get(row.id) ?? [],
-        latestManifestJson: latest?.manifestJson,
-        latestProvenanceJson: latest?.provenanceJson,
-        latestVersion: latest?.version ?? null,
-      }),
+      ...applyOwnerOverridesToItem(
+        mapItemRow({
+          row,
+          categories: categoryMap.get(row.id) ?? [],
+          latestManifestJson: latest?.manifestJson,
+          latestProvenanceJson: latest?.provenanceJson,
+          latestVersion: latest?.version ?? null,
+        }),
+        ownerLayers.get(row.id) ?? { row: null, claimed: false },
+      ),
       ...overviewFields(latest?.id),
     };
   });
@@ -774,9 +787,10 @@ async function relatedProductOf(
   }
   const { group, rows } = found;
   const itemIds = rows.map((member) => member.id);
-  const [categoryMap, latestVersionMap] = await Promise.all([
+  const [categoryMap, latestVersionMap, ownerLayers] = await Promise.all([
     categoriesByItemIds(itemIds),
     latestVersionsByItemIds(itemIds),
+    findOwnerLayersByServerIds(itemIds),
   ]);
   const overviewFields = await overviewFieldsByVersionIds(
     [...latestVersionMap.values()].map((latest) => latest.id),
@@ -789,13 +803,17 @@ async function relatedProductOf(
     members: rows.map((member) => {
       const latest = latestVersionMap.get(member.id);
       return {
-        ...mapItemRow({
-          row: member,
-          categories: categoryMap.get(member.id) ?? [],
-          latestManifestJson: latest?.manifestJson,
-          latestProvenanceJson: latest?.provenanceJson,
-          latestVersion: latest?.version ?? null,
-        }),
+        // The same owner layer as the catalog list (Issue #367, W7).
+        ...applyOwnerOverridesToItem(
+          mapItemRow({
+            row: member,
+            categories: categoryMap.get(member.id) ?? [],
+            latestManifestJson: latest?.manifestJson,
+            latestProvenanceJson: latest?.provenanceJson,
+            latestVersion: latest?.version ?? null,
+          }),
+          ownerLayers.get(member.id) ?? { row: null, claimed: false },
+        ),
         ...overviewFields(latest?.id),
         publisherMatch: isOfficialEntry(productGroupEntryOf(member)),
       };
@@ -840,7 +858,11 @@ export async function findMcp(
         desc(mcpServerVersions.publishedAt),
         desc(mcpServerVersions.createdAt),
       );
-    const categoryMap = await categoriesByItemIds([row.id]);
+    const [categoryMap, ownerLayers] = await Promise.all([
+      categoriesByItemIds([row.id]),
+      findOwnerLayersByServerIds([row.id]),
+    ]);
+    const ownerLayer = ownerLayers.get(row.id) ?? { row: null, claimed: false };
     const latest = versions[0];
     const locale = options.locale ?? "en";
     const [[readme, overviews, overviewLocales, readmeShared], relatedProduct] =
@@ -860,20 +882,32 @@ export async function findMcp(
         options.relatedProduct ? relatedProductOf(row, locale) : null,
       ]);
     const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
-    const item = mapItemRow({
-      row,
-      categories: categoryMap.get(row.id) ?? [],
-      latestManifestJson: latest?.manifestJson,
-      latestProvenanceJson: latest?.provenanceJson,
-      latestVersion: latest?.version ?? null,
-    });
+    // The owner's corrections (Issue #367, W7) are the top layer of the item
+    // and of every published version's manifest, so the manifest route, the
+    // page and the scorecard agree whichever version is asked for.
+    const item = applyOwnerOverridesToItem(
+      mapItemRow({
+        row,
+        categories: categoryMap.get(row.id) ?? [],
+        latestManifestJson: latest?.manifestJson,
+        latestProvenanceJson: latest?.provenanceJson,
+        latestVersion: latest?.version ?? null,
+      }),
+      ownerLayer,
+    );
     return {
       item: {
         ...item,
         aiSummary: aiOverview?.overview.summary ?? null,
         overviewLocales: latest ? (overviewLocales?.get(latest.id) ?? []) : [],
       },
-      versions: versions.map(mapVersionRow),
+      versions: versions.map((version) => ({
+        ...mapVersionRow(version),
+        manifestJson: applyOwnerOverridesToManifest(
+          version.manifestJson,
+          ownerLayer.row,
+        ),
+      })),
       readme: readme
         ? mcpReadmeView({ repoUrl: row.repoUrl, ...readme })
         : null,
@@ -893,12 +927,16 @@ export async function findMcp(
       searchIndexable: !readmeShared,
       relatedProduct,
       // Computed on read from the rows already loaded (Issue #367, W6): the
-      // icon is the one the catalog shows, derived or stored; owner claims
-      // (W7) are not here yet, so `claimed` stays false.
+      // icon is the one the catalog shows, derived or stored; the manifest
+      // and `claimed` carry the owner's layer (W7).
       score: latest
         ? scoreMcp({
-            manifestJson: latest.manifestJson,
+            manifestJson: applyOwnerOverridesToManifest(
+              latest.manifestJson,
+              ownerLayer.row,
+            ),
             provenanceJson: latest.provenanceJson,
+            claimed: item.claimed === true,
             readmeStatus: readme?.readmeStatus ?? null,
             // Any visible overview language, not only the one asked for.
             hasAiOverview:

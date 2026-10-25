@@ -932,7 +932,7 @@ describe("public MCP detail page Score section", () => {
     expect(itemRow(section, "officialPublisher")).toContain(
       "Publish under a domain namespace",
     );
-    expect(itemRow(section, "claimed")).toContain("Owner claims are not open yet");
+    expect(itemRow(section, "claimed")).toContain("Met once a verified owner claims the server");
     expect(itemRow(section, "hasLogo")).not.toContain("Required");
   });
 
