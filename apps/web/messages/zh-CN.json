@@ -432,6 +432,33 @@
         "unsupportedPackage": "该软件包类型无法在沙箱中运行"
       }
     },
+    "toolChangeLog": {
+      "heading": "变更记录",
+      "intro": "每条记录是此条目工具列表的一次变化，并不是服务器自身的版本。",
+      "current": "当前",
+      "emptyList": "不含任何工具",
+      "withdrawn": "已撤回",
+      "addedLabel": "新增 {count} 个工具",
+      "removedLabel": "移除 {count} 个工具",
+      "changedLabel": "变更 {count} 个工具",
+      "addedHeading": "新增",
+      "removedHeading": "移除",
+      "changedHeading": "变更",
+      "serverVersion": "服务器当时报告的版本为 {version}。",
+      "truncated": "显示最近 {count} 条记录。",
+      "sources": {
+        "owner": "所有者",
+        "platform-indexed": "平台索引",
+        "member-observed": "已连接账号"
+      },
+      "fields": {
+        "title": "标题",
+        "description": "描述",
+        "inputSchema": "输入结构",
+        "outputSchema": "输出结构",
+        "annotations": "注解"
+      }
+    },
     "score": {
       "heading": "评分",
       "nav": "评分",
