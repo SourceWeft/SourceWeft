@@ -26,7 +26,8 @@
  *   interface addresses are denied; the old proxy only caught them incidentally or not at all.
  * - the IPv4-embedding IPv6 forms (IPv4-compatible, IPv4-translated, NAT64 `64:ff9b::/96`) are
  *   judged by the IPv4 address they carry, as srt does, instead of being denied wholesale for
- *   lying outside 2000::/3; the rest of `::/8` is not listed (see `UNROUTABLE_V6`).
+ *   lying outside 2000::/3; the rest of `::/8` is not listed (see `UNROUTABLE_V6`). The local-use
+ *   NAT64 prefix `64:ff9b:1::/48` (RFC 8215) is the exception inside that space: it is refused.
  * - the old proxy only served ports 80/443 and refused a name if ANY of its answers was
  *   non-public; srt serves any port and drops the denied answers, dialing a surviving one.
  *   Neither is an address-class question and neither is tested here.
@@ -34,6 +35,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
+// Deep import: srt exports no resolved-address guard API. This path (and `createResolvedAddressGuard`)
+// is part of the pinned srt fork's layout and must be re-checked and updated whenever the fork is bumped.
 import { createResolvedAddressGuard } from "@anthropic-ai/sandbox-runtime/dist/sandbox/resolved-address-guard.js";
 import { deniedReason } from "../src/address-guard.js";
 import { buildConfig } from "../src/policy.js";
@@ -338,10 +341,21 @@ test("::/8 is not listed wholesale: only addresses that embed a denied IPv4 addr
   // The old proxy refused all of it (outside 2000::/3). Listing it would also refuse NAT64
   // answers for public names (`64:ff9b::/96`), so the rest of ::/8 — reserved space that no
   // public host answers from — is the one place this layer is more permissive than the old.
-  for (const address of ["::808:808", "::ffff:0:808:808", "0:1::1", "64:ff9b:1::1"]) {
+  for (const address of ["::808:808", "::ffff:0:808:808", "0:1::1"]) {
     assert.equal(literalDenied(address), false, `literal ${address}`);
     assert.equal(resolvedDenied(address), false, `resolved ${address}`);
   }
+});
+
+test("the local-use NAT64 prefix 64:ff9b:1::/48 (RFC 8215) is refused whole, in both layers", () => {
+  // Its embedded IPv4 address is operator-defined (may be private), so unlike `64:ff9b::/96` it
+  // cannot be judged by what it carries. The well-known prefix stays allowed for public IPv4.
+  for (const address of ["64:ff9b:1::1", "64:ff9b:1::a00:1", "64:ff9b:1:ffff::808:808"]) {
+    assert.equal(literalDenied(address), true, `literal ${address}`);
+    assert.equal(resolvedDenied(address), true, `resolved ${address}`);
+  }
+  assert.equal(literalDenied("64:ff9b::808:808"), false);
+  assert.equal(resolvedDenied("64:ff9b::808:808"), false);
 });
 
 // ---- exhaustive comparison against a port of the retired Rust function -------------------

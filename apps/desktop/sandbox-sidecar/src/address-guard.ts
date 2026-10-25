@@ -3,8 +3,10 @@
  * private/internal network, independent of whatever srt's own network config denies. This
  * is the full policy from the design's Global Constraints: localhost names, loopback,
  * RFC1918, CGNAT, link-local, multicast, well-known cloud metadata addresses, the IPv6
- * unique-local range, the unspecified address, and — via `own` — every address bound to the
- * sandbox host's own network interfaces.
+ * unique-local range, the unspecified address, the documentation, reserved and
+ * non-global-unicast ranges (`UNROUTABLE_V4`/`UNROUTABLE_V6`, including the local-use NAT64
+ * prefix), the IPv4-embedding IPv6 forms of all of the above, and — via `own` — every address
+ * bound to the sandbox host's own network interfaces.
  *
  * `host` may be a bare hostname, a bare IPv4/IPv6 literal in any spelling srt's proxy accepts
  * (dotted quad, inet_aton shorthand, integer, hex or octal), a bracketed IPv6 literal
@@ -123,8 +125,11 @@ addV6(CLOUD_METADATA, "fd00:ec2::", 32); // AWS IPv6 metadata
  *   (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible, IPv4-translated, NAT64 `64:ff9b::/96`) that
  *   srt, and this module's `DENIED_RANGES`, judge by the IPv4 address they carry — on an
  *   IPv6-only/NAT64 network a public name resolves into `64:ff9b::/96`, so denying `::/8`
- *   wholesale would cut off real public hosts. Nothing in `100::/8`-`1fff::` or above `3fff::`
- *   is, or can become, a public host's address on today's Internet.
+ *   wholesale would cut off real public hosts. None of those blocks is currently allocated as
+ *   public global unicast, so a public host does not answer from them today.
+ * - `64:ff9b:1::/48`: the local-use NAT64 prefix (RFC 8215). Unlike the well-known `64:ff9b::/96`
+ *   it is not a public translation: its embedded IPv4 address is operator-defined and may be a
+ *   private one, which this module cannot decode, so the whole prefix is refused.
  *
  * Deliberately NOT listed: `198.18.0.0/15` (RFC 2544 benchmarking). The retired proxy denied it,
  * but it is no private network, and Clash/TUN-style "fake-IP" DNS answers public names with
@@ -140,6 +145,7 @@ export const UNROUTABLE_V4: readonly string[] = [
 ];
 export const UNROUTABLE_V6: readonly string[] = [
   "2001:db8::/32",
+  "64:ff9b:1::/48",
   "100::/8",
   "200::/7",
   "400::/6",

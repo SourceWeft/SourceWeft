@@ -96,6 +96,7 @@ test("linux denies / and home, re-allows the system set, workspace and read root
     "203.0.113.0/24",
     "240.0.0.0/4",
     "2001:db8::/32",
+    "64:ff9b:1::/48",
     "100::/8",
     "200::/7",
     "400::/6",
