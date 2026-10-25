@@ -66,6 +66,20 @@ test("linux denies / and home, re-allows the system set, workspace and read root
     "192.168.0.0/16",
     "100.64.0.0/10",
     "fc00::/7",
+    // Documentation / reserved / non-global-unicast (see address-guard.ts UNROUTABLE_*). Not
+    // 198.18.0.0/15: Clash/TUN fake-IP DNS answers public names from it.
+    "192.0.2.0/24",
+    "198.51.100.0/24",
+    "203.0.113.0/24",
+    "240.0.0.0/4",
+    "2001:db8::/32",
+    "100::/8",
+    "200::/7",
+    "400::/6",
+    "800::/5",
+    "1000::/4",
+    "4000::/2",
+    "8000::/1",
   ]);
   assert.equal(c.bwrapPath, "/opt/sourceweft/libexec/bwrap");
   assert.equal(c.seccomp?.applyPath, "/opt/sw/apply-seccomp");

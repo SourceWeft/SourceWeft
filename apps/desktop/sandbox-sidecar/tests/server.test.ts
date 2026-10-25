@@ -454,9 +454,9 @@ test("ask callback denies private literals with a reason, and allows public ones
 
 test("ask callback denies the sidecar host's own addresses", async () => {
   const srt = makeFakeSrt();
-  const harness = await initHarness(srt, () => new Set(["203.0.113.7"]));
+  const harness = await initHarness(srt, () => new Set(["93.184.216.7"]));
   assert.ok(srt.ask);
-  const result = await srt.ask({ host: "203.0.113.7", port: 443 });
+  const result = await srt.ask({ host: "93.184.216.7", port: 443 });
   assert.equal(typeof result, "object");
   if (typeof result === "object") {
     assert.equal(result.allow, false);

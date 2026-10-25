@@ -8,6 +8,7 @@
  */
 import { isAbsolute, normalize as normalizePosix } from "node:path/posix";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import { UNROUTABLE_V4, UNROUTABLE_V6 } from "./address-guard.js";
 import type { InitConfig } from "./protocol.js";
 
 /**
@@ -113,15 +114,25 @@ function credentialDenies(home: string): string[] {
 }
 
 // Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer
-// behind `address-guard.ts`'s pre-resolution checks on the literal host string. Loopback,
-// link-local, multicast and the specific cloud-metadata addresses are not repeated here:
-// srt's own defaults, together with this sidecar's `address-guard.ts`, already cover them.
+// behind `address-guard.ts`'s pre-resolution checks on the literal host string (srt never
+// re-judges an IP literal, so `address-guard.ts` carries the full policy for literals).
+// Loopback, unspecified (0.0.0.0/8, ::), link-local, multicast, broadcast, the cloud-metadata
+// addresses and the host's own interface addresses are not repeated here: srt's built-in
+// denied set already covers them (see "Resolved-address check" in srt's README). Private-use
+// space is opt-in in srt, hence the first five entries; the documentation, reserved and
+// non-global-unicast ranges come from `address-guard.ts` so both layers share one list.
+//
+// 198.18.0.0/15 (benchmarking) is deliberately NOT denied, although the retired macOS proxy
+// denied it: it is no private network, and Clash/TUN fake-IP DNS answers public names with
+// 198.18.x.x — denying it would break all egress for those users.
 const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
   "10.0.0.0/8",
   "172.16.0.0/12",
   "192.168.0.0/16",
   "100.64.0.0/10",
   "fc00::/7",
+  ...UNROUTABLE_V4,
+  ...UNROUTABLE_V6,
 ];
 
 /**
