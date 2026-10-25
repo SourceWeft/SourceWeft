@@ -8,9 +8,16 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
 import { buildConfig, perWrapReadRoots } from "../src/policy.js";
-import type { InitConfig, Request, Response } from "../src/protocol.js";
+import type {
+  AuditEntry,
+  InitConfig,
+  Request,
+  Response,
+  SidecarEvent,
+  WrapNetwork,
+} from "../src/protocol.js";
 import { startServer } from "../src/server.js";
-import type { SrtLike } from "../src/server.js";
+import type { ServerDeps, SrtLike } from "../src/server.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -108,6 +115,10 @@ type RequestInput = DistributiveOmit<Request, "id"> & { id?: string };
 
 type Harness = {
   send: (request: RequestInput) => Promise<Response>;
+  /** Unsolicited `event` lines the sidecar has written so far, oldest first. */
+  events: SidecarEvent[];
+  /** Resolves with the next `ask` event beyond the `seen` that were already consumed. */
+  nextAsk: () => Promise<SidecarEvent>;
   stop: () => Promise<void>;
 };
 
@@ -117,10 +128,16 @@ function allocateId(): string {
   return `req-${nextId}`;
 }
 
-function startHarness(srt: ReturnType<typeof makeFakeSrt>, ownAddresses: () => Set<string> = () => new Set()): Harness {
+function startHarness(
+  srt: ReturnType<typeof makeFakeSrt>,
+  ownAddresses: () => Set<string> = () => new Set(),
+  extra: Partial<ServerDeps> = {},
+): Harness {
   const input = new PassThrough();
   const output = new PassThrough();
   const responses: Response[] = [];
+  const events: SidecarEvent[] = [];
+  let consumedEvents = 0;
   let buffer = "";
   output.on("data", (chunk: Buffer) => {
     buffer += chunk.toString("utf8");
@@ -128,12 +145,16 @@ function startHarness(srt: ReturnType<typeof makeFakeSrt>, ownAddresses: () => S
     while (newlineIndex !== -1) {
       const line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-      if (line.trim() !== "") responses.push(JSON.parse(line) as Response);
+      if (line.trim() !== "") {
+        const parsed = JSON.parse(line) as Response | SidecarEvent;
+        if ("event" in parsed) events.push(parsed);
+        else responses.push(parsed);
+      }
       newlineIndex = buffer.indexOf("\n");
     }
   });
 
-  const serverPromise = startServer(input, output, { srt, ownAddresses });
+  const serverPromise = startServer(input, output, { srt, ownAddresses, ...extra });
 
   async function send(request: RequestInput): Promise<Response> {
     const id = request.id ?? allocateId();
@@ -150,7 +171,18 @@ function startHarness(srt: ReturnType<typeof makeFakeSrt>, ownAddresses: () => S
     await serverPromise;
   }
 
-  return { send, stop };
+  async function nextAsk(): Promise<SidecarEvent> {
+    const deadline = Date.now() + 5_000;
+    while (events.length <= consumedEvents) {
+      assert.ok(Date.now() < deadline, "no ask event arrived within 5s");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const event = events[consumedEvents] as SidecarEvent;
+    consumedEvents += 1;
+    return event;
+  }
+
+  return { send, events, nextAsk, stop };
 }
 
 function expectError(response: Response, code: string): asserts response is Response & { ok: false } {
@@ -164,8 +196,9 @@ async function initHarness(
   srt: ReturnType<typeof makeFakeSrt>,
   ownAddresses?: () => Set<string>,
   config: InitConfig = linuxInit(),
+  extra: Partial<ServerDeps> = {},
 ): Promise<Harness> {
-  const harness = startHarness(srt, ownAddresses);
+  const harness = startHarness(srt, ownAddresses, extra);
   const response = await harness.send({ op: "init", config });
   assert.equal(response.ok, true, `init failed: ${JSON.stringify(response)}`);
   return harness;
@@ -260,7 +293,10 @@ function assertMergeInvariant(
   assert.deepEqual(config.filesystem.denyRead, expected.denyRead);
   assert.deepEqual(config.filesystem.denyWrite, expected.denyWrite);
   assert.deepEqual(config.filesystem.allowRead, expected.allowRead);
-  assert.deepEqual(config.network, expected.network);
+  // The server adds exactly one thing to `buildConfig`'s network section: the audit request hook.
+  const { filterRequest, ...network } = config.network as { filterRequest?: unknown };
+  assert.equal(typeof filterRequest, "function", "the plain-HTTP audit hook must be installed");
+  assert.deepEqual(network, expected.network);
   assert.deepEqual(config.filesystem.allowWrite, expected.allowWrite);
 }
 
@@ -435,10 +471,34 @@ test("wrap with a workspaceRoot nested inside an init workspace root is ok", asy
   await harness.stop();
 });
 
+/** Wraps `commandId` (default: a fixed one) with `network`, asserting the wrap succeeded. */
+async function wrapCommand(
+  harness: Harness,
+  network?: WrapNetwork,
+  commandId = "c".repeat(22),
+): Promise<void> {
+  const response = await harness.send({
+    op: "wrap",
+    commandId,
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+    ...(network === undefined ? {} : { network }),
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+}
+
+async function auditOf(harness: Harness, commandId = "c".repeat(22)): Promise<AuditEntry[]> {
+  const response = await harness.send({ op: "audit", commandId });
+  assert.equal(response.ok, true, `audit failed: ${JSON.stringify(response)}`);
+  return (response as { ok: true; result: { entries: AuditEntry[] } }).result.entries;
+}
+
 test("ask callback denies private literals with a reason, and allows public ones", async () => {
   const srt = makeFakeSrt();
   const harness = await initHarness(srt);
   assert.ok(srt.ask, "init must register an ask callback");
+  await wrapCommand(harness); // no `network`: open
   const expectedReason = deniedReason("10.0.0.1", new Set());
   assert.ok(expectedReason !== null);
   assert.deepEqual(await srt.ask({ host: "10.0.0.1", port: 80 }), {
@@ -453,6 +513,7 @@ test("ask callback denies the sidecar host's own addresses", async () => {
   const srt = makeFakeSrt();
   const harness = await initHarness(srt, () => new Set(["203.0.113.7"]));
   assert.ok(srt.ask);
+  await wrapCommand(harness);
   const result = await srt.ask({ host: "203.0.113.7", port: 443 });
   assert.equal(typeof result, "object");
   if (typeof result === "object") {
@@ -467,7 +528,305 @@ test("ask callback falls back to a plain false when askCallbackDenyReason is uns
   (srt as { askCallbackDenyReason?: true }).askCallbackDenyReason = undefined;
   const harness = await initHarness(srt);
   assert.ok(srt.ask);
+  await wrapCommand(harness);
   assert.equal(await srt.ask({ host: "10.0.0.1", port: 80 }), false);
+  // The same fallback covers the policy's own denials, not just the guard's.
+  await harness.stop();
+});
+
+test("with no wrapped command every connection is denied (fail closed)", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  assert.deepEqual(await srt.ask({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "no single active command",
+  });
+  await harness.stop();
+});
+
+test("two wrapped commands at once deny every connection; cleanup of one restores the other", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, undefined, "a".repeat(22));
+  await wrapCommand(harness, undefined, "b".repeat(22));
+  assert.deepEqual(await srt.ask({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "no single active command",
+  });
+  await harness.send({ op: "cleanup", commandId: "b".repeat(22) });
+  assert.equal(await srt.ask({ host: "example.com", port: 443 }), true);
+  await harness.stop();
+});
+
+test("the probe wrap is not counted as an active command", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "strict", allow: ["example.com"] });
+  assert.equal((await harness.send({ op: "probe" })).ok, true);
+  assert.equal(await srt.ask({ host: "example.com", port: 443 }), true);
+  await harness.stop();
+});
+
+test("wrap without network behaves as open and audits the connection", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness);
+  assert.equal(await srt.ask({ host: "example.com", port: 443 }), true);
+  const entries = await auditOf(harness);
+  assert.equal(entries.length, 1);
+  assert.deepEqual(
+    { ...entries[0], t: 0 },
+    { t: 0, kind: "connection", host: "example.com", port: 443, decision: "allow", source: "open" },
+  );
+  await harness.stop();
+});
+
+test("a failed wrap registers no network policy", async () => {
+  const srt = makeFakeSrt();
+  srt.wrapError = new Error("proxy failed to start");
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+    network: { mode: "open", allow: [] },
+  });
+  expectError(response, "SANDBOX_UNAVAILABLE");
+  assert.deepEqual(await srt.ask({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "no single active command",
+  });
+  await harness.stop();
+});
+
+test("wrap validates its network policy", async () => {
+  const bad: unknown[] = [
+    "open",
+    null,
+    [],
+    {},
+    { mode: "paranoid", allow: [] },
+    { mode: "ask" },
+    { mode: "ask", allow: "example.com" },
+    { mode: "ask", allow: [42] },
+    { mode: "ask", allow: Array.from({ length: 501 }, (_, i) => `h${i}.example.com`) },
+    { mode: "ask", allow: ["a".repeat(256)] },
+    { mode: "ask", allow: [], suggested: ["x"] },
+    { mode: "ask", allow: [], suggested: { "example.com": 7 } },
+    { mode: "ask", allow: [], suggested: { ["a".repeat(256)]: "skill" } },
+  ];
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  for (const network of bad) {
+    const response = await harness.send({
+      op: "wrap",
+      commandId: "c".repeat(22),
+      command: "echo hi",
+      cwd: workspaceRoot,
+      workspaceRoot,
+      network,
+    } as unknown as Request);
+    expectError(response, "BAD_REQUEST");
+  }
+  // 500 domains of 255 characters is the largest policy accepted.
+  await wrapCommand(harness, {
+    mode: "ask",
+    allow: Array.from({ length: 500 }, (_, i) => `${"a".repeat(240)}${String(i).padStart(3, "0")}.com`),
+    suggested: { "example.com": "skill" },
+  });
+  await harness.stop();
+});
+
+test("the address guard still denies a private host named by an allow rule, in every mode", async () => {
+  for (const mode of ["open", "ask", "strict"] as const) {
+    const srt = makeFakeSrt();
+    const harness = await initHarness(srt);
+    assert.ok(srt.ask);
+    await wrapCommand(harness, { mode, allow: ["10.0.0.1", "10.0.0.1:80", "app.localhost"] });
+    const reason = deniedReason("10.0.0.1", new Set());
+    assert.ok(reason !== null);
+    assert.deepEqual(
+      await srt.ask({ host: "10.0.0.1", port: 80 }),
+      { allow: false, reason: `public internet only: ${reason}` },
+      mode,
+    );
+    assert.equal(harness.events.length, 0, `${mode}: the guard must not raise an approval`);
+    await harness.stop();
+  }
+});
+
+test("ask mode: concurrent connections raise one ask event; the reply resolves them all", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: [], suggested: { "pypi.org": "py-skill" } });
+  const first = srt.ask({ host: "pypi.org", port: 443 });
+  const second = srt.ask({ host: "PyPI.org.", port: 443 });
+  const event = await harness.nextAsk();
+  assert.deepEqual(Object.keys(event).sort(), ["askId", "commandId", "event", "host", "port", "suggestedBy"]);
+  assert.equal(event.event, "ask");
+  assert.equal(event.commandId, "c".repeat(22));
+  assert.equal(event.host, "pypi.org");
+  assert.equal(event.port, 443);
+  assert.equal(event.suggestedBy, "py-skill");
+  assert.ok(event.askId.length >= 16);
+  assert.ok(!("id" in event), "an event line has no response id");
+
+  const reply = await harness.send({ op: "ask.reply", askId: event.askId, allow: true });
+  assert.deepEqual(reply, { id: reply.id, ok: true, result: null });
+  assert.equal(await first, true);
+  assert.equal(await second, true);
+  assert.equal(harness.events.length, 1, "the second connection shared the first ask");
+
+  // Approved for the command: no further ask.
+  assert.equal(await srt.ask({ host: "pypi.org", port: 443 }), true);
+  assert.equal(harness.events.length, 1);
+  const entries = await auditOf(harness);
+  assert.deepEqual(entries.map((e) => [e.decision, e.source]), [["allow", "approval"]]);
+  await harness.stop();
+});
+
+test("ask mode: an ask without a suggestion has no suggestedBy; a deny reply carries its reason", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: ["allowed.example"] });
+  assert.equal(await srt.ask({ host: "allowed.example", port: 443 }), true);
+  assert.equal(harness.events.length, 0, "an allow-list host is never asked about");
+  const pending = srt.ask({ host: "other.example", port: 443 });
+  const event = await harness.nextAsk();
+  assert.ok(!("suggestedBy" in event));
+  await harness.send({ op: "ask.reply", askId: event.askId, allow: false, reason: "not now" });
+  assert.deepEqual(await pending, { allow: false, reason: "not now" });
+  assert.deepEqual(
+    (await auditOf(harness)).map((e) => [e.host, e.decision, e.source, e.reason]),
+    [
+      ["allowed.example", "allow", "rule", undefined],
+      ["other.example", "deny", "user", "not now"],
+    ],
+  );
+  await harness.stop();
+});
+
+test("strict mode never raises an ask", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "strict", allow: [] });
+  assert.deepEqual(await srt.ask({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "host is not on the allow list (strict network mode)",
+  });
+  assert.equal(harness.events.length, 0);
+  await harness.stop();
+});
+
+test("ask.reply with an unknown or already answered askId is BAD_REQUEST", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  expectError(await harness.send({ op: "ask.reply", askId: "nope", allow: true }), "BAD_REQUEST");
+  await wrapCommand(harness, { mode: "ask", allow: [] });
+  const pending = srt.ask({ host: "example.com", port: 443 });
+  const event = await harness.nextAsk();
+  assert.equal((await harness.send({ op: "ask.reply", askId: event.askId, allow: true })).ok, true);
+  await pending;
+  expectError(await harness.send({ op: "ask.reply", askId: event.askId, allow: false }), "BAD_REQUEST");
+  await harness.stop();
+});
+
+test("ask.reply validates its fields", async () => {
+  const harness = await initHarness(makeFakeSrt());
+  for (const bad of [
+    { op: "ask.reply", allow: true },
+    { op: "ask.reply", askId: "x" },
+    { op: "ask.reply", askId: "x", allow: "yes" },
+    { op: "ask.reply", askId: "x", allow: true, reason: 3 },
+  ]) {
+    expectError(await harness.send(bad as unknown as Request), "BAD_REQUEST");
+  }
+  await harness.stop();
+});
+
+test("an unanswered ask is denied after the injected timeout, and a late reply is BAD_REQUEST", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, linuxInit(), { askTimeoutMs: 25 });
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: [] });
+  const pending = srt.ask({ host: "example.com", port: 443 });
+  const event = await harness.nextAsk();
+  assert.deepEqual(await pending, { allow: false, reason: "approval timed out" });
+  expectError(await harness.send({ op: "ask.reply", askId: event.askId, allow: true }), "BAD_REQUEST");
+  assert.deepEqual(
+    (await auditOf(harness)).map((e) => [e.decision, e.source]),
+    [["deny", "timeout"]],
+  );
+  await harness.stop();
+});
+
+test("audit drains, requires init, and cleanup drops the command's policy and pending asks", async () => {
+  const early = startHarness(makeFakeSrt());
+  expectError(await early.send({ op: "audit", commandId: "x" }), "NOT_INITIALIZED");
+  await early.stop();
+
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: [] });
+  assert.equal((await auditOf(harness)).length, 0);
+  const pending = srt.ask({ host: "example.com", port: 443 });
+  await harness.nextAsk();
+  await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  assert.deepEqual(await pending, { allow: false, reason: "command finished" });
+  assert.deepEqual(await auditOf(harness), []);
+  assert.deepEqual(await srt.ask({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "no single active command",
+  });
+  await harness.stop();
+});
+
+test("the installed request hook allows everything and audits plain HTTP without a query", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: ["example.com"] });
+  assert.equal(await srt.ask({ host: "example.com", port: 80 }), true);
+  const hook = (srt.lastCustomConfig as {
+    network: { filterRequest: (request: globalThis.Request, info?: unknown) => Promise<{ action: string; onResponse?: (status: number, headers: object) => void }> };
+  }).network.filterRequest;
+  const decision = await hook(new globalThis.Request("http://example.com/a/b?secret=1"), {
+    scheme: "http",
+    target: { host: "example.com", port: 80 },
+    requestTarget: "/a/b?secret=1",
+  });
+  assert.equal(decision.action, "allow");
+  decision.onResponse?.(200, {});
+  const entries = await auditOf(harness);
+  assert.equal(entries.length, 2);
+  assert.deepEqual(
+    { ...entries[1], t: 0 },
+    {
+      t: 0,
+      kind: "http",
+      host: "example.com",
+      port: 80,
+      decision: "allow",
+      source: "rule",
+      method: "GET",
+      path: "/a/b",
+      status: 200,
+    },
+  );
+  assert.ok(!JSON.stringify(entries).includes("secret"));
   await harness.stop();
 });
 
