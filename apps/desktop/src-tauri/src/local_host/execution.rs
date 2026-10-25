@@ -290,7 +290,7 @@ impl LocalHost {
                 .insert(id.into(), cancel.clone());
             // Network asks raised while this command runs are attributed to this invocation
             // (and denied if it is cancelled or ends).
-            let running = self.network.begin(id, cancel.clone());
+            let _running = self.network.begin(id, cancel.clone());
             // Decision N7: the macOS Seatbelt path keeps its public-only proxy and ignores the
             // policy (its result also has no `networkAudit`); only Linux enforces it.
             #[cfg(target_os = "macos")]
@@ -308,7 +308,7 @@ impl LocalHost {
                 max_output,
                 cancel,
                 network.as_ref(),
-                &running,
+                &_running,
             );
             if let Ok(mut active) = calls.active.lock() {
                 active.remove(id);
@@ -604,6 +604,8 @@ fn macos_result(run: &super::process::RunOutput, max: usize) -> Value {
 #[cfg(test)]
 mod network_tests {
     use super::*;
+    // Not imported at file level on every platform (it is cfg-gated there).
+    use serde_json::json;
 
     #[test]
     fn the_network_policy_is_not_part_of_the_journal_fingerprint() {

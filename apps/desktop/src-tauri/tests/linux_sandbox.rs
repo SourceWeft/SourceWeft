@@ -1050,12 +1050,14 @@ fn ask_mode_blocks_until_decision_then_connects() {
 fn ask_mode_deny_reaches_model_text() {
     let (_app, host) = host_with_bundle();
     let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // A real user denial: the backend's exact text ("denied by user") is what the sidecar
+    // recognises as the user saying no.
     let approvals = ApprovalBridge::start(
         &host,
         Some(Answer {
             delay: Duration::from_millis(100),
             allow: false,
-            reason: Some("blocked by the test policy"),
+            reason: Some("denied by user"),
         }),
     );
     let result = execute_net(
@@ -1068,9 +1070,33 @@ fn ask_mode_deny_reaches_model_text() {
     assert_eq!(approvals.asks().len(), 1);
     let text = output(&result);
     assert!(text.contains("<sandbox_violations>"), "{result}");
-    assert!(text.contains("blocked by the test policy"), "{result}");
+    assert!(text.contains("denied by user"), "{result}");
     assert!(!text.starts_with("200"), "the request must not succeed: {result}");
     let entry = audit_entry(&result, |entry| npm_connection(entry, "deny", "user"));
+    assert_eq!(entry["reason"], "denied by user");
+    drop(approvals);
+
+    // Any other reason is a system denial (a cancelled command, a timeout, an unavailable
+    // approval...), not the user's decision: same model-visible text, source `unavailable`.
+    let approvals = ApprovalBridge::start(
+        &host,
+        Some(Answer {
+            delay: Duration::from_millis(100),
+            allow: false,
+            reason: Some("blocked by the test policy"),
+        }),
+    );
+    let other = execute_net(
+        &host,
+        "ask-deny-system",
+        &workspace,
+        &format!("{FETCH_NPM}; true"),
+        Some(policy("ask", &[])),
+    );
+    assert_eq!(approvals.asks().len(), 1);
+    assert!(output(&other).contains("<sandbox_violations>"), "{other}");
+    assert!(output(&other).contains("blocked by the test policy"), "{other}");
+    let entry = audit_entry(&other, |entry| npm_connection(entry, "deny", "unavailable"));
     assert_eq!(entry["reason"], "blocked by the test policy");
 }
 
@@ -1288,7 +1314,8 @@ fn ask_timeout_denies() {
     let text = output(&result);
     assert!(text.contains("<sandbox_violations>"), "{result}");
     assert!(text.contains("approval timed out"), "{result}");
-    let entry = audit_entry(&result, |entry| npm_connection(entry, "deny", "user"));
+    // A timeout is the system's denial, not the user's: source `unavailable`.
+    let entry = audit_entry(&result, |entry| npm_connection(entry, "deny", "unavailable"));
     assert_eq!(entry["reason"], "approval timed out");
 }
 
