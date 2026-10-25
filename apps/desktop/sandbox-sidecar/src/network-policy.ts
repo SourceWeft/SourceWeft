@@ -41,11 +41,26 @@ export const ASK_TIMEOUT_MS = 150_000;
 /** At most this many audit entries are kept per command; later ones are dropped. */
 const MAX_AUDIT_ENTRIES = 200;
 
+/** Distinct `host:port` approvals that may be waiting on the user at once, per command. */
+const MAX_PENDING_ASKS = 5;
+
+/** A timed-out approval is remembered as a denial for this long. */
+const TIMEOUT_DENIAL_TTL_MS = 60_000;
+
+/**
+ * Distinct `host:port` keys one command may have allowed (and, separately, denied) before new
+ * ones fail closed. Bounds the per-command maps against a command that dials unbounded names.
+ */
+const MAX_TRACKED_HOSTS = 2_000;
+
+/** A user-supplied denial reason is cut to this many characters. */
+const MAX_REASON_LENGTH = 200;
+
 /** Audited paths are cut to this many characters. */
 const MAX_AUDIT_PATH = 200;
 
 /** The `probe` wrap's command id: it makes no connections and is never an active command. */
-const PROBE_COMMAND_ID = "probe";
+export const PROBE_COMMAND_ID = "probe";
 
 /** What the policy asks the host (and through it the user) about one unknown connection. */
 export type AskHostRequest = {
@@ -89,9 +104,17 @@ type CommandState = {
   suggested: Array<[pattern: string, skill: string]>;
   /** `host:port` keys the user approved during this command. */
   approved: Set<string>;
+  /**
+   * Denials remembered for the command: the user's (until the command ends) and a timeout's
+   * (until `until`), so a retrying command is not re-prompted.
+   */
+  denied: Map<string, { reason: string; source: AuditSource; until: number }>;
   /** One in-flight approval per `host:port`, shared by concurrent connections. */
   inflight: Map<string, Promise<Verdict>>;
-  /** Where each allowed `host:port` came from, so a later HTTP entry can name its source. */
+  /**
+   * Where each allowed `host:port` came from, so a later HTTP entry can name its source. Capped at
+   * `MAX_TRACKED_HOSTS`; `open` mode simply stops recording past it, the other modes fail closed.
+   */
   allowedBy: Map<string, AuditSource>;
   /** Settles every pending approval with a denial; called on unregister. */
   cancelPending: Set<() => void>;
@@ -99,8 +122,13 @@ type CommandState = {
 };
 
 export type NetworkPolicy = {
-  /** Starts counting `commandId` as the active command with `policy`. Invalid rules are dropped. */
+  /**
+   * Starts counting `commandId` as the active command with `policy`. Invalid rules are dropped.
+   * Throws if `commandId` is already registered: live state is never silently replaced.
+   */
   register(commandId: string, policy: WrapNetwork): void;
+  /** Whether `commandId` is registered (the `probe` id never is). */
+  has(commandId: string): boolean;
   /** Stops counting it, denies its pending approvals and drops its audit buffer. */
   unregister(commandId: string): void;
   decide(params: { host: string; port: number | undefined }): Promise<NetworkDecision>;
@@ -122,6 +150,17 @@ export type NetworkPolicy = {
 /** `host` in the spelling srt compares and dials. */
 function canonical(host: string): string {
   return canonicalizeHost(host) ?? host;
+}
+
+/**
+ * A reason typed by the user, made safe to show the model inside srt's `<sandbox_violations>`
+ * block and to put in the audit: control and line-separator characters and angle brackets are
+ * removed and the rest is cut to `MAX_REASON_LENGTH`. Empty after cleaning means no reason.
+ */
+function sanitizeReason(reason: unknown): string | undefined {
+  if (typeof reason !== "string") return undefined;
+  const cleaned = reason.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>]/gu, "").trim().slice(0, MAX_REASON_LENGTH);
+  return cleaned === "" ? undefined : cleaned;
 }
 
 function matchesAny(patterns: readonly string[], host: string, port: number): boolean {
@@ -228,20 +267,35 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         asked = Promise.reject(error);
       }
       asked.then(
-          (answer) =>
-            finish(
-              answer.allow
-                ? { allow: true, source: "approval" }
-                : { allow: false, reason: answer.reason ?? "denied by the user", source: "user" },
-              false,
-            ),
-          (error: unknown) => {
-            warn(
-              `network approval for ${host}:${port} failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
+        (answer: unknown) => {
+          // Only a well-formed answer counts. Anything else (a host bug, a null) is a denial, and
+          // not a cached one, so the user can still be asked again.
+          if (typeof answer !== "object" || answer === null) {
             finish({ allow: false, reason: "approval unavailable", source: "unavailable" }, true);
-          },
-        );
+            return;
+          }
+          const { allow, reason } = answer as { allow?: unknown; reason?: unknown };
+          if (allow === true) finish({ allow: true, source: "approval" }, false);
+          else if (allow === false) {
+            finish(
+              {
+                allow: false,
+                reason: sanitizeReason(reason) ?? "denied by the user",
+                source: "user",
+              },
+              false,
+            );
+          } else {
+            finish({ allow: false, reason: "approval unavailable", source: "unavailable" }, true);
+          }
+        },
+        (error: unknown) => {
+          warn(
+            `network approval for ${host}:${port} failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          finish({ allow: false, reason: "approval unavailable", source: "unavailable" }, true);
+        },
+      );
     });
   }
 
@@ -252,6 +306,12 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
     port: number,
   ): Promise<Verdict> {
     if (state.mode === "open") return { allow: true, source: "open" };
+    const key = `${host}:${port}`;
+    // A command that has already been allowed this many distinct destinations is dialling names
+    // faster than anyone can review them: new ones fail closed (known ones keep working).
+    if (!state.allowedBy.has(key) && state.allowedBy.size >= MAX_TRACKED_HOSTS) {
+      return { allow: false, reason: "too many distinct hosts for one command", source: "limit" };
+    }
     if (matchesAny(state.rules, host, port)) return { allow: true, source: "rule" };
     if (state.mode === "strict") {
       return {
@@ -260,12 +320,32 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         source: "strict",
       };
     }
-    const key = `${host}:${port}`;
     if (state.approved.has(key)) return { allow: true, source: "approval" };
+    const remembered = state.denied.get(key);
+    if (remembered !== undefined) {
+      if (remembered.until > now()) {
+        return { allow: false, reason: remembered.reason, source: remembered.source };
+      }
+      state.denied.delete(key);
+    }
     let flight = state.inflight.get(key);
     if (flight === undefined) {
+      if (state.inflight.size >= MAX_PENDING_ASKS) {
+        return { allow: false, reason: "too many pending network approvals", source: "limit" };
+      }
       flight = askUser(commandId, state, host, port).then((verdict) => {
         if (verdict.allow) state.approved.add(key);
+        else if (
+          (verdict.source === "user" || verdict.source === "timeout") &&
+          verdict.reason !== undefined &&
+          state.denied.size < MAX_TRACKED_HOSTS
+        ) {
+          state.denied.set(key, {
+            reason: verdict.reason,
+            source: verdict.source,
+            until: verdict.source === "user" ? Infinity : now() + TIMEOUT_DENIAL_TTL_MS,
+          });
+        }
         return verdict;
       });
       state.inflight.set(key, flight);
@@ -277,7 +357,7 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
   return {
     register(commandId, policy) {
       if (commandId === PROBE_COMMAND_ID) return;
-      commands.get(commandId)?.cancelPending.forEach((cancel) => cancel());
+      if (commands.has(commandId)) throw new Error(`command ${commandId} is already registered`);
       const rules = policy.allow.filter((entry) => isValidAllowedDomainEntry(entry));
       const suggested = Object.entries(policy.suggested ?? {}).filter(([pattern]) =>
         isValidAllowedDomainEntry(pattern),
@@ -302,11 +382,16 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         rules,
         suggested,
         approved: new Set(),
+        denied: new Map(),
         inflight: new Map(),
         allowedBy: new Map(),
         cancelPending: new Set(),
         audit: [],
       });
+    },
+
+    has(commandId) {
+      return commands.has(commandId);
     },
 
     unregister(commandId) {
@@ -340,7 +425,11 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       // The command may have finished while an approval was pending; its buffer is gone then.
       if (commands.get(commandId) === state) {
         record(state, connectionEntry(spelled, port, verdict));
-        if (verdict.allow) state.allowedBy.set(`${spelled}:${port}`, verdict.source);
+        // Past the cap `open` still allows but stops recording (the other modes were already
+        // refused in `verdictFor`), so the map cannot grow without bound.
+        if (verdict.allow && state.allowedBy.size < MAX_TRACKED_HOSTS) {
+          state.allowedBy.set(`${spelled}:${port}`, verdict.source);
+        }
       }
       return verdict.allow ? true : { allow: false, reason: verdict.reason ?? "denied" };
     },
@@ -350,7 +439,11 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       if (active === undefined) return null;
       const [commandId, state] = active;
       const spelled = canonical(host);
-      const source = state.allowedBy.get(`${spelled}:${port}`) ?? "unavailable";
+      // Only a connection this policy allowed can have reached the HTTP hook. If there is no
+      // recorded decision for it (e.g. `open` mode past the tracking cap) there is nothing honest
+      // to write, so the request is not recorded rather than recorded with an invented source.
+      const source = state.allowedBy.get(`${spelled}:${port}`);
+      if (source === undefined) return null;
       return (status) => {
         if (commands.get(commandId) !== state) return;
         record(state, {

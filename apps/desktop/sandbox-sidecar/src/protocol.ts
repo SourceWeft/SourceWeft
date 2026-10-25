@@ -107,7 +107,9 @@ export type AuditSource =
   | "guard"
   | "user"
   | "timeout"
-  | "unavailable";
+  | "unavailable"
+  /** A per-command bound (pending approvals, tracked hosts) refused the connection. */
+  | "limit";
 
 /**
  * One audited network decision. `connection` entries record a host:port decision;

@@ -12,7 +12,7 @@ import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import { createNetworkPolicy } from "./network-policy.js";
+import { createNetworkPolicy, PROBE_COMMAND_ID } from "./network-policy.js";
 import type { AskHostAnswer, AskHostRequest } from "./network-policy.js";
 import {
   assertCwdWithinWorkspace,
@@ -342,6 +342,17 @@ export async function startServer(
     network?: WrapNetwork;
   }): Promise<WrapResult> {
     if (state === null) throw notInitialized();
+    // A command id names live policy state (network rules, approvals, audit) until its `cleanup`:
+    // reusing one would silently replace it, and `probe` is srt's id for the probe wrap.
+    if (request.commandId === PROBE_COMMAND_ID) {
+      throw new SidecarError("BAD_REQUEST", `commandId ${JSON.stringify(PROBE_COMMAND_ID)} is reserved`);
+    }
+    if (networkPolicy.has(request.commandId)) {
+      throw new SidecarError(
+        "BAD_REQUEST",
+        `commandId ${JSON.stringify(request.commandId)} is already wrapped; send cleanup first`,
+      );
+    }
     // Fix round 1 review: `workspaceRoot` is the only input that widens write access, and
     // `cwd` is what srt resolves a relative literal path against — neither is otherwise
     // constrained, so a bad value here (relative, outside every init workspace root, or

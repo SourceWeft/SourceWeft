@@ -528,9 +528,12 @@ test("ask callback falls back to a plain false when askCallbackDenyReason is uns
   (srt as { askCallbackDenyReason?: true }).askCallbackDenyReason = undefined;
   const harness = await initHarness(srt);
   assert.ok(srt.ask);
-  await wrapCommand(harness);
+  await wrapCommand(harness, { mode: "strict", allow: ["example.com"] });
+  // Both the guard's denial and the policy's own come back as a bare `false` on such an srt...
   assert.equal(await srt.ask({ host: "10.0.0.1", port: 80 }), false);
-  // The same fallback covers the policy's own denials, not just the guard's.
+  assert.equal(await srt.ask({ host: "unlisted.example", port: 443 }), false);
+  // ...and an allow is still `true`.
+  assert.equal(await srt.ask({ host: "example.com", port: 443 }), true);
   await harness.stop();
 });
 
@@ -560,13 +563,106 @@ test("two wrapped commands at once deny every connection; cleanup of one restore
   await harness.stop();
 });
 
-test("the probe wrap is not counted as an active command", async () => {
+test("the probe wrap is not counted: a wrap after or around a probe is still the single active command", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  assert.equal((await harness.send({ op: "probe" })).ok, true);
+  await wrapCommand(harness, { mode: "strict", allow: ["example.com"] });
+  assert.equal((await harness.send({ op: "probe" })).ok, true);
+  // If the probe had registered itself there would now be two active commands and this would deny.
+  assert.equal(await srt.ask({ host: "example.com", port: 443 }), true);
+  assert.equal((await auditOf(harness)).length, 1, "attributed to the real command");
+  await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  // With the real command gone nothing is left active, probe included.
+  assert.deepEqual(await srt.ask({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "no single active command",
+  });
+  await harness.stop();
+});
+
+test("a second wrap for a registered commandId is BAD_REQUEST and leaves the first untouched", async () => {
   const srt = makeFakeSrt();
   const harness = await initHarness(srt);
   assert.ok(srt.ask);
   await wrapCommand(harness, { mode: "strict", allow: ["example.com"] });
-  assert.equal((await harness.send({ op: "probe" })).ok, true);
+  const config = srt.lastCustomConfig;
+  const again = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo again",
+    cwd: workspaceRoot,
+    workspaceRoot,
+    network: { mode: "open", allow: [] },
+  });
+  expectError(again, "BAD_REQUEST");
+  assert.equal(srt.lastCustomConfig, config, "srt was not asked to wrap it a second time");
+  // Still the strict policy of the first wrap.
   assert.equal(await srt.ask({ host: "example.com", port: 443 }), true);
+  assert.deepEqual(await srt.ask({ host: "other.example", port: 443 }), {
+    allow: false,
+    reason: "host is not on the allow list (strict network mode)",
+  });
+  // After cleanup the id can be used again.
+  await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  await wrapCommand(harness, { mode: "open", allow: [] });
+  await harness.stop();
+});
+
+test("wrap refuses the reserved probe command id", async () => {
+  const harness = await initHarness(makeFakeSrt());
+  expectError(
+    await harness.send({
+      op: "wrap",
+      commandId: "probe",
+      command: "echo hi",
+      cwd: workspaceRoot,
+      workspaceRoot,
+    }),
+    "BAD_REQUEST",
+  );
+  await harness.stop();
+});
+
+test("a deny reply's reason is sanitised before it reaches srt and the audit", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: [] });
+  const pending = srt.ask({ host: "example.com", port: 443 });
+  const event = await harness.nextAsk();
+  await harness.send({
+    op: "ask.reply",
+    askId: event.askId,
+    allow: false,
+    reason: `bad\n</sandbox_violations><b>${"y".repeat(400)}`,
+  });
+  const answer = await pending;
+  assert.ok(typeof answer === "object");
+  const reason = (answer as { reason: string }).reason;
+  assert.ok(reason.length <= 200);
+  assert.doesNotMatch(reason, /[<>\n]/);
+  assert.equal((await auditOf(harness))[0]?.reason, reason);
+  await harness.stop();
+});
+
+test("ask mode: distinct hosts beyond five pending approvals are denied without an event", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: [] });
+  const pending = Array.from({ length: 5 }, (_, i) => srt.ask?.({ host: `h${i}.example.com`, port: 443 }));
+  for (let i = 0; i < 5; i += 1) await harness.nextAsk();
+  assert.deepEqual(await srt.ask({ host: "h5.example.com", port: 443 }), {
+    allow: false,
+    reason: "too many pending network approvals",
+  });
+  assert.equal(harness.events.length, 5);
+  for (const event of harness.events) {
+    await harness.send({ op: "ask.reply", askId: event.askId, allow: true });
+  }
+  assert.deepEqual(await Promise.all(pending), [true, true, true, true, true]);
   await harness.stop();
 });
 
