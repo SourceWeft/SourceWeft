@@ -523,3 +523,21 @@ export function describeArtifactLinkHost(hostname: string): {
   const unicode = labels.join(".");
   return { ascii, unicode, isInternationalized: unicode !== ascii };
 }
+
+/**
+ * The shared collections an artifact actually has, with their record counts.
+ * Lets the owner pick what a public share exposes instead of typing names.
+ */
+export const artifactSharedCollectionSchema = z.object({
+  collection: artifactRecordCollectionSchema,
+  count: z.number().int().nonnegative(),
+});
+export const artifactSharedCollectionsResponseSchema = z.object({
+  collections: z.array(artifactSharedCollectionSchema),
+});
+export type ArtifactSharedCollection = z.infer<
+  typeof artifactSharedCollectionSchema
+>;
+export type ArtifactSharedCollectionsResponse = z.infer<
+  typeof artifactSharedCollectionsResponseSchema
+>;

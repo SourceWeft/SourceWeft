@@ -2359,8 +2359,17 @@
       "hideFromSearchDescription": "A public link is indexed by default for reach; turn this on for a sensitive one-off.",
       "views": "Views",
       "publicRecords": "Public data collections",
-      "publicRecordsDescription": "Shared data this page may show to anyone with the link, read-only. List collection names; leave empty to show none.",
-      "publicRecordsPlaceholder": "e.g. scores, results"
+      "publicRecordsDescription": "Choose which shared data collections this page may show to anyone with the link, read-only. Everything not switched on stays private.",
+      "publicRecordsPlaceholder": "Collection not listed yet, e.g. scores",
+      "publicRecordsLoading": "Loading collections…",
+      "publicRecordsLoadFailed": "Couldn't load this page's data collections.",
+      "publicRecordsEmpty": "This page has no shared data yet. You can still add a collection name below.",
+      "publicRecordsCount": "{count, plural, one {# record} other {# records}}",
+      "publicRecordsNoData": "No data yet",
+      "publicRecordsRemove": "Remove {name}",
+      "publicRecordsAdd": "Add",
+      "publicRecordsAddLabel": "Add a collection name",
+      "publicRecordsLimit": "At most {count} collections can be public."
     },
     "filePreview": {
       "titleFallback": "File preview",

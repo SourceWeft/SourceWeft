@@ -2359,8 +2359,17 @@
       "hideFromSearchDescription": "公開連結預設會被索引以擴大觸及；如果是敏感的一次性內容，請開啟此項。",
       "views": "瀏覽量",
       "publicRecords": "公開資料集合",
-      "publicRecordsDescription": "此頁面可以向持有連結的任何人唯讀展示的共享資料。填寫集合名稱；留空則不展示任何資料。",
-      "publicRecordsPlaceholder": "例如 scores, results"
+      "publicRecordsDescription": "選擇此頁面可以向持有連結的任何人唯讀展示的共享資料集合。未開啟的集合保持私有。",
+      "publicRecordsPlaceholder": "尚未列出的集合，例如 scores",
+      "publicRecordsLoading": "正在載入集合…",
+      "publicRecordsLoadFailed": "無法載入此頁面的資料集合。",
+      "publicRecordsEmpty": "此頁面還沒有共享資料。你仍可在下方新增集合名稱。",
+      "publicRecordsCount": "{count, plural, other {# 筆記錄}}",
+      "publicRecordsNoData": "暫無資料",
+      "publicRecordsRemove": "移除 {name}",
+      "publicRecordsAdd": "新增",
+      "publicRecordsAddLabel": "新增集合名稱",
+      "publicRecordsLimit": "最多可公開 {count} 個集合。"
     },
     "filePreview": {
       "titleFallback": "檔案預覽",
