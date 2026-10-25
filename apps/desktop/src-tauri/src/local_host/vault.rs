@@ -445,9 +445,12 @@ impl LocalHost {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    // LocalHost::open (and so everything built on it) is macOS/Linux only.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     use std::collections::HashMap;
 
     /// An in-memory keychain.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[derive(Default)]
     pub(crate) struct MemoryStore {
         pub items: Mutex<HashMap<String, Vec<u8>>>,
@@ -455,6 +458,7 @@ pub(crate) mod tests {
         pub fail_get: Mutex<bool>,
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     impl SecretStore for MemoryStore {
         fn get(&self, account: &str) -> std::result::Result<Option<Vec<u8>>, String> {
             if *self.fail_get.lock().unwrap() {
@@ -475,6 +479,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn host_with_store() -> (tempfile::TempDir, LocalHost, Arc<MemoryStore>) {
         let app = tempfile::tempdir().unwrap();
         let host = LocalHost::open(app.path()).unwrap();
@@ -483,6 +488,7 @@ pub(crate) mod tests {
         (app, host, store)
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn secret(env_var: &str, value: &str, hosts: &[&str]) -> NewSecret {
         NewSecret {
             label: format!("{env_var} token"),
@@ -494,6 +500,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn a_secret_round_trips_with_the_value_only_in_the_keychain() {
         let (_app, host, store) = host_with_store();
@@ -529,6 +536,7 @@ pub(crate) mod tests {
         assert_eq!(entries[0].meta, meta);
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn remove_deletes_the_keychain_item_and_the_row() {
         let (_app, host, store) = host_with_store();
@@ -540,6 +548,7 @@ pub(crate) mod tests {
         host.vault_remove(&meta.id).unwrap();
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn a_keychain_failure_stores_nothing() {
         let (_app, host, store) = host_with_store();
@@ -549,6 +558,7 @@ pub(crate) mod tests {
         assert!(host.vault_is_empty().unwrap());
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn without_a_keychain_everything_fails_closed() {
         let app = tempfile::tempdir().unwrap();
@@ -559,6 +569,7 @@ pub(crate) mod tests {
         assert!(host.vault_entries().unwrap().is_empty());
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn a_missing_keychain_item_fails_the_command_without_naming_a_value() {
         let (_app, host, store) = host_with_store();
@@ -569,6 +580,7 @@ pub(crate) mod tests {
         assert!(!error.message.contains("topsecret"));
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn limits_and_names_are_enforced() {
         let (_app, host, _store) = host_with_store();
@@ -601,6 +613,7 @@ pub(crate) mod tests {
         assert!(host.vault_set(secret("D", "v", &refs[..50])).is_ok());
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn at_most_twenty_secrets() {
         let (_app, host, _store) = host_with_store();
@@ -630,6 +643,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_first_secret_needs_the_interception_acknowledgement() {
         let (_app, host, _store) = host_with_store();
@@ -654,6 +668,7 @@ pub(crate) mod tests {
         assert!(parsed.read_only);
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn at_most_two_hundred_distinct_hosts_in_total() {
         let (_app, host, _store) = host_with_store();
