@@ -1365,12 +1365,18 @@
         "envVarField": "环境变量名",
         "valueField": "密钥值",
         "valueHelp": "保存在这台电脑的钥匙串中，之后不会再显示。",
-        "hostsField": "主机（每行一个）",
+        "hostsField": "主机（每行一个，须为确切名称）",
         "readOnlyField": "向这些主机发送写入请求时需要批准",
         "consent": "为了仅对这些主机把占位符替换为真实密钥，SourceWeft 会使用只有沙盒才信任的本地证书，解密这台电脑上所运行命令的 HTTPS 流量。固定证书的工具可能会失败。密钥不会离开这台电脑，也不会展示给 AI。",
         "consentAck": "我已了解并同意",
         "save": "保存密钥",
-        "saving": "正在保存…"
+        "saving": "正在保存…",
+        "hostsHelp": "仅限确切的主机名，例如 api.github.com。不支持通配符。",
+        "hostsWildcardHint": "不支持通配符，请逐个列出每个主机的确切名称。",
+        "consentAllCommands": "这台电脑上的每条命令都会以占位符形式获得所有已保存的密钥，并可将其用于所绑定的主机。",
+        "consentReachable": "即使在“严格”和“询问”网络模式下，所绑定的主机也可以访问。",
+        "consentApproval": "批准某个写入请求，只会让该请求（方法和路径）携带密钥发出。内容中含有密钥的请求始终会询问。",
+        "consentUngated": "如果取消勾选“需要批准”选项，向这些主机的写入将不受限制。"
       }
     },
     "approvals": {
@@ -2354,9 +2360,11 @@
       "failed": "未能发送你的答复，请重试。",
       "requestTitle": "向 {host} 发送写入请求",
       "requestIntro": "你电脑上的某条命令正在发送可能修改数据的请求。此主机已绑定一个已存储的密钥，因此写入需要你的批准。",
-      "requestHelper": "允许后，此命令在运行结束前可向该主机发送写入请求。其他命令会再次询问。",
-      "allowWrites": "允许此命令向该主机写入",
-      "onceOnly": "写入请求只能针对当前命令批准，不能保存为工作区范围的规则。"
+      "requestHelper": "仅允许这一确切的请求（方法和路径）；其他请求会再次询问。",
+      "onceOnly": "写入请求只能针对当前命令批准，不能保存为工作区范围的规则。",
+      "allowThisRequest": "允许此请求",
+      "secretRequestTitle": "向 {host} 发送含已存储密钥的请求",
+      "secretRequestIntro": "请求内容中含有已存储密钥的占位符，真实值将为此主机填入。仅当你确实预期这一确切请求时才批准。"
     }
   },
   "dashboardChatFiles": {

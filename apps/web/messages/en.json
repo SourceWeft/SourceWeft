@@ -1365,12 +1365,18 @@
         "envVarField": "Environment variable name",
         "valueField": "Secret value",
         "valueHelp": "Stored in this computer's keychain. It is never shown again.",
-        "hostsField": "Hosts (one per line)",
+        "hostsField": "Hosts (one per line, exact names)",
         "readOnlyField": "Require approval for write requests to these hosts",
         "consent": "To replace placeholders with the real secret only for these hosts, SourceWeft decrypts the HTTPS traffic of commands running on this computer using a local certificate that only the sandbox trusts. Tools that pin certificates may fail. The secret never leaves this computer and is never shown to the AI.",
         "consentAck": "I understand and agree",
         "save": "Save secret",
-        "saving": "Saving..."
+        "saving": "Saving...",
+        "hostsHelp": "Exact host names only, for example api.github.com. Wildcards are not supported.",
+        "hostsWildcardHint": "Wildcards are not supported. List each host by its exact name.",
+        "consentAllCommands": "Every command on this computer receives all stored secrets as placeholders and can use them for their bound hosts.",
+        "consentReachable": "Bound hosts are reachable even in the strict and ask network modes.",
+        "consentApproval": "Approving a write request lets that one request (method and path) send the secret. A request whose body contains a secret always asks.",
+        "consentUngated": "If you untick the approval option, writes to these hosts are not gated."
       }
     },
     "approvals": {
@@ -2354,9 +2360,11 @@
       "failed": "Could not send your answer. Try again.",
       "requestTitle": "Write request to {host}",
       "requestIntro": "A command on your computer is sending a request that can change data. This host is bound to a stored secret, so writes need your approval.",
-      "requestHelper": "Allowing lets this command send write requests to this host until it finishes. Other commands ask again.",
-      "allowWrites": "Allow writes to this host for this command",
-      "onceOnly": "Write requests can only be allowed for this command, not saved for the workspace."
+      "requestHelper": "Only this exact request (method and path) is allowed; other requests ask again.",
+      "onceOnly": "Write requests can only be allowed for this command, not saved for the workspace.",
+      "allowThisRequest": "Allow this request",
+      "secretRequestTitle": "Request containing a stored secret to {host}",
+      "secretRequestIntro": "The request body contains a placeholder for a stored secret; the real value will be inserted for this host. Only approve if you expect this exact request."
     }
   },
   "dashboardChatFiles": {

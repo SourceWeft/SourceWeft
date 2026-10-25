@@ -7,10 +7,18 @@ import {
   type VaultListing,
 } from "../../../../lib/desktop-bridge";
 
-/** The native side lacks the vault commands (older app, unsupported platform). */
+/**
+ * Hide the section only when this app genuinely has no vault: the platform is
+ * unsupported, or the bridge has no such command. A permission denial ("not
+ * allowed") must stay visible, or a regression there would be invisible.
+ */
 function isMissingCommand(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /not found|not allowed|UNSUPPORTED_PLATFORM/i.test(message);
+  if (/not allowed/i.test(message)) return false;
+  return (
+    error instanceof TypeError ||
+    /UNSUPPORTED_PLATFORM|Command \S+ not found/i.test(message)
+  );
 }
 
 function parseHosts(text: string) {
@@ -51,8 +59,6 @@ export function LocalVaultSection() {
       const next = await desktopBridge.vaultList();
       setListing(next);
       setLoadFailed(false);
-      // Consent is asked again whenever the vault is back to empty.
-      if (next.secrets.length === 0) setAcknowledged(false);
     } catch (e) {
       if (isMissingCommand(e)) setHidden(true);
       else setLoadFailed(true);
@@ -67,19 +73,19 @@ export function LocalVaultSection() {
   if (!desktopBridge.isAvailable() || hidden) return null;
 
   const secrets = listing?.secrets ?? [];
-  const needsConsent = secrets.length === 0;
 
   function resetForm() {
     setLabel("");
     setEnvVar("");
     setHosts("");
     setRequireWriteApproval(true);
+    setAcknowledged(false);
     if (valueRef.current) valueRef.current.value = "";
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (busy || (needsConsent && !acknowledged)) return;
+    if (busy || !acknowledged) return;
     // The only place the secret value is read.
     const value = valueRef.current?.value ?? "";
     setBusy(true);
@@ -91,6 +97,8 @@ export function LocalVaultSection() {
         value,
         hosts: parseHosts(hosts),
         readOnly: requireWriteApproval,
+        // Sent only past the consent tick (the guard above).
+        acknowledgedInterception: true,
       });
       resetForm();
       setAdding(false);
@@ -244,10 +252,18 @@ export function LocalVaultSection() {
               className="block min-h-20 w-full rounded-md border border-border bg-background p-2 font-mono text-xs"
               value={hosts}
               onChange={(e) => setHosts(e.target.value)}
-              placeholder={"api.github.com\n*.example.com"}
+              placeholder={"api.github.com\nuploads.github.com"}
               spellCheck={false}
               required
             />
+            <span className="block text-xs text-muted-foreground">
+              {t("localHost.vault.hostsHelp")}
+            </span>
+            {hosts.includes("*") && (
+              <span role="note" className="block text-xs text-amber-700 dark:text-amber-400">
+                {t("localHost.vault.hostsWildcardHint")}
+              </span>
+            )}
           </label>
           <label className="flex items-start gap-2 text-sm">
             <input
@@ -258,27 +274,31 @@ export function LocalVaultSection() {
             />
             <span>{t("localHost.vault.readOnlyField")}</span>
           </label>
-          {needsConsent && (
-            <div
-              className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
-              data-testid="vault-consent"
-            >
-              <p className="text-sm">{t("localHost.vault.consent")}</p>
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={acknowledged}
-                  onChange={(e) => setAcknowledged(e.target.checked)}
-                />
-                <span>{t("localHost.vault.consentAck")}</span>
-              </label>
-            </div>
-          )}
+          <div
+            className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
+            data-testid="vault-consent"
+          >
+            <p className="text-sm">{t("localHost.vault.consent")}</p>
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              <li>{t("localHost.vault.consentAllCommands")}</li>
+              <li>{t("localHost.vault.consentReachable")}</li>
+              <li>{t("localHost.vault.consentApproval")}</li>
+              <li>{t("localHost.vault.consentUngated")}</li>
+            </ul>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+              />
+              <span>{t("localHost.vault.consentAck")}</span>
+            </label>
+          </div>
           <div className="flex gap-2">
             <Button
               type="submit"
-              disabled={busy || (needsConsent && !acknowledged)}
+              disabled={busy || !acknowledged}
             >
               {busy ? t("localHost.vault.saving") : t("localHost.vault.save")}
             </Button>

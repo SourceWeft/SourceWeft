@@ -1365,12 +1365,18 @@
         "envVarField": "環境變數名",
         "valueField": "金鑰值",
         "valueHelp": "儲存在這臺電腦的鑰匙圈中，之後不會再顯示。",
-        "hostsField": "主機（每行一個）",
+        "hostsField": "主機（每行一個，須為確切名稱）",
         "readOnlyField": "向這些主機傳送寫入請求時需要核准",
         "consent": "為了僅對這些主機把佔位符替換為真實金鑰，SourceWeft 會使用只有沙盒才信任的本機憑證，解密這臺電腦上所執行命令的 HTTPS 流量。固定憑證的工具可能會失敗。金鑰不會離開這臺電腦，也不會展示給 AI。",
         "consentAck": "我已瞭解並同意",
         "save": "儲存金鑰",
-        "saving": "正在儲存…"
+        "saving": "正在儲存…",
+        "hostsHelp": "僅限確切的主機名，例如 api.github.com。不支援萬用字元。",
+        "hostsWildcardHint": "不支援萬用字元，請逐個列出每個主機的確切名稱。",
+        "consentAllCommands": "這臺電腦上的每條命令都會以佔位符形式獲得所有已儲存的金鑰，並可將其用於所綁定的主機。",
+        "consentReachable": "即使在「嚴格」和「詢問」網路模式下，所綁定的主機也可以存取。",
+        "consentApproval": "核准某個寫入請求，只會讓該請求（方法和路徑）攜帶金鑰發出。內容中含有金鑰的請求始終會詢問。",
+        "consentUngated": "如果取消勾選「需要核准」選項，向這些主機的寫入將不受限制。"
       }
     },
     "approvals": {
@@ -2354,9 +2360,11 @@
       "failed": "未能傳送你的答覆，請重試。",
       "requestTitle": "向 {host} 傳送寫入請求",
       "requestIntro": "你電腦上的某條命令正在傳送可能修改資料的請求。此主機已綁定一個已儲存的金鑰，因此寫入需要你的核准。",
-      "requestHelper": "允許後，此命令在執行結束前可向該主機傳送寫入請求。其他命令會再次詢問。",
-      "allowWrites": "允許此命令向該主機寫入",
-      "onceOnly": "寫入請求只能針對目前命令核准，不能儲存為工作區範圍的規則。"
+      "requestHelper": "僅允許這一確切的請求（方法和路徑）；其他請求會再次詢問。",
+      "onceOnly": "寫入請求只能針對目前命令核准，不能儲存為工作區範圍的規則。",
+      "allowThisRequest": "允許此請求",
+      "secretRequestTitle": "向 {host} 傳送含已儲存金鑰的請求",
+      "secretRequestIntro": "請求內容中含有已儲存金鑰的佔位符，真實值將為此主機填入。僅當你確實預期這一確切請求時才核准。"
     }
   },
   "dashboardChatFiles": {

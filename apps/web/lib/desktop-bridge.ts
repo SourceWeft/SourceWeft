@@ -90,6 +90,8 @@ export type NewVaultSecret = {
   value: string;
   hosts: string[];
   readOnly?: boolean;
+  /** True only after the user ticked the consent for HTTPS interception. */
+  acknowledgedInterception: boolean;
 };
 
 type DesktopListener<TPayload> = (payload: TPayload) => void;

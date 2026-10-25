@@ -298,9 +298,9 @@ test("a write-request card shows the request line and only the per-command allow
     "POST api.github.com /v1/issues",
   );
   assert.match(text, /bound to a stored secret/);
-  assert.match(text, /Other commands ask again/);
+  assert.match(text, /Only this exact request \(method and path\) is allowed; other requests ask again/);
   assert.ok(button("Deny", container));
-  assert.ok(button("Allow writes to this host for this command", container));
+  assert.ok(button("Allow this request", container));
   assert.equal(button("Allow for this workspace", container), undefined);
   assert.equal(button("Allow once", container), undefined);
   assert.equal(container.querySelector("select"), null);
@@ -315,7 +315,7 @@ test("write-request allow sends allow_once and deny sends deny", async () => {
   });
   const { container } = await render({});
   await act(async () =>
-    button("Allow writes to this host for this command", container).click(),
+    button("Allow this request", container).click(),
   );
   await act(async () => button("Deny", container).click());
   assert.deepEqual(respondNetworkRequest.mock.calls.map((c) => c.slice(1)), [
@@ -335,7 +335,7 @@ test("NETWORK_REQUEST_ONCE_ONLY keeps the card and explains it", async () => {
   );
   const { container } = await render({});
   await act(async () =>
-    button("Allow writes to this host for this command", container).click(),
+    button("Allow this request", container).click(),
   );
   assert.ok(container.querySelector('[data-testid="network-access-card"]'));
   assert.match(
@@ -343,7 +343,7 @@ test("NETWORK_REQUEST_ONCE_ONLY keeps the card and explains it", async () => {
     /can only be allowed for this command/,
   );
   assert.equal(
-    button("Allow writes to this host for this command", container).disabled,
+    button("Allow this request", container).disabled,
     false,
   );
 });
@@ -360,4 +360,43 @@ test("a host card without kind (older backend) is unchanged and mixes with reque
   assert.ok(button("Allow for this workspace", hostCard));
   assert.ok(hostCard.querySelector("select"));
   assert.equal(hostCard.querySelector('[data-testid="network-request-line"]'), null);
+});
+
+test("a request whose body carries a stored secret says so, with the same two buttons", async () => {
+  listNetworkRequests.mockResolvedValue({
+    requests: [{ ...writeRequest(), secretInBody: true }],
+  });
+  respondNetworkRequest.mockResolvedValue({
+    request: { id: "w1", status: "allowed", scope: "once" },
+  });
+  const { container } = await render({});
+  const text = container.textContent ?? "";
+  assert.match(text, /Request containing a stored secret to api\.github\.com/);
+  assert.match(text, /body contains a placeholder for a stored secret/);
+  assert.match(text, /Only approve if you expect this exact request/);
+  assert.doesNotMatch(text, /Write request to/);
+  assert.equal(
+    container.querySelector('[data-testid="network-request-line"]')?.textContent,
+    "POST api.github.com /v1/issues",
+  );
+  assert.ok(button("Deny", container));
+  assert.equal(container.querySelector("select"), null);
+  await act(async () => button("Allow this request", container).click());
+  assert.deepEqual(respondNetworkRequest.mock.calls[0]?.slice(1), [
+    "w1",
+    { decision: "allow_once" },
+  ]);
+});
+
+test("secretInBody false or missing keeps the plain write-request wording", async () => {
+  listNetworkRequests.mockResolvedValue({
+    requests: [
+      { ...writeRequest("w1"), secretInBody: false },
+      writeRequest("w2"),
+    ],
+  });
+  const { container } = await render({});
+  const text = container.textContent ?? "";
+  assert.equal((text.match(/Write request to api\.github\.com/g) ?? []).length, 2);
+  assert.doesNotMatch(text, /stored secret to/);
 });

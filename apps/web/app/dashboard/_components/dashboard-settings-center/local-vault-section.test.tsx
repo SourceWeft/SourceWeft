@@ -30,7 +30,7 @@ function meta(id: string, over: Record<string, unknown> = {}) {
     id,
     label: "GitHub",
     envVar: "GITHUB_TOKEN",
-    hosts: ["api.github.com", "*.example.com"],
+    hosts: ["api.github.com", "uploads.github.com"],
     readOnly: true,
     createdAt: 1_790_000_000,
     ...over,
@@ -53,12 +53,18 @@ function field(container: HTMLElement, label: RegExp) {
     | HTMLTextAreaElement;
 }
 
+async function tickConsent(container: HTMLElement) {
+  await act(async () => {
+    (container.querySelector('[data-testid="vault-consent"] input') as HTMLInputElement).click();
+  });
+}
+
 async function fillForm(container: HTMLElement) {
   await act(async () => {
     typeInto(field(container, /^Label/), "GitHub");
     typeInto(field(container, /^Environment variable/), "GITHUB_TOKEN");
     typeInto(field(container, /^Secret value/), SECRET_VALUE);
-    typeInto(field(container, /^Hosts/), "api.github.com\n*.example.com\n");
+    typeInto(field(container, /^Hosts/), "api.github.com\nuploads.github.com\n");
   });
 }
 
@@ -84,10 +90,27 @@ test("is hidden without a desktop bridge", async () => {
   assert.equal(bridge.vaultList.mock.calls.length, 0);
 });
 
-test("is hidden when the native side lacks the vault commands", async () => {
-  bridge.vaultList.mockRejectedValue(new Error("Command vault_list not found"));
+test("is hidden when the native side lacks the vault commands or the platform", async () => {
+  for (const failure of [
+    new Error("Command vault_list not found"),
+    new Error("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux."),
+    new TypeError("desktopBridge.vaultList is not a function"),
+  ]) {
+    bridge.vaultList.mockReset();
+    bridge.vaultList.mockRejectedValue(failure);
+    const container = await render();
+    assert.equal(container.innerHTML, "", String(failure));
+    await unmountAll();
+  }
+});
+
+test("a permission denial is shown as an error, never hidden", async () => {
+  bridge.vaultList.mockRejectedValue(
+    new Error("vault_list not allowed on window main, Command not found"),
+  );
   const container = await render();
-  assert.equal(container.innerHTML, "");
+  assert.ok(container.querySelector('[data-testid="vault-section"]'));
+  assert.match(container.querySelector('[role="alert"]')?.textContent ?? "", /Could not read the secrets/);
 });
 
 test("lists secrets with env name, hosts and the write-approval badge, never a value", async () => {
@@ -100,7 +123,7 @@ test("lists secrets with env name, hosts and the write-approval badge, never a v
   assert.equal(rows.length, 2);
   assert.match(rows[0]!.textContent ?? "", /GitHub/);
   assert.match(rows[0]!.textContent ?? "", /GITHUB_TOKEN/);
-  assert.match(rows[0]!.textContent ?? "", /api\.github\.com, \*\.example\.com/);
+  assert.match(rows[0]!.textContent ?? "", /api\.github\.com, uploads\.github\.com/);
   assert.match(rows[0]!.textContent ?? "", /Writes need approval/);
   assert.doesNotMatch(rows[1]!.textContent ?? "", /Writes need approval/);
   assert.equal(container.querySelector('[role="status"]'), null);
@@ -115,17 +138,20 @@ test("shows a notice when secrets are stored but not injected here", async () =>
   );
 });
 
-test("the first secret needs the consent tick; the value is sent, then the field is cleared", async () => {
+test("saving needs the consent tick; the value is sent with the acknowledgement, then the field is cleared", async () => {
   bridge.vaultList
     .mockResolvedValueOnce({ secrets: [], enforced: true })
     .mockResolvedValueOnce({ secrets: [meta("s1")], enforced: true });
   bridge.vaultSet.mockResolvedValue(meta("s1"));
   const container = await render();
   await act(async () => button("Add secret", container).click());
-  assert.match(
-    container.querySelector('[data-testid="vault-consent"]')?.textContent ?? "",
-    /decrypts the HTTPS traffic of commands running on this computer/,
-  );
+  const consent = container.querySelector('[data-testid="vault-consent"]')?.textContent ?? "";
+  assert.match(consent, /decrypts the HTTPS traffic of commands running on this computer/);
+  assert.match(consent, /Every command on this computer receives all stored secrets as placeholders/);
+  assert.match(consent, /reachable even in the strict and ask network modes/);
+  assert.match(consent, /that one request \(method and path\) send the secret/);
+  assert.match(consent, /request whose body contains a secret always asks/);
+  assert.match(consent, /writes to these hosts are not gated/);
   const save = button("Save secret", container);
   assert.equal(save.disabled, true);
   await fillForm(container);
@@ -133,9 +159,7 @@ test("the first secret needs the consent tick; the value is sent, then the field
   await submit(container);
   assert.equal(bridge.vaultSet.mock.calls.length, 0);
 
-  await act(async () => {
-    (container.querySelector('[data-testid="vault-consent"] input') as HTMLInputElement).click();
-  });
+  await tickConsent(container);
   assert.equal(button("Save secret", container).disabled, false);
   await submit(container);
 
@@ -144,8 +168,9 @@ test("the first secret needs the consent tick; the value is sent, then the field
       label: "GitHub",
       envVar: "GITHUB_TOKEN",
       value: SECRET_VALUE,
-      hosts: ["api.github.com", "*.example.com"],
+      hosts: ["api.github.com", "uploads.github.com"],
       readOnly: true,
+      acknowledgedInterception: true,
     },
   ]);
   // Back to the list: the form (and its value field) is gone, and the value
@@ -155,13 +180,23 @@ test("the first secret needs the consent tick; the value is sent, then the field
   assert.equal(container.querySelectorAll('[data-testid="vault-secret"]').length, 1);
 });
 
-test("the value field is a password input and no consent is asked once a secret exists", async () => {
+test("the value field is a password input and consent is required for every secret", async () => {
   bridge.vaultList.mockResolvedValue({ secrets: [meta("s1")], enforced: true });
   const container = await render();
   await act(async () => button("Add secret", container).click());
   assert.equal(field(container, /^Secret value/).type, "password");
-  assert.equal(container.querySelector('[data-testid="vault-consent"]'), null);
-  assert.equal(button("Save secret", container).disabled, false);
+  assert.ok(container.querySelector('[data-testid="vault-consent"]'));
+  assert.equal(button("Save secret", container).disabled, true);
+});
+
+test("hosts are exact names: the help says so and a wildcard gets a hint", async () => {
+  bridge.vaultList.mockResolvedValue({ secrets: [], enforced: true });
+  const container = await render();
+  await act(async () => button("Add secret", container).click());
+  assert.match(container.textContent ?? "", /Exact host names only/);
+  assert.equal(container.querySelector('[role="note"]'), null);
+  await act(async () => typeInto(field(container, /^Hosts/), "*.github.com"));
+  assert.match(container.querySelector('[role="note"]')?.textContent ?? "", /Wildcards are not supported/);
 });
 
 test("write approval defaults on and can be switched off", async () => {
@@ -173,6 +208,7 @@ test("write approval defaults on and can be switched off", async () => {
   assert.equal(box.checked, true);
   await act(async () => box.click());
   await fillForm(container);
+  await tickConsent(container);
   await submit(container);
   assert.equal(
     (bridge.vaultSet.mock.calls[0]![0] as { readOnly: boolean }).readOnly,
@@ -188,6 +224,7 @@ test("a native validation error is shown verbatim and the entered value stays fo
   const container = await render();
   await act(async () => button("Add secret", container).click());
   await fillForm(container);
+  await tickConsent(container);
   await submit(container);
   assert.match(
     container.querySelector('[role="alert"]')?.textContent ?? "",

@@ -44,6 +44,10 @@ function NetworkRequestCard({
   const durationChoices = getTrustDurationChoices(t);
   // A missing kind comes from an older backend and means a plain host request.
   const isWriteRequest = request.kind === "request";
+  // Added to the contract by the backend; an older one omits it (false).
+  const secretInBody =
+    isWriteRequest &&
+    (request as { secretInBody?: boolean }).secretInBody === true;
   const remaining = networkRequestRemainingMs(request, now);
 
   async function respond(decision: LocalNetworkDecision) {
@@ -80,7 +84,12 @@ function NetworkRequestCard({
           <div className="min-w-0 space-y-1">
             <span className="block text-sm font-medium text-foreground">
               {isWriteRequest ? (
-                t("networkAccess.requestTitle", { host: request.host })
+                t(
+                  secretInBody
+                    ? "networkAccess.secretRequestTitle"
+                    : "networkAccess.requestTitle",
+                  { host: request.host },
+                )
               ) : (
                 <>
                   {t("networkAccess.title")}
@@ -95,7 +104,9 @@ function NetworkRequestCard({
               )}
             </span>
             <span className="block text-xs leading-5 text-muted-foreground">
-              {isWriteRequest
+              {secretInBody
+                ? t("networkAccess.secretRequestIntro")
+                : isWriteRequest
                 ? t("networkAccess.requestIntro")
                 : t("networkAccess.intro")}
             </span>
@@ -173,7 +184,7 @@ function NetworkRequestCard({
           {busy
             ? t("networkAccess.sending")
             : isWriteRequest
-              ? t("networkAccess.allowWrites")
+              ? t("networkAccess.allowThisRequest")
               : t("networkAccess.allowOnce")}
         </Button>
         {isWriteRequest ? null : (
