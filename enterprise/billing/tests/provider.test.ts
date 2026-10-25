@@ -39,8 +39,23 @@ function makeConfig(provider: BillingRuntimeConfig["provider"]) {
     creditUnitUsd: 0,
     defaultMarkupRate: 0,
     defaultPlanFamily: "individual_pro" as const,
-    defaultMonthlyPages: 0,
-    defaultMonthlyCredits: 0,
+    planQuotas: {
+      individual_free: {
+        active: true,
+        monthlyPagesLimit: 0,
+        monthlyCreditsGrant: 0,
+      },
+      individual_pro: {
+        active: true,
+        monthlyPagesLimit: 0,
+        monthlyCreditsGrant: 0,
+      },
+      team_standard: {
+        active: true,
+        monthlyPagesLimit: 0,
+        monthlyCreditsGrant: 0,
+      },
+    },
     reconcileEnabled: false,
     creem: {
       apiKey: "",

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { defaultBillingCatalog } from "../src/catalog/billing-catalog";
 import { createHash, verify } from "node:crypto";
 import { test, vi } from "vitest";
 import { Hono } from "hono";
@@ -71,7 +72,8 @@ test("provider selection is explicit and Waffo needs only its two new credential
     WAFFO_PRIVATE_KEY: signingKey.privateKey,
   };
   assert.equal(
-    readBillingConfig(credentials, "http://localhost").provider,
+    readBillingConfig(credentials, "http://localhost", defaultBillingCatalog)
+      .provider,
     "none",
   );
   const config = readBillingConfig(
@@ -81,6 +83,7 @@ test("provider selection is explicit and Waffo needs only its two new credential
       BACKEND_BILLING_PROVIDER: "waffo",
     },
     "http://localhost",
+    defaultBillingCatalog,
   );
   assert.equal(config.waffo.environment, "test");
   assert.equal(config.creem.apiKey, "");
@@ -102,16 +105,29 @@ test("provider selection is explicit and Waffo needs only its two new credential
     /private key/,
   );
   assert.equal(
-    readBillingConfig({ WAFFO_TEST_MODE: "false" }, "http://localhost").waffo
-      .environment,
+    readBillingConfig(
+      { WAFFO_TEST_MODE: "false" },
+      "http://localhost",
+      defaultBillingCatalog,
+    ).waffo.environment,
     "prod",
   );
   assert.throws(
-    () => readBillingConfig({ WAFFO_TEST_MODE: "other" }, "http://localhost"),
+    () =>
+      readBillingConfig(
+        { WAFFO_TEST_MODE: "other" },
+        "http://localhost",
+        defaultBillingCatalog,
+      ),
     /Invalid billing boolean/,
   );
   assert.throws(
-    () => readBillingConfig({ WAFFO_ENVIRONMENT: "test" }, "http://localhost"),
+    () =>
+      readBillingConfig(
+        { WAFFO_ENVIRONMENT: "test" },
+        "http://localhost",
+        defaultBillingCatalog,
+      ),
     /WAFFO_ENVIRONMENT is no longer supported/,
   );
 });
