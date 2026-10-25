@@ -114,24 +114,20 @@ test("gateway persists dispatch and does not replay a command after the socket d
     workspaceId = randomUUID(),
     threadId = randomUUID(),
     teamId = randomUUID();
-  await schema.db
-    .insert(schema.workspaces)
-    .values({
-      id: workspaceId,
-      organizationId: teamId,
-      name: "Socket",
-      slug: workspaceId,
-    });
-  await schema.db
-    .insert(schema.threads)
-    .values({
-      id: threadId,
-      workspaceId,
-      teamId,
-      createdBy: h.userId,
-      title: "Socket",
-      executionTargetJson: { kind: "local", deviceId: h.id },
-    });
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Socket",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.threads).values({
+    id: threadId,
+    workspaceId,
+    teamId,
+    createdBy: h.userId,
+    title: "Socket",
+    executionTargetJson: { kind: "local", deviceId: h.id },
+  });
   const server = createServer();
   const dispose = attachLocalDeviceGateway(server);
   server.listen(0, "127.0.0.1");
@@ -204,6 +200,119 @@ test("gateway persists dispatch and does not replay a command after the socket d
         break;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+  }
+});
+
+test("gateway persists host status reports; old hosts keep null columns; malformed status closes 1008", async () => {
+  const { attachLocalDeviceGateway } = await import("./gateway");
+  const old = await host(),
+    modern = await host();
+  const server = createServer();
+  const dispose = attachLocalDeviceGateway(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as { port: number };
+  const sockets: WebSocket[] = [];
+  const connect = async (token: string) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/v1/local-devices/socket`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    sockets.push(socket);
+    const [message] = await once(socket, "message");
+    assert.equal(JSON.parse(String(message)).type, "connected");
+    return socket;
+  };
+  const row = (id: string) =>
+    schema.db.query.localDevices.findFirst({
+      where: eq(schema.localDevices.id, id),
+    });
+  const waitFor = async (check: () => Promise<boolean>) => {
+    for (let i = 0; i < 100; i++) {
+      if (await check()) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.fail("condition not reached");
+  };
+  const report = (sandbox: Record<string, unknown>) => ({
+    type: "status",
+    platform: "linux",
+    arch: "x64",
+    shell: "bash",
+    protocolVersion: 3,
+    sandbox,
+    capabilities: ["sandbox"],
+  });
+  try {
+    const oldSocket = await connect(old.token);
+    const heartbeat = once(oldSocket, "message");
+    oldSocket.send(JSON.stringify({ type: "heartbeat" }));
+    assert.equal(JSON.parse(String((await heartbeat)[0])).type, "heartbeat");
+    const oldRow = await row(old.id);
+    assert.equal(oldRow?.platform, null);
+    assert.equal(oldRow?.sandboxState, null);
+    assert.equal(oldRow?.capabilities, null);
+    assert.equal(oldRow?.statusReportedAt, null);
+
+    const socket = await connect(modern.token);
+    socket.send(
+      JSON.stringify(
+        report({
+          state: "needsSetup",
+          code: "bwrapMissing",
+          reason: "bubblewrap is not installed",
+          remedy: "privilegedSetup",
+        }),
+      ),
+    );
+    await waitFor(async () => (await row(modern.id))?.sandboxState != null);
+    const first = await row(modern.id);
+    assert.equal(first?.platform, "linux");
+    assert.equal(first?.arch, "x64");
+    assert.equal(first?.shell, "bash");
+    assert.equal(first?.sandboxCode, "bwrapMissing");
+    assert.equal(first?.sandboxReason, "bubblewrap is not installed");
+    assert.equal(first?.sandboxRemedy, "privilegedSetup");
+    assert.deepEqual(first?.capabilities, ["sandbox"]);
+    assert.ok(first?.statusReportedAt);
+
+    // A later report replaces the previous one, including clearing the code.
+    socket.send(JSON.stringify(report({ state: "ready" })));
+    await waitFor(async () => (await row(modern.id))?.sandboxState === "ready");
+    const ready = await row(modern.id);
+    assert.equal(ready?.sandboxCode, null);
+    assert.equal(ready?.sandboxReason, null);
+    assert.equal(ready?.sandboxRemedy, null);
+    assert.equal(socket.readyState, WebSocket.OPEN);
+
+    // Status reports never create or alter invocations.
+    assert.equal(
+      (
+        await schema.db.query.localToolInvocations.findMany({
+          where: eq(schema.localToolInvocations.deviceId, modern.id),
+        })
+      ).length,
+      0,
+    );
+
+    const closed = once(socket, "close");
+    socket.send(
+      JSON.stringify({ ...report({ state: "ready" }), shell: "/bin/sh" }),
+    );
+    const [code] = await closed;
+    assert.equal(code, 1008);
+    assert.equal((await row(modern.id))?.shell, "bash");
+  } finally {
+    for (const socket of sockets) socket.terminate();
+    dispose();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    for (const id of [old.id, modern.id])
+      for (let i = 0; i < 50; i++) {
+        if (!(await row(id))?.connectionId) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
   }
 });
 

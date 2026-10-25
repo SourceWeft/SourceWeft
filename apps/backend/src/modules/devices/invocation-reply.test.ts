@@ -1,6 +1,10 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
+  deviceStatusColumns,
   localDeviceReplySchema,
+  SANDBOX_REMEDIES,
+  SANDBOX_SETUP_CODES,
+  serializeDeviceSandbox,
   localInvocationFailure,
   persistLocalFailureCode,
 } from "./invocation-reply";
@@ -61,4 +65,136 @@ test("old hosts and unrelated error states remain fail closed regardless of Engl
       result: { sourceweftLocalErrorCode: "FILE_NOT_FOUND" },
     }),
   ).toBeNull();
+});
+
+const status = {
+  type: "status",
+  platform: "linux",
+  arch: "x64",
+  shell: "bash",
+  protocolVersion: 3,
+  sandbox: {
+    state: "needsSetup",
+    code: "bwrapMissing",
+    reason: "bubblewrap is not installed",
+    remedy: "privilegedSetup",
+  },
+  capabilities: ["sandbox", "files"],
+};
+
+describe("device status message", () => {
+  test("accepts a full report and a minimal ready report", () => {
+    expect(localDeviceReplySchema.parse(status)).toEqual(status);
+    const minimal = {
+      type: "status",
+      platform: "macos",
+      arch: "arm64",
+      shell: "zsh",
+      sandbox: { state: "ready" },
+      capabilities: [],
+    };
+    expect(localDeviceReplySchema.parse(minimal)).toEqual(minimal);
+  });
+
+  test("every SetupCode and Remedy of the wire contract is accepted", () => {
+    expect([...SANDBOX_SETUP_CODES]).toEqual([
+      "bundleMissing",
+      "bundleStale",
+      "bundleNewer",
+      "bundleInvalid",
+      "bwrapMissing",
+      "userNamespaceRestricted",
+      "sandboxFailed",
+      "installing",
+    ]);
+    expect([...SANDBOX_REMEDIES]).toEqual([
+      "downloadRuntime",
+      "updateApp",
+      "reinstallPackage",
+      "privilegedSetup",
+      "none",
+    ]);
+    for (const code of SANDBOX_SETUP_CODES)
+      for (const remedy of SANDBOX_REMEDIES)
+        expect(
+          localDeviceReplySchema.safeParse({
+            ...status,
+            sandbox: { state: "needsSetup", code, remedy },
+          }).success,
+        ).toBe(true);
+  });
+
+  test.each([
+    ["platform", { platform: "freebsd" }],
+    ["arch", { arch: "ia32" }],
+    ["empty shell", { shell: "" }],
+    ["shell with a path", { shell: "/bin/bash" }],
+    ["shell with a space", { shell: "my shell" }],
+    ["long shell", { shell: "a".repeat(65) }],
+    ["fractional protocolVersion", { protocolVersion: 1.5 }],
+    ["sandbox state", { sandbox: { state: "broken" } }],
+    ["sandbox code", { sandbox: { state: "needsSetup", code: "nope" } }],
+    ["sandbox remedy", { sandbox: { state: "needsSetup", remedy: "nope" } }],
+    [
+      "long reason",
+      { sandbox: { state: "needsSetup", reason: "x".repeat(1001) } },
+    ],
+    ["sandbox extra key", { sandbox: { state: "ready", extra: true } }],
+    ["missing sandbox", { sandbox: undefined }],
+    ["too many capabilities", { capabilities: Array(33).fill("a") }],
+    ["long capability", { capabilities: ["a".repeat(65)] }],
+    ["empty capability", { capabilities: [""] }],
+    ["non-string capability", { capabilities: [1] }],
+    ["extra top-level key", { token: "x" }],
+  ])("rejects an invalid %s", (_name, patch) => {
+    expect(
+      localDeviceReplySchema.safeParse({ ...status, ...patch }).success,
+    ).toBe(false);
+  });
+
+  test("accepts a 1000 character reason and 32 capabilities", () => {
+    expect(
+      localDeviceReplySchema.safeParse({
+        ...status,
+        sandbox: { state: "needsSetup", reason: "x".repeat(1000) },
+        capabilities: Array(32).fill("a"),
+      }).success,
+    ).toBe(true);
+  });
+
+  test("column mapping and serialisation round-trip, with null before any report", () => {
+    const now = new Date("2026-10-25T00:00:00Z");
+    const message = localDeviceReplySchema.parse(status);
+    if (message.type !== "status") throw new Error("wrong reply");
+    const columns = deviceStatusColumns(message, now);
+    expect(columns).toEqual({
+      platform: "linux",
+      arch: "x64",
+      shell: "bash",
+      sandboxState: "needsSetup",
+      sandboxCode: "bwrapMissing",
+      sandboxReason: "bubblewrap is not installed",
+      sandboxRemedy: "privilegedSetup",
+      capabilities: ["sandbox", "files"],
+      statusReportedAt: now,
+    });
+    expect(serializeDeviceSandbox(columns)).toEqual(status.sandbox);
+    const ready = deviceStatusColumns(
+      {
+        ...message,
+        sandbox: { state: "ready" },
+      },
+      now,
+    );
+    expect(ready.sandboxCode).toBeNull();
+    expect(serializeDeviceSandbox(ready)).toEqual({ state: "ready" });
+    expect(
+      serializeDeviceSandbox({
+        sandboxState: null,
+        sandboxCode: null,
+        sandboxReason: null,
+        sandboxRemedy: null,
+      }),
+    ).toBeNull();
+  });
 });

@@ -4,6 +4,7 @@ import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import {
+  deviceStatusColumns,
   localDeviceReplySchema,
   persistLocalFailureCode,
 } from "./invocation-reply";
@@ -91,6 +92,15 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
       const message = parsed.data;
       if (message.type === "heartbeat") {
         ws.send(JSON.stringify({ type: "heartbeat" }));
+        return;
+      }
+      if (message.type === "status") {
+        // Informational only; never touches invocations. The live-connection
+        // guard keeps a replaced or revoked connection from writing.
+        await db
+          .update(localDevices)
+          .set(deviceStatusColumns(message, new Date()))
+          .where(activeConnection);
         return;
       }
       const target = and(
