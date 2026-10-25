@@ -9,6 +9,7 @@ import {
   getCachedWorkspaceHubValue,
   setCachedWorkspaceHubValue,
 } from "../workspace-hub-cache";
+import { subscribeArtifactApprovalChanged } from "./artifact-approval-events";
 import { subscribeArtifactDeleted } from "./artifact-delete-events";
 import { invalidateArtifactDetail } from "./artifact-detail-loader";
 
@@ -259,6 +260,52 @@ export function useArtifacts(input: {
       },
     );
   }, [workspaceId]);
+
+  // Approving or revoking shared data in the preview changes the marker. Re-read
+  // the first page and copy only that flag onto the rows already shown, so the
+  // list does not flash a loading state and loaded pages stay as they are.
+  // Whether the marker flips depends on whether the touched version is the
+  // current one, which only the server knows.
+  useEffect(() => {
+    return subscribeArtifactApprovalChanged(
+      async ({ workspaceId: changedIn }) => {
+        try {
+          const fresh = await contentClient.listArtifactSummaries(changedIn, {
+            limit: 100,
+          });
+          const flags = new Map(
+            fresh.items.map((item) => [item.id, item.awaitingSharedApproval]),
+          );
+          const patch = (items: ArtifactSummaryItem[]) =>
+            items.map((item) => {
+              const flag = flags.get(item.id);
+              return flag === undefined || flag === item.awaitingSharedApproval
+                ? item
+                : { ...item, awaitingSharedApproval: flag };
+            });
+          const cachedItems = workspaceArtifactsCache.get(changedIn);
+          if (cachedItems) {
+            const patched = patch(cachedItems);
+            workspaceArtifactsCache.set(changedIn, patched);
+            setCachedWorkspaceHubValue<WorkspaceArtifactsCacheValue>(
+              WORKSPACE_ARTIFACTS_CACHE_BUCKET,
+              changedIn,
+              {
+                items: patched,
+                nextCursor:
+                  workspaceArtifactsCursorCache.get(changedIn) ?? null,
+              },
+            );
+          }
+          if (currentWorkspaceIdRef.current === changedIn) {
+            setArtifacts(patch);
+          }
+        } catch {
+          // The marker is advisory; the next list refresh corrects it.
+        }
+      },
+    );
+  }, [currentWorkspaceIdRef]);
 
   return {
     artifacts,

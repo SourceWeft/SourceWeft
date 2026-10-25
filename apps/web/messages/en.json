@@ -2904,6 +2904,7 @@
       "preview": "Preview {title}",
       "completed": "completed {date}",
       "public": "Public",
+      "awaitingApproval": "Waiting for approval",
       "couldNotLoad": "Could not load the artifact.",
       "loadFailed": "Failed to load artifacts.",
       "loadMoreFailed": "Failed to load more artifacts."

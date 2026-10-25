@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   findCurrentReadyArtifactVersionRecord: vi.fn(),
   findReadyArtifactVersionRecord: vi.fn(),
   findPubliclySharedArtifactIds: vi.fn(),
+  findPendingSharedApprovalArtifactIdsForViewer: vi.fn(),
   listArtifactSummaryRecords: vi.fn(),
   listArtifactRecords: vi.fn(),
   listCurrentReadyArtifactVersionRecords: vi.fn(),
@@ -72,6 +73,11 @@ vi.mock("./repository", () => ({
     mocks.listCurrentReadyArtifactVersionRecords,
 }));
 
+vi.mock("./pending-shared-approval", () => ({
+  findPendingSharedApprovalArtifactIdsForViewer:
+    mocks.findPendingSharedApprovalArtifactIdsForViewer,
+}));
+
 vi.mock("../sharing/store", () => ({
   findPubliclySharedArtifactIds: mocks.findPubliclySharedArtifactIds,
   revokeShareLink: vi.fn(),
@@ -111,6 +117,9 @@ test("artifact summaries are bounded and never load type handlers", async () => 
   mocks.findPubliclySharedArtifactIds.mockResolvedValue(
     new Set(["artifact-0"]),
   );
+  mocks.findPendingSharedApprovalArtifactIdsForViewer.mockResolvedValue(
+    new Set(["artifact-1"]),
+  );
 
   const result = await contentArtifactsService.listArtifactSummaries({
     workspaceId: "workspace-1",
@@ -123,6 +132,13 @@ test("artifact summaries are bounded and never load type handlers", async () => 
   assert.equal(serialized.includes("payloadJson"), false);
   assert.equal(serialized.includes("storageKey"), false);
   assert.equal(result.items[0]?.isPublic, true);
+  // One batched lookup for the whole page, scoped to the caller.
+  assert.equal(
+    mocks.findPendingSharedApprovalArtifactIdsForViewer.mock.calls.length,
+    1,
+  );
+  assert.equal(result.items[0]?.awaitingSharedApproval, false);
+  assert.equal(result.items[1]?.awaitingSharedApproval, true);
   assert.equal(
     result.items[0]?.previewImage?.url,
     "/v1/workspaces/workspace-1/artifacts/artifact-0/preview-image",

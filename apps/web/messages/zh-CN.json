@@ -2904,6 +2904,7 @@
       "preview": "预览 {title}",
       "completed": "完成于 {date}",
       "public": "公开",
+      "awaitingApproval": "等待审批",
       "couldNotLoad": "无法加载该制品。",
       "loadFailed": "加载制品失败。",
       "loadMoreFailed": "加载更多制品失败。"

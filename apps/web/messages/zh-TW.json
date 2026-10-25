@@ -2904,6 +2904,7 @@
       "preview": "預覽 {title}",
       "completed": "完成於 {date}",
       "public": "公開",
+      "awaitingApproval": "等待核准",
       "couldNotLoad": "無法載入該製品。",
       "loadFailed": "載入製品失敗。",
       "loadMoreFailed": "載入更多製品失敗。"
