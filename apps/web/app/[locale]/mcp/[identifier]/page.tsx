@@ -382,8 +382,11 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     score?.items.find((entry) => entry.key === "hasLicense")?.applicable ===
     false;
   const githubAccount = mcpGithubAccount(item);
-  const license = manifest.license ?? item.license ?? null;
-  const language = manifest.language ?? item.language ?? null;
+  // The item's values are the resolved ones (GitHub, packages, registry,
+  // then the owner's, normalised); the manifest's raw package value would
+  // hide them.
+  const license = item.license ?? null;
+  const language = item.language ?? null;
   const trusted = Boolean(item.official || item.verified);
   const description = publicMcpDescription({ item, manifest });
   const providerName = item.providerName ?? manifest.providerName;

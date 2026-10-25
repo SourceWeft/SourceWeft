@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {
+  normaliseLanguage,
+  normaliseLicense,
   repositoryMetadataFromGithub,
   resolveListingMetadata,
 } from "./listing-metadata";
@@ -88,17 +90,17 @@ describe("sources", () => {
     );
   });
 
-  test("the repository URL falls back to the registry's provenance", () => {
-    assert.equal(
-      resolve({
-        provenance: {
-          ...github(),
-          repository: { url: "https://github.com/acme/server" },
-        },
-        repoUrl: undefined,
-      }).license,
-      "MIT",
-    );
+  test("the repository URL falls back to the registry's provenance when the row has none, or an empty one", () => {
+    const provenance = {
+      ...github(),
+      repository: { url: "https://github.com/acme/server" },
+    };
+    for (const repoUrl of [null, "", "  "]) {
+      assert.equal(resolve({ provenance, repoUrl }).license, "MIT", `repoUrl ${JSON.stringify(repoUrl)}`);
+    }
+    // Without either, nothing ties the record to the entry.
+    assert.equal(resolve({ provenance: github(), repoUrl: null }).license, null);
+    assert.equal(resolve({ provenance: github(), repoUrl: "" }).license, null);
   });
 
   test("a monorepo subfolder takes the repository's license but not its language", () => {
@@ -121,6 +123,73 @@ describe("sources", () => {
     assert.equal(
       resolve({ provenance: { repositoryMetadata: { license: 7 } } }).license,
       null,
+    );
+  });
+});
+
+describe("normalising the values", () => {
+  test("common long names map to their SPDX id", () => {
+    for (const [given, expected] of [
+      ["MIT License", "MIT"],
+      ["  mit  ", "MIT"],
+      ["Apache License 2.0", "Apache-2.0"],
+      ["Apache 2.0", "Apache-2.0"],
+      ["BSD 3-Clause", "BSD-3-Clause"],
+      ["GNU General Public License v3.0", "GPL-3.0"],
+      ["The Unlicense", "Unlicense"],
+      ["Apache-2.0", "Apache-2.0"],
+      ["GPL-3.0-only", "GPL-3.0-only"],
+      ["MIT OR Apache-2.0", "MIT OR Apache-2.0"],
+    ] as const) {
+      assert.equal(normaliseLicense(given), expected, given);
+    }
+  });
+
+  test("placeholders and free text are no license", () => {
+    for (const given of [
+      "",
+      "   ",
+      "Unknown",
+      "UNLICENSED",
+      "NONE",
+      "None",
+      "Other",
+      "N/A",
+      "NOASSERTION",
+      "SEE LICENSE IN LICENSE",
+      "See LICENSE file",
+      "Custom",
+      "x".repeat(130),
+      null,
+      undefined,
+      42,
+    ]) {
+      assert.equal(normaliseLicense(given), null, String(given));
+    }
+  });
+
+  test("a language placeholder is no language", () => {
+    assert.equal(normaliseLanguage(" TypeScript "), "TypeScript");
+    for (const given of ["", "unknown", "None", "N/A", "Other", null, "x".repeat(70)]) {
+      assert.equal(normaliseLanguage(given), null, String(given));
+    }
+  });
+
+  test("every source is normalised, so one license reads alike and a placeholder never counts", () => {
+    const registry = { githubRegistry: { license: "MIT License", matchedBy: "name" } };
+    assert.equal(resolve({ provenance: registry }).license, "MIT");
+    assert.equal(
+      resolve({ manifest: { license: "SEE LICENSE IN LICENSE" }, provenance: {} }).license,
+      null,
+    );
+    // A placeholder from a higher source does not hide a real value below it.
+    const resolved = resolve({
+      manifest: { license: "UNLICENSED", language: "Unknown" },
+      provenance: { ...registry, ...github({ license: "NOASSERTION", language: "n/a" }) },
+    });
+    assert.deepEqual(
+      [resolved.license, resolved.licenseSource, resolved.language],
+      ["MIT", "github-registry", null],
     );
   });
 });

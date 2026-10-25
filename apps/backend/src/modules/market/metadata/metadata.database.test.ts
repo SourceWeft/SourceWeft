@@ -255,4 +255,69 @@ describe("license, language and translated summaries", () => {
     expect(candidate?.record).toBeNull();
     expect(translation.parseSummaryTranslation(candidate?.previous)?.["zh-CN"]).toBe("搜索页面。");
   });
+
+  test("failures back off, double, and stop after the last attempt until the English changes", async () => {
+    const id = `io.github.acme/${tag}-backoff`;
+    await upsert(manifest(id));
+    await settleReadme(id);
+    const versionId = plan.mcpServerVersionId(id, "1.0.0");
+    const day = translation.MCP_SUMMARY_TRANSLATION_RETRY_MS;
+    const failure = (attempts: number) => ({
+      ...translation.settledRecord({ summary: ENGLISH, status: "failed", now: NOW }),
+      attempts,
+    });
+
+    await repository.writeSummaryTranslation(versionId, failure(1));
+    expect(await candidateIdentifiers(new Date(NOW.getTime() + day - 1000))).not.toContain(id);
+    expect(await candidateIdentifiers(new Date(NOW.getTime() + day))).toContain(id);
+
+    await repository.writeSummaryTranslation(versionId, failure(2));
+    expect(await candidateIdentifiers(new Date(NOW.getTime() + day))).not.toContain(id);
+    expect(await candidateIdentifiers(new Date(NOW.getTime() + 2 * day))).toContain(id);
+
+    await repository.writeSummaryTranslation(
+      versionId,
+      failure(translation.MCP_SUMMARY_TRANSLATION_MAX_ATTEMPTS),
+    );
+    expect(await candidateIdentifiers(new Date(NOW.getTime() + 365 * day))).not.toContain(id);
+
+    // The English changes: due again.
+    await upsert(manifest(id, { summary: `${ENGLISH} Now with databases.` }));
+    expect(await candidateIdentifiers(NOW)).toContain(id);
+  });
+
+  test("a new version starts with the earlier version's repository record, until its own README fetch", async () => {
+    const id = `io.github.acme/${tag}-carry`;
+    await upsert(manifest(id, { repoUrl: `https://github.com/acme/${tag}-carry` }));
+    await settleReadme(id);
+    await readme.writeMcpRepositoryMetadata(plan.mcpServerVersionId(id, "1.0.0"), {
+      repository: `acme/${tag}-carry`,
+      subfolder: "",
+      license: "ISC",
+      language: "Go",
+      observedAt: NOW.toISOString(),
+    });
+    await upsert(manifest(id, { version: "2.0.0", repoUrl: `https://github.com/acme/${tag}-carry` }));
+    expect((await provenanceOf(id, "2.0.0")).repositoryMetadata).toMatchObject({
+      repository: `acme/${tag}-carry`,
+      license: "ISC",
+    });
+    const shown = await reads.findMcp(id);
+    expect(shown?.item.latestVersion).toBe("2.0.0");
+    expect(shown?.item.license).toBe("ISC");
+  });
+
+  test("a raw package value never reaches the page; a placeholder is hidden", async () => {
+    const id = `io.github.acme/${tag}-raw`;
+    await upsert(
+      manifest(id, {
+        repoUrl: `https://github.com/acme/${tag}-raw`,
+        license: "SEE LICENSE IN LICENSE",
+        language: "unknown",
+      }),
+    );
+    const item = (await reads.findMcp(id))?.item;
+    expect(item?.license).toBeNull();
+    expect(item?.language).toBeNull();
+  });
 });

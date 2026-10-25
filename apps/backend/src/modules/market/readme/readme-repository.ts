@@ -178,10 +178,17 @@ export async function carryOverMcpReadme(input: {
       readme_ref = p.readme_ref,
       readme_sha256 = p.readme_sha256,
       readme_fetched_at = p.readme_fetched_at,
-      readme_error = p.readme_error
+      readme_error = p.readme_error,
+      -- What GitHub said about the repository, until the new version's own
+      -- fetch (due at once) replaces it.
+      provenance_json = case
+        when p.repository_metadata is null then v.provenance_json
+        else v.provenance_json || jsonb_build_object(${MCP_REPOSITORY_METADATA_KEY}::text, p.repository_metadata)
+      end
     from (
       select readme_status, readme_md, readme_path, readme_ref,
-        readme_sha256, readme_fetched_at, readme_error
+        readme_sha256, readme_fetched_at, readme_error,
+        provenance_json -> ${MCP_REPOSITORY_METADATA_KEY}::text as repository_metadata
       from ${mcpServerVersions}
       where server_id = ${input.serverId}
         and id <> ${input.versionId}

@@ -11,6 +11,7 @@ import {
   type McpOwnerOverridesInput,
 } from "@sourceweft/contracts";
 import type { marketMcpOwnerOverrides } from "@sourceweft/db";
+import { normaliseLanguage, normaliseLicense } from "../metadata/listing-metadata";
 
 /**
  * The owner layer (Issue #367, W7): a verified claimant's corrections,
@@ -267,6 +268,11 @@ export function applyOwnerOverridesToItem(
   const tools = ownerSubmittedTools(input.row.toolsJson);
   const layer = ownerLayerOf(input.row);
   const iconUrl = setValue(values, "iconUrl");
+  const ownerRepoUrl = setValue(values, "repoUrl");
+  const repoMoved =
+    ownerRepoUrl !== undefined &&
+    ownerRepoUrl.replace(/\/+$/, "").toLowerCase() !==
+      (item.repoUrl ?? "").replace(/\/+$/, "").toLowerCase();
   return {
     ...item,
     ...(iconUrl ? { iconUrl, iconSource: "owner" as const } : {}),
@@ -275,8 +281,14 @@ export function applyOwnerOverridesToItem(
     ...(setValue(values, "summary") !== undefined
       ? { descriptionLanguage: null, localizedSummary: null }
       : {}),
-    license: setValue(values, "license") ?? item.license,
-    language: setValue(values, "language") ?? item.language,
+    // The registry's license and language describe the repository it named:
+    // an owner who points the listing elsewhere has not vouched for them.
+    license:
+      normaliseLicense(setValue(values, "license")) ??
+      (repoMoved ? null : item.license),
+    language:
+      normaliseLanguage(setValue(values, "language")) ??
+      (repoMoved ? null : item.language),
     homepageUrl: setValue(values, "homepageUrl") ?? item.homepageUrl,
     repoUrl: setValue(values, "repoUrl") ?? item.repoUrl,
     ...(tools.length > 0
@@ -311,8 +323,10 @@ export function applyOwnerOverridesToManifest(
   put("documentationUrl");
   put("homepageUrl");
   put("repoUrl");
-  put("license");
-  put("language");
+  const license = normaliseLicense(setValue(values, "license"));
+  if (license) next.license = license;
+  const language = normaliseLanguage(setValue(values, "language"));
+  if (language) next.language = language;
   if (tools.length > 0) next.tools = tools;
   next.owner = ownerLayerOf(row);
   return next;

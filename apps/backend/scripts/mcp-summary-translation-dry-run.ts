@@ -36,6 +36,9 @@ const { closeDatabase } = await import("@sourceweft/db");
 const { runSummaryTranslationPass } = await import(
   "../src/modules/market/metadata/summary-translation-run"
 );
+const { summaryTranslationText } = await import(
+  "../src/modules/market/metadata/summary-translation"
+);
 
 try {
   const result = await runSummaryTranslationPass({ limit, dryRun: true });
@@ -45,12 +48,17 @@ try {
     );
   }
   await mkdir(dirname(out), { recursive: true });
-  await writeFile(out, JSON.stringify(result.reports, null, 2));
-  for (const report of result.reports) {
+  // zh-TW is not stored: it is converted when read, so it is shown here the same way.
+  const rows = result.reports.map((report) => ({
+    ...report,
+    "zh-TW": summaryTranslationText(report.record, "zh-TW"),
+  }));
+  await writeFile(out, JSON.stringify(rows, null, 2));
+  for (const report of rows) {
     console.log(`\n[${report.outcome}] ${report.identifier}`);
     console.log(`  ${report.record.sourceLanguage}: ${report.summary}`);
     if (report.record["zh-CN"]) console.log(`  zh-CN: ${report.record["zh-CN"]}`);
-    if (report.record["zh-TW"]) console.log(`  zh-TW: ${report.record["zh-TW"]}`);
+    if (report["zh-TW"]) console.log(`  zh-TW: ${report["zh-TW"]}`);
   }
   console.log(`\n${result.reports.length} entries → ${out}`);
 } finally {

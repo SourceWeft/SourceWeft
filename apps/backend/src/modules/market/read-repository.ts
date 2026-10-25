@@ -37,7 +37,11 @@ import {
   applyOwnerOverridesToManifest,
   ownerSubmittedTools,
 } from "./claims/overrides";
-import { resolveListingMetadata } from "./metadata/listing-metadata";
+import {
+  normaliseLanguage,
+  normaliseLicense,
+  resolveListingMetadata,
+} from "./metadata/listing-metadata";
 import {
   MCP_SUMMARY_TRANSLATION_KEY,
   descriptionLanguageFor,
@@ -306,10 +310,11 @@ function mapItemRow(input: {
     repoUrl: input.row.repoUrl,
     license: listing.hostedOnly
       ? null
-      : (listing.license ?? stringMeta(mergedMeta, "license")),
+      : (listing.license ?? normaliseLicense(stringMeta(mergedMeta, "license"))),
     language: listing.hostedOnly
       ? null
-      : (listing.language ?? stringMeta(mergedMeta, "language")),
+      : (listing.language ??
+        normaliseLanguage(stringMeta(mergedMeta, "language"))),
     status: input.row.status,
     visibility: input.row.visibility,
     categories: input.categories,

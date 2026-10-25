@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "../../../shared/logger";
+import { textOf } from "../../catalog-overview/model";
 import {
   getSystemModelReadiness,
   SystemModelUnavailableError,
@@ -88,7 +89,7 @@ export const callSummaryTranslationModel: SummaryTranslationModelCall = async (
       }),
   );
   return {
-    output: result.structuredOutput ?? result.raw?.content,
+    output: result.structuredOutput ?? textOf(result.raw?.content),
     model: result.providerModel ?? result.model,
   };
 };
@@ -188,35 +189,25 @@ export async function runSummaryTranslationPass(
       continue;
     }
 
-    const prompt = buildSummaryTranslationPrompt(text);
+    const failed = () =>
+      report(
+        "failed",
+        settledRecord({
+          summary: candidate.summary,
+          status: "failed",
+          now,
+          previous: stored,
+        }),
+      );
+    // Only the model call is guarded: a failed write of a translation that
+    // was paid for is the database's error, not the model's.
+    let answer: Awaited<ReturnType<SummaryTranslationModelCall>>;
     try {
-      const answer = await deps.callModel({
-        ...prompt,
+      answer = await deps.callModel({
+        ...buildSummaryTranslationPrompt(text),
         subjectRef: `mcp-server-version:${candidate.versionId}`,
         scopeId,
       });
-      modelErrors = 0;
-      const zhCN = parseSummaryTranslationOutput(answer.output);
-      if (!zhCN) {
-        logger.info("MCP summary translation rejected", {
-          identifier: candidate.identifier,
-          sourceHash: summarySourceHash(candidate.summary),
-        });
-        await report(
-          "failed",
-          settledRecord({ summary: candidate.summary, status: "failed", now }),
-        );
-        continue;
-      }
-      await report(
-        "translated",
-        translatedRecord({
-          summary: candidate.summary,
-          zhCN,
-          model: answer.model,
-          now,
-        }),
-      );
     } catch (error) {
       logger.warn("MCP summary translation call failed", {
         identifier: candidate.identifier,
@@ -229,11 +220,28 @@ export async function runSummaryTranslationPass(
       ) {
         break;
       }
-      await report(
-        "failed",
-        settledRecord({ summary: candidate.summary, status: "failed", now }),
-      );
+      await failed();
+      continue;
     }
+    modelErrors = 0;
+    const zhCN = parseSummaryTranslationOutput(answer.output, text);
+    if (!zhCN) {
+      logger.info("MCP summary translation rejected", {
+        identifier: candidate.identifier,
+        sourceHash: summarySourceHash(candidate.summary),
+      });
+      await failed();
+      continue;
+    }
+    await report(
+      "translated",
+      translatedRecord({
+        summary: candidate.summary,
+        zhCN,
+        model: answer.model,
+        now,
+      }),
+    );
   }
   return result;
 }

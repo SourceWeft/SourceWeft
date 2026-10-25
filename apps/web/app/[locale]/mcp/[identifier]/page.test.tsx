@@ -1294,6 +1294,17 @@ describe("public MCP detail page top card", () => {
     expect(known).toMatch(/<dt[^>]*>Language<\/dt><dd[^>]*>TypeScript<\/dd>/);
   });
 
+  it("shows the resolved license and language, not the manifest's raw package value", async () => {
+    use({
+      item: { language: "Go", license: "MIT" },
+      manifest: { language: "JavaScript", license: "SEE LICENSE IN LICENSE" },
+    });
+    const card = topCard(await render());
+    expect(card).toMatch(/<dt[^>]*>License<\/dt><dd[^>]*>MIT<\/dd>/);
+    expect(card).toMatch(/<dt[^>]*>Language<\/dt><dd[^>]*>Go<\/dd>/);
+    expect(card).not.toContain("SEE LICENSE");
+  });
+
   it("calls a hosted-only service a hosted service, without license or language rows", async () => {
     use({
       item: { language: "TypeScript", license: "MIT" },
