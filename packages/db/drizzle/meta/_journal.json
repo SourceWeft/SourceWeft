@@ -456,6 +456,13 @@
       "when": 1792850292500,
       "tag": "0064_market_mcp_tool_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792901504711,
+      "tag": "0065_market_mcp_icon_dry_run",
+      "breakpoints": true
     }
   ]
 }

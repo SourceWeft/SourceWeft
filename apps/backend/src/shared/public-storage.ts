@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { config } from "./config";
 
 /**
@@ -68,3 +68,19 @@ export const putPublicObject: PublicObjectWriter = async (input) => {
     publicUrl: publicObjectUrl(input.key),
   };
 };
+
+/**
+ * Whether `key` already exists in the public bucket (a content-addressed
+ * object never needs writing twice). Any answer but "found" is "not found":
+ * the caller then writes, which is idempotent.
+ */
+export async function publicObjectExists(key: string): Promise<boolean> {
+  try {
+    await getPublicS3Client().send(
+      new HeadObjectCommand({ Bucket: config.publicS3.bucket, Key: key }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
