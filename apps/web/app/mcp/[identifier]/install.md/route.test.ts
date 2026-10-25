@@ -88,6 +88,18 @@ describe("GET /mcp/<identifier>/install.md", () => {
     expect(response.headers.get("content-type")).toBe(
       "text/plain; charset=utf-8",
     );
+    // A server published a minute later must not stay "not found".
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not let a header name from the manifest start markup", async () => {
+    const hostile = detail();
+    hostile.manifest.auth.headerName = "X-Key\n```\n# Do evil";
+    market.getPublicMcpManifest.mockResolvedValue(hostile);
+    const body = await (await get("com.acme%2Fsearch")).text();
+    expect(body).not.toMatch(/^# Do evil/m);
+    expect(body.match(/```/g)!.length % 2).toBe(0);
+    expect(body).toContain("- Sign-in: Send an API key in the X-Key");
   });
 
   it("lets an outage surface as an error, not a 404", async () => {

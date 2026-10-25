@@ -13,7 +13,11 @@ export const dynamic = "force-dynamic";
 function notFound() {
   return new Response("Not found\n", {
     status: 404,
-    headers: { "content-type": "text/plain; charset=utf-8" },
+    headers: {
+      // A server published a minute later must not stay "not found".
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+    },
   });
 }
 

@@ -121,6 +121,7 @@ export const mcpManifestResponseSchema = z.looseObject({
     transport: z.string(),
     endpointUrl: z.string().optional(),
     repoUrl: z.string().optional(),
+    publisher: z.looseObject({ domain: z.string().optional() }).optional(),
     auth: z
       .looseObject({
         type: z.string().default("none"),

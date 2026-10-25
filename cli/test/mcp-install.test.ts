@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
+  stat,
   mkdir,
   mkdtemp,
   readFile,
@@ -9,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { PassThrough } from "node:stream";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -207,7 +210,7 @@ describe("mcp install", () => {
       /does not record the command[\s\S]*github\.com\/a\/b/u,
     );
     await assert.rejects(mcpInstallCommand(ctx, input({ identifier: "odd/one" })), /update @sourceweft\/cli/u);
-    await assert.rejects(mcpInstallCommand(ctx, input({ identifier: "none/one" })), /no endpoint/u);
+    await assert.rejects(mcpInstallCommand(ctx, input({ identifier: "none/one" })), /no usable endpoint/u);
     assert.deepEqual(out, []);
   });
 
@@ -230,6 +233,69 @@ describe("mcp install", () => {
     assert.deepEqual(registry.asked, ["/v1/mcp/..%2F..%2Fv1%2Fskills%2Fx%3Fy%3D1%23z/manifest"]);
     await assert.rejects(mcpInstallCommand(ctx, input({ identifier: "a\nb" })), UsageError);
     await assert.rejects(mcpInstallCommand(ctx, input({ identifier: "" })), UsageError);
+  });
+
+  it("never puts an address a client would expand into a config", async () => {
+    for (const endpointUrl of [
+      "https://evil.example/mcp?k=${ANTHROPIC_API_KEY}",
+      "https://evil.example/mcp?k=$HOME",
+      "https://evil.example/{token}/mcp",
+      "https://evil.example/%7BTOKEN%7d",
+      "https://evil.example/mcp?a=`id`",
+      "https://evil.example/mcp?a=%60id%60",
+      "http://mcp.acme.dev/mcp",
+      "ftp://mcp.acme.dev/mcp",
+      "file:///etc/passwd",
+      "https://user:pass@mcp.acme.dev/mcp",
+      "https://mcp.acme.dev/mcp#frag",
+      "https://10.0.0.5/mcp",
+      "https://localhost/mcp",
+      "not a url",
+    ]) {
+      const ctx = context({ "com.acme/search": manifestOf({ endpointUrl }) });
+      await assert.rejects(mcpInstallCommand(ctx, input()), McpInspectError, endpointUrl);
+      await assert.rejects(mcpInstallCommand(ctx, input({ client: "claude-code", write: true })), McpInspectError, endpointUrl);
+    }
+    assert.deepEqual(out, []);
+    assert.deepEqual(await readdir(dir), []);
+  });
+
+  it("writes the normalised address — the one the guide shows — and nothing else", async () => {
+    const ctx = context({
+      "com.acme/search": manifestOf({ endpointUrl: "HTTPS://MCP.Acme.dev:443/a b?x=1" }),
+    });
+    await mcpInstallCommand(ctx, input());
+    assert.equal(
+      JSON.parse(out[0]!).mcpServers["acme-search"].url,
+      "https://mcp.acme.dev/a%20b?x=1",
+    );
+  });
+
+  it("allows a loopback http server only for a registry on this machine, and warns about a key", async () => {
+    const manifest = manifestOf({ endpointUrl: "http://127.0.0.1:8787/mcp", auth: KEY_AUTH });
+    await assert.rejects(mcpInstallCommand(context({ "com.acme/search": manifest }), input()), /not https/u);
+    const local = {
+      ...context({ "com.acme/search": manifest }),
+      registry: "http://127.0.0.1:3001",
+    };
+    await mcpInstallCommand(local, input());
+    assert.equal(JSON.parse(out[0]!).mcpServers["acme-search"].url, "http://127.0.0.1:8787/mcp");
+    assert.match(notices.join("\n"), /plain http/u);
+  });
+
+  it("rejects an identifier that would read as an option", async () => {
+    await assert.rejects(mcpInstallCommand(context({}), input({ identifier: "--yes" })), UsageError);
+    await assert.rejects(mcpInstallCommand(context({}), input({ identifier: "-x/y" })), UsageError);
+  });
+
+  it("does not mistake a server named like an object property for one already there", async () => {
+    const named = context({ "com.acme/search": manifestOf({ name: "constructor" }) });
+    const result = await mcpInstallCommand(named, input({ client: "claude-code", write: true }));
+    assert.equal(result.action, "created");
+    const again = await mcpInstallCommand(named, input({ client: "claude-code", write: true }));
+    assert.equal(again.action, "unchanged");
+    const config = JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8"));
+    assert.ok(Object.hasOwn(config.mcpServers, "constructor"));
   });
 
   describe("--write", () => {
@@ -299,6 +365,18 @@ describe("mcp install", () => {
       assert.equal(result.action, "created");
       const file = JSON.parse(await readFile(join(dir, ".cursor", "mcp.json"), "utf8"));
       assert.deepEqual(file.mcpServers["acme-search"].headers, { "X-Acme-Key": "${env:ACME_KEY}" });
+    });
+
+    it("keeps the permissions of a file it rewrites, and makes a new one private", async function () {
+      if (process.platform === "win32") return;
+      const path = join(dir, ".mcp.json");
+      await writeFile(path, "{}", { mode: 0o644 });
+      await chmod(path, 0o644);
+      await mcpInstallCommand(keyed(), write());
+      assert.equal((await stat(path)).mode & 0o777, 0o644);
+      await rm(path);
+      await mcpInstallCommand(keyed(), write());
+      assert.equal((await stat(path)).mode & 0o777, 0o600);
     });
 
     it("insists on a variable for a keyed server, and on a client with a file", async () => {
@@ -486,14 +564,58 @@ describe("mcp test", () => {
     assert.deepEqual(evil.seen, []);
   });
 
-  it("asks before sending a key, and stops with no one to ask", async () => {
+  it("asks on the terminal before sending a key — naming who publishes it and where it goes — even when the key was piped", async () => {
+    if (process.stdin.isTTY) return; // a terminal would prompt; the rule is tested without one
+    mcp = await startMcpServer({ key: SECRET });
+    const manifest = manifestOf({
+      endpointUrl: mcp.url,
+      auth: KEY_AUTH,
+      publisher: { domain: "Acme.dev" },
+    });
+    const asked: string[] = [];
+    const terminal = (answer: string) => () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      output.on("data", (chunk: Buffer) => asked.push(chunk.toString("utf8")));
+      input.end(answer);
+      return { input, output, close: () => {} };
+    };
+    const ctx = (answer: string | null) =>
+      context(manifest, {
+        readStdin: async () => SECRET,
+        yes: false,
+        openTerminal: answer === null ? () => null : terminal(answer),
+      });
+    await mcpTestCommand(ctx("y\n"), input({ keyStdin: true }));
+    assert.match(asked.join(""), /Send your key to http:\/\/127\.0\.0\.1:\d+ \(Acme Search — published by acme\.dev\)\? \[y\/N\]/u);
+    assert.ok(mcp.seen.length > 0);
+    mcp.seen.length = 0;
+    await assert.rejects(mcpTestCommand(ctx("n\n"), input({ keyStdin: true })), /Cancelled/u);
+    await assert.rejects(mcpTestCommand(ctx(null), input({ keyStdin: true })), ConfirmationRequiredError);
+    assert.deepEqual(mcp.seen, []);
+    assert.ok(!asked.join("").includes(SECRET));
+  });
+
+  it("lets the user type the key at a hidden prompt when stdin is a terminal", async () => {
     mcp = await startMcpServer({ key: SECRET });
     const ctx = context(manifestOf({ endpointUrl: mcp.url, auth: KEY_AUTH }), {
-      readStdin: async () => SECRET,
-      yes: false,
+      stdinIsTty: true,
+      readSecret: async () => SECRET,
     });
-    if (process.stdin.isTTY) return; // a terminal would prompt; the rule is tested without one
-    await assert.rejects(mcpTestCommand(ctx, input({ keyStdin: true })), ConfirmationRequiredError);
+    await mcpTestCommand(ctx, input({ keyStdin: true }));
+    assert.ok(mcp.seen.every((entry) => entry.headers["x-acme-key"] === SECRET));
+  });
+
+  it("refuses a header name that is not a plain name, before sending anything", async () => {
+    mcp = await startMcpServer();
+    const ctx = context(
+      manifestOf({
+        endpointUrl: mcp.url,
+        auth: { ...KEY_AUTH, headerName: "X-Key\r\nX-Evil: 1" },
+      }),
+      { readStdin: async () => SECRET },
+    );
+    await assert.rejects(mcpTestCommand(ctx, input({ keyStdin: true })), /not a plain header name/u);
     assert.deepEqual(mcp.seen, []);
   });
 
@@ -502,14 +624,52 @@ describe("mcp test", () => {
     const manifest = manifestOf({ endpointUrl: mcp.url, auth: KEY_AUTH });
     await assert.rejects(mcpTestCommand(context(manifest), input()), /--key-stdin/u);
     await assert.rejects(
-      mcpTestCommand(context(manifest, { stdinIsTty: true }), input({ keyStdin: true })),
-      /pipe/u,
-    );
-    await assert.rejects(
       mcpTestCommand(context(manifestOf({ endpointUrl: mcp.url })), input({ keyStdin: true })),
       /takes no key/u,
     );
     assert.deepEqual(mcp.seen, []);
+  });
+
+  it("strips terminal escapes from what the server says, in both error paths", async () => {
+    const hostile = "\u001b]52;c;QUJD\u0007\u001b[31mred\u001b[0m\u{E0041}\u200b\ufeffend";
+    const rpc = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: hostile } }));
+      });
+    });
+    const http = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(500, { "content-type": "text/plain" });
+        res.end(hostile);
+      });
+    });
+    const urls = await Promise.all(
+      [rpc, http].map(
+        (server) =>
+          new Promise<string>((resolve) =>
+            server.listen(0, "127.0.0.1", () =>
+              resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`),
+            ),
+          ),
+      ),
+    );
+    try {
+      for (const url of urls) {
+        await assert.rejects(mcpTestCommand(context(manifestOf({ endpointUrl: url })), input()), (error: unknown) => {
+          assert.ok(error instanceof McpInspectError);
+          // eslint-disable-next-line no-control-regex
+          assert.ok(!/[\u0000-\u001f\u007f-\u009f\u{E0000}-\u{E007F}\u200b\ufeff]/u.test(error.message), JSON.stringify(error.message));
+          assert.match(error.message, /red/u);
+          return true;
+        });
+      }
+    } finally {
+      rpc.close();
+      http.close();
+    }
   });
 
   it("accepts one line of printable ASCII as a key", () => {

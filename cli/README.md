@@ -42,7 +42,9 @@ talks to the registry each skill was installed from.
 ```sh
 sourceweft mcp install com.example/mcp --client claude-code --key-env EXAMPLE_API_KEY
 sourceweft mcp install com.example/mcp --client claude-code --key-env EXAMPLE_API_KEY --write
-printf %s "$EXAMPLE_API_KEY" | sourceweft mcp test com.example/mcp --key-stdin --yes
+printf %s "$EXAMPLE_API_KEY" | sourceweft mcp test com.example/mcp --key-stdin --yes   # POSIX shell
+$env:EXAMPLE_API_KEY | sourceweft mcp test com.example/mcp --key-stdin --yes             # PowerShell
+sourceweft mcp test com.example/mcp --key-stdin   # typed at a hidden prompt
 sourceweft mcp test com.example/mcp --oauth
 ```
 
@@ -57,13 +59,23 @@ refers to it (`${NAME}`, or `${env:NAME}` for Cursor); the CLI does not read it.
 A server that runs as a local process has no recorded launch command, so there
 is nothing to print for it.
 
-`mcp test` connects to the endpoint the manifest names — https only, never a
-private address — with your own credentials, and lists the tools. A key comes
-from standard input (`--key-stdin`) and is sent only to that origin, after you
-agree to it (`--yes` agrees; without a terminal and without `--yes` the command
-stops with exit code 4). `--oauth` signs in the way `mcp inspect --oauth` does.
-Tool names and descriptions are printed as the server wrote them, minus control
-characters.
+`mcp test` connects to the endpoint the manifest names — https only, no
+credentials in the address, never a private address — with your own
+credentials, and lists the tools. A key comes from standard input
+(`--key-stdin`): piped in, or typed at a hidden prompt when stdin is a terminal.
+It is sent only to that origin, and only after you have answered a question that
+names the server's publisher and the origin (asked on the terminal even when the
+key is piped; `--yes` answers it for non-interactive use, and without a
+terminal or `--yes` the command stops with exit code 4). `--oauth` signs in the
+way `mcp inspect --oauth` does. Tool names, descriptions and error text are the
+server's own, printed without control or invisible characters.
+
+`install` and `test` read the manifest from the registry over TLS; it is not
+covered by the hash-verified skills index, so the registry is trusted for the
+address it names. For that reason an address with `${…}`, `$`, braces or a
+backtick, credentials, a fragment, plain http or a private host is refused: a
+client expands `${VAR}` in a config's `url`, and would send the variable's value
+to the address.
 
 ## MCP owners
 

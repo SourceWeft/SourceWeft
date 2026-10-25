@@ -55,6 +55,30 @@ export type McpClientConfigOptions = {
 
 const HEADER_NAME = /^[\w-]{1,100}$/;
 
+/**
+ * The endpoint as a config will carry it, or null when it must not be put in
+ * one. Clients expand `${VAR}` in a config's `url` and `headers`, so an
+ * address a catalog entry gave as `https://evil.example/?k=${SECRET}` would
+ * make the client send the user's secret away: anything with `$`, `{` or `}`
+ * (also percent-encoded) is refused. Only https, without credentials or a
+ * fragment, is accepted. The returned string is the normalised URL, and the
+ * only form of the endpoint the guide shows and the config holds.
+ */
+export function mcpConfigEndpoint(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+      return null;
+    }
+    const href = url.toString();
+    if (/[`${}]|%7[bd]|%60/i.test(value) || /[`${}]|%7[bd]|%60/i.test(href)) return null;
+    return href;
+  } catch {
+    return null;
+  }
+}
+
 /** How `client` refers to an environment variable inside its config file. */
 function envReference(client: McpClientId, name: string) {
   return client === "cursor" ? `\${env:${name}}` : `\${${name}}`;
@@ -127,7 +151,9 @@ export function remoteMcpClientConfigObject(
   manifest: MarketMcpManifest,
   options: McpClientConfigOptions = {},
 ) {
-  if (manifest.transport === "stdio" || !manifest.endpointUrl) {
+  const endpoint =
+    manifest.transport === "stdio" ? null : mcpConfigEndpoint(manifest.endpointUrl);
+  if (!endpoint) {
     return null;
   }
   const client = options.client ?? "generic";
@@ -141,7 +167,7 @@ export function remoteMcpClientConfigObject(
     ...(client === "cursor"
       ? {}
       : { type: manifest.transport === "streamable_http" ? "http" : "sse" }),
-    url: manifest.endpointUrl,
+    url: endpoint,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
   return { mcpServers: { [mcpClientConfigKey(manifest)]: server } };

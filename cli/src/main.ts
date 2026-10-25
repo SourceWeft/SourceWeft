@@ -23,6 +23,7 @@ import {
   mcpOAuthLogoutCommand,
   mcpSubmitToolsCommand,
 } from "./commands/mcp";
+import { terminalSafe } from "./mcp/oauth/redact";
 import { findAgent } from "./install/agents";
 import { EXIT, toFailure, UsageError } from "./errors";
 import { createRegistryClient, normalizeRegistry } from "./registry/client";
@@ -436,9 +437,10 @@ run(process.argv.slice(2)).then(
   },
   (error: unknown) => {
     const failure = toFailure(error);
-    console.error(`Error: ${failure.message}`);
+    // Server text can reach a message; a terminal must not act on it.
+    console.error(`Error: ${terminalSafe(failure.message)}`);
     for (const detail of failure.details ?? []) {
-      console.error(`  - ${detail}`);
+      console.error(`  - ${terminalSafe(detail)}`);
     }
     process.exitCode = failure.exitCode;
   },

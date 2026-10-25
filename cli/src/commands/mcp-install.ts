@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { McpInspectError, UsageError } from "../errors";
@@ -6,8 +6,10 @@ import { renameWithRetry } from "../install/write";
 import { boundInspectedTools, boundServerInfo } from "../mcp/bound";
 import {
   buildMcpClientConfig,
+  checkEndpoint,
   customHeaderNames,
   ENV_VAR_NAME,
+  HEADER_NAME,
   MCP_CLIENT_IDS,
   REMOTE_TRANSPORTS,
   mcpClientConfigKey,
@@ -18,13 +20,13 @@ import { createHttpTransport } from "../mcp/http";
 import { inspectServer, type InspectResult } from "../mcp/inspect";
 import { createCredentialedFetch } from "../mcp/oauth/guard";
 import { printable, redactSecrets } from "../mcp/oauth/redact";
-import { isPrivateHost, isLoopbackHost } from "../mcp/oauth/trust";
+import { isLoopbackHost } from "../mcp/oauth/trust";
 import {
   RegistryError,
   type RegistryClient,
 } from "../registry/client";
 import type { McpManifestView } from "../registry/schema";
-import { confirm, truncate } from "../ui";
+import { confirm, readHiddenLine, truncate, type Terminal } from "../ui";
 import {
   inspectWithOAuth,
   type McpInspectContext,
@@ -67,8 +69,13 @@ export function parseClient(value: string | undefined): McpClientId {
 }
 
 function checkIdentifier(identifier: string): string {
-  // eslint-disable-next-line no-control-regex
-  if (!identifier.trim() || identifier.length > MAX_IDENTIFIER_CHARS || /[\u0000-\u001f\u007f]/u.test(identifier)) {
+  if (
+    !identifier.trim() ||
+    identifier.length > MAX_IDENTIFIER_CHARS ||
+    identifier.startsWith("-") ||
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/u.test(identifier)
+  ) {
     throw new UsageError("Pass the server's identifier, for example com.notion/mcp.");
   }
   return identifier;
@@ -93,6 +100,20 @@ async function loadManifest(
     }
     throw error;
   }
+}
+
+/** Who the catalog says publishes the server, for the question the user answers. */
+export function publisherLabel(manifest: McpManifestView): string {
+  const domain = manifest.publisher?.domain;
+  if (domain && /^[a-z0-9.-]+\.[a-z]{2,}$/iu.test(domain)) {
+    return `published by ${domain.toLowerCase()}`;
+  }
+  const github = /^io\.github\.([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\//iu.exec(
+    manifest.identifier,
+  );
+  return github
+    ? `published under GitHub account ${github[1]}, not verified as the product's maker`
+    : "publisher not verified";
 }
 
 function siteLink(registry: string, identifier: string): string | null {
@@ -150,6 +171,7 @@ export async function mergeClientConfig(
   const [key, server] = Object.entries(config.mcpServers)[0]!;
   let existing: ConfigFile = {};
   let existed = false;
+  let mode = 0o600;
   try {
     const stat = await lstat(path);
     if (stat.isSymbolicLink()) {
@@ -161,6 +183,8 @@ export async function mergeClientConfig(
       throw new McpInspectError(`${path} is not a regular file.`);
     }
     existed = true;
+    // A rewrite keeps the file's permissions; a new file is private.
+    mode = stat.mode & 0o777;
   } catch (error) {
     if (error instanceof McpInspectError) throw error;
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -185,7 +209,8 @@ export async function mergeClientConfig(
       `"mcpServers" in ${path} is not an object, so the file was left alone.`,
     );
   }
-  const current = servers?.[key];
+  const current =
+    servers !== undefined && Object.hasOwn(servers, key) ? servers[key] : undefined;
   if (current !== undefined && isDeepStrictEqual(current, server)) {
     return "unchanged";
   }
@@ -205,6 +230,7 @@ export async function mergeClientConfig(
       flag: "wx",
       mode: 0o600,
     });
+    await chmod(temp, mode).catch(() => {});
     await renameWithRetry(temp, path);
   } catch (error) {
     await rm(temp, { force: true });
@@ -258,9 +284,9 @@ export async function mcpInstallCommand(
       `This CLI does not know the transport "${printable(manifest.transport, 40)}" of ${identifier}; update @sourceweft/cli.`,
     );
   }
-  if (!manifest.endpointUrl) {
-    throw new McpInspectError(`The catalog records no endpoint for ${identifier}.`);
-  }
+  const registryIsLocal = isLoopbackHost(new URL(ctx.registry).hostname);
+  const endpoint = checkEndpoint(manifest.endpointUrl, registryIsLocal);
+  if ("problem" in endpoint) throw new McpInspectError(endpoint.problem);
   if (input.keyEnv !== undefined && !needsKey) {
     throw new UsageError(
       authType === "oauth"
@@ -285,6 +311,7 @@ export async function mcpInstallCommand(
   const config = buildMcpClientConfig(manifest, {
     client: input.client,
     ...(input.keyEnv !== undefined ? { keyEnv: input.keyEnv } : {}),
+    registryIsLocal,
   });
   if (!config) {
     throw new McpInspectError(`The catalog records no usable endpoint for ${identifier}.`);
@@ -292,6 +319,11 @@ export async function mcpInstallCommand(
   const key = mcpClientConfigKey(manifest);
 
   const guidance: string[] = [];
+  if (needsKey && endpoint.url.protocol === "http:") {
+    guidance.push(
+      `Warning: ${endpoint.url.origin} is plain http, so the key would travel unencrypted. This is accepted only because the registry is on this machine.`,
+    );
+  }
   if (needsKey) {
     guidance.push(
       input.keyEnv !== undefined
@@ -335,6 +367,10 @@ export type McpTestContext = McpInspectContext & {
   readStdin?: () => Promise<string>;
   /** True when standard input is a terminal; replaceable in tests. */
   stdinIsTty?: boolean;
+  /** Reads the key typed at the terminal; replaceable in tests. */
+  readSecret?: () => Promise<string>;
+  /** The terminal consent is asked on; replaceable in tests. */
+  openTerminal?: () => Terminal | null;
   /** The user has agreed to send the credential to the endpoint. */
   yes: boolean;
 };
@@ -357,53 +393,48 @@ export type McpTestResult = {
 };
 
 /**
- * The endpoint a manifest pins, as a URL the CLI may contact: https, no
- * credentials in it, and not a private or local address — unless the registry
- * itself is local, which is a development setup. A registry entry is
- * third-party data; it does not get to point the user's key at their own
- * network.
+ * The endpoint a manifest pins, as the URL the CLI may contact (see
+ * `checkEndpoint`). A registry entry is third-party data; it does not get to
+ * point the user's key at their own network.
  */
 export function pinEndpoint(manifest: McpManifestView, registry: string): URL {
-  let url: URL;
-  try {
-    url = new URL(manifest.endpointUrl ?? "");
-  } catch {
-    throw new McpInspectError("The catalog records no usable endpoint for this server.");
-  }
-  const registryIsLocal = isLoopbackHost(new URL(registry).hostname);
-  if (url.username || url.password || url.hash) {
-    throw new McpInspectError(
-      "The catalog's endpoint carries credentials or a fragment, so it was not contacted.",
-    );
-  }
-  if (url.protocol === "http:" && registryIsLocal && isLoopbackHost(url.hostname)) {
-    return url;
-  }
-  if (url.protocol !== "https:") {
-    throw new McpInspectError(
-      `The catalog's endpoint ${url.origin} is not https, so it was not contacted.`,
-    );
-  }
-  if (isPrivateHost(url.hostname) && !registryIsLocal) {
-    throw new McpInspectError(
-      `The catalog's endpoint ${url.origin} is a private or local address, so it was not contacted.`,
-    );
-  }
-  return url;
+  const checked = checkEndpoint(
+    manifest.endpointUrl,
+    isLoopbackHost(new URL(registry).hostname),
+  );
+  if ("problem" in checked) throw new McpInspectError(checked.problem);
+  return checked.url;
 }
+
+/** How long a piped key may take to arrive before the command gives up. */
+export const STDIN_TIMEOUT_MS = 30_000;
 
 async function defaultReadStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of process.stdin) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
-    size += buffer.length;
-    if (size > MAX_KEY_BYTES) {
-      throw new UsageError("The key on standard input is larger than 16 KiB.");
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      process.stdin.destroy();
+      reject(new UsageError("Nothing arrived on standard input within 30 seconds."));
+    }, STDIN_TIMEOUT_MS);
+  });
+  const read = (async () => {
+    for await (const chunk of process.stdin) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+      size += buffer.length;
+      if (size > MAX_KEY_BYTES) {
+        throw new UsageError("The key on standard input is larger than 16 KiB.");
+      }
+      chunks.push(buffer);
     }
-    chunks.push(buffer);
+    return Buffer.concat(chunks).toString("utf8");
+  })();
+  try {
+    return await Promise.race([read, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 /** The key as one visible-ASCII line, or a usage error that does not repeat it. */
@@ -423,11 +454,19 @@ function headersFor(
   key: string,
 ): Record<string, string> {
   const { auth } = manifest;
+  const checked = (name: string) => {
+    if (!HEADER_NAME.test(name)) {
+      throw new McpInspectError(
+        "The catalog names a header that is not a plain header name, so no key was sent.",
+      );
+    }
+    return name;
+  };
   if (auth.type === "bearer") {
-    return { [auth.headerName ?? "Authorization"]: `Bearer ${key}` };
+    return { [checked(auth.headerName ?? "Authorization")]: `Bearer ${key}` };
   }
   if (auth.type === "api_key_header") {
-    return { [auth.headerName ?? "X-API-Key"]: key };
+    return { [checked(auth.headerName ?? "X-API-Key")]: key };
   }
   const names = customHeaderNames(auth);
   if (names.length !== 1) {
@@ -435,7 +474,7 @@ function headersFor(
       'This server takes several different headers, which one key cannot fill. Use `sourceweft mcp inspect --url <url> --header "Name: value"` for each of them.',
     );
   }
-  return { [names[0]!]: key };
+  return { [checked(names[0]!)]: key };
 }
 
 /** `sourceweft mcp test <identifier>` */
@@ -501,20 +540,33 @@ export async function mcpTestCommand(
   let key: string | undefined;
   if (needsKey) {
     const stdinIsTty = ctx.stdinIsTty ?? process.stdin.isTTY === true;
-    if (stdinIsTty) {
-      throw new UsageError(
-        "--key-stdin reads the key from a pipe, so it does not show on screen: for example `printf %s \"$KEY\" | sourceweft mcp test <identifier> --key-stdin --yes`.",
-      );
-    }
-    key = parseKey(await (ctx.readStdin ?? defaultReadStdin)());
+    // At a terminal the key is typed at a hidden prompt; otherwise it is
+    // piped in. Either way it never passes through an argument.
+    const raw = stdinIsTty
+      ? await (ctx.readSecret ??
+          (() =>
+            readHiddenLine(
+              process.stdin,
+              process.stderr,
+              `Key for ${name} (input is hidden): `,
+            )))()
+      : await (ctx.readStdin ?? defaultReadStdin)();
+    key = parseKey(raw);
   }
 
   if (needsKey || authType === "oauth") {
+    // The question names who publishes the server and where the credential
+    // goes. When the key was piped in, it is asked on the terminal.
+    const who = `${name} — ${publisherLabel(manifest)}`;
     const ok = await confirm(
       needsKey
-        ? `Send your key to ${url.origin}?`
-        : `Sign in at ${url.origin} with your browser?`,
-      { assumeYes: ctx.yes },
+        ? `Send your key to ${url.origin} (${who})?`
+        : `Sign in at ${url.origin} (${who}) with your browser?`,
+      {
+        assumeYes: ctx.yes,
+        viaTerminal: true,
+        ...(ctx.openTerminal ? { openTerminal: ctx.openTerminal } : {}),
+      },
     );
     if (!ok) throw new McpInspectError("Cancelled; nothing was sent.");
   }
