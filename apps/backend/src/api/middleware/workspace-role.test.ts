@@ -179,3 +179,21 @@ test("unauthenticated and unrelated writes fall through to the handler", async (
   mockResolveAccess.mockResolvedValue(null);
   assert.equal((await call("POST", "/threads")).status, 200);
 });
+
+test("artifact page storage leaves role checks to the records service", async () => {
+  withAccess({ role: "viewer" });
+  for (const [method, path] of [
+    ["POST", "/artifacts/a-1/records"],
+    ["POST", "/artifacts/a-1/versions/v-1/records/consent"],
+    ["POST", "/artifacts/a-1/versions/v-1/records/approval"],
+    ["DELETE", "/artifacts/a-1/versions/v-1/records/approval"],
+  ] as const)
+    assert.equal((await call(method, path)).status, 200, `${method} ${path}`);
+  // Neighbouring artifact writes keep the default editor requirement.
+  for (const path of [
+    "/artifacts/a-1",
+    "/artifacts/a-1/records/extra",
+    "/artifacts/a-1/share",
+  ])
+    assert.equal((await call("DELETE", path)).status, 403, path);
+});

@@ -3,10 +3,17 @@ import {
   inertArtifactCsp,
 } from "@sourceweft/contracts/artifact-execution";
 import type { Context, Hono } from "hono";
+import { artifactRecordOperationSchema } from "@sourceweft/contracts/artifact-records";
+import {
+  artifactRecordError,
+  artifactRecordsService,
+} from "../../modules/artifact-records";
 import { contentArtifactsService } from "../../modules/artifacts";
+import { renderableArtifactBody } from "../../modules/artifact-records/runtime";
 import { sharingService } from "../../modules/sharing";
 import { config } from "../../shared/config";
 import { ApiError, ApiResponse } from "../response/api-response";
+import { readHostJsonBody } from "./content/artifact-records";
 import { requireRouteParam } from "./content/helpers";
 
 /**
@@ -239,6 +246,35 @@ export function registerPublicShareRoutes(app: Hono) {
     },
   );
 
+  // Read-only shared records for a public HTML page. The token is the only
+  // grant: no session is read, so a signed-in viewer's cookie adds nothing,
+  // and only collections the owner marked public are reachable.
+  app.post("/v1/public/shares/:token/records", async (c) => {
+    const body = await readHostJsonBody(c);
+    const parsed = artifactRecordOperationSchema.safeParse(
+      body && typeof body === "object"
+        ? (body as { operation?: unknown }).operation
+        : undefined,
+    );
+    if (!parsed.success)
+      throw artifactRecordError(
+        "invalid_request",
+        "The storage request is not valid",
+      );
+    const result = await artifactRecordsService.executePublic({
+      token: requireRouteParam(c, "token"),
+      clientKey: clientIpOf({
+        cfConnectingIp: c.req.header("cf-connecting-ip"),
+        xRealIp: c.req.header("x-real-ip"),
+        xForwardedFor: c.req.header("x-forwarded-for"),
+      }),
+      operation: parsed.data,
+    });
+    c.header("Cache-Control", "no-store");
+    c.header("Referrer-Policy", "no-referrer");
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/v1/public/shares/:token/raw", async (c) => {
     const token = requireRouteParam(c, "token");
     const countView = shouldCountView(
@@ -288,7 +324,12 @@ export function registerPublicShareRoutes(app: Hono) {
       c.header("X-Robots-Tag", "noindex");
     }
     c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
-    return c.body(file.body);
+    return c.body(
+      renderableArtifactBody(
+        file,
+        c.req.query("runtime") === "1" && c.req.query("download") !== "1",
+      ),
+    );
   });
 
   app.get("/v1/public/shares/:token/preview", async (c) => {

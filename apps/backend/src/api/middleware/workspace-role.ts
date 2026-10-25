@@ -50,6 +50,18 @@ const WRITE_RULES: WriteRule[] = [
   // Guest management does its own content-admin check in GuestService.
   { pattern: /^\/guests(\/|$)/, requirement: { plane: "none" } },
   { pattern: /^\/sources\/status$/, requirement: { plane: "none" } },
+  // Artifact page storage: a viewer may write their own `user` records, and
+  // shared writes, approvals and consent each need a different role, so the
+  // records service checks the role per operation.
+  {
+    pattern: /^\/artifacts\/[^/]+\/records$/,
+    requirement: { plane: "none" },
+  },
+  {
+    pattern:
+      /^\/artifacts\/[^/]+\/versions\/[^/]+\/records\/(approval|consent)$/,
+    requirement: { plane: "none" },
+  },
   {
     pattern: /^\/model-gateway\/byok-model-capabilities$/,
     requirement: { plane: "none" },

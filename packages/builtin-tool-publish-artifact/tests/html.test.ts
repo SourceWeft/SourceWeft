@@ -56,6 +56,66 @@ test("embedded images, local anchors and data srcset survive unchanged", () => {
   assert.deepEqual(bytes, copy);
 });
 
+test("links may point at http(s) pages but at nothing else outside the document", () => {
+  assert.doesNotThrow(() =>
+    validateHtmlBytes(
+      document(
+        '<a href="https://example.com/a?b=1">Docs</a><a href="http://example.org" target="_blank">Site</a>',
+      ),
+    ),
+  );
+  for (const href of [
+    "javascript:alert(1)",
+    "page.html",
+    "/v1/workspaces",
+    "data:text/html,hi",
+    "mailto:a@example.com",
+    "https://",
+  ])
+    assert.throws(
+      () => validateHtmlBytes(document(`<a href="${href}">x</a>`)),
+      /HTML_RESOURCE_UNRESOLVED/,
+      href,
+    );
+  assert.throws(
+    () =>
+      validateHtmlBytes(
+        document(
+          "",
+          '<link rel="stylesheet" href="https://example.com/a.css">',
+        ),
+      ),
+    /HTML_RESOURCE_UNRESOLVED/,
+  );
+});
+
+test("storage capabilities are declared through artifact metadata", () => {
+  const result = validateHtmlBytes(
+    document(
+      "",
+      `<meta name="sourceweft:artifact" content='${JSON.stringify({
+        schemaVersion: 1,
+        capabilities: ["storage.shared"],
+      })}'>`,
+    ),
+  );
+  assert.deepEqual(result.metadata, {
+    schemaVersion: 1,
+    capabilities: ["storage.shared"],
+  });
+  assert.throws(() =>
+    validateHtmlBytes(
+      document(
+        "",
+        `<meta name="sourceweft:artifact" content='${JSON.stringify({
+          schemaVersion: 1,
+          capabilities: ["network"],
+        })}'>`,
+      ),
+    ),
+  );
+});
+
 test("incomplete, invalid UTF-8, and malformed capability metadata fail", () => {
   assert.throws(() => validateHtmlBytes(Buffer.from("<html><body>partial")));
   assert.throws(() => validateHtmlBytes(Buffer.from([0xff])));

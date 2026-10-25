@@ -8,7 +8,17 @@ const mocks = vi.hoisted(() => ({
   getSharedVersionFile: vi.fn(),
   getSharedArtifactVersionMediaBytes: vi.fn(),
   getSharedCurrentArtifactVersionMedia: vi.fn(),
+  executePublic: vi.fn(),
 }));
+
+vi.mock("../../modules/artifact-records", async () => {
+  const { ContentError } = await import("../../modules/content/errors");
+  return {
+    artifactRecordsService: { executePublic: mocks.executePublic },
+    artifactRecordError: (code: string, message: string) =>
+      new ContentError(400, `ARTIFACT_RECORD_${code.toUpperCase()}`, message),
+  };
+});
 
 vi.mock("../../modules/sharing", () => ({
   sharingService: {
@@ -208,4 +218,67 @@ test("share tokens never reach private authoring sources, even for the live vers
     kind: "asset",
     fileName: "report.source.json",
   });
+});
+
+test("public records are read with the token and a client key, never a session", async () => {
+  mocks.executePublic.mockResolvedValue({ op: "get", record: null });
+  const response = await createTestApp().request(
+    "http://localhost/v1/public/shares/tok/records",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: "better-auth.session_token=signed-in",
+        "x-real-ip": "203.0.113.9",
+      },
+      body: JSON.stringify({
+        operation: {
+          op: "get",
+          scope: "shared",
+          collection: "scores",
+          id: "a",
+        },
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(mocks.executePublic.mock.calls[0]![0], {
+    token: "tok",
+    clientKey: "203.0.113.9",
+    operation: { op: "get", scope: "shared", collection: "scores", id: "a" },
+  });
+  const invalid = await createTestApp().request(
+    "http://localhost/v1/public/shares/tok/records",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation: { op: "get", collection: "x" } }),
+    },
+  );
+  assert.equal(invalid.status, 400);
+  assert.equal(mocks.executePublic.mock.calls.length, 1);
+});
+
+test("the raw route injects the runtime only for the render request", async () => {
+  const html = Buffer.from(
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body>x</body></html>',
+  );
+  mocks.getSharedArtifactFile.mockResolvedValue({
+    body: html,
+    contentType: "text/html; charset=utf-8",
+    fileName: "index.html",
+    executionPolicy: "sandboxed-html",
+    recordCapabilities: { storage: true, shared: true },
+  });
+  const read = async (query: string) =>
+    (
+      await createTestApp().request(
+        `http://localhost/v1/public/shares/tok/raw${query}`,
+      )
+    ).text();
+  const rendered = await read("?runtime=1");
+  assert.match(rendered, /<html lang="en"><script data-sourceweft-runtime>/);
+  assert.match(rendered, /"storage":true/);
+  assert.equal(await read(""), html.toString());
+  assert.equal(await read("?runtime=1&download=1"), html.toString());
 });

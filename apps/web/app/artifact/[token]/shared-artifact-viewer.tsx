@@ -16,6 +16,8 @@ import {
   artifactPrimaryPreviewFile,
 } from "@sourceweft/builtin-tool-publish-artifact/ui";
 import { Preview } from "@sourceweft/preview/react";
+import { createPublicArtifactRecordsTransport } from "../../../lib/artifact-records-transport";
+import { contentClient } from "../../../lib/sdk";
 
 type SharedArtifact = PublicSharedArtifactResponse["artifact"];
 
@@ -76,6 +78,12 @@ export function SharedArtifactViewer({
       surface: "share",
       title,
       workspaceId: null,
+      // Token-bound and read-only: no session is used, and only collections
+      // the owner marked public answer.
+      records: createPublicArtifactRecordsTransport(
+        contentClient,
+        artifact.token,
+      ),
     };
     try {
       return resolveArtifactPreview(context) ?? null;

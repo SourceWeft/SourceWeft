@@ -2330,7 +2330,9 @@
       "searchVisibilityFailed": "Could not update search visibility.",
       "copyLinkFailed": "Could not copy the link.",
       "noCitationContent": "No citation content is available for this page yet.",
-      "saveNotWired": "Save to sources is not wired yet."
+      "saveNotWired": "Save to sources is not wired yet.",
+      "publicRecordsFailed": "Couldn't update public data collections.",
+      "publicRecordsInvalid": "Collection names use letters, digits, _ or -."
     },
     "deleteDialog": {
       "title": "Delete artifact?",
@@ -2355,7 +2357,10 @@
       "publicLinkLabel": "Public link",
       "hideFromSearch": "Hide from search engines",
       "hideFromSearchDescription": "A public link is indexed by default for reach; turn this on for a sensitive one-off.",
-      "views": "Views"
+      "views": "Views",
+      "publicRecords": "Public data collections",
+      "publicRecordsDescription": "Shared data this page may show to anyone with the link, read-only. List collection names; leave empty to show none.",
+      "publicRecordsPlaceholder": "e.g. scores, results"
     },
     "filePreview": {
       "titleFallback": "File preview",

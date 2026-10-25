@@ -256,6 +256,14 @@ export const shareLinks = pgTable(
     noindex: boolean("noindex").notNull().default(false),
     /** Unique-visitor-ish page views, incremented on each public read. */
     viewCount: integer("view_count").notNull().default(0),
+    /**
+     * Shared record collections the public page may read, chosen by the owner.
+     * Empty (the default) exposes no records at all; public pages never write.
+     */
+    publicRecordCollections: text("public_record_collections")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
     createdBy: text("created_by"),

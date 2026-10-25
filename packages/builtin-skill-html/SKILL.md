@@ -21,4 +21,4 @@ Load the artifact through `prepare_sandbox_workspace`, specifying its artifact I
 
 # Local execution
 
-Use browser-local computation and state. The iframe has an opaque origin and cannot use the host's cookies or persistent storage. External services, login flows and multi-file website hosting need a separately agreed scope. The file must retain its content and interactions after this generating skill is disabled.
+Use browser-local computation and state. The iframe has an opaque origin and cannot use the host's cookies, browser storage or the network. When the user wants the page to remember data or to link to websites, read `references/storage.md`: data is saved through the host's `window.sourceweft.storage` after declaring the `storage` capability, and plain http(s) links open after the viewer confirms. External services, login flows and multi-file website hosting need a separately agreed scope. The file must retain its content and interactions after this generating skill is disabled.

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  ARTIFACT_RECORD_LIMITS,
+  artifactRecordCollectionSchema,
+} from "./artifact-records";
 import { artifactTypeSchema } from "./artifacts";
 
 /**
@@ -25,6 +29,8 @@ export const shareLinkSchema = z.object({
   viewCount: z.number().int().nonnegative(),
   expiresAt: z.string().nullable(),
   createdAt: z.string(),
+  /** Shared record collections the public page may read; empty exposes none. */
+  publicRecordCollections: z.array(z.string()).default([]),
 });
 
 export const createArtifactShareRequestSchema = z.object({
@@ -37,6 +43,18 @@ export const createArtifactShareRequestSchema = z.object({
 export const updateArtifactShareRequestSchema = z.object({
   noindex: z.boolean().optional(),
   expiresAt: z.string().nullable().optional(),
+  /**
+   * Shared record collections the public page may read (never write). Replaces
+   * the current list; an empty list withdraws public record access.
+   */
+  publicRecordCollections: z
+    .array(artifactRecordCollectionSchema)
+    .max(ARTIFACT_RECORD_LIMITS.publicCollections)
+    .refine(
+      (values) => new Set(values).size === values.length,
+      "Collections must be unique",
+    )
+    .optional(),
 });
 
 export const shareResponseSchema = z.object({

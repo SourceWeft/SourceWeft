@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { registerArtifactRoutes } from "./content/artifacts";
+import { registerArtifactRecordRoutes } from "./content/artifact-records";
 import { registerAgentConfirmationRoutes } from "./content/agent-confirmations";
 import { registerByokRoutes } from "./content/byok";
 import { registerCapabilityRoutes } from "./content/capabilities";
@@ -23,6 +24,7 @@ export function registerContentRoutes(app: Hono) {
 
   registerAgentConfirmationRoutes(workspaceRoutes);
   registerArtifactRoutes(workspaceRoutes);
+  registerArtifactRecordRoutes(workspaceRoutes);
   registerCapabilityRoutes(workspaceRoutes);
   registerSourceRoutes(workspaceRoutes);
   registerConnectorRoutes(workspaceRoutes);

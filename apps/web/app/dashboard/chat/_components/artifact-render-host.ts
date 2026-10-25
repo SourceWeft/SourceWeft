@@ -8,7 +8,8 @@
  * capability component has already configured it.
  */
 import { configureArtifactRenderHost } from "@sourceweft/agent-tool-registry/ui";
-import { apiBaseUrl } from "../../../../lib/sdk";
+import { createAppArtifactRecordsTransport } from "../../../../lib/artifact-records-transport";
+import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
 import {
   resolveArtifactPageUrlFromArtifact,
   resolveArtifactPreviewImageUrlFromArtifact,
@@ -29,4 +30,6 @@ configureArtifactRenderHost({
   resolveArtifactFileUrl: resolveArtifactProxyFileUrlFromArtifact,
   resolveArtifactPreviewImageUrl: resolveArtifactPreviewImageUrlFromArtifact,
   useArtifactSnapshot,
+  createArtifactRecordsTransport: (input) =>
+    createAppArtifactRecordsTransport(contentClient, input),
 });

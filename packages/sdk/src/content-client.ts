@@ -1,3 +1,9 @@
+import type {
+  ArtifactRecordOperation,
+  ArtifactRecordRequest,
+  ArtifactRecordResult,
+  ArtifactRecordsStatus,
+} from "@sourceweft/contracts/artifact-records";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
@@ -166,6 +172,14 @@ function localeQuery(locale: string | undefined) {
   return locale ? `?${new URLSearchParams({ locale }).toString()}` : "";
 }
 
+function artifactVersionRecordsPath(
+  workspaceId: string,
+  artifactId: string,
+  artifactVersionId: string,
+) {
+  return `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/versions/${encode(artifactVersionId)}/records`;
+}
+
 function encode(value: string) {
   return encodeURIComponent(value);
 }
@@ -280,6 +294,71 @@ export class ContentClient {
     return this.http.patch<ShareResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
       input,
+    );
+  }
+
+  /** Host-side storage call for one rendered artifact version. */
+  executeArtifactRecord(
+    workspaceId: string,
+    artifactId: string,
+    request: ArtifactRecordRequest,
+  ) {
+    return this.http.post<ArtifactRecordResult>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/records`,
+      request,
+    );
+  }
+
+  getArtifactRecordsStatus(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.get<ArtifactRecordsStatus>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/status`,
+    );
+  }
+
+  approveArtifactSharedRecords(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ approvedAt: string }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/approval`,
+      {},
+    );
+  }
+
+  revokeArtifactSharedRecords(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.delete<{ revoked: boolean }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/approval`,
+    );
+  }
+
+  grantArtifactSharedRecordsConsent(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ consented: true }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/consent`,
+      {},
+    );
+  }
+
+  /** Read-only shared records on a public share; the token is the only grant. */
+  executePublicArtifactRecord(
+    token: string,
+    operation: ArtifactRecordOperation,
+  ) {
+    return this.http.post<ArtifactRecordResult>(
+      `/v1/public/shares/${encode(token)}/records`,
+      { operation },
     );
   }
 

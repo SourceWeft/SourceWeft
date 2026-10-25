@@ -16,6 +16,8 @@ export type TeamAuditAction =
   | "artifact.shared"
   | "artifact.share_revoked"
   | "artifact.deleted"
+  | "artifact.storage_shared_approved"
+  | "artifact.storage_shared_revoked"
   | "workspace.guest_invited"
   | "workspace.guest_accepted"
   | "workspace.guest_revoked"
