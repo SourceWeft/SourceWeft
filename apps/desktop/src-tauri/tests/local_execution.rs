@@ -1,14 +1,21 @@
 #![cfg(target_os = "macos")]
+//! macOS command-execution integration tests through the production `LocalHost` + `dispatch`
+//! path. The tests that actually run a sandboxed command are `#[ignore]` and need the built
+//! `sandbox-sidecar` bundle (installed into `<temp app data>/sandbox/current` by the shared
+//! `common` helpers); run them with
+//! `cargo test --test local_execution -- --include-ignored --test-threads=1`. The non-ignored
+//! `cancelled_queued_invocation_never_runs_after_acquiring_the_host` never starts a command, so
+//! it needs no bundle.
+mod common;
+use common::*;
 use serde_json::json;
-use sourceweft_desktop::local_host::{execution::Executions, LocalHost};
+use sourceweft_desktop::local_host::{execution::Executions, readiness::bundle_dir, LocalHost};
 use std::{fs, sync::Arc, time::Duration};
 
 #[test]
-#[ignore = "requires real macOS sandbox_apply"]
+#[ignore = "requires real macOS sandbox_apply and the sandbox bundle"]
 fn command_creates_real_file_and_duplicate_delivery_does_not_run_twice() {
-    let temp = tempfile::tempdir().unwrap();
-    let host = LocalHost::open(temp.path()).unwrap();
-    host.initialize_invocation_journal().unwrap();
+    let (_app, host) = host_with_bundle();
     let workspace = host.ensure_workspace("test-owner", "test-thread").unwrap();
     let executions = Executions::default();
     let payload = json!({"workspaceId":workspace.id,"command":"printf 'one\\n' >> result.txt; /bin/pwd; /bin/cat result.txt","cwd":".","timeoutMs":10000,"maxOutputChars":2000});
@@ -45,11 +52,10 @@ fn command_creates_real_file_and_duplicate_delivery_does_not_run_twice() {
 }
 
 #[test]
-#[ignore = "requires real macOS sandbox_apply"]
+#[ignore = "requires real macOS sandbox_apply and the sandbox bundle"]
 fn running_command_can_be_cancelled_and_cannot_write_after_cancel() {
-    let temp = tempfile::tempdir().unwrap();
-    let host = Arc::new(LocalHost::open(temp.path()).unwrap());
-    host.initialize_invocation_journal().unwrap();
+    let (_app, host) = host_with_bundle();
+    let host = Arc::new(host);
     let workspace = host.ensure_workspace("owner", "thread").unwrap();
     let executions = Arc::new(Executions::default());
     let worker = {
@@ -77,14 +83,38 @@ fn running_command_can_be_cancelled_and_cannot_write_after_cancel() {
 }
 
 #[test]
-#[ignore = "requires real macOS sandbox_apply"]
+#[ignore = "requires real macOS sandbox_apply and the sandbox bundle"]
 fn proxy_rejects_loopback_and_direct_egress() {
-    let temp = tempfile::tempdir().unwrap();
-    let host = LocalHost::open(temp.path()).unwrap();
-    host.initialize_invocation_journal().unwrap();
-    let w = host.ensure_workspace("a", "t").unwrap();
-    let result=host.dispatch(&Executions::default(),"network","a","t","command.execute",json!({"workspaceId":w.id,"command":"/usr/bin/curl --max-time 5 -s -o /dev/null -w '%{http_code}' http://127.0.0.1/","timeoutMs":10000})).unwrap();
-    assert_eq!(result["output"], "403", "{result}");
+    // New-path behaviour (replacing the retired Rust proxy's bare `403`): a direct request to
+    // loopback is unreachable — NO_PROXY lists 127.0.0.1, so curl connects directly and Seatbelt
+    // denies the outbound connection — and a request forced through the sandbox proxy is refused
+    // by its address guard with a `sandbox_violations` report (asserted on the violation text, not
+    // on a literal `403`).
+    let (_app, host) = host_with_bundle();
+    // The shared `execute` helper dispatches as account "owner", so the workspace is that owner's.
+    let w = host.ensure_workspace("owner", "thread").unwrap();
+    let direct = execute_denied(
+        &host,
+        "direct",
+        &w,
+        "curl -sS --max-time 10 -o /dev/null -w %{http_code} http://127.0.0.1/",
+    );
+    assert_ne!(direct["exitCode"], 0, "{direct}");
+    assert!(
+        output(&direct).starts_with("000"),
+        "direct egress to loopback must be unreachable: {direct}"
+    );
+    let proxied = execute(
+        &host,
+        "proxied",
+        &w,
+        "curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{http_code} http://127.0.0.1/",
+    );
+    let text = output(&proxied);
+    assert!(
+        text.contains("sandbox_violations") && text.contains("public internet only"),
+        "the sandbox proxy must refuse loopback with a violation report: {proxied}"
+    );
 }
 
 #[test]
@@ -110,11 +140,13 @@ fn cancelled_queued_invocation_never_runs_after_acquiring_the_host() {
 }
 
 #[test]
-#[ignore = "requires real macOS sandbox_apply"]
+#[ignore = "requires real macOS sandbox_apply and the sandbox bundle"]
 fn selected_directory_command_and_file_tools_share_physical_files() {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let app = tempfile::tempdir().unwrap();
     let directory = tempfile::tempdir().unwrap();
+    ensure_tmp_claude();
+    copy_bundle_into(&bundle_dir(app.path()));
     let host = LocalHost::open(app.path()).unwrap();
     host.initialize_invocation_journal().unwrap();
     let (grant, root) = host.grant_directory("owner", directory.path()).unwrap();
@@ -147,7 +179,20 @@ fn selected_directory_command_and_file_tools_share_physical_files() {
             json!({"workspaceId":w.id,"path":"."}),
         )
         .unwrap();
-    assert_eq!(listed["files"].as_array().unwrap().len(), 2);
+    // The command tool and the file tools share the same physical directory, so both `input.txt`
+    // (written by `file.write`) and `output.txt` (written by the sandboxed command) are listed.
+    // The sandbox's per-command workspace `TMPDIR` (`<root>/.tmp`) may also appear; assert on the
+    // two files by name rather than an exact count.
+    let paths: Vec<&str> = listed["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert!(
+        paths.contains(&"input.txt") && paths.contains(&"output.txt"),
+        "command and file tools must share the two files: {listed}"
+    );
     host.dispatch(&calls, "edit", "owner", "t", "file.replace", json!({"workspaceId":w.id,"path":"output.txt","expected":STANDARD.encode("original"),"content":STANDARD.encode("edited")})).unwrap();
     assert_eq!(
         fs::read_to_string(root.join("output.txt")).unwrap(),

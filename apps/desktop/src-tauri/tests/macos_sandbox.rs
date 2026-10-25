@@ -1,377 +1,575 @@
 #![cfg(target_os = "macos")]
-//! Run explicitly on an unrestricted macOS test host:
-//! cargo test --test macos_sandbox -- --ignored
-//! The outer Codex sandbox cannot call sandbox_apply; do not skip or silently
-//! replace this test with unconfined command execution.
-use sourceweft_desktop::local_host::sandbox::{isolation_probe_profile, probe_seatbelt};
-use std::{fs, process::Command};
+//! macOS real-sandbox suite, run through the production `LocalHost` + `dispatch` path against a
+//! built `sandbox-sidecar` bundle (copied into `<temp app data>/sandbox/current`, exactly where
+//! production looks for it, like `linux_sandbox.rs`). macOS now wraps every command with the
+//! sidecar / `srt_exec.rs` path (Seatbelt + the proxy agent); the hand-written Seatbelt profile
+//! (`sandbox.rs`) and Rust proxy (`proxy.rs`) are no longer involved, and nothing here references
+//! them.
+//!
+//! Every real test is `#[ignore]` (it needs `sandbox_apply` and the built bundle); run on a real,
+//! unrestricted macOS host with:
+//!
+//!   cargo test --test macos_sandbox -- --include-ignored --test-threads=1
+//!
+//! `--test-threads=1` because each test starts its own sidecar and the host captures the
+//! login-shell `PATH` once per process; the network and readiness probes are also expensive. The
+//! bundle is located relative to `CARGO_MANIFEST_DIR` (no new environment variable); build it with
+//! `bun run build --rg "$(command -v rg)"` in `apps/desktop/sandbox-sidecar` first.
+//!
+//! `hostname_to_loopback_blocked` additionally needs two `/etc/hosts` entries,
+//! `127.0.0.1 sw-loop.test` and `10.0.0.1 sw-private.test` (the macOS-sandbox CI job adds them),
+//! and asserts them, failing with that instruction when they are missing — exactly as
+//! `linux_sandbox.rs` does. `public_https_allowed` makes a real request to the public npm
+//! registry and fails (never skips) when the host has no working public internet.
+mod common;
+use common::*;
+use serde_json::json;
+use sourceweft_desktop::local_host::{
+    execution::Executions,
+    readiness::{bundle_dir, SandboxReadiness},
+    LocalHost,
+};
+use std::{fs, sync::Arc, time::Duration};
 
-fn run(profile: &str, command: &str, args: &[&str]) -> std::process::Output {
-    Command::new("/usr/bin/sandbox-exec")
-        .args(["-p", profile, command])
-        .args(args)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .output()
+// ---------------------------------------------------------------------------------------------
+// Filesystem: writes and reads inside / outside the workspace.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn writes_inside_workspace() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let root = workspace.path.to_str().unwrap().to_string();
+    let result = execute(
+        &host,
+        "write",
+        &workspace,
+        // BSD `mktemp` with no template ignores `$TMPDIR` (it uses the OS per-process temp dir),
+        // so an explicit template under `$TMPDIR` is used to prove temp files land in the
+        // workspace's own write-allowed `.tmp`.
+        "printf hello > out.txt && /bin/pwd && printf '%s\\n' \"$HOME\" \"$TMPDIR\" \"$npm_config_cache\" \"$PIP_CACHE_DIR\" \"$NODE_USE_ENV_PROXY\" && mktemp \"$TMPDIR/sw.XXXXXX\"",
+    );
+    let mut keys: Vec<&str> = result
+        .as_object()
         .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["cancelled", "exitCode", "output", "truncated"],
+        "{result}"
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    assert_eq!(result["cancelled"], false, "{result}");
+    assert_eq!(result["truncated"], false, "{result}");
+    assert_eq!(
+        fs::read_to_string(workspace.path.join("out.txt")).unwrap(),
+        "hello"
+    );
+    let lines: Vec<&str> = output(&result).lines().collect();
+    assert_eq!(lines[0], root, "pwd: {result}");
+    assert_eq!(lines[1], root, "HOME: {result}");
+    assert_eq!(lines[2], format!("{root}/.tmp"), "TMPDIR: {result}");
+    assert_eq!(
+        lines[3],
+        format!("{root}/.cache/npm"),
+        "npm_config_cache: {result}"
+    );
+    assert_eq!(
+        lines[4],
+        format!("{root}/.cache/pip"),
+        "PIP_CACHE_DIR: {result}"
+    );
+    assert_eq!(lines[5], "1", "NODE_USE_ENV_PROXY: {result}");
+    assert!(
+        lines[6].starts_with(&format!("{root}/.tmp/")),
+        "mktemp must land in the workspace TMPDIR: {result}"
+    );
 }
 
 #[test]
-#[ignore = "requires sandbox_apply on a real macOS host"]
-fn seatbelt_enforces_filesystem_network_and_child_process_boundaries() {
-    let working = tempfile::tempdir().unwrap();
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn cannot_write_outside() {
     let outside = tempfile::tempdir().unwrap();
-    probe_seatbelt(working.path()).unwrap();
-    let policy = isolation_probe_profile(working.path()).unwrap();
-    let allowed = working.path().join("output.txt");
-    let denied = outside.path().join("secret.txt");
-    fs::write(&denied, "private-data").unwrap();
-    let output = run(
-        &policy,
-        "/bin/sh",
-        &[
-            "-c",
-            "printf success > \"$1\"",
-            "sh",
-            allowed.to_str().unwrap(),
-        ],
+    let target = outside.path().join("escape.txt");
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_denied(
+        &host,
+        "escape",
+        &workspace,
+        &format!("printf x > {}", quoted(&target)),
     );
     assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        !target.exists(),
+        "a sandboxed command wrote outside its workspace: {result}"
     );
-    assert_eq!(fs::read_to_string(&allowed).unwrap(), "success");
-    let read = run(&policy, "/bin/cat", &[denied.to_str().unwrap()]);
-    assert!(!read.status.success());
-    assert!(!String::from_utf8_lossy(&read.stdout).contains("private-data"));
-    let write = run(
-        &policy,
-        "/bin/sh",
-        &[
-            "-c",
-            "printf overwritten > \"$1\"",
-            "sh",
-            denied.to_str().unwrap(),
-        ],
-    );
-    assert!(!write.status.success());
-    assert_eq!(fs::read_to_string(&denied).unwrap(), "private-data");
-    let child = run(
-        &policy,
-        "/bin/sh",
-        &["-c", "/bin/cat \"$1\"", "sh", denied.to_str().unwrap()],
-    );
-    assert!(!child.status.success());
-    std::os::unix::fs::symlink(&denied, working.path().join("escape")).unwrap();
-    assert!(!run(
-        &policy,
-        "/bin/cat",
-        &[working.path().join("escape").to_str().unwrap()]
-    )
-    .status
-    .success());
+    assert_ne!(result["exitCode"], 0, "{result}");
+}
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port().to_string();
-    let control = Command::new("/usr/bin/nc")
-        .args(["-z", "-w", "1", "127.0.0.1", &port])
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn cannot_read_outside() {
+    // A planted secret in `$HOME` (outside any workspace) and the real macOS shadow password file
+    // `/etc/master.passwd`. Note `/etc/passwd` itself is deliberately world-readable system
+    // configuration that the macOS policy re-allows (`DARWIN_SYSTEM_READ_ROOTS` covers `/etc` and
+    // `/private/etc`); the secret counterpart is `master.passwd` (mode 0600), which stays denied.
+    // `~/.ssh` and a listing of `/Users` must also be denied.
+    let home = home_dir();
+    let secret_path = home.join(".sw-test-secret");
+    let secret = format!("sw-secret-{}", uuid::Uuid::new_v4().simple());
+    fs::write(&secret_path, &secret).unwrap();
+    let _cleanup = RemoveOnDrop(secret_path.clone());
+
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_denied(
+        &host,
+        "secrets",
+        &workspace,
+        &format!(
+            "cat {} 2>&1; cat /etc/master.passwd 2>&1; ls {} 2>&1; ls /Users 2>&1",
+            quoted(&secret_path),
+            quoted(&home.join(".ssh"))
+        ),
+    );
+    assert!(
+        !output(&result).contains(&secret),
+        "home secret leaked into the sandbox: {result}"
+    );
+    assert!(
+        !output(&result).contains("root:"),
+        "/etc/master.passwd contents leaked: {result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn keychains_are_unreadable() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let home = home_dir();
+    // ~/Library/Keychains (login keychain) and the system keychain: both denied, and none of
+    // their bytes may surface. No content is written anywhere by this test.
+    let result = execute_denied(
+        &host,
+        "keychains",
+        &workspace,
+        &format!(
+            "ls {} 2>&1; cat /Library/Keychains/System.keychain 2>&1 | head -c0",
+            quoted(&home.join("Library/Keychains"))
+        ),
+    );
+    assert!(
+        output(&result).contains("Operation not permitted")
+            || output(&result).contains("Permission denied"),
+        "keychains directory was not denied: {result}"
+    );
+    // A direct read of the login keychain db file, if present, must also be denied.
+    let login = home.join("Library/Keychains/login.keychain-db");
+    if login.exists() {
+        let r = execute_denied(
+            &host,
+            "login-kc",
+            &workspace,
+            &format!("cat {}", quoted(&login)),
+        );
+        assert_ne!(r["exitCode"], 0, "login keychain was readable: {r}");
+    }
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn tmp_symlink_workspace() {
+    // A workspace whose real location is reached through macOS's firmlinks: `/tmp`→`/private/tmp`
+    // (app data created under `/tmp`) and `/var`→`/private/var` (the default `$TMPDIR` app data,
+    // under `/private/var/folders`). srt emits both the symlink and resolved spellings, so the
+    // sandboxed command must read and write its workspace under either.
+    let tmp_app = tempfile::tempdir_in("/tmp").unwrap();
+    assert!(
+        tmp_app.path().starts_with("/tmp/"),
+        "precondition: app data must live under /tmp"
+    );
+    let host = host_with_bundle_at(tmp_app.path());
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute(
+        &host,
+        "tmp-ws",
+        &workspace,
+        // `cat f.txt` has no trailing newline, so `echo` separates it from `/bin/pwd`.
+        "printf hi > f.txt && cat f.txt && echo && /bin/pwd",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let lines: Vec<&str> = output(&result).lines().collect();
+    assert_eq!(lines[0], "hi", "workspace read-back: {result}");
+    assert!(
+        lines[1].starts_with("/private/tmp/"),
+        "a workspace under /tmp must resolve through the /private/tmp firmlink: {result}"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.path.join("f.txt")).unwrap(),
+        "hi"
+    );
+
+    // The /var→/private/var firmlink: the default app data lives under /private/var/folders.
+    let (_app, var_host) = host_with_bundle();
+    let var_ws = var_host.ensure_workspace("owner", "thread").unwrap();
+    let var_result = execute(&var_host, "var-ws", &var_ws, "printf ok > g.txt && /bin/pwd");
+    assert_eq!(var_result["exitCode"], 0, "{var_result}");
+    assert!(
+        output(&var_result).trim().starts_with("/private/var/"),
+        "the default workspace must resolve under /private/var: {var_result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn external_volume_style_grant() {
+    // A folder granted through the native picker that lies entirely outside `$HOME` (an
+    // external-volume-style location; here a temp dir under /private/var/folders). It must be a
+    // usable workspace, and the keychains must stay hidden even from a workspace outside `$HOME`.
+    let (_app, host) = host_with_bundle();
+    let outside = tempfile::tempdir().unwrap();
+    assert!(
+        !outside.path().starts_with(home_dir()),
+        "precondition: the granted folder must lie outside $HOME"
+    );
+    let (grant, root) = host.grant_directory("owner", outside.path()).unwrap();
+    let workspace = host
+        .ensure_workspace_with_grant("owner", "thread", Some(&grant))
+        .unwrap();
+    let result = execute(
+        &host,
+        "granted",
+        &workspace,
+        // `cat g.txt` has no trailing newline, so `echo` separates it from `/bin/pwd`.
+        "printf out > g.txt && cat g.txt && echo && /bin/pwd",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let lines: Vec<&str> = output(&result).lines().collect();
+    assert_eq!(lines[0], "out", "{result}");
+    assert_eq!(lines[1], root.to_str().unwrap(), "pwd: {result}");
+    assert_eq!(fs::read_to_string(root.join("g.txt")).unwrap(), "out");
+
+    let denied = execute_denied(
+        &host,
+        "granted-kc",
+        &workspace,
+        &format!(
+            "ls {} 2>&1",
+            quoted(&home_dir().join("Library/Keychains"))
+        ),
+    );
+    assert!(
+        denied["exitCode"] != 0
+            || output(&denied).contains("Operation not permitted")
+            || output(&denied).contains("Permission denied"),
+        "keychains readable from a granted folder outside home: {denied}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn workspace_with_brackets_and_cjk() {
+    let (_app, host) = host_with_bundle();
+    // Start the sidecar first with only the automatic workspace base in its init, so the folder
+    // granted below is outside that set and forces a restart with the updated roots.
+    let automatic = host.ensure_workspace("owner", "first-thread").unwrap();
+    let warm = execute(&host, "warm", &automatic, "true");
+    assert_eq!(warm["exitCode"], 0, "{warm}");
+
+    let parent = tempfile::tempdir().unwrap();
+    let selected = parent.path().join("ws [测试]");
+    fs::create_dir(&selected).unwrap();
+    let (grant, root) = host.grant_directory("owner", &selected).unwrap();
+    let workspace = host
+        .ensure_workspace_with_grant("owner", "granted-thread", Some(&grant))
+        .unwrap();
+    let result = execute(
+        &host,
+        "granted",
+        &workspace,
+        "printf ok > 'a [b] 测试.txt' && /bin/pwd",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    assert_eq!(output(&result).trim(), root.to_str().unwrap(), "{result}");
+    assert_eq!(
+        fs::read_to_string(root.join("a [b] 测试.txt")).unwrap(),
+        "ok"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn cancel_kills_command() {
+    let (_app, host) = host_with_bundle();
+    let host = Arc::new(host);
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let executions = Arc::new(Executions::default());
+    let worker = {
+        let host = host.clone();
+        let executions = executions.clone();
+        let id = workspace.id.clone();
+        std::thread::spawn(move || {
+            host.dispatch(
+                &executions,
+                "cancel-me",
+                "owner",
+                "thread",
+                "command.execute",
+                json!({"workspaceId": id, "command": "printf started > started.txt; sleep 20; printf forbidden > after.txt", "timeoutMs": 60000}),
+            )
+        })
+    };
+    for _ in 0..1000 {
+        if workspace.path.join("started.txt").exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        workspace.path.join("started.txt").exists(),
+        "command must start before cancellation"
+    );
+    assert!(executions.cancel("cancel-me"));
+    let result = worker.join().unwrap().unwrap();
+    assert_eq!(result["cancelled"], true, "{result}");
+    // Longer than the remaining `sleep 20` would take if any process survived the group kill.
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        !workspace.path.join("after.txt").exists(),
+        "a process survived cancellation: {result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn toolchain_commands() {
+    // The workspace, a system tool (/usr/bin/grep), a login-PATH toolchain (node), python3, and a
+    // clang hello-world compile+run, all under the tight read policy. The `/usr/bin` xcode-select
+    // shims (`clang`, `python3`, later `git`) resolve their real tool via `xcrun`; with a full
+    // `Xcode.app` as the active developer dir that path crashes in the sandbox, so `srt_exec`
+    // pins `DEVELOPER_DIR` to the Command Line Tools in the child env — this proves the shims run.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let build = execute(
+        &host,
+        "toolchain",
+        &workspace,
+        "printf hi > f.txt && cat f.txt && /usr/bin/grep -c hi f.txt && \
+         node -e 'console.log(\"node\",process.version)' && \
+         /usr/bin/python3 --version && \
+         printf '#include <stdio.h>\\nint main(){puts(\"clang-ran\");return 0;}\\n' > hello.c && \
+         clang hello.c -o hello && ./hello && \
+         head -c1 /etc/hosts >/dev/null && echo toolchain-ok",
+    );
+    assert_eq!(build["exitCode"], 0, "{build}");
+    assert!(output(&build).contains("node v"), "node: {build}");
+    assert!(output(&build).contains("clang-ran"), "clang: {build}");
+    assert!(output(&build).contains("toolchain-ok"), "{build}");
+    assert_eq!(fs::read_to_string(workspace.path.join("f.txt")).unwrap(), "hi");
+
+    // git's own `init` cannot populate `.git/hooks` (srt blocks that subtree on every platform —
+    // host-executed hook scripts are an escape vector), so the repo is created host-side and the
+    // sandbox does the real work through the git shim, which without the DEVELOPER_DIR pin would
+    // crash in `xcodebuild` on an Xcode host.
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&workspace.path)
         .status()
         .unwrap();
-    assert!(
-        control.success(),
-        "Network control must prove the endpoint is available"
+    assert!(status.success(), "host-side git init failed");
+    let commit = execute(
+        &host,
+        "git",
+        &workspace,
+        "git -c user.name=T -c user.email=t@example.com add -A && \
+         git -c user.name=T -c user.email=t@example.com commit -qm shim && \
+         git log --oneline | head -1 >/dev/null && echo git-ran",
     );
-    let network = run(
-        &policy,
-        "/usr/bin/nc",
-        &["-z", "-w", "1", "127.0.0.1", &port],
-    );
+    assert_eq!(commit["exitCode"], 0, "{commit}");
+    assert!(output(&commit).contains("git-ran"), "{commit}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Network: the sandbox proxy's address guard (parity with the retired Rust proxy).
+// ---------------------------------------------------------------------------------------------
+
+/// Spellings that resolve to a denied address: 127.0.0.1 and its `127.1` shorthand (own
+/// loopback), a private RFC1918 literal, and the cloud-metadata link-local literal.
+const PRIVATE_LITERALS: [&str; 4] = ["127.0.0.1", "127.1", "10.0.0.1", "169.254.169.254"];
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn private_literal_blocked() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    for spelling in PRIVATE_LITERALS {
+        // Direct: srt lists the private ranges in the child's NO_PROXY, so a plain request skips
+        // the proxy; Seatbelt then denies the outbound connection (no empty netns on macOS), so it
+        // fails to connect. `execute_denied` doubles as the positive control that the shell ran.
+        let direct = execute_denied(
+            &host,
+            &format!("direct-{spelling}"),
+            &workspace,
+            &format!("curl -sS --max-time 10 -o /dev/null -w %{{http_code}} http://{spelling}/"),
+        );
+        assert_ne!(direct["exitCode"], 0, "direct {spelling}: {direct}");
+        assert!(
+            output(&direct).starts_with("000"),
+            "a direct connection to {spelling} must fail to connect: {direct}"
+        );
+        // Proxied: `--noproxy ''` forces the request through the sandbox proxy, whose address
+        // guard refuses it with a 403 and a `sandbox_violations` report. The 403 reply is itself
+        // the positive control — curl could only receive it by reaching and talking to the proxy.
+        let proxied = execute(
+            &host,
+            &format!("proxied-{spelling}"),
+            &workspace,
+            &format!(
+                "curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{{http_code}} http://{spelling}/"
+            ),
+        );
+        let text = output(&proxied);
+        assert!(
+            text.contains("403") && text.contains("sandbox_violations"),
+            "a private literal address must be refused by the sandbox proxy: {proxied}"
+        );
+        assert!(
+            text.contains("public internet only"),
+            "the refusal must come from the address guard: {proxied}"
+        );
+        assert!(!text.starts_with("200"), "{spelling} must not connect: {proxied}");
+    }
+}
+
+/// Asserts `/etc/hosts` maps `name` to `address`. The macOS-sandbox CI job adds these entries;
+/// without them a hostname test would prove nothing, so it fails with that instruction.
+fn require_hosts_entry(name: &str, address: &str) {
+    let hosts = fs::read_to_string("/etc/hosts").expect("read /etc/hosts");
+    let present = hosts.lines().any(|line| {
+        let mut fields = line.split('#').next().unwrap_or_default().split_whitespace();
+        fields.next() == Some(address) && fields.any(|field| field == name)
+    });
     assert!(
-        !network.status.success(),
-        "Block-all probe unexpectedly reached localhost"
+        present,
+        "/etc/hosts must map {name} to {address} for this test: add the line \
+         `{address} {name}` (the macOS-sandbox CI job does)"
     );
 }
 
 #[test]
-fn profile_cannot_be_injected_through_a_workspace_name() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("quoted\"(allow network*)");
-    fs::create_dir(&path).unwrap();
-    let profile = isolation_probe_profile(&path).unwrap();
-    assert!(profile.contains("quoted\\\"(allow network*)"));
+#[ignore = "requires sandbox_apply, the sandbox bundle and /etc/hosts test entries"]
+fn hostname_to_loopback_blocked() {
+    require_hosts_entry("sw-loop.test", "127.0.0.1");
+    require_hosts_entry("sw-private.test", "10.0.0.1");
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // `--noproxy ''` forces the request through the sandbox proxy, which resolves the hostname and
+    // denies it because it resolves to a loopback / private address.
+    for name in ["sw-loop.test", "sw-private.test"] {
+        let proxied = execute(
+            &host,
+            &format!("host-{name}"),
+            &workspace,
+            &format!(
+                "curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{{http_code}} http://{name}/"
+            ),
+        );
+        let text = output(&proxied);
+        assert!(
+            text.contains("403") && text.contains("sandbox_violations"),
+            "a hostname resolving to a private address must be refused: {proxied}"
+        );
+        assert!(
+            text.contains("resolved") || text.contains("public internet only"),
+            "the refusal must be a resolved-address denial: {proxied}"
+        );
+        assert!(
+            text.contains(name),
+            "the refusal must name the host under test: {proxied}"
+        );
+        assert!(!text.starts_with("200"), "{name} must not connect: {proxied}");
+    }
 }
 
-/// Minimal real-sandbox regression suite for Task 2's tight macOS read policy, run through the
-/// production `LocalHost` + `dispatch` path against a built `sandbox-sidecar` bundle (copied into
-/// `<temp app data>/sandbox/current`, like `linux_sandbox.rs`). Every test is `#[ignore]`; run on
-/// a real macOS host with:
-///
-///   cargo test --test macos_sandbox -- --include-ignored
-///
-/// Kept deliberately small and self-contained — Task 4 rewrites this file into the full macOS
-/// real-sandbox suite. The subtle "a granted fake `$HOME` still hides its `Library/Keychains`"
-/// case is a policy-shape property proven in `sandbox-sidecar/tests/policy.test.ts`
-/// (`DARWIN_CREDENTIALS`) and by hand against the real sidecar; here the sandbox's `home` is the
-/// real `$HOME`, so the equivalent check is `keychains_are_unreadable`.
-#[cfg(test)]
-mod tight_reads {
-    use serde_json::{json, Value};
-    use sourceweft_desktop::local_host::{execution::Executions, LocalHost, Workspace};
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-    };
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn public_https_allowed() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute(
+        &host,
+        "public",
+        &workspace,
+        "curl -sS -o /dev/null -w %{http_code} https://registry.npmjs.org/left-pad",
+    );
+    assert_eq!(
+        output(&result).trim(),
+        "200",
+        "a public HTTPS request to the npm registry must return 200; a 000/timeout here means \
+         this host has no working public internet. Real public egress is required for this test \
+         and must never be skipped or weakened: {result}"
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+}
 
-    fn built_bundle_source() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sandbox-sidecar/dist/bundle")
-    }
+// ---------------------------------------------------------------------------------------------
+// Readiness and the sidecar's own environment.
+// ---------------------------------------------------------------------------------------------
 
-    fn copy_bundle_into(dest: &Path) {
-        let source = built_bundle_source();
-        assert!(
-            source.join("srt-sidecar").is_file(),
-            "expected a built sidecar bundle at {source:?}; run `bun run build --rg \
-             \"$(command -v rg)\"` in apps/desktop/sandbox-sidecar first"
-        );
-        fs::create_dir_all(dest).unwrap();
-        for entry in fs::read_dir(&source).unwrap() {
-            let entry = entry.unwrap();
-            let target = dest.join(entry.file_name());
-            fs::copy(entry.path(), &target).unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            let mut permissions = fs::metadata(&target).unwrap().permissions();
-            permissions.set_mode(0o755);
-            fs::set_permissions(&target, permissions).unwrap();
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn readiness_needs_setup_without_bundle() {
+    // No bundle under the app data: macOS must report NeedsSetup with the bundle-missing reason,
+    // never Ready (no silent unsandboxed fallback).
+    let app = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(app.path()).unwrap();
+    assert!(!bundle_dir(app.path()).exists());
+    assert_eq!(
+        host.sandbox_readiness(),
+        SandboxReadiness::NeedsSetup {
+            reason: "Sandbox runtime is not installed".to_string()
         }
-    }
+    );
+}
 
-    /// srt treats an existing `/tmp/claude` as its own writable TMPDIR (the state on any machine
-    /// that also runs Claude Code); create it once so every test runs in that configuration.
-    fn ensure_tmp_claude() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            fs::create_dir_all("/tmp/claude").expect("create /tmp/claude");
-        });
-    }
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn readiness_ready_with_bundle() {
+    // With the bundle installed, the production readiness probe (sidecar `init` + `probe`, which
+    // runs a real `sandbox_apply`) reports Ready.
+    let (_app, host) = host_with_bundle();
+    let readiness = host.sandbox_readiness();
+    assert!(
+        matches!(readiness, SandboxReadiness::Ready { .. }),
+        "expected Ready with the bundle installed, got {readiness:?}"
+    );
+}
 
-    fn host_with_bundle() -> (tempfile::TempDir, LocalHost) {
-        ensure_tmp_claude();
-        let app = tempfile::tempdir().unwrap();
-        copy_bundle_into(&app.path().join("sandbox/current"));
-        let host = LocalHost::open(app.path()).unwrap();
-        host.initialize_invocation_journal().unwrap();
-        (app, host)
-    }
-
-    fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -> Value {
-        host.dispatch(
-            &Executions::default(),
-            call,
-            "owner",
-            &workspace.thread_id,
-            "command.execute",
-            json!({"workspaceId": workspace.id, "command": command, "timeoutMs": 60000, "maxOutputChars": 20000}),
-        )
-        .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
-    }
-
-    fn output(result: &Value) -> &str {
-        result["output"].as_str().unwrap()
-    }
-
-    /// Runs `command` after a positive control that must succeed inside the sandbox, so a denial
-    /// test cannot pass merely because the command never ran (e.g. a missing binary).
-    fn execute_denied(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -> Value {
-        let control = workspace.path.join(".sw-control");
-        let _ = fs::remove_file(&control);
-        let result = execute(
-            host,
-            call,
-            workspace,
-            &format!("printf ran > .sw-control && {command}"),
-        );
-        assert_eq!(
-            fs::read_to_string(&control).ok().as_deref(),
-            Some("ran"),
-            "the sandboxed command never ran: {result}"
-        );
-        result
-    }
-
-    fn quoted(path: &Path) -> String {
-        format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"))
-    }
-
-    struct RemoveOnDrop(PathBuf);
-    impl Drop for RemoveOnDrop {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
-        }
-    }
-
-    #[test]
-    #[ignore = "requires sandbox_apply and the sandbox bundle"]
-    fn tight_policy_allows_the_toolchain_and_the_workspace() {
-        let (_app, host) = host_with_bundle();
-        let workspace = host.ensure_workspace("owner", "thread").unwrap();
-        let result = execute(
-            &host,
-            "toolchain",
-            &workspace,
-            // Workspace write+read, a system tool (/usr/bin), a login-PATH toolchain (node), and
-            // the /etc symlink spelling all under the tight read policy.
-            "printf hi > f.txt && cat f.txt && /usr/bin/grep -c hi f.txt && \
-             node -e 'console.log(\"node\",process.version)' && head -c1 /etc/hosts >/dev/null && \
-             echo toolchain-ok",
-        );
-        assert_eq!(result["exitCode"], 0, "{result}");
-        assert!(output(&result).contains("toolchain-ok"), "{result}");
-        assert_eq!(fs::read_to_string(workspace.path.join("f.txt")).unwrap(), "hi");
-    }
-
-    #[test]
-    #[ignore = "requires sandbox_apply and the sandbox bundle"]
-    fn developer_tool_shims_work_under_the_tight_policy() {
-        // The macOS `/usr/bin` xcode-select shims (`cc`, `make`, `git`) resolve their real tool via
-        // `xcrun`. With a full `Xcode.app` as the active developer dir that path crashes in the
-        // sandbox — `xcrun` cold-falls back to `xcodebuild`, which needs XPC/Launch Services the
-        // tight policy withholds. The fix pins `DEVELOPER_DIR` to the Command Line Tools in the
-        // child env (`srt_exec::child_env`/`darwin_developer_dir`) and grants a read of that
-        // toolchain, so the shims run. This proves `cc` compiles+runs, `make` drives the compiler,
-        // and a `git` commit succeeds under the tight policy.
-        let (_app, host) = host_with_bundle();
-        let workspace = host.ensure_workspace("owner", "thread").unwrap();
-
-        let build = execute(
-            &host,
-            "cc",
-            &workspace,
-            "printf '#include <stdio.h>\\nint main(){puts(\"cc-ran\");return 0;}\\n' > hello.c && \
-             cc hello.c -o hello && ./hello && \
-             printf 'all:\\n\\t@echo make-ran\\n' > Makefile && make",
-        );
-        assert_eq!(build["exitCode"], 0, "{build}");
-        assert!(output(&build).contains("cc-ran"), "{build}");
-        assert!(output(&build).contains("make-ran"), "{build}");
-
-        // git's own `init` cannot populate `.git/hooks`: srt blocks that subtree on every platform
-        // for security (host-executed hook scripts are an escape vector), unrelated to this fix. So
-        // the repo is created host-side, and the sandbox does the real work through the git shim —
-        // which without the `DEVELOPER_DIR` pin would crash in `xcodebuild` on this Xcode host.
-        let status = std::process::Command::new("git")
-            .args(["init", "-q"])
-            .current_dir(&workspace.path)
-            .status()
-            .unwrap();
-        assert!(status.success(), "host-side git init failed");
-        let commit = execute(
-            &host,
-            "git",
-            &workspace,
-            "git -c user.name=T -c user.email=t@example.com add -A && \
-             git -c user.name=T -c user.email=t@example.com commit -qm shim && \
-             git log --oneline | head -1 >/dev/null && echo git-ran",
-        );
-        assert_eq!(commit["exitCode"], 0, "{commit}");
-        assert!(output(&commit).contains("git-ran"), "{commit}");
-    }
-
-    #[test]
-    #[ignore = "requires sandbox_apply and the sandbox bundle"]
-    fn keychains_are_unreadable() {
-        let (_app, host) = host_with_bundle();
-        let workspace = host.ensure_workspace("owner", "thread").unwrap();
-        let home = PathBuf::from(std::env::var("HOME").unwrap());
-        // ~/Library/Keychains (login keychain) and the system keychain: both must be denied, and
-        // nothing of their bytes may surface. No content is written anywhere by this test.
-        let result = execute_denied(
-            &host,
-            "keychains",
-            &workspace,
-            &format!(
-                "ls {} 2>&1; cat /Library/Keychains/System.keychain 2>&1 | head -c0",
-                quoted(&home.join("Library/Keychains"))
-            ),
-        );
-        assert!(
-            output(&result).contains("Operation not permitted")
-                || output(&result).contains("Permission denied"),
-            "keychains directory was not denied: {result}"
-        );
-        // Direct read of the login keychain db file, if present, must also be denied.
-        let login = home.join("Library/Keychains/login.keychain-db");
-        if login.exists() {
-            let r = execute_denied(&host, "login-kc", &workspace, &format!("cat {}", quoted(&login)));
-            assert_ne!(r["exitCode"], 0, "login keychain was readable: {r}");
-        }
-    }
-
-    #[test]
-    #[ignore = "requires sandbox_apply and the sandbox bundle"]
-    fn home_and_system_secrets_are_denied() {
-        let home = PathBuf::from(std::env::var("HOME").unwrap());
-        // A planted home secret (outside any workspace) and the shadow password file.
-        let secret_path = home.join(".sw-test-secret");
-        let secret = format!("sw-secret-{}", uuid::Uuid::new_v4().simple());
-        fs::write(&secret_path, &secret).unwrap();
-        let _cleanup = RemoveOnDrop(secret_path.clone());
-
-        let (_app, host) = host_with_bundle();
-        let workspace = host.ensure_workspace("owner", "thread").unwrap();
-        let result = execute_denied(
-            &host,
-            "secrets",
-            &workspace,
-            &format!(
-                "cat {} 2>&1; cat /etc/master.passwd 2>&1; ls {} 2>&1; ls /Users 2>&1",
-                quoted(&secret_path),
-                quoted(&home.join(".ssh"))
-            ),
-        );
-        assert!(
-            !output(&result).contains(&secret),
-            "home secret leaked into the sandbox: {result}"
-        );
-        assert!(
-            !output(&result).contains("root:"),
-            "/etc/master.passwd contents leaked: {result}"
-        );
-    }
-
-    #[test]
-    #[ignore = "requires sandbox_apply and the sandbox bundle"]
-    fn granted_folder_outside_home_is_usable_and_still_hides_keychains() {
-        let (_app, host) = host_with_bundle();
-        // A granted folder outside $HOME (a temp dir under /var/folders-style storage), made the
-        // workspace through the native-picker grant path.
-        let outside = tempfile::tempdir().unwrap();
-        let grant = host.register_folder("owner", outside.path()).unwrap();
-        let grant_id = grant["id"].as_str().unwrap();
-        let workspace = host
-            .ensure_workspace_with_grant("owner", "thread", Some(grant_id))
-            .unwrap();
-        let result = execute(
-            &host,
-            "granted",
-            &workspace,
-            "printf out > g.txt && cat g.txt && echo granted-ok",
-        );
-        assert_eq!(result["exitCode"], 0, "{result}");
-        assert!(output(&result).contains("granted-ok"), "{result}");
-        // The keychains stay hidden even from a workspace outside $HOME.
-        let home = PathBuf::from(std::env::var("HOME").unwrap());
-        let denied = execute_denied(
-            &host,
-            "granted-kc",
-            &workspace,
-            &format!("ls {} 2>&1", quoted(&home.join("Library/Keychains"))),
-        );
-        assert!(
-            denied["exitCode"] != 0
-                || output(&denied).contains("Operation not permitted")
-                || output(&denied).contains("Permission denied"),
-            "keychains readable from a granted folder: {denied}"
-        );
-    }
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn proxy_env_stripped() {
+    // The parent process has `HTTP_PROXY`/`http_proxy` pointing nowhere. The sidecar is started
+    // with a cleared environment and strips any proxy variable before srt loads, so the wrapped
+    // command sees only the sandbox's own proxy, never the parent's bogus value.
+    let _upper = EnvVarGuard::set("HTTP_PROXY", "http://proxy.invalid.example:9/");
+    let _lower = EnvVarGuard::set("http_proxy", "http://proxy.invalid.example:9/");
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute(&host, "proxy-env", &workspace, "env | grep -i proxy || true");
+    let text = output(&result);
+    assert!(
+        !text.contains("proxy.invalid.example"),
+        "the parent's HTTP_PROXY leaked into the sandboxed command: {result}"
+    );
+    // Positive control: the sandbox lays down its own proxy variables, so the command really did
+    // observe a proxy configuration (just not the parent's).
+    assert!(
+        text.to_uppercase().contains("HTTPS_PROXY="),
+        "the sandbox must set its own proxy variables: {result}"
+    );
 }
