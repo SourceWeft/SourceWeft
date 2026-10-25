@@ -60,6 +60,22 @@ impl NetworkPolicy {
     }
 }
 
+/// Whether `host:port` is well-formed enough to put in a `network.ask`: a DNS-style name of
+/// 1..=253 characters from `[A-Za-z0-9._-]`, or a bracket-free IPv6 literal of `[0-9a-fA-F:.]`
+/// (anything containing a colon), and a nonzero port. Control characters, whitespace and
+/// everything else fail.
+fn is_relayable_target(host: &str, port: u16) -> bool {
+    if port == 0 || host.is_empty() || host.len() > 253 {
+        return false;
+    }
+    if host.contains(':') {
+        host.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+    } else {
+        host.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+    }
+}
+
 /// An `ask` event from the sidecar: a connection that matched no rule.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,17 +110,29 @@ pub type Reply = Box<dyn FnOnce(Decision) + Send>;
 
 struct Pending {
     invocation: String,
+    /// The connection whose channel carried the `network.ask`; only that connection's close or
+    /// decisions touch this ask.
+    connection: u64,
     answer: mpsc::Sender<Decision>,
 }
 
 struct Active {
     invocation: String,
+    /// The sidecar's id for the command this invocation is running, registered before the
+    /// command is wrapped. An ask naming any other command is not this invocation's.
+    command_id: Option<String>,
     cancel: Arc<AtomicBool>,
+}
+
+struct Outbound {
+    connection: u64,
+    sender: tokio::sync::mpsc::UnboundedSender<Value>,
 }
 
 #[derive(Default)]
 struct State {
-    outbound: Option<tokio::sync::mpsc::UnboundedSender<Value>>,
+    outbound: Option<Outbound>,
+    next_connection: u64,
     active: Vec<Active>,
     /// Keyed by the bridge's own device-unique ask id, so ids from different sidecar
     /// instances (a restarted sidecar reuses its counter) can never collide on the backend.
@@ -135,9 +163,50 @@ pub struct ActiveCommand {
     invocation: String,
 }
 
+impl ActiveCommand {
+    /// Registers the sidecar's id for the command about to be wrapped, so that only asks naming
+    /// it are attributed to this invocation. Call before `wrap`: the first ask can follow the
+    /// wrap reply immediately.
+    pub fn set_command_id(&self, command_id: &str) {
+        let mut state = self.bridge.state();
+        if let Some(active) = state
+            .active
+            .iter_mut()
+            .find(|a| a.invocation == self.invocation)
+        {
+            active.command_id = Some(command_id.to_string());
+        }
+    }
+}
+
 impl Drop for ActiveCommand {
     fn drop(&mut self) {
         self.bridge.end(&self.invocation);
+    }
+}
+
+/// One WebSocket connection's hold on the bridge's outbound slot. Dropping it clears the slot
+/// and denies the asks sent over *this* connection — but only if it is still the current one:
+/// an old connection's future that exits late (after a re-enrol attached a new connection) must
+/// not touch the new connection's channel or asks.
+pub struct OutboundLease {
+    bridge: NetworkBridge,
+    connection: u64,
+}
+
+impl OutboundLease {
+    /// A `network.decision` that arrived on this connection. Returns whether an ask of this
+    /// connection was waiting; unknown, already-settled (the backend delivers at least once) and
+    /// other connections' asks are ignored.
+    pub fn resolve(&self, ask_id: &str, allow: bool, reason: Option<String>) -> bool {
+        self.bridge
+            .settle(ask_id, Some(self.connection), Decision { allow, reason })
+    }
+}
+
+impl Drop for OutboundLease {
+    fn drop(&mut self) {
+        self.bridge.detach(self.connection);
     }
 }
 
@@ -156,27 +225,42 @@ impl NetworkBridge {
         self.inner.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Installs (or clears) the channel `remote_host::connection()` drains to the WebSocket.
-    /// Clearing denies every pending ask: nobody is left to answer it.
-    pub fn set_outbound(&self, outbound: Option<tokio::sync::mpsc::UnboundedSender<Value>>) {
+    /// Installs the channel `remote_host::connection()` drains to its WebSocket, replacing any
+    /// earlier connection's. The returned lease owns the slot: see [`OutboundLease`].
+    pub fn attach(&self, sender: tokio::sync::mpsc::UnboundedSender<Value>) -> OutboundLease {
+        let mut state = self.state();
+        state.next_connection += 1;
+        let connection = state.next_connection;
+        state.outbound = Some(Outbound { connection, sender });
+        OutboundLease {
+            bridge: self.clone(),
+            connection,
+        }
+    }
+
+    fn detach(&self, connection: u64) {
         let drained = {
             let mut state = self.state();
-            let clearing = outbound.is_none();
-            state.outbound = outbound;
-            if clearing {
-                state.pending.drain().map(|(_, p)| p).collect::<Vec<_>>()
-            } else {
-                Vec::new()
+            if state
+                .outbound
+                .as_ref()
+                .is_some_and(|outbound| outbound.connection == connection)
+            {
+                state.outbound = None;
             }
+            let ids: Vec<String> = state
+                .pending
+                .iter()
+                .filter(|(_, p)| p.connection == connection)
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| state.pending.remove(&id))
+                .collect::<Vec<_>>()
         };
         for pending in drained {
             let _ = pending.answer.send(Decision::deny("device disconnected"));
         }
-    }
-
-    /// The connection ended.
-    pub fn disconnect(&self) {
-        self.set_outbound(None);
     }
 
     /// Records `invocation` as running a command. Commands run serially per device; if more
@@ -184,6 +268,7 @@ impl NetworkBridge {
     pub fn begin(&self, invocation: &str, cancel: Arc<AtomicBool>) -> ActiveCommand {
         self.state().active.push(Active {
             invocation: invocation.to_string(),
+            command_id: None,
             cancel,
         });
         ActiveCommand {
@@ -213,12 +298,25 @@ impl NetworkBridge {
         }
     }
 
-    /// The backend answered (`network.decision`). Returns whether an ask was waiting.
+    /// The backend answered (`network.decision`), from any connection. Returns whether an ask
+    /// was waiting. Connections use [`OutboundLease::resolve`].
     pub fn resolve(&self, ask_id: &str, allow: bool, reason: Option<String>) -> bool {
-        let pending = self.state().pending.remove(ask_id);
+        self.settle(ask_id, None, Decision { allow, reason })
+    }
+
+    fn settle(&self, ask_id: &str, connection: Option<u64>, decision: Decision) -> bool {
+        let pending = {
+            let mut state = self.state();
+            match state.pending.get(ask_id) {
+                Some(p) if connection.is_none_or(|c| p.connection == c) => {
+                    state.pending.remove(ask_id)
+                }
+                _ => None,
+            }
+        };
         match pending {
             Some(pending) => {
-                let _ = pending.answer.send(Decision { allow, reason });
+                let _ = pending.answer.send(decision);
                 true
             }
             None => false,
@@ -243,22 +341,37 @@ impl NetworkBridge {
 
     /// Blocks until the ask has an answer. Public for tests; production goes through `on_ask`.
     pub fn decide(&self, event: &AskEvent) -> Decision {
+        // The host comes from a sandboxed command's own request, so it is untrusted input: a
+        // malformed one is refused here and never reaches the backend.
+        if !is_relayable_target(&event.host, event.port) {
+            return Decision::deny("invalid host");
+        }
         let (answer, receiver) = mpsc::channel();
         let ask_id = uuid::Uuid::new_v4().to_string();
         let cancel = {
             let mut state = self.state();
-            let Some(outbound) = state.outbound.clone() else {
+            let Some((connection, outbound)) = state
+                .outbound
+                .as_ref()
+                .map(|o| (o.connection, o.sender.clone()))
+            else {
                 return Decision::deny("device is offline");
             };
-            if state.active.len() != 1 {
-                return Decision::deny("no active command");
+            match state.active.len() {
+                0 => return Decision::deny("no active command"),
+                1 => {}
+                _ => return Decision::deny("ambiguous active commands"),
             }
             let invocation = state.active[0].invocation.clone();
+            if state.active[0].command_id.as_deref() != Some(event.command_id.as_str()) {
+                return Decision::deny("ask for a different command");
+            }
             let cancel = state.active[0].cancel.clone();
             state.pending.insert(
                 ask_id.clone(),
                 Pending {
                     invocation: invocation.clone(),
+                    connection,
                     answer,
                 },
             );
@@ -315,10 +428,16 @@ mod tests {
 
     fn connected(
         bridge: &NetworkBridge,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<Value> {
+    ) -> (OutboundLease, tokio::sync::mpsc::UnboundedReceiver<Value>) {
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        bridge.set_outbound(Some(sender));
-        receiver
+        (bridge.attach(sender), receiver)
+    }
+
+    /// `begin` plus the command-id registration `srt_exec` does before wrapping.
+    fn begin_cmd(bridge: &NetworkBridge, invocation: &str, cancel: Arc<AtomicBool>) -> ActiveCommand {
+        let active = bridge.begin(invocation, cancel);
+        active.set_command_id("cmd");
+        active
     }
 
     fn spawn_decide(bridge: &NetworkBridge, event: AskEvent) -> std::thread::JoinHandle<Decision> {
@@ -342,7 +461,7 @@ mod tests {
         let bridge = NetworkBridge::default();
         let offline = bridge.decide(&ask("a.com"));
         assert_eq!(offline, Decision::deny("device is offline"));
-        let _frames = connected(&bridge);
+        let (_lease, _frames) = connected(&bridge);
         let idle = bridge.decide(&ask("a.com"));
         assert_eq!(idle, Decision::deny("no active command"));
     }
@@ -350,18 +469,18 @@ mod tests {
     #[test]
     fn two_active_commands_count_as_none() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let _a = bridge.begin("one", Arc::default());
-        let _b = bridge.begin("two", Arc::default());
-        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("no active command"));
+        let (_lease, mut frames) = connected(&bridge);
+        let _a = begin_cmd(&bridge, "one", Arc::default());
+        let _b = begin_cmd(&bridge, "two", Arc::default());
+        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("ambiguous active commands"));
         assert!(frames.try_recv().is_err());
     }
 
     #[test]
     fn ask_is_sent_and_the_decision_resolves_it() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let _active = bridge.begin("inv-1", Arc::default());
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv-1", Arc::default());
         let waiting = spawn_decide(&bridge, ask("example.com"));
         let frame = next_frame(&mut frames);
         assert_eq!(frame["type"], "network.ask");
@@ -385,8 +504,8 @@ mod tests {
     #[test]
     fn a_deny_carries_its_reason() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let _active = bridge.begin("inv", Arc::default());
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
         let waiting = spawn_decide(&bridge, ask("example.com"));
         let ask_id = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
         bridge.resolve(&ask_id, false, Some("user said no".into()));
@@ -402,8 +521,8 @@ mod tests {
     #[test]
     fn the_ask_ids_sent_to_the_backend_are_unique_even_for_equal_sidecar_ids() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let _active = bridge.begin("inv", Arc::default());
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
         let first = spawn_decide(&bridge, ask("a.com"));
         let second = spawn_decide(&bridge, ask("b.com"));
         let one = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
@@ -418,9 +537,9 @@ mod tests {
     #[test]
     fn cancelling_the_invocation_denies_its_pending_ask() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
+        let (_lease, mut frames) = connected(&bridge);
         let cancel = Arc::new(AtomicBool::new(false));
-        let _active = bridge.begin("inv", cancel.clone());
+        let _active = begin_cmd(&bridge, "inv", cancel.clone());
         let waiting = spawn_decide(&bridge, ask("example.com"));
         let ask_id = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
         cancel.store(true, Ordering::SeqCst);
@@ -431,13 +550,13 @@ mod tests {
     #[test]
     fn disconnect_denies_all_pending_asks() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let _active = bridge.begin("inv", Arc::default());
+        let (lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
         let first = spawn_decide(&bridge, ask("a.com"));
         let second = spawn_decide(&bridge, ask("b.com"));
         next_frame(&mut frames);
         next_frame(&mut frames);
-        bridge.disconnect();
+        drop(lease);
         assert_eq!(first.join().unwrap(), Decision::deny("device disconnected"));
         assert_eq!(second.join().unwrap(), Decision::deny("device disconnected"));
         // And a new ask now sees an offline device.
@@ -447,8 +566,8 @@ mod tests {
     #[test]
     fn the_end_of_a_command_denies_what_it_left_pending() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let active = bridge.begin("inv", Arc::default());
+        let (_lease, mut frames) = connected(&bridge);
+        let active = begin_cmd(&bridge, "inv", Arc::default());
         let waiting = spawn_decide(&bridge, ask("a.com"));
         next_frame(&mut frames);
         drop(active);
@@ -458,8 +577,8 @@ mod tests {
     #[test]
     fn no_answer_times_out_as_a_denial() {
         let bridge = NetworkBridge::with_timeout(Duration::from_millis(300));
-        let _frames = connected(&bridge);
-        let _active = bridge.begin("inv", Arc::default());
+        let (_lease, _frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
         let started = Instant::now();
         assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("approval timed out"));
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -468,17 +587,17 @@ mod tests {
     #[test]
     fn a_closed_outbound_channel_is_offline() {
         let bridge = NetworkBridge::default();
-        let frames = connected(&bridge);
+        let (_lease, frames) = connected(&bridge);
         drop(frames);
-        let _active = bridge.begin("inv", Arc::default());
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
         assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("device is offline"));
     }
 
     #[test]
     fn on_ask_does_not_block_and_replies_once() {
         let bridge = NetworkBridge::default();
-        let mut frames = connected(&bridge);
-        let _active = bridge.begin("inv", Arc::default());
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
         let (done, answered) = mpsc::channel();
         let started = Instant::now();
         bridge.on_ask(
@@ -533,5 +652,129 @@ mod tests {
             serde_json::to_string(&policy).unwrap(),
             r#"{"mode":"ask","allow":["a.com"],"suggested":{"a.com":"skill"}}"#
         );
+    }
+
+    #[test]
+    fn an_ask_for_another_command_or_an_unregistered_one_is_denied() {
+        let bridge = NetworkBridge::default();
+        let (_lease, mut frames) = connected(&bridge);
+        let active = bridge.begin("inv", Arc::default());
+        // No sidecar command id registered yet: fail closed.
+        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("ask for a different command"));
+        active.set_command_id("cmd-mine");
+        let mut other = ask("a.com");
+        other.command_id = "cmd-other".into();
+        assert_eq!(bridge.decide(&other), Decision::deny("ask for a different command"));
+        assert!(frames.try_recv().is_err(), "nothing may reach the backend");
+        let mut mine = ask("a.com");
+        mine.command_id = "cmd-mine".into();
+        let waiting = spawn_decide(&bridge, mine);
+        let frame = next_frame(&mut frames);
+        assert!(bridge.resolve(frame["askId"].as_str().unwrap(), true, None));
+        assert!(waiting.join().unwrap().allow);
+    }
+
+    #[test]
+    fn closing_an_old_connection_leaves_the_new_one_working() {
+        let bridge = NetworkBridge::default();
+        let (old_lease, mut old_frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let on_old = spawn_decide(&bridge, ask("old.example.com"));
+        let old_ask = next_frame(&mut old_frames)["askId"].as_str().unwrap().to_string();
+
+        // A re-enrol attaches a new connection before the old future has exited.
+        let (new_lease, mut new_frames) = connected(&bridge);
+        let on_new = spawn_decide(&bridge, ask("new.example.com"));
+        let new_ask = next_frame(&mut new_frames)["askId"].as_str().unwrap().to_string();
+
+        // The old connection finally closes: only its own ask is denied...
+        drop(old_lease);
+        assert_eq!(on_old.join().unwrap(), Decision::deny("device disconnected"));
+        // ...the new connection's ask is untouched and still answerable...
+        assert!(!on_new.is_finished());
+        assert!(new_lease.resolve(&new_ask, true, None));
+        assert!(on_new.join().unwrap().allow);
+        // ...and the new channel is still installed.
+        let third = spawn_decide(&bridge, ask("third.example.com"));
+        let third_ask = next_frame(&mut new_frames)["askId"].as_str().unwrap().to_string();
+        assert!(bridge.resolve(&third_ask, false, None));
+        assert!(!third.join().unwrap().allow);
+        assert!(!bridge.resolve(&old_ask, true, None));
+    }
+
+    #[test]
+    fn a_connection_only_settles_its_own_asks() {
+        let bridge = NetworkBridge::default();
+        let (old_lease, mut old_frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let waiting = spawn_decide(&bridge, ask("a.com"));
+        let ask_id = next_frame(&mut old_frames)["askId"].as_str().unwrap().to_string();
+        let (new_lease, _new_frames) = connected(&bridge);
+        // A decision arriving on the other connection does not settle it.
+        assert!(!new_lease.resolve(&ask_id, true, None));
+        assert!(!waiting.is_finished());
+        assert!(old_lease.resolve(&ask_id, true, None));
+        assert!(waiting.join().unwrap().allow);
+        // At-least-once delivery: a repeat is ignored.
+        assert!(!old_lease.resolve(&ask_id, false, None));
+    }
+
+    #[test]
+    fn the_last_connection_closing_goes_offline() {
+        let bridge = NetworkBridge::default();
+        let (lease, _frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        drop(lease);
+        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("device is offline"));
+    }
+
+    #[test]
+    fn malformed_targets_are_refused_without_contacting_the_backend() {
+        let bridge = NetworkBridge::default();
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let long = format!("{}.com", "a".repeat(300));
+        let edge = "a".repeat(253);
+        for (host, port) in [
+            (long.as_str(), 443),
+            ("evil\0.com", 443),
+            ("evil\n.com", 443),
+            ("evil\r\nHost: x", 443),
+            ("with space.com", 443),
+            ("[::1]", 443),
+            ("ünicode.com", 443),
+            ("", 443),
+            ("example.com", 0),
+            ("1::g", 443),
+        ] {
+            let mut event = ask(host);
+            event.port = port;
+            assert_eq!(
+                bridge.decide(&event),
+                Decision::deny("invalid host"),
+                "{host:?}:{port}"
+            );
+        }
+        assert!(frames.try_recv().is_err(), "nothing may be relayed");
+        // The longest legal name and IPv6/IP literals are relayed.
+        for host in [edge.as_str(), "2001:db8::1", "::ffff:1.2.3.4", "a-b_c.example.com", "93.184.216.34"] {
+            let worker = bridge.clone();
+            let event = ask(host);
+            let waiting = std::thread::spawn(move || worker.decide(&event));
+            let frame = next_frame(&mut frames);
+            assert_eq!(frame["host"], host);
+            assert!(!waiting.is_finished());
+            assert!(frames.try_recv().is_err());
+            // Answer it so the thread ends.
+            let id = frame["askId"].as_str().unwrap().to_string();
+            for _ in 0..200 {
+                if waiting.is_finished() {
+                    break;
+                }
+                bridge.resolve(&id, true, None);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(waiting.join().unwrap().allow);
+        }
     }
 }

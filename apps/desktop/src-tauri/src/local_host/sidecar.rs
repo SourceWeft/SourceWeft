@@ -948,21 +948,34 @@ pub(crate) mod tests {
 
     #[test]
     fn a_blocked_handler_thread_does_not_stall_calls() {
-        // The handler hands the ask to another thread and returns; calls keep working while
-        // that thread waits, and it can answer later through the responder.
+        // The handler hands the ask to another thread and returns. That thread stays blocked on
+        // a gate the test opens only after the calls below have returned, so the calls provably
+        // complete while an ask is unanswered; it then answers through the responder.
         let dir = tempfile::tempdir().unwrap();
         let bundle = bundle_with_stub();
         let (init, log) = recording_init(dir.path());
-        let handler: EventHandler = Arc::new(|event, responder| {
+        let (open_gate, gate) = mpsc::channel::<()>();
+        let gate = Mutex::new(Some(gate));
+        let handler: EventHandler = Arc::new(move |event, responder| {
             let SidecarEvent::Ask(ask) = event;
+            let gate = gate.lock().unwrap().take().expect("one ask");
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(300));
+                let _ = gate.recv_timeout(Duration::from_secs(30));
                 let _ = responder.reply(&ask.ask_id, true, None);
             });
         });
         let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
         wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+        // Several round trips while the ask is still unanswered.
         sidecar.probe().unwrap();
+        wrap(&sidecar, "echo while-pending", None).unwrap();
+        sidecar.probe().unwrap();
+        let before_release = fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            !before_release.contains("ask.reply"),
+            "the answer must not have been written yet: {before_release}"
+        );
+        open_gate.send(()).unwrap();
         wait_for_log(&log, "ask.reply ask-1 true");
         sidecar.probe().unwrap();
     }

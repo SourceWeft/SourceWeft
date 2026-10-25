@@ -467,25 +467,18 @@ impl RemoteHost {
     }
 }
 
-/// Clears the network bridge's outbound channel when a WebSocket connection ends.
-struct NetworkConnection(Arc<LocalHost>);
-impl Drop for NetworkConnection {
-    fn drop(&mut self) {
-        self.0.network.disconnect();
-    }
-}
-
-/// Applies a `network.decision` frame: `{type, askId, allow, reason?}`. Anything but an
-/// explicit `allow: true` denies. A decision for an ask nobody is waiting on (late, repeated,
-/// or already denied by cancellation) is ignored.
+/// Applies a `network.decision` frame: `{type, askId, allow, reason?}` that arrived on `lease`'s
+/// connection. Anything but an explicit `allow: true` denies. A decision for an ask nobody is
+/// waiting on (late, repeated because the backend delivers at least once, already denied by
+/// cancellation, or belonging to another connection) is ignored.
 fn resolve_network_decision(
-    bridge: &sourceweft_desktop::local_host::network::NetworkBridge,
+    lease: &sourceweft_desktop::local_host::network::OutboundLease,
     frame: &Value,
 ) -> Result<(), String> {
     let ask_id = frame["askId"].as_str().ok_or("Missing network ask ID")?;
     let allow = frame["allow"].as_bool() == Some(true);
     let reason = frame["reason"].as_str().map(str::to_owned);
-    bridge.resolve(ask_id, allow, reason);
+    lease.resolve(ask_id, allow, reason);
     Ok(())
 }
 
@@ -519,11 +512,11 @@ async fn connection(
     let (mut sender, mut receiver) = socket.split();
     let (events, mut results) = tokio::sync::mpsc::channel::<(Value, Arc<sourceweft_desktop::local_host::maintenance::Lease>)>(32);
     // Sandbox network asks raised while a command runs leave through this channel for the
-    // lifetime of this connection; the guard clears it (denying whatever is still pending)
-    // however the function exits.
+    // lifetime of this connection. The lease owns the slot: when this future exits (however it
+    // does), it denies the asks sent over this connection and clears the slot only if no newer
+    // connection has replaced it.
     let (network_out, mut network_frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    host.network.set_outbound(Some(network_out));
-    let _network_connection = NetworkConnection(host.clone());
+    let network_lease = host.network.attach(network_out);
     let serial = Arc::new(tokio::sync::Semaphore::new(1));
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     let mut last_received = tokio::time::Instant::now();
@@ -545,7 +538,7 @@ async fn connection(
                     match value["type"].as_str(){
                         Some("connected")=>{if value["deviceId"]!=credential.id||value["userId"]!=credential.user_id{return Err("Device identity mismatch".into());}if let Ok(mut state)=status.lock(){state.connected=true;state.error=None;}},
                         Some("heartbeat")=>{},
-                        Some("network.decision")=>{resolve_network_decision(&host.network,&value)?;},
+                        Some("network.decision")=>{resolve_network_decision(&network_lease,&value)?;},
                         Some("cancel")=>{if let Some(id)=value["id"].as_str(){executions.cancel(id);}},
                         Some("call")=>{
                             if value["userId"]!=credential.user_id{return Err("Call owner mismatch".into());}
@@ -641,15 +634,14 @@ mod linux_computer_name_tests {
 mod network_decision_tests {
     use super::resolve_network_decision;
     use serde_json::json;
-    use sourceweft_desktop::local_host::network::{AskEvent, NetworkBridge};
+    use sourceweft_desktop::local_host::network::{AskEvent, Decision, NetworkBridge, OutboundLease};
     use std::{sync::Arc, time::Duration};
 
-    fn pending_ask(
-        bridge: &NetworkBridge,
-    ) -> (String, std::thread::JoinHandle<sourceweft_desktop::local_host::network::Decision>) {
+    fn pending_ask(bridge: &NetworkBridge) -> (OutboundLease, String, std::thread::JoinHandle<Decision>) {
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
-        bridge.set_outbound(Some(sender));
+        let lease = bridge.attach(sender);
         let active = bridge.begin("inv", Arc::default());
+        active.set_command_id("c");
         let waiting = {
             let bridge = bridge.clone();
             std::thread::spawn(move || {
@@ -671,14 +663,14 @@ mod network_decision_tests {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(5));
         };
-        (frame["askId"].as_str().unwrap().to_string(), waiting)
+        (lease, frame["askId"].as_str().unwrap().to_string(), waiting)
     }
 
     #[test]
     fn an_explicit_allow_resolves_the_ask() {
         let bridge = NetworkBridge::default();
-        let (ask_id, waiting) = pending_ask(&bridge);
-        resolve_network_decision(&bridge, &json!({"type":"network.decision","askId":ask_id,"allow":true})).unwrap();
+        let (lease, ask_id, waiting) = pending_ask(&bridge);
+        resolve_network_decision(&lease, &json!({"type":"network.decision","askId":ask_id,"allow":true})).unwrap();
         assert!(waiting.join().unwrap().allow);
     }
 
@@ -686,9 +678,9 @@ mod network_decision_tests {
     fn anything_but_a_boolean_true_denies_and_carries_the_reason() {
         for allow in [json!(false), json!("true"), json!(1), json!(null)] {
             let bridge = NetworkBridge::default();
-            let (ask_id, waiting) = pending_ask(&bridge);
+            let (lease, ask_id, waiting) = pending_ask(&bridge);
             resolve_network_decision(
-                &bridge,
+                &lease,
                 &json!({"type":"network.decision","askId":ask_id,"allow":allow,"reason":"expired"}),
             )
             .unwrap();
@@ -699,9 +691,17 @@ mod network_decision_tests {
     }
 
     #[test]
-    fn a_decision_without_an_ask_id_is_an_error_and_an_unknown_one_is_ignored() {
+    fn a_decision_without_an_ask_id_is_an_error_and_unknown_or_repeated_ones_are_ignored() {
         let bridge = NetworkBridge::default();
-        assert!(resolve_network_decision(&bridge, &json!({"type":"network.decision","allow":true})).is_err());
-        assert!(resolve_network_decision(&bridge, &json!({"askId":"nobody","allow":true})).is_ok());
+        let (sender, _frames) = tokio::sync::mpsc::unbounded_channel();
+        let lease = bridge.attach(sender);
+        assert!(resolve_network_decision(&lease, &json!({"type":"network.decision","allow":true})).is_err());
+        assert!(resolve_network_decision(&lease, &json!({"askId":"nobody","allow":true})).is_ok());
+        let (lease, ask_id, waiting) = pending_ask(&bridge);
+        let frame = json!({"askId":ask_id,"allow":true});
+        resolve_network_decision(&lease, &frame).unwrap();
+        // The backend delivers at least once: the repeat is a harmless no-op.
+        resolve_network_decision(&lease, &json!({"askId":ask_id,"allow":false})).unwrap();
+        assert!(waiting.join().unwrap().allow);
     }
 }

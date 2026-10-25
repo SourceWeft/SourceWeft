@@ -22,6 +22,8 @@
 #     (an event arriving mid-call)
 #   - wrap.command "SLEEP_ASK:<host>:<port>"   -> like ASK, but the wrapped argv is
 #     `sleep 2` so the command outlives the approval round trip
+#   - wrap.command "SLEEP_ASK_OTHER:<host>:<port>" -> like SLEEP_ASK, but the event names a
+#     different commandId than the wrap's
 #   - wrap.command "SHOW_NETWORK"  -> reply argv ["/bin/echo", <the request's raw
 #     `network` JSON, or empty>] so tests can see what reached the wire
 #   - ask.reply -> reply ok (askId "ask-gone" -> BAD_REQUEST "no pending ask ..."); with "record-ops" also logs "ask.reply <askId> <allow> <reason>"
@@ -95,6 +97,10 @@ while IFS= read -r line; do
                 AUDIT_FAIL)
                     audit_fails=1
                     printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"}}}\n' "$id"
+                    ;;
+                SLEEP_ASK_OTHER:*)
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/sleep","2"],"env":{"FOO":"bar"}}}\n' "$id"
+                    emit_ask "${command#SLEEP_ASK_OTHER:}" "some-other-command"
                     ;;
                 SHOW_NETWORK)
                     net=$(printf '%s' "$line" | sed -n 's/.*"network":\(.*\)}$/\1/p' | sed 's/"/\\"/g')

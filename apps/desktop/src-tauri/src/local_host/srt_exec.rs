@@ -11,7 +11,7 @@
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
 use super::{
-    network::{Decision, NetworkPolicy},
+    network::{ActiveCommand, Decision, NetworkPolicy},
     readiness::{bundle_dir, user_path, Helpers, InitConfig, Platform},
     sidecar::{EventHandler, Sidecar, SidecarEvent, WrappedCommand},
     HostError, LocalHost, Result,
@@ -352,9 +352,13 @@ pub(crate) fn execute_command(
     max_chars: usize,
     cancel: Arc<AtomicBool>,
     network: Option<&NetworkPolicy>,
+    active: &ActiveCommand,
 ) -> Result<Value> {
     prepare_tmpdir(root)?;
     let command_id = new_command_id();
+    // Before `wrap`: the sidecar's first ask can follow the wrap reply immediately, and the
+    // bridge only attributes asks that name this command.
+    active.set_command_id(&command_id);
     let script = pinned_script(root, script);
     let (instance, wrapped) =
         match wrap_in_sandbox(
@@ -717,7 +721,7 @@ mod tests {
     }
 
     fn next_ask(frames: &mut tokio::sync::mpsc::UnboundedReceiver<Value>) -> Value {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
         loop {
             if let Ok(frame) = frames.try_recv() {
                 return frame;
@@ -739,8 +743,8 @@ mod tests {
     fn execute_command_relays_an_ask_and_reports_the_audit() {
         let (_app, host, root) = host_with_stub_bundle();
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
-        host.network.set_outbound(Some(sender));
-        let _active = host.network.begin("inv-1", Arc::default());
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default());
         let bridge = host.network.clone();
         let answerer = std::thread::spawn(move || {
             let frame = next_ask(&mut frames);
@@ -758,7 +762,7 @@ mod tests {
             20_000,
             1000,
             Arc::default(),
-            Some(&ask_policy()),
+            Some(&ask_policy()), &active,
         )
         .unwrap();
         answerer.join().unwrap();
@@ -774,8 +778,8 @@ mod tests {
     fn a_denied_ask_reaches_the_sidecar_as_a_deny() {
         let (_app, host, root) = host_with_stub_bundle();
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
-        host.network.set_outbound(Some(sender));
-        let _active = host.network.begin("inv-1", Arc::default());
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default());
         let bridge = host.network.clone();
         let answerer = std::thread::spawn(move || {
             let frame = next_ask(&mut frames);
@@ -783,7 +787,7 @@ mod tests {
         });
         let result = execute_command(
             &host, &root, &root, "SLEEP_ASK:example.com:443", 20_000, 1000, Arc::default(),
-            Some(&ask_policy()),
+            Some(&ask_policy()), &active,
         )
         .unwrap();
         answerer.join().unwrap();
@@ -791,11 +795,26 @@ mod tests {
     }
 
     #[test]
+    fn an_ask_naming_another_command_is_denied_and_never_reaches_the_backend() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default());
+        let result = execute_command(
+            &host, &root, &root, "SLEEP_ASK_OTHER:example.com:443", 20_000, 1000, Arc::default(),
+            Some(&ask_policy()), &active,
+        )
+        .unwrap();
+        assert!(frames.try_recv().is_err(), "an ask for another command must not be relayed");
+        assert_eq!(result["networkAudit"][0]["decision"], "deny");
+    }
+
+    #[test]
     fn asks_without_a_connection_are_denied_and_the_command_still_finishes() {
         let (_app, host, root) = host_with_stub_bundle();
-        let _active = host.network.begin("inv-1", Arc::default());
+        let active = host.network.begin("inv-1", Arc::default());
         let result = execute_command(
-            &host, &root, &root, "SLEEP_ASK:example.com:443", 20_000, 1000, Arc::default(), None,
+            &host, &root, &root, "SLEEP_ASK:example.com:443", 20_000, 1000, Arc::default(), None, &active,
         )
         .unwrap();
         assert_eq!(result["exitCode"], 0);
@@ -805,8 +824,9 @@ mod tests {
     #[test]
     fn a_failing_audit_never_fails_the_command() {
         let (_app, host, root) = host_with_stub_bundle();
+        let active = host.network.begin("inv", Arc::default());
         let result = execute_command(
-            &host, &root, &root, "AUDIT_FAIL", 20_000, 1000, Arc::default(), None,
+            &host, &root, &root, "AUDIT_FAIL", 20_000, 1000, Arc::default(), None, &active,
         )
         .unwrap();
         assert_eq!(result["exitCode"], 0);
@@ -817,8 +837,9 @@ mod tests {
     #[test]
     fn result_keys_are_the_macos_ones_plus_the_audit() {
         let (_app, host, root) = host_with_stub_bundle();
+        let active = host.network.begin("inv", Arc::default());
         let result = execute_command(
-            &host, &root, &root, "echo hi", 20_000, 1000, Arc::default(), None,
+            &host, &root, &root, "echo hi", 20_000, 1000, Arc::default(), None, &active,
         )
         .unwrap();
         let mut keys: Vec<&str> = result.as_object().unwrap().keys().map(String::as_str).collect();
@@ -847,8 +868,9 @@ mod tests {
         let before = host.sandbox.lock().unwrap().clone().unwrap();
 
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
-        host.network.set_outbound(Some(sender));
-        let _active = host.network.begin("inv-1", Arc::default());
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default());
+        active.set_command_id("cmd");
         let (instance, _) = wrap_in_sandbox(
             &host.sandbox, &root, &root, "SLEEP_ASK:example.com:443", "cmd", None,
             || start_instance(&host),

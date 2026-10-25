@@ -24,7 +24,7 @@ use sourceweft_desktop::local_host::{
     readiness::{bundle_dir, probe_bundle, Helpers, InitConfig, Platform, SandboxReadiness},
     LocalHost, Workspace,
 };
-use sourceweft_desktop::local_host::network::NetworkBridge;
+use sourceweft_desktop::local_host::network::{NetworkBridge, OutboundLease};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -923,6 +923,7 @@ struct Answer {
 /// every ask after the delay; without, it only records them (the ask stays pending).
 struct ApprovalBridge {
     bridge: NetworkBridge,
+    lease: Option<OutboundLease>,
     asks: Arc<Mutex<Vec<Value>>>,
     stop: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
@@ -932,7 +933,7 @@ impl ApprovalBridge {
     fn start(host: &LocalHost, answer: Option<Answer>) -> Self {
         let bridge = host.network.clone();
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
-        bridge.set_outbound(Some(sender));
+        let lease = bridge.attach(sender);
         let asks = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
         let worker = {
@@ -955,6 +956,7 @@ impl ApprovalBridge {
         };
         Self {
             bridge,
+            lease: Some(lease),
             asks,
             stop,
             worker: Some(worker),
@@ -994,7 +996,7 @@ impl Drop for ApprovalBridge {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-        self.bridge.disconnect();
+        drop(self.lease.take());
     }
 }
 

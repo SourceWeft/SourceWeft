@@ -290,7 +290,7 @@ impl LocalHost {
                 .insert(id.into(), cancel.clone());
             // Network asks raised while this command runs are attributed to this invocation
             // (and denied if it is cancelled or ends).
-            let _running = self.network.begin(id, cancel.clone());
+            let running = self.network.begin(id, cancel.clone());
             // Decision N7: the macOS Seatbelt path keeps its public-only proxy and ignores the
             // policy (its result also has no `networkAudit`); only Linux enforces it.
             #[cfg(target_os = "macos")]
@@ -308,6 +308,7 @@ impl LocalHost {
                 max_output,
                 cancel,
                 network.as_ref(),
+                &running,
             );
             if let Ok(mut active) = calls.active.lock() {
                 active.remove(id);
@@ -619,6 +620,33 @@ mod network_tests {
         assert_ne!(print(&with), print(&changed));
         let read = json!({"path":"a","network":{"mode":"ask"}});
         assert_eq!(*fingerprint_payload("file.read", &read), read);
+    }
+
+    /// Redelivering a call with a different `network` policy is the same call: the journal must
+    /// answer it (here `OUTCOME_UNKNOWN`, since the first attempt never completed) instead of
+    /// re-executing or rejecting it as a changed call. Calls that differ in anything else still
+    /// conflict. The payload has no `workspaceId`, so nothing ever runs.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_redelivery_with_a_different_network_policy_is_not_executed_again() {
+        let app = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        host.initialize_invocation_journal().unwrap();
+        let calls = Executions::default();
+        let dispatch = |payload: Value| {
+            host.dispatch(&calls, "call-1", "owner", "thread", "command.execute", payload)
+        };
+        let first = dispatch(json!({"command":"echo hi","network":{"mode":"ask","allow":[],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(first.code, "INVALID_CALL", "{first}");
+        let second = dispatch(json!({"command":"echo hi","network":{"mode":"strict","allow":["a.com"],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(second.code, "OUTCOME_UNKNOWN", "{second}");
+        let third = dispatch(json!({"command":"echo hi"})).unwrap_err();
+        assert_eq!(third.code, "OUTCOME_UNKNOWN", "{third}");
+        let changed = dispatch(json!({"command":"echo bye","network":{"mode":"ask","allow":[],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(changed.code, "INVOCATION_CONFLICT", "{changed}");
     }
 
     #[cfg(target_os = "macos")]
