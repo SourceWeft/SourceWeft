@@ -37,6 +37,7 @@ overrides:
   js-yaml@4: 4.3.2
   js-yaml@5: ^5.4.1
   hono: 4.13.13
+  '@anthropic-ai/sandbox-runtime>zod': 4.6.7
   next: 16.4.2
   creem: 1.6.0
   proxy-addr: 2.0.8
@@ -10958,9 +10959,6 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -11031,7 +11029,7 @@ snapshots:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0
       node-forge: 1.4.0
-      zod: 3.25.76
+      zod: 4.6.7
 
   '@anthropic-ai/sdk@0.115.0(zod@4.6.7)':
     dependencies:
@@ -20996,8 +20994,6 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
-
-  zod@3.25.76: {}
 
   zod@4.6.7: {}
 
