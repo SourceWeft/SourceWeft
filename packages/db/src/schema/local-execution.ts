@@ -38,6 +38,19 @@ export const localDevices = pgTable(
       mode: "date",
     }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    // Last `status` report from the host. All null for hosts that never send one.
+    platform: text("platform"),
+    arch: text("arch"),
+    shell: text("shell"),
+    sandboxState: text("sandbox_state"),
+    sandboxCode: text("sandbox_code"),
+    sandboxReason: text("sandbox_reason"),
+    sandboxRemedy: text("sandbox_remedy"),
+    capabilities: jsonb("capabilities").$type<string[]>(),
+    statusReportedAt: timestamp("status_reported_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),
