@@ -169,7 +169,7 @@ describe("an MCP server's install guide", () => {
       name: "Acme\u200b Search\u{E0049}\u{E0067}\uFEFF",
       summary: "Search\u{E0049}\u{E0067}\u{E006E}\u{E006F}\u{E0072}\u{E0065} Acme\uFE0F.",
     });
-    expect(text).not.toMatch(/[\u200b\ufeff\uFE0F\u{E0000}-\u{E007F}]/u);
+    expect(/[\p{Cf}\p{Mn}]/u.test(text)).toBe(false);
     expect(text).toContain('# Connect the "Acme Search" MCP server');
   });
 
