@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
 const bridge = vi.hoisted(() => ({
@@ -84,7 +84,12 @@ test("installing from the card applies the returned readiness and hides the card
     },
   });
   localRequest.mockResolvedValue({ devices: [] });
-  bridge.installSandboxRuntime.mockResolvedValue({ state: "ready" });
+  bridge.installSandboxRuntime.mockResolvedValue({
+    state: "needsSetup",
+    code: "installing",
+    reason: "stale returned readiness",
+    remedy: "none",
+  });
   const container = await render();
   bridge.localHostStatus.mockResolvedValue({
     ...baseStatus,
@@ -134,4 +139,59 @@ test("a macOS-style status with no readiness shows no card", async () => {
   localRequest.mockResolvedValue({ devices: [] });
   const container = await render();
   assert.doesNotMatch(container.textContent ?? "", /Set up local execution/);
+});
+
+test("a poll that started before an install finished cannot overwrite the fresh status", async () => {
+  vi.useFakeTimers();
+  try {
+    const needsSetup = {
+      ...baseStatus,
+      readiness: {
+        state: "needsSetup",
+        code: "bundleMissing",
+        reason: "The sandbox runtime is not installed.",
+        remedy: "downloadRuntime",
+      },
+    };
+    bridge.localHostStatus.mockResolvedValue(needsSetup);
+    localRequest.mockResolvedValue({ devices: [] });
+    bridge.installSandboxRuntime.mockResolvedValue({ state: "ready" });
+    const container = await render();
+    // The next poll starts, then hangs on its status read until after the install completes.
+    let release: (value: unknown) => void = () => {};
+    bridge.localHostStatus.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    bridge.localHostStatus.mockResolvedValue({
+      ...baseStatus,
+      readiness: { state: "ready" },
+    });
+    await click(button("Install sandbox runtime", container));
+    await flush(6);
+    assert.doesNotMatch(container.textContent ?? "", /Set up local execution/);
+    await act(async () => release(needsSetup));
+    await flush(6);
+    assert.doesNotMatch(container.textContent ?? "", /Set up local execution/);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("an unsupported computer says so instead of 'Setting up'", async () => {
+  bridge.localHostStatus.mockResolvedValue({
+    ...baseStatus,
+    platformSupported: false,
+    readiness: { state: "unsupported" },
+  });
+  localRequest.mockResolvedValue({ devices: [] });
+  const container = await render();
+  const text = container.textContent ?? "";
+  assert.match(text, /Local execution is not available on this computer/);
+  assert.doesNotMatch(text, /Setting up this computer/);
+  assert.doesNotMatch(text, /Set up local execution/);
 });

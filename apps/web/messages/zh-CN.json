@@ -1334,6 +1334,7 @@
       "statusConnecting": "正在连接这台电脑…",
       "statusSettingUp": "正在设置这台电脑…",
       "statusNeedsSetup": "这台电脑需要一次性设置",
+      "statusUnsupported": "这台电脑不支持本机执行",
       "deviceSystem": "系统：{system}",
       "deviceShell": "Shell：{shell}",
       "setup": {
@@ -1345,6 +1346,7 @@
         "updateAppDescription": "此应用与其沙箱运行时不匹配。请更新 SourceWeft（设置 → 关于 → 软件更新），然后重新检查。",
         "reinstallPackageDescription": "SourceWeft .deb 软件包所附带的沙箱辅助程序缺失或无法运行。请重新安装 .deb 软件包（它依赖 bubblewrap 软件包，如果缺少请先安装 bubblewrap），然后重新检查。",
         "privilegedSetupDescription": "需要执行一次管理员操作。它会在 /opt/sourceweft 下安装一份私有的 bubblewrap 副本，以及仅对该副本生效的 AppArmor 配置；系统自带的 bubblewrap 和你的系统安全设置都不会被更改。你可以在命令行中运行下面的命令，也可以点击“运行设置”打开系统的管理员授权窗口。SourceWeft 不会获取你的密码。",
+        "privilegedSetupNoCommandDescription": "需要执行一次管理员操作。它会在 /opt/sourceweft 下安装一份私有的 bubblewrap 副本，以及仅对该副本生效的 AppArmor 配置；系统自带的 bubblewrap 和你的系统安全设置都不会被更改。点击“运行设置”即可打开系统的管理员授权窗口。SourceWeft 不会获取你的密码。",
         "commandLabel": "设置命令",
         "copy": "复制",
         "copied": "已复制",

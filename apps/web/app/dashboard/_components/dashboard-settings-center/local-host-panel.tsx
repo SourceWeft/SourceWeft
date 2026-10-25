@@ -1,6 +1,6 @@
 "use client";
 import { authClient } from "../../../../lib/auth-client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -23,16 +23,22 @@ export function LocalHostPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
-  // Re-reads the native status after an install or a setup attempt, or applies the readiness
-  // the install returned, without waiting for the 5s poll. A failed read keeps the last status.
+  // Every status write carries a sequence number: a poll that started before an install or a
+  // setup attempt finished must not overwrite the status read after it.
+  const statusSeq = useRef(0);
+  // Re-reads the native status after an install or a setup attempt without waiting for the 5s
+  // poll. The returned readiness is used only if that read fails.
   const applyReadiness = useCallback(
     async (readiness?: LocalHostStatus["readiness"]) => {
+      const seq = ++statusSeq.current;
       try {
         const state = await desktopBridge.localHostStatus();
-        setStatus(readiness ? { ...state, readiness } : state);
+        if (seq === statusSeq.current) setStatus(state);
       } catch {
-        if (readiness)
-          setStatus((previous) => (previous ? { ...previous, readiness } : previous));
+        if (readiness && seq === statusSeq.current)
+          setStatus((previous) =>
+            previous ? { ...previous, readiness } : previous,
+          );
       }
     },
     [],
@@ -42,11 +48,12 @@ export function LocalHostPanel() {
     let active = true;
     const refresh = async () => {
       try {
+        const seq = ++statusSeq.current;
         const native = await ensureLocalHostSession(userId);
         // Publish the native status before the device list is fetched: a computer that still
         // needs setup must show its setup card even if listing devices fails.
         const state = await desktopBridge.localHostStatus();
-        if (active) setStatus(state);
+        if (active && seq === statusSeq.current) setStatus(state);
         const list = await localRequest<{ devices: LocalDevice[] }>(
           "/v1/local-devices",
           undefined,
@@ -89,6 +96,7 @@ export function LocalHostPanel() {
       </section>
     );
   const needsSetup = status?.readiness?.state === "needsSetup";
+  const unsupported = status?.readiness?.state === "unsupported";
   const systemLabel = device ? deviceSystemLabel(device) : null;
   const environment = [
     systemLabel && t("localHost.deviceSystem", { system: systemLabel }),
@@ -106,9 +114,11 @@ export function LocalHostPanel() {
             ? t("localHost.statusOnline")
             : needsSetup
               ? t("localHost.statusNeedsSetup")
-              : status?.deviceId
-                ? t("localHost.statusConnecting")
-                : t("localHost.statusSettingUp")}
+              : unsupported
+                ? t("localHost.statusUnsupported")
+                : status?.deviceId
+                  ? t("localHost.statusConnecting")
+                  : t("localHost.statusSettingUp")}
         </p>
         {environment.length > 0 && (
           <p className="mt-1 text-sm text-muted-foreground">

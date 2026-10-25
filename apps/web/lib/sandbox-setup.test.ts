@@ -69,6 +69,15 @@ test("an unknown remedy from a newer host degrades to reason-only", () => {
   assert.equal(card?.action, "none");
 });
 
+test("prototype keys are not remedies", () => {
+  for (const remedy of ["constructor", "__proto__", "toString"]) {
+    assert.equal(
+      sandboxSetupCard(needs(remedy as SandboxRemedy))?.action,
+      "none",
+    );
+  }
+});
+
 test("deviceSystemLabel names known platforms and tolerates missing fields", () => {
   assert.equal(
     deviceSystemLabel({ platform: "linux", arch: "x64" }),

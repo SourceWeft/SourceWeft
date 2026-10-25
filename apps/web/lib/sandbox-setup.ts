@@ -36,7 +36,9 @@ export function sandboxSetupCard(
   readiness: SandboxReadiness | null | undefined,
 ): SandboxSetupCard | null {
   if (!readiness || readiness.state !== "needsSetup") return null;
-  const action = ACTION_BY_REMEDY[readiness.remedy] ?? "none";
+  const action = Object.hasOwn(ACTION_BY_REMEDY, readiness.remedy)
+    ? ACTION_BY_REMEDY[readiness.remedy]
+    : "none";
   const setupCommand =
     action === "privilegedSetup" && readiness.setupCommand
       ? readiness.setupCommand

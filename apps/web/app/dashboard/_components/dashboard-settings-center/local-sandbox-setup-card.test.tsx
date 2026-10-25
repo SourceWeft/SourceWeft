@@ -180,3 +180,29 @@ test("an install already running shows progress and no actions", async () => {
   assert.match(container.textContent ?? "", /being installed/);
   assert.equal(container.querySelectorAll("button").length, 0);
 });
+
+test("an install already running disables Install even when the remedy is still downloadRuntime", async () => {
+  const container = await render(
+    needs("downloadRuntime", { code: "installing" }),
+  );
+  assert.match(container.textContent ?? "", /being installed/);
+  assert.equal(button("Install sandbox runtime", container).disabled, true);
+  await click(button("Install sandbox runtime", container));
+  assert.equal(installSandboxRuntime.mock.calls.length, 0);
+});
+
+test("a running install also locks Run setup", async () => {
+  const container = await render(
+    needs("privilegedSetup", { code: "installing", setupCommand: "pkexec x" }),
+  );
+  assert.equal(button("Run setup", container).disabled, true);
+});
+
+test("privilegedSetup without a command does not refer to a missing command", async () => {
+  const container = await render(needs("privilegedSetup"));
+  const text = container.textContent ?? "";
+  assert.doesNotMatch(text, /command below/);
+  assert.equal(container.querySelector("pre"), null);
+  assert.match(text, /administrator/);
+  assert.ok(button("Run setup", container));
+});

@@ -1334,6 +1334,7 @@
       "statusConnecting": "Connecting this computer…",
       "statusSettingUp": "Setting up this computer…",
       "statusNeedsSetup": "This computer needs one-time setup",
+      "statusUnsupported": "Local execution is not available on this computer",
       "deviceSystem": "System: {system}",
       "deviceShell": "Shell: {shell}",
       "setup": {
@@ -1345,6 +1346,7 @@
         "updateAppDescription": "This app and its sandbox runtime do not match. Update SourceWeft (Settings → About → Software update), then check again.",
         "reinstallPackageDescription": "The sandbox helper that the SourceWeft .deb package installs is missing or cannot run. Reinstall the .deb package (it depends on the bubblewrap package, so install bubblewrap first if it is missing), then check again.",
         "privilegedSetupDescription": "A one-time administrator step is needed. It installs a private copy of bubblewrap under /opt/sourceweft and an AppArmor profile that applies only to that copy; the system bubblewrap and your system security settings are not changed. Run the command below in a terminal, or click Run setup to open your system’s administrator prompt. SourceWeft never sees your password.",
+        "privilegedSetupNoCommandDescription": "A one-time administrator step is needed. It installs a private copy of bubblewrap under /opt/sourceweft and an AppArmor profile that applies only to that copy; the system bubblewrap and your system security settings are not changed. Click Run setup to open your system’s administrator prompt. SourceWeft never sees your password.",
         "commandLabel": "Setup command",
         "copy": "Copy",
         "copied": "Copied",

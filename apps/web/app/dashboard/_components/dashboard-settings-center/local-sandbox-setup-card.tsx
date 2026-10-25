@@ -21,6 +21,8 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
   const [busy, setBusy] = useState<"install" | "setup" | "check" | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // An install started elsewhere (another window, before a restart) must not be started twice.
+  const locked = busy !== null || Boolean(card?.installing);
   if (!card) return null;
 
   const run = async (
@@ -69,7 +71,7 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
             {t("localHost.setup.downloadRuntimeDescription")}
           </p>
           <Button
-            disabled={busy !== null}
+            disabled={locked}
             onClick={() =>
               void run("install", () => desktopBridge.installSandboxRuntime())
             }
@@ -93,7 +95,9 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
       {card.action === "privilegedSetup" && (
         <>
           <p className="text-sm text-muted-foreground">
-            {t("localHost.setup.privilegedSetupDescription")}
+            {card.setupCommand
+              ? t("localHost.setup.privilegedSetupDescription")
+              : t("localHost.setup.privilegedSetupNoCommandDescription")}
           </p>
           {card.setupCommand && (
             <div className="flex items-start gap-2">
@@ -111,7 +115,7 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
             </div>
           )}
           <Button
-            disabled={busy !== null}
+            disabled={locked}
             onClick={() =>
               void run("setup", () => desktopBridge.runSandboxPrivilegedSetup())
             }
@@ -126,7 +130,7 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
         <Button
           size="sm"
           variant="outline"
-          disabled={busy !== null}
+          disabled={locked}
           onClick={() => void run("check", async () => undefined)}
         >
           {t("localHost.setup.checkAgain")}
