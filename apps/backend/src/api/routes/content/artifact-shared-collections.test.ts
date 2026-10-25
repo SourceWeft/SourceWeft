@@ -38,9 +38,7 @@ test("returns the artifact's shared collections for an authorized caller", async
   const response = await get();
   assert.equal(response.status, 200);
   const body = await readJson(response);
-  assert.deepEqual((body.data as Record<string, unknown>).collections, [
-    { collection: "posts", count: 3 },
-  ]);
+  assert.deepEqual(body.collections, [{ collection: "posts", count: 3 }]);
   assert.deepEqual(mocks.list.mock.calls[0]?.[0], {
     workspaceId: "ws-1",
     artifactId: "art-1",
@@ -54,10 +52,7 @@ test("maps forbidden and not_found like the share routes", async () => {
   mocks.list.mockResolvedValue({ ok: false, reason: "not_found" });
   const response = await get();
   assert.equal(response.status, 404);
-  assert.equal(
-    ((await readJson(response)).error as Record<string, unknown>).code,
-    "ARTIFACT_NOT_FOUND",
-  );
+  assert.equal((await readJson(response)).code, "ARTIFACT_NOT_FOUND");
 });
 
 test("requires a session", async () => {
