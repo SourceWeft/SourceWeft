@@ -27,6 +27,8 @@ export type SandboxState = (typeof SANDBOX_STATES)[number];
 
 export const DEVICE_PLATFORMS = ["macos", "linux", "windows"] as const;
 export const DEVICE_ARCHES = ["x64", "arm64"] as const;
+/** Basename of the shell sandboxed commands run under, as a host reports it. */
+export const DEVICE_SHELL_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
 /**
  * Capabilities the gateway announces in its `connected` message. A backend
@@ -67,7 +69,7 @@ const deviceStatusSchema = z.object({
   type: z.literal("status"),
   platform: z.enum(DEVICE_PLATFORMS),
   arch: z.enum(DEVICE_ARCHES),
-  shell: z.string().regex(/^[a-zA-Z0-9._-]{1,64}$/),
+  shell: z.string().regex(DEVICE_SHELL_PATTERN),
   protocolVersion: z.number().int().optional(),
   sandbox: sandboxStatusSchema,
   capabilities: z.array(z.string().min(1).max(64)).max(32),

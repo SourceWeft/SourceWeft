@@ -523,6 +523,54 @@ test("creation context cannot cross sessions, change targets, or revive revoked 
     code: "REMOTE_ACCESS_DISABLED",
   });
 });
+test("the bound device's reported environment is read through the thread binding", async () => {
+  const h = await host(),
+    workspaceId = randomUUID(),
+    threadId = randomUUID(),
+    teamId = randomUUID();
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Environment",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.threads).values({
+    id: threadId,
+    teamId,
+    workspaceId,
+    createdBy: h.userId,
+    title: "Environment",
+    executionTargetJson: { kind: "local", deviceId: h.id },
+  });
+  assert.equal(await provider.boundDeviceEnvironment(threadId), null);
+  await schema.db.insert(schema.localThreadBindings).values({
+    threadId,
+    deviceId: h.id,
+    userId: h.userId,
+  });
+  assert.deepEqual(await provider.boundDeviceEnvironment(threadId), {
+    platform: null,
+    arch: null,
+    shell: null,
+    sandboxState: null,
+  });
+  await schema.db
+    .update(schema.localDevices)
+    .set({
+      platform: "linux",
+      arch: "x64",
+      shell: "bash",
+      sandboxState: "needsSetup",
+      sandboxReason: "free text that must not be selected",
+    })
+    .where(eq(schema.localDevices.id, h.id));
+  assert.deepEqual(await provider.boundDeviceEnvironment(threadId), {
+    platform: "linux",
+    arch: "x64",
+    shell: "bash",
+    sandboxState: "needsSetup",
+  });
+});
 test("offline local Provider assembly does not dispatch a workspace or use cloud", async () => {
   const h = await host(),
     workspaceId = randomUUID(),
