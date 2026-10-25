@@ -31,6 +31,9 @@ function request(
     host: string;
     port: number;
     suggestedBy: string | null;
+    kind: "host" | "request";
+    method: string | null;
+    path: string | null;
     expiresAt: string;
     commandPreview: string;
   }> = {},
@@ -274,4 +277,87 @@ test("polling stops and the card goes away when the run ends", async () => {
   const calls = listNetworkRequests.mock.calls.length;
   await tick(10_000);
   assert.equal(listNetworkRequests.mock.calls.length, calls);
+});
+
+function writeRequest(id = "w1") {
+  return request(id, {
+    kind: "request",
+    method: "POST",
+    path: "/v1/issues",
+    host: "api.github.com",
+  });
+}
+
+test("a write-request card shows the request line and only the per-command allow", async () => {
+  listNetworkRequests.mockResolvedValue({ requests: [writeRequest()] });
+  const { container } = await render({});
+  const text = container.textContent ?? "";
+  assert.match(text, /Write request to api\.github\.com/);
+  assert.equal(
+    container.querySelector('[data-testid="network-request-line"]')?.textContent,
+    "POST api.github.com /v1/issues",
+  );
+  assert.match(text, /bound to a stored secret/);
+  assert.match(text, /Other commands ask again/);
+  assert.ok(button("Deny", container));
+  assert.ok(button("Allow writes to this host for this command", container));
+  assert.equal(button("Allow for this workspace", container), undefined);
+  assert.equal(button("Allow once", container), undefined);
+  assert.equal(container.querySelector("select"), null);
+});
+
+test("write-request allow sends allow_once and deny sends deny", async () => {
+  listNetworkRequests.mockResolvedValue({
+    requests: [writeRequest("w1"), writeRequest("w2")],
+  });
+  respondNetworkRequest.mockResolvedValue({
+    request: { id: "w1", status: "allowed", scope: "once" },
+  });
+  const { container } = await render({});
+  await act(async () =>
+    button("Allow writes to this host for this command", container).click(),
+  );
+  await act(async () => button("Deny", container).click());
+  assert.deepEqual(respondNetworkRequest.mock.calls.map((c) => c.slice(1)), [
+    ["w1", { decision: "allow_once" }],
+    ["w2", { decision: "deny" }],
+  ]);
+  assert.equal(container.querySelector('[data-testid="network-access-card"]'), null);
+});
+
+test("NETWORK_REQUEST_ONCE_ONLY keeps the card and explains it", async () => {
+  listNetworkRequests.mockResolvedValue({ requests: [writeRequest()] });
+  respondNetworkRequest.mockRejectedValue(
+    Object.assign(new Error("once only"), {
+      status: 400,
+      code: "NETWORK_REQUEST_ONCE_ONLY",
+    }),
+  );
+  const { container } = await render({});
+  await act(async () =>
+    button("Allow writes to this host for this command", container).click(),
+  );
+  assert.ok(container.querySelector('[data-testid="network-access-card"]'));
+  assert.match(
+    container.querySelector('[role="alert"]')?.textContent ?? "",
+    /can only be allowed for this command/,
+  );
+  assert.equal(
+    button("Allow writes to this host for this command", container).disabled,
+    false,
+  );
+});
+
+test("a host card without kind (older backend) is unchanged and mixes with request cards", async () => {
+  listNetworkRequests.mockResolvedValue({
+    requests: [request("h1"), writeRequest("w1")],
+  });
+  const { container } = await render({});
+  const cards = container.querySelectorAll('[data-testid="network-access-card"]');
+  assert.equal(cards.length, 2);
+  const hostCard = cards[0] as HTMLElement;
+  assert.match(hostCard.textContent ?? "", /api\.example\.com:443/);
+  assert.ok(button("Allow for this workspace", hostCard));
+  assert.ok(hostCard.querySelector("select"));
+  assert.equal(hostCard.querySelector('[data-testid="network-request-line"]'), null);
 });

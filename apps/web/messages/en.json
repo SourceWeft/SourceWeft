@@ -2327,7 +2327,12 @@
       "allowWorkspace": "Allow for this workspace",
       "sending": "Sending...",
       "forbidden": "Only workspace admins can allow a host for the whole workspace. You can still allow it once.",
-      "failed": "Could not send your answer. Try again."
+      "failed": "Could not send your answer. Try again.",
+      "requestTitle": "Write request to {host}",
+      "requestIntro": "A command on your computer is sending a request that can change data. This host is bound to a stored secret, so writes need your approval.",
+      "requestHelper": "Allowing lets this command send write requests to this host until it finishes. Other commands ask again.",
+      "allowWrites": "Allow writes to this host for this command",
+      "onceOnly": "Write requests can only be allowed for this command, not saved for the workspace."
     }
   },
   "dashboardChatFiles": {

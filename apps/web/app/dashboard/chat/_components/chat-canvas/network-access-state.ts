@@ -1,3 +1,4 @@
+import { LOCAL_NETWORK_REQUEST_ONCE_ONLY_CODE } from "@sourceweft/contracts";
 import type { LocalNetworkRequest } from "@sourceweft/sdk";
 
 /**
@@ -20,6 +21,8 @@ export type NetworkResponseFailure =
   | "gone"
   /** The user lacks permission for a workspace-wide grant; `once` still works. */
   | "forbidden"
+  /** A write-request card was answered with a standing grant; the row stays pending. */
+  | "onceOnly"
   | "failed";
 
 export function classifyNetworkResponseError(
@@ -32,6 +35,9 @@ export function classifyNetworkResponseError(
     code === "NETWORK_REQUEST_NOT_FOUND"
   ) {
     return "gone";
+  }
+  if (code === LOCAL_NETWORK_REQUEST_ONCE_ONLY_CODE) {
+    return "onceOnly";
   }
   if (code === "CONNECTOR_FORBIDDEN" || errorField(error, "status") === 403) {
     return "forbidden";

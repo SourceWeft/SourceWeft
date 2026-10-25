@@ -30,6 +30,13 @@ test("resolved, expired and missing requests are gone; 403 is forbidden", () => 
     "forbidden",
   );
   assert.equal(classifyNetworkResponseError({ status: 403 }), "forbidden");
+  assert.equal(
+    classifyNetworkResponseError({
+      code: "NETWORK_REQUEST_ONCE_ONLY",
+      status: 400,
+    }),
+    "onceOnly",
+  );
   assert.equal(classifyNetworkResponseError(new Error("boom")), "failed");
   assert.equal(classifyNetworkResponseError(null), "failed");
 });

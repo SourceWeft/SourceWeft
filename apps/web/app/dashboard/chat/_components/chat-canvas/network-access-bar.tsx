@@ -22,7 +22,7 @@ import {
 } from "./tool-confirmation-trust";
 import { useNetworkRequests } from "./use-network-requests";
 
-type MessageKey = "forbidden" | "failed";
+type MessageKey = "forbidden" | "onceOnly" | "failed";
 
 function NetworkRequestCard({
   now,
@@ -42,6 +42,8 @@ function NetworkRequestCard({
     defaultTrustDurationChoiceId,
   );
   const durationChoices = getTrustDurationChoices(t);
+  // A missing kind comes from an older backend and means a plain host request.
+  const isWriteRequest = request.kind === "request";
   const remaining = networkRequestRemainingMs(request, now);
 
   async function respond(decision: LocalNetworkDecision) {
@@ -77,18 +79,41 @@ function NetworkRequestCard({
           <GlobeIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
           <div className="min-w-0 space-y-1">
             <span className="block text-sm font-medium text-foreground">
-              {t("networkAccess.title")}
-              {" · "}
-              <span className="font-mono">
-                {t("networkAccess.target", {
-                  host: request.host,
-                  port: request.port,
-                })}
-              </span>
+              {isWriteRequest ? (
+                t("networkAccess.requestTitle", { host: request.host })
+              ) : (
+                <>
+                  {t("networkAccess.title")}
+                  {" · "}
+                  <span className="font-mono">
+                    {t("networkAccess.target", {
+                      host: request.host,
+                      port: request.port,
+                    })}
+                  </span>
+                </>
+              )}
             </span>
             <span className="block text-xs leading-5 text-muted-foreground">
-              {t("networkAccess.intro")}
+              {isWriteRequest
+                ? t("networkAccess.requestIntro")
+                : t("networkAccess.intro")}
             </span>
+            {isWriteRequest ? (
+              <>
+                <code
+                  className="block max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-2 font-mono text-xs leading-5"
+                  data-testid="network-request-line"
+                >
+                  {[request.method, request.host, request.path]
+                    .filter(Boolean)
+                    .join(" ")}
+                </code>
+                <span className="block text-xs leading-5 text-muted-foreground">
+                  {t("networkAccess.requestHelper")}
+                </span>
+              </>
+            ) : null}
             {request.suggestedBy ? (
               <span className="block text-xs text-muted-foreground">
                 {t("networkAccess.requestedBy", { skill: request.suggestedBy })}
@@ -114,22 +139,24 @@ function NetworkRequestCard({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/50 pt-2">
-        <label className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {t("toolConfirmation.rememberFor")}
-          <select
-            aria-label={t("toolConfirmation.rememberAria")}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
-            disabled={busy}
-            onChange={(event) => setTrustDurationId(event.target.value)}
-            value={trustDurationId}
-          >
-            {durationChoices.map((choice) => (
-              <option key={choice.id} value={choice.id}>
-                {choice.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {isWriteRequest ? null : (
+          <label className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            {t("toolConfirmation.rememberFor")}
+            <select
+              aria-label={t("toolConfirmation.rememberAria")}
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+              disabled={busy}
+              onChange={(event) => setTrustDurationId(event.target.value)}
+              value={trustDurationId}
+            >
+              {durationChoices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <Button
           disabled={busy}
           onClick={() => void respond("deny")}
@@ -143,16 +170,22 @@ function NetworkRequestCard({
           onClick={() => void respond("allow_once")}
           size="sm"
         >
-          {busy ? t("networkAccess.sending") : t("networkAccess.allowOnce")}
+          {busy
+            ? t("networkAccess.sending")
+            : isWriteRequest
+              ? t("networkAccess.allowWrites")
+              : t("networkAccess.allowOnce")}
         </Button>
-        <Button
-          disabled={busy}
-          onClick={() => void respond("allow_always")}
-          size="sm"
-          variant="outline"
-        >
-          {t("networkAccess.allowWorkspace")}
-        </Button>
+        {isWriteRequest ? null : (
+          <Button
+            disabled={busy}
+            onClick={() => void respond("allow_always")}
+            size="sm"
+            variant="outline"
+          >
+            {t("networkAccess.allowWorkspace")}
+          </Button>
+        )}
       </div>
     </Alert>
   );
