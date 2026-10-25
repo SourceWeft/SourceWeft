@@ -165,6 +165,12 @@ fn lock_slot(slot: &SandboxSlot) -> std::sync::MutexGuard<'_, Option<Arc<Sandbox
     slot.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Drops the current sidecar (the process exits once the last command still using it is done)
+/// so the next command starts one from the files now on disk; used when the runtime is replaced.
+pub(crate) fn stop_sidecar(slot: &SandboxSlot) {
+    lock_slot(slot).take();
+}
+
 /// Wraps one attempt on `instance`. A failed wrap is never followed by a cleanup: srt has
 /// already undone its own count for it.
 fn try_wrap(
@@ -428,6 +434,35 @@ mod tests {
         assert!(first
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn stopping_the_sidecar_empties_the_slot_so_the_next_command_starts_a_new_one() {
+        let bundle = bundle_with_stub();
+        let slot = SandboxSlot::default();
+        let mut starts = 0;
+        let mut run = |slot: &SandboxSlot| {
+            let (instance, _) = wrap_in_sandbox(
+                slot,
+                Path::new("/w/a/files"),
+                Path::new("/w/a/files"),
+                "echo hi",
+                "id",
+                || {
+                    starts += 1;
+                    stub_instance(bundle.path(), &["/w"])
+                },
+            )
+            .unwrap();
+            instance.finish("id");
+        };
+        run(&slot);
+        stop_sidecar(&slot);
+        assert!(slot.lock().unwrap().is_none());
+        run(&slot);
+        stop_sidecar(&slot);
+        stop_sidecar(&slot); // idempotent on an empty slot
+        assert_eq!(starts, 2);
     }
 
     #[test]

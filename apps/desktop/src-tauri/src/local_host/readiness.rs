@@ -376,8 +376,8 @@ fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> Sandbo
 /// `local_host_status` is polled by the Web UI every few seconds, so a fresh probe runs only
 /// when the cached value could plausibly be stale.
 ///
-/// Policy: a cached `Ready` is never rechecked (nothing currently calls `invalidate` to expire
-/// it; a later task may, e.g. after installing/updating the sandbox runtime). A cached
+/// Policy: a cached `Ready` is never rechecked on its own; only `invalidate` (after a runtime
+/// install or the privileged setup) expires it. A cached
 /// `NeedsSetup`/`Unsupported` is rechecked once `recheck_interval` has elapsed, since whatever
 /// was wrong might have been fixed since. While a probe is already running on some thread, a
 /// concurrent call never blocks on it: it returns the last known value, or a transient
@@ -393,6 +393,11 @@ fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> Sandbo
 pub(crate) struct ReadinessCache {
     last: Option<(SandboxReadiness, Instant)>,
     probing: bool,
+    /// Bumped by every `invalidate`. A probe that started before an invalidation answers its
+    /// own caller but does not store its (possibly pre-install) result.
+    epoch: u64,
+    /// A runtime install is running (see `InstallGuard`): readiness reports `installing`.
+    installing: bool,
 }
 
 #[allow(dead_code)]
@@ -408,7 +413,7 @@ impl ReadinessCache {
         recheck_interval: Duration,
         probe: impl FnOnce() -> SandboxReadiness,
     ) -> SandboxReadiness {
-        {
+        let epoch = {
             let mut state = Self::lock(cache);
             if let Some((value, computed_at)) = &state.last {
                 let fresh = matches!(value, SandboxReadiness::Ready { .. })
@@ -425,13 +430,16 @@ impl ReadinessCache {
                     .unwrap_or_else(SandboxReadiness::checking);
             }
             state.probing = true;
-        }
+            state.epoch
+        };
 
         let result = probe();
 
         let mut state = Self::lock(cache);
         state.probing = false;
-        state.last = Some((result.clone(), Instant::now()));
+        if state.epoch == epoch {
+            state.last = Some((result.clone(), Instant::now()));
+        }
         result
     }
 
@@ -439,7 +447,36 @@ impl ReadinessCache {
     /// call that set it may clear), forcing the next `get_or_probe` call to probe again
     /// regardless of how fresh the cleared value was.
     fn invalidate(cache: &Mutex<Self>) {
-        Self::lock(cache).last = None;
+        let mut state = Self::lock(cache);
+        state.last = None;
+        state.epoch += 1;
+    }
+
+    /// Whether a runtime install is running right now.
+    pub(crate) fn is_installing(cache: &Mutex<Self>) -> bool {
+        Self::lock(cache).installing
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_for_test(cache: &Mutex<Self>, value: SandboxReadiness) {
+        Self::lock(cache).last = Some((value, Instant::now()));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_for_test(cache: &Mutex<Self>) -> Option<SandboxReadiness> {
+        Self::lock(cache).last.as_ref().map(|(value, _)| value.clone())
+    }
+
+    /// Marks an install as running. `None` when one already is: installs never overlap. The
+    /// returned guard ends the install, and invalidates the cache, when dropped, whatever the
+    /// outcome, so neither a success nor a failure leaves a stale answer behind.
+    pub(crate) fn begin_install(cache: &Mutex<Self>) -> Option<InstallGuard<'_>> {
+        let mut state = Self::lock(cache);
+        if state.installing {
+            return None;
+        }
+        state.installing = true;
+        Some(InstallGuard { cache })
     }
 
     /// A poisoned lock here means some earlier call panicked while holding it; the cache is
@@ -447,6 +484,20 @@ impl ReadinessCache {
     /// recovering and carrying on is preferable to poisoning every later readiness check too.
     fn lock(cache: &Mutex<Self>) -> std::sync::MutexGuard<'_, Self> {
         cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+/// Held for the duration of a runtime install; see `ReadinessCache::begin_install`.
+pub(crate) struct InstallGuard<'a> {
+    cache: &'a Mutex<ReadinessCache>,
+}
+
+impl Drop for InstallGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = ReadinessCache::lock(self.cache);
+        state.installing = false;
+        state.last = None;
+        state.epoch += 1;
     }
 }
 
@@ -461,6 +512,12 @@ impl LocalHost {
     /// app-data directory, through `ReadinessCache` so repeated polling doesn't repeatedly
     /// spawn a sidecar. Every other platform is `Unsupported`.
     pub fn sandbox_readiness(&self) -> SandboxReadiness {
+        // While the runtime is being replaced there is nothing meaningful to probe, and the
+        // bundle directory may be mid-swap.
+        if ReadinessCache::is_installing(&self.sandbox_readiness_cache) {
+            return SandboxReadiness::installing();
+        }
+
         #[cfg(target_os = "macos")]
         return SandboxReadiness::Ready {
             toolchain_path: None,
@@ -739,6 +796,7 @@ mod tests {
                 Instant::now(),
             )),
             probing: true,
+            ..Default::default()
         });
         let result = ReadinessCache::get_or_probe(&cache, Duration::from_secs(0), || {
             panic!("must not call probe while one is already in flight")
@@ -751,6 +809,7 @@ mod tests {
         let cache = Mutex::new(ReadinessCache {
             last: None,
             probing: true,
+            ..Default::default()
         });
         let result = ReadinessCache::get_or_probe(&cache, Duration::from_secs(0), || {
             panic!("must not call probe while one is already in flight")
@@ -777,6 +836,37 @@ mod tests {
         ReadinessCache::invalidate(&cache);
         ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), probe);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_probe_that_started_before_an_invalidation_does_not_cache_its_stale_answer() {
+        let cache = Mutex::new(ReadinessCache::default());
+        let stale = ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || {
+            // The install finishes while this probe is still running.
+            ReadinessCache::invalidate(&cache);
+            SandboxReadiness::bundle_missing()
+        });
+        assert_eq!(stale, SandboxReadiness::bundle_missing(), "its own caller still gets it");
+        let fresh = ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || {
+            SandboxReadiness::Ready {
+                toolchain_path: Some(ToolchainPath::System),
+            }
+        });
+        assert!(matches!(fresh, SandboxReadiness::Ready { .. }), "nothing stale was cached");
+    }
+
+    #[test]
+    fn installs_do_not_overlap_and_the_guard_invalidates_on_drop() {
+        let cache = Mutex::new(ReadinessCache::default());
+        ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), SandboxReadiness::bundle_missing);
+        assert!(!ReadinessCache::is_installing(&cache));
+        let guard = ReadinessCache::begin_install(&cache).expect("first install starts");
+        assert!(ReadinessCache::is_installing(&cache));
+        assert!(ReadinessCache::begin_install(&cache).is_none(), "second install refused");
+        drop(guard);
+        assert!(!ReadinessCache::is_installing(&cache));
+        assert!(ReadinessCache::lock(&cache).last.is_none(), "the cached answer was dropped");
+        assert!(ReadinessCache::begin_install(&cache).is_some(), "a later install may start");
     }
 
     #[cfg(target_os = "macos")]

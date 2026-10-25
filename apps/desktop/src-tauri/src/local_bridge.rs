@@ -116,6 +116,36 @@ pub async fn run_sandbox_privileged_setup(
     Err("UNSUPPORTED_PLATFORM".to_string())
 }
 
+/// Downloads, verifies and installs the sandbox runtime for this app version; the user asked
+/// for it by clicking "Install", nothing downloads on its own. Holds an admission lease like the
+/// other local commands, so a pending app update waits for it. Returns the readiness after the
+/// install. Errors are strings starting with a stable code (`SANDBOX_DOWNLOAD_FAILED`,
+/// `SANDBOX_SIGNATURE_INVALID`, `SANDBOX_BUNDLE_INVALID`, `SANDBOX_UNVERIFIABLE_BUILD`,
+/// `SANDBOX_PLATFORM_UNSUPPORTED`, ...) followed by the reason.
+#[tauri::command]
+pub async fn install_sandbox_runtime(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<SandboxReadiness, String> {
+    crate::authorize_desktop_window(&app, &window, true)?;
+    let host = app
+        .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
+        .map(|host| host.inner().clone())
+        .ok_or("UNSUPPORTED_PLATFORM")?;
+    let _lease = host.admission.enter().map_err(str::to_owned)?;
+    #[cfg(unix)]
+    {
+        // Blocking work (download, hashing, a sidecar probe), on the blocking pool; the HTTP
+        // client is created there too.
+        tauri::async_runtime::spawn_blocking(move || host.install_sandbox_runtime())
+            .await
+            .map_err(|error| format!("SANDBOX_INSTALL_FAILED: {error}"))?
+            .map_err(|error| error.to_string())
+    }
+    #[cfg(not(unix))]
+    Err("SANDBOX_PLATFORM_UNSUPPORTED: No sandbox runtime is published for this platform.".to_string())
+}
+
 #[tauri::command]
 pub async fn enable_local_host(
     app: AppHandle,

@@ -1,5 +1,7 @@
 //! Native services. These methods are deliberately not exposed as generic IPC commands.
 //! A future authenticated device dispatcher must supply the account and thread identities.
+#[cfg(unix)]
+pub mod bundle_install;
 pub mod execution;
 pub mod maintenance;
 mod files;

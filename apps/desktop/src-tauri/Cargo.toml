@@ -20,6 +20,11 @@ rusqlite = { version = "0.32.1", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 base64 = "0.22"
+# Sandbox runtime installer (local_host/bundle_install.rs): the same minisign verifier the
+# Tauri updater uses, a gzip reader for the bundle archive, and SHA-256 for its manifest.
+minisign-verify = "0.2"
+flate2 = "1"
+sha2 = "0.10"
 regex = "=1.13.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
