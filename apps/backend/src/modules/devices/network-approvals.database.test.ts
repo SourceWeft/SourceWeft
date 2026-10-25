@@ -91,7 +91,13 @@ async function connectDevice(token: string) {
     waitFor,
     isOpen: () => socket.readyState === WebSocket.OPEN,
     closed: () => closed,
-    ask: (invocationId: string, askId: string, host: string, port = 443) =>
+    ask: (
+      invocationId: string,
+      askId: string,
+      host: string,
+      port = 443,
+      extra: Record<string, unknown> = {},
+    ) =>
       socket.send(
         JSON.stringify({
           type: "network.ask",
@@ -99,6 +105,7 @@ async function connectDevice(token: string) {
           askId,
           host,
           port,
+          ...extra,
         }),
       ),
   };
@@ -248,6 +255,9 @@ test("an ask parks as a pending row and the user's answer reaches the device exa
     { ...listed.requests[0], id: "x", createdAt: "x", expiresAt: "x" },
     {
       id: "x",
+      kind: "host",
+      method: null,
+      path: null,
       host: "example.com",
       port: 443,
       commandPreview: "curl https://example.com/data",
@@ -1436,4 +1446,394 @@ test("a pending request lapses with its command: min(window, the command's own d
     },
   );
   assert.equal((await requests(w.h.id)).length, 2);
+});
+
+const WRITE = { kind: "request", method: "POST", path: "/v1/items" } as const;
+const trustSnapshot = async (w: World) => JSON.stringify(await rulesOf(w));
+const pendingFor = (w: World) =>
+  approvals.listPendingNetworkRequests({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    threadId: w.threadId,
+  });
+
+test("a write request to a secret-bound host always goes to the user: no mode, rule or answer shortcuts it", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  // A standing rule for the host exists, as does an open mode: neither applies.
+  const row = await insertRow(w, invocationId, { host: "api.example.com" });
+  await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: row.id,
+    decision: "allow_always",
+  });
+  await device.waitFor((f) => f.type === "network.decision");
+  const rulesBefore = await trustSnapshot(w);
+  assert.equal(JSON.parse(rulesBefore).length, 1);
+
+  for (const mode of ["ask", "open", "strict"] as const) {
+    await schema.db
+      .update(schema.localDevices)
+      .set({ networkMode: mode })
+      .where(eq(schema.localDevices.id, w.h.id));
+    device.ask(invocationId, `w-${mode}`, "API.example.com", 443, WRITE);
+    await until(
+      () => requests(w.h.id),
+      (rows) => rows.some((r) => r.askId === `w-${mode}`),
+    );
+    const parked = (await requests(w.h.id)).find(
+      (r) => r.askId === `w-${mode}`,
+    )!;
+    assert.deepEqual(
+      {
+        kind: parked.kind,
+        method: parked.method,
+        path: parked.path,
+        host: parked.host,
+        status: parked.status,
+        suggestedBy: parked.suggestedBy,
+      },
+      {
+        kind: "request",
+        method: "POST",
+        path: "/v1/items",
+        host: "api.example.com",
+        status: "pending",
+        suggestedBy: null,
+      },
+      mode,
+    );
+  }
+  assert.equal(
+    device.inbox.some((f) => f.type === "network.decision"),
+    false,
+    "nothing was decided on the user's behalf",
+  );
+  const listed = (await pendingFor(w)).requests.filter(
+    (r) => r.kind === "request",
+  );
+  assert.equal(listed.length, 3);
+  assert.deepEqual(
+    { ...listed[0], id: "x", createdAt: "x", expiresAt: "x" },
+    {
+      id: "x",
+      kind: "request",
+      method: "POST",
+      path: "/v1/items",
+      host: "api.example.com",
+      port: 443,
+      commandPreview: "curl https://example.com/data",
+      suggestedBy: null,
+      createdAt: "x",
+      expiresAt: "x",
+    },
+  );
+  // A host ask is still listed as a host ask.
+  assert.equal(
+    (await pendingFor(w)).requests.filter((r) => r.kind === "host").length,
+    0,
+  );
+
+  // Only "once" and "deny" exist for a write request.
+  await assert.rejects(
+    approvals.respondToNetworkRequest({
+      userId: w.h.userId,
+      workspaceId: w.workspaceId,
+      requestId: listed[0]!.id,
+      decision: "allow_always",
+    }),
+    { code: "NETWORK_REQUEST_ONCE_ONLY", statusCode: 400 },
+  );
+  assert.equal(
+    (await requests(w.h.id)).find((r) => r.id === listed[0]!.id)!.status,
+    "pending",
+  );
+  const once = await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: listed[0]!.id,
+    decision: "allow_once",
+  });
+  assert.deepEqual(once.request.scope, "once");
+  assert.equal(once.trustRule, undefined);
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "w-ask",
+    allow: true,
+  });
+  const denied = await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: listed[1]!.id,
+    decision: "deny",
+  });
+  assert.equal(denied.request.status, "denied");
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "w-open",
+    allow: false,
+    reason: "denied by user",
+  });
+  // The trust-rule table is untouched by every request answer.
+  assert.equal(await trustSnapshot(w), rulesBefore);
+});
+
+test("a malformed write-request ask is denied as an invalid request and stores nothing", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  const bad: Array<[string, Record<string, unknown>]> = [
+    ["no-method", { kind: "request", path: "/x" }],
+    ["lower-method", { kind: "request", method: "post", path: "/x" }],
+    ["long-method", { kind: "request", method: "P".repeat(17), path: "/x" }],
+    ["no-path", { kind: "request", method: "POST" }],
+    ["relative-path", { kind: "request", method: "POST", path: "x" }],
+    [
+      "absolute-uri",
+      { kind: "request", method: "POST", path: "http://a.example/x" },
+    ],
+    [
+      "long-path",
+      { kind: "request", method: "POST", path: `/${"x".repeat(200)}` },
+    ],
+    ["newline", { kind: "request", method: "POST", path: "/a\nb" }],
+    ["nul", { kind: "request", method: "POST", path: "/a\u0000b" }],
+    ["host-with-method", { method: "POST" }],
+    ["host-with-path", { kind: "host", path: "/x" }],
+    ["unknown-kind", { kind: "rule", method: "POST", path: "/x" }],
+  ];
+  for (const [askId, extra] of bad) {
+    device.ask(invocationId, askId, "api.example.com", 443, extra);
+    assert.deepEqual(
+      await device.waitFor(
+        (f) => f.type === "network.decision" && f.askId === askId,
+      ),
+      {
+        type: "network.decision",
+        askId,
+        allow: false,
+        reason: "invalid request",
+      },
+      askId,
+    );
+  }
+  assert.equal((await requests(w.h.id)).length, 0);
+  assert.equal(device.isOpen(), true);
+});
+
+test("a re-sent write-request ask is the same question; a changed one is not", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  device.ask(invocationId, "dup", "api.example.com", 443, WRITE);
+  const [pending] = (
+    await until(
+      () => pendingFor(w),
+      (result) => result.requests.length === 1,
+    )
+  ).requests;
+  device.ask(invocationId, "dup", "api.example.com", 443, WRITE);
+  await quiet(500);
+  assert.equal(
+    device.inbox.some((f) => f.type === "network.decision"),
+    false,
+    "still waiting for the user",
+  );
+  assert.equal((await requests(w.h.id)).length, 1);
+  await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: pending!.id,
+    decision: "allow_once",
+  });
+  await device.waitFor((f) => f.type === "network.decision");
+  device.ask(invocationId, "dup", "api.example.com", 443, WRITE);
+  assert.equal(
+    (await device.waitFor((f) => f.type === "network.decision")).allow,
+    true,
+  );
+  // The same askId for a different request, or as a host question, is denied.
+  for (const extra of [
+    { ...WRITE, method: "DELETE" },
+    { ...WRITE, path: "/v1/other" },
+    {},
+  ]) {
+    device.ask(invocationId, "dup", "api.example.com", 443, extra);
+    assert.equal(
+      (await device.waitFor((f) => f.type === "network.decision")).allow,
+      false,
+      JSON.stringify(extra),
+    );
+  }
+  assert.equal((await requests(w.h.id)).length, 1);
+});
+
+test("write-request rows share the caps and the stale-card rules of host rows", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const capped = await w.invoke();
+  for (let i = 0; i < 20; i++)
+    await insertRow(w, capped, {
+      askId: `req-${i}`,
+      kind: "request",
+      method: "POST",
+      path: "/x",
+      status: "expired",
+      resolvedAt: new Date(),
+      deliveredAt: new Date(),
+    });
+  device.ask(capped, "one-too-many", "api.example.com", 443, WRITE);
+  assert.deepEqual(
+    await device.waitFor(
+      (f) => f.type === "network.decision" && f.askId === "one-too-many",
+    ),
+    {
+      type: "network.decision",
+      askId: "one-too-many",
+      allow: false,
+      reason: "too many network requests",
+    },
+  );
+  assert.equal((await requests(w.h.id)).length, 20);
+
+  // Pending write requests count towards the computer's budget too.
+  for (let command = 0; command < 5; command++) {
+    const id = await w.invoke();
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        insertRow(w, id, {
+          askId: `p-${command}-${i}`,
+          kind: "request",
+          method: "PUT",
+          path: "/y",
+        }),
+      ),
+    );
+  }
+  device.ask(await w.invoke(), "device-full", "api.example.com", 443, WRITE);
+  assert.equal(
+    (
+      await device.waitFor(
+        (f) => f.type === "network.decision" && f.askId === "device-full",
+      )
+    ).allow,
+    false,
+  );
+
+  // Stale cards: finished commands and closed connections take them along.
+  const one = (await requests(w.h.id)).find((r) => r.askId === "p-0-0")!;
+  await schema.db
+    .update(schema.localToolInvocations)
+    .set({ status: "succeeded" })
+    .where(eq(schema.localToolInvocations.id, one.invocationId));
+  const ids = (await pendingFor(w)).requests.map((r) => r.id);
+  assert.equal(ids.includes(one.id), false);
+  // The list is capped at 50 cards; the finished command's is not among them.
+  assert.equal(ids.length, 50);
+  device.socket.terminate();
+  const rows = await until(
+    () => requests(w.h.id),
+    (list) => list.every((row) => row.status !== "pending"),
+  );
+  assert.ok(rows.every((row) => row.status === "expired"));
+  assert.deepEqual((await pendingFor(w)).requests, []);
+});
+
+test("conflicting answers to a write request settle once and never touch trust rules", async () => {
+  const w = await world();
+  const invocationId = await w.invoke();
+  for (let i = 0; i < 6; i++) {
+    const row = await insertRow(w, invocationId, {
+      kind: "request",
+      method: "POST",
+      path: `/r/${i}`,
+    });
+    const respond = (decision: "allow_once" | "deny") =>
+      approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision,
+      });
+    const [a, d] = await Promise.allSettled([
+      respond("allow_once"),
+      respond("deny"),
+    ]);
+    const [final] = (await requests(w.h.id)).filter((r) => r.id === row.id);
+    assert.ok(
+      (a.status === "fulfilled") !== (d.status === "fulfilled"),
+      `round ${i}: exactly one answer wins`,
+    );
+    assert.equal(
+      final!.status,
+      a.status === "fulfilled" ? "allowed" : "denied",
+    );
+    assert.equal(final!.scope, a.status === "fulfilled" ? "once" : null);
+    const loser = (a.status === "fulfilled" ? d : a) as PromiseRejectedResult;
+    assert.equal(loser.reason.code, "NETWORK_REQUEST_RESOLVED");
+  }
+  assert.deepEqual(await rulesOf(w), []);
+
+  // Racing the expiry sweep: one writer wins here as well.
+  for (let i = 0; i < 6; i++) {
+    const expiresAt = new Date(Date.now() + 60_000);
+    const row = await insertRow(w, invocationId, {
+      kind: "request",
+      method: "DELETE",
+      path: "/gone",
+      expiresAt,
+    });
+    const [answer] = await Promise.allSettled([
+      approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision: "allow_once",
+        now: new Date(expiresAt.getTime() - 1),
+      }),
+      approvals.deliverNetworkDecisions(w.h.id, () => true, {
+        now: new Date(expiresAt.getTime() + 1),
+        prune: false,
+      }),
+    ]);
+    const [final] = (await requests(w.h.id)).filter((r) => r.id === row.id);
+    assert.equal(
+      final!.status,
+      answer.status === "fulfilled" ? "allowed" : "expired",
+      `round ${i}`,
+    );
+  }
+  assert.deepEqual(await rulesOf(w), []);
+});
+
+test("a viewer cannot allow a write request but may deny it", async () => {
+  const w = await world({ role: "viewer" });
+  const invocationId = await w.invoke();
+  const row = await insertRow(w, invocationId, {
+    kind: "request",
+    method: "POST",
+    path: "/x",
+  });
+  await assert.rejects(
+    approvals.respondToNetworkRequest({
+      userId: w.h.userId,
+      workspaceId: w.workspaceId,
+      requestId: row.id,
+      decision: "allow_once",
+    }),
+    { statusCode: 403 },
+  );
+  assert.equal(
+    (
+      await approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision: "deny",
+      })
+    ).request.status,
+    "denied",
+  );
 });

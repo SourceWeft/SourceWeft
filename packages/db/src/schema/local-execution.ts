@@ -135,8 +135,16 @@ export const localNetworkRequests = pgTable(
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
     askId: text("ask_id").notNull(),
+    /**
+     * `host`: may the command connect to this host. `request`: may it send
+     * this write request (method + path, no query) to a host whose secret the
+     * user bound read-only.
+     */
+    kind: text("kind").notNull().default("host"),
     host: text("host").notNull(),
     port: integer("port").notNull(),
+    method: text("method"),
+    path: text("path"),
     status: text("status").notNull().default("pending"),
     scope: text("scope"),
     reason: text("reason"),
@@ -175,6 +183,14 @@ export const localNetworkRequests = pgTable(
     check(
       "local_network_requests_scope_check",
       sql`${table.scope} is null or (${table.scope} in ('once', 'always') and ${table.status} = 'allowed')`,
+    ),
+    check(
+      "local_network_requests_kind_check",
+      sql`${table.kind} in ('host', 'request')`,
+    ),
+    check(
+      "local_network_requests_request_shape_check",
+      sql`(${table.kind} = 'host' and ${table.method} is null and ${table.path} is null) or (${table.kind} = 'request' and ${table.method} is not null and char_length(${table.method}) <= 16 and (${table.path} is null or char_length(${table.path}) <= 200))`,
     ),
     check(
       "local_network_requests_port_check",

@@ -13,6 +13,7 @@ export type {
   ListLocalNetworkRequestsResponse,
   LocalNetworkDecision,
   LocalNetworkMode,
+  LocalNetworkRequestKind,
   LocalNetworkRequest,
   RespondLocalNetworkRequest,
   RespondLocalNetworkRequestResponse,

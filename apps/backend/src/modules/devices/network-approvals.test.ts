@@ -30,6 +30,7 @@ import {
   buildCommandNetworkPolicy,
   decisionFrameForRow,
   matchingNetworkRule,
+  readAskShape,
   networkTrustScope,
   NETWORK_REASONS,
 } from "./network-approvals";
@@ -290,5 +291,51 @@ describe("approvalExpiry", () => {
     expect(
       approvalExpiry(T, new Date(T.getTime() - 1)).getTime() <= T.getTime(),
     ).toBe(true);
+  });
+});
+
+describe("readAskShape", () => {
+  test("a plain ask is a host ask and may not carry request fields", () => {
+    expect(readAskShape({})).toEqual({
+      kind: "host",
+      method: null,
+      path: null,
+    });
+    expect(readAskShape({ kind: "host" })).toMatchObject({ kind: "host" });
+    expect(readAskShape({ method: "POST" })).toBeNull();
+    expect(readAskShape({ kind: "host", path: "/x" })).toBeNull();
+  });
+
+  test("a request ask needs an upper-case method and an origin-form path", () => {
+    expect(
+      readAskShape({ kind: "request", method: "POST", path: "/v1/items/1" }),
+    ).toEqual({ kind: "request", method: "POST", path: "/v1/items/1" });
+    for (const bad of [
+      { kind: "request" },
+      { kind: "request", method: "POST" },
+      { kind: "request", method: "post", path: "/x" },
+      { kind: "request", method: "", path: "/x" },
+      { kind: "request", method: "P".repeat(17), path: "/x" },
+      { kind: "request", method: "PO ST", path: "/x" },
+      { kind: "request", method: "POST", path: "" },
+      { kind: "request", method: "POST", path: "x" },
+      { kind: "request", method: "POST", path: "*" },
+      { kind: "request", method: "POST", path: "http://evil.example/x" },
+      { kind: "request", method: "POST", path: `/${"x".repeat(200)}` },
+      { kind: "request", method: "POST", path: "/a\nb" },
+      { kind: "request", method: "POST", path: "/a\u0000b" },
+      { kind: "request", method: "POST", path: "/a\u007fb" },
+      { kind: "rule", method: "POST", path: "/x" },
+      { kind: "", method: "POST", path: "/x" },
+    ])
+      expect(readAskShape(bad), JSON.stringify(bad)).toBeNull();
+    // The longest path allowed is exactly 200 characters.
+    expect(
+      readAskShape({
+        kind: "request",
+        method: "PUT",
+        path: `/${"x".repeat(199)}`,
+      }),
+    ).not.toBeNull();
   });
 });

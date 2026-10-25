@@ -27,6 +27,11 @@ export const localDeviceReplySchema = z.discriminatedUnion("type", [
     askId: z.string().max(256),
     host: z.string(),
     port: z.number(),
+    // `kind: "request"` asks about one write request to a secret-bound host.
+    // Lenient like the rest of the payload: the handler validates the values.
+    kind: z.string().optional(),
+    method: z.string().optional(),
+    path: z.string().optional(),
   }),
 ]);
 

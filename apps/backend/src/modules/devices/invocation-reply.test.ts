@@ -72,6 +72,14 @@ test("network.ask has a strict envelope but a lenient payload", () => {
     port: 443,
   };
   expect(localDeviceReplySchema.parse(ask)).toEqual(ask);
+  expect(
+    localDeviceReplySchema.parse({
+      ...ask,
+      kind: "request",
+      method: "POST",
+      path: "/v1/items",
+    }),
+  ).toMatchObject({ kind: "request", method: "POST", path: "/v1/items" });
   // Program-controlled values reach the handler, which answers with a deny.
   for (const lenient of [
     { ...ask, port: 0 },
@@ -80,6 +88,7 @@ test("network.ask has a strict envelope but a lenient payload", () => {
     { ...ask, host: "" },
     { ...ask, host: "h".repeat(5000) },
     { ...ask, askId: "" },
+    { ...ask, kind: "anything", method: "post", path: "no-slash" },
   ])
     expect(localDeviceReplySchema.safeParse(lenient).success).toBe(true);
   // A broken envelope is still a protocol error.
@@ -88,6 +97,9 @@ test("network.ask has a strict envelope but a lenient payload", () => {
     { ...ask, host: 7 },
     { ...ask, askId: "a".repeat(257) },
     { ...ask, id: 1 },
+    { ...ask, kind: 1 },
+    { ...ask, method: 5 },
+    { ...ask, path: {} },
     { type: "network.ask", id: "call", askId: "a", host: "x" },
     { type: "network.decision", askId: "a", allow: true },
   ])

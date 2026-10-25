@@ -11,6 +11,7 @@ import {
 import {
   LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS,
   LOCAL_NETWORK_HOST_NOT_ALLOWABLE_CODE,
+  LOCAL_NETWORK_REQUEST_ONCE_ONLY_CODE,
   LOCAL_NETWORK_TRUST_DOMAIN,
   LOCAL_NETWORK_TRUST_TARGET_TYPE,
   LOCAL_NETWORK_TRUST_TOOL_NAME,
@@ -59,7 +60,15 @@ export type NetworkAskMessage = {
   askId: string;
   host: string;
   port: number;
+  /** Absent or `host`: a connection. `request`: one write request to a secret-bound host. */
+  kind?: string | undefined;
+  method?: string | undefined;
+  path?: string | undefined;
 };
+
+type AskShape =
+  | { kind: "host"; method: null; path: null }
+  | { kind: "request"; method: string; path: string };
 
 type NetworkRequestRow = typeof localNetworkRequests.$inferSelect;
 
@@ -76,6 +85,7 @@ export const NETWORK_REASONS = {
   unavailable: "network approval is unavailable",
   invalidHost: "invalid host",
   invalidAsk: "invalid network request",
+  invalidRequest: "invalid request",
   tooMany: "too many network requests",
 } as const;
 
@@ -99,6 +109,34 @@ export function approvalExpiry(
   const window = now.getTime() + LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS * 1000;
   const limit = deadline ? deadline.getTime() : Number.NaN;
   return new Date(Number.isFinite(limit) ? Math.min(window, limit) : window);
+}
+
+/**
+ * What an ask is about. A request ask needs an upper-case method and an
+ * origin-form path (no query, no control characters, at most 200 characters);
+ * a host ask carries neither. Anything else is unusable, not a protocol error.
+ */
+export function readAskShape(ask: {
+  kind?: string | undefined;
+  method?: string | undefined;
+  path?: string | undefined;
+}): AskShape | null {
+  if (ask.kind === undefined || ask.kind === "host")
+    return ask.method === undefined && ask.path === undefined
+      ? { kind: "host", method: null, path: null }
+      : null;
+  if (ask.kind !== "request") return null;
+  if (typeof ask.method !== "string" || !/^[A-Z]{1,16}$/.test(ask.method))
+    return null;
+  if (
+    typeof ask.path !== "string" ||
+    !ask.path.startsWith("/") ||
+    ask.path.length > 200 ||
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/.test(ask.path)
+  )
+    return null;
+  return { kind: "request", method: ask.method, path: ask.path };
 }
 
 export function networkTrustScope(host: string): AgentToolTrustScope {
@@ -260,6 +298,8 @@ export async function handleNetworkAsk(
   if (!host) return denyFrame(ask.askId, NETWORK_REASONS.invalidHost);
   if (!Number.isInteger(ask.port) || ask.port < 1 || ask.port > 65535)
     return denyFrame(ask.askId, NETWORK_REASONS.invalidAsk);
+  const shape = readAskShape(ask);
+  if (!shape) return denyFrame(ask.askId, NETWORK_REASONS.invalidRequest);
 
   const [invocation] = await db
     .select()
@@ -286,10 +326,15 @@ export async function handleNetworkAsk(
     .from(localDevices)
     .where(and(eq(localDevices.id, device.id), isNull(localDevices.revokedAt)));
   if (!live) return denyFrame(ask.askId, NETWORK_REASONS.noCommand);
-  if (live.networkMode === "open")
-    return { type: "network.decision", askId: ask.askId, allow: true };
-  if (live.networkMode === "strict")
-    return denyFrame(ask.askId, NETWORK_REASONS.strict);
+  // The mode is about which HOSTS a command may reach. A write request to a
+  // secret-bound host is a different question, and always the user's to
+  // answer: neither open nor strict nor a rule answers it.
+  if (shape.kind === "host") {
+    if (live.networkMode === "open")
+      return { type: "network.decision", askId: ask.askId, allow: true };
+    if (live.networkMode === "strict")
+      return denyFrame(ask.askId, NETWORK_REASONS.strict);
+  }
 
   const [existing] = await db
     .select()
@@ -300,7 +345,7 @@ export async function handleNetworkAsk(
         eq(localNetworkRequests.askId, ask.askId),
       ),
     );
-  if (existing) return replyForExisting(existing, ask, host);
+  if (existing) return replyForExisting(existing, ask, host, shape);
 
   const [thread] = await db
     .select({
@@ -318,12 +363,16 @@ export async function handleNetworkAsk(
     workspaceId: thread.workspaceId,
     userId: device.userId,
   };
-  const rules = await listAgentToolTrustRuleRecords({
-    ...tenant,
-    status: "active",
-    domain: LOCAL_NETWORK_TRUST_DOMAIN,
-    toolName: LOCAL_NETWORK_TRUST_TOOL_NAME,
-  });
+  // Trust rules are about hosts; a request ask never reads or touches them.
+  const rules =
+    shape.kind === "host"
+      ? await listAgentToolTrustRuleRecords({
+          ...tenant,
+          status: "active",
+          domain: LOCAL_NETWORK_TRUST_DOMAIN,
+          toolName: LOCAL_NETWORK_TRUST_TOOL_NAME,
+        })
+      : [];
   const rule = matchingNetworkRule(rules, host, ask.port, now);
   if (rule) {
     await touchAgentToolTrustRuleUse({
@@ -362,7 +411,10 @@ export async function handleNetworkAsk(
   if (expiresAt.getTime() <= now.getTime())
     return denyFrame(ask.askId, NETWORK_REASONS.timedOut);
 
-  const suggestedBy = suggestedSkillFor(invocation.payload, host, ask.port);
+  const suggestedBy =
+    shape.kind === "host"
+      ? suggestedSkillFor(invocation.payload, host, ask.port)
+      : null;
   const [created] = await db
     .insert(localNetworkRequests)
     .values({
@@ -374,8 +426,11 @@ export async function handleNetworkAsk(
       workspaceId: thread.workspaceId,
       threadId: invocation.threadId,
       askId: ask.askId,
+      kind: shape.kind,
       host,
       port: ask.port,
+      method: shape.method,
+      path: shape.path,
       suggestedBy,
       createdAt: now,
       expiresAt,
@@ -393,7 +448,7 @@ export async function handleNetworkAsk(
           eq(localNetworkRequests.askId, ask.askId),
         ),
       );
-    return winner ? replyForExisting(winner, ask, host) : null;
+    return winner ? replyForExisting(winner, ask, host, shape) : null;
   }
   return null;
 }
@@ -402,9 +457,17 @@ function replyForExisting(
   row: NetworkRequestRow,
   ask: NetworkAskMessage,
   host: string,
+  shape: AskShape,
 ): NetworkDecisionFrame | null {
   // The same askId for a different command/target is not a retry.
-  if (row.invocationId !== ask.id || row.port !== ask.port || row.host !== host)
+  if (
+    row.invocationId !== ask.id ||
+    row.port !== ask.port ||
+    row.host !== host ||
+    row.kind !== shape.kind ||
+    row.method !== shape.method ||
+    row.path !== shape.path
+  )
     return denyFrame(ask.askId, NETWORK_REASONS.noCommand);
   return row.status === "pending" ? null : decisionFrameForRow(row);
 }
@@ -558,6 +621,9 @@ export async function listPendingNetworkRequests(input: {
   return {
     requests: rows.map(({ request, payload }) => ({
       id: request.id,
+      kind: request.kind as "host" | "request",
+      method: request.method,
+      path: request.path,
       host: request.host,
       port: request.port,
       commandPreview:
@@ -630,6 +696,15 @@ export async function respondToNetworkRequest(input: {
       "This network request was not found.",
     );
   const request = found.request;
+
+  // A write request is approved for this one request only; there is nothing a
+  // standing rule could safely match (and no rule is ever read or written).
+  if (request.kind === "request" && input.decision === "allow_always")
+    throw new ApiError(
+      400,
+      LOCAL_NETWORK_REQUEST_ONCE_ONLY_CODE,
+      "A write request can only be allowed once or denied.",
+    );
 
   // A standing rule for a host the device can never match would be a promise
   // the sandbox does not keep. Refused up front: the request stays answerable.

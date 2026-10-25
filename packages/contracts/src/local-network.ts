@@ -44,9 +44,25 @@ export type LocalNetworkRequestStatus = z.infer<
   typeof localNetworkRequestStatusSchema
 >;
 
+/**
+ * `host`: may the command connect to this host. `request`: may it send this
+ * write request to a host whose secret the user bound read-only. A request
+ * approval is only ever "once" and never becomes a standing rule.
+ */
+export const localNetworkRequestKindSchema = z.enum(["host", "request"]);
+export type LocalNetworkRequestKind = z.infer<
+  typeof localNetworkRequestKindSchema
+>;
+export const LOCAL_NETWORK_REQUEST_ONCE_ONLY_CODE = "NETWORK_REQUEST_ONCE_ONLY";
+
 /** A pending approval as the conversation shows it. */
 export const localNetworkRequestSchema = z.object({
   id: z.string().min(1),
+  /** Absent from older backends; treat as `host`. */
+  kind: localNetworkRequestKindSchema.optional(),
+  /** `kind: "request"` only: HTTP method and path (no query string). */
+  method: z.string().max(16).nullable().optional(),
+  path: z.string().max(200).nullable().optional(),
   host: z.string().min(1).max(255),
   port: z.number().int().min(1).max(65535),
   /** First 200 characters of the command that opened the connection. */

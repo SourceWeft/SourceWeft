@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   DEFAULT_LOCAL_NETWORK_MODE,
   localNetworkModeSchema,
+  localNetworkRequestSchema,
   respondLocalNetworkRequestSchema,
   updateLocalDeviceNetworkModeSchema,
 } from "../src/local-network";
@@ -42,4 +43,25 @@ test("a response carries only the decision and a TTL, never the rule subject", (
 
 test("network is a confirmation domain", () => {
   assert.equal(toolConfirmationDomainSchema.safeParse("network").success, true);
+});
+
+test("a pending request may be a write request with method and path, and old shapes still parse", () => {
+  const base = {
+    id: "r",
+    host: "api.example.com",
+    port: 443,
+    commandPreview: "curl -X POST",
+    suggestedBy: null,
+    createdAt: "2026-10-25T00:00:00.000Z",
+    expiresAt: "2026-10-25T00:02:00.000Z",
+  };
+  assert.deepEqual(localNetworkRequestSchema.parse(base), base);
+  const write = { ...base, kind: "request", method: "POST", path: "/v1/items" };
+  assert.deepEqual(localNetworkRequestSchema.parse(write), write);
+  for (const bad of [
+    { ...base, kind: "rule" },
+    { ...base, kind: "request", method: "P".repeat(17) },
+    { ...base, kind: "request", method: "POST", path: "/".repeat(201) },
+  ])
+    assert.equal(localNetworkRequestSchema.safeParse(bad).success, false);
 });
