@@ -48,6 +48,7 @@ import {
 } from "../../../seo";
 import {
   getPublicMcpDetail,
+  getPublicMcpToolRevisions,
   getPublicMcpManifest,
   isMarketNotFound,
   listPublicMcp,
@@ -91,6 +92,7 @@ import { remoteMcpClientConfig } from "../_components/mcp-install";
 import { mcpClaimHref } from "../../../../lib/mcp-claims";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 import { McpScoreCard } from "../_components/mcp-score";
+import { McpToolChangeLog } from "../_components/mcp-tool-change-log";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
 // is injected at container start, so a build-time render would bake in the
@@ -293,7 +295,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const [
     authState,
     result,
-    { aiOverview, readme, relatedProduct, score, versions },
+    { aiOverview, readme, relatedProduct, score, toolsRevision, versions },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
@@ -302,6 +304,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     listPublicMcpCategories(locale),
   ]);
   const { item, manifest, version } = result;
+  // Only a list with a history has a change log: one more read, not one per card.
+  const toolRevisions = toolsRevision
+    ? await getPublicMcpToolRevisions(decodedIdentifier)
+    : null;
   const authExplanation = mcpAuthExplanation(manifest.auth);
   // An empty list says why (sign-in required, not validated, failed, read
   // and empty, not indexed yet) in place of "0 tools": in the facts, the
@@ -926,6 +932,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   </p>
                 ) : null}
                 <McpToolRows status={toolsStatus} tools={manifest.tools} />
+                {toolRevisions ? (
+                  <McpToolChangeLog history={toolRevisions} />
+                ) : null}
               </section>
 
               {versions.length > 0 ? (
