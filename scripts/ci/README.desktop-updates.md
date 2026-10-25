@@ -303,6 +303,11 @@ these files); mirroring it is a follow-up.
 How it is built and signed (Linux leg of `desktop-release.yml`, after the AppImage, before
 the artifact upload):
 
+0. `scripts/ci/install-static-ripgrep.sh` downloads the pinned official static (musl)
+   ripgrep release named in `scripts/ci/ripgrep-release.json` (version, asset, URL, SHA-256),
+   checks the SHA-256 before extracting and refuses a dynamically linked binary. Both the
+   release leg and the `sandbox-bundle` PR job use it; the runner's apt ripgrep is never
+   bundled. To bump ripgrep, change that one file with the checksum from the official release.
 1. `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "$(command -v rg)"`
    (Bun 1.4.2) writes `dist/bundle/` including `manifest.json`: `schemaVersion` 1,
    `protocolVersion` (`SANDBOX_PROTOCOL_VERSION`), `appVersion` (the desktop package

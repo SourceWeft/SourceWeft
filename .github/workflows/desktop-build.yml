@@ -210,8 +210,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Install ripgrep
-        run: sudo apt-get install -y --no-install-recommends ripgrep
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
@@ -233,11 +231,20 @@ jobs:
         env:
           DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
         run: node --test scripts/ci/sandbox-bundle-signature.test.mjs
+      - name: Install the pinned static ripgrep (fails if it is not statically linked)
+        id: ripgrep
+        run: |
+          set -euo pipefail
+          rg="$(bash scripts/ci/install-static-ripgrep.sh "$RUNNER_TEMP/ripgrep")"
+          echo "path=$rg" >> "$GITHUB_OUTPUT"
+          file "$rg"
+          # A statically linked binary has no program interpreter (dynamic loader) entry.
+          if readelf -lW "$rg" | grep -q INTERP; then
+            echo "::error::ripgrep is dynamically linked"
+            exit 1
+          fi
       - name: Build the sandbox bundle for the release target
-        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "$(command -v rg)"
-      - name: Report the shared libraries the bundled ripgrep needs
-        # Informational: the bundle ships the runner's ripgrep as-is.
-        run: ldd apps/desktop/sandbox-sidecar/dist/bundle/rg || true
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "${{ steps.ripgrep.outputs.path }}"
       - name: Pack, sign (throwaway key) and verify exactly as the release does
         env:
           DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier

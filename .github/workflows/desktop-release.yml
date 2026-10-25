@@ -33,7 +33,7 @@ jobs:
             bundles: nsis
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bundles: appimage
+            bundles: appimage,deb
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -141,8 +141,9 @@ jobs:
           DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends ripgrep
-          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$DESKTOP_RELEASE_TARGET" --rg "$(command -v rg)"
+          # Pinned official static ripgrep (scripts/ci/ripgrep-release.json), checksum-verified.
+          rg="$(bash scripts/ci/install-static-ripgrep.sh "$RUNNER_TEMP/ripgrep")"
+          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$DESKTOP_RELEASE_TARGET" --rg "$rg"
           bundle=sandbox-bundle
           rm -rf "$bundle"
           node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$bundle"

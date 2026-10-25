@@ -102,7 +102,6 @@ jobs:
             release-installers/**/*.exe
             release-installers/**/*.AppImage
             release-installers/**/*.app.tar.gz
-            release-installers/**/sourceweft-sandbox-*.tar.gz
             release-installers/**/*.sig
           body: |
             Desktop repair release with verified Tauri updater signatures, plus self-hosting files for Web/Docker.
@@ -112,6 +111,20 @@ jobs:
 
             Publication resumed using unchanged desktop artifacts and image from the original verified release build.
           generate_release_notes: true
+      - name: Attach the sandbox runtime bundle when the original build produced one
+        # Releases built before the bundle existed have none; the installer step above keeps
+        # fail_on_unmatched_files, this one only runs when the artifact really contains it.
+        if: steps.source.outputs.published != 'true' && hashFiles('release-installers/**/sourceweft-sandbox-*.tar.gz') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.source.outputs.tag }}
+          target_commitish: ${{ steps.source.outputs.sha }}
+          draft: true
+          overwrite_files: false
+          prerelease: ${{ steps.source.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            release-installers/**/sourceweft-sandbox-*.tar.gz
       - name: Verify GitHub asset bytes
         id: assets
         env:
