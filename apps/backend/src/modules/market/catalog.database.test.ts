@@ -167,12 +167,10 @@ describe("MCP catalog on the mcp_* tables", () => {
       "hasLogo",
       "hasDocs",
       "hasLicense",
-      "officialPublisher",
-      "claimed",
     ]);
     expect(
       detailed.score.items.find((entry) => entry.key === "reachable"),
-    ).toMatchObject({ required: true, met: false });
+    ).toMatchObject({ applicable: true, required: true, met: false });
     expect(detailed.versions.map((version) => version.version).sort()).toEqual([
       "1.0.0",
       "1.1.0",

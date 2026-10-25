@@ -52,6 +52,13 @@ for (const [network, prefix] of [
   ["fc00::", 7],
   ["fe80::", 10],
   ["ff00::", 8],
+  // Transition ranges that embed or tunnel an IPv4 address, whose own
+  // reachability these checks cannot see: NAT64 (64:ff9b::/96), 6to4,
+  // Teredo and the discard-only prefix.
+  ["64:ff9b::", 96],
+  ["2002::", 16],
+  ["2001::", 32],
+  ["100::", 64],
 ] as const) {
   nonPublicAddresses.addSubnet(network, prefix, "ipv6");
 }

@@ -949,7 +949,7 @@ export async function findMcp(
       relatedProduct,
       // Computed on read from the rows already loaded (Issue #367, W6): the
       // icon is the one the catalog shows, derived or stored; the manifest
-      // and `claimed` carry the owner's layer (W7).
+      // carries the owner's layer (W7), so owner corrections count.
       score: latest
         ? scoreMcp({
             manifestJson: applyOwnerOverridesToManifest(
@@ -957,14 +957,12 @@ export async function findMcp(
               ownerLayer.row,
             ),
             provenanceJson: latest.provenanceJson,
-            claimed: item.claimed === true,
             readmeStatus: readme?.readmeStatus ?? null,
             // Any visible overview language, not only the one asked for.
             hasAiOverview:
               (latest ? (overviewLocales?.get(latest.id)?.length ?? 0) : 0) > 0,
             iconUrl: item.iconUrl,
             iconSource: item.iconSource,
-            publisher: item.publisher,
           })
         : null,
       toolsRevision,

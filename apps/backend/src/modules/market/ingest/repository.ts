@@ -227,7 +227,13 @@ export async function findStoredIconProvenance(
 ): Promise<
   Map<
     string,
-    { selfDescription?: unknown; githubRegistry?: unknown; iconProbe?: unknown }
+    {
+      selfDescription?: unknown;
+      githubRegistry?: unknown;
+      iconProbe?: unknown;
+      iconCandidates?: unknown;
+      iconDecision?: unknown;
+    }
   >
 > {
   if (versionIds.length === 0) {
@@ -239,6 +245,8 @@ export async function findStoredIconProvenance(
       selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
       githubRegistry: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'githubRegistry'`,
       iconProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconProbe'`,
+      iconCandidates: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconCandidates'`,
+      iconDecision: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconDecision'`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
@@ -249,6 +257,8 @@ export async function findStoredIconProvenance(
         selfDescription: row.selfDescription ?? undefined,
         githubRegistry: row.githubRegistry ?? undefined,
         iconProbe: row.iconProbe ?? undefined,
+        iconCandidates: row.iconCandidates ?? undefined,
+        iconDecision: row.iconDecision ?? undefined,
       },
     ]),
   );

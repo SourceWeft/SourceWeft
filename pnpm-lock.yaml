@@ -282,6 +282,9 @@ importers:
       opencc-js:
         specifier: ^1.4.2
         version: 1.4.2
+      parse5:
+        specifier: 7.3.0
+        version: 7.3.0
       pdfjs-dist:
         specifier: ^6.2.108
         version: 6.2.108
@@ -303,6 +306,9 @@ importers:
       srt-parser-2:
         specifier: ^1.2.3
         version: 1.2.3
+      tldts:
+        specifier: 7.4.10
+        version: 7.4.10
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -711,6 +717,9 @@ importers:
 
   cli:
     devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.1
+        version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.7)
       '@sourceweft/eslint-config':
         specifier: workspace:*
         version: link:../packages/eslint-config
@@ -20231,8 +20240,7 @@ snapshots:
 
   tldts-core@6.1.86: {}
 
-  tldts-core@7.4.10:
-    optional: true
+  tldts-core@7.4.10: {}
 
   tldts@6.1.86:
     dependencies:
@@ -20241,7 +20249,6 @@ snapshots:
   tldts@7.4.10:
     dependencies:
       tldts-core: 7.4.10
-    optional: true
 
   to-regex-range@5.0.1:
     dependencies:

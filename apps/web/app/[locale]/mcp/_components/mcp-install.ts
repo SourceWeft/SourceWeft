@@ -1,13 +1,43 @@
 import type { MarketMcpManifest } from "@sourceweft/market-sdk";
 
-function serverKey(identifier: string) {
-  const tail = identifier.split("/").filter(Boolean).at(-1) ?? identifier;
-  return (
-    tail
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "mcp-server"
-  );
+const GENERIC_KEY_TOKENS = new Set(["mcp", "server", "servers"]);
+const MAX_KEY_LENGTH = 40;
+
+function keyTokens(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token && !GENERIC_KEY_TOKENS.has(token));
+}
+
+/** Four base-36 characters of an FNV-1a hash: stable for an identifier. */
+function stableSuffix(identifier: string) {
+  let hash = 0x811c9dc5;
+  for (const char of identifier) {
+    hash ^= char.codePointAt(0)!;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36).padStart(4, "0").slice(-4);
+}
+
+/**
+ * The key a client config files the server under: the display name's slug
+ * (`Notion` → `notion`), not the identifier's last segment, which for
+ * `com.notion/mcp` is `mcp` and would collide with every other such server.
+ * Generic words (mcp, server) are dropped; a name that is nothing but those,
+ * or has no letters, falls back to the identifier's tokens with a suffix
+ * derived from the identifier, so the key stays the same for the same server
+ * and differs between servers. Collision with a config the user already has
+ * is for the installer to handle.
+ */
+export function mcpClientConfigKey(manifest: {
+  identifier: string;
+  name?: string | null;
+}) {
+  const named = keyTokens(manifest.name ?? "").join("-");
+  if (named) return named.slice(0, MAX_KEY_LENGTH).replace(/-+$/, "");
+  const fallback = keyTokens(manifest.identifier.replace(/\//g, " ")).join("-");
+  return `${(fallback || "server").slice(0, MAX_KEY_LENGTH - 5).replace(/-+$/, "")}-${stableSuffix(manifest.identifier)}`;
 }
 
 function authHeaders(auth: MarketMcpManifest["auth"]) {
@@ -47,7 +77,7 @@ export function remoteMcpClientConfig(manifest: MarketMcpManifest) {
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
   return JSON.stringify(
-    { mcpServers: { [serverKey(manifest.identifier)]: server } },
+    { mcpServers: { [mcpClientConfigKey(manifest)]: server } },
     null,
     2,
   );
