@@ -453,8 +453,15 @@
     {
       "idx": 64,
       "version": "7",
-      "when": 1792860197099,
-      "tag": "0064_artifact_records",
+      "when": 1792850292500,
+      "tag": "0064_market_mcp_tool_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792901605282,
+      "tag": "0065_artifact_records",
       "breakpoints": true
     }
   ]

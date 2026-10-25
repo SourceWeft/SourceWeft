@@ -1,5 +1,5 @@
 {
-  "id": "d86438af-0578-490a-bf13-70aa8cd1efc6",
+  "id": "583c91f6-1a19-402b-b76d-b37e77acdbe2",
   "prevId": "248659bd-5698-4117-b257-19425905e7a8",
   "version": "7",
   "dialect": "postgresql",
@@ -17787,6 +17787,150 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.market_mcp_tool_revisions": {
+      "name": "market_mcp_tool_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tools_hash": {
+          "name": "tools_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "canonical_version": {
+          "name": "canonical_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "withdrawn": {
+          "name": "withdrawn",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "tools_count": {
+          "name": "tools_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "tools_json": {
+          "name": "tools_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "diff_json": {
+          "name": "diff_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "server_version": {
+          "name": "server_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_confirmed_at": {
+          "name": "last_confirmed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "market_mcp_tool_revisions_item_source_revision_uq": {
+          "name": "market_mcp_tool_revisions_item_source_revision_uq",
+          "columns": [
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "revision",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "market_mcp_tool_revisions_item_id_mcp_servers_id_fk": {
+          "name": "market_mcp_tool_revisions_item_id_mcp_servers_id_fk",
+          "tableFrom": "market_mcp_tool_revisions",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "market_mcp_tool_revisions_source_check": {
+          "name": "market_mcp_tool_revisions_source_check",
+          "value": "\"market_mcp_tool_revisions\".\"source\" in ('owner', 'platform-indexed', 'member-observed')"
+        },
+        "market_mcp_tool_revisions_revision_check": {
+          "name": "market_mcp_tool_revisions_revision_check",
+          "value": "\"market_mcp_tool_revisions\".\"revision\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.mcp_categories": {
       "name": "mcp_categories",
       "schema": "",
@@ -19493,13 +19637,6 @@
           "notNull": true,
           "default": 0
         },
-        "public_record_collections": {
-          "name": "public_record_collections",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
@@ -19648,429 +19785,6 @@
         "share_links_access_level_check": {
           "name": "share_links_access_level_check",
           "value": "\"share_links\".\"access_level\" in ('viewer')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.artifact_capability_approvals": {
-      "name": "artifact_capability_approvals",
-      "schema": "",
-      "columns": {
-        "version_id": {
-          "name": "version_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "artifact_id": {
-          "name": "artifact_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "capability": {
-          "name": "capability",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "approved_by": {
-          "name": "approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "approved_at": {
-          "name": "approved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "revoked_by": {
-          "name": "revoked_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "artifact_capability_approvals_artifact_idx": {
-          "name": "artifact_capability_approvals_artifact_idx",
-          "columns": [
-            {
-              "expression": "artifact_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "artifact_capability_approvals_version_id_artifact_versions_id_fk": {
-          "name": "artifact_capability_approvals_version_id_artifact_versions_id_fk",
-          "tableFrom": "artifact_capability_approvals",
-          "tableTo": "artifact_versions",
-          "columnsFrom": [
-            "version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "artifact_capability_approvals_artifact_id_artifacts_id_fk": {
-          "name": "artifact_capability_approvals_artifact_id_artifacts_id_fk",
-          "tableFrom": "artifact_capability_approvals",
-          "tableTo": "artifacts",
-          "columnsFrom": [
-            "artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "artifact_capability_approvals_pk": {
-          "name": "artifact_capability_approvals_pk",
-          "columns": [
-            "version_id",
-            "capability"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "artifact_capability_approvals_capability_check": {
-          "name": "artifact_capability_approvals_capability_check",
-          "value": "\"artifact_capability_approvals\".\"capability\" in ('storage.shared')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.artifact_record_consents": {
-      "name": "artifact_record_consents",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version_id": {
-          "name": "version_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "artifact_id": {
-          "name": "artifact_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "capability": {
-          "name": "capability",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_at": {
-          "name": "granted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "artifact_record_consents_artifact_idx": {
-          "name": "artifact_record_consents_artifact_idx",
-          "columns": [
-            {
-              "expression": "artifact_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "artifact_record_consents_version_id_artifact_versions_id_fk": {
-          "name": "artifact_record_consents_version_id_artifact_versions_id_fk",
-          "tableFrom": "artifact_record_consents",
-          "tableTo": "artifact_versions",
-          "columnsFrom": [
-            "version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "artifact_record_consents_artifact_id_artifacts_id_fk": {
-          "name": "artifact_record_consents_artifact_id_artifacts_id_fk",
-          "tableFrom": "artifact_record_consents",
-          "tableTo": "artifacts",
-          "columnsFrom": [
-            "artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "artifact_record_consents_pk": {
-          "name": "artifact_record_consents_pk",
-          "columns": [
-            "user_id",
-            "version_id",
-            "capability"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "artifact_record_consents_capability_check": {
-          "name": "artifact_record_consents_capability_check",
-          "value": "\"artifact_record_consents\".\"capability\" in ('storage.shared')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.artifact_records": {
-      "name": "artifact_records",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "artifact_id": {
-          "name": "artifact_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "collection": {
-          "name": "collection",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "record_id": {
-          "name": "record_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "etag": {
-          "name": "etag",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "artifact_records_data_gin": {
-          "name": "artifact_records_data_gin",
-          "columns": [
-            {
-              "expression": "\"data\" jsonb_path_ops",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
-          "with": {}
-        },
-        "artifact_records_owner_idx": {
-          "name": "artifact_records_owner_idx",
-          "columns": [
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"artifact_records\".\"owner_user_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "artifact_records_workspace_id_workspaces_id_fk": {
-          "name": "artifact_records_workspace_id_workspaces_id_fk",
-          "tableFrom": "artifact_records",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "artifact_records_artifact_id_artifacts_id_fk": {
-          "name": "artifact_records_artifact_id_artifacts_id_fk",
-          "tableFrom": "artifact_records",
-          "tableTo": "artifacts",
-          "columnsFrom": [
-            "artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "artifact_records_workspace_team_fk": {
-          "name": "artifact_records_workspace_team_fk",
-          "tableFrom": "artifact_records",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id",
-            "team_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "artifact_records_key_uq": {
-          "name": "artifact_records_key_uq",
-          "nullsNotDistinct": true,
-          "columns": [
-            "artifact_id",
-            "scope",
-            "owner_user_id",
-            "collection",
-            "record_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "artifact_records_scope_check": {
-          "name": "artifact_records_scope_check",
-          "value": "\"artifact_records\".\"scope\" in ('user', 'shared')"
-        },
-        "artifact_records_owner_check": {
-          "name": "artifact_records_owner_check",
-          "value": "(\"artifact_records\".\"scope\" = 'user') = (\"artifact_records\".\"owner_user_id\" is not null)"
-        },
-        "artifact_records_size_check": {
-          "name": "artifact_records_size_check",
-          "value": "\"artifact_records\".\"size_bytes\" >= 0"
         }
       },
       "isRLSEnabled": false

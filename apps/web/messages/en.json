@@ -432,6 +432,33 @@
         "unsupportedPackage": "the package type cannot run in the sandbox"
       }
     },
+    "toolChangeLog": {
+      "heading": "Change log",
+      "intro": "Each entry is a change to this listing's tool list. It is not a version of the server itself.",
+      "current": "Current",
+      "emptyList": "Lists no tools",
+      "withdrawn": "Withdrawn",
+      "addedLabel": "{count, plural, one {# tool added} other {# tools added}}",
+      "removedLabel": "{count, plural, one {# tool removed} other {# tools removed}}",
+      "changedLabel": "{count, plural, one {# tool changed} other {# tools changed}}",
+      "addedHeading": "Added",
+      "removedHeading": "Removed",
+      "changedHeading": "Changed",
+      "serverVersion": "The server reported version {version}.",
+      "truncated": "Showing the latest {count} entries.",
+      "sources": {
+        "owner": "Owner",
+        "platform-indexed": "Platform index",
+        "member-observed": "Connected accounts"
+      },
+      "fields": {
+        "title": "title",
+        "description": "description",
+        "inputSchema": "input schema",
+        "outputSchema": "output schema",
+        "annotations": "annotations"
+      }
+    },
     "score": {
       "heading": "Score",
       "nav": "Score",

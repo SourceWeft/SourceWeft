@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import {
@@ -757,6 +757,182 @@ describe("MCP owner claims", () => {
         item: { claimed: boolean };
       };
       expect(detail.item.claimed).toBe(false);
+    });
+
+    test("tool lists make revisions: a new one per difference, a withdrawal for clearing or a block", async () => {
+      const identifier = `com.${tag}rev/mcp`;
+      const host = `${tag}rev.com`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      await becomeOwner("rev-a", identifier, host);
+      const tool = (name: string, description = "") => ({
+        name,
+        description,
+        inputSchema: {},
+        annotations: {},
+      });
+      const submit = (tools: ReturnType<typeof tool>[], serverInfo?: Record<string, unknown>) =>
+        service.setMcpOwnerTools(
+          { userId: "rev-a", identifier, submission: { tools, ...(serverInfo ? { serverInfo } : {}) } },
+          deps(),
+        );
+      const history = async () => {
+        const response = await app.request(`/v1/mcp/${enc(identifier)}/tools/revisions`);
+        expect(response.status).toBe(200);
+        return (await json(response)) as unknown as {
+          source: string | null;
+          items: Array<{
+            revision: number;
+            current: boolean;
+            withdrawn: boolean;
+            serverVersion: string | null;
+            added: string[];
+            removed: string[];
+            changed: Array<{ name: string; fields: string[] }>;
+          }>;
+        };
+      };
+      const detailRevision = async () =>
+        ((await json(await app.request(`/v1/mcp/${enc(identifier)}`))) as unknown as {
+          toolsRevision: { source: string; revision: number } | null;
+        }).toolsRevision;
+
+      expect(await detailRevision()).toBeNull();
+      await submit([tool("a"), tool("b")], { name: "srv", version: "1.4.0" });
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 1 });
+      // The same list again (reordered, whitespace changed) is not a revision.
+      advance(60);
+      await submit([tool("b"), tool("a")], { name: "srv", version: "1.4.1" });
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 1 });
+      await submit([tool("a", "now described"), tool("c")]);
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 2 });
+
+      let page = await history();
+      expect(page.source).toBe("owner");
+      expect(page.items.map((item) => [item.revision, item.current])).toEqual([
+        [2, true],
+        [1, false],
+      ]);
+      expect(page.items[0]).toMatchObject({
+        added: ["c"],
+        removed: ["b"],
+        changed: [{ name: "a", fields: ["description"] }],
+      });
+      expect(page.items[1]).toMatchObject({ added: ["a", "b"], serverVersion: "1.4.0" });
+
+      // Clearing is a withdrawal, not an empty list; the detail has no revision to show.
+      state.userId = "rev-a";
+      const cleared = await app.request(`/v1/market/mcp/${enc(identifier)}/owner-overrides/tools`, {
+        method: "DELETE",
+      });
+      expect(cleared.status).toBe(200);
+      expect(await detailRevision()).toBeNull();
+      // Nothing is public once the owner's list is no longer shown.
+      expect((await history()).items).toEqual([]);
+      // Publishing again continues the numbering against the empty list.
+      await submit([tool("a", "now described"), tool("c")]);
+      page = await history();
+      expect(page.items.map((item) => [item.revision, item.withdrawn])).toEqual([
+        [4, false],
+        [3, true],
+        [2, false],
+        [1, false],
+      ]);
+      expect(page.items[0]).toMatchObject({ added: ["a", "c"], removed: [] });
+
+      // A block clears the blocked member's list and, in the same step, the
+      // history of it.
+      await service.adminBlockMcpMember(
+        { adminUserId: "market-admin", identifier, userId: "rev-a" },
+        deps(),
+      );
+      const rows = await data.db
+        .select({ revision: data.marketMcpToolRevisions.revision })
+        .from(data.marketMcpToolRevisions)
+        .innerJoin(data.mcpServers, eq(data.mcpServers.id, data.marketMcpToolRevisions.itemId))
+        .where(eq(data.mcpServers.identifier, identifier));
+      expect(rows).toEqual([]);
+      // No member or team identifier anywhere in the table.
+      expect(Object.keys(data.marketMcpToolRevisions).join(" ")).not.toMatch(/user|member|team/i);
+    });
+
+    test("a shown owner list is the only history: no fallback, no other source, nothing of a blocked member's", async () => {
+      const identifier = `com.${tag}hist/mcp`;
+      const host = `${tag}hist.com`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      const toolRevisions = await import("../tool-revisions");
+      const [server] = await data.db
+        .select({ id: data.mcpServers.id })
+        .from(data.mcpServers)
+        .where(eq(data.mcpServers.identifier, identifier));
+      const itemId = server!.id;
+      const tool = (name: string) => ({ name, inputSchema: {}, annotations: {} });
+      const submit = (userId: string, tools: ReturnType<typeof tool>[]) =>
+        service.setMcpOwnerTools({ userId, identifier, submission: { tools } }, deps());
+      const history = async (query = "") =>
+        (await json(await app.request(`/v1/mcp/${enc(identifier)}/tools/revisions${query}`))) as unknown as {
+          source: string | null;
+          items: Array<{ revision: number; added: string[]; withdrawn: boolean }>;
+        };
+      const detailRevision = async () =>
+        ((await json(await app.request(`/v1/mcp/${enc(identifier)}`))) as unknown as {
+          toolsRevision: { source: string; revision: number } | null;
+        }).toolsRevision;
+
+      // The platform's snapshot is what shows while no owner list does.
+      await toolRevisions.recordToolRevision({ itemId, source: "platform-indexed", tools: [tool("platform_tool")] });
+      expect(await detailRevision()).toMatchObject({ source: "platform-indexed", revision: 1 });
+
+      // An owner list stored before revisions existed: the page shows it, so
+      // the platform's history must not stand in for it.
+      await becomeOwner("hist-a", identifier, host);
+      await submit("hist-a", [tool("a_secret_one")]);
+      await data.db
+        .delete(data.marketMcpToolRevisions)
+        .where(eq(data.marketMcpToolRevisions.itemId, itemId));
+      await toolRevisions.recordToolRevision({ itemId, source: "platform-indexed", tools: [tool("platform_tool")] });
+      expect(await detailRevision()).toBeNull();
+      expect(await history()).toEqual({ source: null, items: [], nextBefore: null });
+
+      // With owner revisions it is the owner's, whatever `source` asks for.
+      await submit("hist-a", [tool("a_secret_one"), tool("a_secret_two")]);
+      for (const query of ["", "?source=platform-indexed", "?source=member-observed"]) {
+        const page = await history(query);
+        expect(page.source).toBe("owner");
+        expect(page.items.map((entry) => entry.added)).toEqual([["a_secret_one", "a_secret_two"]]);
+      }
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 1 });
+      await submit("hist-a", [tool("a_secret_one")]);
+      expect((await history()).items).toHaveLength(2);
+
+      // An empty submission clears the list: a withdrawal, not an empty list.
+      await submit("hist-a", []);
+      expect(await detailRevision()).toMatchObject({ source: "platform-indexed" });
+      const rows = async () =>
+        data.db
+          .select({ revision: data.marketMcpToolRevisions.revision, withdrawn: data.marketMcpToolRevisions.withdrawn })
+          .from(data.marketMcpToolRevisions)
+          .where(
+            and(
+              eq(data.marketMcpToolRevisions.itemId, itemId),
+              eq(data.marketMcpToolRevisions.source, "owner"),
+            ),
+          )
+          .orderBy(asc(data.marketMcpToolRevisions.revision));
+      expect((await rows()).map((row) => row.withdrawn)).toEqual([false, false, true]);
+
+      // A blocked member's earlier revisions do not outlive the block, even
+      // when another owner then submits a list of their own.
+      await submit("hist-a", [tool("a_secret_three")]);
+      await becomeOwner("hist-b", identifier, host);
+      await service.adminBlockMcpMember(
+        { adminUserId: "market-admin", identifier, userId: "hist-a" },
+        deps(),
+      );
+      expect(await rows()).toEqual([]);
+      await submit("hist-b", [tool("b_tool")]);
+      const after = await history();
+      expect(after.items).toEqual([expect.objectContaining({ revision: 1, added: ["b_tool"] })]);
+      expect(JSON.stringify(after)).not.toContain("a_secret");
     });
 
     test("fields keep their authors: blocking one owner clears theirs and keeps the other's", async () => {

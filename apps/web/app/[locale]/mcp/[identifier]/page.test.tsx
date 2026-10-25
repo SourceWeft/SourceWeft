@@ -9,6 +9,7 @@ import {
 const market = vi.hoisted(() => ({
   getPublicMcpDetail: vi.fn(),
   getPublicMcpManifest: vi.fn(),
+  getPublicMcpToolRevisions: vi.fn(),
   listPublicMcp: vi.fn(),
   listPublicMcpCategories: vi.fn(),
 }));
@@ -161,6 +162,7 @@ beforeEach(() => {
   market.getPublicMcpDetail
     .mockReset()
     .mockResolvedValue({ readme: null, versions: [] });
+  market.getPublicMcpToolRevisions.mockReset().mockResolvedValue(null);
   market.listPublicMcp.mockReset().mockResolvedValue({ items: [] });
   market.listPublicMcpCategories.mockReset().mockResolvedValue({ items: [] });
 });
@@ -980,5 +982,127 @@ describe("public MCP detail page Score section", () => {
     const html = await render();
     expect(scoreSection(html)).toBeUndefined();
     expect(navLabels(html)).not.toContain("score");
+  });
+});
+
+describe("public MCP detail page tool change log", () => {
+  const revision = (overrides: Record<string, unknown>) => ({
+    source: "owner",
+    revision: 1,
+    current: false,
+    withdrawn: false,
+    toolsCount: 2,
+    serverVersion: null,
+    observedAt: "2026-10-20T10:00:00.000Z",
+    lastConfirmedAt: "2026-10-20T10:00:00.000Z",
+    added: [],
+    removed: [],
+    changed: [],
+    ...overrides,
+  });
+  const toolsRevision = {
+    source: "owner",
+    revision: 3,
+    observedAt: "2026-10-24T10:00:00.000Z",
+    lastConfirmedAt: "2026-10-24T10:00:00.000Z",
+  };
+  // One entry's markup: from its marker to the next entry's (or the end).
+  function entry(log: string, revision: number) {
+    const start = log.indexOf(`data-revision="${revision}"`);
+    const next = log.indexOf('data-revision="', start + 1);
+    return log.slice(start, next === -1 ? undefined : next);
+  }
+  function changeLog(html: string) {
+    return /<div[^>]*data-testid="mcp-tool-change-log"[^>]*>([\s\S]*?)<\/ol>/.exec(
+      html,
+    )?.[0];
+  }
+
+  it("lists the revisions newest first under Tools, the latest marked Current", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      toolsRevision,
+      versions: [],
+    });
+    market.getPublicMcpToolRevisions.mockResolvedValue({
+      source: "owner",
+      nextBefore: null,
+      items: [
+        revision({
+          revision: 3,
+          current: true,
+          observedAt: "2026-10-24T10:00:00.000Z",
+          added: ["fresh"],
+          removed: ["gone_a", "gone_b"],
+          changed: [{ name: "search", fields: ["description", "inputSchema"] }],
+          serverVersion: "2.1.0",
+        }),
+        revision({ revision: 2, source: "platform-indexed", withdrawn: true }),
+        revision({ revision: 1, added: ["search", "gone_a", "gone_b"] }),
+      ],
+    });
+    const html = await render();
+    expect(market.getPublicMcpToolRevisions).toHaveBeenCalledTimes(1);
+    const log = changeLog(html)!;
+    expect(html.indexOf('id="tools"')).toBeLessThan(
+      html.indexOf('data-testid="mcp-tool-change-log"'),
+    );
+    expect(log).toMatch(/<h3[^>]*>Change log<\/h3>/);
+    const entries = [...log.matchAll(/<li[^>]*data-revision="(\d+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(entries).toEqual(["3", "2", "1"]);
+    const first = entry(log, 3);
+    expect(first).toContain('data-revision-current="true"');
+    expect(first).toContain("Current");
+    expect(first).toContain("Oct 24, 2026");
+    expect(first).toContain("Owner");
+    expect(first).toContain("+1");
+    expect(first).toContain("−2");
+    expect(first).toContain("~1");
+    // Expandable to the names, with what changed in the changed ones.
+    expect(first).toContain("<details");
+    expect(first).toContain(">fresh<");
+    expect(first).toContain(">gone_a<");
+    expect(first).toContain(">search<");
+    expect(first).toContain("description, input schema");
+    expect(first).toContain("The server reported version 2.1.0.");
+    const withdrawn = entry(log, 2);
+    expect(withdrawn).toContain("Platform index");
+    expect(withdrawn).toContain("Withdrawn");
+    expect(withdrawn).not.toContain("<details");
+    expect(entry(log, 1)).toContain('data-revision-current="false"');
+  });
+
+  it("says an empty list lists no tools, instead of +0 −0 ~0", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      toolsRevision,
+      versions: [],
+    });
+    market.getPublicMcpToolRevisions.mockResolvedValue({
+      source: "owner",
+      nextBefore: null,
+      items: [revision({ revision: 2, current: true, toolsCount: 0 })],
+    });
+    const log = changeLog(await render())!;
+    expect(log).toContain("Lists no tools");
+    expect(log).not.toContain("+0");
+    expect(log).not.toContain("<details");
+  });
+
+  it("shows no change log, and asks for none, without a revision history", async () => {
+    const html = await render();
+    expect(changeLog(html)).toBeUndefined();
+    expect(market.getPublicMcpToolRevisions).not.toHaveBeenCalled();
+  });
+
+  it("shows no change log when the history cannot be read", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      toolsRevision,
+      versions: [],
+    });
+    expect(changeLog(await render())).toBeUndefined();
   });
 });

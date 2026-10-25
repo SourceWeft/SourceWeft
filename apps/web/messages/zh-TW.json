@@ -432,6 +432,33 @@
         "unsupportedPackage": "該軟體包類型無法在沙箱中執行"
       }
     },
+    "toolChangeLog": {
+      "heading": "變更記錄",
+      "intro": "每條記錄是此條目工具列表的一次變化，並不是伺服器自身的版本。",
+      "current": "目前",
+      "emptyList": "不含任何工具",
+      "withdrawn": "已撤回",
+      "addedLabel": "新增 {count} 個工具",
+      "removedLabel": "移除 {count} 個工具",
+      "changedLabel": "變更 {count} 個工具",
+      "addedHeading": "新增",
+      "removedHeading": "移除",
+      "changedHeading": "變更",
+      "serverVersion": "伺服器當時報告的版本為 {version}。",
+      "truncated": "顯示最近 {count} 條記錄。",
+      "sources": {
+        "owner": "擁有者",
+        "platform-indexed": "平臺索引",
+        "member-observed": "已連接帳號"
+      },
+      "fields": {
+        "title": "標題",
+        "description": "描述",
+        "inputSchema": "輸入結構",
+        "outputSchema": "輸出結構",
+        "annotations": "註解"
+      }
+    },
     "score": {
       "heading": "評分",
       "nav": "評分",

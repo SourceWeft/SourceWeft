@@ -435,3 +435,67 @@ export const marketMcpOwnerOverrides = pgTable("market_mcp_owner_overrides", {
     .notNull()
     .defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// Tool revisions (Issue #367). Every source of a server's tool list — the
+// owner's submission, the platform's own snapshot, a member's authenticated
+// discovery — records a new revision whenever its canonicalised list differs
+// from the source's previous one. A revision number is the history of THIS
+// listing, not the server's own version (`server_version` is context only).
+// No member or team identifier is stored here. Written only by
+// `modules/market/tool-revisions`.
+// ---------------------------------------------------------------------------
+
+export type McpToolRevisionSource =
+  | "owner"
+  | "platform-indexed"
+  | "member-observed";
+
+export const marketMcpToolRevisions = pgTable(
+  "market_mcp_tool_revisions",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    source: text("source").$type<McpToolRevisionSource>().notNull(),
+    // 1, 2, 3 … per item and source; never reused or skipped.
+    revision: integer("revision").notNull(),
+    // sha256 of the canonical list (or of the withdrawal marker).
+    toolsHash: text("tools_hash").notNull(),
+    // The version of the canonicalisation that produced the hash.
+    canonicalVersion: integer("canonical_version").notNull(),
+    // The source took its list back (an owner cleared it, a block removed it):
+    // not the same as publishing a valid empty list.
+    withdrawn: boolean("withdrawn").notNull().default(false),
+    toolsCount: integer("tools_count").notNull().default(0),
+    // The bounded tool list as recorded. Null once the revision fell out of
+    // the latest fifty, when only `diff_json` is kept.
+    toolsJson: jsonb("tools_json").$type<unknown[]>(),
+    diffJson: jsonb("diff_json").$type<Record<string, unknown>>().notNull(),
+    // What the server called its own version at the time. Context only.
+    serverVersion: text("server_version"),
+    observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" })
+      .notNull(),
+    // Last time the same list was seen again.
+    lastConfirmedAt: timestamp("last_confirmed_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+  },
+  (table) => [
+    check(
+      "market_mcp_tool_revisions_source_check",
+      sql`${table.source} in ('owner', 'platform-indexed', 'member-observed')`,
+    ),
+    check(
+      "market_mcp_tool_revisions_revision_check",
+      sql`${table.revision} >= 1`,
+    ),
+    uniqueIndex("market_mcp_tool_revisions_item_source_revision_uq").on(
+      table.itemId,
+      table.source,
+      table.revision,
+    ),
+  ],
+);
