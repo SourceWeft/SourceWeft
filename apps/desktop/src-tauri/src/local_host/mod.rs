@@ -10,6 +10,7 @@ mod proxy;
 mod sidecar;
 #[cfg(target_os = "linux")]
 mod srt_exec;
+pub mod privileged_setup;
 pub mod readiness;
 pub mod sandbox;
 mod workspace;

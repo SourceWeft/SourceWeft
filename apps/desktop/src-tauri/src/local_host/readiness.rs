@@ -47,8 +47,164 @@ pub enum SandboxReadiness {
         #[serde(skip_serializing_if = "Option::is_none")]
         toolchain_path: Option<ToolchainPath>,
     },
-    NeedsSetup { reason: String },
+    // `rename_all` again for `setup_command`; `code` and `remedy` serialise as camelCase
+    // strings through their own enums. `setup_command` is present only for
+    // `Remedy::PrivilegedSetup` and omitted from the wire otherwise.
+    #[serde(rename_all = "camelCase")]
+    NeedsSetup {
+        code: SetupCode,
+        reason: String,
+        remedy: Remedy,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        setup_command: Option<String>,
+    },
     Unsupported,
+}
+
+/// Why local execution needs setup; the machine-readable half of `NeedsSetup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SetupCode {
+    BundleMissing,
+    BundleStale,
+    BundleNewer,
+    BundleInvalid,
+    BwrapMissing,
+    UserNamespaceRestricted,
+    SandboxFailed,
+    Installing,
+}
+
+/// What the user can do about a `NeedsSetup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Remedy {
+    DownloadRuntime,
+    UpdateApp,
+    ReinstallPackage,
+    PrivilegedSetup,
+    None,
+}
+
+// Constructors are used by the Linux probe, the installer, and the tests; a plain macOS
+// `cargo build` sees no caller for some of them.
+#[allow(dead_code)]
+impl SandboxReadiness {
+    fn needs_setup(code: SetupCode, reason: impl Into<String>, remedy: Remedy) -> Self {
+        Self::NeedsSetup {
+            code,
+            reason: reason.into(),
+            remedy,
+            setup_command: None,
+        }
+    }
+
+    /// The sandbox bundle has not been installed (or is not where the host expects it).
+    pub(crate) fn bundle_missing() -> Self {
+        Self::needs_setup(
+            SetupCode::BundleMissing,
+            "Sandbox runtime is not installed",
+            Remedy::DownloadRuntime,
+        )
+    }
+
+    /// The runtime installer is running right now (set by the installer while it works).
+    pub(crate) fn installing() -> Self {
+        Self::needs_setup(
+            SetupCode::Installing,
+            "Installing the sandbox runtime",
+            Remedy::None,
+        )
+    }
+
+    /// A transient answer while another thread's probe is still running and there is no earlier
+    /// result to return. Reason only: there is nothing for the user to do.
+    fn checking() -> Self {
+        Self::needs_setup(
+            SetupCode::SandboxFailed,
+            "Checking the sandbox runtime",
+            Remedy::None,
+        )
+    }
+
+    /// The scoped bubblewrap at `path` is missing, not executable, or (`code`
+    /// `UserNamespaceRestricted`) refused by the kernel's user-namespace policy: all three are
+    /// fixed by the same one-time privileged setup. `appimage` (the `APPIMAGE` variable is set)
+    /// means there is no package to reinstall, so the user runs the setup script through
+    /// `pkexec` instead.
+    fn bwrap_setup(code: SetupCode, reason: impl Into<String>, appimage: bool) -> Self {
+        if appimage {
+            Self::NeedsSetup {
+                code,
+                reason: reason.into(),
+                remedy: Remedy::PrivilegedSetup,
+                setup_command: Some(super::privileged_setup::privileged_setup_command()),
+            }
+        } else {
+            Self::needs_setup(code, reason, Remedy::ReinstallPackage)
+        }
+    }
+}
+
+/// Whether this process runs from an AppImage (the AppImage runtime sets `APPIMAGE` to the
+/// image path). Read only, never set, and no configuration of ours: it only picks which remedy
+/// text we show.
+#[cfg(unix)]
+fn running_as_appimage() -> bool {
+    std::env::var_os("APPIMAGE").is_some_and(|value| !value.is_empty())
+}
+
+/// Whether `message` is one of the known ways bubblewrap reports that the kernel refused the
+/// unprivileged user/network namespace it needs (AppArmor's
+/// `apparmor_restrict_unprivileged_userns`, or a missing uid-map permission). Anything else,
+/// including a bare "Operation not permitted" that did not come from bwrap, is not a match.
+#[cfg(unix)]
+fn is_user_namespace_denial(message: &str) -> bool {
+    message.contains("RTM_NEWADDR")
+        || message.contains("setting up uid map")
+        || message
+            .lines()
+            .any(|line| line.contains("bwrap:") && line.contains("Operation not permitted"))
+}
+
+/// Maps a failed `Sidecar::start` / `probe` (the host error `code` and `message`) to the
+/// readiness it means. Pure, so the table test needs no Linux.
+///
+/// - `BUNDLE_STALE` (older protocol) -> reinstall the runtime; `BUNDLE_NEWER` -> update the app.
+/// - `HELPER_MISSING` (a file the bundle should contain is gone) -> the bundle is invalid:
+///   reinstall the runtime.
+/// - A known user-namespace denial -> same remedy as a missing bwrap.
+/// - Anything else -> `SandboxFailed` with the message verbatim and no remedy: we do not guess.
+#[cfg(unix)]
+fn classify_probe_failure(code: &str, message: &str, appimage: bool) -> SandboxReadiness {
+    match code {
+        "BUNDLE_STALE" => SandboxReadiness::needs_setup(
+            SetupCode::BundleStale,
+            message,
+            Remedy::DownloadRuntime,
+        ),
+        "BUNDLE_NEWER" => {
+            SandboxReadiness::needs_setup(SetupCode::BundleNewer, message, Remedy::UpdateApp)
+        }
+        "HELPER_MISSING" => SandboxReadiness::needs_setup(
+            SetupCode::BundleInvalid,
+            message,
+            Remedy::DownloadRuntime,
+        ),
+        _ if is_user_namespace_denial(message) => {
+            SandboxReadiness::bwrap_setup(SetupCode::UserNamespaceRestricted, message, appimage)
+        }
+        _ => SandboxReadiness::needs_setup(SetupCode::SandboxFailed, message, Remedy::None),
+    }
+}
+
+/// Whether `path` is a regular file (following symlinks) with at least one execute bit.
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 /// Which `PATH` a sandboxed command's toolchain lookups end up resolving against.
@@ -181,17 +337,34 @@ fn extract_path(output: &str) -> Option<&str> {
 /// this function itself is uncached, so a test can call it as many times as it likes.
 #[cfg(unix)]
 pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
+    probe_bundle_with(bundle, init, running_as_appimage())
+}
+
+/// `probe_bundle` with the AppImage decision as a parameter, so tests do not depend on (or
+/// mutate) this process's environment.
+///
+/// Deterministic pre-checks run before any process is started: a missing bundle, then (when the
+/// init names one) a missing or non-executable bubblewrap. Only then is the sidecar started.
+#[cfg(unix)]
+fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> SandboxReadiness {
     if !bundle.join("srt-sidecar").is_file() {
-        return SandboxReadiness::NeedsSetup {
-            reason: "Sandbox runtime is not installed".to_string(),
-        };
+        return SandboxReadiness::bundle_missing();
+    }
+    if let Some(bwrap) = init.bwrap_path.as_deref() {
+        if !is_executable_file(Path::new(bwrap)) {
+            return SandboxReadiness::bwrap_setup(
+                SetupCode::BwrapMissing,
+                format!("The sandbox helper bubblewrap is missing or not executable at {bwrap}"),
+                appimage,
+            );
+        }
     }
     let sidecar = match Sidecar::start(bundle, init) {
         Ok(sidecar) => sidecar,
-        Err(error) => return SandboxReadiness::NeedsSetup { reason: error.message },
+        Err(error) => return classify_probe_failure(error.code, &error.message, appimage),
     };
     if let Err(error) = sidecar.probe() {
-        return SandboxReadiness::NeedsSetup { reason: error.message };
+        return classify_probe_failure(error.code, &error.message, appimage);
     }
     SandboxReadiness::Ready {
         toolchain_path: Some(user_path().1),
@@ -208,7 +381,8 @@ pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
 /// `NeedsSetup`/`Unsupported` is rechecked once `recheck_interval` has elapsed, since whatever
 /// was wrong might have been fixed since. While a probe is already running on some thread, a
 /// concurrent call never blocks on it: it returns the last known value, or a transient
-/// `NeedsSetup { reason: "Checking the sandbox runtime" }` if there isn't one yet.
+/// `SandboxReadiness::checking()` (`NeedsSetup`, reason "Checking the sandbox runtime", no
+/// remedy) if there isn't one yet.
 // `get_or_probe`/`invalidate` are only reached from `sandbox_readiness`'s Linux branch in a
 // production (non-test) build, so a plain `cargo build` on macOS/Windows sees no caller and
 // would otherwise warn this whole type as dead code; the unit tests below exercise the cache
@@ -248,9 +422,7 @@ impl ReadinessCache {
                     .last
                     .as_ref()
                     .map(|(value, _)| value.clone())
-                    .unwrap_or_else(|| SandboxReadiness::NeedsSetup {
-                        reason: "Checking the sandbox runtime".to_string(),
-                    });
+                    .unwrap_or_else(SandboxReadiness::checking);
             }
             state.probing = true;
         }
@@ -329,6 +501,10 @@ impl LocalHost {
 mod tests {
     use super::*;
 
+    fn needs_setup_for_test(reason: &str) -> SandboxReadiness {
+        SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
+    }
+
     #[cfg(unix)]
     const STUB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stub-sidecar.sh");
     #[cfg(unix)]
@@ -394,11 +570,15 @@ mod tests {
     fn missing_bundle_is_needs_setup() {
         let bundle = tempfile::tempdir().unwrap();
         let readiness = probe_bundle(bundle.path(), &test_init());
+        assert_eq!(readiness, SandboxReadiness::bundle_missing());
         assert_eq!(
-            readiness,
-            SandboxReadiness::NeedsSetup {
-                reason: "Sandbox runtime is not installed".to_string()
-            }
+            serde_json::to_value(&readiness).unwrap(),
+            serde_json::json!({
+                "state": "needsSetup",
+                "code": "bundleMissing",
+                "reason": "Sandbox runtime is not installed",
+                "remedy": "downloadRuntime",
+            })
         );
     }
 
@@ -425,9 +605,11 @@ mod tests {
         let readiness = probe_bundle(bundle.path(), &test_init());
         assert_eq!(
             readiness,
-            SandboxReadiness::NeedsSetup {
-                reason: "stub probe failure for readiness test".to_string()
-            }
+            SandboxReadiness::needs_setup(
+                SetupCode::SandboxFailed,
+                "stub probe failure for readiness test",
+                Remedy::None
+            )
         );
     }
 
@@ -435,17 +617,23 @@ mod tests {
     #[cfg(unix)]
     fn stale_or_newer_bundles_need_setup_with_the_exact_reason() {
         let bundle = bundle_with_stub();
-        for (mode, expected) in [
+        for (mode, code, remedy, expected) in [
             (
                 "protocol-null",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
                 "The sandbox runtime is out of date (protocol none, this app needs 1). Install the update.",
             ),
             (
                 "protocol-0",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
                 "The sandbox runtime is out of date (protocol 0, this app needs 1). Install the update.",
             ),
             (
                 "protocol-2",
+                SetupCode::BundleNewer,
+                Remedy::UpdateApp,
                 "The sandbox runtime (protocol 2) is newer than this app supports (1). Update SourceWeft.",
             ),
         ] {
@@ -453,9 +641,7 @@ mod tests {
             init.home = format!("/tmp/sourceweft-readiness-test-home/{mode}");
             assert_eq!(
                 probe_bundle(bundle.path(), &init),
-                SandboxReadiness::NeedsSetup {
-                    reason: expected.to_string()
-                },
+                SandboxReadiness::needs_setup(code, expected, remedy),
                 "{mode}"
             );
         }
@@ -524,9 +710,7 @@ mod tests {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let probe = || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            SandboxReadiness::NeedsSetup {
-                reason: "not yet".to_string(),
-            }
+            needs_setup_for_test("not yet")
         };
         ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), probe);
         ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), probe);
@@ -539,9 +723,7 @@ mod tests {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let probe = || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            SandboxReadiness::NeedsSetup {
-                reason: "not yet".to_string(),
-            }
+            needs_setup_for_test("not yet")
         };
         ReadinessCache::get_or_probe(&cache, Duration::from_millis(20), probe);
         std::thread::sleep(Duration::from_millis(40));
@@ -553,9 +735,7 @@ mod tests {
     fn a_probe_already_in_flight_returns_the_last_known_value_without_blocking() {
         let cache = Mutex::new(ReadinessCache {
             last: Some((
-                SandboxReadiness::NeedsSetup {
-                    reason: "stale".to_string(),
-                },
+                needs_setup_for_test("stale"),
                 Instant::now(),
             )),
             probing: true,
@@ -563,12 +743,7 @@ mod tests {
         let result = ReadinessCache::get_or_probe(&cache, Duration::from_secs(0), || {
             panic!("must not call probe while one is already in flight")
         });
-        assert_eq!(
-            result,
-            SandboxReadiness::NeedsSetup {
-                reason: "stale".to_string()
-            }
-        );
+        assert_eq!(result, needs_setup_for_test("stale"));
     }
 
     #[test]
@@ -580,12 +755,12 @@ mod tests {
         let result = ReadinessCache::get_or_probe(&cache, Duration::from_secs(0), || {
             panic!("must not call probe while one is already in flight")
         });
-        assert_eq!(
+        assert_eq!(result, SandboxReadiness::checking());
+        assert!(matches!(
             result,
-            SandboxReadiness::NeedsSetup {
-                reason: "Checking the sandbox runtime".to_string()
-            }
-        );
+            SandboxReadiness::NeedsSetup { ref reason, remedy: Remedy::None, .. }
+                if reason == "Checking the sandbox runtime"
+        ));
     }
 
     #[test]
@@ -619,6 +794,213 @@ mod tests {
             },
             "expected Ready without a bundle on macOS"
         );
+    }
+
+    #[test]
+    fn needs_setup_wire_shape() {
+        use serde_json::json;
+        assert_eq!(
+            serde_json::to_value(SandboxReadiness::installing()).unwrap(),
+            json!({
+                "state": "needsSetup",
+                "code": "installing",
+                "reason": "Installing the sandbox runtime",
+                "remedy": "none",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(SandboxReadiness::NeedsSetup {
+                code: SetupCode::BwrapMissing,
+                reason: "missing".to_string(),
+                remedy: Remedy::PrivilegedSetup,
+                setup_command: Some("pkexec true".to_string()),
+            })
+            .unwrap(),
+            json!({
+                "state": "needsSetup",
+                "code": "bwrapMissing",
+                "reason": "missing",
+                "remedy": "privilegedSetup",
+                "setupCommand": "pkexec true",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(SandboxReadiness::Unsupported).unwrap(),
+            json!({"state": "unsupported"})
+        );
+    }
+
+    #[test]
+    fn every_code_and_remedy_serialises_camel_case() {
+        let codes = [
+            (SetupCode::BundleMissing, "bundleMissing"),
+            (SetupCode::BundleStale, "bundleStale"),
+            (SetupCode::BundleNewer, "bundleNewer"),
+            (SetupCode::BundleInvalid, "bundleInvalid"),
+            (SetupCode::BwrapMissing, "bwrapMissing"),
+            (SetupCode::UserNamespaceRestricted, "userNamespaceRestricted"),
+            (SetupCode::SandboxFailed, "sandboxFailed"),
+            (SetupCode::Installing, "installing"),
+        ];
+        for (code, wire) in codes {
+            assert_eq!(serde_json::to_value(code).unwrap(), wire);
+        }
+        let remedies = [
+            (Remedy::DownloadRuntime, "downloadRuntime"),
+            (Remedy::UpdateApp, "updateApp"),
+            (Remedy::ReinstallPackage, "reinstallPackage"),
+            (Remedy::PrivilegedSetup, "privilegedSetup"),
+            (Remedy::None, "none"),
+        ];
+        for (remedy, wire) in remedies {
+            assert_eq!(serde_json::to_value(remedy).unwrap(), wire);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_failures_are_classified() {
+        let command = crate::local_host::privileged_setup::privileged_setup_command();
+        let setup = |code: SetupCode, reason: &str, appimage: bool| {
+            if appimage {
+                SandboxReadiness::NeedsSetup {
+                    code,
+                    reason: reason.to_string(),
+                    remedy: Remedy::PrivilegedSetup,
+                    setup_command: Some(command.clone()),
+                }
+            } else {
+                SandboxReadiness::needs_setup(code, reason, Remedy::ReinstallPackage)
+            }
+        };
+        let userns = "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted";
+        let uid_map = "bwrap: setting up uid map: Permission denied";
+        let namespace = "bwrap: Creating new namespace failed: Operation not permitted";
+        let multi_line = "srt: wrap failed\nbwrap: Creating new namespace failed: Operation not permitted\n";
+        for appimage in [false, true] {
+            // Bundle problems never depend on how the app was installed.
+            assert_eq!(
+                classify_probe_failure("BUNDLE_STALE", "old", appimage),
+                SandboxReadiness::needs_setup(SetupCode::BundleStale, "old", Remedy::DownloadRuntime)
+            );
+            assert_eq!(
+                classify_probe_failure("BUNDLE_NEWER", "new", appimage),
+                SandboxReadiness::needs_setup(SetupCode::BundleNewer, "new", Remedy::UpdateApp)
+            );
+            assert_eq!(
+                classify_probe_failure("HELPER_MISSING", "sandbox helper not found at /b/rg", appimage),
+                SandboxReadiness::needs_setup(
+                    SetupCode::BundleInvalid,
+                    "sandbox helper not found at /b/rg",
+                    Remedy::DownloadRuntime
+                )
+            );
+            // The known user-namespace denials, whatever code carried them.
+            for message in [userns, uid_map, namespace, multi_line] {
+                for code in ["SANDBOX_UNAVAILABLE", "POLICY_INVALID"] {
+                    assert_eq!(
+                        classify_probe_failure(code, message, appimage),
+                        setup(SetupCode::UserNamespaceRestricted, message, appimage),
+                        "{code}: {message}"
+                    );
+                }
+            }
+            // Everything else is reported verbatim with no remedy.
+            for message in [
+                "bwrap: Can't find source path /nope: No such file or directory",
+                "cp: cannot create regular file: Operation not permitted",
+                "sandbox probe exited with code 1",
+                "Operation not permitted",
+                "",
+            ] {
+                assert_eq!(
+                    classify_probe_failure("SANDBOX_UNAVAILABLE", message, appimage),
+                    SandboxReadiness::needs_setup(SetupCode::SandboxFailed, message, Remedy::None),
+                    "{message}"
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    mod bwrap_precheck {
+        use super::*;
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        fn init_with_bwrap(path: &Path) -> InitConfig {
+            let mut init = test_init();
+            init.bwrap_path = Some(path.to_string_lossy().into_owned());
+            init
+        }
+
+        fn write_mode(path: &Path, mode: u32) {
+            fs::write(path, "#!/bin/sh\nexit 0\n").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+
+        #[test]
+        fn a_missing_or_non_executable_bwrap_needs_privileged_setup_or_a_reinstall() {
+            let bundle = bundle_with_stub();
+            let dir = tempfile::tempdir().unwrap();
+            let not_executable = dir.path().join("bwrap-noexec");
+            write_mode(&not_executable, 0o644);
+            let directory = dir.path().join("bwrap-dir");
+            fs::create_dir(&directory).unwrap();
+            let missing = dir.path().join("bwrap-missing");
+
+            for path in [missing, not_executable, directory] {
+                let init = init_with_bwrap(&path);
+                let reason = format!(
+                    "The sandbox helper bubblewrap is missing or not executable at {}",
+                    path.display()
+                );
+                assert_eq!(
+                    probe_bundle_with(bundle.path(), &init, false),
+                    SandboxReadiness::needs_setup(
+                        SetupCode::BwrapMissing,
+                        reason.clone(),
+                        Remedy::ReinstallPackage
+                    ),
+                    "{path:?}"
+                );
+                assert_eq!(
+                    probe_bundle_with(bundle.path(), &init, true),
+                    SandboxReadiness::NeedsSetup {
+                        code: SetupCode::BwrapMissing,
+                        reason,
+                        remedy: Remedy::PrivilegedSetup,
+                        setup_command: Some(
+                            crate::local_host::privileged_setup::privileged_setup_command()
+                        ),
+                    },
+                    "{path:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn an_executable_bwrap_lets_the_probe_proceed() {
+            let bundle = bundle_with_stub();
+            let dir = tempfile::tempdir().unwrap();
+            let bwrap = dir.path().join("bwrap");
+            write_mode(&bwrap, 0o755);
+            let readiness =
+                probe_bundle_with(bundle.path(), &init_with_bwrap(&bwrap), false);
+            assert!(
+                matches!(readiness, SandboxReadiness::Ready { .. }),
+                "expected Ready, got {readiness:?}"
+            );
+        }
+
+        #[test]
+        fn a_missing_bundle_is_reported_before_a_missing_bwrap() {
+            let bundle = tempfile::tempdir().unwrap();
+            let init = init_with_bwrap(Path::new("/nonexistent/bwrap"));
+            assert_eq!(
+                probe_bundle_with(bundle.path(), &init, true),
+                SandboxReadiness::bundle_missing()
+            );
+        }
     }
 
     #[test]
