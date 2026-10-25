@@ -496,6 +496,90 @@ export const marketMcpScoreSchema = z.object({
   items: z.array(marketMcpScoreItemSchema),
 });
 
+// ---------------------------------------------------------------------------
+// Tool revisions (Issue #367). A listing's tool list has a history per source:
+// a new revision whenever the canonicalised list differs from that source's
+// previous one. The number is the history of THIS listing, not the server's
+// own version. No member or team identifier is ever part of it.
+// ---------------------------------------------------------------------------
+
+export const marketMcpToolRevisionSourceSchema = z.enum([
+  "owner",
+  "platform-indexed",
+  "member-observed",
+]);
+export type MarketMcpToolRevisionSource = z.infer<
+  typeof marketMcpToolRevisionSourceSchema
+>;
+
+export const MARKET_MCP_TOOL_REVISIONS_MAX_LIMIT = 50;
+export const MARKET_MCP_TOOL_REVISIONS_DEFAULT_LIMIT = 20;
+
+export const marketMcpToolFieldSchema = z.enum([
+  "title",
+  "description",
+  "inputSchema",
+  "outputSchema",
+  "annotations",
+]);
+
+// On the detail answer: the current revision of the source whose tools the
+// page shows. Null when that list has no revision history.
+export const marketMcpToolsRevisionSchema = z.object({
+  source: marketMcpToolRevisionSourceSchema,
+  revision: z.number().int().min(1),
+  observedAt: z.string(),
+  lastConfirmedAt: z.string(),
+});
+
+export const marketMcpToolRevisionSchema = z.object({
+  source: marketMcpToolRevisionSourceSchema,
+  revision: z.number().int().min(1),
+  // The newest revision of its source, and not a withdrawal.
+  current: z.boolean(),
+  // The source took its list back; not the same as a valid empty list.
+  withdrawn: z.boolean(),
+  toolsCount: z.number().int().min(0),
+  // What the server called its own version then. Context only.
+  serverVersion: z.string().nullable(),
+  observedAt: z.string(),
+  lastConfirmedAt: z.string(),
+  added: z.array(z.string()),
+  removed: z.array(z.string()),
+  changed: z.array(
+    z.object({ name: z.string(), fields: z.array(marketMcpToolFieldSchema) }),
+  ),
+});
+export type MarketMcpToolRevision = z.infer<typeof marketMcpToolRevisionSchema>;
+export type MarketMcpToolsRevision = z.infer<typeof marketMcpToolsRevisionSchema>;
+
+// GET /v1/mcp/:identifier/tools/revisions — newest first, for the one source
+// whose tools the page shows (the answer's `source`; there is no way to ask for
+// another). `before` is the revision number to continue after (the previous
+// answer's `nextBefore`).
+export const listMarketMcpToolRevisionsRequestSchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MARKET_MCP_TOOL_REVISIONS_MAX_LIMIT)
+    .default(MARKET_MCP_TOOL_REVISIONS_DEFAULT_LIMIT),
+  // A revision number is a Postgres `integer`.
+  before: z.coerce.number().int().min(1).max(2_147_483_647).optional(),
+});
+export type ListMarketMcpToolRevisionsRequest = z.infer<
+  typeof listMarketMcpToolRevisionsRequestSchema
+>;
+
+export const listMarketMcpToolRevisionsResponseSchema = z.object({
+  source: marketMcpToolRevisionSourceSchema.nullable(),
+  items: z.array(marketMcpToolRevisionSchema),
+  nextBefore: z.number().int().min(1).nullable(),
+});
+export type ListMarketMcpToolRevisionsResponse = z.infer<
+  typeof listMarketMcpToolRevisionsResponseSchema
+>;
+
 export const getMarketMcpResponseSchema = z.object({
   item: marketItemSummarySchema,
   versions: z.array(marketItemVersionSchema),
@@ -517,6 +601,9 @@ export const getMarketMcpResponseSchema = z.object({
   // when the server has no published version to score. Optional for answers
   // from before it existed.
   score: marketMcpScoreSchema.nullable().optional(),
+  // The current revision of the source whose tool list is shown; null when
+  // that list has no history. Optional for answers from before it existed.
+  toolsRevision: marketMcpToolsRevisionSchema.nullable().optional(),
 });
 
 export const getMarketMcpManifestResponseSchema = z.object({
@@ -923,10 +1010,39 @@ export const MARKET_MCP_INSPECT_LIMITS = Object.freeze({
   serverInfoBytes: 4 * 1024,
 });
 
+/**
+ * How deep a tool's schemas and annotations may nest. Real JSON Schemas stay
+ * far below this; a value that fits the byte limit only as thousands of nested
+ * arrays would overflow the stack of any recursive walk over it.
+ */
+export const MARKET_MCP_TOOL_MAX_NESTING = 64;
+
+/**
+ * Does any value nest deeper than `limit`? Walks with an explicit stack, so
+ * the check cannot overflow on the input it rejects.
+ */
+export function marketMcpNestsDeeperThan(root: unknown, limit: number): boolean {
+  const stack: Array<[unknown, number]> = [[root, 0]];
+  while (stack.length > 0) {
+    const [value, depth] = stack.pop()!;
+    if (!value || typeof value !== "object") continue;
+    if (depth >= limit) return true;
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      stack.push([child, depth + 1]);
+    }
+  }
+  return false;
+}
+
 // UTF-8 size of a value's JSON; this package runs in browsers too, so no
 // Node `Buffer`.
 function jsonBytes(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
+  try {
+    return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
+  } catch {
+    // Nested too deeply to serialise: over any limit, not a server error.
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 export const marketMcpInspectedToolSchema = z
@@ -941,6 +1057,16 @@ export const marketMcpInspectedToolSchema = z
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     annotations: z.record(z.string(), z.unknown()).default({}),
   })
+  .refine(
+    (tool) =>
+      !marketMcpNestsDeeperThan(
+        [tool.inputSchema, tool.outputSchema, tool.annotations],
+        MARKET_MCP_TOOL_MAX_NESTING,
+      ),
+    {
+      message: `A tool's schemas and annotations may nest at most ${MARKET_MCP_TOOL_MAX_NESTING} levels deep`,
+    },
+  )
   .refine(
     (tool) =>
       jsonBytes(tool.inputSchema) +

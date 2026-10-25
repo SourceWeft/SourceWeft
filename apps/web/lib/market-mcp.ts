@@ -16,6 +16,8 @@ import {
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
   type ListMarketMcpResponse,
+  type ListMarketMcpToolRevisionsResponse,
+  type MarketMcpToolsRevision,
 } from "@sourceweft/market-sdk";
 
 import type { Locale } from "@sourceweft/i18n/locales";
@@ -131,6 +133,10 @@ export type PublicMcpDetail = {
   // The latest version's quality scorecard (Issue #367, W6); null when the
   // market has none or cannot be read, and the page shows no Score section.
   score: MarketMcpScore | null;
+  // The current revision of the source whose tool list the page shows (Issue
+  // #367, tool revisions); null when that list has no history or the market
+  // cannot be read, and the page shows no change log.
+  toolsRevision: MarketMcpToolsRevision | null;
 };
 
 // A hidden or regenerated overview shows within about two minutes: this
@@ -151,6 +157,7 @@ const cachedMcpDetail = unstable_cache(
       relatedProduct: detail.relatedProduct ?? null,
       score: detail.score ?? null,
       searchIndexable: detail.searchIndexable ?? true,
+      toolsRevision: detail.toolsRevision ?? null,
       versions: detail.versions,
     };
   },
@@ -177,8 +184,30 @@ export async function getPublicMcpDetail(
       relatedProduct: null,
       score: null,
       searchIndexable: true,
+      toolsRevision: null,
       versions: [],
     };
+  }
+}
+
+const cachedMcpToolRevisions = unstable_cache(
+  async (identifier: string) => marketClient().listMcpToolRevisions(identifier),
+  ["public-mcp-tool-revisions"],
+  { revalidate: MCP_DETAIL_REVALIDATE_SECONDS },
+);
+
+/**
+ * The newest page of the change log of the tool list the page shows
+ * (`GET /v1/mcp/:identifier/tools/revisions`); null when it cannot be read —
+ * the page then goes without the change log.
+ */
+export async function getPublicMcpToolRevisions(
+  identifier: string,
+): Promise<ListMarketMcpToolRevisionsResponse | null> {
+  try {
+    return await cachedMcpToolRevisions(identifier);
+  } catch {
+    return null;
   }
 }
 

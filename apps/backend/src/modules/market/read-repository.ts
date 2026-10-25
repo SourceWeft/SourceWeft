@@ -3,6 +3,8 @@ import {
   marketMcpToolsValidationSchema,
   mcpTransportSchema,
   type MarketItemSummary,
+  type ListMarketMcpToolRevisionsRequest,
+  type ListMarketMcpToolRevisionsResponse,
   type MarketItemVersion,
   type MarketMcpAiOverview,
   type MarketMcpIconSource,
@@ -10,6 +12,7 @@ import {
   type MarketMcpProductGroup,
   type MarketMcpReadme,
   type MarketMcpScore,
+  type MarketMcpToolsRevision,
   type MarketMcpToolsValidation,
   type McpRuntime,
   type McpTransport,
@@ -32,8 +35,10 @@ import {
 import {
   applyOwnerOverridesToItem,
   applyOwnerOverridesToManifest,
+  ownerSubmittedTools,
 } from "./claims/overrides";
 import { findOwnerLayersByServerIds } from "./claims/repository";
+import { readToolRevisionsPage, readToolsRevision } from "./tool-revisions";
 import {
   findBrandPublisherDomains,
   findProductGroupMembers,
@@ -63,6 +68,11 @@ type MarketMcpRecord = {
   relatedProduct: MarketMcpProductGroup | null;
   /** The latest version's quality scorecard; null without a version to score. */
   score: MarketMcpScore | null;
+  /**
+   * The current revision of the source whose tool list is shown (Issue #367,
+   * tool revisions); null when that list has no history. Detail only.
+   */
+  toolsRevision: MarketMcpToolsRevision | null;
 };
 
 /**
@@ -831,7 +841,12 @@ async function relatedProductOf(
  */
 export async function findMcp(
   identifier: string,
-  options: { locale?: MarketMcpLocale; relatedProduct?: boolean } = {},
+  options: {
+    locale?: MarketMcpLocale;
+    relatedProduct?: boolean;
+    /** Read the tools revision too (detail only; one more query). */
+    toolsRevision?: boolean;
+  } = {},
 ): Promise<MarketMcpRecord | null> {
   // Preserve database errors: returning null here would turn an outage into 404.
   const [row] = await db
@@ -863,6 +878,12 @@ export async function findMcp(
       findOwnerLayersByServerIds([row.id]),
     ]);
     const ownerLayer = ownerLayers.get(row.id) ?? { row: null, claimed: false };
+    const toolsRevision = options.toolsRevision
+      ? await readToolsRevision(
+          row.id,
+          ownerSubmittedTools(ownerLayer.row?.toolsJson).length > 0,
+        )
+      : null;
     const latest = versions[0];
     const locale = options.locale ?? "en";
     const [[readme, overviews, overviewLocales, readmeShared], relatedProduct] =
@@ -946,9 +967,37 @@ export async function findMcp(
             publisher: item.publisher,
           })
         : null,
+      toolsRevision,
     };
   }
   return null;
+}
+
+/**
+ * One page of a public listing's tool-revision history, newest first; null
+ * when there is no such listing. The source defaults to the one whose tools the
+ * page shows.
+ */
+export async function listMcpToolRevisions(
+  identifier: string,
+  query: ListMarketMcpToolRevisionsRequest,
+): Promise<ListMarketMcpToolRevisionsResponse | null> {
+  const [row] = await db
+    .select({ id: mcpServers.id })
+    .from(mcpServers)
+    .where(
+      and(eq(mcpServers.identifier, identifier), publicMarketMcpCondition()),
+    )
+    .limit(1);
+  if (!row) return null;
+  const ownerLayers = await findOwnerLayersByServerIds([row.id]);
+  return readToolRevisionsPage({
+    itemId: row.id,
+    ownerToolsVisible:
+      ownerSubmittedTools(ownerLayers.get(row.id)?.row?.toolsJson).length > 0,
+    limit: query.limit,
+    before: query.before,
+  });
 }
 
 export async function findMcpVersion(identifier: string, version?: string) {
