@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { setDefaultFileViewerAssetBaseUrl } from "@file-viewer/core";
+import { FILE_VIEWER_ASSET_BASE_URL } from "./asset-base.mjs";
 import type {
   FileViewerRendererPlugin,
   FileRenderHandler,
@@ -160,7 +161,7 @@ function EnginePreview({
 }
 
 export async function createPreviewView(name: string) {
-  setDefaultFileViewerAssetBaseUrl("/file-viewer/");
+  setDefaultFileViewerAssetBaseUrl(FILE_VIEWER_ASSET_BASE_URL);
   const family = previewFamily(name);
   const options = {
     rendererMode: "replace" as const,
@@ -211,10 +212,10 @@ export async function createPreviewView(name: string) {
     ...(family === "legacyPresentation"
       ? {
           presentation: {
-            pptModuleUrl: "/file-viewer/vendor/ppt/index.mjs",
-            pptWorkerUrl: "/file-viewer/vendor/ppt/worker.mjs",
-            pptWasmUrl: "/file-viewer/vendor/ppt/ppt-native.wasm",
-            pptFontUrl: "/file-viewer/vendor/ppt/ppt-font-cjk.otf",
+            pptModuleUrl: `${FILE_VIEWER_ASSET_BASE_URL}vendor/ppt/index.mjs`,
+            pptWorkerUrl: `${FILE_VIEWER_ASSET_BASE_URL}vendor/ppt/worker.mjs`,
+            pptWasmUrl: `${FILE_VIEWER_ASSET_BASE_URL}vendor/ppt/ppt-native.wasm`,
+            pptFontUrl: `${FILE_VIEWER_ASSET_BASE_URL}vendor/ppt/ppt-font-cjk.otf`,
             pptWorker: true,
             // Private file previews should not persist rendered pages in IndexedDB.
             pptCache: false,

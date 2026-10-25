@@ -30,5 +30,5 @@ export default [
     },
   },
   // Vendor assets copied by @sourceweft/preview, not application source.
-  globalIgnores(["public/file-viewer/vendor/**"]),
+  globalIgnores(["public/file-viewer/**"]),
 ];

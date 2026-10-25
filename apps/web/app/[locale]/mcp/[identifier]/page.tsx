@@ -294,13 +294,49 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const overviewLocale = mcpOverviewLocale(locale);
   const [
     authState,
-    result,
-    { aiOverview, readme, relatedProduct, score, toolsRevision, versions },
+    {
+      result,
+      detail: { aiOverview, readme, score, toolsRevision, versions },
+      productGroup,
+      showIntegrations,
+      relatedMarket,
+    },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadMcp(decodedIdentifier),
-    getPublicMcpDetail(decodedIdentifier, overviewLocale),
+    // The related read needs the manifest's categories and the detail's
+    // product group, so it starts as soon as those two cached reads resolve,
+    // alongside auth and categories instead of after them (#389). A manifest
+    // failure (notFound / market outage) rejects this branch before any
+    // related read starts, with the same semantics as before.
+    Promise.all([
+      loadMcp(decodedIdentifier),
+      getPublicMcpDetail(decodedIdentifier, overviewLocale),
+    ]).then(async ([loaded, detail]) => {
+      const group = productGroupView(
+        detail.relatedProduct,
+        loaded.item.identifier,
+      );
+      // "More servers like X" only where "Other X integrations" is not shown,
+      // and then only for servers that share meaningful words, not just a
+      // category.
+      const integrations = Boolean(group && group.others.length > 0);
+      return {
+        result: loaded,
+        detail,
+        productGroup: group,
+        showIntegrations: integrations,
+        relatedMarket:
+          !integrations && loaded.item.categories.length > 0
+            ? await listPublicMcp({
+                category: loaded.item.categories.join(","),
+                includeDesktopOnly: true,
+                limit: 12,
+                locale: overviewLocale,
+              })
+            : { items: [] },
+      };
+    }),
     listPublicMcpCategories(locale),
   ]);
   const { item, manifest, version } = result;
@@ -327,21 +363,6 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       (tool) => tool.source === MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED,
     );
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
-  const productGroup = productGroupView(relatedProduct, item.identifier);
-  // "More servers like X" only where "Other X integrations" is not shown, and
-  // then only for servers that share meaningful words, not just a category.
-  const showIntegrations = Boolean(
-    productGroup && productGroup.others.length > 0,
-  );
-  const relatedMarket =
-    !showIntegrations && item.categories.length > 0
-      ? await listPublicMcp({
-          category: item.categories.join(","),
-          includeDesktopOnly: true,
-          limit: 12,
-          locale: overviewLocale,
-        })
-      : { items: [] };
   const relatedItems = relatedMcpItems({
     candidates: relatedMarket.items,
     current: item,

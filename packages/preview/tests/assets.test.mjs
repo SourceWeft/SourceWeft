@@ -6,6 +6,10 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import {
+  FILE_VIEWER_ASSET_BASE_URL,
+  FILE_VIEWER_ASSET_VERSION,
+} from "../src/asset-base.mjs";
 
 const require = createRequire(import.meta.url);
 const packageRoot = dirname(
@@ -14,17 +18,22 @@ const packageRoot = dirname(
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 it("ships every declared PPT asset and preserves the original licensed runtime byte for byte", async () => {
-  const target = await mkdtemp(join(tmpdir(), "sourceweft-preview-assets-"));
+  const root = await mkdtemp(join(tmpdir(), "sourceweft-preview-assets-"));
+  const target = join(root, FILE_VIEWER_ASSET_VERSION);
   try {
     const copy = spawnSync(
       process.execPath,
       [
         fileURLToPath(new URL("../scripts/copy-assets.mjs", import.meta.url)),
-        target,
+        root,
       ],
       { encoding: "utf8" },
     );
     expect(copy.status, copy.stderr).toBe(0);
+    expect(FILE_VIEWER_ASSET_BASE_URL).toBe(
+      `/file-viewer/${FILE_VIEWER_ASSET_VERSION}/`,
+    );
+    expect(await readdir(root)).toEqual([FILE_VIEWER_ASSET_VERSION]);
     const manifest = JSON.parse(
       await readFile(
         join(packageRoot, "viewer/file-viewer-asset-pack.json"),
@@ -52,6 +61,6 @@ it("ships every declared PPT asset and preserves the original licensed runtime b
       "NOT OPEN SOURCE",
     );
   } finally {
-    await rm(target, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
