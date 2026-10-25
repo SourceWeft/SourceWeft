@@ -800,13 +800,19 @@ test("ask mode: an ask without a suggestion has no suggestedBy; a deny reply car
   const pending = srt.ask({ host: "other.example", port: 443 });
   const event = await harness.nextAsk();
   assert.ok(!("suggestedBy" in event));
-  await harness.send({ op: "ask.reply", askId: event.askId, allow: false, reason: "not now" });
-  assert.deepEqual(await pending, { allow: false, reason: "not now" });
+  await harness.send({ op: "ask.reply", askId: event.askId, allow: false, reason: "denied by user" });
+  assert.deepEqual(await pending, { allow: false, reason: "denied by user" });
+  // Any other reason is the system's, not the user's.
+  const second = srt.ask({ host: "third.example", port: 443 });
+  const secondEvent = await harness.nextAsk();
+  await harness.send({ op: "ask.reply", askId: secondEvent.askId, allow: false, reason: "device is offline" });
+  assert.deepEqual(await second, { allow: false, reason: "device is offline" });
   assert.deepEqual(
     (await auditOf(harness)).map((e) => [e.host, e.decision, e.source, e.reason]),
     [
       ["allowed.example", "allow", "rule", undefined],
-      ["other.example", "deny", "user", "not now"],
+      ["other.example", "deny", "user", "denied by user"],
+      ["third.example", "deny", "unavailable", "device is offline"],
     ],
   );
   await harness.stop();

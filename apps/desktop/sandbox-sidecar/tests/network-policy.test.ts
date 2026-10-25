@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { matchesDomainPatternWithPort } from "@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
 import { canonicalizeHost } from "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js";
 import { deniedReason } from "../src/address-guard.js";
-import { createNetworkPolicy } from "../src/network-policy.js";
+import { createNetworkPolicy, USER_DENIAL_REASONS } from "../src/network-policy.js";
 import type { AskHostRequest, AskHostAnswer } from "../src/network-policy.js";
 import type { NetworkMode, WrapNetwork } from "../src/protocol.js";
 
@@ -224,10 +224,10 @@ test("ask: concurrent connections to one host:port share a single ask", async ()
   );
   assert.equal(h.asks[1]?.suggestedBy, "py-skill");
   h.answer({ allow: true });
-  h.answer({ allow: false, reason: "no thanks" });
+  h.answer({ allow: false, reason: "denied by user" });
   assert.equal(await first, true);
   assert.equal(await second, true);
-  assert.deepEqual(await other, DENY("no thanks"));
+  assert.deepEqual(await other, DENY("denied by user"));
   const entries = h.policy.drainAudit("c1");
   assert.deepEqual(
     entries.map((e) => [e.port, e.decision, e.source]),
@@ -249,10 +249,10 @@ test("ask: an approval and a user denial are both cached for the command", async
   assert.equal(h.asks.length, 1);
 
   const denied = h.policy.decide({ host: "other.example", port: 443 });
-  h.answer({ allow: false });
-  assert.deepEqual(await denied, DENY("denied by the user"));
+  h.answer({ allow: false, reason: "denied by user" });
+  assert.deepEqual(await denied, DENY("denied by user"));
   // A retry (any spelling of the same host:port) is denied without prompting again...
-  assert.deepEqual(await h.policy.decide({ host: "Other.Example.", port: 443 }), DENY("denied by the user"));
+  assert.deepEqual(await h.policy.decide({ host: "Other.Example.", port: 443 }), DENY("denied by user"));
   assert.equal(h.asks.length, 2, "the denial was cached");
   // ...but another port is a different key.
   const otherPort = h.policy.decide({ host: "other.example", port: 80 });
@@ -328,9 +328,10 @@ test("ask.reply reasons are stripped of control characters and angle brackets an
   assert.doesNotMatch(reason, /[<>\u0000-\u001f\u2028]/);
   assert.equal(h.policy.drainAudit("c1")[0]?.reason, reason);
 
+  // A reason that is nothing once cleaned is a system denial with the generic reason.
   const empty = h.policy.decide({ host: "other.example", port: 443 });
   h.answer({ allow: false, reason: "<>\n" });
-  assert.deepEqual(await empty, DENY("denied by the user"));
+  assert.deepEqual(await empty, DENY("approval unavailable"));
 });
 
 test("ask: a throwing askHost and a malformed answer both deny, and neither is cached", async () => {
@@ -536,4 +537,81 @@ test("the probe command id is never counted as active", async () => {
   h.policy.register("c1", net("open"));
   h.policy.register("probe", net("strict"));
   assert.equal(await h.policy.decide({ host: "example.com", port: 443 }), true);
+});
+
+// ---- Only the user's own denial is remembered for the whole command ---------------------------
+
+/** What the backend or the host sends when the answer is not the user's: all `allow: false`. */
+const SYSTEM_REASONS = [
+  "approval timed out",
+  "device is offline",
+  "ambiguous active commands",
+  "ask for a different command",
+  "invalid host",
+  "network approval is unavailable",
+  "too many network requests",
+  "command cancelled",
+  "command finished",
+  "no active command for this approval",
+];
+
+const DAY_MS = 86_400_000;
+
+test("USER_DENIAL_REASONS are exactly the backend's text and the sidecar's own", () => {
+  assert.deepEqual([...USER_DENIAL_REASONS], ["denied by user", "denied by the user"]);
+});
+
+test("a user denial is audited as user and remembered for the whole command", async () => {
+  for (const reason of USER_DENIAL_REASONS) {
+    const h = makeHarness();
+    h.policy.register("c1", net("ask"));
+    const first = h.policy.decide({ host: "example.com", port: 443 });
+    h.answer({ allow: false, reason });
+    await first;
+    h.clock.now += 10 * DAY_MS;
+    await h.policy.decide({ host: "example.com", port: 443 });
+    assert.equal(h.asks.length, 1, `"${reason}" is still remembered after ten days`);
+    assert.deepEqual(h.policy.drainAudit("c1").map((e) => [e.decision, e.source, e.reason]), [
+      ["deny", "user", reason],
+    ]);
+  }
+});
+
+test("every other denial is a system denial: audited as unavailable, reason kept, remembered for 30 s", async () => {
+  for (const reason of SYSTEM_REASONS) {
+    const h = makeHarness();
+    h.policy.register("c1", net("ask"));
+    const decide = () => h.policy.decide({ host: "example.com", port: 443 });
+    const first = decide();
+    h.answer({ allow: false, reason });
+    assert.deepEqual(await first, DENY(reason));
+    assert.deepEqual(h.policy.drainAudit("c1").map((e) => [e.decision, e.source, e.reason]), [
+      ["deny", "unavailable", reason],
+    ]);
+    h.clock.now += 29_000;
+    await decide();
+    assert.equal(h.asks.length, 1, `"${reason}" is remembered for 29 s`);
+    h.clock.now += 2_000;
+    const again = decide();
+    assert.equal(h.asks.length, 2, `"${reason}" is asked again after 31 s`);
+    h.answer({ allow: true });
+    await again;
+  }
+});
+
+test("a denial with no reason, or only spacing around the user text, is a system denial", async () => {
+  for (const reply of [{ allow: false }, { allow: false, reason: " denied by user " }, { allow: false, reason: "Denied by user" }]) {
+    const h = makeHarness();
+    h.policy.register("c1", net("ask"));
+    const first = h.policy.decide({ host: "example.com", port: 443 });
+    h.answer(reply);
+    const denied = await first;
+    assert.equal(typeof denied, "object");
+    assert.equal(h.policy.drainAudit("c1")[0]?.source, "unavailable", JSON.stringify(reply));
+    h.clock.now += 31_000;
+    const again = h.policy.decide({ host: "example.com", port: 443 });
+    assert.equal(h.asks.length, 2, JSON.stringify(reply));
+    h.answer({ allow: true });
+    await again;
+  }
 });

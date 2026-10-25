@@ -53,6 +53,22 @@ const TIMEOUT_DENIAL_TTL_MS = 60_000;
  */
 const MAX_TRACKED_HOSTS = 2_000;
 
+/**
+ * The reason text that marks an `ask.reply { allow: false }` as the user's own decision. Nothing
+ * else a reply can say is the user's: the backend and the host also answer `allow: false` when a
+ * device is offline, a request is malformed or ambiguous, the backend's own approval window
+ * ran out, a command was cancelled and so on, and none of those may be remembered as "the user
+ * said no" for the rest of the command.
+ *
+ * `"denied by user"` is the text the backend sends: this must match `NETWORK_REASONS.denied` in
+ * `apps/backend/src/modules/devices/network-approvals.ts` (the backend constant is the source of
+ * truth). `"denied by the user"` is this sidecar's own spelling, still accepted.
+ */
+export const USER_DENIAL_REASONS: readonly string[] = ["denied by user", "denied by the user"];
+
+/** A denial that is not the user's (see `USER_DENIAL_REASONS`) is remembered for this long. */
+const SYSTEM_DENIAL_TTL_MS = 30_000;
+
 /** A user-supplied denial reason is cut to this many characters. */
 const MAX_REASON_LENGTH = 200;
 
@@ -94,7 +110,16 @@ export type NetworkPolicyOptions = {
 /** What `decide` answers srt: `true` allows, the object denies with a reason srt shows the model. */
 export type NetworkDecision = true | { allow: false; reason: string };
 
-type Verdict = { allow: boolean; reason?: string; source: AuditSource };
+type Verdict = {
+  allow: boolean;
+  reason?: string;
+  source: AuditSource;
+  /**
+   * How long a denial is remembered for the command (`Infinity` for the user's own); absent
+   * means not remembered, so the next attempt asks again.
+   */
+  cacheMs?: number;
+};
 
 type CommandState = {
   mode: WrapNetwork["mode"];
@@ -243,7 +268,11 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         finish({ allow: false, reason: "command finished", source: "unavailable" }, true);
       // Never keep the process alive on this timer: the approval is moot once the host is gone.
       const timer = setTimeout(
-        () => finish({ allow: false, reason: "approval timed out", source: "timeout" }, true),
+        () =>
+          finish(
+            { allow: false, reason: "approval timed out", source: "timeout", cacheMs: TIMEOUT_DENIAL_TTL_MS },
+            true,
+          ),
         askTimeoutMs,
       );
       timer.unref?.();
@@ -277,12 +306,19 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
           const { allow, reason } = answer as { allow?: unknown; reason?: unknown };
           if (allow === true) finish({ allow: true, source: "approval" }, false);
           else if (allow === false) {
+            // Only the user's own words make this the user's denial; any other `allow: false`
+            // (an offline device, a backend timeout, a malformed ask...) is the system's and is
+            // remembered only briefly, so a passing failure does not become a permanent "no".
+            const userDenied = typeof reason === "string" && USER_DENIAL_REASONS.includes(reason);
             finish(
-              {
-                allow: false,
-                reason: sanitizeReason(reason) ?? "denied by the user",
-                source: "user",
-              },
+              userDenied
+                ? { allow: false, reason: sanitizeReason(reason), source: "user", cacheMs: Infinity }
+                : {
+                    allow: false,
+                    reason: sanitizeReason(reason) ?? "approval unavailable",
+                    source: "unavailable",
+                    cacheMs: SYSTEM_DENIAL_TTL_MS,
+                  },
               false,
             );
           } else {
@@ -336,14 +372,14 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       flight = askUser(commandId, state, host, port).then((verdict) => {
         if (verdict.allow) state.approved.add(key);
         else if (
-          (verdict.source === "user" || verdict.source === "timeout") &&
+          verdict.cacheMs !== undefined &&
           verdict.reason !== undefined &&
           state.denied.size < MAX_TRACKED_HOSTS
         ) {
           state.denied.set(key, {
             reason: verdict.reason,
             source: verdict.source,
-            until: verdict.source === "user" ? Infinity : now() + TIMEOUT_DENIAL_TTL_MS,
+            until: now() + verdict.cacheMs,
           });
         }
         return verdict;
