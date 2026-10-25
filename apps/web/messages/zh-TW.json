@@ -2364,7 +2364,7 @@
       "publicRecordsLoading": "正在載入集合…",
       "publicRecordsLoadFailed": "無法載入此頁面的資料集合。",
       "publicRecordsEmpty": "此頁面還沒有共享資料。你仍可在下方新增集合名稱。",
-      "publicRecordsCount": "{count, plural, other {# 筆記錄}}",
+      "publicRecordsCount": "{count, plural, other {# 條記錄}}",
       "publicRecordsNoData": "暫無資料",
       "publicRecordsRemove": "移除 {name}",
       "publicRecordsAdd": "新增",
