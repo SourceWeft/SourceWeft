@@ -29,6 +29,9 @@ fn main() {
             "enable_local_host",
             "disconnect_local_host",
             "choose_working_directory",
+            "vault_list",
+            "vault_set",
+            "vault_remove",
         ]),
     ))
     .expect("failed to build Tauri application metadata");
