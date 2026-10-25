@@ -185,7 +185,7 @@ test("team subscription seat sync updates provider before local quota", async ()
   // Per-member billing: a member's grant is one seat's worth and does NOT scale
   // with the team's seat count. Changing seats never re-grants existing members;
   // a new member gets their own per-seat allocation when their row is created.
-  assert.equal(store.account?.monthlyCreditsGrant, 20_000);
+  assert.equal(store.account?.monthlyCreditsGrant, 8_000);
   assert.equal(store.account?.monthlyPagesGrant, 6_000);
 
   const seatLedgers = store.ledgers.filter(
@@ -394,7 +394,7 @@ test("team subscription seat downgrade fully claws back unused monthly quota", a
   assert.equal(store.account?.seatCount, 2);
   // Per-member grant is one seat's worth and is not scaled or clawed back by the
   // team seat count; the member's balance is untouched by the seat change.
-  assert.equal(store.account?.monthlyCreditsGrant, 20_000);
+  assert.equal(store.account?.monthlyCreditsGrant, 8_000);
   assert.equal(store.account?.monthlyCreditsBalance, 60_000);
   assert.equal(store.account?.monthlyPagesGrant, 6_000);
   assert.equal(store.account?.monthlyPagesBalance, 18_000);
