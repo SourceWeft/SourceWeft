@@ -1347,7 +1347,31 @@
       "networkOpen": "允許所有公用主機",
       "networkStrict": "僅限已允許的主機",
       "networkHelperEnforced": "由這臺電腦上的沙盒強制執行。",
-      "networkHelperUnenforced": "此設定在這臺電腦上尚未生效，命令仍可存取任何公用主機。"
+      "networkHelperUnenforced": "此設定在這臺電腦上尚未生效，命令仍可存取任何公用主機。",
+      "vault": {
+        "title": "本機命令使用的金鑰",
+        "description": "在這臺電腦上儲存 API 金鑰。命令只能看到佔位符；真實值只會被替換進發往你所綁定主機的 HTTPS 請求中。",
+        "notEnforced": "金鑰已儲存，但這臺電腦暫時還不會把它們注入命令。",
+        "loadError": "無法讀取這臺電腦上儲存的金鑰。",
+        "empty": "尚未儲存任何金鑰。",
+        "hostsLine": "主機：{hosts}",
+        "writesNeedApproval": "寫入需要核准",
+        "remove": "移除",
+        "removeQuestion": "移除 {label}？",
+        "confirmRemove": "移除金鑰",
+        "cancel": "取消",
+        "add": "新增金鑰",
+        "labelField": "標籤",
+        "envVarField": "環境變數名",
+        "valueField": "金鑰值",
+        "valueHelp": "儲存在這臺電腦的鑰匙圈中，之後不會再顯示。",
+        "hostsField": "主機（每行一個）",
+        "readOnlyField": "向這些主機傳送寫入請求時需要核准",
+        "consent": "為了僅對這些主機把佔位符替換為真實金鑰，SourceWeft 會使用只有沙盒才信任的本機憑證，解密這臺電腦上所執行命令的 HTTPS 流量。固定憑證的工具可能會失敗。金鑰不會離開這臺電腦，也不會展示給 AI。",
+        "consentAck": "我已瞭解並同意",
+        "save": "儲存金鑰",
+        "saving": "正在儲存…"
+      }
     },
     "approvals": {
       "title": "核准",

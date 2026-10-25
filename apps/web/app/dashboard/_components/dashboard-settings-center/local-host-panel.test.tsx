@@ -14,6 +14,8 @@ vi.mock("../../../../lib/desktop-bridge", () => ({
   desktopBridge: {
     isAvailable: () => true,
     localHostStatus: () => localHostStatus(),
+    // This file is about the network setting; the vault section hides itself.
+    vaultList: () => Promise.reject(new Error("Command vault_list not found")),
   },
 }));
 vi.mock("../../../../lib/local-execution", () => ({

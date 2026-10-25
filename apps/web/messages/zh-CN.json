@@ -1347,7 +1347,31 @@
       "networkOpen": "允许所有公共主机",
       "networkStrict": "仅限已允许的主机",
       "networkHelperEnforced": "由这台电脑上的沙盒强制执行。",
-      "networkHelperUnenforced": "此设置在这台电脑上尚未生效，命令仍可访问任何公共主机。"
+      "networkHelperUnenforced": "此设置在这台电脑上尚未生效，命令仍可访问任何公共主机。",
+      "vault": {
+        "title": "本地命令使用的密钥",
+        "description": "在这台电脑上保存 API 密钥。命令只能看到占位符；真实值只会被替换进发往你所绑定主机的 HTTPS 请求中。",
+        "notEnforced": "密钥已保存，但这台电脑暂时还不会把它们注入命令。",
+        "loadError": "无法读取这台电脑上保存的密钥。",
+        "empty": "尚未保存任何密钥。",
+        "hostsLine": "主机：{hosts}",
+        "writesNeedApproval": "写入需要批准",
+        "remove": "移除",
+        "removeQuestion": "移除 {label}？",
+        "confirmRemove": "移除密钥",
+        "cancel": "取消",
+        "add": "添加密钥",
+        "labelField": "标签",
+        "envVarField": "环境变量名",
+        "valueField": "密钥值",
+        "valueHelp": "保存在这台电脑的钥匙串中，之后不会再显示。",
+        "hostsField": "主机（每行一个）",
+        "readOnlyField": "向这些主机发送写入请求时需要批准",
+        "consent": "为了仅对这些主机把占位符替换为真实密钥，SourceWeft 会使用只有沙盒才信任的本地证书，解密这台电脑上所运行命令的 HTTPS 流量。固定证书的工具可能会失败。密钥不会离开这台电脑，也不会展示给 AI。",
+        "consentAck": "我已了解并同意",
+        "save": "保存密钥",
+        "saving": "正在保存…"
+      }
     },
     "approvals": {
       "title": "审批",

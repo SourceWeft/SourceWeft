@@ -1347,7 +1347,31 @@
       "networkOpen": "Allow all public hosts",
       "networkStrict": "Only allowed hosts",
       "networkHelperEnforced": "Enforced by the sandbox on this computer.",
-      "networkHelperUnenforced": "This setting is not enforced on this computer yet. Commands can still reach any public host."
+      "networkHelperUnenforced": "This setting is not enforced on this computer yet. Commands can still reach any public host.",
+      "vault": {
+        "title": "Secrets for local commands",
+        "description": "Store API keys on this computer. Commands only see a placeholder; the real value is substituted into HTTPS requests to the hosts you bind it to.",
+        "notEnforced": "Secrets are stored, but this computer does not inject them into commands yet.",
+        "loadError": "Could not read the secrets stored on this computer.",
+        "empty": "No secrets stored.",
+        "hostsLine": "Hosts: {hosts}",
+        "writesNeedApproval": "Writes need approval",
+        "remove": "Remove",
+        "removeQuestion": "Remove {label}?",
+        "confirmRemove": "Remove secret",
+        "cancel": "Cancel",
+        "add": "Add secret",
+        "labelField": "Label",
+        "envVarField": "Environment variable name",
+        "valueField": "Secret value",
+        "valueHelp": "Stored in this computer's keychain. It is never shown again.",
+        "hostsField": "Hosts (one per line)",
+        "readOnlyField": "Require approval for write requests to these hosts",
+        "consent": "To replace placeholders with the real secret only for these hosts, SourceWeft decrypts the HTTPS traffic of commands running on this computer using a local certificate that only the sandbox trusts. Tools that pin certificates may fail. The secret never leaves this computer and is never shown to the AI.",
+        "consentAck": "I understand and agree",
+        "save": "Save secret",
+        "saving": "Saving..."
+      }
     },
     "approvals": {
       "title": "Approvals",

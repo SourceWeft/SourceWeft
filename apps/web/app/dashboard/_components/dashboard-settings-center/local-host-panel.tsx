@@ -13,6 +13,7 @@ import {
   type LocalDevice,
 } from "../../../../lib/local-execution";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
+import { LocalVaultSection } from "./local-vault-section";
 export function LocalHostPanel() {
   const t = useTranslations("dashboardSettings");
   const userId = authClient.useSession().data?.user.id;
@@ -228,6 +229,7 @@ export function LocalHostPanel() {
           {t("localHost.addFolder")}
         </Button>
       </div>
+      <LocalVaultSection />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
