@@ -1,9 +1,7 @@
 "use client";
 
-import {
-  getPricingConfig,
-  planFamilyToPricingPlanId,
-} from "../../app/_landing/pricing-config";
+import type { BillingDisplayCatalog } from "@sourceweft/contracts/billing-catalog";
+import { planFamilyToPricingPlanId } from "../../app/_landing/pricing-config";
 import { trackEvent } from "./client";
 
 type BillingInterval = "monthly" | "yearly";
@@ -25,18 +23,28 @@ function centsToDollars(cents: number | null | undefined) {
   return cents / 100;
 }
 
+// The catalog the deployment published in its capabilities; unset until the
+// capabilities load, in which case events simply carry no value.
+let analyticsCatalog: BillingDisplayCatalog | null = null;
+
+export function setAnalyticsCatalog(catalog: BillingDisplayCatalog | null) {
+  analyticsCatalog = catalog;
+}
+
 function getPlanPriceCents(input: {
   billingInterval: BillingInterval;
   plan: CheckoutPlan;
   seatCount?: number;
 }) {
-  const plan = getPricingConfig().find((item) => item.id === input.plan);
+  const plan = analyticsCatalog?.plans[input.plan];
   if (!plan) {
     return undefined;
   }
 
   const unitPrice =
-    input.billingInterval === "yearly" ? plan.yearlyPrice : plan.monthlyPrice;
+    input.billingInterval === "yearly"
+      ? plan.priceCents.yearly
+      : plan.priceCents.monthly;
   return input.plan === "team"
     ? unitPrice * Math.max(input.seatCount ?? 1, 1)
     : unitPrice;
@@ -81,18 +89,15 @@ export function trackBeginCheckout(input: {
   seatCount?: number;
   source: CheckoutSource;
 }) {
-  trackEvent(
-    "begin_checkout",
-    {
-      billing_interval: input.billingInterval,
-      currency: "USD",
-      items: [checkoutItem(input)],
-      plan: input.plan,
-      seat_count: input.seatCount,
-      source: input.source,
-      value: centsToDollars(getPlanPriceCents(input)),
-    },
-  );
+  trackEvent("begin_checkout", {
+    billing_interval: input.billingInterval,
+    currency: "USD",
+    items: [checkoutItem(input)],
+    plan: input.plan,
+    seat_count: input.seatCount,
+    source: input.source,
+    value: centsToDollars(getPlanPriceCents(input)),
+  });
 }
 
 export function trackCheckoutError(input: {
@@ -127,22 +132,19 @@ export function trackPurchase(input: {
   }
   const billingInterval = normalizeBillingInterval(input.billingInterval);
 
-  trackEvent(
-    "purchase",
-    {
-      billing_interval: billingInterval,
-      currency: (input.currency ?? "USD").toUpperCase(),
-      items: [
-        checkoutItem({
-          billingInterval,
-          plan,
-        }),
-      ],
-      plan: input.planFamily,
-      transaction_id: input.orderId,
-      value: centsToDollars(input.amountTotal),
-    },
-  );
+  trackEvent("purchase", {
+    billing_interval: billingInterval,
+    currency: (input.currency ?? "USD").toUpperCase(),
+    items: [
+      checkoutItem({
+        billingInterval,
+        plan,
+      }),
+    ],
+    plan: input.planFamily,
+    transaction_id: input.orderId,
+    value: centsToDollars(input.amountTotal),
+  });
 }
 
 export function trackChatMessageSent(input: {

@@ -5,8 +5,8 @@
       "description": "For individuals exploring SourceWeft",
       "cta": "Get Started",
       "features": [
-        "300 pages / month",
-        "3,000 credits / month",
+        "{pages} pages / month",
+        "{credits} credits / month",
         "All features included",
         "Browser extension + desktop app",
         "Community support"
@@ -17,8 +17,8 @@
       "description": "For power users who need more capacity",
       "cta": "Upgrade to Pro",
       "features": [
-        "6,000 pages / month",
-        "8,000 credits / month",
+        "{pages} pages / month",
+        "{credits} credits / month",
         "All features included",
         "Browser extension + desktop app",
         "Agent observability",
@@ -30,8 +30,8 @@
       "description": "For teams building shared knowledge",
       "cta": "Create team",
       "features": [
-        "6,000 pages × seats / month",
-        "8,000 credits × seats / month",
+        "{pages} pages × seats / month",
+        "{credits} credits × seats / month",
         "Agent observability",
         "Shared workspaces & RBAC",
         "Team analytics",

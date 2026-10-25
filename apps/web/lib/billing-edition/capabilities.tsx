@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
+import { setAnalyticsCatalog } from "../analytics/events";
 import { deploymentClient } from "../sdk";
 
 type State =
@@ -59,6 +60,13 @@ export function DeploymentCapabilitiesProvider({
       active = false;
     };
   }, [attempt, initialCapabilities]);
+  useEffect(() => {
+    setAnalyticsCatalog(
+      state.status === "ready" && state.capabilities.edition === "commercial"
+        ? state.capabilities.billing.catalog
+        : null,
+    );
+  }, [state]);
   return (
     <Context.Provider value={state}>
       {state.status === "error" ? (
