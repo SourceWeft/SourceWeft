@@ -267,6 +267,11 @@ export async function startServer(
     return null;
   }
 
+  /** macOS shell for srt's `[binShell, "-c", ...]` argv; Linux keeps srt's own default. */
+  function binShellFor(config: InitConfig): string | undefined {
+    return config.platform === "darwin" ? "/bin/bash" : undefined;
+  }
+
   async function handleWrap(request: {
     commandId: string;
     command: string;
@@ -291,7 +296,7 @@ export async function startServer(
     try {
       const { argv, env } = await deps.srt.wrapWithSandboxArgv(
         request.command,
-        undefined,
+        binShellFor(state.config),
         customConfig,
         undefined,
         cwd,
@@ -333,7 +338,7 @@ export async function startServer(
     try {
       const wrapped = await deps.srt.wrapWithSandboxArgv(
         "true",
-        undefined,
+        binShellFor(state.config),
         customConfig,
         undefined,
         workspaceRoot,

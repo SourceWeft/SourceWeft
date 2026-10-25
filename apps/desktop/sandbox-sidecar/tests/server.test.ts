@@ -43,6 +43,7 @@ function makeFakeSrt(): SrtLike & {
     params: { host: string; port: number | undefined },
   ) => Promise<boolean | { allow: false; reason: string }>;
   lastCustomConfig?: unknown;
+  binShells: Array<string | undefined>;
   probeExit: { code: number; stderr: string };
   initError?: Error;
   wrapError?: Error;
@@ -54,6 +55,7 @@ function makeFakeSrt(): SrtLike & {
     probeExit: { code: 0, stderr: "" },
     cleanupCalls: 0,
     resetCalls: 0,
+    binShells: [] as Array<string | undefined>,
     ask: undefined as
       | ((
           params: { host: string; port: number | undefined },
@@ -73,13 +75,14 @@ function makeFakeSrt(): SrtLike & {
     },
     async wrapWithSandboxArgv(
       command: string,
-      _binShell?: string,
+      binShell?: string,
       customConfig?: unknown,
       _abortSignal?: AbortSignal,
       _cwd?: string,
       _options?: { commandId?: string },
     ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
       fake.lastCustomConfig = customConfig;
+      fake.binShells.push(binShell);
       if (fake.wrapError) throw fake.wrapError;
       if (command === "true") {
         const script = `process.stderr.write(${JSON.stringify(fake.probeExit.stderr)});process.exit(${fake.probeExit.code})`;
@@ -677,3 +680,39 @@ test(
     assert.equal(lines[1]?.ok, true, `shutdown failed: ${JSON.stringify(lines[1])}`);
   },
 );
+
+test("darwin wrap and probe pass /bin/bash as srt's binShell; linux leaves srt's default", async () => {
+  const darwin = makeFakeSrt();
+  const darwinHarness = await initHarness(darwin, undefined, linuxInit({ platform: "darwin" }));
+  assert.equal(
+    (await darwinHarness.send({ op: "probe" })).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await darwinHarness.send({
+        op: "wrap",
+        commandId: "c".repeat(22),
+        command: "echo hi",
+        cwd: workspaceRoot,
+        workspaceRoot,
+      })
+    ).ok,
+    true,
+  );
+  assert.deepEqual(darwin.binShells, ["/bin/bash", "/bin/bash"]);
+  await darwinHarness.stop();
+
+  const linux = makeFakeSrt();
+  const linuxHarness = await initHarness(linux);
+  await linuxHarness.send({ op: "probe" });
+  await linuxHarness.send({
+    op: "wrap",
+    commandId: "d".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+  });
+  assert.deepEqual(linux.binShells, [undefined, undefined]);
+  await linuxHarness.stop();
+});

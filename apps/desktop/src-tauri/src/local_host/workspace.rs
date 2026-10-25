@@ -32,8 +32,8 @@ pub struct LocalHost {
     // only platform that currently reads it) so the struct's shape does not depend on target
     // OS.
     pub(super) sandbox_readiness_cache: Mutex<ReadinessCache>,
-    // The Linux sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
-    #[cfg(target_os = "linux")]
+    // The sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(super) sandbox: super::srt_exec::SandboxSlot,
 }
 
@@ -144,7 +144,7 @@ impl LocalHost {
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
                 sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "macos", target_os = "linux"))]
                 sandbox: Default::default(),
             })
         }
@@ -215,7 +215,7 @@ impl LocalHost {
 
     /// The sandbox sidecar's `init.workspaceRoots`: the automatic workspace base plus every
     /// currently granted directory that still exists (a missing one cannot be a workspace).
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(super) fn sandbox_workspace_roots(&self) -> Result<Vec<PathBuf>> {
         let mut roots = vec![self.workspace_base()];
         let db = self

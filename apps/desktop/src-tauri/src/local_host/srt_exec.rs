@@ -1,6 +1,6 @@
-//! Linux local command execution through the sandbox sidecar (`srt-sidecar`, which wraps each
-//! command with sandbox-runtime and bubblewrap). Produces exactly the macOS
-//! `execute_command` result shape: `{"output","exitCode","truncated","cancelled"}`.
+//! Local command execution on Linux and macOS through the sandbox sidecar (`srt-sidecar`, which
+//! wraps each command with sandbox-runtime: bubblewrap on Linux, Seatbelt on macOS). Produces
+//! the result shape `{"output","exitCode","truncated","cancelled"}`.
 //!
 //! One sidecar is kept per `LocalHost`, started lazily from `readiness::bundle_dir`. Its `init`
 //! lists `<base>/task-workspaces` plus every currently granted directory as the workspace roots
@@ -64,13 +64,29 @@ impl SandboxInstance {
     }
 }
 
-/// The `InitConfig` for a Linux sidecar whose helpers live in `bundle`, for a host whose app
-/// data is `base`. `<base>/local-host` (the host database) and `<base>/sandbox` (the runtime
-/// bundles) are denied explicitly, independent of whether `base` lies under `$HOME`.
-pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<String>) -> InitConfig {
+/// The platform this build runs the sidecar for.
+pub(crate) const HOST_PLATFORM: Platform = if cfg!(target_os = "macos") {
+    Platform::Darwin
+} else {
+    Platform::Linux
+};
+
+/// The `InitConfig` for a sidecar of `platform` whose helpers live in `bundle`, for a host whose
+/// app data is `base`. `<base>/local-host` (the host database) and `<base>/sandbox` (the
+/// runtime bundles) are denied explicitly, independent of whether `base` lies under `$HOME`.
+///
+/// Linux gets the production bubblewrap and the seccomp helper; macOS has neither (Seatbelt
+/// needs no helper binary), so its bundle holds only the sidecar, ripgrep and the proxy agent.
+pub(crate) fn init_config(
+    platform: Platform,
+    bundle: &Path,
+    base: &Path,
+    workspace_roots: Vec<String>,
+) -> InitConfig {
     let home = std::env::var("HOME").unwrap_or_default();
+    let linux = platform == Platform::Linux;
     InitConfig {
-        platform: Platform::Linux,
+        platform,
         read_roots: read_roots(Path::new(&home), base, &user_path().0),
         deny_roots: [base.join("local-host"), base.join("sandbox")]
             .iter()
@@ -80,7 +96,8 @@ pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<Strin
         workspace_roots,
         helpers: Helpers {
             ripgrep: bundle.join("rg").to_string_lossy().into_owned(),
-            apply_seccomp: Some(bundle.join("apply-seccomp").to_string_lossy().into_owned()),
+            apply_seccomp: linux
+                .then(|| bundle.join("apply-seccomp").to_string_lossy().into_owned()),
             java_agent_jar: Some(
                 bundle
                     .join("srt-proxy-agent.jar")
@@ -88,7 +105,7 @@ pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<Strin
                     .into_owned(),
             ),
         },
-        bwrap_path: Some(BWRAP_PATH.to_string()),
+        bwrap_path: linux.then(|| BWRAP_PATH.to_string()),
     }
 }
 
@@ -262,7 +279,10 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let sidecar = Sidecar::start(&bundle, &init_config(&bundle, &host.base, names))?;
+    let sidecar = Sidecar::start(
+        &bundle,
+        &init_config(HOST_PLATFORM, &bundle, &host.base, names),
+    )?;
     Ok(SandboxInstance::new(sidecar, roots))
 }
 
@@ -637,7 +657,7 @@ mod tests {
     #[test]
     fn init_config_denies_the_host_database_and_bundles() {
         let base = Path::new("/home/u/.local/share/app");
-        let init = init_config(&base.join("sandbox/current"), base, vec![]);
+        let init = init_config(Platform::Linux, &base.join("sandbox/current"), base, vec![]);
         assert_eq!(
             init.deny_roots,
             [
@@ -645,6 +665,39 @@ mod tests {
                 "/home/u/.local/share/app/sandbox"
             ]
         );
+        assert_eq!(init.platform, Platform::Linux);
         assert_eq!(init.bwrap_path.as_deref(), Some(BWRAP_PATH));
+        assert!(init.helpers.apply_seccomp.is_some());
+        assert!(init.helpers.java_agent_jar.is_some());
+    }
+
+    #[test]
+    fn darwin_init_config_has_no_bwrap_or_seccomp_but_keeps_the_jar() {
+        let base = Path::new("/Users/u/Library/Application Support/app");
+        let bundle = base.join("sandbox/current");
+        let init = init_config(Platform::Darwin, &bundle, base, vec!["/w".to_string()]);
+        assert_eq!(init.platform, Platform::Darwin);
+        assert_eq!(init.bwrap_path, None);
+        assert_eq!(init.helpers.apply_seccomp, None);
+        assert_eq!(
+            init.helpers.java_agent_jar.as_deref(),
+            Some("/Users/u/Library/Application Support/app/sandbox/current/srt-proxy-agent.jar")
+        );
+        assert_eq!(
+            init.helpers.ripgrep,
+            "/Users/u/Library/Application Support/app/sandbox/current/rg"
+        );
+        assert_eq!(
+            init.deny_roots,
+            [
+                "/Users/u/Library/Application Support/app/local-host",
+                "/Users/u/Library/Application Support/app/sandbox"
+            ]
+        );
+        assert_eq!(init.workspace_roots, ["/w"]);
+        let wire = serde_json::to_value(&init).unwrap();
+        assert_eq!(wire["platform"], "darwin");
+        assert!(wire.get("bwrapPath").is_none());
+        assert!(wire["helpers"].get("applySeccomp").is_none());
     }
 }
