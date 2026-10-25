@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "currency": "usd",
+  "credits": { "unitUsd": 0.00125, "markupRate": 0.25 },
+  "plans": {
+    "free": { "credits": 3000, "pages": 300 },
+    "pro": {
+      "credits": 8000,
+      "pages": 6000,
+      "priceCents": { "monthly": 990, "yearly": 9900 }
+    },
+    "team": {
+      "minSeats": 2,
+      "credits": 8000,
+      "pages": 6000,
+      "priceCents": { "monthly": 990, "yearly": 9900 }
+    }
+  },
+  "topups": {
+    "credit": { "units": 10000, "priceCents": 1250 },
+    "page": { "units": 1000, "priceCents": 500 }
+  }
+}
