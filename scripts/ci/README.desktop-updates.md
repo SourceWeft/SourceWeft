@@ -127,7 +127,7 @@ update-capable mode:
 - `aarch64-apple-darwin`
 - `x86_64-apple-darwin`
 - `x86_64-pc-windows-msvc`
-- `x86_64-unknown-linux-gnu` (Ubuntu 22.04 baseline, AppImage)
+- `x86_64-unknown-linux-gnu` (Ubuntu 22.04 baseline, AppImage; a `.deb` is built beside it)
 
 The generated Tauri release config always enables updater artifacts and enables
 platform distribution signing only for `signed`. `build.rs` embeds the public
@@ -331,11 +331,20 @@ pack, sign and verify steps with a throwaway key; nothing is uploaded.
 
 ## Linux packaging
 
-Linux x64 is distributed as an AppImage, which is also the signed updater payload.
+Linux x64 is distributed as an AppImage, which is also the signed updater payload, and
+as a `.deb`. The `.deb` is attached to the GitHub Release as
+`SourceWeft_<version>_linux-x86_64.deb` (signed releases only); it is not a download-page or
+update-manifest entry, and in-app updates apply to the AppImage only. The `.deb` depends on
+`bubblewrap` and `socat` and its maintainer scripts run the sandbox setup script (copy of
+bubblewrap at `/opt/sourceweft/libexec/bwrap` plus a scoped AppArmor profile; removed on
+package removal). The AppImage runs the same script through `pkexec` when the user asks the
+app to. Linux ARM64 is not supported. Local device execution on Linux x64 additionally
+needs the signed sandbox runtime described above, which the app downloads when the user
+clicks Install. User-facing setup is documented in `apps/desktop/LINUX_SANDBOX.md`.
+
 The verification and signed workflows use Ubuntu 22.04, install WebKitGTK 4.1,
 GTK/AppIndicator and AppImage dependencies via `install-desktop-linux-deps.sh`,
-and bundle GStreamer base/good support. AppImage is the only supported Linux
-package format; Linux ARM64 and local device execution are not enabled.
+and bundle GStreamer base/good support.
 
 Linux descriptors set `distributionSigned=false` and `notarized=false`: these
 fields refer to OS code signing, not the mandatory `.AppImage.sig` updater

@@ -21,8 +21,8 @@ Before creating a `vMAJOR.MINOR.PATCH` tag (optionally with a semver prerelease)
 ## Desktop installers
 
 `.github/workflows/desktop-build.yml` is reusable, manually dispatchable, and runs
-for desktop changes in pull requests. It builds a macOS app/DMG and Windows NSIS
-installer with the committed lockfile, then retains them as workflow artifacts.
+for desktop changes in pull requests. It builds a macOS app/DMG, a Windows NSIS
+installer and a Linux AppImage and `.deb` with the committed lockfile, then retains them as workflow artifacts.
 Standalone verification runs do not install the app or publish customer downloads.
 The tag Release workflow calls this same builder, waits for both platforms and CI,
 then attaches the DMG and NSIS EXE to GitHub Release alongside the self-hosting archive.
