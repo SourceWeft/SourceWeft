@@ -12,13 +12,18 @@ import {
 } from "@sourceweft/billing/server";
 import { PostgresBillingStore } from "@sourceweft/billing/postgres";
 import {
+  findIgnoredLegacyBillingEnv,
   readBillingConfig,
   validateBillingConfiguration,
 } from "@sourceweft/billing/config";
+import { toDisplayCatalog } from "@sourceweft/billing/billing-catalog-schema";
 import {
   createCreemReversalSync,
   createCreemSubscriptionSync,
+  createCreemClient,
   createCreemWebhookHandler,
+  listCatalogCreemProducts,
+  monitorCreemCatalogPrices,
   monitorStrandedCreemReceipts,
 } from "@sourceweft/billing/integrations/creem";
 import { createBillingHttpRoutes } from "@sourceweft/billing/integrations/http";
@@ -40,9 +45,31 @@ import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { createSourceweftOrganizationMetadata } from "../modules/auth/organization-metadata";
 import { createBillingMembershipSource } from "./membership-source";
+import { loadBillingCatalog } from "./catalog-file";
 import type { BillingHttpHost } from "./http-host";
 import type { CheckResult } from "../checks/types";
-const billingConfig = readBillingConfig(process.env, config.auth.webBaseUrl);
+const loadedCatalog = loadBillingCatalog();
+const billingConfig = readBillingConfig(
+  process.env,
+  config.auth.webBaseUrl,
+  loadedCatalog.catalog,
+);
+// A mounted file that is missing falls back to the shipped one, so make the
+// file in use and its key numbers visible at every start.
+logger.info("Billing catalog loaded", {
+  filePath: loadedCatalog.filePath,
+  fingerprint: loadedCatalog.fingerprint,
+  creditUnitUsd: billingConfig.creditUnitUsd,
+  markupRate: billingConfig.defaultMarkupRate,
+  proPriceCents: billingConfig.catalog.individualProMonthlyAmountCents,
+  proCredits: billingConfig.planQuotas.individual_pro.monthlyCreditsGrant,
+});
+for (const name of findIgnoredLegacyBillingEnv(process.env)) {
+  logger.warn(
+    "Ignoring a retired billing environment variable; edit the billing catalog file instead",
+    { name },
+  );
+}
 const alerts: BillingAlertSink = {
   async trigger(input) {
     return (await import("../modules/ops")).opsAlertService.trigger(input);
@@ -147,11 +174,37 @@ export function registerBillingHttpRoutes(app: Hono, host: BillingHttpHost) {
 export const billingSchedulesEnabled =
   ["waffo", "stripe", "creem"].includes(billingConfig.provider) ||
   billingConfig.reconcileEnabled;
+// Creem charges its own product price; flag drift from the catalog without
+// ever blocking checkout or the rest of the schedule.
+async function checkCreemCatalogPrices() {
+  if (!billingConfig.creem.apiKey) return;
+  try {
+    const creem = createCreemClient({
+      apiKey: billingConfig.creem.apiKey,
+      testMode: billingConfig.creem.testMode,
+    });
+    await monitorCreemCatalogPrices({
+      products: listCatalogCreemProducts(billingConfig),
+      getProduct: async (productId) => {
+        const product = await creem.products.get(productId);
+        return { price: product.price, currency: product.currency };
+      },
+      alerts,
+      logger,
+    });
+  } catch (error) {
+    logger.error("Creem catalog price check failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 export async function reconcileBillingSchedule() {
   if (billingConfig.provider === "waffo") await waffo().drain();
   if (billingConfig.provider === "stripe") await stripe().drain();
-  if (billingConfig.provider === "creem")
+  if (billingConfig.provider === "creem") {
     await monitorStrandedCreemReceipts({ store, alerts, logger });
+    await checkCreemCatalogPrices();
+  }
   if (billingConfig.reconcileEnabled)
     return createBillingSchedule(billing().service, alerts, logger)();
 }
@@ -178,6 +231,7 @@ export function getBillingDeploymentCapabilities(): DeploymentCapabilities {
                 : "prod"
               : undefined,
       mode: billingConfig.mode,
+      catalog: toDisplayCatalog(loadedCatalog.catalog),
       checkout,
       teamSubscriptions: checkout && billingConfig.teamBillingEnabled,
       topup:

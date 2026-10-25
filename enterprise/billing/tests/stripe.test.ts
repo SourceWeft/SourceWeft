@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { defaultBillingCatalog } from "../src/catalog/billing-catalog";
 import { test, vi } from "vitest";
 import Stripe from "stripe";
 import { Hono } from "hono";
@@ -110,6 +111,7 @@ test("Stripe activation is explicit and rejects public keys, wrong modes and mis
         STRIPE_WEBHOOK_SECRET: "whsec_fixture",
       },
       "http://localhost",
+      defaultBillingCatalog,
     ).provider,
     "none",
   );
@@ -121,6 +123,7 @@ test("Stripe activation is explicit and rejects public keys, wrong modes and mis
       STRIPE_WEBHOOK_SECRET: "whsec_fixture",
     },
     "http://localhost",
+    defaultBillingCatalog,
   );
   validateBillingConfiguration(config);
   assert.equal(config.stripe.testMode, true);

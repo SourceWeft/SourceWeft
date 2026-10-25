@@ -1,3 +1,5 @@
+import type { BillingDisplayCatalog } from "@sourceweft/contracts/billing-catalog";
+
 export interface PlanConfig {
   id: "free" | "pro" | "team";
   name: string;
@@ -26,84 +28,60 @@ export function planFamilyToPricingPlanId(
   }
 }
 
-export type PricingEnv = Partial<
-  Record<
-    | "NEXT_PUBLIC_PRICING_PRO_MONTHLY"
-    | "NEXT_PUBLIC_PRICING_PRO_YEARLY"
-    | "NEXT_PUBLIC_PRICING_TEAM_MONTHLY"
-    | "NEXT_PUBLIC_PRICING_TEAM_YEARLY",
-    string | undefined
-  >
+/** The localized card copy for each plan; feature lines may use `{pages}` and `{credits}`. */
+export type PlansCopy = Record<
+  PlanConfig["id"],
+  {
+    name: string;
+    description: string;
+    cta: string;
+    features: readonly string[];
+  }
 >;
 
-function readProcessEnv(): PricingEnv {
-  const maybeProcess = (globalThis as { process?: { env?: PricingEnv } })
-    .process;
-  return maybeProcess?.env ?? {};
-}
-
-function cents(envVar: string | undefined, fallback: number): number {
-  const n = parseInt(envVar ?? "", 10);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
-export function getPricingConfig(
-  env: PricingEnv = readProcessEnv(),
+/**
+ * Pricing cards: prices, ids and structure from the catalog the deployment
+ * publishes; wording from `copy`. Quota numbers in the feature lines are filled
+ * from the catalog (en-US grouping in every locale, e.g. "8,000"), so a changed
+ * quota never leaves a stale number behind.
+ */
+export function buildPricingPlans(
+  catalog: BillingDisplayCatalog,
+  copy: PlansCopy,
 ): PlanConfig[] {
+  const number = new Intl.NumberFormat("en-US");
+  const card = (
+    id: PlanConfig["id"],
+    plan: { credits: number; pages: number },
+    prices: { monthly: number; yearly: number },
+    extra: Pick<PlanConfig, "ctaHref" | "highlighted">,
+  ): PlanConfig => ({
+    id,
+    name: copy[id].name,
+    monthlyPrice: prices.monthly,
+    yearlyPrice: prices.yearly,
+    description: copy[id].description,
+    features: copy[id].features.map((line) =>
+      line
+        .replaceAll("{pages}", number.format(plan.pages))
+        .replaceAll("{credits}", number.format(plan.credits)),
+    ),
+    cta: copy[id].cta,
+    ...extra,
+  });
+  const signIn = "/auth/sign-in";
+  const { free, pro, team } = catalog.plans;
   return [
-    {
-      id: "free",
-      name: "Free",
-      monthlyPrice: 0,
-      yearlyPrice: 0,
-      description: "For individuals exploring SourceWeft",
-      features: [
-        "300 pages / month",
-        "3,000 credits / month",
-        "All features included",
-        "Browser extension + desktop app",
-        "Community support",
-      ],
-      cta: "Get Started",
-      ctaHref: "/auth/sign-in",
+    card(
+      "free",
+      free,
+      { monthly: 0, yearly: 0 },
+      { ctaHref: signIn, highlighted: false },
+    ),
+    card("pro", pro, pro.priceCents, { ctaHref: signIn, highlighted: true }),
+    card("team", team, team.priceCents, {
+      ctaHref: signIn,
       highlighted: false,
-    },
-    {
-      id: "pro",
-      name: "Pro",
-      monthlyPrice: cents(env.NEXT_PUBLIC_PRICING_PRO_MONTHLY, 990),
-      yearlyPrice: cents(env.NEXT_PUBLIC_PRICING_PRO_YEARLY, 9900),
-      description: "For power users who need more capacity",
-      features: [
-        "6,000 pages / month",
-        "8,000 credits / month",
-        "All features included",
-        "Browser extension + desktop app",
-        "Agent observability",
-        "Priority support",
-      ],
-      cta: "Upgrade to Pro",
-      ctaHref: "/auth/sign-in",
-      highlighted: true,
-    },
-    {
-      id: "team",
-      name: "Team",
-      monthlyPrice: cents(env.NEXT_PUBLIC_PRICING_TEAM_MONTHLY, 990),
-      yearlyPrice: cents(env.NEXT_PUBLIC_PRICING_TEAM_YEARLY, 9900),
-      description: "For teams building shared knowledge",
-      features: [
-        "6,000 pages × seats / month",
-        "8,000 credits × seats / month",
-        "Agent observability",
-        "Shared workspaces & RBAC",
-        "Team analytics",
-        "SSO (coming soon)",
-        "Dedicated support",
-      ],
-      cta: "Create team",
-      ctaHref: "/auth/sign-in",
-      highlighted: false,
-    },
+    }),
   ];
 }
