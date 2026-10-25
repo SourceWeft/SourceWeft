@@ -1,10 +1,9 @@
 #![cfg(target_os = "macos")]
 //! macOS real-sandbox suite, run through the production `LocalHost` + `dispatch` path against a
 //! built `sandbox-sidecar` bundle (copied into `<temp app data>/sandbox/current`, exactly where
-//! production looks for it, like `linux_sandbox.rs`). macOS now wraps every command with the
-//! sidecar / `srt_exec.rs` path (Seatbelt + the proxy agent); the hand-written Seatbelt profile
-//! (`sandbox.rs`) and Rust proxy (`proxy.rs`) are no longer involved, and nothing here references
-//! them.
+//! production looks for it, like `linux_sandbox.rs`). On macOS every command is wrapped by the
+//! sidecar through `local_host/srt_exec.rs`, the same path as on Linux: srt's Seatbelt policy plus
+//! its proxy, with the sidecar's address guard and read policy (`policy.ts`) on top.
 //!
 //! Every real test is `#[ignore]` (it needs `sandbox_apply` and the built bundle); run on a real,
 //! unrestricted macOS host with:
@@ -29,7 +28,7 @@ use sourceweft_desktop::local_host::{
     readiness::{bundle_dir, SandboxReadiness},
     LocalHost,
 };
-use std::{fs, sync::Arc, time::Duration};
+use std::{fs, path::Path, sync::Arc, time::Duration};
 
 // ---------------------------------------------------------------------------------------------
 // Filesystem: writes and reads inside / outside the workspace.
@@ -152,16 +151,31 @@ fn keychains_are_unreadable() {
     let (_app, host) = host_with_bundle();
     let workspace = host.ensure_workspace("owner", "thread").unwrap();
     let home = home_dir();
+    // The control only means something if the file exists and is readable outside the sandbox
+    // (the system keychain is world-readable on macOS); otherwise the denial below is vacuous.
+    let system_keychain = Path::new("/Library/Keychains/System.keychain");
+    assert!(
+        fs::File::open(system_keychain).is_ok(),
+        "precondition: {system_keychain:?} must exist and be readable on the host"
+    );
     // ~/Library/Keychains (login keychain) and the system keychain: both denied, and none of
-    // their bytes may surface. No content is written anywhere by this test.
+    // their bytes may surface (the system keychain read goes to /dev/null; only a marker prints).
+    // No content is written anywhere by this test.
     let result = execute_denied(
         &host,
         "keychains",
         &workspace,
         &format!(
-            "ls {} 2>&1; cat /Library/Keychains/System.keychain 2>&1 | head -c0",
-            quoted(&home.join("Library/Keychains"))
+            "ls {} 2>&1; if cat {} >/dev/null 2>&1; then echo SYSTEM-KEYCHAIN-READ; \
+             else echo SYSTEM-KEYCHAIN-DENIED; fi",
+            quoted(&home.join("Library/Keychains")),
+            quoted(system_keychain)
         ),
+    );
+    assert!(
+        output(&result).contains("SYSTEM-KEYCHAIN-DENIED")
+            && !output(&result).contains("SYSTEM-KEYCHAIN-READ"),
+        "/Library/Keychains/System.keychain was readable: {result}"
     );
     assert!(
         output(&result).contains("Operation not permitted")

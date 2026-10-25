@@ -53,9 +53,13 @@ on a real, unrestricted macOS host; do not silently replace it with an unconfine
 execution test. Build the bundle first (Bun 1.4.2), then run the suite:
 
 ```sh
-cd apps/desktop/sandbox-sidecar && bun run build --rg "$(command -v rg)"
-cd - && cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test macos_sandbox -- --include-ignored --test-threads=1
+(cd apps/desktop/sandbox-sidecar && bun run build --rg "$(command -v rg)")
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test macos_sandbox -- --include-ignored --test-threads=1
 ```
+
+The same bundle also backs the other opt-in real tests (`--test macos_signing`,
+`--test local_execution`, `--test local_workspaces`, `--test local_binary_reads`), run with the same
+`-- --include-ignored --test-threads=1` flags.
 
 `hostname_to_loopback_blocked` also needs these `/etc/hosts` entries and fails with
 that instruction when they are missing:

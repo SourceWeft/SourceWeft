@@ -121,7 +121,7 @@ is no automatic migration of old DB Workfiles into user directories.
 Passed: backend and Web TypeScript checks; focused backend route/provider/assembly
 and filesystem tests; Web command-confirmation tests; sandbox file backend tests;
 VFS mount tests; interpreter tests; native workspace tests; PostgreSQL migration
-and trigger tests in a transaction-scoped isolated schema; real macOS sandbox
+and trigger tests in a transaction-scoped isolated schema; real macOS Seatbelt
 execution, cancellation, egress and filesystem boundary tests. The selected-folder
 integration test writes input through the native file API, executes in that
 folder, lists/edits the output, and reads a subsequent external edit.
