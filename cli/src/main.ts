@@ -14,6 +14,11 @@ import {
 } from "./commands/manage";
 import { agentsCommand } from "./commands/agents";
 import {
+  mcpInstallCommand,
+  mcpTestCommand,
+  parseClient,
+} from "./commands/mcp-install";
+import {
   mcpInspectCommand,
   mcpOAuthLogoutCommand,
   mcpSubmitToolsCommand,
@@ -40,6 +45,17 @@ Skills:
   skills remove <slug>      Remove an installed skill
   skills doctor             Check installed skills for problems
 
+MCP servers in the catalog:
+  mcp install <identifier> [--client claude-code|cursor|generic]
+               [--key-env NAME] [--write [--force]]
+                            Print the client config for a catalog server; with
+                            --write, merge it into ./.mcp.json or
+                            ./.cursor/mcp.json. A key is referenced by the NAME
+                            of an environment variable, never written.
+  mcp test <identifier> [--key-stdin | --oauth] [--yes]
+                            Connect to the server's catalog endpoint with your own
+                            credentials and list its tools (key on stdin)
+
 MCP server owners:
   mcp inspect (--url <url> [--header "Name: value"]... | --url <url> --oauth
                | --stdio "<command>")
@@ -63,6 +79,10 @@ Options:
   --category <slug>  Filter search by category
   --sort <sort>      recommended, popular, new or name
   --limit <n>        Number of search results
+  --client <id>      Client for mcp install: claude-code, cursor or generic (default)
+  --key-env <name>   Name of the environment variable that holds the key (mcp install)
+  --write            Merge the config into the project's client config file (mcp install)
+  --key-stdin        Read the key for mcp test from standard input, never an argument
   --url <url>        MCP Streamable HTTP endpoint to inspect
   --header <line>    "Name: value" sent on every request to --url (repeatable)
   --oauth            Sign in to --url with the server's OAuth in your browser
@@ -100,6 +120,10 @@ async function run(argv: string[]): Promise<number> {
         stdio: { type: "string" },
         oauth: { type: "boolean", default: false },
         "client-name": { type: "string" },
+        client: { type: "string" },
+        "key-env": { type: "string" },
+        "key-stdin": { type: "boolean", default: false },
+        write: { type: "boolean", default: false },
         out: { type: "string" },
         "api-key": { type: "string" },
         json: { type: "boolean", default: false },
@@ -151,6 +175,63 @@ async function run(argv: string[]): Promise<number> {
               : {}),
             ...(values.out !== undefined ? { out: values.out } : {}),
             force: values.force,
+            json: values.json,
+          },
+        );
+        return EXIT.ok;
+      }
+      case "install": {
+        const [identifier] = args;
+        if (!identifier || args.length > 1) {
+          throw new UsageError(
+            "Usage: sourceweft mcp install <identifier> [--client claude-code|cursor|generic] [--key-env NAME] [--write [--force]]",
+          );
+        }
+        const registry = normalizeRegistry(values.registry);
+        await mcpInstallCommand(
+          {
+            client: createRegistryClient(registry),
+            registry,
+            out,
+            notice: (line) => console.error(line),
+          },
+          {
+            identifier,
+            client: parseClient(values.client),
+            ...(values["key-env"] !== undefined
+              ? { keyEnv: values["key-env"] }
+              : {}),
+            write: values.write,
+            force: values.force,
+            json: values.json,
+          },
+        );
+        return EXIT.ok;
+      }
+      case "test": {
+        const [identifier] = args;
+        if (!identifier || args.length > 1) {
+          throw new UsageError(
+            "Usage: sourceweft mcp test <identifier> [--key-stdin | --oauth [--client-name <name>]] [--yes] [--json]",
+          );
+        }
+        const registry = normalizeRegistry(values.registry);
+        await mcpTestCommand(
+          {
+            client: createRegistryClient(registry),
+            registry,
+            out,
+            version: VERSION,
+            notice: (line) => console.error(line),
+            yes: values.yes,
+          },
+          {
+            identifier,
+            keyStdin: values["key-stdin"],
+            oauth: values.oauth,
+            ...(values["client-name"] !== undefined
+              ? { clientName: values["client-name"] }
+              : {}),
             json: values.json,
           },
         );

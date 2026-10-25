@@ -9,6 +9,8 @@ import {
   type SkillResponse,
   mcpOwnerOverridesResponseSchema,
   type McpOwnerOverridesResponse,
+  mcpManifestResponseSchema,
+  type McpManifestResponse,
 } from "./schema";
 
 /** The production marketplace API. `--registry` overrides it. */
@@ -211,6 +213,17 @@ export class RegistryClient {
     if (params.limit !== undefined) query.set("limit", String(params.limit));
     const suffix = query.size > 0 ? `?${query}` : "";
     return this.get(`/v1/skills${suffix}`, searchResponseSchema);
+  }
+
+  /**
+   * A public catalog server's latest manifest. The identifier holds a slash
+   * (`com.notion/mcp`) and travels as one path segment.
+   */
+  getMcpManifest(identifier: string): Promise<McpManifestResponse> {
+    return this.get(
+      `/v1/mcp/${encodeURIComponent(identifier)}/manifest`,
+      mcpManifestResponseSchema,
+    );
   }
 
   /**

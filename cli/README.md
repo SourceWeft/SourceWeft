@@ -37,6 +37,34 @@ The registry defaults to `https://api.sourceweft.com`; `--registry` points the
 command at another one. `list` and `doctor` are local. `remove` uses stored references locally; resolving a new alias for an older installation can query its original registry. `update`
 talks to the registry each skill was installed from.
 
+## Using an MCP server from the catalog
+
+```sh
+sourceweft mcp install com.example/mcp --client claude-code --key-env EXAMPLE_API_KEY
+sourceweft mcp install com.example/mcp --client claude-code --key-env EXAMPLE_API_KEY --write
+printf %s "$EXAMPLE_API_KEY" | sourceweft mcp test com.example/mcp --key-stdin --yes
+sourceweft mcp test com.example/mcp --oauth
+```
+
+`mcp install` reads the server's manifest from the registry and prints the
+`mcpServers` config for `--client claude-code`, `cursor` or `generic` (the
+default, with placeholders). It prints by default; `--write` merges it into
+`./.mcp.json` or `./.cursor/mcp.json`, keeping everything else in the file,
+doing nothing when the server is already there, and refusing to replace a
+different server under the same key without `--force`. A key is never taken on
+the command line: `--key-env NAME` names an environment variable and the config
+refers to it (`${NAME}`, or `${env:NAME}` for Cursor); the CLI does not read it.
+A server that runs as a local process has no recorded launch command, so there
+is nothing to print for it.
+
+`mcp test` connects to the endpoint the manifest names — https only, never a
+private address — with your own credentials, and lists the tools. A key comes
+from standard input (`--key-stdin`) and is sent only to that origin, after you
+agree to it (`--yes` agrees; without a terminal and without `--yes` the command
+stops with exit code 4). `--oauth` signs in the way `mcp inspect --oauth` does.
+Tool names and descriptions are printed as the server wrote them, minus control
+characters.
+
 ## MCP owners
 
 If you publish an MCP server listed in the SourceWeft catalog and have claimed

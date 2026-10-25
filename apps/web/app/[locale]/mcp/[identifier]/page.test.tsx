@@ -1531,3 +1531,32 @@ describe("public MCP detail page tool change log", () => {
     expect(changeLog(await render())).toBeUndefined();
   });
 });
+
+describe("public MCP detail page agent prompt", () => {
+  it("offers a prompt that points an agent at the server's install guide", async () => {
+    const html = await render();
+    const guide = `${SITE_URL}/mcp/${encodeURIComponent(IDENTIFIER)}/install.md`;
+    expect(html).toContain("Use with an agent");
+    // The prompt is shown, copyable, and holds the guide's address once.
+    expect(html).toContain(`Read ${guide} and connect the MCP server it describes`);
+    expect(html).toContain("Never put an API key in a command");
+    // The link is the real, unprefixed file, kept out of the index.
+    expect(html).toMatch(
+      new RegExp(`<a[^>]*href="/mcp/${encodeURIComponent(IDENTIFIER)}/install.md"[^>]*rel="nofollow"`),
+    );
+  });
+
+  it("offers none for a server with no remote endpoint to configure", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        manifest: {
+          ...manifestResponse.manifest,
+          endpointUrl: undefined,
+          transport: "stdio",
+        },
+      }),
+    );
+    expect(await render()).not.toContain("Use with an agent");
+  });
+});
