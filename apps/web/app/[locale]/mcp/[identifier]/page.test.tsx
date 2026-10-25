@@ -695,6 +695,29 @@ describe("public MCP detail page security note", () => {
     expect(matched).toContain("does not make the server's tools safe");
     const mismatched = securityNote(await withPublisher(false));
     expect(mismatched).toContain("endpoint is not on that domain");
+    // A package with a domain namespace has no endpoint to match.
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: {
+          ...manifestResponse.item,
+          identifier: "com.notion/pkg",
+          publisher: {
+            domain: "notion.com",
+            source: "registry-namespace",
+            endpointMatch: false,
+          },
+        },
+        manifest: {
+          ...manifestResponse.manifest,
+          endpointUrl: undefined,
+          transport: "stdio",
+        },
+      }),
+    );
+    const stdioNote = securityNote(await render());
+    expect(stdioNote).toContain("no endpoint to match against that domain");
+    expect(stdioNote).not.toContain("endpoint is not on that domain");
     // No domain, no GitHub namespace: nothing was verified.
     market.getPublicMcpManifest.mockResolvedValue(
       getMarketMcpManifestResponseSchema.parse({
@@ -705,7 +728,7 @@ describe("public MCP detail page security note", () => {
     expect(securityNote(await render())).toContain(
       "has not verified who publishes this server",
     );
-    for (const note of [github, matched, mismatched]) {
+    for (const note of [github, matched, mismatched, stdioNote]) {
       expect(note).not.toContain("is safe");
       expect(note).not.toContain("Unverified listings are allowed");
       expect(note).toContain("do not review the server's code");
@@ -1135,6 +1158,36 @@ describe("public MCP detail page Score section", () => {
     expect(license).not.toContain("Declare a license");
   });
 
+  it("treats an answer without the applicable flag as applicable", async () => {
+    const legacy = score("B", ["reachable", "authDeclared", "hasDescription"]);
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: {
+        ...legacy,
+        items: legacy.items.map((item) => {
+          const copy: Record<string, unknown> = { ...item };
+          delete copy.applicable;
+          return copy;
+        }),
+      },
+      versions: [],
+    });
+    const section = scoreSection(await render())!;
+    expect(section).not.toContain("Not applicable");
+    expect(section).toContain('data-score-applicable="true"');
+  });
+
+  it("announces the percentage once", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: score("B", ["reachable"]),
+      versions: [],
+    });
+    const section = scoreSection(await render())!;
+    expect(section).toMatch(/aria-hidden="true"[^>]*>25%</);
+    expect([...section.matchAll(/25%/g)]).toHaveLength(2);
+  });
+
   it("shows no Score section when the market has no score", async () => {
     const html = await render();
     expect(scoreSection(html)).toBeUndefined();
@@ -1178,10 +1231,20 @@ describe("public MCP detail page top card", () => {
     });
     const card = topCard(await render());
     expect(card).toContain("Sign-in required");
-    expect(card).toContain("could not read its tools anonymously");
+    expect(card).toContain("could not read its tools without an account");
     // Signing in is not promised to reveal them.
-    expect(card).toContain("may show tools");
+    expect(card).not.toMatch(/may show tools|will show|reveal/i);
     expect(card).not.toMatch(/<dd[^>]*>0<\/dd>/);
+  });
+
+  it("calls an API-key endpoint a credential, not a sign-in", async () => {
+    use({
+      manifest: { tools: [] },
+      provenanceJson: { authProbe: { result: "credential" } },
+    });
+    const card = topCard(await render());
+    expect(card).toContain("Credential required");
+    expect(card).not.toContain("Sign-in required");
   });
 
   it("separates tools not indexed, read and empty, not validated and failed", async () => {

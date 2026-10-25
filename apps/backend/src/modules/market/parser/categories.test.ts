@@ -73,13 +73,40 @@ test("classifyByText keyword-classifies plain text and pins explicit slugs", () 
   assert.deepEqual(classifyByText("zzz qqq"), ["other"]);
 });
 
-test("classifyByText files nothing from a text too thin to place a server", () => {
-  // A name and a word or two: the Notion-like registry entry.
-  assert.deepEqual(classifyByText("Notion MCP Server (Hosted)"), ["other"]);
-  assert.deepEqual(classifyByText("Postgres"), ["other"]);
+test("classifyByText files nothing from a text with no evidence", () => {
+  // A hosted product's name and a word or two: the Notion-like registry entry
+  // names no category.
+  assert.deepEqual(classifyByText("MCP Server (Hosted)"), ["other"]);
+  assert.deepEqual(classifyByText("server API"), ["other"]);
   assert.deepEqual(classifyByText(""), ["other"]);
   // Explicit categories survive however thin the text.
-  assert.deepEqual(classifyByText("Postgres", ["databases"]), ["databases"]);
+  assert.deepEqual(classifyByText("x", ["databases"]), ["databases"]);
+});
+
+test("classifyByText keeps the short texts that name a specific thing", () => {
+  // A re-sync rewrites auto categories with this rule: a correct category
+  // from a short text must not fall to "other".
+  const cases: Array<[string, string]> = [
+    ["Playwright browser automation", "browser-automation"],
+    ["PostgreSQL database access", "databases"],
+    ["Slack", "communication-collaboration"],
+    ["Query Postgres", "databases"],
+    ["Create and review pull requests", "developer-tools"],
+    ["Manage Shopify orders", "business-commerce"],
+  ];
+  for (const [text, expected] of cases) {
+    assert.ok(classifyByText(text).includes(expected), `${text} → ${expected}`);
+  }
+});
+
+test("classifyByText ignores boilerplate that every remote server says", () => {
+  assert.deepEqual(
+    classifyByText("MCP server with streamable HTTP transport and OAuth"),
+    ["other"],
+  );
+  assert.deepEqual(classifyByText("Hosted LLM gateway over linear workflows"), [
+    "other",
+  ]);
 });
 
 test("classifyByText needs a specific keyword or two different generic ones", () => {

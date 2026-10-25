@@ -625,10 +625,10 @@
         "github": "The registry verified the GitHub account {owner} for this listing. That does not show the account is the product's maker.",
         "unknown": "SourceWeft has not verified who publishes this server.",
         "claimed": "A verified owner manages this listing; that does not make the server's tools safe either.",
-        "scope": "SourceWeft's checks cover whether the listing is complete and the endpoint answered; they do not review the server's code or what its tools do."
+        "scope": "SourceWeft's checks cover whether the listing is complete and the endpoint answered; they do not review the server's code or what its tools do.",
+        "domainNoEndpoint": "The registry verified that this server's namespace belongs to {domain}. It runs from a package rather than a hosted endpoint, so there is no endpoint to match against that domain."
       },
       "publishedByGithub": "Published by GitHub account {owner}",
-      "officialPublisherMark": "Official publisher",
       "delivery": "Delivery",
       "hostedService": "Hosted service",
       "integrationsShowMore": "Show more"
@@ -708,15 +708,17 @@
         "authRequired": "Sign-in required",
         "notValidated": "Not validated yet",
         "empty": "No tools",
-        "unindexed": "Not indexed yet"
+        "unindexed": "Not indexed yet",
+        "credentialRequired": "Credential required"
       },
       "explain": {
         "partial": "SourceWeft lists at most {count} tools per server, so there may be more than shown.",
-        "authRequired": "This server asks for credentials, so SourceWeft could not read its tools anonymously and has not indexed them. Connecting your own account may show tools; what you see can depend on the account and its permissions.",
+        "authRequired": "This server asks you to sign in, so SourceWeft could not read its tools without an account and has not indexed them. What a connected account sees can depend on that account and its permissions.",
         "failed": "SourceWeft started this package once in an isolated sandbox, without credentials, to list its tools. That failed: {reason}.",
         "notValidated": "SourceWeft has not started this package in its sandbox yet, so its tools are not known.",
         "empty": "SourceWeft read this server and it lists no tools.",
-        "unindexed": "SourceWeft has not read this server's tools yet."
+        "unindexed": "SourceWeft has not read this server's tools yet.",
+        "credentialRequired": "This server asks for a credential such as an API key, so SourceWeft could not read its tools without one and has not indexed them."
       }
     }
   },

@@ -247,11 +247,17 @@ describe("public MCP card", () => {
     const authRequired = await card(
       item({ requiresAuth: true, transport: "streamable_http" }),
     );
-    expect(authRequired).toContain("Sign-in required");
-    expect(authRequired).toContain('data-tools-status="authRequired"');
+    expect(authRequired).toContain("Credential required");
+    expect(authRequired).toContain('data-tools-status="credentialRequired"');
     expect(authRequired).not.toContain("0 tools");
     const unindexed = await card(item({ transport: "streamable_http" }));
     expect(unindexed).toContain("Not indexed yet");
+    // Not a warning: most remote cards have no tool list.
+    expect(
+      /data-tools-status="unindexed"[^>]*>([\s\S]*?)<\/span><\/span>/.exec(
+        unindexed,
+      )?.[1],
+    ).not.toContain("lucide-triangle-alert");
     expect(unindexed).not.toContain("0 tools");
     const stdio = await card(item({ transport: "stdio" }));
     expect(stdio).toContain("Not validated yet");

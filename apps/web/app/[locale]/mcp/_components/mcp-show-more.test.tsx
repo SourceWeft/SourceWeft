@@ -12,9 +12,9 @@ afterEach(async () => {
 
 function cards(count: number) {
   return Array.from({ length: count }, (_, index) => (
-    <article data-card key={index}>
+    <a data-card href={`#card-${index + 1}`} key={index}>
       Card {index + 1}
-    </article>
+    </a>
   ));
 }
 
@@ -28,9 +28,12 @@ describe("McpShowMore", () => {
     expect(container.querySelectorAll("[data-card]")).toHaveLength(5);
     expect(container.textContent).toContain("Card 5");
     expect(container.textContent).not.toContain("Card 6");
+    expect(button("Show more").getAttribute("aria-expanded")).toBe("false");
     await click(button("Show more"));
     expect(container.querySelectorAll("[data-card]")).toHaveLength(8);
     expect(container.querySelector("button")).toBeNull();
+    // The control is gone: focus lands on the first card it revealed.
+    expect(document.activeElement?.textContent).toBe("Card 6");
   });
 
   it("has no control, and says no total, when everything fits", async () => {

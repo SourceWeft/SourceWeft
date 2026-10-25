@@ -1,5 +1,6 @@
-import type {
-  MarketItemSummary,
+import {
+  MARKET_MCP_INSPECT_LIMITS,
+  type MarketItemSummary,
   MarketItemVersion,
   McpStdioValidationReason,
 } from "@sourceweft/market-contracts";
@@ -17,8 +18,10 @@ export type McpToolsStatus =
   | { kind: "listed"; count: number }
   /** The listing stops at the cap: there may be more than shown. */
   | { kind: "partial"; count: number }
-  /** The endpoint asks for credentials, so nothing was listed anonymously. */
+  /** The endpoint asks users to sign in (OAuth): nothing was listed anonymously. */
   | { kind: "authRequired" }
+  /** The endpoint asks for a credential such as an API key: likewise. */
+  | { kind: "credentialRequired" }
   /** A stdio package the sandbox could not start or list. */
   | { kind: "failed"; reason: McpStdioValidationReason }
   /** A stdio package the sandbox has not tried yet. */
@@ -28,8 +31,8 @@ export type McpToolsStatus =
   /** A remote the index has not listed (yet). */
   | { kind: "unindexed" };
 
-/** Listings are cut here (`MCP_TOOL_LISTING_LIMITS.tools`, the owner cap). */
-export const MCP_TOOLS_LISTING_CAP = 200;
+/** Listings are cut here: the same cap as an owner's submitted tool list. */
+export const MCP_TOOLS_LISTING_CAP = MARKET_MCP_INSPECT_LIMITS.tools;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -63,18 +66,18 @@ export function mcpToolsStatus(input: {
 
   const probe = isRecord(provenance?.authProbe) ? provenance.authProbe : null;
   const probeResult = typeof probe?.result === "string" ? probe.result : null;
-  if (probeResult === "credential" || probeResult === "oauth") {
-    return { kind: "authRequired" };
-  }
+  if (probeResult === "oauth") return { kind: "authRequired" };
+  if (probeResult === "credential") return { kind: "credentialRequired" };
   const listing = isRecord(provenance?.toolsListing)
     ? provenance.toolsListing
     : null;
   if (listing && listing.toolsCount === 0 && typeof listing.listedAt === "string") {
     return { kind: "empty" };
   }
-  // Without a stored probe (a list answer) the summary's flag is all there is.
+  // Without a stored probe (a list answer) the summary's flag is all there
+  // is, and it does not say OAuth from key: the neutral wording.
   if (probeResult === null && input.item.requiresAuth) {
-    return { kind: "authRequired" };
+    return { kind: "credentialRequired" };
   }
   return { kind: "unindexed" };
 }

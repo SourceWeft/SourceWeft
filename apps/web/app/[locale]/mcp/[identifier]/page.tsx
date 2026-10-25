@@ -713,9 +713,11 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   <p data-security-provenance>
                     {item.publisher
                       ? t(
-                          item.publisher.endpointMatch
-                            ? "security.domain"
-                            : "security.domainOther",
+                          !manifest.endpointUrl
+                            ? "security.domainNoEndpoint"
+                            : item.publisher.endpointMatch
+                              ? "security.domain"
+                              : "security.domainOther",
                           { domain: item.publisher.domain },
                         )
                       : githubAccount

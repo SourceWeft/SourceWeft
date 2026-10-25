@@ -115,17 +115,28 @@ const weakKeywords = new Set([
   "canvas", "creative", "location", "map", "maps", "local", "health", "place",
   "places", "ai", "ml", "model", "agent", "claude", "gemini", "inference",
   "embedding", "page content", "project management", "web search",
-  "machine learning", "geo",
+  "machine learning", "geo", "oauth", "transport", "llm", "linear", "retrieval",
+  "secret", "scanner", "compliance", "speech",
 ]);
 
-/** Fewer words than this say too little to file a server anywhere. */
-const MIN_CLASSIFIABLE_WORDS = 5;
+/**
+ * Generic words alone need a text of at least this many words: two of them in
+ * a very short text ("server API") are a coincidence, not a description. A
+ * specific keyword is evidence in any length ("Slack", "Playwright browser
+ * automation").
+ */
+const MIN_WORDS_FOR_GENERIC_EVIDENCE = 5;
 
 function categoryEvidence(patterns: RegExp[], haystack: string) {
   const strong = new Set<string>();
   const weak = new Set<string>();
   for (const pattern of patterns) {
-    const global = new RegExp(pattern.source, "g");
+    // Plural forms too ("pull requests", "databases"): the suffix sits
+    // outside the keyword's capture group.
+    const global = new RegExp(
+      pattern.source.replace(/\)\\b$/, ")(?:s|es)?\\b"),
+      "g",
+    );
     for (const match of haystack.matchAll(global)) {
       const keyword = (match[1] ?? match[0]).toLowerCase();
       (weakKeywords.has(keyword) ? weak : strong).add(keyword);
@@ -141,10 +152,10 @@ function categoryEvidence(patterns: RegExp[], haystack: string) {
  * submission parser (rich repo text) and registry federation
  * (name/title/description).
  *
- * A guess needs evidence: a text of fewer than five words files nothing, and a
- * category qualifies only through one specific keyword (a product or
- * technology name) or two different generic ones, never through a single
- * generic word such as "server" or "search".
+ * A guess needs evidence: a category qualifies through one specific keyword (a
+ * product or technology name) or through two different generic ones in a text
+ * of at least five words, never through a single generic word such as
+ * "server" or "search".
  */
 export function classifyByText(
   text: string,
@@ -160,18 +171,17 @@ export function classifyByText(
 
   const haystack = text.toLowerCase();
   const words = haystack.match(/[\p{L}\p{N}]+/gu) ?? [];
-  if (words.length >= MIN_CLASSIFIABLE_WORDS) {
-    for (const category of mcpCategoryDefinitions) {
-      if (category.slug === "other" || ordered.has(category.slug)) {
-        continue;
-      }
-      const { strong, weak } = categoryEvidence(
-        categoryKeywords.get(category.slug) ?? [],
-        haystack,
-      );
-      if (strong >= 1 || weak >= 2) {
-        ordered.set(category.slug, strong * 2 + weak);
-      }
+  const genericEvidenceAllowed = words.length >= MIN_WORDS_FOR_GENERIC_EVIDENCE;
+  for (const category of mcpCategoryDefinitions) {
+    if (category.slug === "other" || ordered.has(category.slug)) {
+      continue;
+    }
+    const { strong, weak } = categoryEvidence(
+      categoryKeywords.get(category.slug) ?? [],
+      haystack,
+    );
+    if (strong >= 1 || (genericEvidenceAllowed && weak >= 2)) {
+      ordered.set(category.slug, strong * 2 + weak);
     }
   }
 

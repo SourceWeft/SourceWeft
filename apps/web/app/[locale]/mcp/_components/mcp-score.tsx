@@ -14,13 +14,20 @@ import type { MarketMcpScore } from "@sourceweft/market-contracts";
 // `useTranslations` reads the request's messages in a server component too.
 export function McpScoreCard({ score }: { score: MarketMcpScore }) {
   const t = useTranslations("mcp.score");
+  // `applicable` is absent in answers cached before it existed: only an
+  // explicit false means "does not apply".
+  const applies = (item: MarketMcpScore["items"][number]) =>
+    item.applicable !== false;
   return (
     <div
       className="rounded-xl border border-zinc-300 bg-white/58 p-5 dark:border-white/10 dark:bg-white/[0.03]"
       data-score-percentage={score.percentage}
     >
       <div className="flex items-center gap-4">
-        <p className="shrink-0 text-4xl font-semibold tabular-nums">
+        <p
+          aria-hidden="true"
+          className="shrink-0 text-4xl font-semibold tabular-nums"
+        >
           {score.percentage}%
         </p>
         <div className="min-w-0">
@@ -36,13 +43,13 @@ export function McpScoreCard({ score }: { score: MarketMcpScore }) {
         {score.items.map((item) => (
           <li
             className="py-3"
-            data-score-applicable={item.applicable}
+            data-score-applicable={applies(item)}
             data-score-item={item.key}
             data-score-met={item.met}
             key={item.key}
           >
             <div className="flex items-center gap-3 text-sm">
-              {!item.applicable ? (
+              {!applies(item) ? (
                 <Minus
                   aria-label={t("notApplicable")}
                   className="size-4 shrink-0 text-zinc-400"
@@ -70,12 +77,12 @@ export function McpScoreCard({ score }: { score: MarketMcpScore }) {
                 </span>
               ) : null}
               <span className="ml-auto shrink-0 tabular-nums text-zinc-500">
-                {item.applicable
+                {applies(item)
                   ? t("weight", { weight: item.weight })
                   : t("notApplicable")}
               </span>
             </div>
-            {!item.applicable ? (
+            {!applies(item) ? (
               <p className="mt-1.5 pl-7 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                 {t(`items.${item.key}.notApplicableHint` as never)}
               </p>

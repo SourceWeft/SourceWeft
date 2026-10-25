@@ -432,7 +432,11 @@ export async function McpMarketCard({
             }
             title={statusText.explain}
           >
-            <AlertTriangle className="size-3.5 shrink-0" />
+            {status.kind === "failed" ? (
+              <AlertTriangle className="size-3.5 shrink-0" />
+            ) : (
+              <Code2 className="size-3.5 shrink-0" />
+            )}
             <span className="truncate">{statusText.label}</span>
           </span>
         )}

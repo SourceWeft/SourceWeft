@@ -14,16 +14,24 @@ const GENERIC_TERMS = new Set([
   "services", "integration", "integrations", "official", "hosted", "remote",
   "local", "access", "manage", "provides", "provide", "allows", "allow",
   "enables", "enable", "llm", "llms", "agent", "agents", "client",
-  "clients", "data", "platform", "based", "built", "simple", "easy", "new",
+  "clients", "registry", "github", "data", "platform", "based", "built", "simple", "easy", "new",
 ].map((term) => term.toLowerCase()));
 
 const MIN_TERM_LENGTH = 3;
 /** Distinct meaningful words two listings must share to be called related. */
 export const MCP_RELATED_MIN_SHARED_TERMS = 2;
 
+/**
+ * Federation fills the summary of an entry whose registry text has none with
+ * a placeholder ("MCP server <identifier> from the MCP registry."): it says
+ * nothing about the server, so it never counts as text.
+ */
+const PLACEHOLDER_SUMMARY = /^\s*MCP server \S+ from the MCP registry\.?\s*$/i;
+
 export function mcpMeaningfulTerms(...texts: Array<string | null | undefined>) {
   const terms = new Set<string>();
   for (const text of texts) {
+    if (text && PLACEHOLDER_SUMMARY.test(text)) continue;
     for (const term of (text ?? "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ??
       []) {
       if (term.length >= MIN_TERM_LENGTH && !GENERIC_TERMS.has(term)) {

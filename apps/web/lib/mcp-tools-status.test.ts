@@ -22,17 +22,23 @@ describe("mcpToolsStatus", () => {
   });
 
   it("never says zero for a remote that asks for credentials", () => {
-    for (const result of ["credential", "oauth"]) {
-      expect(
-        mcpToolsStatus({
-          item: remote,
-          provenanceJson: { authProbe: { result } },
-        }),
-      ).toEqual({ kind: "authRequired" });
-    }
-    // A list answer has no provenance: the summary's flag stands in.
+    expect(
+      mcpToolsStatus({
+        item: remote,
+        provenanceJson: { authProbe: { result: "oauth" } },
+      }),
+    ).toEqual({ kind: "authRequired" });
+    // An API-key endpoint is not "sign in".
+    expect(
+      mcpToolsStatus({
+        item: remote,
+        provenanceJson: { authProbe: { result: "credential" } },
+      }),
+    ).toEqual({ kind: "credentialRequired" });
+    // A list answer has no provenance: the summary's flag stands in, and it
+    // cannot tell OAuth from a key.
     expect(mcpToolsStatus({ item: { ...remote, requiresAuth: true } })).toEqual(
-      { kind: "authRequired" },
+      { kind: "credentialRequired" },
     );
   });
 

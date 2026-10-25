@@ -50,6 +50,25 @@ describe("relatedMcpItems", () => {
     expect(relatedMcpItems({ candidates: [current], current })).toEqual([]);
   });
 
+  it("does not relate servers by federation's placeholder summary", () => {
+    const placeholder = (identifier: string) =>
+      `MCP server ${identifier} from the MCP registry.`;
+    const left = entry("io.github.a/one", "One", placeholder("io.github.a/one"));
+    expect(mcpMeaningfulTerms(left.name, left.summary)).toEqual(
+      new Set(["one"]),
+    );
+    expect(
+      relatedMcpItems({
+        candidates: [
+          entry("io.github.b/two", "Two", placeholder("io.github.b/two")),
+        ],
+        current: left,
+      }),
+    ).toEqual([]);
+    // "github" and "registry" are generic even in real text.
+    expect([...mcpMeaningfulTerms("GitHub registry tools")]).toEqual([]);
+  });
+
   it("honors the limit", () => {
     const candidates = Array.from({ length: 6 }, (_, index) =>
       entry(`b/${index}`, "Calendar Events", "Calendar events"),

@@ -625,10 +625,10 @@
         "github": "註冊中心已驗證此條目所屬的 GitHub 帳號 {owner}。這並不表明該帳號就是產品方。",
         "unknown": "SourceWeft 尚未驗證誰發布了此服務。",
         "claimed": "已驗證的擁有者管理著此條目；這同樣不代表該服務的工具是安全的。",
-        "scope": "SourceWeft 的檢查只涵蓋條目是否完整、端點是否回應；不審查伺服器的程式碼，也不審查其工具的行為。"
+        "scope": "SourceWeft 的檢查只涵蓋條目是否完整、端點是否回應；不審查伺服器的程式碼，也不審查其工具的行為。",
+        "domainNoEndpoint": "註冊中心已驗證此服務的命名空間屬於 {domain}。它以軟體包形式執行，而不是託管端點，因此沒有可與該網域比對的端點。"
       },
       "publishedByGithub": "由 GitHub 帳號 {owner} 發布",
-      "officialPublisherMark": "官方發布者",
       "delivery": "交付方式",
       "hostedService": "託管服務",
       "integrationsShowMore": "顯示更多"
@@ -708,15 +708,17 @@
         "authRequired": "需要登入",
         "notValidated": "尚未驗證",
         "empty": "沒有工具",
-        "unindexed": "尚未收錄"
+        "unindexed": "尚未收錄",
+        "credentialRequired": "需要憑證"
       },
       "explain": {
         "partial": "SourceWeft 對每個伺服器最多列出 {count} 個工具，因此實際可能不止這些。",
-        "authRequired": "該伺服器需要憑證，因此 SourceWeft 無法匿名讀取其工具，也未收錄。連接你自己的帳號後也許能看到工具；具體內容可能因帳號及其權限而異。",
+        "authRequired": "該伺服器需要登入，因此 SourceWeft 無法在沒有帳號的情況下讀取其工具，也未收錄。已連接帳號所能看到的內容可能因帳號及其權限而異。",
         "failed": "SourceWeft 曾在隔離沙箱中以無憑證方式啟動該軟體包一次，以列出其工具，但未能完成：{reason}。",
         "notValidated": "SourceWeft 尚未在沙箱中啟動過該軟體包，因此其工具未知。",
         "empty": "SourceWeft 已讀取該伺服器，它沒有列出任何工具。",
-        "unindexed": "SourceWeft 尚未讀取此伺服器的工具。"
+        "unindexed": "SourceWeft 尚未讀取此伺服器的工具。",
+        "credentialRequired": "該伺服器需要 API 金鑰等憑證，因此 SourceWeft 無法在沒有憑證的情況下讀取其工具，也未收錄。"
       }
     }
   },

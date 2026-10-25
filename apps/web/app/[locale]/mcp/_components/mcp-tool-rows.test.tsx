@@ -129,8 +129,11 @@ describe("McpToolRows", () => {
   it("explains an empty list by why it is empty", async () => {
     const authRequired = await empty({ kind: "authRequired" });
     expect(authRequired).toContain('data-tools-status="authRequired"');
-    expect(authRequired).toContain("could not read its tools anonymously");
-    expect(authRequired).toContain("may show tools");
+    expect(authRequired).toContain("could not read its tools without an account");
+    expect(authRequired).not.toMatch(/may show tools|will show|reveal/i);
+    expect(await empty({ kind: "credentialRequired" })).toContain(
+      "such as an API key",
+    );
     expect(authRequired).not.toMatch(/\bno tools\b/i);
     expect(await empty({ kind: "unindexed" })).toContain(
       "has not read this server&#x27;s tools yet",
