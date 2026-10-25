@@ -31,6 +31,9 @@ driven by a small helper called the sandbox runtime):
 - Linux **x86_64**. No sandbox runtime is published for other architectures: on them the app
   reports "No sandbox runtime is published for this platform." with no action to take.
   Windows reports local execution as unavailable.
+- An x86-64 CPU with SSE4.2 (any Intel or AMD processor from about 2009 onwards). The
+  sandbox runtime is a Bun-compiled executable; since Bun 1.4 its x64 build targets
+  Nehalem (SSE4.2) and picks AVX2 code at run time, so AVX2 is **not** required.
 - A desktop session. The app is a graphical application.
 - A Secret Service keyring (GNOME Keyring, KWallet, ...) that is running and unlocked. The
   app keeps this device's credentials there and has no file-based fallback.
@@ -62,7 +65,16 @@ which stops ordinary programs, bubblewrap included, from creating the user names
 sandbox needs. The usual workaround is to loosen the system-wide setting or to give
 `/usr/bin/bwrap` a profile, which affects every program that calls it. SourceWeft instead
 gives a private copy its own profile. The script **never** modifies `/usr/bin/bwrap`, any
-other AppArmor profile, or any sysctl; the restriction stays in force for everything else.
+other AppArmor profile, or any sysctl, so the restriction still applies to every other
+program, including `/usr/bin/bwrap`.
+
+The trade-off is that the profile is attached to the file, not to SourceWeft: the copy is
+world-executable, so **any local process or user that runs
+`/opt/sourceweft/libexec/bwrap` can create user namespaces**, which is exactly what the
+restriction otherwise withholds from unprivileged programs. It is a deliberate, narrow
+exception, not a system-wide change. If that is not acceptable, do not
+install the profile (remove the package or run the setup script's uninstall) and keep local
+execution disabled on that machine.
 
 The same step runs again on every package upgrade, so the copy follows the system
 `bubblewrap`. If you update the `bubblewrap` package on its own, the copy is not refreshed
