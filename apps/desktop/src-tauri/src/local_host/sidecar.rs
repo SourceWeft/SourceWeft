@@ -5,7 +5,10 @@
 //! `local_host::process::run_wrapped`) or know where the sidecar bundle lives on disk
 //! (a later task supplies `bundle: &Path`).
 #![allow(dead_code)] // Wired up by a later task; keep the whole client warning-free until then.
-use super::{HostError, Result};
+use super::{
+    network::{AskEvent, NetworkPolicy},
+    HostError, Result,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -15,7 +18,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError},
-        Mutex,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -77,6 +80,9 @@ enum Request<'a> {
         command: String,
         cwd: String,
         workspace_root: String,
+        /// Absent means "no policy", which the sidecar treats as `open`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        network: Option<&'a NetworkPolicy>,
     },
     #[serde(rename = "violations", rename_all = "camelCase")]
     Violations {
@@ -86,6 +92,16 @@ enum Request<'a> {
     },
     #[serde(rename = "cleanup", rename_all = "camelCase")]
     Cleanup { id: String, command_id: String },
+    #[serde(rename = "audit", rename_all = "camelCase")]
+    Audit { id: String, command_id: String },
+    #[serde(rename = "ask.reply", rename_all = "camelCase")]
+    AskReply {
+        id: String,
+        ask_id: &'a str,
+        allow: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<&'a str>,
+    },
     #[serde(rename = "probe")]
     Probe { id: String },
     #[serde(rename = "shutdown")]
@@ -140,19 +156,163 @@ fn path_to_string(path: &Path) -> Result<String> {
     })
 }
 
-/// The live stdin/stdout half of the connection, held behind the same lock so only one
-/// request is ever in flight per `Sidecar`.
+/// What became of an `ask.reply` sent through [`Sidecar::ask_reply`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AskReplyOutcome {
+    Delivered,
+    /// The sidecar had no such pending ask (late answer after its own timeout, or a repeat).
+    UnknownAsk,
+}
+
+/// An unsolicited line from the sidecar: it carries `event` instead of `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "event")]
+pub(crate) enum SidecarEvent {
+    /// A connection that matched no rule; the command keeps running until it is answered.
+    #[serde(rename = "ask")]
+    Ask(AskEvent),
+}
+
+/// Receives sidecar events on the reader thread, together with a handle to answer asks.
+/// **It must not block**: a slow handler stalls every reply behind it. Hand long work (such as
+/// waiting for a human) to another thread and answer through the [`AskResponder`] later.
+pub(crate) type EventHandler = Arc<dyn Fn(SidecarEvent, AskResponder) + Send + Sync>;
+
+/// Sends `ask.reply` from threads other than the request/reply caller (the reader thread and
+/// whatever thread the event handler hands the ask to). Requests it originates are
+/// fire-and-forget: they carry ids prefixed `ev-`, which the reader thread recognises on the
+/// way back and drops instead of delivering to the one in-flight caller, so they can never
+/// desynchronize the request/reply pairing.
+#[derive(Clone)]
+pub(crate) struct AskResponder {
+    stdin: Arc<Mutex<ChildStdin>>,
+    next: Arc<AtomicU64>,
+}
+
+const EVENT_REPLY_PREFIX: &str = "ev-";
+
+impl AskResponder {
+    pub(crate) fn reply(&self, ask_id: &str, allow: bool, reason: Option<&str>) -> Result<()> {
+        let id = format!(
+            "{EVENT_REPLY_PREFIX}{}",
+            self.next.fetch_add(1, Ordering::SeqCst)
+        );
+        write_request(
+            &self.stdin,
+            &Request::AskReply {
+                id,
+                ask_id,
+                allow,
+                reason,
+            },
+        )
+        .map_err(|message| HostError::new("SANDBOX_UNAVAILABLE", message))
+    }
+}
+
+/// Serialises `request` and writes it as one line. The lock is held for the whole line, so
+/// concurrent writers (a caller and an `AskResponder`) never interleave.
+fn write_request(
+    stdin: &Mutex<ChildStdin>,
+    request: &Request,
+) -> std::result::Result<(), String> {
+    let mut line = serde_json::to_string(request)
+        .map_err(|error| format!("failed to encode sidecar request: {error}"))?;
+    line.push('\n');
+    let mut stdin = stdin
+        .lock()
+        .map_err(|_| "sidecar stdin lock was poisoned".to_string())?;
+    stdin
+        .write_all(line.as_bytes())
+        .and_then(|()| stdin.flush())
+        .map_err(|error| format!("failed to write to sidecar: {error}"))
+}
+
+/// The reply half of the connection, held behind its own lock so only one request is ever in
+/// flight per `Sidecar`. (Stdin is shared separately, so events can be answered meanwhile.)
 struct Connection {
-    stdin: ChildStdin,
     replies: Receiver<String>,
+}
+
+/// What the reader thread makes of one stdout line.
+enum Line {
+    Event(serde_json::Value),
+    /// The reply to a request the reader/handler side sent itself; nobody is waiting for it.
+    /// Carries the sidecar's error message when that reply was a failure.
+    Orphan(Option<String>),
+    /// Anything else, including unparseable text: the in-flight caller judges it, exactly as
+    /// before events existed.
+    Reply,
+}
+
+fn classify(line: &str) -> Line {
+    match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(value) if value.get("event").is_some() => Line::Event(value),
+        Ok(value)
+            if value
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| id.starts_with(EVENT_REPLY_PREFIX)) =>
+        {
+            let failure = (value.get("ok") == Some(&serde_json::Value::Bool(false))).then(|| {
+                value
+                    .pointer("/error/message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unspecified error")
+                    .to_string()
+            });
+            Line::Orphan(failure)
+        }
+        _ => Line::Reply,
+    }
+}
+
+fn dispatch_event(
+    value: serde_json::Value,
+    handler: &Option<EventHandler>,
+    responder: &AskResponder,
+) {
+    let event: SidecarEvent = match serde_json::from_value(value) {
+        Ok(event) => event,
+        Err(error) => {
+            eprintln!("sourceweft-desktop: ignoring unknown sidecar event: {error}");
+            return;
+        }
+    };
+    match handler {
+        Some(handler) => {
+            let responder = responder.clone();
+            let handler = handler.clone();
+            // A panicking handler must not kill the reader thread (that would fail every
+            // later call); the ask it dropped is denied by the sidecar's own timeout.
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                handler(event, responder)
+            }));
+            if outcome.is_err() {
+                eprintln!("sourceweft-desktop: sidecar event handler panicked");
+            }
+        }
+        None => {
+            let SidecarEvent::Ask(ask) = event;
+            let responder = responder.clone();
+            // Off the reader thread, so a full stdin pipe can never stop us reading.
+            std::thread::spawn(move || {
+                let _ = responder.reply(
+                    &ask.ask_id,
+                    false,
+                    Some("network approvals are not available"),
+                );
+            });
+        }
+    }
 }
 
 /// A handle to a running sandbox sidecar process, speaking the line-delimited JSON protocol
 /// over its stdin/stdout. Stderr is left inherited so sidecar diagnostics land in the host's
-/// own log. Construct with `start` (or `start_with_timeout` for tests); every other call
-/// returns `Err(HostError { code: "SANDBOX_UNAVAILABLE", .. })` on I/O failure or on not
-/// hearing back within the configured timeout, and otherwise propagates the sidecar's own
-/// error code verbatim (mapped through `map_error_code`).
+/// own log. Construct with `start` / `start_with_events` (or the `_with_timeout` forms for
+/// tests); every other call returns `Err(HostError { code: "SANDBOX_UNAVAILABLE", .. })` on I/O
+/// failure or on not hearing back within the configured timeout, and otherwise propagates the
+/// sidecar's own error code verbatim (mapped through `map_error_code`).
 ///
 /// **Any `Err` with code `"SANDBOX_UNAVAILABLE"` means this `Sidecar` must be discarded.**
 /// A timed-out, disconnected, unparseable, or mismatched-id reply means the next line read
@@ -161,10 +321,14 @@ struct Connection {
 /// be sitting in the channel, waiting to be wrongly consumed by a future call). Rather than
 /// try to resynchronize, every such failure latches `poisoned`, and every later call on the
 /// same instance fails fast with `SANDBOX_UNAVAILABLE` without touching stdin/stdout at all.
-/// Callers (Task 6) must start a fresh `Sidecar` instead of reusing one that has failed this
-/// way.
+/// Callers must start a fresh `Sidecar` instead of reusing one that has failed this way.
+///
+/// Unsolicited `event` lines are not part of that pairing: the reader thread routes them to
+/// the event handler before they can reach the reply channel, so an event arriving while a
+/// call is in flight neither satisfies nor desynchronizes it.
 pub(crate) struct Sidecar {
     conn: Mutex<Connection>,
+    stdin: Arc<Mutex<ChildStdin>>,
     child: Mutex<Child>,
     next_id: AtomicU64,
     timeout: Duration,
@@ -176,9 +340,19 @@ pub(crate) struct Sidecar {
 
 impl Sidecar {
     /// Starts `<bundle>/srt-sidecar` and sends `init`, using the production 30 s reply
-    /// timeout for every call made over the lifetime of the returned `Sidecar`.
+    /// timeout for every call made over the lifetime of the returned `Sidecar`. Network asks
+    /// are all denied (there is no handler to answer them).
     pub(crate) fn start(bundle: &Path, init: &InitConfig) -> Result<Sidecar> {
         Self::start_with_timeout(bundle, init, Duration::from_secs(30))
+    }
+
+    /// Same as `start`, but sidecar events go to `handler`.
+    pub(crate) fn start_with_events(
+        bundle: &Path,
+        init: &InitConfig,
+        handler: EventHandler,
+    ) -> Result<Sidecar> {
+        Self::start_inner(bundle, init, Duration::from_secs(30), Some(handler))
     }
 
     /// Same as `start`, but with an explicit reply timeout, applied to `init` and to every
@@ -188,6 +362,15 @@ impl Sidecar {
         bundle: &Path,
         init: &InitConfig,
         timeout: Duration,
+    ) -> Result<Sidecar> {
+        Self::start_inner(bundle, init, timeout, None)
+    }
+
+    pub(crate) fn start_inner(
+        bundle: &Path,
+        init: &InitConfig,
+        timeout: Duration,
+        handler: Option<EventHandler>,
     ) -> Result<Sidecar> {
         let mut command = Command::new(bundle.join("srt-sidecar"));
         command
@@ -215,18 +398,42 @@ impl Sidecar {
             HostError::new("SANDBOX_UNAVAILABLE", "sidecar stdout was not piped")
         })?;
 
+        let stdin = Arc::new(Mutex::new(stdin));
+        let responder = AskResponder {
+            stdin: stdin.clone(),
+            next: Arc::new(AtomicU64::new(0)),
+        };
         let (sender, replies) = mpsc::channel();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
+            let mut logged_failed_reply = false;
             loop {
                 line.clear();
                 match reader.read_line(&mut line) {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {
                         let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
-                        if sender.send(trimmed).is_err() {
-                            break;
+                        match classify(&trimmed) {
+                            Line::Event(value) => dispatch_event(value, &handler, &responder),
+                            // A failed `ask.reply` we sent ourselves is almost always a late
+                            // answer to an ask the sidecar already timed out or finished
+                            // ("no pending ask"): benign, never a desync. Say so once.
+                            Line::Orphan(failure) => {
+                                if let Some(message) = failure {
+                                    if !logged_failed_reply {
+                                        logged_failed_reply = true;
+                                        eprintln!(
+                                            "sourceweft-desktop: sidecar rejected an ask.reply (ignored; logged once): {message}"
+                                        );
+                                    }
+                                }
+                            }
+                            Line::Reply => {
+                                if sender.send(trimmed).is_err() {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -236,7 +443,8 @@ impl Sidecar {
         });
 
         let sidecar = Sidecar {
-            conn: Mutex::new(Connection { stdin, replies }),
+            conn: Mutex::new(Connection { replies }),
+            stdin,
             child: Mutex::new(child),
             next_id: AtomicU64::new(0),
             timeout,
@@ -253,6 +461,7 @@ impl Sidecar {
         command: &str,
         cwd: &Path,
         workspace_root: &Path,
+        network: Option<&NetworkPolicy>,
     ) -> Result<WrappedCommand> {
         let id = self.allocate_id();
         let result = self.call(
@@ -263,6 +472,7 @@ impl Sidecar {
                 command: command.to_string(),
                 cwd: path_to_string(cwd)?,
                 workspace_root: path_to_string(workspace_root)?,
+                network,
             },
         )?;
         let wrapped: WrapResult = serde_json::from_value(result).map_err(|error| {
@@ -307,6 +517,70 @@ impl Sidecar {
         Ok(())
     }
 
+    /// Drains the connection/HTTP decisions recorded for `command_id`. Call it before
+    /// `cleanup`, which forgets the command.
+    pub(crate) fn audit(&self, command_id: &str) -> Result<Vec<serde_json::Value>> {
+        #[derive(Deserialize)]
+        struct AuditResult {
+            entries: Vec<serde_json::Value>,
+        }
+        let id = self.allocate_id();
+        let result = self.call(
+            &id,
+            &Request::Audit {
+                id: id.clone(),
+                command_id: command_id.to_string(),
+            },
+        )?;
+        serde_json::from_value::<AuditResult>(result)
+            .map(|audit| audit.entries)
+            .map_err(|error| {
+                HostError::new(
+                    "SANDBOX_UNAVAILABLE",
+                    format!("invalid audit result from sidecar: {error}"),
+                )
+            })
+    }
+
+    /// Answers a network ask through the normal request/reply path and waits for the sidecar's
+    /// `ok`. Must not be called from the event handler on the reader thread (the reader has to
+    /// keep reading to deliver that reply); event handlers answer through their
+    /// [`AskResponder`] instead.
+    ///
+    /// An ask the sidecar no longer knows (already answered, or timed out on its side) is not
+    /// an error and does not poison the connection: it is reported as
+    /// [`AskReplyOutcome::UnknownAsk`] and logged once per process.
+    pub(crate) fn ask_reply(
+        &self,
+        ask_id: &str,
+        allow: bool,
+        reason: Option<&str>,
+    ) -> Result<AskReplyOutcome> {
+        let id = self.allocate_id();
+        match self.call(
+            &id,
+            &Request::AskReply {
+                id: id.clone(),
+                ask_id,
+                allow,
+                reason,
+            },
+        ) {
+            Ok(_) => Ok(AskReplyOutcome::Delivered),
+            Err(error) if error.code == "BAD_REQUEST" && error.message.starts_with("no pending ask") => {
+                static LOGGED: AtomicBool = AtomicBool::new(false);
+                if !LOGGED.swap(true, Ordering::SeqCst) {
+                    eprintln!(
+                        "sourceweft-desktop: ask.reply for an ask the sidecar no longer holds (ignored; logged once): {}",
+                        error.message
+                    );
+                }
+                Ok(AskReplyOutcome::UnknownAsk)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) fn probe(&self) -> Result<()> {
         let id = self.allocate_id();
         self.call(&id, &Request::Probe { id: id.clone() })?;
@@ -337,18 +611,12 @@ impl Sidecar {
             ));
         }
 
-        let mut conn = self
+        let conn = self
             .conn
             .lock()
             .map_err(|_| self.poison("sidecar connection lock was poisoned"))?;
 
-        let mut line = serde_json::to_string(request)
-            .map_err(|error| self.poison(format!("failed to encode sidecar request: {error}")))?;
-        line.push('\n');
-        conn.stdin
-            .write_all(line.as_bytes())
-            .and_then(|()| conn.stdin.flush())
-            .map_err(|error| self.poison(format!("failed to write to sidecar: {error}")))?;
+        write_request(&self.stdin, request).map_err(|message| self.poison(message))?;
 
         let raw = conn.replies.recv_timeout(self.timeout).map_err(|error| {
             let reason = match error {
@@ -401,14 +669,8 @@ impl Drop for Sidecar {
     fn drop(&mut self) {
         // Best-effort: ask the sidecar to shut itself down, but never block on a reply —
         // a dead or stuck sidecar must not hang the host's own shutdown path.
-        if let Ok(mut conn) = self.conn.lock() {
-            let id = self.allocate_id();
-            if let Ok(mut line) = serde_json::to_string(&Request::Shutdown { id }) {
-                line.push('\n');
-                let _ = conn.stdin.write_all(line.as_bytes());
-                let _ = conn.stdin.flush();
-            }
-        }
+        let id = self.allocate_id();
+        let _ = write_request(&self.stdin, &Request::Shutdown { id });
         if let Ok(mut child) = self.child.lock() {
             // Give the sidecar up to 2s to exit on its own after `shutdown`.
             if wait_up_to(&mut child, Duration::from_secs(2)) {
@@ -429,13 +691,14 @@ impl Drop for Sidecar {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use super::super::network::NetworkMode;
     use std::{fs, os::unix::fs::PermissionsExt};
 
     const STUB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stub-sidecar.sh");
 
-    fn bundle_with_stub() -> tempfile::TempDir {
+    pub(crate) fn bundle_with_stub() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("srt-sidecar");
         fs::copy(STUB, &target).unwrap();
@@ -451,7 +714,7 @@ mod tests {
         dir
     }
 
-    fn test_init() -> InitConfig {
+    pub(crate) fn test_init() -> InitConfig {
         InitConfig {
             platform: Platform::Darwin,
             home: "/tmp/sourceweft-sidecar-test-home".to_string(),
@@ -477,6 +740,7 @@ mod tests {
                 "echo hi",
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                None,
             )
             .unwrap();
         assert_eq!(wrapped.argv, vec!["/bin/echo".to_string(), "hi".to_string()]);
@@ -493,6 +757,7 @@ mod tests {
                 "ERROR:HELPER_MISSING",
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                None,
             )
             .unwrap_err();
         assert_eq!(error.code, "HELPER_MISSING");
@@ -522,6 +787,7 @@ mod tests {
                 "HANG",
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                None,
             )
             .unwrap_err();
         assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
@@ -543,6 +809,7 @@ mod tests {
                 "HANG",
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                None,
             )
             .unwrap_err();
         assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
@@ -568,5 +835,236 @@ mod tests {
             !names.to_uppercase().contains("PROXY"),
             "sidecar environment leaked a proxy variable: {names}"
         );
+    }
+
+    const WORKSPACE: &str = "/tmp/sourceweft-sidecar-test-workspace";
+
+    fn wrap(sidecar: &Sidecar, command: &str, network: Option<&NetworkPolicy>) -> Result<WrappedCommand> {
+        sidecar.wrap("cmd-ev", command, Path::new("/tmp"), Path::new(WORKSPACE), network)
+    }
+
+    /// A handler that forwards every ask to a channel and answers `allow` from `answer`.
+    fn collecting_handler(
+        answer: bool,
+    ) -> (EventHandler, mpsc::Receiver<AskEvent>) {
+        let (sender, receiver) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        let handler: EventHandler = Arc::new(move |event, responder| {
+            let SidecarEvent::Ask(ask) = event;
+            let _ = responder.reply(&ask.ask_id, answer, Some("handler says so"));
+            let _ = sender.lock().unwrap().send(ask);
+        });
+        (handler, receiver)
+    }
+
+    fn recording_init(dir: &Path) -> (InitConfig, std::path::PathBuf) {
+        let mut init = test_init();
+        init.home = dir.join("record-ops").to_str().unwrap().to_string();
+        (init, dir.join("record-ops.log"))
+    }
+
+    fn wait_for_log(log: &Path, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let text = fs::read_to_string(log).unwrap_or_default();
+            if text.contains(needle) {
+                return text;
+            }
+            assert!(Instant::now() < deadline, "log never contained {needle:?}: {text}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn ask_event_after_a_reply_reaches_the_handler() {
+        let bundle = bundle_with_stub();
+        let (handler, asks) = collecting_handler(true);
+        let sidecar =
+            Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+        let ask = asks.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(ask.ask_id, "ask-1");
+        assert_eq!(ask.command_id, "cmd-ev");
+        assert_eq!(ask.host, "example.com");
+        assert_eq!(ask.port, 443);
+        assert_eq!(ask.suggested_by, None);
+    }
+
+    #[test]
+    fn an_event_arriving_mid_call_does_not_desync() {
+        let bundle = bundle_with_stub();
+        let (handler, asks) = collecting_handler(true);
+        let sidecar =
+            Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+        // The stub writes the event line first, then the wrap reply.
+        let wrapped = wrap(&sidecar, "EVENT_FIRST:example.com:80", None).unwrap();
+        assert_eq!(wrapped.argv, ["/bin/echo", "hi"]);
+        assert_eq!(asks.recv_timeout(Duration::from_secs(5)).unwrap().port, 80);
+        // The framing is intact: later calls still pair with their own replies.
+        sidecar.probe().unwrap();
+        wrap(&sidecar, "echo ok", None).unwrap();
+        sidecar.cleanup("cmd-ev").unwrap();
+        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn handler_answers_are_written_and_their_replies_are_not_delivered_to_callers() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = bundle_with_stub();
+        let (init, log) = recording_init(dir.path());
+        let (handler, asks) = collecting_handler(false);
+        let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
+        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+        asks.recv_timeout(Duration::from_secs(5)).unwrap();
+        let text = wait_for_log(&log, "ask.reply ask-1 false handler says so");
+        assert!(text.contains("wrap cmd-ev"), "{text}");
+        // The stub's `ok` for that reply carries an `ev-` id; if it leaked into the reply
+        // channel the next call would see a mismatched id and poison the connection.
+        sidecar.probe().unwrap();
+        sidecar.probe().unwrap();
+        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn without_a_handler_every_ask_is_denied() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = bundle_with_stub();
+        let (init, log) = recording_init(dir.path());
+        let sidecar = Sidecar::start(bundle.path(), &init).unwrap();
+        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+        wait_for_log(&log, "ask.reply ask-1 false network approvals are not available");
+        sidecar.probe().unwrap();
+    }
+
+    #[test]
+    fn a_panicking_handler_does_not_kill_the_connection() {
+        let bundle = bundle_with_stub();
+        let handler: EventHandler = Arc::new(|_, _| panic!("boom"));
+        let sidecar =
+            Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+        wrap(&sidecar, "EVENT_FIRST:example.com:443", None).unwrap();
+        sidecar.probe().unwrap();
+    }
+
+    #[test]
+    fn a_blocked_handler_thread_does_not_stall_calls() {
+        // The handler hands the ask to another thread and returns; calls keep working while
+        // that thread waits, and it can answer later through the responder.
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = bundle_with_stub();
+        let (init, log) = recording_init(dir.path());
+        let handler: EventHandler = Arc::new(|event, responder| {
+            let SidecarEvent::Ask(ask) = event;
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                let _ = responder.reply(&ask.ask_id, true, None);
+            });
+        });
+        let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
+        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+        sidecar.probe().unwrap();
+        wait_for_log(&log, "ask.reply ask-1 true");
+        sidecar.probe().unwrap();
+    }
+
+    #[test]
+    fn ask_reply_goes_through_the_normal_call_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = bundle_with_stub();
+        let (init, log) = recording_init(dir.path());
+        let sidecar = Sidecar::start(bundle.path(), &init).unwrap();
+        assert_eq!(
+            sidecar.ask_reply("ask-9", true, None).unwrap(),
+            AskReplyOutcome::Delivered
+        );
+        sidecar.ask_reply("ask-10", false, Some("nope")).unwrap();
+        let text = fs::read_to_string(&log).unwrap();
+        assert!(text.contains("ask.reply ask-9 true"), "{text}");
+        assert!(text.contains("ask.reply ask-10 false nope"), "{text}");
+    }
+
+    #[test]
+    fn a_late_ask_reply_is_benign_and_does_not_poison() {
+        let bundle = bundle_with_stub();
+        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+        // The stub rejects askId "ask-gone" the way the sidecar rejects an unknown or
+        // already-answered one.
+        assert_eq!(
+            sidecar.ask_reply("ask-gone", true, None).unwrap(),
+            AskReplyOutcome::UnknownAsk
+        );
+        sidecar.probe().unwrap();
+        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_rejected_responder_reply_is_dropped_without_a_desync() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = bundle_with_stub();
+        let (init, log) = recording_init(dir.path());
+        let handler: EventHandler = Arc::new(|_, responder| {
+            let _ = responder.reply("ask-gone", true, None);
+        });
+        let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
+        wrap(&sidecar, "EVENT_FIRST:example.com:443", None).unwrap();
+        wait_for_log(&log, "ask.reply ask-gone true");
+        sidecar.probe().unwrap();
+        sidecar.probe().unwrap();
+        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn audit_returns_the_entries() {
+        let bundle = bundle_with_stub();
+        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+        let entries = sidecar.audit("cmd-1").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["host"], "example.com");
+        assert_eq!(entries[0]["source"], "approval");
+    }
+
+    #[test]
+    fn an_audit_error_keeps_its_code_and_does_not_poison() {
+        let bundle = bundle_with_stub();
+        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+        let error = sidecar.audit("AUDIT_ERROR").unwrap_err();
+        assert_eq!(error.code, "BAD_REQUEST");
+        sidecar.probe().unwrap();
+    }
+
+    #[test]
+    fn wrap_sends_the_network_policy_and_omits_it_when_absent() {
+        let bundle = bundle_with_stub();
+        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+        let policy = NetworkPolicy {
+            mode: NetworkMode::Ask,
+            allow: vec!["a.com".to_string()],
+            suggested: BTreeMap::from([("a.com".to_string(), "skill".to_string())]),
+        };
+        let with = wrap(&sidecar, "SHOW_NETWORK", Some(&policy)).unwrap();
+        assert_eq!(
+            with.argv[1],
+            r#"{"mode":"ask","allow":["a.com"],"suggested":{"a.com":"skill"}}"#
+        );
+        let without = wrap(&sidecar, "SHOW_NETWORK", None).unwrap();
+        assert_eq!(without.argv[1], "");
+    }
+
+    #[test]
+    fn poisoned_semantics_are_unchanged_with_a_handler_present() {
+        let bundle = bundle_with_stub();
+        let (handler, _asks) = collecting_handler(true);
+        let sidecar = Sidecar::start_inner(
+            bundle.path(),
+            &test_init(),
+            Duration::from_secs(4),
+            Some(handler),
+        )
+        .unwrap();
+        let first = wrap(&sidecar, "HANG", None).unwrap_err();
+        assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
+        let started = Instant::now();
+        assert_eq!(sidecar.probe().unwrap_err().code, "SANDBOX_UNAVAILABLE");
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 }

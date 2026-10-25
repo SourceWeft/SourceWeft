@@ -2,6 +2,7 @@
 //! A future authenticated device dispatcher must supply the account and thread identities.
 pub mod execution;
 pub mod maintenance;
+pub mod network;
 mod files;
 #[cfg(unix)]
 pub(crate) mod process;
