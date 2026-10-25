@@ -25,6 +25,20 @@ export type FakeOAuthMcpOptions = {
   tokenError?: (code: string) => string;
   /** `/mcp` answers a 307 to this URL once authenticated. */
   redirectMcpTo?: string;
+  /** `/mcp` answers a 307 to this URL to a request without a valid token. */
+  redirectUnauthenticatedTo?: string;
+  /** `/mcp` answers this status to a valid token (a 403 is "not enough"). */
+  mcpStatus?: 403;
+  /** Changes the authorization-server metadata (a hostile or odd server). */
+  metadata?: (origin: string, base: Record<string, unknown>) => Record<string, unknown>;
+  /** Paths (prefixes) that are accepted and never answered. */
+  hang?: string[];
+  /** `scopes_supported` in the protected-resource metadata. */
+  scopesSupported?: string[];
+  /** `scope` in the `WWW-Authenticate` challenge. */
+  challengeScope?: string;
+  /** The refresh grant fails with this OAuth error. */
+  refreshFails?: "server_error" | "invalid_grant";
   tools?: unknown[];
 };
 
@@ -114,15 +128,22 @@ export async function startFakeOAuthMcp(
       ...(authorization ? { authorization } : {}),
     });
 
+    if (options.hang?.some((prefix) => url.pathname.startsWith(prefix))) {
+      return;
+    }
+
     if (url.pathname === "/.well-known/oauth-protected-resource/mcp") {
       json(res, 200, {
         resource: `${origin}/mcp`,
         authorization_servers: [origin],
+        ...(options.scopesSupported
+          ? { scopes_supported: options.scopesSupported }
+          : {}),
       });
       return;
     }
     if (url.pathname === "/.well-known/oauth-authorization-server") {
-      json(res, 200, {
+      const base = {
         issuer: origin,
         authorization_endpoint: `${origin}/authorize`,
         token_endpoint: `${origin}/token`,
@@ -133,7 +154,8 @@ export async function startFakeOAuthMcp(
         grant_types_supported: ["authorization_code", "refresh_token"],
         code_challenge_methods_supported: ["S256"],
         token_endpoint_auth_methods_supported: ["none"],
-      });
+      };
+      json(res, 200, options.metadata ? options.metadata(origin, base) : base);
       return;
     }
     if (url.pathname === "/register" && req.method === "POST") {
@@ -180,7 +202,10 @@ export async function startFakeOAuthMcp(
       res.end();
       return;
     }
-    if (url.pathname === "/token" && req.method === "POST") {
+    if (
+      (url.pathname === "/token" || url.pathname === "/token2") &&
+      req.method === "POST"
+    ) {
       const params = new URLSearchParams(await readBody(req));
       fake.tokenRequests.push(params);
       if (options.tokenError) {
@@ -206,6 +231,12 @@ export async function startFakeOAuthMcp(
         return;
       }
       if (params.get("grant_type") === "refresh_token") {
+        if (options.refreshFails) {
+          json(res, options.refreshFails === "server_error" ? 500 : 400, {
+            error: options.refreshFails,
+          });
+          return;
+        }
         const refresh = params.get("refresh_token") ?? "";
         if (!fake.validRefreshTokens.delete(refresh)) {
           json(res, 400, { error: "invalid_grant" });
@@ -220,13 +251,29 @@ export async function startFakeOAuthMcp(
     if (url.pathname === "/mcp") {
       const token = authorization?.replace(/^Bearer /u, "");
       if (!token || !fake.validTokens.has(token)) {
+        if (options.redirectUnauthenticatedTo) {
+          res.writeHead(307, { location: options.redirectUnauthenticatedTo });
+          res.end();
+          return;
+        }
         json(
           res,
           401,
           { error: "unauthorized" },
           {
-            "www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
+            "www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"${
+              options.challengeScope ? `, scope="${options.challengeScope}"` : ""
+            }`,
           },
+        );
+        return;
+      }
+      if (options.mcpStatus === 403) {
+        json(
+          res,
+          403,
+          { error: "forbidden" },
+          { "www-authenticate": 'Bearer error="insufficient_scope"' },
         );
         return;
       }

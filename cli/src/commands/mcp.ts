@@ -23,7 +23,7 @@ import {
 import { redactSecrets } from "../mcp/oauth/redact";
 import {
   createFileStore,
-  defaultConfigDirectory,
+  defaultStoreDirectory,
   resourceKey,
   type McpOAuthStore,
 } from "../mcp/oauth/store";
@@ -60,6 +60,8 @@ export type McpInspectContext = {
   launchBrowser?: (url: string) => Promise<boolean>;
   /** How long `--oauth` waits for the browser; five minutes otherwise. */
   oauthTimeoutMs?: number;
+  /** Time limit of each sign-in request; fifteen seconds otherwise. */
+  oauthRequestTimeoutMs?: number;
 };
 
 /** The name a server's consent page shows for this CLI. */
@@ -79,7 +81,7 @@ export type McpInspectInput = {
 };
 
 function oauthStoreOf(ctx: McpInspectContext): McpOAuthStore {
-  return ctx.oauthStore ?? createFileStore(defaultConfigDirectory());
+  return ctx.oauthStore ?? createFileStore(defaultStoreDirectory());
 }
 
 /** `Name: value` → `[name, value]`; a line without both is a usage error. */
@@ -256,24 +258,29 @@ async function inspectWithOAuth(
         ...(ctx.oauthTimeoutMs !== undefined
           ? { callbackTimeoutMs: ctx.oauthTimeoutMs }
           : {}),
+        ...(ctx.oauthRequestTimeoutMs !== undefined
+          ? { requestTimeoutMs: ctx.oauthRequestTimeoutMs }
+          : {}),
       });
       const transport = createHttpTransport(
         url,
         { authorization: `Bearer ${authorization.accessToken}` },
         {
-          fetchImpl: createCredentialedFetch(
-            [new URL(url).origin],
-            ctx.fetchImpl,
-          ),
+          fetchImpl: createCredentialedFetch([new URL(url).origin], {
+            ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+            signal: abort.signal,
+          }),
           unauthorizedMessage: (status, method) =>
-            `The server refused the signed-in token (HTTP ${status}) on ${method}.`,
+            status === 401
+              ? `The server refused the signed-in token (HTTP 401) on ${method}.`
+              : `The server accepted the sign-in but refused ${method} (HTTP ${status}): the account or the granted scope is not enough for this server. Signing in again would not change that; check the account and the permissions the consent page asked for.`,
         },
       );
       try {
         return await inspectServer(transport, client);
       } catch (error) {
         const next: AuthorizeMode | undefined =
-          error instanceof McpUnauthorizedError
+          error instanceof McpUnauthorizedError && error.retryable
             ? authorization.source === "stored"
               ? "renew"
               : authorization.source === "refreshed"
@@ -315,7 +322,7 @@ export async function mcpOAuthLogoutCommand(
   input: { url: string },
 ): Promise<number> {
   const url = validateInspectUrl(input.url);
-  const store = ctx.oauthStore ?? createFileStore(defaultConfigDirectory());
+  const store = ctx.oauthStore ?? createFileStore(defaultStoreDirectory());
   const removed = await store.deleteResource(resourceKey(url));
   ctx.out(
     removed > 0

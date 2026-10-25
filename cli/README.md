@@ -64,9 +64,11 @@ registers itself with the server (dynamic client registration; servers without
 it are refused with a message), opens your browser, and receives the result on a
 loopback port on this computer, so the browser must run on the same machine
 (`--client-name <name>` sets the name the consent page shows). The token is kept
-under `~/.config/sourceweft` (`%APPDATA%\sourceweft` on Windows, owner-only),
+under `~/.sourceweft/mcp-oauth` (owner-only on macOS and Linux),
 used again on the next run, refreshed when it expires, and sent only to the
-endpoint you passed and the authorization server it declares. `oauth-logout
+endpoint you passed and to the token endpoint of its authorization server. Every
+endpoint the authorization server declares must be on its own https origin (a
+private or local address is refused unless it is the host you passed). `oauth-logout
 --url <endpoint>` deletes it. If no browser can be started the CLI prints the
 sign-in address instead; that works only when you open it on the same machine.
 

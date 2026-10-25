@@ -61,9 +61,16 @@ export class McpInspectError extends Error {
 
 /** The MCP server answered 401 or 403 to the credentials the CLI sent. */
 export class McpUnauthorizedError extends McpInspectError {
-  constructor(message: string) {
+  /**
+   * Whether signing in again could help: a 401 says the token is not valid, a
+   * 403 or `insufficient_scope` says it is valid but not enough.
+   */
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable = true) {
     super(message);
     this.name = "McpUnauthorizedError";
+    this.retryable = retryable;
   }
 }
 

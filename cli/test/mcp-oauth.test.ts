@@ -13,12 +13,18 @@ import {
 } from "../src/commands/mcp";
 import { McpInspectError, UsageError } from "../src/errors";
 import { browserCommand, openBrowser } from "../src/mcp/oauth/browser";
+import { authorize } from "../src/mcp/oauth/flow";
 import { createCredentialedFetch, createOpenFetch } from "../src/mcp/oauth/guard";
+import {
+  checkTarget,
+  isPrivateHost,
+  validateAuthorizationServer,
+} from "../src/mcp/oauth/trust";
 import { startLoopbackListener } from "../src/mcp/oauth/loopback";
-import { redactSecrets } from "../src/mcp/oauth/redact";
+import { printable, redactSecrets } from "../src/mcp/oauth/redact";
 import {
   createFileStore,
-  defaultConfigDirectory,
+  defaultStoreDirectory,
   resourceKey,
 } from "../src/mcp/oauth/store";
 import {
@@ -111,9 +117,11 @@ describe("credentialed fetch", () => {
 
   it("sends nothing to an origin it was not made for", async () => {
     let calls = 0;
-    const guarded = createCredentialedFetch(["https://mcp.example.com"], async () => {
-      calls += 1;
-      return ok();
+    const guarded = createCredentialedFetch(["https://mcp.example.com"], {
+      fetchImpl: async () => {
+        calls += 1;
+        return ok();
+      },
     });
     await assert.rejects(
       guarded("https://evil.example.net/mcp", { headers: { authorization: "Bearer x" } }),
@@ -126,16 +134,15 @@ describe("credentialed fetch", () => {
 
   it("stops at a redirect to another origin without following it", async () => {
     const seen: string[] = [];
-    const guarded = createCredentialedFetch(
-      ["https://mcp.example.com"],
-      async (input) => {
+    const guarded = createCredentialedFetch(["https://mcp.example.com"], {
+      fetchImpl: async (input) => {
         seen.push(String(input));
         return new Response(null, {
           status: 307,
           headers: { location: "https://evil.example.net/steal" },
         });
       },
-    );
+    });
     await assert.rejects(
       guarded("https://mcp.example.com/mcp", { method: "POST", body: "{}" }),
       /redirected to https:\/\/evil\.example\.net/u,
@@ -145,30 +152,34 @@ describe("credentialed fetch", () => {
 
   it("follows a 307 on the same origin a few times and no 302", async () => {
     let hops = 0;
-    const same = createCredentialedFetch(["https://a.example"], async (input) => {
-      hops += 1;
-      return hops < 3
-        ? new Response(null, { status: 307, headers: { location: "/next" } })
-        : new Response(String(input));
+    const same = createCredentialedFetch(["https://a.example"], {
+      fetchImpl: async (input) => {
+        hops += 1;
+        return hops < 3
+          ? new Response(null, { status: 307, headers: { location: "/next" } })
+          : new Response(String(input));
+      },
     });
     assert.equal(await (await same("https://a.example/start")).text(), "https://a.example/next");
 
-    const endless = createCredentialedFetch(["https://a.example"], async () =>
-      new Response(null, { status: 307, headers: { location: "/loop" } }),
-    );
+    const endless = createCredentialedFetch(["https://a.example"], {
+      fetchImpl: async () =>
+        new Response(null, { status: 307, headers: { location: "/loop" } }),
+    });
     await assert.rejects(endless("https://a.example/start"), /redirect/u);
 
-    const found = createCredentialedFetch(["https://a.example"], async () =>
-      new Response(null, { status: 302, headers: { location: "/elsewhere" } }),
-    );
+    const found = createCredentialedFetch(["https://a.example"], {
+      fetchImpl: async () =>
+        new Response(null, { status: 302, headers: { location: "/elsewhere" } }),
+    });
     await assert.rejects(found("https://a.example/start"), /not redirected/u);
   });
 
   it("refuses plain http except on the machine itself", async () => {
-    const guarded = createCredentialedFetch(["http://mcp.example.com"], async () => ok());
+    const guarded = createCredentialedFetch(["http://mcp.example.com"], {
+      fetchImpl: async () => ok(),
+    });
     await assert.rejects(guarded("http://mcp.example.com/mcp"), /Refusing/u);
-    const open = createOpenFetch(async () => ok());
-    await assert.rejects(open("http://auth.example.com/.well-known/x"), /https/u);
   });
 });
 
@@ -234,6 +245,7 @@ describe("loopback listener", () => {
 
   it("times out with a clear message and frees the port", async () => {
     listener = await startLoopbackListener({ expectedState: "s", timeoutMs: 50 });
+    listener.startTimer();
     const uri = listener.redirectUri;
     await assert.rejects(listener.result, /No sign-in arrived within 1 second/u);
     await listener.close();
@@ -295,6 +307,7 @@ describe("token store", () => {
     const store = createFileStore(join(dir, "state"));
     const base = {
       version: 1 as const,
+      tokenEndpoint: "https://as1/token",
       client: { client_id: "c1" },
       tokens: { access_token: "a-secret", token_type: "Bearer" },
     };
@@ -321,6 +334,7 @@ describe("token store", () => {
       version: 1,
       resource: "https://a.example/mcp",
       issuer: "https://as",
+      tokenEndpoint: "https://as/token",
       client: { client_id: "c" },
     });
     const [name] = await readdir(join(dir, "other"));
@@ -337,16 +351,190 @@ describe("token store", () => {
     );
   });
 
-  it("finds the config directory per platform", () => {
-    assert.equal(defaultConfigDirectory("linux", {}, "/home/u"), join("/home/u", ".config", "sourceweft"));
+  it("keeps its files in one fixed directory under the home directory", () => {
     assert.equal(
-      defaultConfigDirectory("darwin", { XDG_CONFIG_HOME: "/x" }, "/Users/u"),
-      join("/x", "sourceweft"),
+      defaultStoreDirectory("/home/u"),
+      join("/home/u", ".sourceweft", "mcp-oauth"),
     );
-    assert.equal(
-      defaultConfigDirectory("win32", { APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, "C:\\Users\\u"),
-      join("C:\\Users\\u\\AppData\\Roaming", "sourceweft"),
+  });
+
+  it("serialises work on one record, and lets different records run side by side", async () => {
+    const store = createFileStore(join(dir, "locks"));
+    const order: string[] = [];
+    const slow = (name: string) =>
+      store.withLock("https://a.example/mcp", "https://as", async () => {
+        order.push(`${name} start`);
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        order.push(`${name} end`);
+      });
+    await Promise.all([slow("one"), slow("two")]);
+    assert.deepEqual(order.map((entry) => entry.split(" ")[1]), ["start", "end", "start", "end"]);
+    await store.withLock("https://b.example/mcp", "https://as", async () => {
+      await store.withLock("https://c.example/mcp", "https://as", async () => {});
+    });
+    // The lock files are gone, and a failing job releases its lock.
+    await assert.rejects(
+      store.withLock("https://a.example/mcp", "https://as", async () => {
+        throw new Error("boom");
+      }),
+      /boom/u,
     );
+    await store.withLock("https://a.example/mcp", "https://as", async () => {});
+    assert.deepEqual(
+      (await readdir(join(dir, "locks"))).filter((name) => name.endsWith(".lock")),
+      [],
+    );
+  });
+});
+
+describe("trusting what the authorization server says", () => {
+  const server = new URL("https://mcp.vendor.example/mcp");
+  const metadata = (overrides: Record<string, string | undefined> = {}) => ({
+    issuer: "https://auth.vendor.example",
+    authorization_endpoint: "https://auth.vendor.example/authorize",
+    token_endpoint: "https://auth.vendor.example/token",
+    registration_endpoint: "https://auth.vendor.example/register",
+    ...overrides,
+  });
+  const asUrl = "https://auth.vendor.example/";
+
+  it("accepts a consistent server, with or without the issuer's trailing slash", () => {
+    validateAuthorizationServer(metadata(), asUrl, server);
+    validateAuthorizationServer(metadata(), "https://auth.vendor.example", server);
+    validateAuthorizationServer(
+      metadata({ issuer: "https://auth.vendor.example/" }),
+      "https://auth.vendor.example",
+      server,
+    );
+  });
+
+  it("refuses an issuer that is not the address the server was found at", () => {
+    assert.throws(
+      () =>
+        validateAuthorizationServer(
+          metadata({ issuer: "https://other.vendor.example" }),
+          asUrl,
+          server,
+        ),
+      /names the issuer https:\/\/other\.vendor\.example/u,
+    );
+  });
+
+  it("refuses endpoints on another origin than the issuer", () => {
+    for (const field of [
+      "authorization_endpoint",
+      "token_endpoint",
+      "registration_endpoint",
+    ]) {
+      assert.throws(
+        () =>
+          validateAuthorizationServer(
+            metadata({ [field]: "https://collector.example/endpoint" }),
+            asUrl,
+            server,
+          ),
+        /must be on the issuer's own origin/u,
+        field,
+      );
+    }
+  });
+
+  it("refuses http, and a local address unless the endpoint you passed is local", () => {
+    assert.throws(
+      () =>
+        validateAuthorizationServer(
+          metadata({
+            issuer: "http://auth.vendor.example",
+            authorization_endpoint: "http://auth.vendor.example/authorize",
+            token_endpoint: "http://auth.vendor.example/token",
+            registration_endpoint: "http://auth.vendor.example/register",
+          }),
+          "http://auth.vendor.example/",
+          server,
+        ),
+      /uses https/u,
+    );
+    const local = {
+      issuer: "http://127.0.0.1:2375",
+      authorization_endpoint: "http://127.0.0.1:2375/authorize",
+      token_endpoint: "http://127.0.0.1:2375/token",
+    };
+    assert.throws(
+      () => validateAuthorizationServer(local, "http://127.0.0.1:2375/", server),
+      /only when the endpoint you passed is local too/u,
+    );
+    validateAuthorizationServer(
+      local,
+      "http://127.0.0.1:2375/",
+      new URL("http://127.0.0.1:9000/mcp"),
+    );
+  });
+
+  it("refuses private and link-local hosts unless they are the host you passed", () => {
+    for (const host of [
+      "169.254.169.254",
+      "10.0.0.5",
+      "192.168.1.9",
+      "172.20.0.1",
+      "100.64.0.1",
+      "[fd00::1]",
+      "[fe80::1]",
+      "[::ffff:7f00:1]",
+      "metadata",
+      "service.internal",
+      "printer.local",
+      "localhost",
+    ]) {
+      assert.ok(isPrivateHost(new URL(`https://${host}/`).hostname), host);
+      assert.throws(
+        () => checkTarget(new URL(`https://${host}/x`), server),
+        /private or local address/u,
+        host,
+      );
+    }
+    for (const host of ["auth.vendor.example", "8.8.8.8", "172.32.0.1", "[2606:4700::1]"]) {
+      assert.ok(!isPrivateHost(new URL(`https://${host}/`).hostname), host);
+      checkTarget(new URL(`https://${host}/x`), server);
+    }
+    // The host the user named is the user's own business.
+    checkTarget(new URL("https://10.0.0.5:8443/oauth"), new URL("https://10.0.0.5/mcp"));
+  });
+
+  it("checks every hop of a discovery redirect and never follows a request with a body across origins", async () => {
+    const seen: string[] = [];
+    const open = createOpenFetch(server, {
+      fetchImpl: async (input, init) => {
+        seen.push(`${init?.method ?? "GET"} ${String(input)}`);
+        const target = String(input);
+        if (target.endsWith("/private"))
+          return new Response(null, { status: 302, headers: { location: "https://169.254.169.254/latest" } });
+        if (target.endsWith("/downgrade"))
+          return new Response(null, { status: 302, headers: { location: "http://auth.vendor.example/x" } });
+        if (target.endsWith("/moved"))
+          return new Response(null, { status: 307, headers: { location: "https://other.example/x" } });
+        return new Response("ok");
+      },
+    });
+    await assert.rejects(open("https://auth.vendor.example/private"), /private or local/u);
+    await assert.rejects(open("https://auth.vendor.example/downgrade"), /uses https/u);
+    await assert.rejects(
+      open("https://auth.vendor.example/moved", { method: "POST", body: "{}" }),
+      /not followed/u,
+    );
+    assert.ok(!seen.some((line) => line.includes("169.254") || line.includes("other.example")));
+    await assert.rejects(open("http://auth.vendor.example/x"), /uses https/u);
+    assert.equal(await (await open("https://auth.vendor.example/ok")).text(), "ok");
+  });
+});
+
+describe("printing server-supplied text", () => {
+  it("replaces control, C1, separator and bidi characters and caps the length", () => {
+    const text = printable("a\u001b[31mred\u0085b\u202ec\u2028d\u0000e");
+    // eslint-disable-next-line no-control-regex
+    assert.ok(!/[\u0000-\u001f\u007f-\u009f\u2028\u202e]/u.test(text), JSON.stringify(text));
+    assert.equal(printable("x".repeat(500), 20).length, 20);
+    assert.ok(printable("x".repeat(500), 20).endsWith("…"));
+    assert.equal(printable(undefined), "");
   });
 });
 
@@ -646,5 +834,175 @@ describe("mcp inspect --oauth", () => {
     if (process.platform !== "win32") {
       assert.equal((await stat(join(dir, "store"))).mode & 0o777, 0o700);
     }
+  });
+  it("stops before registering when the metadata mixes origins or names another issuer", async () => {
+    fake = await startFakeOAuthMcp({
+      metadata: (_origin, base) => ({
+        ...base,
+        token_endpoint: "http://127.0.0.1:1/token",
+      }),
+    });
+    await assert.rejects(
+      mcpInspectCommand(context(), input(fake.url)),
+      /must be on the issuer's own origin/u,
+    );
+    assert.equal(fake.registrations.length, 0);
+    assert.equal(launches.length, 0);
+    await fake.close();
+
+    fake = await startFakeOAuthMcp({
+      metadata: (_origin, base) => ({ ...base, issuer: "https://impostor.example" }),
+    });
+    await assert.rejects(
+      mcpInspectCommand(context(), input(fake.url)),
+      /names the issuer https:\/\/impostor\.example/u,
+    );
+    assert.equal(fake.registrations.length, 0);
+    assert.equal(launches.length, 0);
+  });
+
+  it("shows which authorization server the browser is about to talk to", async () => {
+    fake = await startFakeOAuthMcp();
+    await mcpInspectCommand(context(), input(fake.url));
+    assert.ok(
+      notices.some((line) => line.includes(`authorization server ${fake!.origin}`)),
+    );
+  });
+
+  it("does not send a refresh token to a token endpoint other than the one it came from", async () => {
+    fake = await startFakeOAuthMcp({ expiresIn: 1 });
+    await mcpInspectCommand(context(), input(fake.url));
+    const before = fake.tokenRequests.length;
+    fake.options.metadata = (origin, base) => ({ ...base, token_endpoint: `${origin}/token2` });
+    await mcpInspectCommand(context(), input(fake.url));
+    const grants = fake.tokenRequests.slice(before).map((r) => r.get("grant_type"));
+    assert.deepEqual(grants, ["authorization_code"], "no refresh_token grant was sent");
+    assert.equal(launches.length, 2);
+    assert.ok(notices.some((line) => line.includes("token endpoint changed")));
+  });
+
+  it("does not follow a redirect from the unauthenticated probe to another origin or to http", async () => {
+    const attacker: string[] = [];
+    const evil = createServer((req, res) => {
+      attacker.push(`${req.method} ${req.url}`);
+      res.writeHead(200);
+      res.end();
+    });
+    await new Promise<void>((resolve) => evil.listen(0, "127.0.0.1", resolve));
+    try {
+      const evilUrl = `http://127.0.0.1:${(evil.address() as AddressInfo).port}/probe`;
+      fake = await startFakeOAuthMcp({ redirectUnauthenticatedTo: evilUrl });
+      await mcpInspectCommand(context(), input(fake.url));
+      assert.deepEqual(attacker, []);
+      await fake.close();
+      fake = await startFakeOAuthMcp({
+        redirectUnauthenticatedTo: "http://collector.example.invalid/probe",
+      });
+      await mcpInspectCommand(context(), input(fake.url));
+    } finally {
+      evil.close();
+    }
+  });
+
+  it("asks only for the scope the server's challenge named, and for none otherwise", async () => {
+    fake = await startFakeOAuthMcp({ scopesSupported: ["read", "write", "admin"] });
+    await mcpInspectCommand(context(), input(fake.url));
+    assert.equal(fake.authorizeQueries[0]!.get("scope"), null);
+    assert.equal(fake.registrations[0]!.scope, undefined);
+    await fake.close();
+    await rm(join(dir, "store"), { recursive: true, force: true });
+
+    fake = await startFakeOAuthMcp({
+      scopesSupported: ["read", "write", "admin"],
+      challengeScope: "read",
+    });
+    await mcpInspectCommand(context(), input(fake.url));
+    assert.equal(fake.authorizeQueries[0]!.get("scope"), "read");
+  });
+
+  it("prints server-supplied error text as one capped, clean line", async () => {
+    fake = await startFakeOAuthMcp({
+      tokenError: () =>
+        JSON.stringify({
+          error: "server_error",
+          error_description: `\u001b[2Jfake prompt\u202e ${"x".repeat(2_000)}`,
+        }),
+    });
+    await assert.rejects(
+      mcpInspectCommand(context(), input(fake.url)),
+      (error: unknown) => {
+        assert.ok(error instanceof McpInspectError);
+        // eslint-disable-next-line no-control-regex
+        assert.ok(!/[\u0000-\u001f\u007f-\u009f\u202e]/u.test(error.message));
+        assert.ok(error.message.length <= 1_000, String(error.message.length));
+        return true;
+      },
+    );
+  });
+
+  it("cancels mid-discovery when aborted, and times out a hung authorization server", async () => {
+    fake = await startFakeOAuthMcp({ hang: ["/.well-known"] });
+    const controller = new AbortController();
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 100);
+    await assert.rejects(
+      authorize({
+        url: fake.url,
+        clientName: "t",
+        store: store(),
+        mode: "login",
+        notice: () => {},
+        signal: controller.signal,
+      }),
+      /cancelled/u,
+    );
+    assert.ok(Date.now() - started < 5_000);
+    await fake.close();
+
+    // The wait for the browser has not started while registration hangs.
+    fake = await startFakeOAuthMcp({ hang: ["/register"] });
+    await assert.rejects(
+      mcpInspectCommand(
+        context({ oauthTimeoutMs: 100, oauthRequestTimeoutMs: 400 }),
+        input(fake.url),
+      ),
+      /did not answer within/u,
+    );
+    assert.equal(launches.length, 0);
+  });
+
+  it("lets two runs share one rotating refresh token without a second sign-in", async () => {
+    fake = await startFakeOAuthMcp({ expiresIn: 1 });
+    await mcpInspectCommand(context(), input(fake.url));
+    await Promise.all([
+      mcpInspectCommand(context(), input(fake.url, { out: "race-a.json" })),
+      mcpInspectCommand(context(), input(fake.url, { out: "race-b.json" })),
+    ]);
+    const refreshes = fake.tokenRequests.filter(
+      (request) => request.get("grant_type") === "refresh_token",
+    );
+    assert.equal(refreshes.length, 1, "the refresh token was spent once");
+    assert.equal(launches.length, 1, "nobody was sent back to the browser");
+  });
+
+  it("signs in again only when the server says the grant is gone, not on a server error", async () => {
+    fake = await startFakeOAuthMcp({ expiresIn: 1, refreshFails: "server_error" });
+    await mcpInspectCommand(context(), input(fake.url));
+    await assert.rejects(mcpInspectCommand(context(), input(fake.url)), /Sign-in failed|server/iu);
+    assert.equal(launches.length, 1);
+
+    fake.options.refreshFails = "invalid_grant";
+    await mcpInspectCommand(context(), input(fake.url));
+    assert.equal(launches.length, 2);
+  });
+
+  it("does not open the browser for a 403 or insufficient scope", async () => {
+    fake = await startFakeOAuthMcp({ mcpStatus: 403 });
+    await assert.rejects(
+      mcpInspectCommand(context(), input(fake.url)),
+      /Signing in again would not change that/u,
+    );
+    assert.equal(launches.length, 1, "only the first sign-in");
+    assert.equal(fake.tokenRequests.length, 1, "no renewal either");
   });
 });

@@ -142,9 +142,13 @@ export function createHttpTransport(
     if (session) sessionId = session;
     if (response.status === 401 || response.status === 403) {
       await response.body?.cancel();
+      const insufficientScope = /insufficient_scope/iu.test(
+        response.headers.get("www-authenticate") ?? "",
+      );
       throw new McpUnauthorizedError(
         options.unauthorizedMessage?.(response.status, method) ??
           `The server refused the credentials (HTTP ${response.status}) on ${method}. Pass the header it expects with --header "Authorization: Bearer <token>" (repeatable); it is sent to the server and never written to the file.`,
+        response.status === 401 && !insufficientScope,
       );
     }
     return response;

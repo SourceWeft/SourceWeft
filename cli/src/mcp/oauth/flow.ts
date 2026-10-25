@@ -9,7 +9,10 @@ import {
   startAuthorization,
   type OAuthClientProvider,
 } from "@modelcontextprotocol/sdk/client/auth.js";
-import { OAuthError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  InvalidClientError,
+  InvalidGrantError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type {
   AuthorizationServerMetadata,
   OAuthClientInformationFull,
@@ -17,13 +20,10 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { McpInspectError } from "../../errors";
 import { openBrowser } from "./browser";
-import {
-  createCredentialedFetch,
-  createOpenFetch,
-  isSecureOrigin,
-} from "./guard";
+import { createCredentialedFetch, createOpenFetch } from "./guard";
 import { startLoopbackListener } from "./loopback";
-import { redactSecrets } from "./redact";
+import { printable, redactSecrets } from "./redact";
+import { validateAuthorizationServer } from "./trust";
 import {
   resourceKey,
   type McpOAuthStore,
@@ -42,7 +42,6 @@ import {
 
 /** An access token this close to its end counts as expired. */
 const EXPIRY_MARGIN_MS = 60_000;
-const PROBE_TIMEOUT_MS = 10_000;
 
 export type TokenSource = "stored" | "refreshed" | "signed-in";
 
@@ -65,6 +64,8 @@ export type AuthorizeOptions = {
   /** Replaceable in tests; true when a browser was started. */
   launchBrowser?: (url: string) => Promise<boolean>;
   callbackTimeoutMs?: number;
+  /** Per-request time limit; the guard's default otherwise. */
+  requestTimeoutMs?: number;
   signal?: AbortSignal;
   now?: () => number;
 };
@@ -96,22 +97,6 @@ function secretsOf(record: OAuthRecord | undefined): string[] {
   ].filter((value): value is string => Boolean(value));
 }
 
-function requireSecureEndpoints(
-  metadata: AuthorizationServerMetadata,
-  asUrl: string,
-): void {
-  for (const [name, value] of [
-    ["authorization endpoint", metadata.authorization_endpoint],
-    ["token endpoint", metadata.token_endpoint],
-  ] as const) {
-    if (!isSecureOrigin(new URL(value))) {
-      throw new McpInspectError(
-        `The authorization server ${asUrl} declares an insecure ${name} (${new URL(value).origin}); sign-in needs https.`,
-      );
-    }
-  }
-}
-
 /**
  * Asks the endpoint for a token-less answer, to learn where its protected
  * resource metadata is (the `WWW-Authenticate` header of a 401). Nothing
@@ -138,7 +123,6 @@ async function probeChallenge(
           clientInfo: { name: "sourceweft-cli", version: "0" },
         },
       }),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     await response.body?.cancel();
     if (response.status !== 401) return {};
@@ -156,7 +140,7 @@ async function probeChallenge(
 
 function describeFailure(error: unknown, secrets: readonly string[]): string {
   const text = error instanceof Error ? error.message : String(error);
-  return redactSecrets(text, secrets);
+  return printable(redactSecrets(text, secrets));
 }
 
 /**
@@ -173,8 +157,8 @@ export async function authorize(
   } catch (error) {
     if (error instanceof McpInspectError) {
       throw new McpInspectError(
-        redactSecrets(error.message, secrets),
-        error.details.map((line) => redactSecrets(line, secrets)),
+        printable(redactSecrets(error.message, secrets), 1_000),
+        error.details.map((line) => printable(redactSecrets(line, secrets))),
       );
     }
     throw new McpInspectError(
@@ -190,7 +174,14 @@ async function authorizeUnchecked(
   const now = options.now ?? Date.now;
   const serverUrl = new URL(options.url);
   const resourceId = resourceKey(options.url);
-  const openFetch = createOpenFetch(options.fetchImpl);
+  const limits = {
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.requestTimeoutMs !== undefined
+      ? { timeoutMs: options.requestTimeoutMs }
+      : {}),
+  };
+  const openFetch = createOpenFetch(serverUrl, limits);
 
   const challenge = await probeChallenge(options.url, openFetch);
   const info = await discoverOAuthServerInfo(serverUrl, {
@@ -199,6 +190,10 @@ async function authorizeUnchecked(
       : {}),
     fetchFn: openFetch,
   });
+  // Discovery treats a failed request as "nothing there"; a Ctrl-C is not that.
+  if (options.signal?.aborted) {
+    throw new McpInspectError("The sign-in was cancelled.");
+  }
   const asUrl = info.authorizationServerUrl;
   const metadata = info.authorizationServerMetadata;
   if (!metadata) {
@@ -206,7 +201,7 @@ async function authorizeUnchecked(
       `${serverUrl.origin} does not publish OAuth metadata (no protected-resource or authorization-server document was found), so --oauth cannot sign in to it. Use --header with a token you already hold.`,
     );
   }
-  requireSecureEndpoints(metadata, asUrl);
+  validateAuthorizationServer(metadata, asUrl, serverUrl);
   const resource = await selectResourceURL(
     serverUrl,
     {} as OAuthClientProvider,
@@ -217,11 +212,12 @@ async function authorizeUnchecked(
     resource && info.resourceMetadata
       ? info.resourceMetadata.resource
       : undefined;
-  const scope = challenge.scope ?? info.resourceMetadata?.scopes_supported?.join(" ");
+  // Only what the server's own challenge asked for: not every scope it knows.
+  const scope = challenge.scope;
 
   const tokenFetch = createCredentialedFetch(
     [new URL(metadata.token_endpoint).origin],
-    options.fetchImpl,
+    limits,
   );
 
   const record = await options.store.load(resourceId, asUrl);
@@ -235,34 +231,67 @@ async function authorizeUnchecked(
     if (fresh && options.mode === "reuse") {
       return { accessToken: stored.access_token, source: "stored", secrets };
     }
-    if (stored.refresh_token) {
-      try {
-        const refreshed = await refreshAuthorization(asUrl, {
-          metadata,
-          clientInformation: record.client,
-          refreshToken: stored.refresh_token,
-          ...(resourceIndicator ? { resource: resourceIndicator } : {}),
-          fetchFn: tokenFetch,
-        });
-        const next: OAuthRecord = {
-          ...record,
-          tokens: toStoredTokens(refreshed, now()),
-        };
-        await options.store.save(next);
-        secrets.push(...secretsOf(next));
-        return {
-          accessToken: refreshed.access_token,
-          source: "refreshed",
-          secrets,
-        };
-      } catch (error) {
-        // The server said the grant is gone: sign in again. A network
-        // failure or a refused redirect is not that and is reported.
-        if (!(error instanceof OAuthError)) throw error;
-        options.notice(
-          "The stored sign-in could not be renewed; signing in again.",
-        );
-      }
+    if (record.tokenEndpoint !== metadata.token_endpoint) {
+      // The refresh token was issued for another token endpoint; it is not
+      // sent to this one.
+      options.notice(
+        "The authorization server's token endpoint changed since the last sign-in, so the stored refresh token is not sent to it; signing in again.",
+      );
+    } else if (stored.refresh_token) {
+      const renewed = await options.store.withLock(
+        resourceId,
+        asUrl,
+        async (): Promise<Authorization | undefined> => {
+          // Another run may have spent the refresh token while this one
+          // waited for the lock; its result is the one to use.
+          const current = await options.store.load(resourceId, asUrl);
+          secrets.push(...secretsOf(current));
+          if (!current?.tokens) return undefined;
+          if (current.tokens.access_token !== stored.access_token) {
+            return {
+              accessToken: current.tokens.access_token,
+              source: "refreshed",
+              secrets,
+            };
+          }
+          if (!current.tokens.refresh_token) return undefined;
+          try {
+            const refreshed = await refreshAuthorization(asUrl, {
+              metadata,
+              clientInformation: current.client,
+              refreshToken: current.tokens.refresh_token,
+              ...(resourceIndicator ? { resource: resourceIndicator } : {}),
+              fetchFn: tokenFetch,
+            });
+            const next: OAuthRecord = {
+              ...current,
+              tokens: toStoredTokens(refreshed, now()),
+            };
+            await options.store.save(next);
+            secrets.push(...secretsOf(next));
+            return {
+              accessToken: refreshed.access_token,
+              source: "refreshed",
+              secrets,
+            };
+          } catch (error) {
+            // Only "the grant or the client is gone" means signing in again;
+            // a server error, a network failure or a refused redirect is
+            // reported as it is.
+            if (
+              error instanceof InvalidGrantError ||
+              error instanceof InvalidClientError
+            ) {
+              options.notice(
+                "The stored sign-in could not be renewed; signing in again.",
+              );
+              return undefined;
+            }
+            throw error;
+          }
+        },
+      );
+      if (renewed) return renewed;
     }
   }
 
@@ -298,12 +327,6 @@ async function signIn(input: {
       `The authorization server ${asUrl} does not offer dynamic client registration, and this command carries no preregistered client for it. Obtain a token another way and pass it with --header "Authorization: Bearer <token>".`,
     );
   }
-  if (!isSecureOrigin(new URL(metadata.registration_endpoint))) {
-    throw new McpInspectError(
-      `The authorization server ${asUrl} declares an insecure registration endpoint; sign-in needs https.`,
-    );
-  }
-
   const state = randomBytes(32).toString("base64url");
   const listener = await startLoopbackListener({
     expectedState: state,
@@ -338,11 +361,17 @@ async function signIn(input: {
     });
     secrets.push(codeVerifier);
 
+    const authorizationServer = new URL(asUrl).origin;
+    options.notice(
+      `Signing in to ${new URL(options.url).origin} with the authorization server ${authorizationServer}.`,
+    );
+    // The wait the person is given starts when the browser is offered.
+    listener.startTimer();
     const launch = options.launchBrowser ?? openBrowser;
     const opened = await launch(authorizationUrl.href);
     if (opened) {
       options.notice(
-        `Opened your browser to sign in to ${new URL(options.url).origin}. Waiting for you to approve (the sign-in returns to ${listener.redirectUri} on this computer).`,
+        `Opened your browser. Waiting for you to approve (the sign-in returns to ${listener.redirectUri} on this computer).`,
       );
     } else {
       options.notice(
@@ -364,10 +393,11 @@ async function signIn(input: {
     secrets.push(tokens.access_token);
     if (tokens.refresh_token) secrets.push(tokens.refresh_token);
 
-    await options.store.save({
+    const record: OAuthRecord = {
       version: 1,
       resource: input.resourceId,
       issuer: asUrl,
+      tokenEndpoint: metadata.token_endpoint,
       client: {
         client_id: registered.client_id,
         ...(registered.client_secret
@@ -379,7 +409,10 @@ async function signIn(input: {
           registered.token_endpoint_auth_method ?? "none",
       },
       tokens: toStoredTokens(tokens, input.now()),
-    });
+    };
+    await options.store.withLock(input.resourceId, asUrl, () =>
+      options.store.save(record),
+    );
     return { accessToken: tokens.access_token, source: "signed-in", secrets };
   } finally {
     await listener.close();

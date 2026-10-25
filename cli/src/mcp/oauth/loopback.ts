@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { McpInspectError } from "../../errors";
+import { printable } from "./redact";
 
 /**
  * The redirect target of the authorization-code flow: a short-lived HTTP
@@ -20,6 +21,11 @@ export type LoopbackListener = {
   redirectUri: string;
   /** Resolves with the authorization code; rejects on error, timeout or abort. */
   result: Promise<CallbackResult>;
+  /**
+   * Starts the wait: the time limit runs from here, so it covers only the
+   * person's part (the browser), not discovery or registration before it.
+   */
+  startTimer: () => void;
   /** Releases the port and the timer; safe to call more than once. */
   close: () => Promise<void>;
 };
@@ -38,13 +44,6 @@ export type LoopbackOptions = {
 
 const PAGE = (title: string, body: string) =>
   `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:16px system-ui;margin:3rem auto;max-width:32rem"><h1>${title}</h1><p>${body}</p></body>`;
-
-/** Text safe to print: a server-supplied description, flattened and capped. */
-function printable(value: string | null): string {
-  if (!value) return "";
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, 300);
-}
 
 function describeDuration(ms: number): string {
   return ms >= 60_000
@@ -204,15 +203,18 @@ export async function startLoopbackListener(
   }
   if (!boundHost) throw describeBindError(lastError, hosts.join("/"));
 
-  const timer = setTimeout(() => {
-    settle.reject(
-      new McpInspectError(
-        `No sign-in arrived within ${describeDuration(timeoutMs)}. Run the command again and finish the browser step sooner.`,
-      ),
-    );
-  }, timeoutMs);
-
   let closed = false;
+  let timer: NodeJS.Timeout | undefined;
+  const startTimer = () => {
+    if (timer !== undefined || closed) return;
+    timer = setTimeout(() => {
+      settle.reject(
+        new McpInspectError(
+          `No sign-in arrived within ${describeDuration(timeoutMs)}. Run the command again and finish the browser step sooner.`,
+        ),
+      );
+    }, timeoutMs);
+  };
   const onAbort = () =>
     settle.reject(new McpInspectError("The sign-in was cancelled."));
   const close = async (): Promise<void> => {
@@ -235,6 +237,7 @@ export async function startLoopbackListener(
   return {
     redirectUri: `http://${hostInUri}:${boundPort}${CALLBACK_PATH}`,
     result,
+    startTimer,
     close,
   };
 }
