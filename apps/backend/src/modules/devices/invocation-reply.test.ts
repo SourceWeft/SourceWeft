@@ -119,7 +119,7 @@ describe("device status message", () => {
         expect(
           localDeviceReplySchema.safeParse({
             ...status,
-            sandbox: { state: "needsSetup", code, remedy },
+            sandbox: { state: "needsSetup", code, remedy, reason: "why" },
           }).success,
         ).toBe(true);
   });
@@ -133,30 +133,75 @@ describe("device status message", () => {
     ["long shell", { shell: "a".repeat(65) }],
     ["fractional protocolVersion", { protocolVersion: 1.5 }],
     ["sandbox state", { sandbox: { state: "broken" } }],
-    ["sandbox code", { sandbox: { state: "needsSetup", code: "nope" } }],
-    ["sandbox remedy", { sandbox: { state: "needsSetup", remedy: "nope" } }],
+    ["sandbox code", { sandbox: { ...status.sandbox, code: "nope" } }],
+    ["sandbox remedy", { sandbox: { ...status.sandbox, remedy: "nope" } }],
     [
       "long reason",
-      { sandbox: { state: "needsSetup", reason: "x".repeat(1001) } },
+      { sandbox: { ...status.sandbox, reason: "x".repeat(1001) } },
     ],
-    ["sandbox extra key", { sandbox: { state: "ready", extra: true } }],
+    ["ready with a code", { sandbox: { state: "ready", code: "bundleStale" } }],
+    ["ready with a remedy", { sandbox: { state: "ready", remedy: "none" } }],
+    ["ready with a reason", { sandbox: { state: "ready", reason: "why" } }],
+    [
+      "needsSetup without a code",
+      { sandbox: { state: "needsSetup", remedy: "none", reason: "why" } },
+    ],
+    [
+      "needsSetup without a remedy",
+      {
+        sandbox: { state: "needsSetup", code: "bundleStale", reason: "why" },
+      },
+    ],
+    [
+      "needsSetup without a reason",
+      {
+        sandbox: { state: "needsSetup", code: "bundleStale", remedy: "none" },
+      },
+    ],
+    ["bare needsSetup", { sandbox: { state: "needsSetup" } }],
+    [
+      "unsupported with a code",
+      { sandbox: { state: "unsupported", code: "bundleStale" } },
+    ],
+    [
+      "unsupported with a remedy",
+      { sandbox: { state: "unsupported", remedy: "none" } },
+    ],
     ["missing sandbox", { sandbox: undefined }],
     ["too many capabilities", { capabilities: Array(33).fill("a") }],
     ["long capability", { capabilities: ["a".repeat(65)] }],
     ["empty capability", { capabilities: [""] }],
     ["non-string capability", { capabilities: [1] }],
-    ["extra top-level key", { token: "x" }],
   ])("rejects an invalid %s", (_name, patch) => {
     expect(
       localDeviceReplySchema.safeParse({ ...status, ...patch }).success,
     ).toBe(false);
   });
 
+  test("unsupported needs no detail and may carry a reason", () => {
+    for (const sandbox of [
+      { state: "unsupported" },
+      { state: "unsupported", reason: "no sandbox on this OS" },
+    ])
+      expect(
+        localDeviceReplySchema.safeParse({ ...status, sandbox }).success,
+      ).toBe(true);
+  });
+
+  test("unknown keys are stripped so newer hosts stay compatible", () => {
+    const parsed = localDeviceReplySchema.parse({
+      ...status,
+      osVersion: "26.1",
+      sandbox: { ...status.sandbox, extra: true },
+    });
+    expect(parsed).toEqual(status);
+  });
+
   test("accepts a 1000 character reason and 32 capabilities", () => {
     expect(
       localDeviceReplySchema.safeParse({
         ...status,
-        sandbox: { state: "needsSetup", reason: "x".repeat(1000) },
+        sandbox: { ...status.sandbox, reason: "x".repeat(1000) },
         capabilities: Array(32).fill("a"),
       }).success,
     ).toBe(true);

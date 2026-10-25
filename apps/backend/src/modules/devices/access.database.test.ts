@@ -114,20 +114,24 @@ test("gateway persists dispatch and does not replay a command after the socket d
     workspaceId = randomUUID(),
     threadId = randomUUID(),
     teamId = randomUUID();
-  await schema.db.insert(schema.workspaces).values({
-    id: workspaceId,
-    organizationId: teamId,
-    name: "Socket",
-    slug: workspaceId,
-  });
-  await schema.db.insert(schema.threads).values({
-    id: threadId,
-    workspaceId,
-    teamId,
-    createdBy: h.userId,
-    title: "Socket",
-    executionTargetJson: { kind: "local", deviceId: h.id },
-  });
+  await schema.db
+    .insert(schema.workspaces)
+    .values({
+      id: workspaceId,
+      organizationId: teamId,
+      name: "Socket",
+      slug: workspaceId,
+    });
+  await schema.db
+    .insert(schema.threads)
+    .values({
+      id: threadId,
+      workspaceId,
+      teamId,
+      createdBy: h.userId,
+      title: "Socket",
+      executionTargetJson: { kind: "local", deviceId: h.id },
+    });
   const server = createServer();
   const dispose = attachLocalDeviceGateway(server);
   server.listen(0, "127.0.0.1");
@@ -220,7 +224,10 @@ test("gateway persists host status reports; old hosts keep null columns; malform
     );
     sockets.push(socket);
     const [message] = await once(socket, "message");
-    assert.equal(JSON.parse(String(message)).type, "connected");
+    const connected = JSON.parse(String(message));
+    assert.equal(connected.type, "connected");
+    // A host may only send `status` to a backend that announces it.
+    assert.deepEqual(connected.features, ["status"]);
     return socket;
   };
   const row = (id: string) =>
@@ -255,6 +262,24 @@ test("gateway persists host status reports; old hosts keep null columns; malform
     assert.equal(oldRow?.statusReportedAt, null);
 
     const socket = await connect(modern.token);
+    const seeded = {
+      id: randomUUID(),
+      deviceId: modern.id,
+      userId: modern.userId,
+      action: "folder.list",
+      payload: { folderId: "grant" },
+      status: "succeeded",
+      result: { ok: true },
+      error: null,
+      deadline: new Date(Date.now() + 3_600_000),
+    };
+    await schema.db.insert(schema.localToolInvocations).values(seeded);
+    const invocations = () =>
+      schema.db.query.localToolInvocations.findMany({
+        where: eq(schema.localToolInvocations.deviceId, modern.id),
+      });
+    const before = await invocations();
+    assert.equal(before.length, 1);
     socket.send(
       JSON.stringify(
         report({
@@ -285,15 +310,28 @@ test("gateway persists host status reports; old hosts keep null columns; malform
     assert.equal(ready?.sandboxRemedy, null);
     assert.equal(socket.readyState, WebSocket.OPEN);
 
+    // Last frame wins even when frames arrive back to back.
+    for (let i = 0; i < 25; i++)
+      socket.send(
+        JSON.stringify(
+          report({
+            state: "needsSetup",
+            code: "installing",
+            reason: `step ${i}`,
+            remedy: "none",
+          }),
+        ),
+      );
+    socket.send(JSON.stringify(report({ state: "ready" })));
+    await waitFor(async () => (await row(modern.id))?.sandboxState === "ready");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const settled = await row(modern.id);
+    assert.equal(settled?.sandboxState, "ready");
+    assert.equal(settled?.sandboxCode, null);
+    assert.equal(settled?.sandboxReason, null);
+
     // Status reports never create or alter invocations.
-    assert.equal(
-      (
-        await schema.db.query.localToolInvocations.findMany({
-          where: eq(schema.localToolInvocations.deviceId, modern.id),
-        })
-      ).length,
-      0,
-    );
+    assert.deepEqual(await invocations(), before);
 
     const closed = once(socket, "close");
     socket.send(
@@ -313,6 +351,77 @@ test("gateway persists host status reports; old hosts keep null columns; malform
         if (!(await row(id))?.connectionId) break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
+  }
+});
+
+test("status from a replaced or revoked connection is dropped and closes the socket", async () => {
+  const { attachLocalDeviceGateway } = await import("./gateway");
+  const h = await host();
+  const server = createServer();
+  const dispose = attachLocalDeviceGateway(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as { port: number };
+  const sockets: WebSocket[] = [];
+  const connect = async () => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/v1/local-devices/socket`,
+      { headers: { Authorization: `Bearer ${h.token}` } },
+    );
+    sockets.push(socket);
+    const [message] = await once(socket, "message");
+    assert.equal(JSON.parse(String(message)).type, "connected");
+    return socket;
+  };
+  const row = () =>
+    schema.db.query.localDevices.findFirst({
+      where: eq(schema.localDevices.id, h.id),
+    });
+  const status = (shell: string) =>
+    JSON.stringify({
+      type: "status",
+      platform: "macos",
+      arch: "arm64",
+      shell,
+      sandbox: { state: "ready" },
+      capabilities: [],
+    });
+  try {
+    const stale = await connect();
+    const current = await connect();
+    const staleClosed = once(stale, "close");
+    stale.send(status("stale"));
+    assert.equal((await staleClosed)[0], 1008);
+    const untouched = await row();
+    assert.equal(untouched?.shell, null);
+    assert.equal(untouched?.sandboxState, null);
+    assert.equal(untouched?.statusReportedAt, null);
+
+    // The current connection still works...
+    current.send(status("zsh"));
+    for (let i = 0; i < 100 && (await row())?.shell !== "zsh"; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal((await row())?.shell, "zsh");
+
+    // ...until the device is revoked.
+    await schema.db
+      .update(schema.localDevices)
+      .set({ revokedAt: new Date() })
+      .where(eq(schema.localDevices.id, h.id));
+    const currentClosed = once(current, "close");
+    current.send(status("fish"));
+    assert.equal((await currentClosed)[0], 1008);
+    assert.equal((await row())?.shell, "zsh");
+  } finally {
+    for (const socket of sockets) socket.terminate();
+    dispose();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    for (let i = 0; i < 50; i++) {
+      if (!(await row())?.connectionId) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   }
 });
 

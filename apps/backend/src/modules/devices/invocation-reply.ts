@@ -28,24 +28,50 @@ export type SandboxState = (typeof SANDBOX_STATES)[number];
 export const DEVICE_PLATFORMS = ["macos", "linux", "windows"] as const;
 export const DEVICE_ARCHES = ["x64", "arm64"] as const;
 
-const deviceStatusSchema = z
+/**
+ * Capabilities the gateway announces in its `connected` message. A backend
+ * that does not know the `status` message closes the socket with 1008 on it,
+ * so a host MUST send `status` only when `connected.features` includes
+ * "status"; hosts talking to an older backend simply never report.
+ */
+export const GATEWAY_FEATURES = ["status"] as const;
+
+const sandboxStatusSchema = z
   .object({
-    type: z.literal("status"),
-    platform: z.enum(DEVICE_PLATFORMS),
-    arch: z.enum(DEVICE_ARCHES),
-    shell: z.string().regex(/^[a-zA-Z0-9._-]{1,64}$/),
-    protocolVersion: z.number().int().optional(),
-    sandbox: z
-      .object({
-        state: z.enum(SANDBOX_STATES),
-        code: z.enum(SANDBOX_SETUP_CODES).optional(),
-        reason: z.string().max(1000).optional(),
-        remedy: z.enum(SANDBOX_REMEDIES).optional(),
-      })
-      .strict(),
-    capabilities: z.array(z.string().min(1).max(64)).max(32),
+    state: z.enum(SANDBOX_STATES),
+    code: z.enum(SANDBOX_SETUP_CODES).optional(),
+    reason: z.string().max(1000).optional(),
+    remedy: z.enum(SANDBOX_REMEDIES).optional(),
   })
-  .strict();
+  .superRefine((sandbox, ctx) => {
+    const issue = (key: "code" | "remedy" | "reason", message: string) =>
+      ctx.addIssue({ code: "custom", path: [key], message });
+    if (sandbox.state === "ready") {
+      for (const key of ["code", "remedy", "reason"] as const)
+        if (sandbox[key] !== undefined)
+          issue(key, `${key} is not allowed when the sandbox is ready`);
+    } else if (sandbox.state === "needsSetup") {
+      for (const key of ["code", "remedy", "reason"] as const)
+        if (sandbox[key] === undefined)
+          issue(key, `${key} is required when the sandbox needs setup`);
+    } else {
+      for (const key of ["code", "remedy"] as const)
+        if (sandbox[key] !== undefined)
+          issue(key, `${key} is not allowed when the sandbox is unsupported`);
+    }
+  });
+
+// Unknown keys are stripped, like every other message here, so a newer host
+// adding a field never makes an older backend close the socket.
+const deviceStatusSchema = z.object({
+  type: z.literal("status"),
+  platform: z.enum(DEVICE_PLATFORMS),
+  arch: z.enum(DEVICE_ARCHES),
+  shell: z.string().regex(/^[a-zA-Z0-9._-]{1,64}$/),
+  protocolVersion: z.number().int().optional(),
+  sandbox: sandboxStatusSchema,
+  capabilities: z.array(z.string().min(1).max(64)).max(32),
+});
 export type DeviceStatusMessage = z.infer<typeof deviceStatusSchema>;
 
 // Optional additive field: old hosts omit it and old backends ignore it.
