@@ -185,13 +185,22 @@ const XCODE_SELECT: &str = "/usr/bin/xcode-select";
 /// `PATH`. `$HOME`-relative toolchains (nvm, pyenv, rustup) come from `read_roots` via `PATH`.
 const DARWIN_HOMEBREW_PREFIXES: [&str; 2] = ["/opt/homebrew", "/usr/local"];
 
+/// The macOS Command Line Tools developer directory (the fixed OS install path). Read root and
+/// `DEVELOPER_DIR` target for the `/usr/bin` xcode-select tool shims (`git`, `cc`, `clang`, `make`,
+/// `/usr/bin/python3`) — see `darwin_developer_dir` for why a full `Xcode.app` can't serve that role
+/// in the sandbox and the shims are pointed here instead. Added to the read roots when it exists
+/// (`darwin_read_roots`), so the sandboxed shim can read the real tools it resolves under it; a
+/// narrow toolchain subpath of `/Library`, never a wholesale `/Library` grant.
+const DARWIN_COMMAND_LINE_TOOLS: &str = "/Library/Developer/CommandLineTools";
+
 /// macOS read roots: the PATH-derived toolchain roots under `$HOME` (`read_roots`), plus the
 /// active developer directory from `xcode-select -p` (only when it resolves to a real, canonical
-/// directory — the `cc`/`clang`/`git` xcode-select shims resolve the real toolchain under it) and
-/// the Homebrew prefixes `DARWIN_HOMEBREW_PREFIXES`. The OS read set (`/bin`, `/usr/bin`, `/etc`,
-/// `/var`, `/dev`, …) is the sidecar's own `DARWIN_SYSTEM_READ_ROOTS`, not here. Each discovered
-/// path is canonicalised and kept only when it is a directory; the result is de-duplicated with
-/// the PATH roots first.
+/// directory — the `cc`/`clang`/`git` xcode-select shims resolve the real toolchain under it), the
+/// Command Line Tools directory `DARWIN_COMMAND_LINE_TOOLS` (the developer dir the shims are pinned
+/// to in the sandbox; `darwin_developer_dir`), and the Homebrew prefixes `DARWIN_HOMEBREW_PREFIXES`.
+/// The OS read set (`/bin`, `/usr/bin`, `/etc`, `/var`, `/dev`, …) is the sidecar's own
+/// `DARWIN_SYSTEM_READ_ROOTS`, not here. Each discovered path is canonicalised and kept only when
+/// it is a directory; the result is de-duplicated with the PATH roots first.
 pub(crate) fn darwin_read_roots(
     home: &Path,
     base: &Path,
@@ -202,8 +211,38 @@ pub(crate) fn darwin_read_roots(
     if let Some(dir) = developer_dir(xcode_select) {
         candidates.push(dir);
     }
+    candidates.push(PathBuf::from(DARWIN_COMMAND_LINE_TOOLS));
     candidates.extend(DARWIN_HOMEBREW_PREFIXES.iter().map(PathBuf::from));
     darwin_read_roots_with(home, base, path_var, &candidates)
+}
+
+/// The developer directory the macOS `/usr/bin` xcode-select tool shims (`git`, `cc`, `clang`,
+/// `make`, `/usr/bin/python3`) are pinned to inside the sandbox, via `DEVELOPER_DIR` in the child
+/// env (`child_env`). Returns the canonical Command Line Tools path when `command_line_tools` is an
+/// existing directory, else `None`.
+///
+/// A *full* `Xcode.app` cannot act as the in-sandbox developer directory: its shims make `xcrun`
+/// resolve each tool by writing a lookup cache in the per-user Darwin temp dir — which the
+/// workspace-only write policy denies — and then cold-fall back to `xcodebuild`, which needs the
+/// XPC / Launch Services the tight sandbox withholds and crashes (`DVTSystemPrerequisites`
+/// "blocked by sandbox"). Granting a read of the cache dir is on the forbidden list, and reading
+/// `Xcode.app/Contents/Info.plist` only moves the failure on to `xcodebuild` — so no read widening
+/// fixes it. The Command Line Tools instead resolve tools from a fixed layout with no `xcodebuild`
+/// dependency (the cache-write failure is then a harmless warning), so pointing the shims there is
+/// the only mechanism that lets them run under the tight policy. Consequences:
+///   * when CLT is already the active developer dir, this is the same directory — no change;
+///   * when a full Xcode is the active dir, the shims are redirected to CLT. This is a deliberate,
+///     documented divergence from the "active" toolchain (`xcode-select -p`): the active one is
+///     non-functional in the sandbox, so CLT is the least-surprising *working* choice, and it ships
+///     the same command-line `clang`/`git`/`make` for this purpose;
+///   * when CLT is absent, `None` leaves the active developer dir in force (an Xcode-only machine's
+///     shims stay unsupported — no safe mechanism can run a full Xcode in the sandbox).
+fn darwin_developer_dir(command_line_tools: &str) -> Option<String> {
+    let canonical = Path::new(command_line_tools).canonicalize().ok()?;
+    if !canonical.is_dir() {
+        return None;
+    }
+    canonical.to_str().map(str::to_string)
 }
 
 /// `darwin_read_roots` with its discovered extra directories supplied directly, so a test can
@@ -375,7 +414,17 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
 
 /// The wrapped command's environment with the pinned toolchain, home, temp and cache locations
 /// laid over it. The pinned values win over anything the sidecar's own environment supplied.
-fn child_env(root: &Path, wrapped: Vec<(String, String)>) -> Vec<(String, String)> {
+///
+/// `developer_dir` is set only on macOS (`Some` from `darwin_developer_dir`), and pins
+/// `DEVELOPER_DIR` so the `/usr/bin` xcode-select tool shims resolve against the Command Line Tools
+/// toolchain, which works under the tight sandbox where a full `Xcode.app` cannot. It is `None` on
+/// Linux and on a macOS host with no Command Line Tools, leaving the inherited developer dir
+/// untouched.
+fn child_env(
+    root: &Path,
+    wrapped: Vec<(String, String)>,
+    developer_dir: Option<&str>,
+) -> Vec<(String, String)> {
     let root_text = root.to_string_lossy();
     let mut env: BTreeMap<String, String> = wrapped.into_iter().collect();
     for (key, value) in [
@@ -387,6 +436,9 @@ fn child_env(root: &Path, wrapped: Vec<(String, String)>) -> Vec<(String, String
         ("NODE_USE_ENV_PROXY", "1".to_string()),
     ] {
         env.insert(key.to_string(), value);
+    }
+    if let Some(dir) = developer_dir {
+        env.insert("DEVELOPER_DIR".to_string(), dir.to_string());
     }
     env.into_iter().collect()
 }
@@ -441,7 +493,12 @@ pub(crate) fn execute_command(
                 return Err(error);
             }
         };
-    let env = child_env(root, wrapped.env);
+    // macOS pins `DEVELOPER_DIR` to the Command Line Tools so the `/usr/bin` xcode-select tool
+    // shims work under the tight policy; Linux and a CLT-less macOS host get `None` (unchanged env).
+    let developer_dir = (HOST_PLATFORM == Platform::Darwin)
+        .then(|| darwin_developer_dir(DARWIN_COMMAND_LINE_TOOLS))
+        .flatten();
+    let env = child_env(root, wrapped.env, developer_dir.as_deref());
     let run = super::process::run_wrapped(&wrapped.argv, &env, cwd, timeout_ms, max_chars, cancel);
     let result = run.map(|run| {
         let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
@@ -823,6 +880,54 @@ mod tests {
         let roots = darwin_read_roots(&home, &base, "/usr/bin:/bin", XCODE_SELECT);
         // Every entry is an absolute, canonical path (no `$HOME` roots in this PATH).
         assert!(roots.iter().all(|r| Path::new(r).is_absolute()));
+    }
+
+    #[test]
+    fn darwin_developer_dir_detects_an_existing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path().canonicalize().unwrap();
+        // An existing directory: returned as its canonical path.
+        let clt = dir.join("CommandLineTools");
+        fs::create_dir(&clt).unwrap();
+        assert_eq!(
+            darwin_developer_dir(clt.to_str().unwrap()),
+            Some(clt.to_str().unwrap().to_string())
+        );
+        // A path that does not exist: None.
+        assert_eq!(darwin_developer_dir(dir.join("absent").to_str().unwrap()), None);
+        // A file, not a directory: None.
+        let file = dir.join("afile");
+        fs::write(&file, "x").unwrap();
+        assert_eq!(darwin_developer_dir(file.to_str().unwrap()), None);
+    }
+
+    #[test]
+    fn child_env_pins_the_developer_dir_only_when_given() {
+        let root = Path::new("/w/ws");
+        // A wrapped env that already carries a (stale) DEVELOPER_DIR, to prove the pin wins.
+        let wrapped = || vec![("DEVELOPER_DIR".to_string(), "/stale/xcode".to_string())];
+
+        let with = child_env(root, wrapped(), Some("/Library/Developer/CommandLineTools"));
+        let find = |env: &[(String, String)], key: &str| {
+            env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+        };
+        assert_eq!(
+            find(&with, "DEVELOPER_DIR").as_deref(),
+            Some("/Library/Developer/CommandLineTools"),
+            "the override must win over the wrapped value"
+        );
+        // The other pinned values are still laid over the wrapped env.
+        assert_eq!(find(&with, "HOME").as_deref(), Some("/w/ws"));
+        assert_eq!(find(&with, "TMPDIR").as_deref(), Some("/w/ws/.tmp"));
+
+        // No override (Linux / no Command Line Tools): DEVELOPER_DIR is left as the wrapped value,
+        // never introduced or rewritten by us.
+        let without = child_env(root, wrapped(), None);
+        assert_eq!(find(&without, "DEVELOPER_DIR").as_deref(), Some("/stale/xcode"));
+
+        // No override and no wrapped value: no DEVELOPER_DIR at all.
+        let clean = child_env(root, vec![], None);
+        assert_eq!(find(&clean, "DEVELOPER_DIR"), None);
     }
 
     #[test]

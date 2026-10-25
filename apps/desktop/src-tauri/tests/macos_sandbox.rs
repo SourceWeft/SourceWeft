@@ -232,6 +232,53 @@ mod tight_reads {
 
     #[test]
     #[ignore = "requires sandbox_apply and the sandbox bundle"]
+    fn developer_tool_shims_work_under_the_tight_policy() {
+        // The macOS `/usr/bin` xcode-select shims (`cc`, `make`, `git`) resolve their real tool via
+        // `xcrun`. With a full `Xcode.app` as the active developer dir that path crashes in the
+        // sandbox — `xcrun` cold-falls back to `xcodebuild`, which needs XPC/Launch Services the
+        // tight policy withholds. The fix pins `DEVELOPER_DIR` to the Command Line Tools in the
+        // child env (`srt_exec::child_env`/`darwin_developer_dir`) and grants a read of that
+        // toolchain, so the shims run. This proves `cc` compiles+runs, `make` drives the compiler,
+        // and a `git` commit succeeds under the tight policy.
+        let (_app, host) = host_with_bundle();
+        let workspace = host.ensure_workspace("owner", "thread").unwrap();
+
+        let build = execute(
+            &host,
+            "cc",
+            &workspace,
+            "printf '#include <stdio.h>\\nint main(){puts(\"cc-ran\");return 0;}\\n' > hello.c && \
+             cc hello.c -o hello && ./hello && \
+             printf 'all:\\n\\t@echo make-ran\\n' > Makefile && make",
+        );
+        assert_eq!(build["exitCode"], 0, "{build}");
+        assert!(output(&build).contains("cc-ran"), "{build}");
+        assert!(output(&build).contains("make-ran"), "{build}");
+
+        // git's own `init` cannot populate `.git/hooks`: srt blocks that subtree on every platform
+        // for security (host-executed hook scripts are an escape vector), unrelated to this fix. So
+        // the repo is created host-side, and the sandbox does the real work through the git shim —
+        // which without the `DEVELOPER_DIR` pin would crash in `xcodebuild` on this Xcode host.
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&workspace.path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "host-side git init failed");
+        let commit = execute(
+            &host,
+            "git",
+            &workspace,
+            "git -c user.name=T -c user.email=t@example.com add -A && \
+             git -c user.name=T -c user.email=t@example.com commit -qm shim && \
+             git log --oneline | head -1 >/dev/null && echo git-ran",
+        );
+        assert_eq!(commit["exitCode"], 0, "{commit}");
+        assert!(output(&commit).contains("git-ran"), "{commit}");
+    }
+
+    #[test]
+    #[ignore = "requires sandbox_apply and the sandbox bundle"]
     fn keychains_are_unreadable() {
         let (_app, host) = host_with_bundle();
         let workspace = host.ensure_workspace("owner", "thread").unwrap();
