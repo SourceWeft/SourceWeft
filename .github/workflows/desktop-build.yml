@@ -201,3 +201,96 @@ jobs:
             echo "::error::secret_store tests fell back to the no-keyring skip path; the real Secret Service round trip never ran"
             exit 1
           fi
+
+  macos-sandbox:
+    name: Real sandbox suite on macOS
+    # Pinned to macos-14 (arm64) instead of macos-latest: the real suite depends on the
+    # runner's Seatbelt behaviour and Xcode/CLT layout, which can change when -latest moves.
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Describe the runner (diagnostics for sandbox_apply behaviour)
+        run: |
+          sw_vers
+          uname -m
+          xcode-select -p
+          if [ -d /Library/Developer/CommandLineTools ]; then
+            echo "/Library/Developer/CommandLineTools: present"
+          else
+            echo "/Library/Developer/CommandLineTools: absent"
+          fi
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Matches the version the bundle is built with locally (srt requires >= 1.4).
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          # Distinct from the `package` and `linux-sandbox` keys so the jobs never race to
+          # save the same cache entry.
+          key: desktop-macos-sandbox-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+      - name: Install ripgrep (the bundle ships a real rg binary)
+        run: |
+          set -eu
+          brew install ripgrep
+          rg_path=$(command -v rg)
+          echo "rg: ${rg_path}"
+          # The bundle copies this file, so it must be a real arm64 Mach-O executable, not a
+          # shell function or a wrapper script.
+          file -L "${rg_path}"
+          file -L "${rg_path}" | grep -q "Mach-O 64-bit executable arm64"
+          "${rg_path}" --version
+      - run: pnpm install --frozen-lockfile
+      - name: Sandbox sidecar unit tests
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar test
+      - name: Build sandbox sidecar bundle
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --rg "$(command -v rg)"
+      - name: Add the /etc/hosts entries the proxy hostname tests require
+        # hostname_to_loopback_blocked asserts these exist: names that resolve to host loopback
+        # and to a private address, without depending on live DNS.
+        run: |
+          set -eu
+          for entry in '127.0.0.1 sw-loop.test' '10.0.0.1 sw-private.test'; do
+            if ! grep -qxF "${entry}" /etc/hosts; then
+              echo "${entry}" | sudo tee -a /etc/hosts > /dev/null
+            fi
+            grep -qxF "${entry}" /etc/hosts
+          done
+          grep -E 'sw-(loop|private)\.test' /etc/hosts
+      - name: Pre-build the real-sandbox test binaries
+        # Compiles (but does not run) before the next step sets a poisoned proxy: cargo
+        # itself honours HTTP_PROXY/HTTPS_PROXY for its own registry access, and a cold cache
+        # would otherwise make that step fail to even compile, not just prove the sidecar
+        # strips the variables.
+        run: >-
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          --test macos_sandbox --test macos_signing --test local_execution
+          --test local_workspaces --test local_binary_reads --no-run
+      - name: Real-sandbox suite (readiness, Seatbelt execution, signing)
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+        run: |
+          # Both cases (lowercase set here rather than in `env:`, since GitHub Actions treats
+          # env keys as case-insensitive and would reject HTTP_PROXY/http_proxy as
+          # duplicates there); this proves neither ever reaches the sandboxed child. The
+          # binaries were already compiled by the previous step, so this invocation only runs
+          # them. No skip or continue-on-error: a runner that refuses sandbox_apply fails here.
+          export http_proxy=http://127.0.0.1:9
+          export https_proxy=http://127.0.0.1:9
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
+            --test macos_sandbox --test macos_signing --test local_execution \
+            --test local_workspaces --test local_binary_reads \
+            -- --include-ignored --test-threads=1
