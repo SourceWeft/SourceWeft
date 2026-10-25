@@ -171,10 +171,12 @@ test.each(["macos", "windows", "linux"])(
     const dialog = await settings();
     expect(dialog.textContent).toContain("Account & workspace");
     expect(dialog.textContent).toContain("Desktop app");
-    expect(Boolean(button("This computer", dialog))).toBe(platform === "macos");
+    expect(Boolean(button("This computer", dialog))).toBe(
+      platform === "macos" || platform === "linux",
+    );
     await click(button("About", dialog));
     expect(dialog.textContent).toContain("About content");
-    if (platform === "macos") {
+    if (platform === "macos" || platform === "linux") {
       await click(button("This computer", dialog));
       expect(dialog.textContent).toContain("Local computer content");
     }
