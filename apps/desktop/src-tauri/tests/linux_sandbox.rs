@@ -24,7 +24,10 @@ use sourceweft_desktop::local_host::{
     readiness::{bundle_dir, probe_bundle, Helpers, InitConfig, Platform, SandboxReadiness},
     LocalHost, Workspace,
 };
-use sourceweft_desktop::local_host::network::{NetworkBridge, OutboundLease};
+use sourceweft_desktop::local_host::{
+    network::{NetworkBridge, OutboundLease},
+    vault::{NewSecret, SecretStore},
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -1341,4 +1344,330 @@ fn plain_http_audit_has_method_and_path() {
     assert_eq!(entry["decision"], "allow", "{result}");
     assert_eq!(entry["source"], "rule", "{result}");
     assert!(entry["status"].is_u64(), "status must be numeric: {result}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Device vault: secret placeholders, injection into requests to the bound hosts, request
+// approvals, and the TLS-termination CA.
+//
+// Why the upstream is a public echo service. The sandbox's address guard refuses loopback,
+// private and own-interface addresses in every mode, so a stub server on the CI runner is
+// unreachable by design, and the runner has no documentation-range network to host one. These
+// tests therefore call two public echo endpoints that return the request headers, with throwaway
+// `test-secret-<random>` values (never a real credential): `httpbin.org` for the bound host and
+// `postman-echo.com` for "some other host". `require_endpoint` probes both first; an unreachable
+// endpoint FAILS the test with its name (a silent skip would hide a broken suite).
+// ---------------------------------------------------------------------------------------------
+
+const BOUND_HEADERS: &str = "https://httpbin.org/headers";
+const OTHER_HEADERS: &str = "https://postman-echo.com/headers";
+
+/// An in-memory keychain for the vault.
+#[derive(Default)]
+struct MemoryVault(Mutex<std::collections::HashMap<String, Vec<u8>>>);
+
+impl SecretStore for MemoryVault {
+    fn get(&self, account: &str) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.0.lock().unwrap().get(account).cloned())
+    }
+    fn set(&self, account: &str, secret: &[u8]) -> Result<(), String> {
+        self.0.lock().unwrap().insert(account.to_string(), secret.to_vec());
+        Ok(())
+    }
+    fn delete(&self, account: &str) -> Result<(), String> {
+        self.0.lock().unwrap().remove(account);
+        Ok(())
+    }
+}
+
+fn host_with_vault() -> (tempfile::TempDir, LocalHost) {
+    let (app, host) = host_with_bundle();
+    host.set_secret_store(Arc::new(MemoryVault::default()));
+    (app, host)
+}
+
+/// A throwaway secret value for one test.
+fn test_value() -> String {
+    format!("test-secret-{}", uuid::Uuid::new_v4().simple())
+}
+
+fn add_secret(host: &LocalHost, env_var: &str, value: &str, hosts: &[&str], read_only: bool) {
+    host.vault_set(NewSecret {
+        label: format!("{env_var} (test)"),
+        env_var: env_var.to_string(),
+        value: value.to_string(),
+        hosts: hosts.iter().map(|h| h.to_string()).collect(),
+        read_only,
+    })
+    .unwrap_or_else(|error| panic!("vault_set failed: {error}"));
+}
+
+/// Fails (does not skip) unless `url` answers 200 to a direct request from this machine, with a
+/// few retries. Direct means no proxy: CI exports poisoned `http_proxy`/`https_proxy` variables
+/// for this suite.
+fn require_endpoint(url: &str) {
+    let mut last = String::new();
+    for attempt in 0..4 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        let probe = std::process::Command::new("curl")
+            .args(["--noproxy", "*", "-sS", "--max-time", "20", "-o", "/dev/null", "-w", "%{http_code}", url])
+            .output();
+        match probe {
+            Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == "200" => return,
+            Ok(out) => {
+                last = format!(
+                    "HTTP {} {}",
+                    String::from_utf8_lossy(&out.stdout).trim(),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )
+            }
+            Err(error) => last = error.to_string(),
+        }
+    }
+    panic!(
+        "the echo endpoint {url} is unreachable from this machine ({last}); the secret-injection \
+         suite needs it and does not skip silently"
+    );
+}
+
+fn require_echo_endpoints() {
+    require_endpoint(BOUND_HEADERS);
+    require_endpoint(OTHER_HEADERS);
+}
+
+/// Sends `Authorization: Bearer $TEST_TOKEN` to `url` from inside the sandbox and prints
+/// `PLACEHOLDER=<what the command's variable holds>` and the echoed headers.
+fn echo_command(url: &str) -> String {
+    format!(
+        "printf 'PLACEHOLDER=%s\\n' \"$TEST_TOKEN\"; \
+         curl -sS --max-time 40 -H \"Authorization: Bearer $TEST_TOKEN\" {url}"
+    )
+}
+
+fn placeholder_of(result: &Value) -> String {
+    output(result)
+        .lines()
+        .find_map(|line| line.strip_prefix("PLACEHOLDER="))
+        .unwrap_or_else(|| panic!("no PLACEHOLDER line in: {result}"))
+        .trim()
+        .to_string()
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and public echo endpoints"]
+fn fake_value_in_env_and_real_value_upstream() {
+    require_echo_endpoints();
+    let (_app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let value = test_value();
+    add_secret(&host, "TEST_TOKEN", &value, &["httpbin.org"], true);
+    let result = execute_net(
+        &host,
+        "inject",
+        &workspace,
+        &format!("env | grep '^TEST_TOKEN=fake_value_'; {}", echo_command(BOUND_HEADERS)),
+        Some(policy("open", &[])),
+    );
+    let text = output(&result);
+    // bwrap passed the placeholder through to the child's environment...
+    assert!(text.contains("TEST_TOKEN=fake_value_"), "{result}");
+    let placeholder = placeholder_of(&result);
+    assert!(placeholder.starts_with("fake_value_"), "{placeholder}");
+    assert!(!placeholder.contains(&value));
+    // ...and the upstream saw the real value, not the placeholder.
+    assert!(text.contains(&format!("Bearer {value}")), "upstream must receive the real value: {result}");
+    assert!(!text.contains(&format!("Bearer {placeholder}")), "{result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and public echo endpoints"]
+fn other_host_gets_placeholder_not_secret() {
+    require_echo_endpoints();
+    let (_app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let value = test_value();
+    add_secret(&host, "TEST_TOKEN", &value, &["httpbin.org"], true);
+    // The same variable, sent to a host the secret is not bound to.
+    let result = execute_net(
+        &host,
+        "other-host",
+        &workspace,
+        &echo_command(OTHER_HEADERS),
+        Some(policy("open", &[])),
+    );
+    let text = output(&result);
+    let placeholder = placeholder_of(&result);
+    assert!(
+        text.matches(&placeholder).count() >= 2,
+        "the other host must be sent (and echo) the placeholder: {result}"
+    );
+    assert!(!text.contains(&value), "the real value must never reach another host: {result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and public echo endpoints"]
+fn write_needs_approval_read_does_not() {
+    require_echo_endpoints();
+    let (_app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    add_secret(&host, "TEST_TOKEN", &test_value(), &["httpbin.org"], true);
+    let post = "curl -sS --max-time 40 -X POST -d x=1 -H \"Authorization: Bearer $TEST_TOKEN\" \
+                -w '\\nSTATUS=%{http_code}\\n' https://httpbin.org/post";
+    let get = "curl -sS --max-time 40 -o /dev/null -w 'STATUS=%{http_code}\\n' \
+               -H \"Authorization: Bearer $TEST_TOKEN\" https://httpbin.org/headers";
+
+    // A read needs no approval (and the bound host needs no host-level ask either: its being
+    // bound to the secret already allows it).
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let read = execute_net(&host, "vault-get", &workspace, get, Some(policy("ask", &[])));
+    assert!(output(&read).contains("STATUS=200"), "{read}");
+    assert!(approvals.asks().is_empty(), "a GET must not ask: {:?}", approvals.asks());
+
+    // A write asks, as a request-kind approval, and goes through once allowed.
+    let written = execute_net(&host, "vault-post-allow", &workspace, post, Some(policy("ask", &[])));
+    assert!(output(&written).contains("STATUS=200"), "{written}");
+    let asks = approvals.asks();
+    assert_eq!(asks.len(), 1, "{asks:?}");
+    assert_eq!(asks[0]["kind"], "request");
+    assert_eq!(asks[0]["method"], "POST");
+    assert_eq!(asks[0]["path"], "/post");
+    assert_eq!(asks[0]["host"], "httpbin.org");
+    assert_eq!(asks[0]["port"], 443);
+    drop(approvals);
+
+    // Denied: the request is answered 403 and the model is told why.
+    let denying = ApprovalBridge::start(
+        &host,
+        Some(Answer {
+            delay: Duration::from_millis(50),
+            allow: false,
+            reason: Some("no writes today"),
+        }),
+    );
+    let denied = execute_net(&host, "vault-post-deny", &workspace, post, Some(policy("ask", &[])));
+    let text = output(&denied);
+    assert!(text.contains("STATUS=403"), "{denied}");
+    assert!(text.contains("no writes today"), "{denied}");
+    assert_eq!(denying.asks().len(), 1);
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn ca_key_unreadable_in_sandbox() {
+    let (app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    add_secret(&host, "TEST_TOKEN", &test_value(), &["httpbin.org"], true);
+    let ca_dir = app.path().canonicalize().unwrap().join("sandbox/ca");
+    let result = execute_net(
+        &host,
+        "ca-key",
+        &workspace,
+        &format!(
+            "printf ran > .sw-control; cat {key} 2>&1; echo KEY_EXIT=$?; ls {dir} 2>&1; echo LS_EXIT=$?",
+            key = quoted(&ca_dir.join("ca.key")),
+            dir = quoted(&ca_dir),
+        ),
+        Some(policy("open", &[])),
+    );
+    assert_eq!(fs::read_to_string(workspace.path.join(".sw-control")).unwrap(), "ran", "{result}");
+    let text = output(&result);
+    assert!(!text.contains("PRIVATE KEY"), "the CA key must not be readable in the sandbox: {result}");
+    assert!(!text.contains("KEY_EXIT=0"), "{result}");
+    // The CA exists on the host (TLS termination really was on) and its key is owner-only.
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(ca_dir.join("ca.key")).expect("ca.key was created").permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+    assert!(ca_dir.join("ca.crt").is_file());
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn no_tls_when_vault_empty() {
+    let (app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_net(
+        &host,
+        "no-tls",
+        &workspace,
+        "env | grep -E '^(SSL_CERT_FILE|NODE_EXTRA_CA_CERTS|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|GIT_SSL_CAINFO|PIP_CERT|CARGO_HTTP_CAINFO)=' ; \
+         echo TRUST_ENV_DONE; \
+         curl -sS --max-time 40 -o /dev/null -w 'STATUS=%{http_code} VERIFY=%{ssl_verify_result}\\n' https://registry.npmjs.org/left-pad",
+        Some(policy("open", &[])),
+    );
+    let text = output(&result);
+    // No trust-bundle variables: nothing re-signs this traffic.
+    let before_done = text.split("TRUST_ENV_DONE").next().unwrap();
+    assert!(before_done.trim().is_empty(), "no CA trust variable may be set with an empty vault: {result}");
+    // The upstream's own certificate chain verified against the system trust store.
+    assert!(text.contains("STATUS=200 VERIFY=0"), "{result}");
+    assert!(
+        !app.path().canonicalize().unwrap().join("sandbox/ca").exists(),
+        "no CA is created while the vault is empty"
+    );
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and public echo endpoints"]
+fn https_audit_has_method_path_status() {
+    require_echo_endpoints();
+    let (_app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    add_secret(&host, "TEST_TOKEN", &test_value(), &["httpbin.org"], true);
+    let result = execute_net(
+        &host,
+        "https-audit",
+        &workspace,
+        "curl -sS --max-time 40 -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $TEST_TOKEN\" 'https://httpbin.org/headers?token=do-not-record'",
+        Some(policy("open", &[])),
+    );
+    assert_eq!(output(&result).trim(), "200", "{result}");
+    let entry = audit_entry(&result, |entry| entry["kind"] == "http");
+    assert_eq!(entry["method"], "GET", "{result}");
+    assert_eq!(entry["host"], "httpbin.org", "{result}");
+    assert_eq!(entry["port"], 443, "{result}");
+    assert_eq!(entry["path"], "/headers", "the query string must not be audited: {result}");
+    assert_eq!(entry["status"], 200, "{result}");
+    assert!(!result.to_string().contains("do-not-record"), "{result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and public echo endpoints"]
+fn real_value_absent_from_all_outputs() {
+    require_echo_endpoints();
+    let (_app, host) = host_with_vault();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let value = test_value();
+    add_secret(&host, "TEST_TOKEN", &value, &["httpbin.org"], true);
+    // Everything a command can print about itself, plus requests that succeed, are denied, and
+    // go to another host. Response bodies are discarded so the upstream's echo cannot appear.
+    let script = "env; printenv TEST_TOKEN; \
+         curl -sS --max-time 40 -o /dev/null -w 'GET=%{http_code}\\n' -H \"Authorization: Bearer $TEST_TOKEN\" https://httpbin.org/headers; \
+         curl -sS --max-time 40 -o /dev/null -w 'POST=%{http_code}\\n' -X POST -d x=1 -H \"Authorization: Bearer $TEST_TOKEN\" https://httpbin.org/post; \
+         curl -sS --max-time 40 -o /dev/null -w 'OTHER=%{http_code}\\n' -H \"Authorization: Bearer $TEST_TOKEN\" https://postman-echo.com/headers; \
+         echo \"$TEST_TOKEN\" > placeholder.txt; ls -la; true";
+    // Once with the write allowed, once denied.
+    for (call, allow) in [("scan-allow", true), ("scan-deny", false)] {
+        let approvals = ApprovalBridge::start(
+            &host,
+            Some(Answer {
+                delay: Duration::from_millis(50),
+                allow,
+                reason: Some("scan reason"),
+            }),
+        );
+        let result = execute_net(&host, call, &workspace, script, Some(policy("ask", &["postman-echo.com"])));
+        drop(approvals);
+        let everything = result.to_string();
+        assert!(!everything.contains(&value), "{call}: the real value leaked into the result JSON: {everything}");
+        assert!(output(&result).contains("TEST_TOKEN=fake_value_"), "{call}: {result}");
+        assert!(output(&result).contains("GET=200"), "{call}: {result}");
+        for entry in audit(&result) {
+            assert!(!entry.to_string().contains(&value), "{call}: {entry}");
+        }
+        // Not in the files the command wrote either (it only ever had the placeholder).
+        let written = fs::read_to_string(workspace.path.join("placeholder.txt")).unwrap();
+        assert!(written.trim().starts_with("fake_value_") && !written.contains(&value));
+    }
 }
