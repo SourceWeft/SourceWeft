@@ -87,6 +87,35 @@ pub async fn local_host_status(
     })
 }
 
+/// Linux (AppImage): runs the one-time privileged sandbox setup through `pkexec`, which shows
+/// the system authentication dialog; the app never sees a password. The script is a constant
+/// embedded in the app, nothing from the caller reaches it. Cached readiness is invalidated
+/// afterwards, whatever the outcome, so the next status poll probes again. Other platforms
+/// have no such setup.
+#[tauri::command]
+pub async fn run_sandbox_privileged_setup(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<(), String> {
+    crate::authorize_desktop_window(&app, &window, true)?;
+    #[cfg(target_os = "linux")]
+    {
+        let host = app
+            .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
+            .map(|host| host.inner().clone())
+            .ok_or("UNSUPPORTED_PLATFORM")?;
+        let result = tauri::async_runtime::spawn_blocking(
+            sourceweft_desktop::local_host::privileged_setup::run_privileged_setup,
+        )
+        .await
+        .map_err(|error| format!("Sandbox setup failed: {error}"))?;
+        host.invalidate_sandbox_readiness();
+        result
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err("UNSUPPORTED_PLATFORM".to_string())
+}
+
 #[tauri::command]
 pub async fn enable_local_host(
     app: AppHandle,

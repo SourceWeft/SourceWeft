@@ -18,6 +18,7 @@
     "allow-set-autostart",
     "allow-open-external-url",
     "allow-authenticate-local-host",
-    "allow-choose-local-folder"
+    "allow-choose-local-folder",
+    "allow-run-sandbox-privileged-setup"
   ]
 }

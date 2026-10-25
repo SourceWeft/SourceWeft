@@ -29,6 +29,7 @@ fn main() {
             "enable_local_host",
             "disconnect_local_host",
             "choose_working_directory",
+            "run_sandbox_privileged_setup",
         ]),
     ))
     .expect("failed to build Tauri application metadata");
