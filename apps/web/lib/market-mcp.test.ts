@@ -97,6 +97,8 @@ describe("getPublicMcpDetail", () => {
       {
         aiOverview,
         overviewLocales: ["en", "zh-CN"],
+        localizedSummary: null,
+        descriptionLanguage: null,
         readme: { markdown: "# Weather", source, status: "ok" },
         relatedProduct: null,
         score: null,
@@ -115,6 +117,8 @@ describe("getPublicMcpDetail", () => {
     await expect(getPublicMcpDetail("x", "en")).resolves.toEqual({
       aiOverview: null,
       overviewLocales: [],
+      localizedSummary: null,
+      descriptionLanguage: null,
       readme: null,
       relatedProduct: null,
       score: null,
@@ -188,6 +192,8 @@ describe("getPublicMcpDetail", () => {
     await expect(getPublicMcpDetail("x", "zh-TW")).resolves.toEqual({
       aiOverview: null,
       overviewLocales: [],
+      localizedSummary: null,
+      descriptionLanguage: null,
       readme: null,
       relatedProduct: null,
       score: null,

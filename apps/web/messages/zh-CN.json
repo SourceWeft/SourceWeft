@@ -662,6 +662,11 @@
       "publishedByGithub": "由 GitHub 账号 {owner} 发布",
       "delivery": "交付方式",
       "hostedService": "托管服务",
+      "translatedSummary": {
+        "badge": "AI 翻译",
+        "note": "由 AI 模型根据下方的原文描述翻译，可能有误。",
+        "original": "原文描述"
+      },
       "integrationsShowMore": "显示更多"
     },
     "readme": {
@@ -683,6 +688,8 @@
       "requirements": "运行要求",
       "englishFallback": "暂无中文概览，以下为英文版本。",
       "cardSummaryTitle": "AI 生成的简介",
+      "translatedTag": "AI 翻译",
+      "translatedCardTitle": "根据原文描述由 AI 翻译",
       "admin": {
         "title": "AI 概览",
         "loading": "正在加载概览…",
@@ -4092,6 +4099,10 @@
         "documentationUrl": "文档 URL",
         "homepageUrl": "主页 URL",
         "repoUrl": "仓库 URL",
+        "license": "许可证",
+        "licenseHint": "SPDX 编号或名称，例如 MIT。托管服务不显示。",
+        "language": "主要语言",
+        "languageHint": "服务使用的编程语言，例如 TypeScript。托管服务不显示。",
         "deprecated": "标记为已弃用",
         "deprecatedHint": "告知访客此服务已不再维护。它仍会保留在列表中。",
         "urlInvalid": "请输入以 https:// 开头的完整网址。",

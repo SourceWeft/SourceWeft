@@ -394,9 +394,19 @@ export async function McpMarketCard({
               "data-ai-summary": "",
               title: tOverview("cardSummaryTitle"),
             }
-          : {})}
+          : cardText.translated
+            ? {
+                "data-ai-translated": "",
+                title: tOverview("translatedCardTitle"),
+              }
+            : {})}
       >
         {cardText.text}
+        {cardText.translated ? (
+          <span className="ml-1.5 whitespace-nowrap text-xs text-zinc-400 dark:text-zinc-500">
+            {tOverview("translatedTag")}
+          </span>
+        ) : null}
       </p>
 
       <div className="mb-4 mt-4 flex flex-wrap gap-2">

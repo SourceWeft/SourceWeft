@@ -26,7 +26,8 @@ import type { RoutedGatewayConfig } from "./types";
 /**
  * The system model: the one door for model calls the platform makes on its
  * own behalf — the AI overviews (and the categories that come with them) of
- * market skills and MCP servers — which belong to no tenant.
+ * market skills and MCP servers, and the Chinese translations of MCP summaries —
+ * which belong to no tenant.
  *
  * It adds no Provider support of its own. It borrows the non-secret
  * definition of a Provider from the active global gateway configuration
@@ -50,6 +51,7 @@ export const SYSTEM_MODEL_PURPOSES = [
   "skill_market.overview",
   "skill_market.evaluation",
   "mcp_market.overview",
+  "mcp_market.translation",
 ] as const;
 
 export type SystemModelPurpose = (typeof SYSTEM_MODEL_PURPOSES)[number];

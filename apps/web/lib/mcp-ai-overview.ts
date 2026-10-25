@@ -42,17 +42,27 @@ export function mcpOverviewLocale(
  * one, else the registry's own summary — or, given the server's template
  * description (#367 W4, `mcpTemplateDescription`), that template where the
  * registry summary is not longer than it. Plain text either way.
+ *
+ * Where the server has no AI summary and the registry's is a worthwhile text
+ * (not replaced by the template), a Chinese reader sees its AI translation
+ * (`localizedSummary`), flagged `translated` so the card can say so.
  */
 export function mcpCardText(
-  item: Pick<MarketItemSummary, "summary" | "aiSummary">,
+  item: Pick<MarketItemSummary, "summary" | "aiSummary"> & {
+    localizedSummary?: MarketItemSummary["localizedSummary"];
+  },
   template?: string | null,
-): { text: string; ai: boolean } {
+): { text: string; ai: boolean; translated?: true } {
   const aiSummary = item.aiSummary?.trim();
   if (aiSummary) return { text: aiSummary, ai: true };
   const summary = item.summary.trim();
   const fallback = template?.trim();
-  return fallback && summary.length <= fallback.length
-    ? { text: fallback, ai: false }
+  if (fallback && summary.length <= fallback.length) {
+    return { text: fallback, ai: false };
+  }
+  const translation = item.localizedSummary?.text.trim();
+  return translation
+    ? { text: translation, ai: false, translated: true }
     : { text: item.summary, ai: false };
 }
 

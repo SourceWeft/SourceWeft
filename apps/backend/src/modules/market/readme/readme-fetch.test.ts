@@ -24,9 +24,11 @@ import {
 } from "./readme-queue";
 import type { ClaimedMcpReadme } from "./readme-repository";
 import type { McpReadmeColumns } from "./readme-state";
+import type { McpRepositoryMetadata } from "../metadata/listing-metadata";
 import {
   GITHUB_README_QUERY_SIZE,
   type GitHubReadmeResult,
+  type GitHubRepositoryFacts,
   type GitHubReadmeTarget,
 } from "./github-readme";
 
@@ -120,8 +122,11 @@ function harness(input: {
   results?: Record<string, GitHubReadmeResult>;
   points?: number;
   hasToken?: boolean;
+  /** What GitHub says about each repository (by repo name); unanswered when absent. */
+  facts?: Record<string, GitHubRepositoryFacts>;
 }) {
   const writes: Array<[string, McpReadmeColumns]> = [];
+  const metadataWrites: Array<[string, McpRepositoryMetadata]> = [];
   const recorded: McpReadmeBatchSummary[] = [];
   const results = input.results ?? {};
   const deps = {
@@ -133,6 +138,11 @@ function harness(input: {
     write: vi.fn(async (versionId: string, columns: McpReadmeColumns) => {
       writes.push([versionId, columns]);
     }),
+    writeRepositoryMetadata: vi.fn(
+      async (versionId: string, record: McpRepositoryMetadata) => {
+        metadataWrites.push([versionId, record]);
+      },
+    ),
     defer: vi.fn(
       async ({ versionIds }: { versionIds: string[] }) => versionIds.length,
     ),
@@ -142,6 +152,7 @@ function harness(input: {
         if (!result) throw new Error(`unexpected fetch for ${repo}`);
         return result;
       }),
+      repositories: targets.map(({ repo }) => input.facts?.[repo] ?? null),
       cost: 1,
       remaining: input.points ?? 4000,
       resetAt: RESET,
@@ -152,7 +163,7 @@ function harness(input: {
     }),
     now: () => NOW,
   } satisfies FetchMcpReadmeBatchDeps;
-  return { deps, writes, recorded };
+  return { deps, writes, recorded, metadataWrites };
 }
 
 const RESET = new Date(NOW.getTime() + 40 * 60 * 1000);
@@ -495,5 +506,55 @@ describe("fetching a batch", () => {
       "unexpected fetch for broken",
     );
     assert.deepEqual(brokenSummary.outcomes, { error: 1 });
+  });
+});
+
+describe("repository metadata", () => {
+  test("stores what GitHub says about the repository, whatever became of the README", async () => {
+    const { deps, metadataWrites } = harness({
+      rows: {
+        licensed: claimed("licensed"),
+        bare: claimed("bare"),
+        sub: claimed("sub", {
+          provenanceJson: { repository: { subfolder: "mcp" } },
+        }),
+        unanswered: claimed("unanswered"),
+      },
+      results: {
+        licensed: okResult("README.md"),
+        bare: { status: "not_found", reason: "missing" },
+        sub: okResult("mcp/README.md"),
+        unanswered: { status: "error", message: "boom" },
+      },
+      facts: {
+        licensed: { licenseSpdxId: "MIT", primaryLanguage: "TypeScript" },
+        // A license file GitHub could not identify, and no code at all.
+        bare: { licenseSpdxId: "NOASSERTION", primaryLanguage: null },
+        sub: { licenseSpdxId: "Apache-2.0", primaryLanguage: "Python" },
+      },
+    });
+
+    await fetchMcpReadmeBatch(
+      { versionIds: ["licensed", "bare", "sub", "unanswered"], reason: "scheduled" },
+      deps,
+    );
+
+    const byVersion = new Map(metadataWrites);
+    assert.equal(byVersion.size, 3, "an unanswered repository writes nothing");
+    assert.deepEqual(
+      { ...byVersion.get("licensed"), observedAt: undefined },
+      {
+        repository: "acme/licensed",
+        subfolder: "",
+        license: "MIT",
+        language: "TypeScript",
+        observedAt: undefined,
+      },
+    );
+    assert.equal(byVersion.get("licensed")?.observedAt, NOW.toISOString());
+    // NOASSERTION is no license; the record stays so a removed license replaces the old one.
+    assert.deepEqual(byVersion.get("bare")?.license, undefined);
+    assert.deepEqual(byVersion.get("bare")?.language, undefined);
+    assert.equal(byVersion.get("sub")?.subfolder, "mcp");
   });
 });

@@ -117,6 +117,22 @@ describe("public MCP card", () => {
     }
   });
 
+  it("shows a Chinese reader's translation of a long registry summary, marked as AI-translated", async () => {
+    const summary =
+      "Forecasts for any city, with severe-weather alerts and air quality.";
+    const html = await card(
+      item({
+        summary,
+        localizedSummary: { locale: "zh-CN", text: "任意城市的天气预报，含恶劣天气预警和空气质量。" },
+      }),
+    );
+    expect(html).toContain("任意城市的天气预报，含恶劣天气预警和空气质量。");
+    expect(html).not.toContain(summary);
+    expect(html).toContain("data-ai-translated");
+    expect(html).toContain(enMessages.mcp.aiOverview.translatedTag);
+    expect(html).not.toContain("data-ai-summary");
+  });
+
   // Issue #367: the publisher's own server, next to the provider name.
   it("marks a server its publisher runs as from the official publisher", async () => {
     const html = await card(

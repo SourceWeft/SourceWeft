@@ -662,6 +662,11 @@
       "publishedByGithub": "由 GitHub 帳號 {owner} 發布",
       "delivery": "交付方式",
       "hostedService": "託管服務",
+      "translatedSummary": {
+        "badge": "AI 翻譯",
+        "note": "由 AI 模型根據下方的原文描述翻譯，可能有誤。",
+        "original": "原文描述"
+      },
       "integrationsShowMore": "顯示更多"
     },
     "readme": {
@@ -683,6 +688,8 @@
       "requirements": "執行需求",
       "englishFallback": "暫無中文概覽，以下為英文版本。",
       "cardSummaryTitle": "AI 產生的簡介",
+      "translatedTag": "AI 翻譯",
+      "translatedCardTitle": "根據原文描述由 AI 翻譯",
       "admin": {
         "title": "AI 概覽",
         "loading": "正在載入概覽…",
@@ -4092,6 +4099,10 @@
         "documentationUrl": "文件 URL",
         "homepageUrl": "首頁 URL",
         "repoUrl": "儲存庫 URL",
+        "license": "授權條款",
+        "licenseHint": "SPDX 編號或名稱，例如 MIT。託管服務不顯示。",
+        "language": "主要語言",
+        "languageHint": "服務使用的程式語言，例如 TypeScript。託管服務不顯示。",
         "deprecated": "標記為已棄用",
         "deprecatedHint": "告知訪客此服務已不再維護。它仍會保留在列表中。",
         "urlInvalid": "請輸入以 https:// 開頭的完整網址。",

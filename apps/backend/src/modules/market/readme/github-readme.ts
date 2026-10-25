@@ -169,9 +169,24 @@ export type GitHubReadmeResult =
   | { status: "unauthorized"; message: string }
   | { status: "error"; message: string };
 
+/**
+ * What GitHub says about the repository itself, asked in the same query as
+ * the README so it costs no request of its own, and answered whether or not
+ * the repository has a README. Null per target when GitHub did not answer
+ * for the repository (it is not there, or the query failed).
+ */
+export type GitHubRepositoryFacts = {
+  /** `licenseInfo.spdxId`: `NOASSERTION` for a license file GitHub could not identify. */
+  licenseSpdxId: string | null;
+  /** `primaryLanguage.name`. */
+  primaryLanguage: string | null;
+};
+
 export type GitHubReadmeBatch = {
   /** One result per target, in the targets' order. */
   results: GitHubReadmeResult[];
+  /** One entry per target, in the targets' order. */
+  repositories: Array<GitHubRepositoryFacts | null>;
   /** GraphQL points the queries cost. */
   cost: number;
   /** Points GitHub says are left in the hour, and when they reset; null before any answer. */
@@ -433,6 +448,9 @@ export async function fetchGitHubReadmes(
   const results: Array<GitHubReadmeResult | undefined> = targets.map(
     () => undefined,
   );
+  const repositories: Array<GitHubRepositoryFacts | null> = targets.map(
+    () => null,
+  );
   const batch = {
     cost: 0,
     remaining: null as number | null,
@@ -557,7 +575,11 @@ export async function fetchGitHubReadmes(
     string,
     TreeEntry | null | string | undefined
   >;
-  type Probe = { defaultBranchRef: { target: ProbeCommit | null } | null };
+  type Probe = {
+    defaultBranchRef: { target: ProbeCommit | null } | null;
+    licenseInfo?: { spdxId?: string | null } | null;
+    primaryLanguage?: { name?: string | null } | null;
+  };
   await ask<{ directory: Directory }, Probe>(
     [...directories.values()].map((directory) => ({ directory })),
     GITHUB_README_QUERY_SIZE,
@@ -567,7 +589,7 @@ export async function fetchGitHubReadmes(
           (name, k) =>
             `f${k}: file(path: ${variable(`p${k}_`, "String!", joinPath(directory.dir, name))}) { ${ENTRY_WITH_BLOB} }`,
         );
-        return `defaultBranchRef { target { ... on Commit { oid ${files.join(" ")} } } }`;
+        return `licenseInfo { spdxId } primaryLanguage { name } defaultBranchRef { target { ... on Commit { oid ${files.join(" ")} } } }`;
       }),
     ({ directory }, data, error) => {
       if (error || !data) {
@@ -578,6 +600,12 @@ export async function fetchGitHubReadmes(
             : { status: "not_found", reason: "missing" },
         );
         return;
+      }
+      for (const index of directory.targets) {
+        repositories[index] = {
+          licenseSpdxId: data.licenseInfo?.spdxId ?? null,
+          primaryLanguage: data.primaryLanguage?.name ?? null,
+        };
       }
       const commit = data.defaultBranchRef?.target;
       if (!data.defaultBranchRef) {
@@ -739,6 +767,7 @@ export async function fetchGitHubReadmes(
   };
   return {
     results: results.map((result) => result ?? unanswered),
+    repositories,
     cost: batch.cost,
     remaining: batch.remaining,
     resetAt: batch.resetAt,

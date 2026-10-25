@@ -25,7 +25,13 @@ type FakeFile =
   | { bytes: Buffer; text: string | null; isBinary?: boolean };
 
 /** `files` by repository path; null is an empty repository (no default branch). */
-type FakeRepository = { files: Record<string, FakeFile> } | null;
+type FakeRepository = {
+  files: Record<string, FakeFile>;
+  /** `licenseInfo.spdxId`; null/absent is a repository without a detected license. */
+  license?: string | null;
+  /** `primaryLanguage.name`. */
+  language?: string | null;
+} | null;
 
 const blobId = (bytes: Buffer) =>
   createHash("sha1")
@@ -182,7 +188,15 @@ function fakeGitHub(github: FakeGitHub) {
             }
           }
         }
-        data[alias] = { defaultBranchRef: { target: commit } };
+        data[alias] = {
+          licenseInfo: repository.license
+            ? { spdxId: repository.license }
+            : null,
+          primaryLanguage: repository.language
+            ? { name: repository.language }
+            : null,
+          defaultBranchRef: { target: commit },
+        };
         continue;
       }
       if (!repository || variables[`c${i}`] !== COMMIT) {
@@ -253,6 +267,51 @@ afterEach(() => {
 });
 
 describe("fetchGitHubReadmes", () => {
+  test("reports what GitHub says about each repository, with or without a README", async () => {
+    const { calls } = fakeGitHub({
+      repositories: {
+        "acme/licensed": {
+          files: { "README.md": "# hi" },
+          license: "MIT",
+          language: "TypeScript",
+        },
+        "acme/readmeless": {
+          files: { "src/index.ts": "x" },
+          license: "NOASSERTION",
+          language: "Go",
+        },
+        "acme/plain": { files: { "README.md": "# plain" } },
+        "acme/empty": null,
+      },
+    });
+
+    const batch = await fetchGitHubReadmes([
+      target("licensed"),
+      target("readmeless"),
+      target("plain"),
+      target("empty"),
+      target("missing"),
+    ]);
+
+    assert.deepEqual(
+      batch.results.map((result) => result.status),
+      ["ok", "not_found", "ok", "not_found", "not_found"],
+    );
+    assert.deepEqual(batch.repositories, [
+      { licenseSpdxId: "MIT", primaryLanguage: "TypeScript" },
+      { licenseSpdxId: "NOASSERTION", primaryLanguage: "Go" },
+      { licenseSpdxId: null, primaryLanguage: null },
+      { licenseSpdxId: null, primaryLanguage: null },
+      null,
+    ]);
+    // Asked in the README's own probe (the second call lists the README-less
+    // repository): no request of its own.
+    assert.equal(calls.length, 2);
+    assert.doesNotMatch(calls[1]!.query, /licenseInfo/);
+    assert.match(calls[0]!.query, /licenseInfo \{ spdxId \}/);
+    assert.match(calls[0]!.query, /primaryLanguage \{ name \}/);
+  });
+
   test("reads each README with the commit it was read at, in one query", async () => {
     const markdown = "# carrerlift\n\nFind jobs. [Docs](docs/setup.md)\n";
     const { calls } = fakeGitHub({

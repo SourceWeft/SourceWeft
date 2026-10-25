@@ -662,6 +662,11 @@
       "publishedByGithub": "Published by GitHub account {owner}",
       "delivery": "Delivery",
       "hostedService": "Hosted service",
+      "translatedSummary": {
+        "badge": "AI-translated",
+        "note": "Translated by an AI model from the original description below; it can be wrong.",
+        "original": "Original description"
+      },
       "integrationsShowMore": "Show more"
     },
     "readme": {
@@ -683,6 +688,8 @@
       "requirements": "Requirements",
       "englishFallback": "Shown in English: no overview in your language yet.",
       "cardSummaryTitle": "AI-generated summary",
+      "translatedTag": "AI-translated",
+      "translatedCardTitle": "AI-translated from the original description",
       "admin": {
         "title": "AI overview",
         "loading": "Loading overview…",
@@ -4092,6 +4099,10 @@
         "documentationUrl": "Documentation URL",
         "homepageUrl": "Homepage URL",
         "repoUrl": "Repository URL",
+        "license": "License",
+        "licenseHint": "An SPDX id or a name, such as MIT. Not shown for a hosted service.",
+        "language": "Main language",
+        "languageHint": "The language the server is written in, such as TypeScript. Not shown for a hosted service.",
         "deprecated": "Mark as deprecated",
         "deprecatedHint": "Tells visitors this server is no longer maintained. It stays listed.",
         "urlInvalid": "Enter a full URL starting with https://.",

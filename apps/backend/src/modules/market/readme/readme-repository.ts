@@ -7,6 +7,10 @@ import {
   workspaceMcpInstalls,
 } from "@sourceweft/db";
 import { latestPublishedVersionOf } from "../latest-version";
+import {
+  MCP_REPOSITORY_METADATA_KEY,
+  type McpRepositoryMetadata,
+} from "../metadata/listing-metadata";
 import type { McpReadmeColumns } from "./readme-state";
 
 /**
@@ -135,6 +139,24 @@ export async function writeMcpReadmeColumns(
 }
 
 /**
+ * Store what GitHub said about the version's repository (license, primary
+ * language) under the version's provenance, replacing the previous record and
+ * leaving the rest of the provenance as it is. The page reads it through
+ * `resolveListingMetadata`.
+ */
+export async function writeMcpRepositoryMetadata(
+  versionId: string,
+  record: McpRepositoryMetadata,
+): Promise<void> {
+  await db
+    .update(mcpServerVersions)
+    .set({
+      provenanceJson: sql`${mcpServerVersions.provenanceJson} || jsonb_build_object(${MCP_REPOSITORY_METADATA_KEY}::text, ${JSON.stringify(record)}::jsonb)`,
+    })
+    .where(eq(mcpServerVersions.id, versionId));
+}
+
+/**
  * Give version `versionId` of server `serverId`, while it has never been read
  * (`pending`, no fetch yet), the README of the server's most recently read
  * other version. The README is read from the repository's default branch, not
@@ -156,10 +178,17 @@ export async function carryOverMcpReadme(input: {
       readme_ref = p.readme_ref,
       readme_sha256 = p.readme_sha256,
       readme_fetched_at = p.readme_fetched_at,
-      readme_error = p.readme_error
+      readme_error = p.readme_error,
+      -- What GitHub said about the repository, until the new version's own
+      -- fetch (due at once) replaces it.
+      provenance_json = case
+        when p.repository_metadata is null then v.provenance_json
+        else v.provenance_json || jsonb_build_object(${MCP_REPOSITORY_METADATA_KEY}::text, p.repository_metadata)
+      end
     from (
       select readme_status, readme_md, readme_path, readme_ref,
-        readme_sha256, readme_fetched_at, readme_error
+        readme_sha256, readme_fetched_at, readme_error,
+        provenance_json -> ${MCP_REPOSITORY_METADATA_KEY}::text as repository_metadata
       from ${mcpServerVersions}
       where server_id = ${input.serverId}
         and id <> ${input.versionId}
