@@ -1,6 +1,7 @@
 "use client";
 import { useBillingControls, useBillingUiHost } from "./context";
 import { useBillingCopy } from "./use-billing-copy";
+import { formatPrice } from "./format-price";
 import { formatCopy } from "../messages";
 
 import * as React from "react";
@@ -19,11 +20,6 @@ type CheckoutSource = "landing" | "dashboard";
 
 const MIN_TEAM_SEATS = 2;
 const MAX_TEAM_SEATS = 99;
-
-function formatPrice(cents: number, freeLabel: string): string {
-  if (cents === 0) return freeLabel;
-  return `$${(cents / 100).toFixed(0)}`;
-}
 
 function createCheckoutIntent() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {

@@ -91,10 +91,71 @@ function toolText(tools: ParsedTool[]) {
 }
 
 /**
+ * Keywords that appear in far too many descriptions to place a server on
+ * their own: "server", "api", "search", "file", "data"… One of them is not
+ * evidence of a category; two different ones are. Anything not listed here
+ * (a product or technology name: postgres, slack, playwright) is specific
+ * enough to count alone.
+ */
+const weakKeywords = new Set([
+  "api", "sdk", "code", "coding", "developer", "development", "issue", "commit",
+  "ci", "cd", "ide", "debug", "terminal", "shell", "cli", "git", "github",
+  "gitlab", "repo", "repository", "dom", "fetch", "extract", "search", "news",
+  "website", "data", "analysis", "report", "metrics", "metric", "notebook",
+  "dashboard", "chart", "file", "folder", "directory", "drive", "storage",
+  "document", "box", "knowledge", "memory", "docs", "documentation", "context",
+  "wiki", "semantic", "research", "learning", "paper", "papers", "task", "todo",
+  "note", "notes", "schedule", "workflow", "automation", "reminder", "email",
+  "mail", "chat", "message", "meeting", "teams", "social", "collaboration",
+  "customer", "product", "order", "support", "marketing", "ads", "payment",
+  "cloud", "server", "network", "deploy", "deployment", "container", "hosting",
+  "vm", "security", "auth", "identity", "testing", "validate", "monitor",
+  "monitoring", "log", "logs", "trace", "traces", "alert", "alerts", "quote",
+  "quotes", "bank", "image", "video", "audio", "media", "design", "music",
+  "canvas", "creative", "location", "map", "maps", "local", "health", "place",
+  "places", "ai", "ml", "model", "agent", "claude", "gemini", "inference",
+  "embedding", "page content", "project management", "web search",
+  "machine learning", "geo", "oauth", "transport", "llm", "linear", "retrieval",
+  "secret", "scanner", "compliance", "speech",
+]);
+
+/**
+ * Generic words alone need a text of at least this many words: two of them in
+ * a very short text ("server API") are a coincidence, not a description. A
+ * specific keyword is evidence in any length ("Slack", "Playwright browser
+ * automation").
+ */
+const MIN_WORDS_FOR_GENERIC_EVIDENCE = 5;
+
+function categoryEvidence(patterns: RegExp[], haystack: string) {
+  const strong = new Set<string>();
+  const weak = new Set<string>();
+  for (const pattern of patterns) {
+    // Plural forms too ("pull requests", "databases"): the suffix sits
+    // outside the keyword's capture group.
+    const global = new RegExp(
+      pattern.source.replace(/\)\\b$/, ")(?:s|es)?\\b"),
+      "g",
+    );
+    for (const match of haystack.matchAll(global)) {
+      const keyword = (match[1] ?? match[0]).toLowerCase();
+      (weakKeywords.has(keyword) ? weak : strong).add(keyword);
+    }
+  }
+  return { strong: strong.size, weak: weak.size };
+}
+
+/**
  * Keyword-classify free text into up to three category slugs. Any explicit slugs
- * are normalized and pinned first; the rest are scored by keyword hits over the
- * text. Falls back to ["other"] when nothing matches. Shared by the submission
- * parser (rich repo text) and registry federation (name/title/description).
+ * are normalized and pinned first; the rest are scored by keyword evidence over
+ * the text. Falls back to ["other"] when nothing qualifies. Shared by the
+ * submission parser (rich repo text) and registry federation
+ * (name/title/description).
+ *
+ * A guess needs evidence: a category qualifies through one specific keyword (a
+ * product or technology name) or through two different generic ones in a text
+ * of at least five words, never through a single generic word such as
+ * "server" or "search".
  */
 export function classifyByText(
   text: string,
@@ -109,16 +170,18 @@ export function classifyByText(
   }
 
   const haystack = text.toLowerCase();
+  const words = haystack.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const genericEvidenceAllowed = words.length >= MIN_WORDS_FOR_GENERIC_EVIDENCE;
   for (const category of mcpCategoryDefinitions) {
     if (category.slug === "other" || ordered.has(category.slug)) {
       continue;
     }
-    const score = (categoryKeywords.get(category.slug) ?? []).reduce(
-      (count, pattern) => count + (pattern.test(haystack) ? 1 : 0),
-      0,
+    const { strong, weak } = categoryEvidence(
+      categoryKeywords.get(category.slug) ?? [],
+      haystack,
     );
-    if (score > 0) {
-      ordered.set(category.slug, score);
+    if (strong >= 1 || (genericEvidenceAllowed && weak >= 2)) {
+      ordered.set(category.slug, strong * 2 + weak);
     }
   }
 

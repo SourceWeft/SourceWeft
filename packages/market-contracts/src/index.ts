@@ -471,8 +471,6 @@ export const marketMcpScoreItemKeySchema = z.enum([
   "hasLogo",
   "hasDocs",
   "hasLicense",
-  "officialPublisher",
-  "claimed",
 ]);
 
 // F when a required item is not met, else by the share of the total weight
@@ -482,6 +480,11 @@ export const marketMcpScoreGradeSchema = z.enum(["A", "B", "F"]);
 export const marketMcpScoreItemSchema = z.object({
   key: marketMcpScoreItemKeySchema,
   weight: z.number().int().min(0),
+  // False when the item does not apply to this entry (a hosted-only service
+  // has no license to declare): it is then neither met nor required and its
+  // weight is left out of the percentage. Absent means true, for answers from
+  // before it existed.
+  applicable: z.boolean().default(true),
   // Required for THIS entry: a remote's reachability, say, but not a stdio
   // package's.
   required: z.boolean(),
@@ -490,7 +493,7 @@ export const marketMcpScoreItemSchema = z.object({
 
 export const marketMcpScoreSchema = z.object({
   grade: marketMcpScoreGradeSchema,
-  // Met weight as a share of the total weight, 0–100, whole number.
+  // Met weight as a share of the weight that applies, 0–100, whole number.
   percentage: z.number().int().min(0).max(100),
   // Every item, in the definition's order, whether met or not.
   items: z.array(marketMcpScoreItemSchema),

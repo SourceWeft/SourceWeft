@@ -411,10 +411,11 @@
       "officialPublisher": "官方發布者",
       "officialPublisherTitle": "由 {domain} 發布，該網域同時執行此服務的端點。",
       "tools": "{count, plural, other {# 個工具}}",
-      "viewAll": "檢視全部"
+      "viewAll": "檢視全部",
+      "githubAccount": "由 GitHub 帳號 {owner} 發布",
+      "githubAccountTitle": "註冊中心已驗證發布此條目的 GitHub 帳號。這並不表明該帳號就是產品方。"
     },
     "tools": {
-      "empty": "工具後設資料尚未被收錄。",
       "parameters": "輸入參數",
       "required": "必填",
       "moreParameters": "另有 {count} 個",
@@ -462,21 +463,15 @@
     "score": {
       "heading": "評分",
       "nav": "評分",
-      "gradeLabel": "評級 {grade}",
-      "percentage": "已滿足 {percentage}% 的收錄檢查項",
-      "intro": "該評分衡量此收錄條目的完整程度，依據註冊中心條目、端點與公開來源計算得出。它不是對伺服器本身的評價，也不包含安裝量或使用者評價。",
-      "gradeExplain": {
-        "A": "完整的收錄：所有必需檢查項均通過，且已滿足至少 80% 的權重。",
-        "B": "良好的收錄：所有必需檢查項均通過，且已滿足至少 60% 的權重。",
-        "F": "不完整的收錄：某項必需檢查未通過，或已滿足的權重不足 60%。"
-      },
+      "percentage": "已滿足適用檢查項的 {percentage}%",
+      "intro": "該評分衡量此收錄條目的完整程度，依據註冊中心條目、端點與公開來源計算得出。它不是對伺服器本身的評價，也不表示伺服器安全或目前可用：可連通性是帶日期的檢查結果，評分也不包含安裝量或使用者評價。",
       "required": "必需",
       "met": "已滿足",
       "notMet": "未滿足",
       "weight": "{weight} 分",
       "items": {
         "reachable": {
-          "label": "可連通",
+          "label": "近 30 天內可連通",
           "hint": "請保持端點能夠回應 MCP 握手；SourceWeft 每 30 天探測一次。"
         },
         "authDeclared": {
@@ -501,17 +496,11 @@
         },
         "hasLicense": {
           "label": "授權條款",
-          "hint": "請在儲存庫或註冊中心條目中宣告授權條款。"
-        },
-        "officialPublisher": {
-          "label": "官方發布者",
-          "hint": "請使用與端點主機名符合的網域名稱空間（例如 com.example）發布。"
-        },
-        "claimed": {
-          "label": "擁有者已認領",
-          "hint": "待已驗證的擁有者認領此伺服器後即視為滿足：在伺服器頁面上，通過 GitHub 帳號或網域認領。"
+          "hint": "請在儲存庫或註冊中心條目中宣告授權條款。",
+          "notApplicableHint": "託管服務按其提供方的條款使用，因此這裡不要求授權條款。此檢查項不計入百分比。"
         }
-      }
+      },
+      "notApplicable": "不適用"
     },
     "faq": {
       "eyebrow": "MCP 常見問答",
@@ -585,13 +574,8 @@
       "lead": "暫無 AI 概覽：以下資訊來自註冊中心條目和服務本身。",
       "publisher": "發布者",
       "endpoint": "端點",
-      "transport": "傳輸",
-      "auth": "驗證方式",
-      "tools": "工具",
-      "toolsCount": "{count, plural, other {# 個工具}}",
       "documentation": "文件",
-      "repository": "儲存庫",
-      "homepage": "首頁"
+      "probed": "最近檢查"
     },
     "detail": {
       "documentation": "文件",
@@ -622,7 +606,8 @@
         "toolsNotValidated": "工具（未驗證）",
         "versions": "版本（{count}）",
         "related": "相關",
-        "integrations": "{brand} 整合（{count}）"
+        "integrations": "{brand} 整合",
+        "toolsPlain": "工具"
       },
       "overviewHeading": "概覽",
       "riskSummary": "風險摘要：",
@@ -652,7 +637,6 @@
       "trust": "信任",
       "published": "發布於",
       "securityHeading": "安全提示",
-      "securityBody": "MCP 服務會從對話中接收工具引數，並可能執行外部操作。允許列出未驗證的服務，但 SourceWeft 會對其加以標記，以便你在啟用前先審查該服務。",
       "relatedHeading": "更多類似 {name} 的服務",
       "integrationsHeading": "其他 {brand} 整合",
       "officialPointer": "發布方自己的服務：<link>{name}</link>",
@@ -660,7 +644,21 @@
       "sections": "章節導覽",
       "copy": "複製",
       "copied": "已複製",
-      "copyFailed": "複製失敗"
+      "copyFailed": "複製失敗",
+      "security": {
+        "base": "MCP 服務會接收對話中的工具呼叫請求，並可能執行外部操作。啟用前請先了解該服務能做什麼，並只授予它所需的權限。",
+        "domain": "註冊中心已驗證此服務的命名空間屬於 {domain}，且該網域同時執行其端點。這可以確認發布者，但並不代表該服務的工具是安全的。",
+        "domainOther": "註冊中心已驗證此服務的命名空間屬於 {domain}，但其端點不在該網域下，因此發布者未必執行此服務。",
+        "github": "註冊中心已驗證此條目所屬的 GitHub 帳號 {owner}。這並不表明該帳號就是產品方。",
+        "unknown": "SourceWeft 尚未驗證誰發布了此服務。",
+        "claimed": "已驗證的擁有者管理著此條目；這同樣不代表該服務的工具是安全的。",
+        "scope": "SourceWeft 的檢查只涵蓋條目是否完整、端點是否回應；不審查伺服器的程式碼，也不審查其工具的行為。",
+        "domainNoEndpoint": "註冊中心已驗證此服務的命名空間屬於 {domain}。它以軟體包形式執行，而不是託管端點，因此沒有可與該網域比對的端點。"
+      },
+      "publishedByGithub": "由 GitHub 帳號 {owner} 發布",
+      "delivery": "交付方式",
+      "hostedService": "託管服務",
+      "integrationsShowMore": "顯示更多"
     },
     "readme": {
       "imagePlaceholder": "圖片",
@@ -729,6 +727,25 @@
         "show": "顯示",
         "hiddenDone": "概覽已隱藏。",
         "shownDone": "概覽已顯示。"
+      }
+    },
+    "toolsStatus": {
+      "label": {
+        "partial": "{count}+ 個工具",
+        "authRequired": "需要登入",
+        "notValidated": "尚未驗證",
+        "empty": "沒有工具",
+        "unindexed": "尚未收錄",
+        "credentialRequired": "需要憑證"
+      },
+      "explain": {
+        "partial": "SourceWeft 對每個伺服器最多列出 {count} 個工具，因此實際可能不止這些。",
+        "authRequired": "該伺服器需要登入，因此 SourceWeft 無法在沒有帳號的情況下讀取其工具，也未收錄。已連接帳號所能看到的內容可能因帳號及其權限而異。",
+        "failed": "SourceWeft 曾在隔離沙箱中以無憑證方式啟動該軟體包一次，以列出其工具，但未能完成：{reason}。",
+        "notValidated": "SourceWeft 尚未在沙箱中啟動過該軟體包，因此其工具未知。",
+        "empty": "SourceWeft 已讀取該伺服器，它沒有列出任何工具。",
+        "unindexed": "SourceWeft 尚未讀取此伺服器的工具。",
+        "credentialRequired": "該伺服器需要 API 金鑰等憑證，因此 SourceWeft 無法在沒有憑證的情況下讀取其工具，也未收錄。"
       }
     }
   },
@@ -837,7 +854,7 @@
     "ORGANIZATION_NAME_DESCRIPTION": "這是你的組織的顯示名稱。",
     "ORGANIZATION_NAME_INSTRUCTIONS": "最多使用 32 個字元。",
     "ORGANIZATION_SLUG": "Slug 地址",
-    "ORGANIZATION_SLUG_DESCRIPTION": "這是你的組織的 URL 名稱空間。",
+    "ORGANIZATION_SLUG_DESCRIPTION": "這是你的組織的 URL 命名空間。",
     "ORGANIZATION_SLUG_INSTRUCTIONS": "最多使用 48 個字元。",
     "ORGANIZATION_SLUG_PLACEHOLDER": "acme-inc",
     "CREATE_ORGANIZATION_SUCCESS": "組織建立成功",

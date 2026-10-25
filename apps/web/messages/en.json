@@ -411,10 +411,11 @@
       "officialPublisher": "Official publisher",
       "officialPublisherTitle": "Published by {domain}, which also runs this server's endpoint.",
       "tools": "{count, plural, one {# tool} other {# tools}}",
-      "viewAll": "View all"
+      "viewAll": "View all",
+      "githubAccount": "Published by GitHub account {owner}",
+      "githubAccountTitle": "The registry verified the GitHub account that published this listing. That does not show the account makes the product."
     },
     "tools": {
-      "empty": "Tool metadata has not been indexed yet.",
       "parameters": "Parameters",
       "required": "required",
       "moreParameters": "+{count} more",
@@ -462,21 +463,15 @@
     "score": {
       "heading": "Score",
       "nav": "Score",
-      "gradeLabel": "Grade {grade}",
-      "percentage": "{percentage}% of the listing checks met",
-      "intro": "How complete this listing is, computed from the registry entry, the endpoint and public sources. Not a rating of the server, and no installs or reviews go into it.",
-      "gradeExplain": {
-        "A": "Complete listing: every required check passes and at least 80% of the weight is met.",
-        "B": "Good listing: every required check passes and at least 60% of the weight is met.",
-        "F": "Incomplete listing: a required check fails, or less than 60% of the weight is met."
-      },
+      "percentage": "{percentage}% of the applicable checks met",
+      "intro": "How complete this listing is, computed from the registry entry, the endpoint and public sources. Not a rating of the server and not a statement that it is safe or working today: reachability is a dated check, and no installs or reviews go into the score.",
       "required": "Required",
       "met": "Met",
       "notMet": "Not met",
       "weight": "{weight} pts",
       "items": {
         "reachable": {
-          "label": "Reachable",
+          "label": "Reached in the last 30 days",
           "hint": "Keep the endpoint answering the MCP handshake; SourceWeft probes it every 30 days."
         },
         "authDeclared": {
@@ -501,17 +496,11 @@
         },
         "hasLicense": {
           "label": "License",
-          "hint": "Declare a license in the repository or the registry entry."
-        },
-        "officialPublisher": {
-          "label": "Official publisher",
-          "hint": "Publish under a domain namespace, such as com.example, that matches the endpoint's host."
-        },
-        "claimed": {
-          "label": "Claimed by owner",
-          "hint": "Met once a verified owner claims the server: from its page, with their GitHub account or their domain."
+          "hint": "Declare a license in the repository or the registry entry.",
+          "notApplicableHint": "A hosted service is used under its provider's terms, so no license is expected here. This check is left out of the percentage."
         }
-      }
+      },
+      "notApplicable": "Not applicable"
     },
     "faq": {
       "eyebrow": "MCP FAQ",
@@ -585,13 +574,8 @@
       "lead": "No AI overview yet: these facts come from the registry entry and the server itself.",
       "publisher": "Publisher",
       "endpoint": "Endpoint",
-      "transport": "Transport",
-      "auth": "Auth",
-      "tools": "Tools",
-      "toolsCount": "{count, plural, one {# tool} other {# tools}}",
       "documentation": "Documentation",
-      "repository": "Repository",
-      "homepage": "Homepage"
+      "probed": "Last checked"
     },
     "detail": {
       "documentation": "Documentation",
@@ -622,7 +606,8 @@
         "toolsNotValidated": "Tools (not validated)",
         "versions": "Versions ({count})",
         "related": "Related",
-        "integrations": "{brand} integrations ({count})"
+        "integrations": "{brand} integrations",
+        "toolsPlain": "Tools"
       },
       "overviewHeading": "Overview",
       "riskSummary": "Risk summary: ",
@@ -652,7 +637,6 @@
       "trust": "Trust",
       "published": "Published",
       "securityHeading": "Security note",
-      "securityBody": "MCP servers receive tool arguments from a conversation and may perform external actions. Unverified listings are allowed, but SourceWeft marks them so you can review the server before enabling it.",
       "relatedHeading": "More servers like {name}",
       "integrationsHeading": "Other {brand} integrations",
       "officialPointer": "The publisher's own server: <link>{name}</link>",
@@ -660,7 +644,21 @@
       "sections": "Sections",
       "copy": "Copy",
       "copied": "Copied",
-      "copyFailed": "Copy failed"
+      "copyFailed": "Copy failed",
+      "security": {
+        "base": "MCP servers receive tool arguments from a conversation and may perform external actions. Review what a server can do before you enable it, and give it only the access it needs.",
+        "domain": "The registry verified that this server's namespace belongs to {domain}, which also runs its endpoint. That identifies the publisher; it does not make the server's tools safe.",
+        "domainOther": "The registry verified that this server's namespace belongs to {domain}, but the endpoint is not on that domain, so the publisher may not run this server.",
+        "github": "The registry verified the GitHub account {owner} for this listing. That does not show the account is the product's maker.",
+        "unknown": "SourceWeft has not verified who publishes this server.",
+        "claimed": "A verified owner manages this listing; that does not make the server's tools safe either.",
+        "scope": "SourceWeft's checks cover whether the listing is complete and the endpoint answered; they do not review the server's code or what its tools do.",
+        "domainNoEndpoint": "The registry verified that this server's namespace belongs to {domain}. It runs from a package rather than a hosted endpoint, so there is no endpoint to match against that domain."
+      },
+      "publishedByGithub": "Published by GitHub account {owner}",
+      "delivery": "Delivery",
+      "hostedService": "Hosted service",
+      "integrationsShowMore": "Show more"
     },
     "readme": {
       "imagePlaceholder": "Image",
@@ -729,6 +727,25 @@
         "show": "Show",
         "hiddenDone": "Overview hidden.",
         "shownDone": "Overview shown."
+      }
+    },
+    "toolsStatus": {
+      "label": {
+        "partial": "{count}+ tools",
+        "authRequired": "Sign-in required",
+        "notValidated": "Not validated yet",
+        "empty": "No tools",
+        "unindexed": "Not indexed yet",
+        "credentialRequired": "Credential required"
+      },
+      "explain": {
+        "partial": "SourceWeft lists at most {count} tools per server, so there may be more than shown.",
+        "authRequired": "This server asks you to sign in, so SourceWeft could not read its tools without an account and has not indexed them. What a connected account sees can depend on that account and its permissions.",
+        "failed": "SourceWeft started this package once in an isolated sandbox, without credentials, to list its tools. That failed: {reason}.",
+        "notValidated": "SourceWeft has not started this package in its sandbox yet, so its tools are not known.",
+        "empty": "SourceWeft read this server and it lists no tools.",
+        "unindexed": "SourceWeft has not read this server's tools yet.",
+        "credentialRequired": "This server asks for a credential such as an API key, so SourceWeft could not read its tools without one and has not indexed them."
       }
     }
   },

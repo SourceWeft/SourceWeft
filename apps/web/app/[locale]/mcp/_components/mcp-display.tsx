@@ -23,18 +23,18 @@ import type {
   MarketMcpToolManifest,
   McpRiskLevel,
   McpRuntime,
-  McpStdioValidationReason,
   McpTransport,
 } from "@sourceweft/market-sdk";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
-import { mcpPublisherDomain } from "../../../../lib/mcp-facts";
+import { mcpGithubAccount, mcpPublisherDomain } from "../../../../lib/mcp-facts";
 import {
-  mcpToolsValidation,
-  mcpToolsValidationReasonKey,
-} from "../../../../lib/mcp-tools-validation";
+  mcpToolsStatus,
+  type McpToolsStatus,
+} from "../../../../lib/mcp-tools-status";
+import { mcpToolsValidationReasonKey } from "../../../../lib/mcp-tools-validation";
 import {
   mcpRuntimeKind,
   runtimeLabel,
@@ -45,6 +45,7 @@ import { slugify } from "../../../../lib/slug";
 import { mcpToolParameters } from "../../../../lib/mcp-tool-parameters";
 
 import { McpIcon } from "./mcp-client";
+import { McpShowMore } from "./mcp-show-more";
 import { mcpPath } from "./mcp-paths";
 import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
@@ -59,6 +60,20 @@ export function mcpCategoryPath(slug: string) {
 
 export function mcpCategoryNames(categories: MarketCategory[]) {
   return new Map(categories.map((category) => [category.slug, category.name]));
+}
+
+/**
+ * The category a page or card leads with: the first one, unless it is
+ * "other", which only says nothing better was found. A highlighted category
+ * (the one being browsed) wins when the item has it.
+ */
+export function mcpPrimaryCategory(
+  categories: readonly string[],
+  highlight?: string,
+) {
+  if (highlight && categories.includes(highlight)) return highlight;
+  const first = categories[0];
+  return first && first !== "other" ? first : undefined;
 }
 
 export function mcpCategoryLabel(
@@ -270,8 +285,8 @@ export function mcpDetailSeoDescription(input: {
  * also runs its endpoint. Not the "Official" badge, which is the manual
  * first-party flag.
  */
-export async function McpOfficialPublisherMark({ domain }: { domain: string }) {
-  const t = await getTranslations("mcp.card");
+export function McpOfficialPublisherMark({ domain }: { domain: string }) {
+  const t = useTranslations("mcp.card");
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1 font-medium text-emerald-700 dark:text-emerald-300"
@@ -284,25 +299,55 @@ export async function McpOfficialPublisherMark({ domain }: { domain: string }) {
   );
 }
 
+/**
+ * Who published a card's server, beside its name: "Official publisher" only
+ * when the registry namespace's domain also runs the endpoint, a neutral
+ * "Published by GitHub account X" for an `io.github.*` entry with no domain
+ * publisher, otherwise the provider name. A claim changes none of this.
+ */
+async function McpCardPublisher({ item }: { item: MarketItemSummary }) {
+  const t = await getTranslations("mcp.card");
+  const account = mcpGithubAccount(item);
+  return (
+    <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
+      {account ? (
+        <span
+          className="truncate"
+          data-github-account={account}
+          title={t("githubAccountTitle")}
+        >
+          {t("githubAccount", { owner: account })}
+        </span>
+      ) : (
+        <span className="truncate">{item.providerName ?? item.identifier}</span>
+      )}
+      {item.publisher?.endpointMatch ? (
+        <McpOfficialPublisherMark domain={item.publisher.domain} />
+      ) : null}
+    </p>
+  );
+}
+
 export async function McpMarketCard({
   categoryNames,
   highlightCategory,
+  hideVerification,
   item,
 }: {
   categoryNames?: ReadonlyMap<string, string>;
   /** Category to show when the item has several, e.g. the one being browsed. */
   highlightCategory?: string;
+  /** Leave out the verification badge: a list where every card shares it. */
+  hideVerification?: boolean;
   item: MarketItemSummary;
 }) {
   const t = await getTranslations("mcp.card");
   const tOverview = await getTranslations("mcp.aiOverview");
   const tTemplate = await getTranslations("mcp.template");
+  const tStatus = await getTranslations("mcp.toolsStatus");
   const tValidation = await getTranslations("mcp.toolsValidation");
   const trusted = Boolean(item.official || item.verified);
-  const primaryCategory =
-    highlightCategory && item.categories.includes(highlightCategory)
-      ? highlightCategory
-      : item.categories[0];
+  const primaryCategory = mcpPrimaryCategory(item.categories, highlightCategory);
   // Without an AI summary, the template sentence (#367 W4) stands in for a
   // registry summary no longer than it. A list item has no endpoint.
   const cardText = mcpCardText(
@@ -318,11 +363,9 @@ export async function McpMarketCard({
       tTemplate,
     ),
   );
-  // A package the sandbox could not list tools for says so, not "0 tools".
-  const validation = mcpToolsValidation(item);
-  const validationReason = validation
-    ? tValidation(`reason.${mcpToolsValidationReasonKey(validation.reason)}`)
-    : null;
+  // An empty list says why it is empty, never "0 tools" for an unknown.
+  const status = mcpToolsStatus({ item });
+  const statusText = mcpToolsStatusText(status, tStatus, tValidation);
   return (
     <LocaleLink
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -339,16 +382,9 @@ export async function McpMarketCard({
           <h3 className="truncate text-base font-semibold leading-6 text-zinc-950 dark:text-white">
             {item.name}
           </h3>
-          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
-            <span className="truncate">
-              {item.providerName ?? item.identifier}
-            </span>
-            {item.publisher?.endpointMatch ? (
-              <McpOfficialPublisherMark domain={item.publisher.domain} />
-            ) : null}
-          </p>
+          <McpCardPublisher item={item} />
         </div>
-        <McpVerificationBadge item={item} />
+        {hideVerification ? null : <McpVerificationBadge item={item} />}
       </div>
 
       <p
@@ -382,21 +418,26 @@ export async function McpMarketCard({
             {mcpCategoryLabel(primaryCategory, categoryNames)}
           </span>
         ) : null}
-        {validationReason ? (
-          <span
-            className="inline-flex min-w-0 items-center gap-1.5"
-            data-tools-validation={validation?.reason}
-            title={tValidation("explain", { reason: validationReason })}
-          >
-            <AlertTriangle className="size-3.5 shrink-0" />
-            <span className="truncate">
-              {tValidation("withReason", { reason: validationReason })}
-            </span>
-          </span>
-        ) : (
+        {status.kind === "listed" ? (
           <span className="inline-flex shrink-0 items-center gap-1.5">
             <Code2 className="size-3.5" />
-            {t("tools", { count: item.toolsCount })}
+            {t("tools", { count: status.count })}
+          </span>
+        ) : (
+          <span
+            className="inline-flex min-w-0 items-center gap-1.5"
+            data-tools-status={status.kind}
+            data-tools-validation={
+              status.kind === "failed" ? status.reason : undefined
+            }
+            title={statusText.explain}
+          >
+            {status.kind === "failed" ? (
+              <AlertTriangle className="size-3.5 shrink-0" />
+            ) : (
+              <Code2 className="size-3.5 shrink-0" />
+            )}
+            <span className="truncate">{statusText.label}</span>
           </span>
         )}
         <span className="ml-auto shrink-0">{formatDate(item.updatedAt)}</span>
@@ -409,30 +450,45 @@ export function McpCardGrid({
   categoryNames,
   className,
   highlightCategory,
+  hideVerification,
+  initialCount,
   items,
+  showMoreLabel,
 }: {
   categoryNames?: ReadonlyMap<string, string>;
   className?: string;
   highlightCategory?: string;
+  hideVerification?: boolean;
+  /** Show this many cards, the rest behind a "Show more" control. */
+  initialCount?: number;
   items: MarketItemSummary[];
+  showMoreLabel?: string;
 }) {
-  return (
-    <div
-      className={cn(
-        "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
-        className,
-      )}
-    >
-      {items.map((item) => (
-        <McpMarketCard
-          categoryNames={categoryNames}
-          highlightCategory={highlightCategory}
-          item={item}
-          key={item.identifier}
-        />
-      ))}
-    </div>
+  const gridClassName = cn(
+    "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
+    className,
   );
+  const cards = items.map((item) => (
+    <McpMarketCard
+      categoryNames={categoryNames}
+      highlightCategory={highlightCategory}
+      hideVerification={hideVerification}
+      item={item}
+      key={item.identifier}
+    />
+  ));
+  if (initialCount !== undefined && showMoreLabel) {
+    return (
+      <McpShowMore
+        className={gridClassName}
+        initial={initialCount}
+        label={showMoreLabel}
+      >
+        {cards}
+      </McpShowMore>
+    );
+  }
+  return <div className={gridClassName}>{cards}</div>;
 }
 
 export async function McpDirectorySection({
@@ -482,28 +538,71 @@ export async function McpDirectorySection({
   );
 }
 
+/**
+ * The label and the one-sentence explanation of a tool status. `failed` keeps
+ * the stdio validation's own wording and reasons; the others say what is
+ * actually known: not "0 tools", and never that signing in reveals tools.
+ */
+export function mcpToolsStatusText(
+  status: McpToolsStatus,
+  tStatus: (key: string, values?: Record<string, string | number>) => string,
+  tValidation: (key: string, values?: Record<string, string | number>) => string,
+) {
+  switch (status.kind) {
+    case "listed":
+      return { label: String(status.count), explain: "" };
+    case "partial":
+      return {
+        label: tStatus("label.partial", { count: status.count }),
+        explain: tStatus("explain.partial", { count: status.count }),
+      };
+    case "failed":
+      return {
+        label: tValidation("withReason", {
+          reason: tValidation(
+            `reason.${mcpToolsValidationReasonKey(status.reason)}`,
+          ),
+        }),
+        explain: tStatus("explain.failed", {
+          reason: tValidation(
+            `reason.${mcpToolsValidationReasonKey(status.reason)}`,
+          ),
+        }),
+      };
+    default:
+      return {
+        label: tStatus(`label.${status.kind}`),
+        explain: tStatus(`explain.${status.kind}`),
+      };
+  }
+}
+
 export async function McpToolRows({
   tools,
-  validation,
+  status,
 }: {
   tools: MarketMcpToolManifest[];
-  /** The failed sandbox validation to explain an empty list with, if any. */
-  validation?: { reason: McpStdioValidationReason } | null;
+  /** Why the list is empty, when it is. */
+  status?: McpToolsStatus;
 }) {
   const t = await getTranslations("mcp");
   if (tools.length === 0) {
+    const tStatus = await getTranslations("mcp.toolsStatus");
+    const tValidation = await getTranslations("mcp.toolsValidation");
+    const text = mcpToolsStatusText(
+      status ?? { kind: "unindexed" },
+      tStatus,
+      tValidation,
+    );
     return (
       <div
         className="rounded-lg border border-zinc-300 bg-white/52 p-5 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400"
-        data-tools-validation={validation?.reason}
+        data-tools-status={status?.kind ?? "unindexed"}
+        data-tools-validation={
+          status?.kind === "failed" ? status.reason : undefined
+        }
       >
-        {validation
-          ? t("toolsValidation.explain", {
-              reason: t(
-                `toolsValidation.reason.${mcpToolsValidationReasonKey(validation.reason)}`,
-              ),
-            })
-          : t("tools.empty")}
+        {text.explain}
       </div>
     );
   }
