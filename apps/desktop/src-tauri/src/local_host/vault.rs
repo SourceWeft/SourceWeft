@@ -488,7 +488,6 @@ pub(crate) mod tests {
         (app, host, store)
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn secret(env_var: &str, value: &str, hosts: &[&str]) -> NewSecret {
         NewSecret {
             label: format!("{env_var} token"),
