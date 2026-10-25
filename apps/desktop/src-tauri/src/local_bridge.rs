@@ -1,9 +1,11 @@
 //! Narrow discovery bridge for the existing Web UI. No separate native pages.
 //! Workspace/file operations stay internal until authenticated dispatch is wired.
 use serde::Serialize;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use sourceweft_desktop::local_host::vault::SecretStore;
 use sourceweft_desktop::local_host::{
     readiness::SandboxReadiness,
-    vault::{NewSecret, SecretMeta, SecretStore, VaultListing},
+    vault::{NewSecret, SecretMeta, VaultListing},
     LocalHost,
 };
 use std::sync::Arc;
@@ -143,11 +145,16 @@ pub async fn choose_working_directory(
 
 /// The device vault's secret values, in the OS keychain under `service` with the secret id as
 /// the account. The library takes this as a trait because the keychain module belongs to the
-/// app binary.
+/// app binary. Only where `secret_store` exists (macOS and Linux): on other platforms the host
+/// is never opened, so the vault commands below answer `UNSUPPORTED_PLATFORM` (no managed
+/// `LocalHost`) while staying registered, which keeps `invoke_handler`, `build.rs` and the
+/// capabilities uniform across platforms.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub struct KeychainStore {
     service: String,
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 impl Default for KeychainStore {
     fn default() -> Self {
         Self {
@@ -156,6 +163,7 @@ impl Default for KeychainStore {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 impl SecretStore for KeychainStore {
     fn get(&self, account: &str) -> Result<Option<Vec<u8>>, String> {
         crate::secret_store::get(&self.service, account)
@@ -213,7 +221,7 @@ pub async fn vault_remove(app: AppHandle, window: WebviewWindow, id: String) -> 
         .map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests {
     use super::*;
 

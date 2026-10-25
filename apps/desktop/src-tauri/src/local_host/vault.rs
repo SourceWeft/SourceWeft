@@ -681,6 +681,12 @@ pub(crate) mod tests {
         assert!(format!("{new:?}").contains("API_KEY"));
         let value = SecretValue::new("TOPSECRETVALUE".into());
         assert!(!format!("{value:?}").contains("TOPSECRETVALUE"));
+    }
+
+    /// `sidecar` (and so `WrapSecret`) exists on unix only.
+    #[cfg(unix)]
+    #[test]
+    fn the_wire_secret_debug_output_never_shows_a_value() {
         let hosts = vec!["example.com".to_string()];
         let wire = super::super::sidecar::WrapSecret {
             env_var: "API_KEY",
