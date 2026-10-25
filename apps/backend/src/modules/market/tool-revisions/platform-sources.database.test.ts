@@ -50,7 +50,9 @@ const profile = {
   date: "2026-10-20",
 };
 
-function manifest(identifier: string, endpointUrl: string | undefined = ENDPOINT) {
+// `null` is a listing with no remote endpoint (an omitted argument would take
+// the default).
+function manifest(identifier: string, endpointUrl: string | null = ENDPOINT) {
   return marketMcpManifestSchema.parse({
     schemaVersion: 1,
     identifier,
@@ -76,8 +78,7 @@ describe("platform snapshot and member-observed tools", () => {
 
   async function item(options: { endpointUrl?: string | null; tools?: unknown[] } = {}) {
     const identifier = `io.github.${tag}n${counter++}/server`;
-    const endpointUrl = options.endpointUrl === null ? undefined : (options.endpointUrl ?? ENDPOINT);
-    const base = manifest(identifier, endpointUrl);
+    const base = manifest(identifier, options.endpointUrl === undefined ? ENDPOINT : options.endpointUrl);
     await (await import("../ingest/repository")).upsertMarketMcp({
       status: "published",
       visibility: "public",
