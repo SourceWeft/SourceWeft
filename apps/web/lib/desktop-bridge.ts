@@ -46,8 +46,8 @@ export type AutostartState = {
 };
 
 /**
- * Readiness of local sandboxed execution. Absent when no LocalHost is managed, and on macOS,
- * whose Seatbelt sandbox needs no setup (the status there is unchanged from earlier builds).
+ * Readiness of local sandboxed execution. Absent when no LocalHost is managed. macOS and Linux
+ * both report it, from the sandbox bundle's probe.
  */
 export type SandboxReadiness =
   | { state: "ready"; toolchainPath?: "loginShell" | "system" }

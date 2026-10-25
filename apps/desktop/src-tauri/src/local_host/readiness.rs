@@ -2,9 +2,9 @@
 //! inside it.
 //!
 //! On macOS and Linux readiness is the sandbox bundle's probe (the sidecar's `init` + `probe`
-//! round trip). Nothing here ever reports `Ready` on a missing helper, a failed `init`/`probe` round trip, or a dead
-//! sidecar: those are reported as `NeedsSetup` with a reason, so local execution fails loudly
-//! instead of silently running unsandboxed.
+//! round trip). Nothing here ever reports `Ready` on a missing helper, a failed `init`/`probe`
+//! round trip, or a dead sidecar: those are reported as `NeedsSetup` with a reason, so local
+//! execution fails loudly instead of silently running unsandboxed.
 use super::LocalHost;
 #[cfg(unix)]
 use super::sidecar::Sidecar;
@@ -195,8 +195,8 @@ pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
     }
 }
 
-/// `LocalHost::sandbox_readiness`'s cache: probing is expensive (spawning a login shell; on
-/// Linux, starting a whole sidecar process and round-tripping `init` + `probe`), and
+/// `LocalHost::sandbox_readiness`'s cache: probing is expensive (spawning a login shell, then
+/// starting a whole sidecar process and round-tripping `init` + `probe`), and
 /// `local_host_status` is polled by the Web UI every few seconds, so a fresh probe runs only
 /// when the cached value could plausibly be stale.
 ///
@@ -206,11 +206,10 @@ pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
 /// was wrong might have been fixed since. While a probe is already running on some thread, a
 /// concurrent call never blocks on it: it returns the last known value, or a transient
 /// `NeedsSetup { reason: "Checking the sandbox runtime" }` if there isn't one yet.
-// `get_or_probe`/`invalidate` are only reached from `sandbox_readiness`'s Linux branch in a
-// production (non-test) build, so a plain `cargo build` on macOS/Windows sees no caller and
-// would otherwise warn this whole type as dead code; the unit tests below exercise the cache
-// policy directly (platform-independently) precisely so it does not need a real Linux target
-// to verify, which is also why it is not itself `#[cfg(target_os = "linux")]`-gated.
+// `get_or_probe`/`invalidate` are only reached from `sandbox_readiness` on macOS and Linux, so a
+// build for any other target sees no caller and would otherwise warn this whole type as dead
+// code; the unit tests below exercise the cache policy directly (platform-independently),
+// which is also why the type is not itself `cfg`-gated to those targets.
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub(crate) struct ReadinessCache {

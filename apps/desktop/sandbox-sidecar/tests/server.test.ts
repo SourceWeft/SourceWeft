@@ -33,6 +33,12 @@ function linuxInit(overrides: Partial<InitConfig> = {}): InitConfig {
   };
 }
 
+/** The darwin shape of `InitConfig`: ripgrep is the only helper (macOS has no bubblewrap and no
+ * seccomp helper), exactly what the Rust host sends on macOS. */
+function darwinInit(overrides: Partial<InitConfig> = {}): InitConfig {
+  return linuxInit({ platform: "darwin", helpers: { ripgrep: rgPath }, ...overrides });
+}
+
 /** A fake `SrtLike`, driving the server's error mapping and merged-config logic without any
  * real sandboxing. `wrapWithSandboxArgv("true", ...)` — what `probe` always wraps — returns an
  * argv that, when actually spawned by `probe`'s `runProbe`, exits with `probeExit.code` after
@@ -618,7 +624,7 @@ test("main strips proxy variables", () => {
 // actually happen; a `PassThrough`-driven `startServer` test, unlike this one, can't exercise
 // it. `SandboxManager` always sandboxes for the actual host OS, not `InitConfig.platform`, so
 // this only exercises a real sandbox session where that host OS has one srt supports — on
-// this Mac, that's `sandbox-exec` on darwin; skipped elsewhere rather than failing on an
+// this Mac, that's Seatbelt on darwin; skipped elsewhere rather than failing on an
 // environment this test was never meant to assert anything about.
 test(
   "main flushes the shutdown ack to stdout before exiting (real srt)",
@@ -683,7 +689,7 @@ test(
 
 test("darwin wrap and probe pass /bin/bash as srt's binShell; linux leaves srt's default", async () => {
   const darwin = makeFakeSrt();
-  const darwinHarness = await initHarness(darwin, undefined, linuxInit({ platform: "darwin" }));
+  const darwinHarness = await initHarness(darwin, undefined, darwinInit());
   assert.equal(
     (await darwinHarness.send({ op: "probe" })).ok,
     true,

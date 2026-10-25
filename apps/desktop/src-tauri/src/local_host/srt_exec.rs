@@ -78,7 +78,7 @@ pub(crate) const HOST_PLATFORM: Platform = if cfg!(target_os = "macos") {
 /// runtime bundles) are denied explicitly, independent of whether `base` lies under `$HOME`.
 ///
 /// Linux gets the production bubblewrap and the seccomp helper; macOS has neither (Seatbelt
-/// needs no helper binary), so its bundle holds only the sidecar, ripgrep and the proxy agent.
+/// needs no helper binary), so its bundle holds only the sidecar, ripgrep and the proxy agent jar.
 pub(crate) fn init_config(
     platform: Platform,
     bundle: &Path,
@@ -507,7 +507,8 @@ fn prepare_tmpdir(root: &Path) -> Result<()> {
 }
 
 /// Runs `script` under `/bin/sh`-compatible wrapping in `cwd` (inside `root`), with write access
-/// to `root` only, and returns the same JSON shape as macOS.
+/// to `root` only, and returns the JSON shape the backend expects
+/// (`{"output","exitCode","truncated","cancelled"}`).
 pub(crate) fn execute_command(
     host: &LocalHost,
     root: &Path,

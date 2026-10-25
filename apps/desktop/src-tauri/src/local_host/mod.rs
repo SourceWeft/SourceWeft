@@ -5,15 +5,11 @@ pub mod maintenance;
 mod files;
 #[cfg(unix)]
 pub(crate) mod process;
-// Retired by the sidecar path; deleted with `sandbox.rs` once the new path is proven.
-#[allow(dead_code)]
-mod proxy;
 #[cfg(unix)]
 mod sidecar;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod srt_exec;
 pub mod readiness;
-pub mod sandbox;
 mod workspace;
 
 pub use workspace::{LocalHost, Workspace};

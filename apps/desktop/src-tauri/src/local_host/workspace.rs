@@ -28,9 +28,8 @@ pub struct LocalHost {
     // app-data base, without a single-purpose accessor method.
     pub(super) base: PathBuf,
     // Caches `sandbox_readiness()`'s result; see `ReadinessCache`'s own doc comment in
-    // readiness.rs for the policy. Present on every platform (not just Linux, which is the
-    // only platform that currently reads it) so the struct's shape does not depend on target
-    // OS.
+    // readiness.rs for the policy. Present on every platform (only macOS and Linux read it) so
+    // the struct's shape does not depend on target OS.
     pub(super) sandbox_readiness_cache: Mutex<ReadinessCache>,
     // The sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
