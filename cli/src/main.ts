@@ -13,7 +13,11 @@ import {
   type ManageContext,
 } from "./commands/manage";
 import { agentsCommand } from "./commands/agents";
-import { mcpInspectCommand, mcpSubmitToolsCommand } from "./commands/mcp";
+import {
+  mcpInspectCommand,
+  mcpOAuthLogoutCommand,
+  mcpSubmitToolsCommand,
+} from "./commands/mcp";
 import { findAgent } from "./install/agents";
 import { EXIT, toFailure, UsageError } from "./errors";
 import { createRegistryClient, normalizeRegistry } from "./registry/client";
@@ -37,9 +41,12 @@ Skills:
   skills doctor             Check installed skills for problems
 
 MCP server owners:
-  mcp inspect (--url <url> [--header "Name: value"]... | --stdio "<command>")
+  mcp inspect (--url <url> [--header "Name: value"]... | --url <url> --oauth
+               | --stdio "<command>")
                             List your server's tools with your own credentials
                             and write them to a file (default ./mcp-tools.json)
+  mcp oauth-logout --url <url>
+                            Forget the sign-in that inspect --oauth stored
   mcp submit-tools <identifier> <file> --api-key <key>
                             Upload that file for a catalog server you have claimed
 
@@ -58,6 +65,9 @@ Options:
   --limit <n>        Number of search results
   --url <url>        MCP Streamable HTTP endpoint to inspect
   --header <line>    "Name: value" sent on every request to --url (repeatable)
+  --oauth            Sign in to --url with the server's OAuth in your browser
+                     (needs a browser on this machine; the token stays here)
+  --client-name <n>  Name the server's consent page shows (default: SourceWeft CLI)
   --stdio <command>  Shell command that starts an MCP server on stdio
   --out <file>       Where inspect writes the tool list (default ./mcp-tools.json)
   --api-key <key>    Your SourceWeft API key (Settings → API keys), for submit-tools
@@ -88,6 +98,8 @@ async function run(argv: string[]): Promise<number> {
         url: { type: "string" },
         header: { type: "string", multiple: true },
         stdio: { type: "string" },
+        oauth: { type: "boolean", default: false },
+        "client-name": { type: "string" },
         out: { type: "string" },
         "api-key": { type: "string" },
         json: { type: "boolean", default: false },
@@ -124,20 +136,31 @@ async function run(argv: string[]): Promise<number> {
       case "inspect": {
         if (args.length > 0) {
           throw new UsageError(
-            'Usage: sourceweft mcp inspect (--url <url> [--header "Name: value"]... | --stdio "<command>") [--out <file>] [--force] [--json]',
+            'Usage: sourceweft mcp inspect (--url <url> [--header "Name: value"]... | --url <url> --oauth [--client-name <name>] | --stdio "<command>") [--out <file>] [--force] [--json]',
           );
         }
         await mcpInspectCommand(
-          { out, version: VERSION },
+          { out, version: VERSION, notice: (line) => console.error(line) },
           {
             ...(values.url !== undefined ? { url: values.url } : {}),
             ...(values.header !== undefined ? { headers: values.header } : {}),
             ...(values.stdio !== undefined ? { stdio: values.stdio } : {}),
+            ...(values.oauth ? { oauth: true } : {}),
+            ...(values["client-name"] !== undefined
+              ? { clientName: values["client-name"] }
+              : {}),
             ...(values.out !== undefined ? { out: values.out } : {}),
             force: values.force,
             json: values.json,
           },
         );
+        return EXIT.ok;
+      }
+      case "oauth-logout": {
+        if (args.length > 0 || !values.url) {
+          throw new UsageError("Usage: sourceweft mcp oauth-logout --url <url>");
+        }
+        await mcpOAuthLogoutCommand({ out }, { url: values.url });
         return EXIT.ok;
       }
       case "submit-tools": {

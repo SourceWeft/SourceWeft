@@ -1,4 +1,4 @@
-import { McpInspectError } from "../errors";
+import { McpInspectError, McpUnauthorizedError } from "../errors";
 import {
   isRecord,
   isResponseTo,
@@ -96,7 +96,12 @@ function messagesIn(contentType: string, body: string): unknown[] {
 export function createHttpTransport(
   url: string,
   userHeaders: Readonly<Record<string, string>>,
-  options: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  options: {
+    fetchImpl?: typeof fetch;
+    timeoutMs?: number;
+    /** What a 401/403 means for this caller; the default points at `--header`. */
+    unauthorizedMessage?: (status: number, method: string) => string;
+  } = {},
 ): McpTransport {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? HTTP_TIMEOUT_MS;
@@ -137,8 +142,13 @@ export function createHttpTransport(
     if (session) sessionId = session;
     if (response.status === 401 || response.status === 403) {
       await response.body?.cancel();
-      throw new McpInspectError(
-        `The server refused the credentials (HTTP ${response.status}) on ${method}. Pass the header it expects with --header "Authorization: Bearer <token>" (repeatable); it is sent to the server and never written to the file.`,
+      const insufficientScope = /insufficient_scope/iu.test(
+        response.headers.get("www-authenticate") ?? "",
+      );
+      throw new McpUnauthorizedError(
+        options.unauthorizedMessage?.(response.status, method) ??
+          `The server refused the credentials (HTTP ${response.status}) on ${method}. Pass the header it expects with --header "Authorization: Bearer <token>" (repeatable); it is sent to the server and never written to the file.`,
+        response.status === 401 && !insufficientScope,
       );
     }
     return response;
