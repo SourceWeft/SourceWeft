@@ -82,10 +82,28 @@ test("parseSecrets enforces the shape and the limits, always as BAD_REQUEST", ()
   );
   assert.equal(parseSecrets(biggest).length, 20);
   assert.equal(parseSecrets([secret({ hosts: hosts(50, "one") })]).length, 1);
-  // One host more across the whole wrap is refused, and the message names the limit.
+  // One distinct host more across the whole wrap is refused, and the message names the limit.
   const tooMany = [...biggest.slice(0, 19), secret({ envVar: "LAST", hosts: hosts(11, "last") })];
   assert.equal(code(() => parseSecrets(tooMany)), "BAD_REQUEST");
-  assert.throws(() => parseSecrets(tooMany), /at most 200 hosts across all secrets/);
+  assert.throws(() => parseSecrets(tooMany), /at most 200 distinct hosts across all secrets/);
+  // The limit counts distinct hosts, the way the vault does: the same hosts bound to many secrets,
+  // in any letter case, are counted once.
+  const shared = hosts(50, "shared");
+  const sameHosts = Array.from({ length: 5 }, (_, i) =>
+    secret({ envVar: `D${i}`, hosts: i % 2 === 0 ? shared : shared.map((host) => host.toUpperCase()) }),
+  );
+  assert.equal(parseSecrets(sameHosts).length, 5);
+  // 200 distinct hosts split over secrets that also repeat one another's hosts are still accepted...
+  const overlapping = [
+    secret({ envVar: "O1", hosts: hosts(50, "a") }),
+    secret({ envVar: "O2", hosts: [...hosts(50, "a").slice(25), ...hosts(25, "b")] }),
+    secret({ envVar: "O3", hosts: hosts(50, "c") }),
+    secret({ envVar: "O4", hosts: hosts(50, "d") }),
+    secret({ envVar: "O5", hosts: [...hosts(25, "b"), ...hosts(25, "e")] }),
+  ];
+  assert.equal(parseSecrets(overlapping).length, 5); // 50 + 25 + 50 + 50 + 25 new ones = 200 distinct
+  // ...and one more distinct host is not.
+  assert.equal(code(() => parseSecrets([...overlapping, secret({ envVar: "O6", hosts: ["extra.example.com"] })])), "BAD_REQUEST");
 });
 
 test("registerSecrets refuses when TLS termination is not active, before registering anything", () => {

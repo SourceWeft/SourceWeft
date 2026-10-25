@@ -29,7 +29,7 @@ const MAX_VALUE_BYTES = 4096;
 /** The most hosts one secret may be bound to. */
 const MAX_HOSTS = 50;
 /**
- * The most hosts across all of one command's secrets. The host adds every bound host to the
+ * The most distinct hosts across all of one command's secrets (the vault counts the same way). The host adds every bound host to the
  * command's network allow list (which the sidecar caps at 500 entries), so this leaves room
  * for the user's own rules.
  */
@@ -84,7 +84,8 @@ export function parseSecrets(value: unknown): WrapSecret[] {
     throw bad(`"wrap" request secrets must have at most ${MAX_SECRETS} entries`);
   }
   const seen = new Set<string>();
-  let totalHosts = 0;
+  /** Distinct hosts so far, letter case ignored; the same host bound to several secrets counts once. */
+  const distinctHosts = new Set<string>();
   return value.map((raw: unknown, index): WrapSecret => {
     const at = `secrets[${index}]`;
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -112,9 +113,11 @@ export function parseSecrets(value: unknown): WrapSecret[] {
         throw bad(`${at}.hosts entries must be exact domain names: no wildcard, port or IP literal`);
       }
     }
-    totalHosts += hosts.length;
-    if (totalHosts > MAX_TOTAL_HOSTS) {
-      throw bad(`"wrap" request secrets must bind at most ${MAX_TOTAL_HOSTS} hosts across all secrets`);
+    for (const host of hosts as string[]) distinctHosts.add(host.toLowerCase());
+    if (distinctHosts.size > MAX_TOTAL_HOSTS) {
+      throw bad(
+        `"wrap" request secrets must bind at most ${MAX_TOTAL_HOSTS} distinct hosts across all secrets`,
+      );
     }
     if (typeof readOnly !== "boolean") throw bad(`${at}.readOnly must be a boolean`);
     return { envVar, value: secretValue, hosts: [...(hosts as string[])], readOnly };
