@@ -88,6 +88,56 @@ test("recovery attaches the bundle only when the original artifacts have one", a
   );
 });
 
+test("recovery attaches the .deb only when the original artifacts have one, and verifies it", async () => {
+  const recovery = await workflow("desktop-release-recovery");
+  const steps = Object.values(recovery.jobs).flatMap((job) => job.steps);
+  const installers = steps.find((step) =>
+    step.name?.startsWith("Prepare draft"),
+  );
+  const deb = steps.find((step) =>
+    step.name?.startsWith("Attach the Linux .deb"),
+  );
+  assert(!covers(installers.with.files, "release-installers/x/SourceWeft.deb"));
+  assert.match(
+    deb.if,
+    /hashFiles\('release-installers\/\*\*\/\*\.deb'\) != ''/,
+  );
+  assert.match(deb.if, /published != 'true'/);
+  assert.equal(deb.with.fail_on_unmatched_files, true);
+  assert.equal(deb.with.overwrite_files, false);
+  assert.equal(deb.with.draft, true);
+  assert.equal(deb.with.tag_name, installers.with.tag_name);
+  assert.equal(deb.with.body, undefined, "must not rewrite the release body");
+  assert(covers(deb.with.files, "release-installers/x/SourceWeft.deb"));
+  assert(steps.indexOf(installers) < steps.indexOf(deb));
+  assert(
+    steps.indexOf(deb) < steps.findIndex((step) => step.id === "assets"),
+    "assets are verified after the .deb is attached",
+  );
+  const script = await readFile(
+    new URL("./desktop-release-recovery.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    script,
+    /\(dmg\|exe\|AppImage\|deb\|/,
+    "verify-github covers .deb",
+  );
+});
+
+test("deb-install removal checks use `test ! -e` and the ownership check accepts numeric owners", async () => {
+  const steps = (await workflow("desktop-build")).jobs["deb-install"].steps;
+  const runs = steps.map((step) => step.run ?? "").join("\n");
+  assert.doesNotMatch(
+    runs,
+    /^\s*! test /m,
+    "bash -e ignores a negated command",
+  );
+  assert.match(runs, /test ! -e \/opt\/sourceweft\/libexec\/bwrap/);
+  assert.match(runs, /\(root\/root\|0\/0\)/);
+  assert.doesNotMatch(runs, /gnome-keyring|dbus-x11/);
+});
+
 test("both bundle builds use the one pinned static ripgrep and never apt", async () => {
   const pin = JSON.parse(
     await readFile(new URL("./ripgrep-release.json", import.meta.url), "utf8"),

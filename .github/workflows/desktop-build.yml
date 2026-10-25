@@ -17,6 +17,9 @@ on:
       - "scripts/ci/Dockerfile.desktop-linux"
       - "scripts/ci/prepare-desktop-release.mjs"
       - "scripts/ci/sandbox-bundle*.mjs"
+      - "scripts/ci/desktop-deb*.mjs"
+      - "scripts/ci/install-static-ripgrep.sh"
+      - "scripts/ci/ripgrep-release.json"
       - "scripts/ci/update-verifier/**"
       - ".github/workflows/desktop-release.yml"
 
@@ -204,6 +207,7 @@ jobs:
     # (restricted unprivileged user namespaces, AppArmor enforcing) and proves that its
     # maintainer scripts alone give a working scoped bubblewrap, that the system bubblewrap and
     # the sysctl are left alone, and that removing the package undoes everything.
+    # GitHub `needs` cannot target one matrix leg, so this waits for the whole `package` matrix.
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -235,7 +239,8 @@ jobs:
           case ",${depends}," in *" bubblewrap"*|*",bubblewrap"*) ;; *) echo "::error::Depends lacks bubblewrap"; exit 1 ;; esac
           case ",${depends}," in *" socat"*|*",socat"*) ;; *) echo "::error::Depends lacks socat"; exit 1 ;; esac
           dpkg-deb -c "${DEB_PATH}" | grep -E ' \./opt/sourceweft/libexec/sourceweft-sandbox-setup$'
-          dpkg-deb -c "${DEB_PATH}" | grep -E '^-rwxr-xr-x root/root .* \./opt/sourceweft/libexec/sourceweft-sandbox-setup$'
+          # Tauri writes numeric owner 0/0 without names; dpkg installs both as root.
+          dpkg-deb -c "${DEB_PATH}" | grep -E '^-rwxr-xr-x (root/root|0/0) .* \./opt/sourceweft/libexec/sourceweft-sandbox-setup$'
       - name: Assert the restricted-userns sysctl is enabled (before install)
         run: |
           value=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
@@ -289,7 +294,7 @@ jobs:
           test -f /etc/apparmor.d/sourceweft-bwrap
           sudo cat /sys/kernel/security/apparmor/profiles | grep -E '^sourceweft-bwrap '
       - name: Install sandbox CI dependencies
-        run: sudo apt-get install -y --no-install-recommends ripgrep gnome-keyring dbus-x11
+        run: sudo apt-get install -y --no-install-recommends ripgrep
       - name: Install Linux build dependencies
         run: sudo bash scripts/ci/install-desktop-linux-deps.sh
       - uses: pnpm/action-setup@v4
@@ -338,9 +343,10 @@ jobs:
         run: |
           set -eu
           sudo apt-get remove -y "${DEB_PACKAGE}"
-          ! test -e /opt/sourceweft/libexec/bwrap
-          ! test -e /opt/sourceweft/libexec/sourceweft-sandbox-setup
-          ! test -e /etc/apparmor.d/sourceweft-bwrap
+          # `test ! -e`, not `! test -e`: bash -e ignores a failed negated command.
+          test ! -e /opt/sourceweft/libexec/bwrap
+          test ! -e /opt/sourceweft/libexec/sourceweft-sandbox-setup
+          test ! -e /etc/apparmor.d/sourceweft-bwrap
           if sudo grep -E '^sourceweft-bwrap ' /sys/kernel/security/apparmor/profiles; then
             echo "::error::the sourceweft-bwrap profile is still loaded after removal"
             exit 1

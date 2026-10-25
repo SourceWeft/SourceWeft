@@ -138,6 +138,11 @@ const octal = (value, width) => {
 };
 
 function header({ name, size, mode }) {
+  // The ustar name field is 100 bytes; a longer name would overwrite the mode field.
+  assert(
+    Buffer.byteLength(name, "latin1") <= 100,
+    `entry name is longer than the 100-byte ustar limit: ${name}`,
+  );
   const block = Buffer.alloc(BLOCK);
   const put = (offset, text) => block.write(text, offset, "latin1");
   put(0, name);

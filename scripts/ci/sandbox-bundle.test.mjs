@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { packBundle, verifyTarball } from "./sandbox-bundle.mjs";
+import { packBundle, verifyTarball, writeTar } from "./sandbox-bundle.mjs";
 
 const script = fileURLToPath(new URL("./sandbox-bundle.mjs", import.meta.url));
 const TARGET = "x86_64-unknown-linux-gnu";
@@ -501,4 +501,10 @@ test("CLI: pack then verify; usage errors exit non-zero", async (t) => {
     spawnSync(process.execPath, [script, "pack", bundle]).status,
     0,
   );
+});
+
+test("the tar writer rejects names over the 100-byte ustar limit instead of corrupting the header", () => {
+  const entry = (name) => [{ name, bytes: Buffer.from("x"), mode: 0o644 }];
+  assert.doesNotThrow(() => writeTar(entry("a".repeat(100))));
+  assert.throws(() => writeTar(entry("a".repeat(101))), /100-byte ustar limit/);
 });

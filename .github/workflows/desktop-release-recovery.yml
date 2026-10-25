@@ -125,6 +125,20 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release-installers/**/sourceweft-sandbox-*.tar.gz
+      - name: Attach the Linux .deb when the original build produced one
+        # Same shape as the bundle step: releases built before the .deb existed have none;
+        # once the artifact contains one it is mandatory.
+        if: steps.source.outputs.published != 'true' && hashFiles('release-installers/**/*.deb') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.source.outputs.tag }}
+          target_commitish: ${{ steps.source.outputs.sha }}
+          draft: true
+          overwrite_files: false
+          prerelease: ${{ steps.source.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            release-installers/**/*.deb
       - name: Verify GitHub asset bytes
         id: assets
         env:
