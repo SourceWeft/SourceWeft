@@ -156,34 +156,78 @@ fn execute_in_signed_bundle(app: &Path, command: &str) -> Value {
     .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
 }
 
-/// Starts the idle sidecar from `bundle`, asks `vmmap` for its address space and returns whether a
-/// "JS JIT generated code" region exists (and the full `vmmap` text for diagnostics).
-fn sidecar_has_jit_region(bundle: &Path) -> (bool, String) {
-    let mut child = Command::new(bundle.join("srt-sidecar"))
+/// Kills and reaps the child on drop, so a panic while inspecting it never leaks a sidecar.
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// A region every JavaScriptCore process maps at VM startup, signed with or without `allow-jit`.
+/// It is the readiness marker: once it is present the engine has initialised, so the absence of
+/// the JIT region is a result and not "vmmap ran too early".
+const VM_STARTED_MARKER: &str = "JS VM Gigacage";
+const JIT_REGION: &str = "JS JIT generated code";
+
+/// What `vmmap` saw in the idle sidecar once the JavaScript engine had started.
+struct SidecarMemory {
+    vmmap: String,
+}
+
+impl SidecarMemory {
+    fn has_jit_region(&self) -> bool {
+        self.vmmap.contains(JIT_REGION)
+    }
+}
+
+/// Starts the idle sidecar from `bundle` and polls `vmmap` (up to 15 s) until the engine's
+/// start-up marker region is mapped, then takes one more snapshot after a short settle so the
+/// JIT pool, which is created in the same initialisation, has had its chance to appear. Panics
+/// if the marker never shows up, so a caller can never read "no JIT region" off a process that
+/// had not started yet.
+fn inspect_idle_sidecar(bundle: &Path) -> SidecarMemory {
+    let child = Command::new(bundle.join("srt-sidecar"))
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    // Keep stdin open so the idle sidecar keeps running while it is inspected.
-    let _stdin = child.stdin.take().unwrap();
-    // Give JavaScriptCore time to finish starting (the JIT region is mapped at VM startup).
-    std::thread::sleep(Duration::from_millis(1500));
-    let started = Instant::now();
-    let vmmap = Command::new("/usr/bin/vmmap")
-        .arg(child.id().to_string())
-        .output()
-        .unwrap();
-    let text = String::from_utf8_lossy(&vmmap.stdout).into_owned();
-    let _ = child.kill();
-    let _ = child.wait();
+    // Keep stdin open (inside the guard's child) so the idle sidecar keeps running.
+    let mut sidecar = KillOnDrop(child);
+    let _stdin = sidecar.0.stdin.take();
+    let pid = sidecar.0.id().to_string();
+    let vmmap = |pid: &str| {
+        let output = Command::new("/usr/bin/vmmap").arg(pid).output().unwrap();
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let text = vmmap(&pid);
+        if text.contains("Process:") && text.contains(VM_STARTED_MARKER) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the sidecar never mapped {VM_STARTED_MARKER:?} within 15s, so its memory cannot be \
+             judged; last vmmap output:\n{text}"
+        );
+        assert!(
+            sidecar.0.try_wait().unwrap().is_none(),
+            "the sidecar exited before it could be inspected; last vmmap output:\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let text = vmmap(&pid);
     assert!(
-        vmmap.status.success() && text.contains("Process:"),
-        "vmmap could not inspect the sidecar after {:?}: {text}{}",
-        started.elapsed(),
-        String::from_utf8_lossy(&vmmap.stderr)
+        text.contains(VM_STARTED_MARKER),
+        "the sidecar went away while being inspected:\n{text}"
     );
-    (text.contains("JS JIT generated code"), text)
+    SidecarMemory { vmmap: text }
 }
 
 fn assert_bundle_runs(bundle_root: &Path, label: &str) {
@@ -255,8 +299,12 @@ fn bundle_signed_with_allow_jit_runs_with_jit() {
 
     // The signed sidecar passes readiness and runs a wrapped command, and maps a JIT region.
     assert_bundle_runs(app.path(), "allow-jit");
-    let (has_jit, _) = sidecar_has_jit_region(&bundle);
-    assert!(has_jit, "the allow-jit sidecar must map a JS JIT region");
+    let memory = inspect_idle_sidecar(&bundle);
+    assert!(
+        memory.has_jit_region(),
+        "the allow-jit sidecar must map a JS JIT region:\n{}",
+        memory.vmmap
+    );
 }
 
 #[test]
@@ -289,9 +337,14 @@ fn bundle_signed_without_allow_jit_loses_jit() {
 
     // ...but the kernel refuses its executable-memory region, so JavaScriptCore runs without
     // its JIT.
-    let (has_jit, vmmap) = sidecar_has_jit_region(&bundle);
+    let memory = inspect_idle_sidecar(&bundle);
     assert!(
-        !has_jit,
-        "without allow-jit the sidecar must not map a JS JIT region:\n{vmmap}"
+        memory.vmmap.contains(VM_STARTED_MARKER),
+        "the engine start-up marker must be present for the absence below to mean anything"
+    );
+    assert!(
+        !memory.has_jit_region(),
+        "without allow-jit the sidecar must not map a JS JIT region:\n{}",
+        memory.vmmap
     );
 }

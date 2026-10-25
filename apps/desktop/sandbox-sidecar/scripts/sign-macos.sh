@@ -18,8 +18,8 @@
 #
 # Why allow-jit: signed with the hardened runtime but without `com.apple.security.cs.allow-jit`
 # the sidecar still starts, but the kernel refuses JavaScriptCore's executable-memory (MAP_JIT)
-# region and the engine silently falls back to its interpreter (about 7x more CPU on a hot loop,
-# measured with Bun 1.4.2). tests/macos_signing.rs asserts the JIT region is present with the
+# region and the engine silently falls back to its interpreter (roughly 8x more CPU on a hot
+# loop; one measurement with Bun 1.4.2). tests/macos_signing.rs asserts the JIT region is present with the
 # entitlement and absent without it. No other entitlement is needed or granted.
 #
 # WHAT PLAN 2's RELEASE JOB MUST DO FOR DISTRIBUTION (UNVERIFIED in this repository: it needs
@@ -36,7 +36,13 @@
 #      desktop app performs itself (no com.apple.quarantine xattr) does not trigger Gatekeeper,
 #      but notarization is still the requirement for any quarantined or manually distributed
 #      copy of the bundle.
-# Only the ad-hoc path (identity `-`) is exercised and verified here.
+# Only the ad-hoc path (identity `-`) is exercised and verified here. The Developer ID branch
+# adds `--timestamp`, which needs network access to Apple's timestamp server; it was checked
+# only against a fake `codesign` that echoed its arguments, never against a real certificate.
+#
+# Failure handling: the binaries are signed one after the other, so a failure part-way through
+# (non-zero exit) can leave the bundle half-signed. The release job must treat any non-zero exit
+# as a failed bundle and discard it.
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
