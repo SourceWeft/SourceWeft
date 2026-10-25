@@ -50,3 +50,40 @@ test.each(["en", "zh-CN", "zh-TW", "unknown"])(
     }
   },
 );
+
+test("pro and team show $9.90 monthly and $99 yearly without rounding", async () => {
+  const copy = getBillingMessages("en");
+  const plans = getPricingConfig({}).map((plan) => ({
+    ...plan,
+    ...copy.plans[plan.id],
+  }));
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const billingHost = {
+    locale: "en",
+    authClient: {},
+    billingClient: {},
+  } as BillingUiHost;
+  try {
+    await act(async () =>
+      root.render(
+        <BillingUiProvider value={billingHost}>
+          <PricingToggle
+            authState={{ isPending: false, isSignedIn: false, user: null }}
+            plans={plans}
+          />
+        </BillingUiProvider>,
+      ),
+    );
+    expect(host.textContent).toContain("$9.90");
+    expect(host.textContent).not.toContain("$10");
+    const yearly = host.querySelector(
+      `button[aria-label="${copy.controls.yearly}"]`,
+    ) as HTMLButtonElement;
+    await act(async () => yearly.click());
+    expect(host.textContent).toContain("$99");
+    expect(host.textContent).not.toContain("$9.90");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
