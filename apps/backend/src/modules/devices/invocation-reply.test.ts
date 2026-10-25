@@ -62,3 +62,27 @@ test("old hosts and unrelated error states remain fail closed regardless of Engl
     }),
   ).toBeNull();
 });
+
+test("network.ask is part of the closed device protocol and nothing looser is accepted", () => {
+  const ask = {
+    type: "network.ask",
+    id: "call",
+    askId: "ask-1",
+    host: "example.com",
+    port: 443,
+  };
+  expect(localDeviceReplySchema.parse(ask)).toEqual(ask);
+  for (const bad of [
+    { ...ask, port: 0 },
+    { ...ask, port: 65536 },
+    { ...ask, port: 443.5 },
+    { ...ask, port: "443" },
+    { ...ask, host: "" },
+    { ...ask, host: "h".repeat(256) },
+    { ...ask, askId: "" },
+    { ...ask, askId: "a".repeat(129) },
+    { type: "network.ask", id: "call", askId: "a", host: "x" },
+    { type: "network.decision", askId: "a", allow: true },
+  ])
+    expect(localDeviceReplySchema.safeParse(bad).success).toBe(false);
+});

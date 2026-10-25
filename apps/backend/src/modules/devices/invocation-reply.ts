@@ -16,6 +16,15 @@ export const localDeviceReplySchema = z.discriminatedUnion("type", [
       .regex(/^[A-Z][A-Z0-9_]{0,127}$/)
       .optional(),
   }),
+  // A running `command.execute` asks whether it may reach a host. `id` is the
+  // call's invocation id; `askId` makes a re-sent ask idempotent.
+  z.object({
+    type: z.literal("network.ask"),
+    id: z.string().max(256),
+    askId: z.string().min(1).max(128),
+    host: z.string().min(1).max(255),
+    port: z.number().int().min(1).max(65535),
+  }),
 ]);
 
 export function persistLocalFailureCode(input: {

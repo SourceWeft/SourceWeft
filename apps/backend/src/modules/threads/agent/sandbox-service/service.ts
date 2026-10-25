@@ -22,6 +22,7 @@ import {
 } from "./provider-registry";
 import { DrizzleSandboxOperationStore, DrizzleSandboxStore } from "./stores";
 import { localProviderForTurn } from "../../../devices/provider";
+import type { NetworkSkillInput } from "../../../devices/network-skill-domains";
 import { ContentError } from "../../../content/errors";
 
 const CLEANUP_LIMIT = 25;
@@ -66,10 +67,15 @@ const sandboxService = new AgentSandboxService({
  */
 export const agentSandboxService = {
   async createRuntimeForTurn(
-    input: SandboxRuntimeRequest,
+    input: SandboxRuntimeRequest & {
+      /** Local conversations only: the turn's skills, for declared domains. */
+      localNetworkSkills?: readonly NetworkSkillInput[];
+    },
   ): Promise<AgentSandboxRuntimeForTurn | null> {
     if (input.executionTarget?.kind === "local") {
-      const localFactory = await localProviderForTurn(input.context);
+      const localFactory = await localProviderForTurn(input.context, {
+        networkSkills: input.localNetworkSkills ?? [],
+      });
       if (!localFactory)
         throw new ContentError(
           409,

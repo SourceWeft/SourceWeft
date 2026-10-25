@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   binding: { threadId: "t", userId: "owner", deviceId: "pc" },
   call: vi.fn(),
   update: vi.fn(),
+  policy: vi.fn(),
 }));
 vi.mock("@sourceweft/db", () => ({
   threads: {},
@@ -38,6 +39,9 @@ vi.mock("@sourceweft/db", () => ({
   },
 }));
 vi.mock("./service", () => ({ localCall: state.call }));
+vi.mock("./network-approvals", () => ({
+  resolveCommandNetworkPolicy: state.policy,
+}));
 import { localProviderForTurn } from "./provider";
 const context = {
   teamId: "team",
@@ -48,6 +52,7 @@ const context = {
 beforeEach(() => {
   vi.clearAllMocks();
   state.thread.createdBy = "owner";
+  state.policy.mockResolvedValue({ mode: "ask", allow: [], suggested: {} });
   state.call.mockImplementation(async (input) => {
     if (input.action === "workspace.ensure")
       return { id: "native", path: "/Users/test/task" };
@@ -135,4 +140,65 @@ test("PC download maps only structured FILE_NOT_FOUND into provider missing", as
     ).rejects.toBe(failure);
     expect(failure).not.toBeInstanceOf(SandboxProviderError);
   }
+});
+
+test("each command carries a freshly resolved network policy for this user and the turn's skills", async () => {
+  const networkSkills = [
+    { name: "pdf", sourceType: "builtin", skillMd: "---\nname: pdf\n---" },
+  ];
+  const policy = {
+    mode: "ask",
+    allow: ["api.example.com"],
+    suggested: { "x.example.com": "mine" },
+  };
+  state.policy.mockResolvedValue(policy);
+  const provider = (await localProviderForTurn(context, {
+    networkSkills,
+  }))!.createProvider();
+  await provider.getSandbox("native");
+  await provider.execute({
+    providerSandboxId: "native",
+    command: "curl https://api.example.com",
+    timeoutMs: 10_000,
+    maxOutputChars: 1000,
+  } as never);
+  expect(state.policy).toHaveBeenCalledWith({
+    deviceId: "pc",
+    tenant: { teamId: "team", workspaceId: "w", userId: "owner" },
+    skills: networkSkills,
+  });
+  const execute = state.call.mock.calls.find(
+    ([input]) => input.action === "command.execute",
+  )![0];
+  expect(execute.payload).toMatchObject({
+    command: "curl https://api.example.com",
+    network: policy,
+  });
+  // The second command resolves again instead of reusing the first answer.
+  state.policy.mockResolvedValue({ mode: "strict", allow: [], suggested: {} });
+  await provider.execute({
+    providerSandboxId: "native",
+    command: "true",
+    timeoutMs: 10_000,
+    maxOutputChars: 1000,
+  } as never);
+  expect(state.policy).toHaveBeenCalledTimes(2);
+  expect(state.call.mock.calls.at(-1)![0].payload.network.mode).toBe("strict");
+});
+
+test("a failed policy lookup stops the command instead of running it unrestricted", async () => {
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  await provider.getSandbox("native");
+  state.policy.mockRejectedValue(new Error("LOCAL_DEVICE_NOT_FOUND"));
+  await expect(
+    provider.execute({
+      providerSandboxId: "native",
+      command: "true",
+      timeoutMs: 10_000,
+      maxOutputChars: 1000,
+    } as never),
+  ).rejects.toThrow("LOCAL_DEVICE_NOT_FOUND");
+  expect(
+    state.call.mock.calls.some(([input]) => input.action === "command.execute"),
+  ).toBe(false);
 });

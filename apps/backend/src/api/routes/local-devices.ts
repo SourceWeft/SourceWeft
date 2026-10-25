@@ -355,6 +355,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
           name: row.name,
           online: isOnline(row),
           remoteEnabled: row.remoteEnabled,
+          networkMode: row.networkMode,
           connected: await requireDeviceAccess(
             session.user.id,
             row.id,
