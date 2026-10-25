@@ -1339,7 +1339,15 @@
       "workingDirectoriesTitle": "工作目录",
       "workingDirectoriesDescription": "每个对话都会获得独立的任务文件夹。移除文件夹访问权限会停止受影响任务的后续本地操作，并保留其中的文件。",
       "removeAccess": "移除访问权限",
-      "addFolder": "添加文件夹"
+      "addFolder": "添加文件夹",
+      "networkTitle": "网络访问",
+      "networkDescription": "选择在这台电脑上运行的命令可以访问互联网上的哪些内容。私有网络和本地网络地址始终会被拦截。",
+      "networkSelectAria": "网络访问模式",
+      "networkAsk": "每次询问",
+      "networkOpen": "允许所有公共主机",
+      "networkStrict": "仅限已允许的主机",
+      "networkHelperEnforced": "由这台电脑上的沙盒强制执行。",
+      "networkHelperNeutral": "适用于沙盒运行环境；macOS 将在沙盒更新后支持。"
     },
     "approvals": {
       "title": "审批",
@@ -1360,7 +1368,9 @@
       "expired": "已过期",
       "noExpiry": "永不过期",
       "neverUsed": "从未使用",
-      "unknownPrompt": "未知确认请求"
+      "unknownPrompt": "未知确认请求",
+      "networkRule": "网络 · {host}",
+      "networkRuleDetail": "本地命令可通过任意端口访问此主机"
     },
     "about": {
       "title": "关于",
@@ -2303,6 +2313,21 @@
       "summaryFailed": "本次运行已使用 {steps}/{limit} 步，但总结生成失败。你可以从已保存的进度继续。",
       "continue": "继续剩余任务",
       "continueMessage": "请根据当前会话已保存的进度继续尚未完成的工作。先确认现有结果，避免重复已完成的操作。"
+    },
+    "networkAccess": {
+      "region": "网络访问请求",
+      "title": "请求访问网络",
+      "target": "{host}:{port}",
+      "intro": "你电脑上的某条命令正在尝试访问此主机。等待你答复期间，命令会继续运行。",
+      "commandLabel": "命令",
+      "requestedBy": "由技能 {skill} 请求",
+      "expiresIn": "{time} 后自动拒绝",
+      "deny": "拒绝",
+      "allowOnce": "仅允许一次",
+      "allowWorkspace": "在此工作区始终允许",
+      "sending": "正在发送…",
+      "forbidden": "只有工作区管理员才能在整个工作区范围内允许某个主机。你仍可以仅允许一次。",
+      "failed": "未能发送你的答复，请重试。"
     }
   },
   "dashboardChatFiles": {

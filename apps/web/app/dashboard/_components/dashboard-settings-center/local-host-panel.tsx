@@ -2,6 +2,7 @@
 import { authClient } from "../../../../lib/auth-client";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import type { LocalNetworkMode } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopBridge,
@@ -116,6 +117,49 @@ export function LocalHostPanel() {
             ? t("localHost.turnOffRemoteAccess")
             : t("localHost.remoteAccessTitle")}
         </Button>
+      </div>
+      <div className="space-y-3 rounded-lg border p-4">
+        <h3 className="font-medium">{t("localHost.networkTitle")}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t("localHost.networkDescription")}
+        </p>
+        <select
+          aria-label={t("localHost.networkSelectAria")}
+          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+          disabled={busy || !device}
+          onChange={async (event) => {
+            if (!device) return;
+            const networkMode = event.target.value as LocalNetworkMode;
+            setBusy(true);
+            setError(null);
+            try {
+              // Like the remote-access switch, only this computer may change
+              // its own policy: the request carries the native proof.
+              const value = await localRequest<{
+                networkMode: LocalNetworkMode;
+              }>(
+                `/v1/local-devices/${device.id}`,
+                { networkMode },
+                { localProof: true, method: "PATCH" },
+              );
+              setDevice({ ...device, networkMode: value.networkMode });
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          value={device?.networkMode ?? "ask"}
+        >
+          <option value="ask">{t("localHost.networkAsk")}</option>
+          <option value="open">{t("localHost.networkOpen")}</option>
+          <option value="strict">{t("localHost.networkStrict")}</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {status?.readiness
+            ? t("localHost.networkHelperEnforced")
+            : t("localHost.networkHelperNeutral")}
+        </p>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
         <h3 className="font-medium">{t("localHost.workingDirectoriesTitle")}</h3>
