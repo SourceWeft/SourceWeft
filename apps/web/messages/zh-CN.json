@@ -1347,7 +1347,7 @@
       "networkOpen": "允许所有公共主机",
       "networkStrict": "仅限已允许的主机",
       "networkHelperEnforced": "由这台电脑上的沙盒强制执行。",
-      "networkHelperNeutral": "适用于沙盒运行环境；macOS 将在沙盒更新后支持。"
+      "networkHelperUnenforced": "此设置在这台电脑上尚未生效，命令仍可访问任何公共主机。"
     },
     "approvals": {
       "title": "审批",

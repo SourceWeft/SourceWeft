@@ -1347,7 +1347,7 @@
       "networkOpen": "允許所有公用主機",
       "networkStrict": "僅限已允許的主機",
       "networkHelperEnforced": "由這臺電腦上的沙盒強制執行。",
-      "networkHelperNeutral": "適用於沙盒執行環境；macOS 將在沙盒更新後支援。"
+      "networkHelperUnenforced": "此設定在這臺電腦上尚未生效，命令仍可存取任何公用主機。"
     },
     "approvals": {
       "title": "核准",

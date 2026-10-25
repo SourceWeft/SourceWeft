@@ -1347,7 +1347,7 @@
       "networkOpen": "Allow all public hosts",
       "networkStrict": "Only allowed hosts",
       "networkHelperEnforced": "Enforced by the sandbox on this computer.",
-      "networkHelperNeutral": "Applies to the sandboxed runtime; macOS support arrives with the sandbox update."
+      "networkHelperUnenforced": "This setting is not enforced on this computer yet. Commands can still reach any public host."
     },
     "approvals": {
       "title": "Approvals",

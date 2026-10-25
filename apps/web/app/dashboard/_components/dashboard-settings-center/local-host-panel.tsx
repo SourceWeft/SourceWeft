@@ -63,6 +63,7 @@ export function LocalHostPanel() {
       clearInterval(timer);
     };
   }, [userId]);
+  const enforced = Boolean(status?.readiness);
   if (!desktopBridge.isAvailable()) return null;
   if (dataOwner && dataOwner !== userId)
     return (
@@ -126,9 +127,11 @@ export function LocalHostPanel() {
         <select
           aria-label={t("localHost.networkSelectAria")}
           className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-          disabled={busy || !device}
+          // Without sandbox readiness (macOS, older builds) the policy is not
+          // enforced, so no mode may be offered as if it were.
+          disabled={busy || !device || !enforced}
           onChange={async (event) => {
-            if (!device) return;
+            if (!device || !enforced) return;
             const networkMode = event.target.value as LocalNetworkMode;
             setBusy(true);
             setError(null);
@@ -156,9 +159,9 @@ export function LocalHostPanel() {
           <option value="strict">{t("localHost.networkStrict")}</option>
         </select>
         <p className="text-xs text-muted-foreground">
-          {status?.readiness
+          {enforced
             ? t("localHost.networkHelperEnforced")
-            : t("localHost.networkHelperNeutral")}
+            : t("localHost.networkHelperUnenforced")}
         </p>
       </div>
       <div className="space-y-3 rounded-lg border p-4">

@@ -62,7 +62,12 @@ function modeSelect(container: HTMLElement) {
 beforeEach(() => {
   localRequest.mockReset();
   localHostStatus.mockReset();
-  localHostStatus.mockResolvedValue({ connected: true, deviceId: "device-1" });
+  // The sandbox reports readiness (Linux): the policy is enforced.
+  localHostStatus.mockResolvedValue({
+    connected: true,
+    deviceId: "device-1",
+    readiness: { state: "ready" },
+  });
 });
 afterEach(unmountAll);
 
@@ -128,20 +133,40 @@ test("a failed change keeps the old mode and shows the error", async () => {
   assert.equal(modeSelect(container).value, "ask");
 });
 
-test("the helper line is platform-neutral without sandbox readiness", async () => {
-  route("ask");
+test("without sandbox readiness the select stays visible but disabled, with the stored mode", async () => {
+  localHostStatus.mockResolvedValue({ connected: true, deviceId: "device-1" });
+  route("strict");
   const container = await render();
-  assert.match(container.textContent ?? "", /macOS support arrives with the sandbox update/);
+  const select = modeSelect(container);
+  assert.equal(select.disabled, true);
+  assert.equal(select.value, "strict");
+  assert.match(
+    container.textContent ?? "",
+    /not enforced on this computer yet/,
+  );
+  assert.doesNotMatch(container.textContent ?? "", /Enforced by the sandbox/);
 });
 
-test("the helper line says it is enforced when the sandbox reports readiness", async () => {
-  localHostStatus.mockResolvedValue({
-    connected: true,
-    deviceId: "device-1",
-    readiness: { state: "ready" },
-  });
+test("a disabled select never PATCHes the device", async () => {
+  localHostStatus.mockResolvedValue({ connected: true, deviceId: "device-1" });
   route("ask");
   const container = await render();
+  const select = modeSelect(container);
+  await act(async () => {
+    select.value = "strict";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await flush(4);
+  assert.equal(
+    localRequest.mock.calls.some(([, body]) => Boolean(body) && (body as { networkMode?: string }).networkMode),
+    false,
+  );
+});
+
+test("with sandbox readiness the select is enabled and says it is enforced", async () => {
+  route("ask");
+  const container = await render();
+  assert.equal(modeSelect(container).disabled, false);
   assert.match(container.textContent ?? "", /Enforced by the sandbox on this computer/);
-  assert.doesNotMatch(container.textContent ?? "", /macOS support arrives/);
+  assert.doesNotMatch(container.textContent ?? "", /not enforced/);
 });
