@@ -33,7 +33,7 @@ describe("what of a member's tool is kept", () => {
         type: "object",
         required: ["parent"],
         properties: {
-          parent: { type: "string", description: "Parent page" },
+          parent: { type: "string" },
           kind: {},
           nested: {
             type: "array",
@@ -41,6 +41,40 @@ describe("what of a member's tool is kept", () => {
           },
         },
         additionalProperties: false,
+      },
+    });
+  });
+
+  test("free text and extensions inside the schema are dropped, property names stay", () => {
+    const kept = memberObservedTool({
+      name: "t",
+      inputSchema: {
+        type: "object",
+        title: "Acme Corp board",
+        description: "Pick one of your workspaces: Acme, Globex",
+        "x-workspace": "ws_123",
+        $comment: "internal",
+        properties: {
+          custom_field_123: {
+            type: "string",
+            title: "Customer ID",
+            description: "Your Acme Corp customer",
+            pattern: "^ACME-[0-9]+$",
+            "x-internal-id": "abc",
+            format: "uuid",
+          },
+          description: { type: "string" },
+          title: { type: "string" },
+        },
+        patternProperties: { "^user_": { type: "string" } },
+      },
+    });
+    expect(kept?.inputSchema).toEqual({
+      type: "object",
+      properties: {
+        custom_field_123: { type: "string", format: "uuid" },
+        description: { type: "string" },
+        title: { type: "string" },
       },
     });
   });

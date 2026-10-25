@@ -37,6 +37,12 @@ const tool = (name: string, description = "", inputSchema: Record<string, unknow
   annotations: {},
 });
 
+// Every time here is relative to now: the endpoint refuses a read dated more
+// than a few minutes ahead.
+const ago = (ms: number) => new Date(Date.now() - ms);
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
 const profile = {
   tier: "free",
   role: "member",
@@ -150,6 +156,7 @@ describe("platform snapshot and member-observed tools", () => {
 
   beforeEach(() => {
     state.userId = "market-admin";
+    member?.resetMemberObservationState();
   });
 
   describe("the admin endpoint", () => {
@@ -173,7 +180,8 @@ describe("platform snapshot and member-observed tools", () => {
 
     test("a snapshot becomes revision 1; the same list again confirms it; a change is revision 2", async () => {
       const { identifier, itemId } = await item();
-      const first = await submit(identifier, { observedAt: "2026-10-24T10:00:00.000Z" });
+      const confirmedAt = ago(2 * HOUR);
+      const first = await submit(identifier, { observedAt: ago(3 * HOUR).toISOString() });
       expect(first.status).toBe(201);
       expect(await first.json()).toMatchObject({
         identifier,
@@ -181,11 +189,11 @@ describe("platform snapshot and member-observed tools", () => {
         revision: 1,
         toolsCount: 2,
       });
-      const again = await submit(identifier, { observedAt: "2026-10-25T10:00:00.000Z" });
+      const again = await submit(identifier, { observedAt: confirmedAt.toISOString() });
       expect(again.status).toBe(200);
       expect(await again.json()).toMatchObject({ outcome: "confirmed", revision: 1 });
       const changed = await submit(identifier, {
-        observedAt: "2026-10-26T10:00:00.000Z",
+        observedAt: ago(HOUR).toISOString(),
         tools: [tool("search", "Search things"), tool("get", "Get a thing"), tool("put")],
       });
       expect(await changed.json()).toMatchObject({ outcome: "created", revision: 2 });
@@ -193,14 +201,15 @@ describe("platform snapshot and member-observed tools", () => {
       expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({
         referenceProfileJson: profile,
-        lastConfirmedAt: new Date("2026-10-25T10:00:00.000Z"),
+        lastConfirmedAt: confirmedAt,
       });
       expect(rows[0]?.endpointKey).toMatch(/^[0-9a-f]{64}$/);
     });
 
     test("the page shows the snapshot's tools, risk unknown, labelled with its profile and date", async () => {
       const { identifier } = await item();
-      await submit(identifier, { observedAt: "2026-10-24T10:00:00.000Z" });
+      const observedAt = ago(HOUR);
+      await submit(identifier, { observedAt: observedAt.toISOString() });
       const page = await detail(identifier);
       expect(page.toolsRevision).toMatchObject({ source: "platform-indexed", revision: 1 });
       expect(page.item.toolsCount).toBe(2);
@@ -208,16 +217,18 @@ describe("platform snapshot and member-observed tools", () => {
       expect(manifestJson.tools.map((entry) => entry.name)).toEqual(["get", "search"]);
       expect(manifestJson.tools.every((entry) => entry.risk === "unknown")).toBe(true);
       expect(manifestJson.tools.every((entry) => entry.source === "platform-indexed")).toBe(true);
+      // The admin's free-text profile is stored, never part of a public answer.
       expect(manifestJson.toolsReference).toEqual({
         source: "platform-indexed",
-        observedAt: "2026-10-24T10:00:00.000Z",
+        observedAt: observedAt.toISOString(),
         stale: false,
-        profile,
       });
+      expect(JSON.stringify(page)).not.toContain('"scopes"');
       const viaManifest = await (
         await app.request(`/v1/mcp/${enc(identifier)}/manifest`)
       ).json();
       expect(viaManifest.manifest.toolsReference).toMatchObject({ stale: false });
+      expect(viaManifest.manifest.tools.map((entry: { name: string }) => entry.name)).toEqual(["get", "search"]);
     });
 
     test("a later endpoint change marks the snapshot stale; a new snapshot at the new address clears it", async () => {
@@ -316,7 +327,7 @@ describe("platform snapshot and member-observed tools", () => {
         // A body deep enough to overflow a recursive walk is refused, not crashed on.
         let abyss = '{"type":"string"}';
         for (let i = 0; i < 3_000; i++) abyss = `{"items":${abyss}}`;
-        const raw = `{"identifier":${JSON.stringify(identifier)},"endpointOrigin":${JSON.stringify(ORIGIN)},"endpointUrl":${JSON.stringify(ENDPOINT)},"tools":[{"name":"x","inputSchema":${abyss}}],"referenceProfile":${JSON.stringify(profile)},"observedAt":"2026-10-24T10:00:00.000Z"}`;
+        const raw = `{"identifier":${JSON.stringify(identifier)},"endpointOrigin":${JSON.stringify(ORIGIN)},"endpointUrl":${JSON.stringify(ENDPOINT)},"tools":[{"name":"x","inputSchema":${abyss}}],"referenceProfile":${JSON.stringify(profile)},"observedAt":"${ago(HOUR).toISOString()}"}`;
         expect((await post("/v1/market/admin/mcp/platform-snapshots", raw)).status).toBe(400);
         const dup = [tool("same"), tool("same")];
         expect((await submit(identifier, { tools: dup })).status).toBe(422);
@@ -332,7 +343,7 @@ describe("platform snapshot and member-observed tools", () => {
 
       test("a key named __proto__ stays a key and pollutes nothing", async () => {
         const { identifier, itemId } = await item();
-        const raw = `{"identifier":${JSON.stringify(identifier)},"endpointOrigin":${JSON.stringify(ORIGIN)},"endpointUrl":${JSON.stringify(ENDPOINT)},"tools":[{"name":"p","inputSchema":{"type":"object","properties":{"__proto__":{"type":"string"},"constructor":{"type":"number"}}}}],"referenceProfile":${JSON.stringify(profile)},"observedAt":"2026-10-24T10:00:00.000Z"}`;
+        const raw = `{"identifier":${JSON.stringify(identifier)},"endpointOrigin":${JSON.stringify(ORIGIN)},"endpointUrl":${JSON.stringify(ENDPOINT)},"tools":[{"name":"p","inputSchema":{"type":"object","properties":{"__proto__":{"type":"string"},"constructor":{"type":"number"}}}}],"referenceProfile":${JSON.stringify(profile)},"observedAt":"${ago(HOUR).toISOString()}"}`;
         expect((await post("/v1/market/admin/mcp/platform-snapshots", raw)).status).toBe(201);
         const [row] = await rowsOf(itemId, "platform-indexed");
         const stored = (row!.toolsJson as Array<{ inputSchema: { properties: Record<string, unknown> } }>)[0]!;
@@ -346,22 +357,40 @@ describe("platform snapshot and member-observed tools", () => {
           observedAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         });
         expect(future.status).toBe(422);
-        expect(await submit(identifier, { observedAt: "2026-10-24T10:00:00.000Z" })).toHaveProperty("status", 201);
+        expect(await future.json()).toMatchObject({ code: "MCP_SNAPSHOT_FROM_THE_FUTURE" });
+        expect(await submit(identifier, { observedAt: ago(2 * HOUR).toISOString() })).toHaveProperty("status", 201);
         const older = await submit(identifier, {
-          observedAt: "2026-10-23T10:00:00.000Z",
+          observedAt: ago(3 * HOUR).toISOString(),
           tools: [tool("other")],
         });
         expect(older.status).toBe(409);
         expect(await older.json()).toMatchObject({ code: "MCP_SNAPSHOT_OLDER_THAN_LATEST" });
       });
+
+      test("the older-than-latest check holds under concurrency: a slow older run never lands on top", async () => {
+        const { identifier, itemId } = await item();
+        const runs = await Promise.all(
+          [4, 1, 3, 2].map((hours, index) =>
+            submit(identifier, {
+              observedAt: ago(hours * HOUR).toISOString(),
+              tools: [tool(`t${index}`)],
+            }),
+          ),
+        );
+        expect(runs.map((response) => response.status).every((status) => [200, 201, 409].includes(status))).toBe(true);
+        const rows = await rowsOf(itemId, "platform-indexed");
+        // Whatever order they ran in, the observed times of the revisions only grow.
+        const times = rows.map((row) => row.observedAt.getTime());
+        expect(times).toEqual([...times].sort((a, b) => a - b));
+      });
     });
 
-    test("an empty list is a valid snapshot, and the page then shows no tools from it", async () => {
-      const { identifier } = await item();
-      expect((await submit(identifier, { tools: [] })).status).toBe(201);
-      const page = await detail(identifier);
-      expect(page.toolsRevision).toMatchObject({ source: "platform-indexed" });
-      expect(page.versions[0]!.manifestJson.tools).toEqual([]);
+    test("an empty list is refused: taking a snapshot down is the tool-sources takedown", async () => {
+      const { identifier, itemId } = await item();
+      const response = await submit(identifier, { tools: [] });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ code: "MCP_SNAPSHOT_NO_TOOLS" });
+      expect(await rowsOf(itemId, "platform-indexed")).toHaveLength(0);
     });
   });
 
@@ -376,7 +405,7 @@ describe("platform snapshot and member-observed tools", () => {
       // No mixing: only the snapshot's two tools, none of the member's.
       expect(page.versions[0]!.manifestJson.tools.map((entry) => entry.name)).toEqual(["get", "search"]);
       // With the owner's list visible, neither is applied.
-      expect(await revisions.readReferenceTools(itemId, true, false)).toBeNull();
+      expect(await revisions.readReferenceTools(itemId, true, "none")).toBeNull();
     });
 
     test("members' observation never replaces tools the registry or a probe listed", async () => {
@@ -406,15 +435,18 @@ describe("platform snapshot and member-observed tools", () => {
       expect(page.toolsRevision).toMatchObject({ source: "member-observed", revision: 1 });
       const manifestJson = page.versions[0]!.manifestJson;
       expect(manifestJson.tools).toMatchObject([{ name: "list_pages", risk: "unknown", source: "member-observed" }]);
-      const reference = manifestJson.toolsReference as { observedAt: string; profile: unknown; stale: boolean };
+      const reference = manifestJson.toolsReference as { observedAt: string; stale: boolean };
       expect(reference.observedAt).toMatch(/T00:00:00\.000Z$/);
-      expect(reference.profile).toBeNull();
+      expect(reference).not.toHaveProperty("profile");
       expect(reference.stale).toBe(false);
     });
 
     test("the same list only confirms; every real difference is a new revision", async () => {
       const entry = await item();
       await observe(entry);
+      // Offered again at once, the same list is not even asked about.
+      expect(await observe(entry)).toEqual({ recorded: false, reason: "recent" });
+      member.resetMemberObservationState();
       expect(await observe(entry)).toEqual({ recorded: true, outcome: "confirmed" });
       const changed = await observe(entry, {
         tools: [{ name: "list_pages", description: "List all pages", inputSchema: { type: "object" } }],
@@ -515,6 +547,92 @@ describe("platform snapshot and member-observed tools", () => {
     });
   });
 
+  describe("a member cannot steer the public list", () => {
+    const names = (...list: string[]) => list.map((name) => ({ name, inputSchema: {} }));
+
+    test("at most three new revisions a day, on a budget of its own", async () => {
+      const entry = await item();
+      const lists = [["a"], ["a", "b"], ["a", "b", "c"], ["a", "b", "c", "d"]];
+      const results = [];
+      for (const list of lists) results.push(await observe(entry, { tools: names(...list) }));
+      expect(results.map((result) => result.recorded && result.outcome)).toEqual([
+        "created",
+        "created",
+        "created",
+        "throttled",
+      ]);
+      expect(await rowsOf(entry.itemId, "member-observed")).toHaveLength(3);
+      // Spent member budget leaves the platform's and the owner's alone.
+      expect((await submit(entry.identifier)).status).toBe(201);
+      await revisions.recordToolRevision({ itemId: entry.itemId, source: "owner", tools: [tool("o1")] });
+      expect(await rowsOf(entry.itemId, "owner")).toHaveLength(1);
+    });
+
+    test("a reduced list is not a new revision within a week; a superset or a different list is", async () => {
+      const entry = await item();
+      await observe(entry, { tools: names("a", "b", "c") });
+      expect(await observe(entry, { tools: names("a", "b") })).toEqual({ recorded: false, reason: "reduced" });
+      expect(await observe(entry, { tools: names("a") })).toEqual({ recorded: false, reason: "reduced" });
+      expect(await rowsOf(entry.itemId, "member-observed")).toHaveLength(1);
+      // The page still shows the fuller list.
+      expect((await detail(entry.identifier)).versions[0]!.manifestJson.tools).toHaveLength(3);
+      expect(await observe(entry, { tools: names("a", "b", "c", "d") })).toEqual({ recorded: true, outcome: "created" });
+      expect(await observe(entry, { tools: names("a", "z") })).toEqual({ recorded: true, outcome: "created" });
+    });
+
+    test("a reduced list is recorded once the fuller one has not been seen for a week", async () => {
+      const entry = await item();
+      await observe(entry, { tools: names("a", "b", "c"), observedAt: new Date(Date.now() - 8 * DAY) });
+      expect(await observe(entry, { tools: names("a", "b") })).toEqual({ recorded: true, outcome: "created" });
+    });
+
+    test("the same tool names with a different description are a real change, not a reduction", async () => {
+      const entry = await item();
+      await observe(entry, { tools: [{ name: "a", description: "one", inputSchema: {} }] });
+      expect(await observe(entry, { tools: [{ name: "a", description: "two", inputSchema: {} }] })).toEqual({
+        recorded: true,
+        outcome: "created",
+      });
+    });
+
+    test("a burst of the same list is asked about once", async () => {
+      const entry = await item();
+      const results = await Promise.all(
+        Array.from({ length: 6 }, () => observe(entry, { tools: names("a") })),
+      );
+      expect(results.filter((result) => result.recorded).length).toBeGreaterThanOrEqual(1);
+      expect(await rowsOf(entry.itemId, "member-observed")).toHaveLength(1);
+    });
+  });
+
+  describe("what an install can seed", () => {
+    test("the manifest an install reads has no observed or snapshot tools; the visitor's has", async () => {
+      const entry = await item();
+      await observe(entry);
+      const read = await import("../read-repository");
+      const forInstall = await read.findMcpVersion(entry.identifier);
+      expect(forInstall!.itemVersion.manifestJson.tools).toEqual([]);
+      expect(forInstall!.itemVersion.manifestJson).not.toHaveProperty("toolsReference");
+      const forVisitor = await read.findMcpVersion(entry.identifier, undefined, { referenceTools: true });
+      expect(forVisitor!.itemVersion.manifestJson.tools).toHaveLength(1);
+      // The platform's snapshot is no different.
+      const platform = await item();
+      await submit(platform.identifier);
+      const platformForInstall = await read.findMcpVersion(platform.identifier);
+      expect(platformForInstall!.itemVersion.manifestJson.tools).toEqual([]);
+      expect(await read.findMcp(platform.identifier)).toMatchObject({ toolsRevision: null });
+    });
+
+    test("the snapshot never replaces tools the registry or a probe classified", async () => {
+      const { identifier } = await item({ tools: [{ ...tool("classified_tool"), risk: "read" }] });
+      await submit(identifier);
+      const page = await detail(identifier);
+      expect(page.toolsRevision).toBeNull();
+      expect(page.versions[0]!.manifestJson.tools.map((entry) => entry.name)).toEqual(["classified_tool"]);
+      expect(page.versions[0]!.manifestJson.toolsReference).toBeUndefined();
+    });
+  });
+
   describe("takedown", () => {
     test("removes a source's whole history, hides it, and keeps it from being recorded again until restored", async () => {
       const entry = await item();
@@ -536,6 +654,7 @@ describe("platform snapshot and member-observed tools", () => {
       const history = await (await app.request(`/v1/mcp/${enc(entry.identifier)}/tools/revisions`)).json();
       expect(history).toMatchObject({ source: null, items: [] });
 
+      member.resetMemberObservationState();
       expect(await observe(entry)).toEqual({ recorded: false, reason: "taken-down" });
       expect((await rowsOf(entry.itemId, "member-observed"))).toHaveLength(1);
 
@@ -545,6 +664,7 @@ describe("platform snapshot and member-observed tools", () => {
         action: "restore",
       });
       expect(await restore.json()).toMatchObject({ changed: true });
+      member.resetMemberObservationState();
       expect(await observe(entry)).toEqual({ recorded: true, outcome: "created" });
       expect(await rowsOf(entry.itemId, "member-observed")).toHaveLength(1);
     });

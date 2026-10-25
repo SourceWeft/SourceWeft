@@ -40,6 +40,21 @@ export const TOOL_REVISIONS_KEPT_ROWS = 500;
  */
 export const TOOL_REVISIONS_PER_DAY = 24;
 
+/**
+ * A members' observation is the least trusted source: whoever connects with a
+ * credential that narrows the server (a scope, a toolset header, a plan) sees a
+ * different list. It may make this many new revisions per listing in a rolling
+ * 24 hours, on a budget of its own (the other sources' are never touched).
+ */
+export const MEMBER_OBSERVED_REVISIONS_PER_DAY = 3;
+
+/**
+ * A members' observation that is a strict subset (by tool name) of the latest
+ * one confirmed this recently is not recorded: a reduced list is more likely a
+ * restricted account than a real change. A superset or a different list is.
+ */
+export const MEMBER_OBSERVED_SUBSET_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 export const TOOL_REVISION_LIMITS = MARKET_MCP_INSPECT_LIMITS;
 
 export type CanonicalTool = {

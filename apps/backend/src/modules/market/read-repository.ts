@@ -40,7 +40,7 @@ import {
 import { findOwnerLayersByServerIds } from "./claims/repository";
 import {
   applyReferenceToolsToManifest,
-  manifestListsTools,
+  baseToolsOf,
   readReferenceTools,
   readToolRevisionsPage,
   readToolsRevision,
@@ -852,6 +852,13 @@ export async function findMcp(
     relatedProduct?: boolean;
     /** Read the tools revision too (detail only; one more query). */
     toolsRevision?: boolean;
+    /**
+     * Show the platform's snapshot or members' observation as the manifest's
+     * tools (Issue #367). For what a visitor sees only (the detail and the
+     * manifest route). Never for installs: what they seed into a workspace is
+     * the registry's, a probe's or the owner's list, not an observation.
+     */
+    referenceTools?: boolean;
   } = {},
 ): Promise<MarketMcpRecord | null> {
   // Preserve database errors: returning null here would turn an outage into 404.
@@ -890,12 +897,14 @@ export async function findMcp(
     // probe found none (Issue #367).
     const ownerToolsVisible =
       ownerSubmittedTools(ownerLayer.row?.toolsJson).length > 0;
-    const baseToolsListed = manifestListsTools(latest?.manifestJson);
+    const base = baseToolsOf(latest?.manifestJson);
     const [toolsRevision, referenceTools] = await Promise.all([
       options.toolsRevision
-        ? readToolsRevision(row.id, ownerToolsVisible, baseToolsListed)
+        ? readToolsRevision(row.id, ownerToolsVisible, base)
         : null,
-      readReferenceTools(row.id, ownerToolsVisible, baseToolsListed),
+      options.referenceTools
+        ? readReferenceTools(row.id, ownerToolsVisible, base)
+        : null,
     ]);
     const withReference = (manifestJson: Record<string, unknown>) =>
       applyReferenceToolsToManifest(
@@ -1014,14 +1023,20 @@ export async function listMcpToolRevisions(
     itemId: row.id,
     ownerToolsVisible:
       ownerSubmittedTools(ownerLayers.get(row.id)?.row?.toolsJson).length > 0,
-    baseToolsListed: manifestListsTools(latestVersion.get(row.id)?.manifestJson),
+    base: baseToolsOf(latestVersion.get(row.id)?.manifestJson),
     limit: query.limit,
     before: query.before,
   });
 }
 
-export async function findMcpVersion(identifier: string, version?: string) {
-  const record = await findMcp(identifier);
+export async function findMcpVersion(
+  identifier: string,
+  version?: string,
+  options: { referenceTools?: boolean } = {},
+) {
+  const record = await findMcp(identifier, {
+    referenceTools: options.referenceTools,
+  });
   if (!record) {
     return null;
   }

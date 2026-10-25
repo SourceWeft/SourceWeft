@@ -122,7 +122,8 @@ export const MARKET_MCP_TOOL_SOURCE_PLATFORM_INDEXED = "platform-indexed";
 export const MARKET_MCP_TOOL_SOURCE_MEMBER_OBSERVED = "member-observed";
 
 // The approved reference profile a platform snapshot was read with. Describes
-// the kind of account, never which account.
+// the kind of account, never which account. Free text written by an admin: it
+// is stored with the snapshot and never part of a public answer.
 export const marketMcpReferenceProfileSchema = z
   .object({
     tier: z.string().trim().min(1).max(64),
@@ -147,7 +148,6 @@ export const marketMcpToolsReferenceSchema = z.object({
   observedAt: z.string(),
   // The listing's endpoint changed since the list was read.
   stale: z.boolean(),
-  profile: marketMcpReferenceProfileSchema.nullable().default(null),
 });
 export type MarketMcpToolsReference = z.infer<
   typeof marketMcpToolsReferenceSchema
@@ -1030,6 +1030,7 @@ export type MarketMcpGithubRegistryProvenance = z.infer<
 >;
 
 export * from "./sitemaps";
+export * from "./endpoint-pin";
 
 // ---------------------------------------------------------------------------
 // Owner-submitted tool lists (Issue #367, W7). `sourceweft mcp inspect` runs

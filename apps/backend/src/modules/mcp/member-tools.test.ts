@@ -35,6 +35,7 @@ test("hands the catalog the tools and the endpoint, and returns before it finish
     install: catalogInstall,
     tools,
     complete: true,
+    publishable: true,
     record: record as never,
   });
   assert.equal(returned, undefined);
@@ -55,11 +56,43 @@ test("an install that is not from the catalog is never offered", async () => {
       install: { ...catalogInstall, source },
       tools,
       complete: true,
+      publishable: true,
       record,
     });
   }
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(record.mock.calls.length, 0);
+});
+
+test("a connection that is not publishable is never offered", async () => {
+  const record = vi.fn();
+  recordMemberToolObservation({
+    install: catalogInstall,
+    publishable: false,
+    tools,
+    complete: true,
+    record,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(record.mock.calls.length, 0);
+});
+
+test("a failure is logged without its message, which may carry query parameters", async () => {
+  const { logger } = await import("../../shared/logger");
+  vi.mocked(logger.warn).mockClear();
+  recordMemberToolObservation({
+    install: catalogInstall,
+    publishable: true,
+    tools,
+    complete: true,
+    record: vi.fn().mockRejectedValue(
+      Object.assign(new Error('insert into "x" params: secret-tool-name'), { code: "57014" }),
+    ),
+  });
+  await vi.waitFor(() => assert.equal(vi.mocked(logger.warn).mock.calls.length, 1));
+  const logged = JSON.stringify(vi.mocked(logger.warn).mock.calls[0]);
+  assert.ok(!logged.includes("secret-tool-name"));
+  assert.ok(logged.includes("57014"));
 });
 
 test("a rejected or throwing recorder is swallowed", async () => {
@@ -70,12 +103,14 @@ test("a rejected or throwing recorder is swallowed", async () => {
       install: catalogInstall,
       tools,
       complete: true,
+      publishable: true,
       record: vi.fn().mockRejectedValue(new Error("down")),
     });
     recordMemberToolObservation({
       install: catalogInstall,
       tools,
       complete: true,
+      publishable: true,
       record: vi.fn(() => {
         throw new Error("sync");
       }),

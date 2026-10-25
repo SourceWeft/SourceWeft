@@ -4,7 +4,6 @@ import {
   MARKET_MCP_TOOL_SOURCE_MEMBER_OBSERVED,
   MARKET_MCP_TOOL_SOURCE_PLATFORM_INDEXED,
   marketMcpInspectedToolSchema,
-  marketMcpReferenceProfileSchema,
   type ListMarketMcpToolRevisionsResponse,
   type MarketMcpToolManifest,
   type MarketMcpToolRevision,
@@ -66,7 +65,7 @@ async function latestBySource(itemId: string): Promise<LatestBySource> {
 function displayedSource(
   latest: LatestBySource,
   ownerToolsVisible: boolean,
-  baseToolsListed: boolean,
+  base: BaseTools,
 ): MarketMcpToolRevisionSource | null {
   if (ownerToolsVisible) {
     const owner = latest.owner;
@@ -75,8 +74,10 @@ function displayedSource(
   for (const source of SOURCE_PRIORITY) {
     if (source === "owner") continue;
     // The registry's or a probe's own list is the server's word, listed
-    // without anyone's account; members' observations never replace it.
-    if (source === "member-observed" && baseToolsListed) continue;
+    // without anyone's account: members' observations never replace it, and
+    // the platform's snapshot never replaces tools that carry a risk.
+    if (source === "member-observed" && base !== "none") continue;
+    if (source === "platform-indexed" && base === "classified") continue;
     const entry = latest[source];
     if (entry && !entry.withdrawn) return source;
   }
@@ -97,10 +98,10 @@ function publicTime(source: MarketMcpToolRevisionSource, at: Date): string {
 export async function readToolsRevision(
   itemId: string,
   ownerToolsVisible: boolean,
-  baseToolsListed = false,
+  base: BaseTools = "none",
 ): Promise<MarketMcpToolsRevision | null> {
   const latest = await latestBySource(itemId);
-  const source = displayedSource(latest, ownerToolsVisible, baseToolsListed);
+  const source = displayedSource(latest, ownerToolsVisible, base);
   if (!source) return null;
   const { revision, observedAt, lastConfirmedAt } = latest[source]!;
   return {
@@ -119,8 +120,8 @@ export async function readToolsRevision(
 export async function readToolRevisionsPage(input: {
   itemId: string;
   ownerToolsVisible: boolean;
-  /** The registry or a probe listed tools: members' observations stay hidden. */
-  baseToolsListed?: boolean;
+  /** What the registry or a probe listed (see {@link baseToolsOf}). */
+  base?: BaseTools;
   limit: number;
   before?: number;
 }): Promise<ListMarketMcpToolRevisionsResponse> {
@@ -128,7 +129,7 @@ export async function readToolRevisionsPage(input: {
   const source = displayedSource(
     latest,
     input.ownerToolsVisible,
-    input.baseToolsListed ?? false,
+    input.base ?? "none",
   );
   const newest = source ? latest[source] : undefined;
   if (!source || !newest) {
@@ -201,11 +202,11 @@ export type ReferenceTools = {
 export async function readReferenceTools(
   itemId: string,
   ownerToolsVisible: boolean,
-  baseToolsListed: boolean,
+  base: BaseTools,
 ): Promise<ReferenceTools | null> {
   if (ownerToolsVisible) return null;
   const latest = await latestBySource(itemId);
-  const source = displayedSource(latest, false, baseToolsListed);
+  const source = displayedSource(latest, false, base);
   if (source !== "platform-indexed" && source !== "member-observed") return null;
   const [row] = await db
     .select({
@@ -213,7 +214,6 @@ export async function readReferenceTools(
       observedAt: marketMcpToolRevisions.observedAt,
       lastConfirmedAt: marketMcpToolRevisions.lastConfirmedAt,
       endpointKey: marketMcpToolRevisions.endpointKey,
-      referenceProfileJson: marketMcpToolRevisions.referenceProfileJson,
     })
     .from(marketMcpToolRevisions)
     .where(
@@ -250,14 +250,12 @@ export async function readReferenceTools(
     });
   }
   // The newest confirmation is the date shown: "read by SourceWeft … · date".
-  const profile = marketMcpReferenceProfileSchema.safeParse(row.referenceProfileJson);
   return {
     tools,
     endpointKey: row.endpointKey,
     reference: {
       source,
       observedAt: publicTime(source, row.lastConfirmedAt),
-      profile: source === "platform-indexed" && profile.success ? profile.data : null,
     },
   };
 }
@@ -276,10 +274,20 @@ export function referenceIsStale(
   return !pin || endpointKeyHash(pin) !== endpointKey;
 }
 
-/** Whether a stored manifest lists tools of its own (registry, probe or sandbox). */
-export function manifestListsTools(manifestJson: Record<string, unknown> | undefined): boolean {
+/**
+ * What a stored manifest lists on its own (registry, probe or sandbox):
+ * nothing, tools without a risk assessment, or tools that carry one.
+ */
+export type BaseTools = "none" | "unclassified" | "classified";
+
+export function baseToolsOf(manifestJson: Record<string, unknown> | undefined): BaseTools {
   const tools = manifestJson?.tools;
-  return Array.isArray(tools) && tools.length > 0;
+  if (!Array.isArray(tools) || tools.length === 0) return "none";
+  const classified = tools.some((tool) => {
+    const risk = (tool as { risk?: unknown } | null)?.risk;
+    return typeof risk === "string" && risk !== "unknown";
+  });
+  return classified ? "classified" : "unclassified";
 }
 
 /**

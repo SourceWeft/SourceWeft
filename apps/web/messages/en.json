@@ -2653,7 +2653,7 @@
       },
       "headersHint": "Use one header per line. Secret values are not shown again after saving.",
       "noAuthNote": "This MCP server does not require credentials.",
-      "catalogNotice": "SourceWeft keeps the names, descriptions and schemas of the tools this server exposes so others can see what it offers. It never keeps your data or credentials.",
+      "catalogNotice": "The names, descriptions and schemas this server returns may be shown publicly on its catalog page. Your credentials and the data you send are never kept.",
       "oauthNote": "This MCP server uses OAuth. Connect your account with the provider — you'll be redirected to grant access, then returned here. Your token is stored encrypted and refreshed automatically.",
       "optionalKeyNote": "This MCP server works without a credential. Add an API key if you have one.",
       "method": {

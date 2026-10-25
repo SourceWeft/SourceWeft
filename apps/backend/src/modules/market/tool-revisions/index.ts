@@ -41,10 +41,11 @@ export {
 } from "./canonical";
 export {
   applyReferenceToolsToManifest,
-  manifestListsTools,
+  baseToolsOf,
   readReferenceTools,
   readToolRevisionsPage,
   readToolsRevision,
   referenceIsStale,
+  type BaseTools,
   type ReferenceTools,
 } from "./read";

@@ -2,7 +2,14 @@ import { isAccountSpecificGatewayHost } from "./account-gateways";
 import { readCatalogEndpoint } from "./catalog-endpoint";
 import { memberObservedTool, type MemberObservedTool } from "./member-observed-tool";
 import { endpointKeyHash, pinEndpoint, sameEndpoint } from "./endpoint-pin";
-import { ToolRevisionInputError } from "./canonical";
+import {
+  MEMBER_OBSERVED_REVISIONS_PER_DAY,
+  MEMBER_OBSERVED_SUBSET_WINDOW_MS,
+  ToolRevisionInputError,
+  canonicalizeTools,
+  hashCanonicalTools,
+  validateTools,
+} from "./canonical";
 import { recordToolRevision } from "./record";
 
 /**
@@ -22,11 +29,47 @@ export type MemberObservationSkip =
   | "endpoint"
   | "gateway"
   | "taken-down"
+  | "reduced"
+  | "recent"
+  | "busy"
   | "invalid";
 
 export type MemberObservationResult =
   | { recorded: true; outcome: "created" | "confirmed" | "throttled" }
   | { recorded: false; reason: MemberObservationSkip };
+
+/**
+ * A burst of members on one listing must not pile transactions up on its
+ * advisory lock: the same list recorded for a listing in the last
+ * {@link RECENT_WINDOW_MS} is not offered again, and at most
+ * {@link MAX_IN_FLIGHT} recordings run at once (the rest are dropped; the next
+ * member's connection offers the list again).
+ */
+const RECENT_WINDOW_MS = 10 * 60 * 1000;
+const RECENT_MAX_ENTRIES = 1_000;
+const MAX_IN_FLIGHT = 4;
+const recent = new Map<string, number>();
+let inFlight = 0;
+
+function seenRecently(key: string, now: number): boolean {
+  const at = recent.get(key);
+  return at !== undefined && now - at < RECENT_WINDOW_MS;
+}
+
+function remember(key: string, now: number) {
+  recent.delete(key);
+  recent.set(key, now);
+  for (const oldest of recent.keys()) {
+    if (recent.size <= RECENT_MAX_ENTRIES) break;
+    recent.delete(oldest);
+  }
+}
+
+/** For tests: forget what was recorded recently. */
+export function resetMemberObservationState() {
+  recent.clear();
+  inFlight = 0;
+}
 
 /**
  * Records the tools a member's own connection returned as the listing's
@@ -69,6 +112,44 @@ export async function recordMemberObservedTools(input: {
     kept.push(entry);
   }
 
+  let hash: string;
+  try {
+    hash = hashCanonicalTools(canonicalizeTools(validateTools(kept)));
+  } catch (error) {
+    if (error instanceof ToolRevisionInputError) {
+      return { recorded: false, reason: "invalid" };
+    }
+    throw error;
+  }
+  const key = `${input.marketIdentifier}\u0000${hash}`;
+  const startedAt = (input.observedAt ?? new Date()).getTime();
+  if (seenRecently(key, startedAt)) return { recorded: false, reason: "recent" };
+  if (inFlight >= MAX_IN_FLIGHT) return { recorded: false, reason: "busy" };
+  inFlight++;
+  try {
+    return await recordObserved(
+      { marketIdentifier: input.marketIdentifier, endpointUrl: input.endpointUrl, observedAt: input.observedAt },
+      kept,
+      used,
+      key,
+      startedAt,
+    );
+  } finally {
+    inFlight--;
+  }
+}
+
+async function recordObserved(
+  input: {
+    marketIdentifier: string;
+    endpointUrl: string;
+    observedAt?: Date;
+  },
+  kept: NonNullable<ReturnType<typeof memberObservedTool>>[],
+  used: NonNullable<ReturnType<typeof pinEndpoint>>,
+  key: string,
+  now: number,
+): Promise<MemberObservationResult> {
   const entry = await readCatalogEndpoint(input.marketIdentifier);
   if (!entry) return { recorded: false, reason: "not-catalog" };
   if (!sameEndpoint(input.endpointUrl, entry.endpointUrl)) {
@@ -82,10 +163,16 @@ export async function recordMemberObservedTools(input: {
       endpointKey: endpointKeyHash(used),
       observedAt: input.observedAt,
       skipWhenTakenDown: true,
+      maxRevisionsPerDay: MEMBER_OBSERVED_REVISIONS_PER_DAY,
+      skipSubsetWithinMs: MEMBER_OBSERVED_SUBSET_WINDOW_MS,
     });
-    return result.outcome === "taken-down"
-      ? { recorded: false, reason: "taken-down" }
-      : { recorded: true, outcome: result.outcome };
+    if (result.outcome === "taken-down") return { recorded: false, reason: "taken-down" };
+    if (result.outcome === "older") return { recorded: false, reason: "recent" };
+    // Whatever was decided for this list stands for a while: asking again
+    // would only repeat it.
+    remember(key, now);
+    if (result.outcome === "subset") return { recorded: false, reason: "reduced" };
+    return { recorded: true, outcome: result.outcome };
   } catch (error) {
     if (error instanceof ToolRevisionInputError) {
       return { recorded: false, reason: "invalid" };

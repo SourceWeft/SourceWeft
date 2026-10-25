@@ -102,12 +102,17 @@ export function recordMemberToolObservation(input: {
     marketIdentifier: string | null;
     endpointUrl: string | null;
   };
+  /**
+   * The connection may be published (see `resolveMemberMcpAuth`): OAuth, or
+   * only the listing's declared header. False skips the observation.
+   */
+  publishable: boolean;
   tools: MemberToolInput[];
   /** False when the member's list was cut off (count or size bounds). */
   complete: boolean;
   record?: typeof recordMemberObservedTools;
 }): void {
-  if (input.install.source !== "market") return;
+  if (input.install.source !== "market" || !input.publishable) return;
   const record = input.record ?? recordMemberObservedTools;
   void Promise.resolve()
     .then(() =>
@@ -123,8 +128,14 @@ export function recordMemberToolObservation(input: {
       }),
     )
     .catch((error: unknown) => {
+      // Only the kind of failure: a database error's message carries the
+      // query and its parameters (tool names, descriptions, schemas).
       logger.warn("MCP member tool observation was not recorded", {
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? error.name : "unknown",
+        code:
+          typeof (error as { code?: unknown } | null)?.code === "string"
+            ? (error as { code: string }).code
+            : undefined,
       });
     });
 }

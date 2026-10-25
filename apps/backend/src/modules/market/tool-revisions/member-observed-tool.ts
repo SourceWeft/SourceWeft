@@ -13,23 +13,33 @@ export type MemberObservedTool = {
 };
 
 /**
- * Keywords of an input schema that carry VALUES rather than structure, and so
- * may hold the connecting account's own data (a default workspace, an example
- * row, the list of this account's projects as an enum). They are removed
- * everywhere a schema is read, never inside a name-to-schema map.
+ * Keywords of an input schema that carry VALUES or free text rather than
+ * structure, and so may hold the connecting account's own data (a default
+ * workspace, an example row, the list of this account's projects as an enum, a
+ * field described as "Your Acme Corp board"). They are removed everywhere a
+ * schema is read, as is any `x-*` extension, and never inside a name-to-schema
+ * map: property NAMES stay, so a property called `default` or `description` is
+ * kept. What remains is the shape: names, types, required, items, composition.
  */
-const VALUE_KEYWORDS: ReadonlySet<string> = new Set([
+const DROPPED_KEYWORDS: ReadonlySet<string> = new Set([
   "default",
   "examples",
   "example",
   "const",
   "enum",
+  "description",
+  "title",
+  "$comment",
+  "pattern",
+  "patternProperties",
 ]);
+
+const isDroppedKeyword = (key: string) =>
+  DROPPED_KEYWORDS.has(key) || key.startsWith("x-");
 
 /** Keywords whose value maps NAMES to schemas: the names are not keywords. */
 const SCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
   "properties",
-  "patternProperties",
   "$defs",
   "definitions",
   "dependentSchemas",
@@ -50,7 +60,7 @@ function structureOf(schema: unknown): unknown {
   if (!schema || typeof schema !== "object") return schema;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema)) {
-    if (VALUE_KEYWORDS.has(key)) continue;
+    if (isDroppedKeyword(key)) continue;
     if (SCHEMA_MAP_KEYWORDS.has(key) && value && typeof value === "object" && !Array.isArray(value)) {
       const named: Record<string, unknown> = {};
       for (const [name, entry] of Object.entries(value)) {
@@ -66,7 +76,7 @@ function structureOf(schema: unknown): unknown {
 
 /**
  * The tool as kept: name, description (clipped to the listing limit) and the
- * input schema's structure. No title, annotations, output schema or any value
+ * input schema's structure (see {@link DROPPED_KEYWORDS}). No title, annotations, output schema or any value
  * keyword. Null when the tool cannot be kept (nested too deep for a recursive
  * walk), in which case the whole observation is dropped: a list with a tool
  * missing is not the server's list.

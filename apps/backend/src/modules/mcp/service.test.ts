@@ -2124,6 +2124,51 @@ test("a member's discovery is offered to the catalog without anything about them
   assert.ok(!JSON.stringify(offered).match(/user_a|workspace_1|team_1|mcp_install_arcmira/));
 });
 
+test("a key under a header the listing does not declare is never offered to the catalog", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: true, outcome: "created" });
+  const install = oauthOrKeyInstall({ authType: "api_key_header" });
+  install.manifestJson = {
+    auth: {
+      type: "api_key_header",
+      required: true,
+      headerName: "X-Api-Key",
+      methods: [{ type: "header", name: "X-Api-Key" }],
+    },
+  };
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.createLangChainMcpClient.mockImplementation(() => ({
+    close: vi.fn(async () => undefined),
+    getTools: vi.fn(async () => [originalTool({ name: "mcp__arcmira__get_a" })]),
+  }));
+  const discover = () =>
+    new McpService().discoverToolsForMember({
+      workspaceId: "workspace_1",
+      userId: "user_a",
+      installId: "mcp_install_arcmira",
+    });
+
+  // The member narrows the server with a toolset header of their own choosing.
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    headerName: "X-MCP-Toolsets",
+    encryptedSecret: "enc:narrow",
+  });
+  const result = await discover();
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["get_a"]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 0);
+
+  // The same member under the declared header is offered.
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    headerName: "x-api-key",
+    encryptedSecret: "enc:key",
+  });
+  await discover();
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+});
+
 test("a failing observation never fails the member's discovery", async () => {
   resetAuthMethodMocks();
   mocks.recordMemberObservedTools.mockRejectedValue(new Error("database is down"));

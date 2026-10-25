@@ -124,7 +124,6 @@ describe("public MCP detail page tools reference", () => {
           source: "platform-indexed",
           observedAt: "2026-10-24T10:00:00.000Z",
           stale: true,
-          profile: { tier: "free", role: "member", scopes: ["read"], date: "2026-10-20" },
         },
       }),
     );

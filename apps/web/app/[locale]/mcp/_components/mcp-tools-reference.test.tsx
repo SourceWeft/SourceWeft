@@ -31,7 +31,6 @@ const platform: MarketMcpToolsReference = {
   source: "platform-indexed",
   observedAt: "2026-10-24T10:00:00.000Z",
   stale: false,
-  profile: { tier: "free", role: "member", scopes: ["read"], date: "2026-10-20" },
 };
 
 function render(reference: MarketMcpToolsReference, locale = "en") {
@@ -47,11 +46,6 @@ describe("tools reference note", () => {
     expect(html).not.toContain("server address changed");
   });
 
-  it("does not expose the reference profile", () => {
-    const html = render(platform);
-    expect(html).not.toMatch(/free|member|scope|read<|2026-10-20/);
-  });
-
   it("flags a list read from an address the listing no longer has", () => {
     const html = render({ ...platform, stale: true });
     expect(html).toContain("The server address changed since this was read.");
@@ -63,7 +57,6 @@ describe("tools reference note", () => {
       source: "member-observed",
       observedAt: "2026-10-24T00:00:00.000Z",
       stale: false,
-      profile: null,
     });
     expect(html).toContain("Observed through connected accounts · 2026-10-24");
     expect(html).toContain("It can differ by account.");

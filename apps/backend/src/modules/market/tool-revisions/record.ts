@@ -64,6 +64,21 @@ export type RecordToolRevisionInput = {
    * can never be overtaken by a recording that read the state before it.
    */
   skipWhenTakenDown?: boolean;
+  /**
+   * New revisions this source may make in a rolling 24 hours (default
+   * {@link TOOL_REVISIONS_PER_DAY}).
+   */
+  maxRevisionsPerDay?: number;
+  /**
+   * Record nothing when the list's tool names are a strict subset of the
+   * source's latest list, confirmed less than this long before `observedAt`.
+   */
+  skipSubsetWithinMs?: number;
+  /**
+   * Record nothing when `observedAt` is older than the source's latest
+   * confirmation, decided under the same lock as the write.
+   */
+  rejectOlderThanLatest?: boolean;
 };
 
 export type ToolRevisionOutcome =
@@ -96,6 +111,20 @@ export type ToolRevisionOutcome =
   | {
       /** `skipWhenTakenDown` was set and the source is taken down. */
       outcome: "taken-down";
+      revision: null;
+      toolsHash: string;
+      diff: null;
+    }
+  | {
+      /** `rejectOlderThanLatest` was set and a newer observation is recorded. */
+      outcome: "older";
+      revision: null;
+      toolsHash: string;
+      diff: null;
+    }
+  | {
+      /** `skipSubsetWithinMs` was set and the list is a reduction of the latest. */
+      outcome: "subset";
       revision: null;
       toolsHash: string;
       diff: null;
@@ -156,6 +185,13 @@ export async function recordToolRevision(
     if (input.skipWhenTakenDown && latest?.withdrawn) {
       return { outcome: "taken-down", revision: null, toolsHash, diff: null };
     }
+    if (
+      input.rejectOlderThanLatest &&
+      latest &&
+      observedAt.getTime() < latest.lastConfirmedAt.getTime()
+    ) {
+      return { outcome: "older", revision: null, toolsHash, diff: null };
+    }
     const previous = previousList(latest);
     if (latest && previous.hash === toolsHash) {
       await tx
@@ -183,7 +219,24 @@ export async function recordToolRevision(
         .where(eq(marketMcpToolRevisions.id, latest.id));
       return { outcome: "confirmed", revision: latest.revision, toolsHash, diff: null };
     }
-    if (await madeTooMany(tx, input.itemId, input.source, observedAt)) {
+    if (
+      input.skipSubsetWithinMs !== undefined &&
+      latest &&
+      !latest.withdrawn &&
+      observedAt.getTime() - latest.lastConfirmedAt.getTime() < input.skipSubsetWithinMs &&
+      isStrictSubset(canonical, previous.tools)
+    ) {
+      return { outcome: "subset", revision: null, toolsHash, diff: null };
+    }
+    if (
+      await madeTooMany(
+        tx,
+        input.itemId,
+        input.source,
+        observedAt,
+        input.maxRevisionsPerDay ?? TOOL_REVISIONS_PER_DAY,
+      )
+    ) {
       return { outcome: "throttled", revision: null, toolsHash, diff: null };
     }
     const diff = diffTools(previous.tools, canonical);
@@ -255,12 +308,23 @@ async function lockSource(
   );
 }
 
+/** Every name of `next` is in `previous`, and `previous` has more. */
+function isStrictSubset(
+  next: readonly CanonicalTool[],
+  previous: readonly CanonicalTool[],
+): boolean {
+  if (next.length >= previous.length) return false;
+  const names = new Set(previous.map((tool) => tool.name));
+  return next.every((tool) => names.has(tool.name));
+}
+
 /** Revisions this item and source already made in the 24 hours up to `at`. */
 async function madeTooMany(
   tx: ToolRevisionTx,
   itemId: string,
   source: McpToolRevisionSource,
   at: Date,
+  limit: number,
 ): Promise<boolean> {
   const since = new Date(at.getTime() - 24 * 60 * 60 * 1000);
   const [row] = await tx
@@ -273,7 +337,7 @@ async function madeTooMany(
         gt(marketMcpToolRevisions.observedAt, since),
       ),
     );
-  return (row?.count ?? 0) >= TOOL_REVISIONS_PER_DAY;
+  return (row?.count ?? 0) >= limit;
 }
 
 async function latestRevision(

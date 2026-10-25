@@ -1,5 +1,3 @@
-import { and, desc, eq } from "drizzle-orm";
-import { db, marketMcpToolRevisions } from "@sourceweft/db";
 import {
   MARKET_MCP_SNAPSHOT_LIMITS,
   type MarketMcpToolSourceActionRequest,
@@ -54,6 +52,13 @@ export async function submitPlatformSnapshot(
     refuse(422, "MCP_SNAPSHOT_FROM_THE_FUTURE", "observedAt is in the future");
   }
 
+  if (input.tools.length === 0) {
+    refuse(
+      422,
+      "MCP_SNAPSHOT_NO_TOOLS",
+      "A snapshot lists at least one tool; to remove a snapshot use the tool-sources takedown",
+    );
+  }
   const entry = await readCatalogEndpoint(input.identifier);
   if (!entry) refuse(404, "MCP_ITEM_NOT_FOUND", "MCP item not found");
   const current = entry.endpointUrl ? pinEndpoint(entry.endpointUrl) : null;
@@ -72,27 +77,6 @@ export async function submitPlatformSnapshot(
     );
   }
 
-  // An older read must not become the current one: a slow run arriving after a
-  // newer one would be recorded as a change back.
-  const [latest] = await db
-    .select({ lastConfirmedAt: marketMcpToolRevisions.lastConfirmedAt })
-    .from(marketMcpToolRevisions)
-    .where(
-      and(
-        eq(marketMcpToolRevisions.itemId, entry.itemId),
-        eq(marketMcpToolRevisions.source, "platform-indexed"),
-      ),
-    )
-    .orderBy(desc(marketMcpToolRevisions.revision))
-    .limit(1);
-  if (latest && observedAt.getTime() < latest.lastConfirmedAt.getTime()) {
-    refuse(
-      409,
-      "MCP_SNAPSHOT_OLDER_THAN_LATEST",
-      "A newer snapshot of this listing was already recorded",
-    );
-  }
-
   let result;
   try {
     result = await recordToolRevision({
@@ -103,6 +87,9 @@ export async function submitPlatformSnapshot(
       endpointKey: endpointKeyHash(current),
       referenceProfile: input.referenceProfile,
       skipWhenTakenDown: true,
+      // Decided under the write's lock: a slow older run arriving after a
+      // newer one would be recorded as a change back.
+      rejectOlderThanLatest: true,
     });
   } catch (error) {
     if (error instanceof ToolRevisionInputError) {
@@ -116,6 +103,16 @@ export async function submitPlatformSnapshot(
       "MCP_SNAPSHOT_SOURCE_TAKEN_DOWN",
       "Platform snapshots of this listing were taken down by an admin; restore them first",
     );
+  }
+  if (result.outcome === "older") {
+    refuse(
+      409,
+      "MCP_SNAPSHOT_OLDER_THAN_LATEST",
+      "A newer snapshot of this listing was already recorded",
+    );
+  }
+  if (result.outcome === "subset") {
+    throw new Error("Unreachable: snapshots do not skip subsets");
   }
   return {
     identifier: entry.identifier,
