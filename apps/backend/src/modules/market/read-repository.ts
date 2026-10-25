@@ -841,7 +841,12 @@ async function relatedProductOf(
  */
 export async function findMcp(
   identifier: string,
-  options: { locale?: MarketMcpLocale; relatedProduct?: boolean } = {},
+  options: {
+    locale?: MarketMcpLocale;
+    relatedProduct?: boolean;
+    /** Read the tools revision too (detail only; one more query). */
+    toolsRevision?: boolean;
+  } = {},
 ): Promise<MarketMcpRecord | null> {
   // Preserve database errors: returning null here would turn an outage into 404.
   const [row] = await db
@@ -873,10 +878,12 @@ export async function findMcp(
       findOwnerLayersByServerIds([row.id]),
     ]);
     const ownerLayer = ownerLayers.get(row.id) ?? { row: null, claimed: false };
-    const toolsRevision = await readToolsRevision(
-      row.id,
-      ownerSubmittedTools(ownerLayer.row?.toolsJson).length > 0,
-    );
+    const toolsRevision = options.toolsRevision
+      ? await readToolsRevision(
+          row.id,
+          ownerSubmittedTools(ownerLayer.row?.toolsJson).length > 0,
+        )
+      : null;
     const latest = versions[0];
     const locale = options.locale ?? "en";
     const [[readme, overviews, overviewLocales, readmeShared], relatedProduct] =
@@ -986,7 +993,6 @@ export async function listMcpToolRevisions(
   const ownerLayers = await findOwnerLayersByServerIds([row.id]);
   return readToolRevisionsPage({
     itemId: row.id,
-    source: query.source,
     ownerToolsVisible:
       ownerSubmittedTools(ownerLayers.get(row.id)?.row?.toolsJson).length > 0,
     limit: query.limit,

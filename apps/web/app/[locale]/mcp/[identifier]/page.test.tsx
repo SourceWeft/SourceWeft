@@ -1074,6 +1074,23 @@ describe("public MCP detail page tool change log", () => {
     expect(entry(log, 1)).toContain('data-revision-current="false"');
   });
 
+  it("says an empty list lists no tools, instead of +0 −0 ~0", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      toolsRevision,
+      versions: [],
+    });
+    market.getPublicMcpToolRevisions.mockResolvedValue({
+      source: "owner",
+      nextBefore: null,
+      items: [revision({ revision: 2, current: true, toolsCount: 0 })],
+    });
+    const log = changeLog(await render())!;
+    expect(log).toContain("Lists no tools");
+    expect(log).not.toContain("+0");
+    expect(log).not.toContain("<details");
+  });
+
   it("shows no change log, and asks for none, without a revision history", async () => {
     const html = await render();
     expect(changeLog(html)).toBeUndefined();

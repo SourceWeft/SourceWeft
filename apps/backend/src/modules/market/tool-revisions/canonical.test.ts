@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { submitMarketMcpOwnerToolsRequestSchema } from "@sourceweft/market-contracts";
 import {
   ToolRevisionInputError,
   canonicalizeTools,
@@ -124,5 +125,48 @@ describe("bounds", () => {
     expect(() => validateTools([{ nope: true }])).toThrow(
       expect.objectContaining({ code: "TOOLS_INVALID" }),
     );
+  });
+});
+
+describe("hostile shapes", () => {
+  test("a schema property named __proto__ is kept and changes the hash", () => {
+    const withProto = JSON.parse(
+      '{"name":"t","inputSchema":{"type":"object","properties":{"__proto__":{"type":"string"}}}}',
+    );
+    const without = { name: "t", inputSchema: { type: "object", properties: {} } };
+    const canonical = canon([withProto]);
+    expect(
+      Object.keys(
+        (canonical[0]!.inputSchema.properties as Record<string, unknown>) ?? {},
+      ),
+    ).toEqual(["__proto__"]);
+    expect(JSON.stringify(canonical)).toContain('"__proto__"');
+    expect(hashOf([withProto])).not.toBe(hashOf([without]));
+    // And a different value under it is a different list.
+    const other = JSON.parse(
+      '{"name":"t","inputSchema":{"type":"object","properties":{"__proto__":{"type":"number"}}}}',
+    );
+    expect(hashOf([withProto])).not.toBe(hashOf([other]));
+  });
+
+  test("values nested thousands deep are rejected, not a stack overflow", () => {
+    const deep = JSON.parse(`${"[".repeat(5000)}${"]".repeat(5000)}`);
+    for (const tool of [
+      { name: "t", inputSchema: { deep } },
+      { name: "t", annotations: { deep } },
+    ]) {
+      expect(() => validateTools([tool])).toThrow(
+        expect.objectContaining({ code: "TOOLS_INVALID" }),
+      );
+    }
+    // The contract answers a validation failure for the same body too.
+    const parsed = submitMarketMcpOwnerToolsRequestSchema.safeParse({
+      tools: [{ name: "t", inputSchema: { deep } }],
+    });
+    expect(parsed.success).toBe(false);
+    // Ordinary depth is fine.
+    let nested: unknown = { type: "string" };
+    for (let i = 0; i < 30; i += 1) nested = { type: "array", items: nested };
+    expect(validateTools([{ name: "t", inputSchema: { nested } }])).toHaveLength(1);
   });
 });

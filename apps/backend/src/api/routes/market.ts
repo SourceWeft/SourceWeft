@@ -115,6 +115,7 @@ export function registerMarketRoutes(app: Hono) {
     const record = await findMcp(c.req.param("identifier"), {
       locale,
       relatedProduct: true,
+      toolsRevision: true,
     });
     if (!record) {
       throw ApiError.notFound("MCP item not found");
@@ -139,7 +140,6 @@ export function registerMarketRoutes(app: Hono) {
   // per request, at most MARKET_MCP_TOOL_REVISIONS_MAX_LIMIT entries.
   app.get("/v1/mcp/:identifier/tools/revisions", async (c) => {
     const query = listMarketMcpToolRevisionsRequestSchema.safeParse({
-      source: c.req.query("source") || undefined,
       limit: c.req.query("limit") || undefined,
       before: c.req.query("before") || undefined,
     });

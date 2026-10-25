@@ -436,6 +436,7 @@
       "heading": "Change log",
       "intro": "Each entry is a change to this listing's tool list. It is not a version of the server itself.",
       "current": "Current",
+      "emptyList": "Lists no tools",
       "withdrawn": "Withdrawn",
       "addedLabel": "{count, plural, one {# tool added} other {# tools added}}",
       "removedLabel": "{count, plural, one {# tool removed} other {# tools removed}}",

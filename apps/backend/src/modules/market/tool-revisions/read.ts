@@ -50,23 +50,36 @@ async function latestBySource(itemId: string): Promise<LatestBySource> {
 }
 
 /**
- * The source whose tool list the page shows: the owner's while it is visible,
- * otherwise the platform's snapshot, otherwise the members' observation. A
- * source whose latest revision is a withdrawal has no list to show. The owner
- * list counts only when `ownerToolsVisible` (the owner layer shows it), so
- * history never outlives what the page displays.
+ * The source whose tool list the page shows. While the owner layer shows an
+ * owner list, the owner is the ONLY candidate: with no revision of its own yet
+ * (every list stored before revisions existed) there is no history to show,
+ * never another source's. Otherwise the platform's snapshot, then the members'
+ * observation. A source whose latest revision is a withdrawal has no list.
  */
 function displayedSource(
   latest: LatestBySource,
   ownerToolsVisible: boolean,
 ): MarketMcpToolRevisionSource | null {
+  if (ownerToolsVisible) {
+    const owner = latest.owner;
+    return owner && !owner.withdrawn ? "owner" : null;
+  }
   for (const source of SOURCE_PRIORITY) {
+    if (source === "owner") continue;
     const entry = latest[source];
-    if (!entry || entry.withdrawn) continue;
-    if (source === "owner" && !ownerToolsVisible) continue;
-    return source;
+    if (entry && !entry.withdrawn) return source;
   }
   return null;
+}
+
+/**
+ * What the public may learn of when. Each member connection can refresh a
+ * `member-observed` revision, so its times are coarsened to the day: they would
+ * otherwise say when anyone last connected.
+ */
+function publicTime(source: MarketMcpToolRevisionSource, at: Date): string {
+  const iso = at.toISOString();
+  return source === "member-observed" ? `${iso.slice(0, 10)}T00:00:00.000Z` : iso;
 }
 
 /** Detail answer: the current revision of the displayed source, or null. */
@@ -78,24 +91,30 @@ export async function readToolsRevision(
   const source = displayedSource(latest, ownerToolsVisible);
   if (!source) return null;
   const { revision, observedAt, lastConfirmedAt } = latest[source]!;
-  return { source, revision, observedAt, lastConfirmedAt };
+  return {
+    source,
+    revision,
+    observedAt: publicTime(source, new Date(observedAt)),
+    lastConfirmedAt: publicTime(source, new Date(lastConfirmedAt)),
+  };
 }
 
-/** One page of a source's history, newest first. */
+/**
+ * One page of the DISPLAYED source's history, newest first. There is no way to
+ * ask for another source: the history of a list the page does not show (a
+ * lower-priority source, a withdrawn one) is not public.
+ */
 export async function readToolRevisionsPage(input: {
   itemId: string;
-  /** Defaults to the displayed source. */
-  source?: MarketMcpToolRevisionSource;
   ownerToolsVisible: boolean;
   limit: number;
   before?: number;
 }): Promise<ListMarketMcpToolRevisionsResponse> {
   const latest = await latestBySource(input.itemId);
-  const source = input.source ?? displayedSource(latest, input.ownerToolsVisible);
+  const source = displayedSource(latest, input.ownerToolsVisible);
   const newest = source ? latest[source] : undefined;
-  // History of an owner list the page no longer shows is not public.
-  if (!source || !newest || (source === "owner" && !input.ownerToolsVisible)) {
-    return { source: input.source ?? null, items: [], nextBefore: null };
+  if (!source || !newest) {
+    return { source: null, items: [], nextBefore: null };
   }
   const rows = await db
     .select({
@@ -129,8 +148,8 @@ export async function readToolRevisionsPage(input: {
       withdrawn: row.withdrawn,
       toolsCount: row.toolsCount,
       serverVersion: row.serverVersion,
-      observedAt: row.observedAt.toISOString(),
-      lastConfirmedAt: row.lastConfirmedAt.toISOString(),
+      observedAt: publicTime(source, row.observedAt),
+      lastConfirmedAt: publicTime(source, row.lastConfirmedAt),
       added: diff.added ?? [],
       removed: diff.removed ?? [],
       changed: (diff.changed ?? []).map((entry) => ({

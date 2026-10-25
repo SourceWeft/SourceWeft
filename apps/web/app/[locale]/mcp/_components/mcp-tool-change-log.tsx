@@ -64,6 +64,9 @@ function RevisionEntry({ revision }: { revision: MarketMcpToolRevision }) {
         <span className="rounded-full border border-zinc-300 px-2 py-0.5 text-[11px] dark:border-white/10">
           {t("withdrawn")}
         </span>
+      ) : !hasNames ? (
+        // A list that is empty after a withdrawal has no tool to count.
+        <span className="text-zinc-600 dark:text-zinc-300">{t("emptyList")}</span>
       ) : (
         <>
           <span

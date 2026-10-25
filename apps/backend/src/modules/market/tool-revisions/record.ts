@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
 import {
   db,
   marketMcpToolRevisions,
@@ -8,6 +8,8 @@ import {
 import {
   TOOL_CANONICAL_VERSION,
   TOOL_REVISIONS_KEPT_FULL,
+  TOOL_REVISIONS_KEPT_ROWS,
+  TOOL_REVISIONS_PER_DAY,
   WITHDRAWN_TOOLS_HASH,
   canonicalizeTools,
   diffTools,
@@ -63,6 +65,18 @@ export type ToolRevisionOutcome =
       revision: number;
       toolsHash: string;
       diff: null;
+    }
+  | {
+      /**
+       * The source already made {@link TOOL_REVISIONS_PER_DAY} revisions in the
+       * last 24 hours: nothing was recorded (the caller's own write is
+       * unaffected). The next change, once the window has room, is recorded
+       * against the latest revision as usual.
+       */
+      outcome: "throttled";
+      revision: null;
+      toolsHash: string;
+      diff: null;
     };
 
 export type WithdrawToolRevisionInput = {
@@ -94,7 +108,14 @@ type RevisionRow = typeof marketMcpToolRevisions.$inferSelect;
  *   advisory lock per item and source, so two parallel callers neither
  *   duplicate nor skip a revision number (the unique index is the backstop).
  * - Retention: the latest {@link TOOL_REVISIONS_KEPT_FULL} revisions of an item
- *   and source keep their full list; older ones keep only the diff.
+ *   and source keep their full list; older ones keep only the diff, and rows
+ *   beyond {@link TOOL_REVISIONS_KEPT_ROWS} are deleted, oldest first.
+ * - Rate: at most {@link TOOL_REVISIONS_PER_DAY} new revisions per item and
+ *   source in a rolling 24 hours (measured from `observedAt`); beyond that the
+ *   outcome is `throttled` and nothing is written.
+ * - A canonical-form bump never creates a revision: the previous list is
+ *   re-canonicalised before comparing and diffing, and a confirmed revision
+ *   is upgraded to the current form.
  * - Pass `tx` to record inside the caller's transaction (the owner path does,
  *   so the list and its history commit together); the lock is then held until
  *   that transaction ends. Without it the call runs its own transaction.
@@ -110,16 +131,29 @@ export async function recordToolRevision(
   const run = async (tx: ToolRevisionTx): Promise<ToolRevisionOutcome> => {
     await lockSource(tx, input.itemId, input.source);
     const latest = await latestRevision(tx, input.itemId, input.source);
-    if (latest && (await sameList(latest, toolsHash))) {
+    const previous = previousList(latest);
+    if (latest && previous.hash === toolsHash) {
       await tx
         .update(marketMcpToolRevisions)
         .set({
           lastConfirmedAt: sql`greatest(${marketMcpToolRevisions.lastConfirmedAt}, ${observedAt})`,
+          // A revision made under an older canonical form moves to the
+          // current one, so its hash and version never disagree with the form.
+          ...(latest.canonicalVersion !== TOOL_CANONICAL_VERSION
+            ? {
+                canonicalVersion: TOOL_CANONICAL_VERSION,
+                toolsHash,
+                toolsJson: latest.toolsJson ? canonical : null,
+              }
+            : {}),
         })
         .where(eq(marketMcpToolRevisions.id, latest.id));
       return { outcome: "confirmed", revision: latest.revision, toolsHash, diff: null };
     }
-    const diff = diffTools(toolsOf(latest), canonical);
+    if (await madeTooMany(tx, input.itemId, input.source, observedAt)) {
+      return { outcome: "throttled", revision: null, toolsHash, diff: null };
+    }
+    const diff = diffTools(previous.tools, canonical);
     const revision = (latest?.revision ?? 0) + 1;
     await insertRevision(tx, {
       itemId: input.itemId,
@@ -153,7 +187,7 @@ export async function withdrawToolRevision(
     await lockSource(tx, input.itemId, input.source);
     const latest = await latestRevision(tx, input.itemId, input.source);
     if (!latest || latest.withdrawn) return { outcome: "none" };
-    const diff = diffTools(toolsOf(latest), []);
+    const diff = diffTools(previousList(latest).tools, []);
     const revision = latest.revision + 1;
     await insertRevision(tx, {
       itemId: input.itemId,
@@ -171,14 +205,38 @@ export async function withdrawToolRevision(
   return options.tx ? run(options.tx) : db.transaction(run);
 }
 
+// A key space of its own: the claim locks use the one-argument form.
+const TOOL_REVISION_LOCK_NAMESPACE = 0x544c5256;
+
 async function lockSource(
   tx: ToolRevisionTx,
   itemId: string,
   source: McpToolRevisionSource,
 ) {
   await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtext(${`mcp-tool-revisions:${itemId}:${source}`}))`,
+    sql`select pg_advisory_xact_lock(${TOOL_REVISION_LOCK_NAMESPACE}::int, hashtext(${`${itemId}:${source}`}))`,
   );
+}
+
+/** Revisions this item and source already made in the 24 hours up to `at`. */
+async function madeTooMany(
+  tx: ToolRevisionTx,
+  itemId: string,
+  source: McpToolRevisionSource,
+  at: Date,
+): Promise<boolean> {
+  const since = new Date(at.getTime() - 24 * 60 * 60 * 1000);
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(marketMcpToolRevisions)
+    .where(
+      and(
+        eq(marketMcpToolRevisions.itemId, itemId),
+        eq(marketMcpToolRevisions.source, source),
+        gt(marketMcpToolRevisions.observedAt, since),
+      ),
+    );
+  return (row?.count ?? 0) >= TOOL_REVISIONS_PER_DAY;
 }
 
 async function latestRevision(
@@ -200,30 +258,28 @@ async function latestRevision(
   return row ?? null;
 }
 
-/** The recorded list as canonical tools (empty for none or a withdrawal). */
-function toolsOf(row: RevisionRow | null): CanonicalTool[] {
-  if (!row || row.withdrawn || !Array.isArray(row.toolsJson)) return [];
-  return row.toolsJson as CanonicalTool[];
-}
-
 /**
- * Is the latest revision the same list? A revision made under an older
- * canonical form is re-derived from its stored list, so changing the form
- * alone never creates a revision; without a stored list it counts as different.
+ * The latest revision's list and hash in the CURRENT canonical form. A revision
+ * made under an older form is re-derived from its stored list (a pruned or
+ * unreadable one has no comparable hash); a withdrawal is an empty list that
+ * never equals any list.
  */
-async function sameList(latest: RevisionRow, toolsHash: string): Promise<boolean> {
-  if (latest.withdrawn) return false;
-  if (latest.canonicalVersion === TOOL_CANONICAL_VERSION) {
-    return latest.toolsHash === toolsHash;
+function previousList(row: RevisionRow | null): {
+  tools: CanonicalTool[];
+  hash: string | null;
+} {
+  if (!row) return { tools: [], hash: null };
+  if (row.withdrawn) return { tools: [], hash: WITHDRAWN_TOOLS_HASH };
+  const stored = Array.isArray(row.toolsJson) ? row.toolsJson : null;
+  if (row.canonicalVersion === TOOL_CANONICAL_VERSION) {
+    return { tools: (stored ?? []) as CanonicalTool[], hash: row.toolsHash };
   }
-  if (!Array.isArray(latest.toolsJson)) return false;
+  if (!stored) return { tools: [], hash: null };
   try {
-    const rederived = hashCanonicalTools(
-      canonicalizeTools(validateTools(latest.toolsJson)),
-    );
-    return rederived === toolsHash;
+    const tools = canonicalizeTools(validateTools(stored));
+    return { tools, hash: hashCanonicalTools(tools) };
   } catch {
-    return false;
+    return { tools: stored as CanonicalTool[], hash: null };
   }
 }
 
@@ -271,4 +327,38 @@ async function insertRevision(
         sql`${marketMcpToolRevisions.toolsJson} is not null`,
       ),
     );
+  // And a ceiling on the rows themselves.
+  await tx
+    .delete(marketMcpToolRevisions)
+    .where(
+      and(
+        eq(marketMcpToolRevisions.itemId, row.itemId),
+        eq(marketMcpToolRevisions.source, row.source),
+        lte(marketMcpToolRevisions.revision, row.revision - TOOL_REVISIONS_KEPT_ROWS),
+      ),
+    );
+}
+
+/**
+ * Deletes a source's whole history for an item. For when what the history
+ * describes must not stay public — an admin block removes the blocked member's
+ * list, and with it every earlier revision of that source. The numbering of a
+ * later list starts again at 1.
+ */
+export async function purgeToolRevisions(
+  input: { itemId: string; source: McpToolRevisionSource },
+  options: { tx?: ToolRevisionTx } = {},
+): Promise<void> {
+  const run = async (tx: ToolRevisionTx) => {
+    await lockSource(tx, input.itemId, input.source);
+    await tx
+      .delete(marketMcpToolRevisions)
+      .where(
+        and(
+          eq(marketMcpToolRevisions.itemId, input.itemId),
+          eq(marketMcpToolRevisions.source, input.source),
+        ),
+      );
+  };
+  await (options.tx ? run(options.tx) : db.transaction(run));
 }

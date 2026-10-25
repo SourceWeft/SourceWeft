@@ -247,11 +247,14 @@ describe("tool revisions", () => {
 
   test("the latest fifty keep their list; older ones keep only the diff", async () => {
     const { itemId } = await item("retention");
+    const start = Date.parse("2026-09-01T00:00:00Z");
     for (let i = 1; i <= 55; i += 1) {
       await revisions.recordToolRevision({
         itemId,
         source: "owner",
         tools: [tool("a", `version ${i}`)],
+        // Hourly: inside the daily limit.
+        observedAt: new Date(start + i * 60 * 60 * 1000),
       });
     }
     const rows = await rowsOf(itemId);
@@ -298,6 +301,168 @@ describe("tool revisions", () => {
     ).toMatchObject({ outcome: "confirmed", revision: 1 });
   });
 
+  test("a source makes at most 24 revisions in a rolling day; the next change waits", async () => {
+    const { itemId } = await item("throttle");
+    const at = (hours: number) => new Date(Date.parse("2026-10-01T00:00:00Z") + hours * 3_600_000);
+    for (let i = 1; i <= revisions.TOOL_REVISIONS_PER_DAY; i += 1) {
+      expect(
+        await revisions.recordToolRevision({
+          itemId,
+          source: "owner",
+          tools: [tool("a", `v${i}`)],
+          observedAt: at(i / 100),
+        }),
+      ).toMatchObject({ outcome: "created", revision: i });
+    }
+    expect(
+      await revisions.recordToolRevision({
+        itemId,
+        source: "owner",
+        tools: [tool("a", "one too many")],
+        observedAt: at(0.5),
+      }),
+    ).toMatchObject({ outcome: "throttled", revision: null, diff: null });
+    // The same list as the latest still only confirms.
+    expect(
+      await revisions.recordToolRevision({
+        itemId,
+        source: "owner",
+        tools: [tool("a", `v${revisions.TOOL_REVISIONS_PER_DAY}`)],
+        observedAt: at(0.5),
+      }),
+    ).toMatchObject({ outcome: "confirmed" });
+    // Another source has its own allowance.
+    expect(
+      await revisions.recordToolRevision({ itemId, source: "platform-indexed", tools: [tool("a")], observedAt: at(0.5) }),
+    ).toMatchObject({ outcome: "created", revision: 1 });
+    // A day later it records again, compared with the latest revision.
+    const later = await revisions.recordToolRevision({
+      itemId,
+      source: "owner",
+      tools: [tool("a", "one too many")],
+      observedAt: at(26),
+    });
+    expect(later).toMatchObject({ outcome: "created", revision: 25 });
+    expect(later.outcome === "created" && later.diff.changed).toEqual([
+      { name: "a", fields: ["description"] },
+    ]);
+  });
+
+  test("rows beyond the ceiling are deleted oldest first, numbering unbroken", async () => {
+    const { itemId } = await item("rowcap");
+    const cap = revisions.TOOL_REVISIONS_KEPT_ROWS;
+    // Long ago: none of it inside the daily window of the new revision.
+    const base = Date.parse("2020-01-01T00:00:00Z");
+    await data.db.insert(data.marketMcpToolRevisions).values(
+      Array.from({ length: cap + 5 }, (_, i) => ({
+        id: randomUUID(),
+        itemId,
+        source: "owner" as const,
+        revision: i + 1,
+        toolsHash: `h${i}`,
+        canonicalVersion: revisions.TOOL_CANONICAL_VERSION,
+        toolsCount: 1,
+        toolsJson: null,
+        diffJson: { added: [], removed: [], changed: [] },
+        observedAt: new Date(base + i * 3_600_000 * 48),
+        lastConfirmedAt: new Date(base + i * 3_600_000 * 48),
+      })),
+    );
+    // The latest row has no stored list (pruned): the next list is a change.
+    const next = await revisions.recordToolRevision({
+      itemId,
+      source: "owner",
+      tools: [tool("a")],
+      observedAt: new Date("2026-12-31T00:00:00Z"),
+    });
+    expect(next).toMatchObject({ outcome: "created", revision: cap + 6 });
+    const rows = await rowsOf(itemId);
+    expect(rows).toHaveLength(cap);
+    expect(rows[0]?.revision).toBe(7);
+    expect(rows[rows.length - 1]?.revision).toBe(cap + 6);
+  }, 120_000);
+
+  test("a canonical-form bump re-derives the old list: no spurious changes, confirm upgrades", async () => {
+    const { itemId } = await item("bump");
+    // A revision as an older form stored it: keys unsorted, text unnormalised.
+    const oldForm = [
+      { name: "b", description: "  spaced   out ", inputSchema: { z: 1, a: { y: 2, x: 3 } }, annotations: {} },
+      { name: "a", description: "same", inputSchema: { type: "object" }, annotations: {} },
+    ];
+    await data.db.insert(data.marketMcpToolRevisions).values({
+      id: randomUUID(),
+      itemId,
+      source: "owner",
+      revision: 1,
+      toolsHash: "hash-of-the-old-form",
+      canonicalVersion: 0,
+      toolsCount: 2,
+      toolsJson: oldForm,
+      diffJson: { added: ["a", "b"], removed: [], changed: [] },
+      observedAt: new Date("2026-10-01T00:00:00Z"),
+      lastConfirmedAt: new Date("2026-10-01T00:00:00Z"),
+    });
+    const same = [
+      tool("a", "same"),
+      { name: "b", description: "spaced out", inputSchema: { a: { x: 3, y: 2 }, z: 1 } },
+    ];
+    // A real change beside the form difference: the diff names only the change.
+    const changed = await revisions.recordToolRevision({
+      itemId,
+      source: "owner",
+      tools: [tool("a", "edited"), same[1]!],
+      observedAt: new Date("2026-10-02T00:00:00Z"),
+    });
+    expect(changed).toMatchObject({ outcome: "created", revision: 2 });
+    expect(changed.outcome === "created" && changed.diff).toEqual({
+      added: [],
+      removed: [],
+      changed: [{ name: "a", fields: ["description"] }],
+    });
+    // Another item: the same list confirms, and the revision moves to the current form.
+    const other = (await item("bump2")).itemId;
+    await data.db.insert(data.marketMcpToolRevisions).values({
+      id: randomUUID(),
+      itemId: other,
+      source: "owner",
+      revision: 1,
+      toolsHash: "hash-of-the-old-form",
+      canonicalVersion: 0,
+      toolsCount: 2,
+      toolsJson: oldForm,
+      diffJson: { added: ["a", "b"], removed: [], changed: [] },
+      observedAt: new Date("2026-10-01T00:00:00Z"),
+      lastConfirmedAt: new Date("2026-10-01T00:00:00Z"),
+    });
+    const confirmed = await revisions.recordToolRevision({
+      itemId: other,
+      source: "owner",
+      tools: same,
+      observedAt: new Date("2026-10-03T00:00:00Z"),
+    });
+    expect(confirmed).toMatchObject({ outcome: "confirmed", revision: 1 });
+    const [row] = await rowsOf(other);
+    expect(row).toMatchObject({
+      canonicalVersion: revisions.TOOL_CANONICAL_VERSION,
+      toolsHash: confirmed.toolsHash,
+      lastConfirmedAt: new Date("2026-10-03T00:00:00Z"),
+    });
+    expect((row?.toolsJson as Array<{ name: string }>).map((t) => t.name)).toEqual(["a", "b"]);
+  });
+
+  test("purging a source's history leaves the others and restarts the numbering", async () => {
+    const { itemId } = await item("purge");
+    await revisions.recordToolRevision({ itemId, source: "owner", tools: [tool("a")] });
+    await revisions.recordToolRevision({ itemId, source: "owner", tools: [tool("b")] });
+    await revisions.recordToolRevision({ itemId, source: "platform-indexed", tools: [tool("p")] });
+    await revisions.purgeToolRevisions({ itemId, source: "owner" });
+    expect(await rowsOf(itemId)).toEqual([]);
+    expect(await rowsOf(itemId, "platform-indexed")).toHaveLength(1);
+    expect(
+      await revisions.recordToolRevision({ itemId, source: "owner", tools: [tool("c")] }),
+    ).toMatchObject({ outcome: "created", revision: 1 });
+  });
+
   test("revisions go with the item", async () => {
     const { itemId } = await item("cascade");
     await revisions.recordToolRevision({ itemId, source: "owner", tools: [tool("a")] });
@@ -306,11 +471,63 @@ describe("tool revisions", () => {
   });
 
   describe("read side", () => {
+    test("only the displayed source's history is public: a `source` parameter is ignored; member times are days", async () => {
+      const { identifier, itemId } = await item("shown");
+      await revisions.recordToolRevision({
+        itemId,
+        source: "platform-indexed",
+        tools: [tool("p")],
+        observedAt: new Date("2026-10-20T08:15:30Z"),
+      });
+      await revisions.recordToolRevision({
+        itemId,
+        source: "member-observed",
+        tools: [tool("m1"), tool("m2")],
+        observedAt: new Date("2026-10-24T13:45:12Z"),
+      });
+      const history = async (query = "") =>
+        (await (await app.request(`/v1/mcp/${enc(identifier)}/tools/revisions${query}`)).json()) as {
+          source: string | null;
+          items: Array<{ source: string; added: string[]; observedAt: string }>;
+        };
+      for (const query of ["", "?source=member-observed", "?source=owner", "?source=nope"]) {
+        const page = await history(query);
+        expect(page.source).toBe("platform-indexed");
+        expect(page.items.map((entry) => entry.added)).toEqual([["p"]]);
+        expect(page.items[0]?.observedAt).toBe("2026-10-20T08:15:30.000Z");
+      }
+      // The platform source takes its list back: the member observation shows,
+      // with times coarsened to the day (each connection refreshes them).
+      await revisions.withdrawToolRevision({ itemId, source: "platform-indexed" });
+      await revisions.recordToolRevision({
+        itemId,
+        source: "member-observed",
+        tools: [tool("m1"), tool("m2")],
+        observedAt: new Date("2026-10-25T22:59:59Z"),
+      });
+      const shown = await history();
+      expect(shown.source).toBe("member-observed");
+      expect(shown.items[0]).toMatchObject({
+        added: ["m1", "m2"],
+        observedAt: "2026-10-24T00:00:00.000Z",
+        lastConfirmedAt: "2026-10-25T00:00:00.000Z",
+      });
+      const detail = (await (await app.request(`/v1/mcp/${enc(identifier)}`)).json()) as {
+        toolsRevision: { source: string; observedAt: string; lastConfirmedAt: string };
+      };
+      expect(detail.toolsRevision).toEqual({
+        source: "member-observed",
+        revision: 1,
+        observedAt: "2026-10-24T00:00:00.000Z",
+        lastConfirmedAt: "2026-10-25T00:00:00.000Z",
+      });
+    });
+
     test("the displayed source is owner, then platform, then member; withdrawn and hidden owner lists are skipped", async () => {
       const { itemId } = await item("display");
-      expect(await revisions.readToolsRevision(itemId, true)).toBeNull();
+      expect(await revisions.readToolsRevision(itemId, false)).toBeNull();
       await revisions.recordToolRevision({ itemId, source: "member-observed", tools: [tool("m")] });
-      expect(await revisions.readToolsRevision(itemId, true)).toMatchObject({
+      expect(await revisions.readToolsRevision(itemId, false)).toMatchObject({
         source: "member-observed",
         revision: 1,
       });
@@ -321,10 +538,19 @@ describe("tool revisions", () => {
       expect(await revisions.readToolsRevision(itemId, false)).toMatchObject({
         source: "platform-indexed",
       });
+      // The owner's list IS shown: it is the only candidate, never a fallback.
+      const legacy = (await item("legacy")).itemId;
+      await revisions.recordToolRevision({ itemId: legacy, source: "platform-indexed", tools: [tool("p")] });
+      expect(await revisions.readToolsRevision(legacy, true)).toBeNull();
+      expect(
+        await revisions.readToolRevisionsPage({ itemId: legacy, ownerToolsVisible: true, limit: 10 }),
+      ).toEqual({ source: null, items: [], nextBefore: null });
       await revisions.withdrawToolRevision({ itemId, source: "owner" });
-      expect(await revisions.readToolsRevision(itemId, true)).toMatchObject({
+      expect(await revisions.readToolsRevision(itemId, false)).toMatchObject({
         source: "platform-indexed",
       });
+      // Shown yet withdrawn (not a state the owner layer produces): still no fallback.
+      expect(await revisions.readToolsRevision(itemId, true)).toBeNull();
     });
 
     test("pages newest first with a cursor, and the endpoint's shape and bounds", async () => {
@@ -383,9 +609,11 @@ describe("tool revisions", () => {
       // Stored lists never leave the server.
       expect(JSON.stringify(first)).not.toContain("inputSchema");
 
-      for (const bad of ["?limit=0", "?limit=51", "?before=0", "?source=nope", "?limit=abc"]) {
+      for (const bad of ["?limit=0", "?limit=51", "?before=0", "?before=3000000000", "?limit=abc"]) {
         expect((await app.request(url(bad))).status).toBe(400);
       }
+      // The largest integer a revision number can be is fine (and empty).
+      expect((await app.request(url("?before=2147483647"))).status).toBe(200);
       expect((await app.request(`/v1/mcp/${enc("io.github.nobody/none")}/tools/revisions`)).status).toBe(404);
       // The detail carries the current revision of the displayed source.
       const detail = (await (await app.request(`/v1/mcp/${enc(identifier)}`)).json()) as {

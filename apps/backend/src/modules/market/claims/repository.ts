@@ -22,6 +22,7 @@ import {
   type McpOwnerOverridesRow,
 } from "./overrides";
 import {
+  purgeToolRevisions,
   recordToolRevision,
   withdrawToolRevision,
 } from "../tool-revisions";
@@ -442,10 +443,11 @@ export async function blockMember(input: {
           updatedAt: input.now,
         })
         .where(eq(marketMcpOwnerOverrides.serverId, input.serverId));
-      // The blocked member's list is gone: the history says so.
+      // The blocked member's list is gone, and so is the history of it: it
+      // would otherwise stay public beside whatever another owner submits.
       if (cleared.clearTools) {
-        await withdrawToolRevision(
-          { itemId: input.serverId, source: "owner", observedAt: input.now },
+        await purgeToolRevisions(
+          { itemId: input.serverId, source: "owner" },
           { tx },
         );
       }

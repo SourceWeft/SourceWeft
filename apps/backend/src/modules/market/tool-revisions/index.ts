@@ -8,9 +8,18 @@
  *   authenticated discovery. Never after a failed, partial or unknown one.
  * - `withdrawToolRevision({ itemId, source })` when a source takes its list
  *   back (not the same as an empty list).
+ * - `purgeToolRevisions({ itemId, source })` when the history itself must go
+ *   (an admin block).
  * - Pass `{ tx }` to commit with the caller's own write.
+ *
+ * Writers that can observe the same list out of order (a member's discovery,
+ * a platform snapshot run) must give `observedAt` an ordering rule of their
+ * own: a slow older observation arriving after a newer one is compared with
+ * the NEWER revision and would be recorded as a change back. This module
+ * orders by call, not by `observedAt`.
  */
 export {
+  purgeToolRevisions,
   recordToolRevision,
   withdrawToolRevision,
   type RecordToolRevisionInput,
@@ -22,6 +31,8 @@ export {
 export {
   TOOL_CANONICAL_VERSION,
   TOOL_REVISIONS_KEPT_FULL,
+  TOOL_REVISIONS_KEPT_ROWS,
+  TOOL_REVISIONS_PER_DAY,
   ToolRevisionInputError,
   type ToolRevisionDiff,
 } from "./canonical";

@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   MARKET_MCP_INSPECT_LIMITS,
+  MARKET_MCP_TOOL_MAX_NESTING,
   marketMcpInspectedToolSchema,
+  marketMcpNestsDeeperThan,
   type MarketMcpInspectedTool,
 } from "@sourceweft/market-contracts";
 
@@ -24,6 +26,19 @@ export const TOOL_CANONICAL_VERSION = 1;
 
 /** Full lists kept per item and source; older revisions keep their diff only. */
 export const TOOL_REVISIONS_KEPT_FULL = 50;
+
+/**
+ * Rows kept per item and source, diff-only ones included: the oldest beyond
+ * this are deleted (the numbering keeps counting from the newest).
+ */
+export const TOOL_REVISIONS_KEPT_ROWS = 500;
+
+/**
+ * New revisions one item and source may make in a rolling 24 hours. A list
+ * that keeps changing (a server that rotates its tools, a misbehaving writer)
+ * would otherwise grow the history, and the public change log, without bound.
+ */
+export const TOOL_REVISIONS_PER_DAY = 24;
 
 export const TOOL_REVISION_LIMITS = MARKET_MCP_INSPECT_LIMITS;
 
@@ -85,6 +100,13 @@ export function validateTools(tools: readonly unknown[]): MarketMcpInspectedTool
   const parsed: MarketMcpInspectedTool[] = [];
   const names = new Set<string>();
   for (const tool of tools) {
+    // Before anything recursive touches it (the contract checks this too).
+    if (marketMcpNestsDeeperThan(tool, MARKET_MCP_TOOL_MAX_NESTING)) {
+      throw new ToolRevisionInputError(
+        "TOOLS_INVALID",
+        `A tool may nest values at most ${MARKET_MCP_TOOL_MAX_NESTING} levels deep`,
+      );
+    }
     const result = marketMcpInspectedToolSchema.safeParse(tool);
     if (!result.success) {
       throw new ToolRevisionInputError(
@@ -104,13 +126,25 @@ export function validateTools(tools: readonly unknown[]): MarketMcpInspectedTool
   return parsed;
 }
 
+// Own data property, so a key named `__proto__` stays a key (a plain
+// assignment would set the prototype and silently drop it).
+function setOwn(target: Record<string, unknown>, key: string, value: unknown) {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
+// Callers have bounded the nesting (see `validateTools`).
 function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeys);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(value).sort(compareCodeUnits)) {
       const entry = (value as Record<string, unknown>)[key];
-      if (entry !== undefined) out[key] = sortKeys(entry);
+      if (entry !== undefined) setOwn(out, key, sortKeys(entry));
     }
     return out;
   }
