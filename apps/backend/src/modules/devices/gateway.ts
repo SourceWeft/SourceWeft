@@ -18,6 +18,7 @@ import {
   deliverNetworkDecisions,
   denyFrame,
   handleNetworkAsk,
+  withAskKind,
   NETWORK_REASONS,
 } from "./network-approvals";
 import { logger } from "../../shared/logger";
@@ -110,7 +111,10 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
             deviceId,
             error: String(error),
           });
-          return denyFrame(message.askId, NETWORK_REASONS.unavailable);
+          return withAskKind(
+            denyFrame(message.askId, NETWORK_REASONS.unavailable),
+            message.kind,
+          );
         });
         if (frame && ws.readyState === WebSocket.OPEN)
           ws.send(JSON.stringify(frame));

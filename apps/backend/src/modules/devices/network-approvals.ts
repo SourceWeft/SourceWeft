@@ -41,7 +41,6 @@ import {
   sidecarAllowEntry,
 } from "./network-policy";
 import {
-  MAX_NETWORK_POLICY_ENTRIES,
   resolveSkillNetworkDomains,
   type NetworkSkillInput,
 } from "./network-skill-domains";
@@ -52,6 +51,11 @@ export type NetworkDecisionFrame = {
   askId: string;
   allow: boolean;
   reason?: string;
+  /**
+   * Echoed for answers about a write request, so a device can tell them from
+   * answers about a host and refuses one that lacks it (an older backend).
+   */
+  kind?: "request";
 };
 
 export type NetworkAskMessage = {
@@ -90,6 +94,12 @@ export const NETWORK_REASONS = {
   invalidRequest: "invalid request",
   tooMany: "too many network requests",
 } as const;
+
+/**
+ * Entries sent in a command's `allow` list. The device merges up to 200 vault
+ * hosts into it and the sandbox refuses a list over 500, so this leaves room.
+ */
+export const MAX_NETWORK_ALLOW_ENTRIES = 300;
 
 /** Bounds on what one command and one computer may leave waiting. */
 export const MAX_NETWORK_REQUESTS_PER_COMMAND = 20;
@@ -164,19 +174,30 @@ export function denyFrame(askId: string, reason: string): NetworkDecisionFrame {
   return { type: "network.decision", askId, allow: false, reason };
 }
 
+/** Marks the answer to a write-request ask; host answers stay unmarked. */
+export function withAskKind<T extends NetworkDecisionFrame>(
+  frame: T,
+  kind: string | undefined,
+): T {
+  return kind === "request" ? { ...frame, kind: "request" } : frame;
+}
+
 /** The frame for a settled row. Pure so delivery and idempotent replies agree. */
 export function decisionFrameForRow(
-  row: Pick<NetworkRequestRow, "askId" | "status" | "reason">,
+  row: Pick<NetworkRequestRow, "askId" | "status" | "reason"> &
+    Partial<Pick<NetworkRequestRow, "kind">>,
 ): NetworkDecisionFrame {
-  if (row.status === "allowed")
-    return { type: "network.decision", askId: row.askId, allow: true };
-  return denyFrame(
-    row.askId,
-    row.reason ??
-      (row.status === "expired"
-        ? NETWORK_REASONS.timedOut
-        : NETWORK_REASONS.denied),
-  );
+  const frame: NetworkDecisionFrame =
+    row.status === "allowed"
+      ? { type: "network.decision", askId: row.askId, allow: true }
+      : denyFrame(
+          row.askId,
+          row.reason ??
+            (row.status === "expired"
+              ? NETWORK_REASONS.timedOut
+              : NETWORK_REASONS.denied),
+        );
+  return withAskKind(frame, row.kind);
 }
 
 /** Active, unexpired `network_access` rules as allow-list patterns (exact hosts). */
@@ -229,14 +250,20 @@ export function buildCommandNetworkPolicy(input: {
   // still an allow-list mode, so only open needs no list.
   if (input.mode === "open") return { mode: "open", allow: [], suggested: {} };
   const skills = resolveSkillNetworkDomains(input.skills);
-  // Only entries the device's runtime will actually keep.
+  // Only entries the device's runtime will actually keep, within the room the
+  // desktop leaves for the vault hosts it merges in. Skill domains come first;
+  // rules follow newest first, so the oldest are the ones dropped past the cap.
+  const newestFirst = [...input.rules].sort(
+    (a, b) =>
+      b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id),
+  );
   const allow = [
     ...new Set(
-      [...allowPatternsFromRules(input.rules, input.now), ...skills.trusted]
+      [...skills.trusted, ...allowPatternsFromRules(newestFirst, input.now)]
         .map(sidecarAllowEntry)
         .filter((entry): entry is string => entry !== null),
     ),
-  ].slice(0, MAX_NETWORK_POLICY_ENTRIES);
+  ].slice(0, MAX_NETWORK_ALLOW_ENTRIES);
   return { mode: input.mode, allow, suggested: skills.suggested };
 }
 
@@ -299,6 +326,17 @@ export async function handleNetworkAsk(
   device: { id: string; userId: string },
   ask: NetworkAskMessage,
   now: Date = new Date(),
+): Promise<NetworkDecisionFrame | null> {
+  // Every answer to a write-request ask, denials and replays included, echoes
+  // the kind the device asked with.
+  const frame = await answerNetworkAsk(device, ask, now);
+  return frame ? withAskKind(frame, ask.kind) : null;
+}
+
+async function answerNetworkAsk(
+  device: { id: string; userId: string },
+  ask: NetworkAskMessage,
+  now: Date,
 ): Promise<NetworkDecisionFrame | null> {
   // The host and port are whatever the sandboxed program tried to connect to;
   // anything unusable is a deny, never a protocol error.

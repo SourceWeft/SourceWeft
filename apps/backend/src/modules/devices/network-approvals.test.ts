@@ -28,6 +28,8 @@ import {
   allowPatternsFromRules,
   approvalExpiry,
   buildCommandNetworkPolicy,
+  MAX_NETWORK_ALLOW_ENTRIES,
+  withAskKind,
   decisionFrameForRow,
   matchingNetworkRule,
   readAskShape,
@@ -164,7 +166,7 @@ describe("buildCommandNetworkPolicy", () => {
       buildCommandNetworkPolicy({ mode: "ask", rules: [rule()], skills, now }),
     ).toEqual({
       mode: "ask",
-      allow: ["api.example.com", "cdn.pdf.example"],
+      allow: ["cdn.pdf.example", "api.example.com"],
       suggested: { "evil.example": "mine" },
     });
   });
@@ -179,7 +181,7 @@ describe("buildCommandNetworkPolicy", () => {
       }),
     ).toMatchObject({
       mode: "strict",
-      allow: ["api.example.com", "cdn.pdf.example"],
+      allow: ["cdn.pdf.example", "api.example.com"],
     });
   });
 
@@ -189,18 +191,51 @@ describe("buildCommandNetworkPolicy", () => {
     ).toEqual({ mode: "open", allow: [], suggested: {} });
   });
 
-  test("duplicates collapse and the list is bounded", () => {
+  test("duplicates collapse and the list leaves room for the vault hosts the device adds", () => {
+    // 300 + the desktop's 200 vault hosts stays within the runtime's 500.
+    expect(MAX_NETWORK_ALLOW_ENTRIES).toBe(300);
     const many = Array.from({ length: 600 }, (_, i) =>
-      rule({ id: `r${i}`, targetId: `h${i}.example.com` }),
+      rule({
+        id: `r${i}`,
+        targetId: `h${i}.example.com`,
+        // r0 is the oldest, r599 the newest.
+        createdAt: new Date(Date.UTC(2026, 0, 1) + i * 1000).toISOString(),
+      }),
     );
     const policy = buildCommandNetworkPolicy({
       mode: "ask",
       rules: [rule(), rule({ id: "dup" }), ...many],
-      skills: [],
+      skills: [
+        {
+          name: "pdf",
+          sourceType: "builtin",
+          skillMd:
+            '---\nname: pdf\nnetwork-domains:\n  - "cdn.pdf.example"\n---',
+        },
+      ],
       now,
     });
-    expect(policy.allow).toHaveLength(500);
-    expect(new Set(policy.allow).size).toBe(500);
+    expect(policy.allow).toHaveLength(300);
+    expect(new Set(policy.allow).size).toBe(300);
+    // Skill domains are never the ones dropped; past the cap the oldest rules go.
+    expect(policy.allow[0]).toBe("cdn.pdf.example");
+    expect(policy.allow).toContain("h599.example.com");
+    expect(policy.allow).not.toContain("h0.example.com");
+    // Deterministic whatever order the rules arrive in.
+    const reversed = buildCommandNetworkPolicy({
+      mode: "ask",
+      rules: [rule(), rule({ id: "dup" }), ...[...many].reverse()],
+      skills: [
+        {
+          name: "pdf",
+          sourceType: "builtin",
+          skillMd:
+            '---\nname: pdf\nnetwork-domains:\n  - "cdn.pdf.example"\n---',
+        },
+      ],
+      now,
+    });
+    expect(reversed.allow).toEqual(policy.allow);
   });
 
   test("no skills and no rules is an empty ask policy", () => {
@@ -235,6 +270,38 @@ describe("decisionFrameForRow", () => {
     ).toMatchObject({ allow: false, reason: "command finished" });
   });
 
+  test("answers about a write request echo the kind; host answers do not", () => {
+    for (const status of ["allowed", "denied", "expired"] as const) {
+      expect(
+        decisionFrameForRow({
+          askId: "a",
+          status,
+          reason: null,
+          kind: "request",
+        }),
+        status,
+      ).toMatchObject({
+        type: "network.decision",
+        askId: "a",
+        kind: "request",
+      });
+      expect(
+        decisionFrameForRow({ askId: "a", status, reason: null, kind: "host" }),
+      ).not.toHaveProperty("kind");
+      expect(
+        decisionFrameForRow({ askId: "a", status, reason: null }),
+      ).not.toHaveProperty("kind");
+    }
+    const deny = {
+      type: "network.decision" as const,
+      askId: "a",
+      allow: false,
+    };
+    expect(withAskKind(deny, "request")).toEqual({ ...deny, kind: "request" });
+    for (const other of ["host", "rule", undefined])
+      expect(withAskKind(deny, other)).toEqual(deny);
+  });
+
   test("a row that is somehow still pending is never an allow", () => {
     expect(
       decisionFrameForRow({ askId: "a", status: "pending", reason: null })
@@ -262,11 +329,12 @@ describe("allow list sent to the device", () => {
       ],
       now,
     });
+    // Skill domains first, then rules newest first (ties by id).
     expect(policy.allow).toEqual([
+      "*.cdn.example",
       "api.example.com",
       "[2001:db8::1]",
       "8.8.8.8",
-      "*.cdn.example",
     ]);
   });
 });

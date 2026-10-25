@@ -1564,6 +1564,7 @@ test("a write request to a secret-bound host always goes to the user: no mode, r
     type: "network.decision",
     askId: "w-ask",
     allow: true,
+    kind: "request",
   });
   const denied = await approvals.respondToNetworkRequest({
     userId: w.h.userId,
@@ -1577,6 +1578,7 @@ test("a write request to a secret-bound host always goes to the user: no mode, r
     askId: "w-open",
     allow: false,
     reason: "denied by user",
+    kind: "request",
   });
   // The trust-rule table is untouched by every request answer.
   assert.equal(await trustSnapshot(w), rulesBefore);
@@ -1617,6 +1619,8 @@ test("a malformed write-request ask is denied as an invalid request and stores n
         askId,
         allow: false,
         reason: "invalid request",
+        // Only an ask that said it was a write request gets the echo.
+        ...(extra.kind === "request" ? { kind: "request" } : {}),
       },
       askId,
     );
@@ -1696,6 +1700,7 @@ test("write-request rows share the caps and the stale-card rules of host rows", 
       askId: "one-too-many",
       allow: false,
       reason: "too many network requests",
+      kind: "request",
     },
   );
   assert.equal((await requests(w.h.id)).length, 20);
@@ -1938,4 +1943,79 @@ test("the body flag is only valid on a write request", async () => {
     (rows) => rows.length === 1,
   );
   assert.equal((await requests(w.h.id))[0]!.secretInBody, false);
+});
+
+test("every answer about a write request echoes its kind: replays, expiry and disconnects included", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  // Replay of a settled row.
+  device.ask(invocationId, "e-1", "api.example.com", 443, WRITE);
+  const [pending] = (
+    await until(
+      () => pendingFor(w),
+      (result) => result.requests.length === 1,
+    )
+  ).requests;
+  await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: pending!.id,
+    decision: "deny",
+  });
+  const first = await device.waitFor((f) => f.type === "network.decision");
+  assert.equal(first.kind, "request");
+  device.ask(invocationId, "e-1", "api.example.com", 443, WRITE);
+  assert.equal(
+    (await device.waitFor((f) => f.type === "network.decision")).kind,
+    "request",
+  );
+  // A host answer to the same device carries no echo.
+  device.ask(invocationId, "h-1", "plain.example", 443);
+  await until(
+    () => requests(w.h.id),
+    (rows) => rows.length === 2,
+  );
+  await schema.db
+    .update(schema.localNetworkRequests)
+    .set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(schema.localNetworkRequests.askId, "h-1"));
+  const hostFrame = await device.waitFor((f) => f.type === "network.decision");
+  assert.equal(hostFrame.askId, "h-1");
+  assert.equal("kind" in hostFrame, false);
+  // Expiry sweep of a write request.
+  const expiring = await insertRow(w, invocationId, {
+    askId: "e-2",
+    kind: "request",
+    method: "POST",
+    path: "/late",
+    expiresAt: new Date(Date.now() - 1000),
+  });
+  assert.ok(expiring.id);
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "e-2",
+    allow: false,
+    reason: "approval timed out",
+    kind: "request",
+  });
+  // A command that finished.
+  const other = await w.invoke();
+  await insertRow(w, other, {
+    askId: "e-3",
+    kind: "request",
+    method: "PUT",
+    path: "/gone",
+  });
+  await schema.db
+    .update(schema.localToolInvocations)
+    .set({ status: "succeeded" })
+    .where(eq(schema.localToolInvocations.id, other));
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "e-3",
+    allow: false,
+    reason: "command finished",
+    kind: "request",
+  });
 });
