@@ -157,10 +157,7 @@ pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String
             continue;
         };
         if !canonical.is_dir()
-            || canonical_home.starts_with(&canonical)
-            || canonical == canonical_local
-            || canonical.starts_with(&canonical_base)
-            || canonical_base.starts_with(&canonical)
+            || is_protected_read_root(&canonical, &canonical_home, &canonical_local, &canonical_base)
         {
             continue;
         }
@@ -172,6 +169,27 @@ pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String
         }
     }
     roots
+}
+
+/// Ruling R16: the areas a read root must never equal, contain, or be an ancestor of — the home
+/// directory itself (and its ancestors), exactly `~/.local` (which holds `~/.local/share`, where
+/// app data lives), and the app-data `base` in either direction (a root inside it, or one that
+/// contains it). All arguments are already canonicalised.
+///
+/// `read_roots` processes only `PATH` entries that already lie *inside* `$HOME`, so it does not
+/// (and must not) reject "inside home" here — that is the toolchain it is re-allowing.
+/// `darwin_read_roots_with` adds that one further check for its discovered extras, which can point
+/// anywhere (e.g. a `DEVELOPER_DIR=$HOME` that makes `xcode-select -p` echo the home directory).
+fn is_protected_read_root(
+    canonical: &Path,
+    canonical_home: &Path,
+    canonical_local: &Path,
+    canonical_base: &Path,
+) -> bool {
+    canonical_home.starts_with(canonical)
+        || canonical == canonical_local
+        || canonical.starts_with(canonical_base)
+        || canonical_base.starts_with(canonical)
 }
 
 /// The system `xcode-select` the production discovery runs; a test passes a stub path instead.
@@ -247,8 +265,11 @@ fn darwin_developer_dir(command_line_tools: &str) -> Option<String> {
 
 /// `darwin_read_roots` with its discovered extra directories supplied directly, so a test can
 /// drive the merge without depending on what the host has installed. Each extra is canonicalised
-/// and kept only when it is a directory; the PATH-derived roots come first and duplicates are
-/// dropped.
+/// and kept only when it is a directory **and** passes the same R16 containment filter
+/// `read_roots` applies, plus a rejection of anything inside (or equal to) `$HOME`: a discovered
+/// extra can point anywhere, so a `DEVELOPER_DIR` that makes `xcode-select -p` echo `$HOME`, a home
+/// subdirectory, or the app-data base must never silently re-open it for every wrapped command. The
+/// PATH-derived roots come first and duplicates are dropped.
 fn darwin_read_roots_with(
     home: &Path,
     base: &Path,
@@ -256,11 +277,20 @@ fn darwin_read_roots_with(
     extra: &[PathBuf],
 ) -> Vec<String> {
     let mut roots = read_roots(home, base, path_var);
+    if !home.is_absolute() {
+        return roots;
+    }
+    let canonical_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let canonical_base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let canonical_local = canonical_home.join(".local");
     for candidate in extra {
         let Ok(canonical) = candidate.canonicalize() else {
             continue;
         };
-        if !canonical.is_dir() {
+        if !canonical.is_dir()
+            || canonical.starts_with(&canonical_home)
+            || is_protected_read_root(&canonical, &canonical_home, &canonical_local, &canonical_base)
+        {
             continue;
         }
         let Some(text) = canonical.to_str() else {
@@ -279,7 +309,16 @@ fn darwin_read_roots_with(
 /// broken `xcode-select` never adds a read root. The canonical form is what is compared and handed
 /// to srt (srt matches literal paths without resolving them against a cwd).
 fn developer_dir(xcode_select: &str) -> Option<PathBuf> {
-    let output = Command::new(xcode_select).arg("-p").output().ok()?;
+    // Clear the environment first: `xcode-select -p` echoes `$DEVELOPER_DIR` verbatim when it is
+    // set (e.g. `DEVELOPER_DIR=$HOME xcode-select -p` prints the home directory), so an inherited
+    // `DEVELOPER_DIR` pointing at `$HOME`, a home subpath, or the app-data base would otherwise be
+    // discovered here and re-opened for reads in every wrapped command. `xcode-select` needs no
+    // environment to read the active developer directory, and the binary is an absolute path.
+    let output = Command::new(xcode_select)
+        .env_clear()
+        .arg("-p")
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -867,6 +906,86 @@ mod tests {
             ]
         );
         assert!(!roots.iter().any(|r| *r == absent.to_string_lossy()));
+    }
+
+    #[test]
+    fn darwin_read_roots_drop_home_local_and_base_candidates() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        fs::create_dir_all(home.join(".local")).unwrap();
+        let home_sub = home.join("Developer");
+        fs::create_dir(&home_sub).unwrap();
+        let home_parent = home.parent().unwrap().to_path_buf();
+        // A base OUTSIDE home, so the base-containment checks are exercised on their own (on a real
+        // macOS host base is under home, where the inside-home check already covers it).
+        let base_root = tempfile::tempdir().unwrap();
+        let base = base_root.path().canonicalize().unwrap().join("app");
+        fs::create_dir_all(&base).unwrap();
+        let base_parent = base.parent().unwrap().to_path_buf();
+        // A directory outside every protected area.
+        let safe = tempfile::tempdir().unwrap();
+        let safe = safe.path().canonicalize().unwrap();
+
+        for dropped in [
+            home.clone(),         // equals home
+            home_sub.clone(),     // inside home (the DEVELOPER_DIR=$HOME/sub leak)
+            home.join(".local"),  // exactly ~/.local
+            home_parent.clone(),  // contains (is an ancestor of) home
+            base.clone(),         // equals base
+            base_parent.clone(),  // contains base
+        ] {
+            let roots = darwin_read_roots_with(&home, &base, "/usr/bin", std::slice::from_ref(&dropped));
+            assert!(
+                !roots.iter().any(|r| *r == dropped.to_string_lossy()),
+                "{dropped:?} must be dropped, got {roots:?}"
+            );
+        }
+        // A directory outside all protected areas is kept.
+        let kept = darwin_read_roots_with(&home, &base, "/usr/bin", &[safe.clone()]);
+        assert!(
+            kept.iter().any(|r| *r == safe.to_string_lossy()),
+            "{safe:?} should be kept, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn developer_dir_runs_xcode_select_with_a_cleared_environment() {
+        // Regression: `xcode-select -p` echoes `$DEVELOPER_DIR` verbatim, so an inherited
+        // `DEVELOPER_DIR` (pointing at `$HOME`, a home subpath, or the app-data base) must never
+        // reach the child and become a read root. Rather than mutate this process's own
+        // environment (which would race the login-shell `user_path()` reads in sibling tests), the
+        // stub reports success only when it sees a cleared environment: the test runner always has
+        // `HOME` set, so if `developer_dir` did NOT clear the child env the stub would see it and
+        // bail. It prints a real directory (so a non-cleared run is caught as a `Some` vs `None`
+        // difference, not a missing path) only when `DEVELOPER_DIR` and `HOME` are both empty. (A
+        // cleared-env `/bin/sh` still defaults `PATH`, so `PATH` is not part of the check.)
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path().canonicalize().unwrap();
+        let reported = dir.join("Developer");
+        fs::create_dir(&reported).unwrap();
+        let stub = dir.join("xcode-select");
+        fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\nif [ -z \"$DEVELOPER_DIR\" ] && [ -z \"$HOME\" ]; \
+                 then printf '%s' '{}'; else exit 7; fi\n",
+                reported.to_str().unwrap()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&stub).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&stub, permissions).unwrap();
+        fs::File::open(&stub).unwrap().sync_all().unwrap();
+        assert!(
+            std::env::var_os("HOME").is_some(),
+            "the test runner must have HOME set for this test to be meaningful"
+        );
+        assert_eq!(
+            developer_dir(stub.to_str().unwrap()),
+            Some(reported),
+            "xcode-select must run with a cleared environment (HOME/PATH/DEVELOPER_DIR unset)"
+        );
     }
 
     /// The production discovery entry point adds the real `xcode-select -p` developer directory
