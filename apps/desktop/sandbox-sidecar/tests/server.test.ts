@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
-import { buildConfig, perWrapReadRoots } from "../src/policy.js";
+import { buildConfig, perWrapReadRoots, perWrapWriteDenies } from "../src/policy.js";
 import type { InitConfig, Request, Response } from "../src/protocol.js";
 import { startServer } from "../src/server.js";
 import type { SrtLike } from "../src/server.js";
@@ -721,4 +721,61 @@ test("darwin wrap and probe pass /bin/bash as srt's binShell; linux leaves srt's
   });
   assert.deepEqual(linux.binShells, [undefined, undefined]);
   await linuxHarness.stop();
+});
+
+// A granted $HOME is writable, so the credential paths must reach srt as `denyWrite` for every
+// wrap — the overlay's empty `denyWrite` must not replace them.
+test("darwin wrap keeps the credential denyWrite entries from buildConfig", async () => {
+  const srt = makeFakeSrt();
+  const init = darwinInit();
+  const harness = await initHarness(srt, undefined, init);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  const denied = (srt.lastCustomConfig as { filesystem: { denyWrite: Array<{ path: string }> } })
+    .filesystem.denyWrite.map((entry) => entry.path);
+  for (const relative of [".ssh", ".aws", ".gnupg", "Library/Keychains"])
+    assert.ok(denied.includes(`${init.home}/${relative}`), `${relative} must be write-denied`);
+  assertMergeInvariant(srt.lastCustomConfig, workspaceRoot, init);
+  await harness.stop();
+});
+
+test("linux wrap and probe add write denies only for credential paths that exist at that moment", async () => {
+  const home = mkdtempSync(join(tmpRoot, "linux-home-"));
+  mkdirSync(join(home, ".ssh"));
+  const init = linuxInit({ home });
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, init);
+  const denyWrite = () =>
+    (srt.lastCustomConfig as { filesystem: { denyWrite: Array<{ path: string }> } }).filesystem.denyWrite.map(
+      (entry) => entry.path,
+    );
+  const wrap = async () => {
+    const response = await harness.send({
+      op: "wrap",
+      commandId: "c".repeat(22),
+      command: "echo hi",
+      cwd: workspaceRoot,
+      workspaceRoot,
+    });
+    assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  };
+  await wrap();
+  // The static entry survives; the existing directory is added; absent paths (which srt would
+  // otherwise create as placeholders in the real home) are not.
+  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".ssh")]);
+  // Checked per command: a path that appears later is covered by the next wrap.
+  mkdirSync(join(home, ".aws"));
+  await wrap();
+  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".ssh"), join(home, ".aws")]);
+  assert.deepEqual(perWrapWriteDenies(init), [join(home, ".ssh"), join(home, ".aws")]);
+  const probe = await harness.send({ op: "probe" });
+  assert.equal(probe.ok, true, `probe failed: ${JSON.stringify(probe)}`);
+  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".ssh"), join(home, ".aws")]);
+  await harness.stop();
 });

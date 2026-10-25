@@ -6,6 +6,7 @@
  * access to exactly that command's workspace root — the caller (Task 3's server) merges the
  * two before handing the result to srt.
  */
+import { lstatSync } from "node:fs";
 import { isAbsolute, normalize as normalizePosix } from "node:path/posix";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { UNROUTABLE_V4, UNROUTABLE_V6 } from "./address-guard.js";
@@ -193,6 +194,40 @@ function credentialDenies(platform: InitConfig["platform"], home: string): strin
   return relatives.map((relative) => `${base}/${relative}`);
 }
 
+/** True when `path` exists (a symlink counts, dangling or not). */
+function existsNoFollow(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The credential paths (`credentialDenies`) that must also stay unwritable, so a granted `$HOME`
+ * workspace cannot overwrite a private key or plant `~/.ssh/authorized_keys`. `denyWrite` takes
+ * precedence over srt's `allowWrite` for the workspace.
+ *
+ * darwin: all of them, unconditionally (`buildConfig`) — Seatbelt matches a path rule whether or
+ * not the path exists and creates nothing on the host.
+ *
+ * linux: only the ones that exist right now (`perWrapWriteDenies`, per command). For an absent
+ * deny path under a writable root, bubblewrap first creates an empty placeholder on the host
+ * (the first missing component — for `~/.aws` an empty FILE, for `~/.config/gh/hosts.yml` a
+ * `~/.config` directory) and removes it after the command. In a granted `$HOME` that would
+ * transiently litter the real home, and leave a stray file there if the sidecar died mid-command.
+ * Skipping absent paths is the safe subset: it leaves "the command creates a missing
+ * `~/.ssh` itself" unprotected on Linux (reads of those paths stay denied everywhere).
+ */
+export function perWrapWriteDenies(
+  init: Pick<InitConfig, "platform" | "home">,
+  exists: (path: string) => boolean = existsNoFollow,
+): string[] {
+  if (init.platform === "darwin") return [];
+  return credentialDenies(init.platform, init.home).filter(exists);
+}
+
 // Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer
 // behind `address-guard.ts`'s pre-resolution checks on the literal host string (srt never
 // re-judges an IP literal, so `address-guard.ts` carries the full policy for literals).
@@ -291,7 +326,10 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
         literal: true as const,
       })),
       allowWrite: [],
-      denyWrite: deniedWritePaths(init.platform).map((path) => ({
+      denyWrite: [
+        ...deniedWritePaths(init.platform),
+        ...(init.platform === "darwin" ? credentialDenies(init.platform, init.home) : []),
+      ].map((path) => ({
         path,
         literal: true as const,
       })),

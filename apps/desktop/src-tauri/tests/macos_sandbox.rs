@@ -245,6 +245,52 @@ fn granted_home_hides_credential_directories() {
         text.contains("sibling-ok"),
         "positive control: a sibling file in the granted home must stay readable: {result}"
     );
+
+    // The same paths are unwritable: a command must not overwrite a key or plant a new file
+    // (`authorized_keys`, a second key) inside them. The workspace (= home) itself stays writable.
+    let writes = execute_denied(
+        &host,
+        "granted-home-write",
+        &workspace,
+        "for f in .ssh/new_key .ssh/authorized_keys .aws/credentials .gnupg/x Library/Keychains/y; do \
+           if printf pwned > \"$f\" 2>/dev/null; then echo \"WROTE:$f\"; else echo \"DENIED:$f\"; fi; done; \
+         if printf fresh > sibling-new.txt; then echo WROTE-SIBLING; else echo SIBLING-DENIED; fi",
+    );
+    let text = output(&writes);
+    for relative in [
+        ".ssh/new_key",
+        ".ssh/authorized_keys",
+        ".aws/credentials",
+        ".gnupg/x",
+        "Library/Keychains/y",
+    ] {
+        assert!(
+            text.contains(&format!("DENIED:{relative}")) && !text.contains(&format!("WROTE:{relative}")),
+            "{relative} was writable from a granted home: {writes}"
+        );
+    }
+    assert!(
+        text.contains("WROTE-SIBLING"),
+        "positive control: the granted home itself must stay writable: {writes}"
+    );
+    // On the host: nothing was created, nothing overwritten, the sibling exists.
+    for relative in [".ssh/new_key", ".ssh/authorized_keys", "Library/Keychains/y"] {
+        assert!(
+            !home_path.join(relative).exists(),
+            "{relative} was created inside the credential directory"
+        );
+    }
+    for (relative, secret) in planted {
+        assert_eq!(
+            fs::read_to_string(home_path.join(relative)).unwrap(),
+            secret,
+            "{relative} was overwritten"
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(home_path.join("sibling-new.txt")).unwrap(),
+        "fresh"
+    );
 }
 
 #[test]
