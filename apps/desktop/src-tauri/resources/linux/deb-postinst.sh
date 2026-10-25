@@ -11,8 +11,11 @@ set -e
 case "$1" in
   configure)
     if ! /opt/sourceweft/libexec/sourceweft-sandbox-setup install; then
-      echo "sourceweft: the local sandbox setup failed. Local execution will report that it needs setup." >&2
-      echo "sourceweft: fix the problem above, then run: sudo /opt/sourceweft/libexec/sourceweft-sandbox-setup install" >&2
+      # The setup script exits 0 when AppArmor is simply absent (it says so itself), so this
+      # only runs when a step really failed; the messages above name the step, and the files
+      # may be partly installed.
+      echo "sourceweft: the local sandbox setup exited with an error (see the messages above). Local execution will report that it needs setup." >&2
+      echo "sourceweft: fix the problem, then run: sudo /opt/sourceweft/libexec/sourceweft-sandbox-setup install" >&2
     fi
     ;;
 esac
