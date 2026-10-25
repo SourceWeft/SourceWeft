@@ -102,16 +102,24 @@ export function buildArtifactRuntimeScript(input: {
       return Promise.reject(failure("unavailable", "This page does not declare storage"));
     if (portPromise) return portPromise;
     portPromise = new Promise(function (resolve, reject) {
-      var timer = setTimeout(function () {
-        window.removeEventListener("message", onWelcome);
-        portPromise = null;
-        reject(failure("unavailable", "Storage is not available here"));
-      }, 5000);
+      var attempts = 0;
+      // The host answers one hello per iframe, and only once its listener is
+      // up, so repeat it briefly; the host ignores repeats after it answers.
+      var timer = setInterval(function () {
+        if (++attempts > 50) {
+          clearInterval(timer);
+          window.removeEventListener("message", onWelcome);
+          portPromise = null;
+          reject(failure("unavailable", "Storage is not available here"));
+          return;
+        }
+        host.postMessage({ type: C.hello, v: C.v }, "*");
+      }, 100);
       function onWelcome(event) {
         if (event.source !== host) return;
         var data = event.data;
         if (!data || data.type !== C.welcome || !event.ports || !event.ports[0]) return;
-        clearTimeout(timer);
+        clearInterval(timer);
         window.removeEventListener("message", onWelcome);
         var port = event.ports[0];
         port.onmessage = function (message) {
@@ -180,6 +188,9 @@ export function buildArtifactRuntimeScript(input: {
       }
     });
   }
+  // Claim the host's single handshake now, before any page script can run: a
+  // document the frame navigates to later arrives too late for it.
+  if (C.storage) connect().catch(function () {});
   var storage = Object.freeze({
     collection: collection,
     get: function (key, options) {

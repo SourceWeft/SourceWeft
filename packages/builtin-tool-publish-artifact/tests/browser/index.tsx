@@ -40,11 +40,22 @@ const storageTransport: ArtifactRecordsTransport = {
   },
 };
 const root = createRoot(document.getElementById("root")!);
+// Counts handshake requests as the host sees them, so a test can tell that a
+// page claimed it without ever calling storage.
+(window as unknown as { __hellos: number }).__hellos = 0;
+window.addEventListener(
+  "message",
+  (event) => {
+    if (event.data?.type === "sourceweft.storage/hello")
+      (window as unknown as { __hellos: number }).__hellos++;
+  },
+  true,
+);
 if (new URLSearchParams(location.search).has("storage")) {
   root.render(
     <HtmlPreview
       title="Storage fixture"
-      fileUrl="/storage.html?artifactVersionId=version-1"
+      fileUrl={`/${new URLSearchParams(location.search).get("storage") || "storage"}.html?artifactVersionId=version-1`}
       downloadUrl={null}
       storage={{ storage: true, shared: false }}
       records={storageTransport}

@@ -121,6 +121,32 @@ test("opaque origins, non-JSON bodies and oversized requests never reach the ser
   assert.equal(mocks.execute.mock.calls.length, 0);
 });
 
+test("the body limit holds without a trustworthy Content-Length", async () => {
+  const chunk = new TextEncoder().encode(`${"x".repeat(64 * 1024)}`);
+  let pulled = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulled++;
+      controller.enqueue(chunk);
+      if (pulled >= 1000) controller.close();
+    },
+  });
+  const response = await app().request(
+    "/v1/workspaces/ws-1/artifacts/a/records",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: stream,
+      // @ts-expect-error Node's fetch needs this for a streamed request body.
+      duplex: "half",
+    },
+  );
+  assert.equal(response.status, 400);
+  // Reading stopped at the limit instead of draining all 1000 chunks.
+  assert.ok(pulled < 20, `pulled ${pulled} chunks`);
+  assert.equal(mocks.execute.mock.calls.length, 0);
+});
+
 test("unauthenticated requests are rejected", async () => {
   mocks.requireSession.mockResolvedValue(null);
   const response = await post("/artifacts/a/records", {

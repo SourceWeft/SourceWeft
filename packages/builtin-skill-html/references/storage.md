@@ -54,7 +54,7 @@ const { records, cursor } = await tasks.query({
 // records: [{ id, data, etag, createdAt, updatedAt }]; pass cursor back for the next page.
 ```
 
-Filter operators are `eq`, `ne`, `in` (up to 20 values), `contains` (array or object containment), `exists`, and `lt`, `lte`, `gt`, `gte`. Range operators compare a number with a number and a string with a string. Paths are dotted field names such as `meta.owner`. A query takes up to 8 filters and 2 sort fields. Missing fields sort as null. Numbers sort before strings.
+Filter operators are `eq`, `ne`, `in` (up to 20 values), `contains` (array or object containment), `exists`, and `lt`, `lte`, `gt`, `gte`. Range operators compare a number with a number and a string with a string. Paths are dotted field names such as `meta.owner`. A query takes up to 8 filters and 2 sort fields. Missing fields sort as null. Ascending order is null, then strings, then numbers, then booleans, then arrays, then objects (descending reverses it), so do not mix types in a field you sort by.
 
 ## Limits and errors
 

@@ -42,6 +42,20 @@ test("scalar equality uses the GIN containment probe plus exact equality", () =>
   assert.match(structured.sql, / = \$\d+::jsonb$/u);
 });
 
+test("array-index paths skip the containment probe", () => {
+  const indexed = render(
+    filterCondition({ path: "items.0", op: "eq", value: "x" }),
+  );
+  assert.equal(indexed.sql.includes("@>"), false);
+  assert.match(indexed.sql, / = \$\d+::jsonb$/u);
+  assert.equal(
+    render(
+      filterCondition({ path: "items.name", op: "eq", value: "x" }),
+    ).sql.includes("@>"),
+    true,
+  );
+});
+
 test("each operator maps to a fixed SQL shape", () => {
   assert.match(
     render(filterCondition({ path: "a", op: "ne", value: 1 })).sql,

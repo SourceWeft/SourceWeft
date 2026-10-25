@@ -139,11 +139,17 @@ export function HtmlPreview({
     setPendingLink(null);
   }, [fileUrl]);
 
+  // The bridge reads the transport through a ref: a new transport object for
+  // the same document must not rebuild the host, which would close the port
+  // the page already holds and forget that the frame has loaded.
+  const transportRef = useRef<ArtifactRecordsTransport | null>(null);
+  transportRef.current = storage?.storage ? records : null;
+
   // One bridge per iframe document; remounting the iframe makes a new one.
   useEffect(() => {
     const host = new ArtifactBridgeHost({
       frameWindow: () => frame.current?.contentWindow ?? null,
-      transport: storage?.storage ? records : null,
+      transport: () => transportRef.current,
       onOpenLink: setPendingLink,
     });
     bridge.current = host;
@@ -154,7 +160,7 @@ export function HtmlPreview({
       host.close();
       if (bridge.current === host) bridge.current = null;
     };
-  }, [fileUrl, frameGeneration, records, storage?.storage]);
+  }, [fileUrl, frameGeneration]);
 
   function frameLoaded() {
     if (bridge.current?.frameLoaded() === "navigated") {

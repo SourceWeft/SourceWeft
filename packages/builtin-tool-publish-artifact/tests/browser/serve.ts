@@ -79,6 +79,22 @@ const server = createServer(async (req, res) => {
     );
     return;
   }
+  // Declares storage but never calls it: the runtime must still have claimed
+  // the host's single handshake by the time the page's own scripts run.
+  if (url.pathname === "/idle.html") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader(
+      "Content-Security-Policy",
+      artifactExecutionCsp("sandboxed-html"),
+    );
+    res.end(
+      injectArtifactRuntime(
+        '<!doctype html><html><head><meta charset="utf-8"></head><body><p id="idle">idle</p></body></html>',
+        buildArtifactRuntimeScript({ storage: true }),
+      ),
+    );
+    return;
+  }
   if (url.pathname === "/storage.html") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader(

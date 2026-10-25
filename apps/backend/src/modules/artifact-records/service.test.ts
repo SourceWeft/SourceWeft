@@ -324,6 +324,31 @@ test("invalid data, conflicts and quotas map to the page's error codes", async (
   });
 });
 
+test("the rate limit is charged before any lookup", async () => {
+  mocks.allow.mockResolvedValueOnce(false);
+  await rejectsWith(
+    call({ op: "get", collection: "c", id: "x" }),
+    "ARTIFACT_RECORD_RATE_LIMITED",
+  );
+  assert.equal(mocks.resolveAccess.mock.calls.length, 0);
+  assert.equal(mocks.findReadyVersion.mock.calls.length, 0);
+  mocks.allow.mockResolvedValueOnce(false);
+  await rejectsWith(
+    service.executePublic({
+      token: "tok",
+      clientKey: "1.2.3.4",
+      operation: artifactRecordOperationSchema.parse({
+        op: "get",
+        scope: "shared",
+        collection: "c",
+        id: "x",
+      }),
+    }),
+    "ARTIFACT_RECORD_RATE_LIMITED",
+  );
+  assert.equal(mocks.findLiveShare.mock.calls.length, 0);
+});
+
 test("rate limits are per viewer and artifact, and fail closed", async () => {
   mocks.allow.mockResolvedValueOnce(false);
   await rejectsWith(
@@ -560,7 +585,7 @@ test("public pages read only owner-chosen shared collections of an approved vers
     collection: "scores",
     recordId: "a",
   });
-  assert.equal(mocks.allow.mock.calls.at(-1)![0], "share:share-1:1.2.3.4:r");
+  assert.equal(mocks.allow.mock.calls.at(-1)![0], "share:tok:1.2.3.4:r");
 
   mocks.findLiveShare.mockResolvedValueOnce(null);
   await rejectsWith(

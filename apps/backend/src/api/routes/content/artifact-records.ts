@@ -31,6 +31,30 @@ function rejectOpaqueOrigin(c: Context) {
     );
 }
 
+/**
+ * Reads at most `requestBytes` of the body and stops there. `Content-Length`
+ * is only a hint (a chunked or understated request carries no usable one), so
+ * the limit is enforced on the bytes actually received, and an oversized
+ * request is cancelled instead of being buffered whole.
+ */
+async function readBoundedText(request: Request): Promise<string> {
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > ARTIFACT_RECORD_LIMITS.requestBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw artifactRecordError("invalid_request", "The request is too large");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function readHostJsonBody(c: Context): Promise<unknown> {
   rejectOpaqueOrigin(c);
   const contentType = c.req
@@ -46,9 +70,7 @@ export async function readHostJsonBody(c: Context): Promise<unknown> {
   const declared = Number(c.req.header("content-length") ?? "0");
   if (declared > ARTIFACT_RECORD_LIMITS.requestBytes)
     throw artifactRecordError("invalid_request", "The request is too large");
-  const text = await c.req.text();
-  if (Buffer.byteLength(text, "utf8") > ARTIFACT_RECORD_LIMITS.requestBytes)
-    throw artifactRecordError("invalid_request", "The request is too large");
+  const text = await readBoundedText(c.req.raw);
   if (!text) return {};
   try {
     return JSON.parse(text);

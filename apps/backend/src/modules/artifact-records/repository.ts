@@ -122,7 +122,11 @@ export async function writeRecord(input: {
   teamId: string;
   workspaceId: string;
   actorUserId: string;
-  data: unknown;
+  /**
+   * The validated JSON text, bound as `jsonb`. Passing the parsed value would
+   * make a top-level `null` a SQL NULL, which the NOT NULL column refuses.
+   */
+  dataJson: string;
   sizeBytes: number;
   ifMatch?: string;
   limits: RecordWriteLimits;
@@ -193,7 +197,7 @@ export async function writeRecord(input: {
       await tx
         .update(artifactRecords)
         .set({
-          data: input.data,
+          data: sql`${input.dataJson}::jsonb`,
           sizeBytes: input.sizeBytes,
           etag,
           updatedBy: input.actorUserId,
@@ -210,7 +214,7 @@ export async function writeRecord(input: {
         ownerUserId: input.key.ownerUserId,
         collection: input.key.collection,
         recordId: input.key.recordId,
-        data: input.data,
+        data: sql`${input.dataJson}::jsonb`,
         sizeBytes: input.sizeBytes,
         etag,
         createdBy: input.actorUserId,

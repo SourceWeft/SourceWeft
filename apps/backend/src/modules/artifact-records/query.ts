@@ -42,6 +42,10 @@ function containmentProbe(path: string, value: unknown) {
     .reduceRight<unknown>((inner, key) => ({ [key]: inner }), value);
 }
 
+function hasIndexSegment(path: string) {
+  return path.split(".").some((part) => /^[0-9]+$/u.test(part));
+}
+
 const COMPARISON_OPERATORS = {
   lt: "<",
   lte: "<=",
@@ -55,8 +59,10 @@ export function filterCondition(filter: ArtifactRecordFilter): SQL {
     case "eq":
       // Structural equality is exact; the containment probe only lets the GIN
       // index narrow candidates for scalars (containment alone would also
-      // match arrays holding the scalar).
-      return isScalar(filter.value)
+      // match arrays holding the scalar). `#>` reads an all-digit segment as
+      // an array index while the probe would spell it as an object key, so
+      // such paths use the exact comparison alone.
+      return isScalar(filter.value) && !hasIndexSegment(filter.path)
         ? sql`(${artifactRecords.data} @> ${jsonParameter(
             containmentProbe(filter.path, filter.value),
           )} and ${target} = ${jsonParameter(filter.value)})`

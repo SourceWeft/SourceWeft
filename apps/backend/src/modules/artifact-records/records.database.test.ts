@@ -377,7 +377,7 @@ test("quotas are enforced inside the write transaction", async () => {
       teamId,
       workspaceId,
       actorUserId: viewer,
-      data: { n: 1 },
+      dataJson: '{"n":1}',
       sizeBytes,
       limits,
     });
@@ -425,4 +425,43 @@ test("account and artifact deletion remove their records", async () => {
     );
     assert.equal(rows.rows[0].n, 0, table);
   }
+});
+
+test("every JSON value round-trips, including a top-level null", async () => {
+  for (const [id, value] of [
+    ["null", null],
+    ["false", false],
+    ["zero", 0],
+    ["empty-string", ""],
+    ["empty-array", []],
+    ["unicode", '😀 \\ "q"'],
+  ] as const) {
+    await run({ op: "set", collection: "values", id, data: value });
+    const read = await run({ op: "get", collection: "values", id });
+    assert.ok(read.op === "get" && read.record, id);
+    assert.deepEqual(read.record.data, value, id);
+    // Overwriting an existing row takes the same path.
+    await run({ op: "set", collection: "values", id, data: value });
+  }
+});
+
+test("equality on array-index paths matches the stored element", async () => {
+  await run({
+    op: "set",
+    collection: "indexed",
+    id: "a",
+    data: { items: ["x", "y"], "0": "root" },
+  });
+  const ids = async (path: string, value: string) => {
+    const result = await run({
+      op: "query",
+      collection: "indexed",
+      where: [{ path, op: "eq", value }],
+    });
+    assert.ok(result.op === "query");
+    return result.records.map((record) => record.id);
+  };
+  assert.deepEqual(await ids("items.0", "x"), ["a"]);
+  assert.deepEqual(await ids("items.1", "x"), []);
+  assert.deepEqual(await ids("0", "root"), ["a"]);
 });

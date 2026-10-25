@@ -34,7 +34,8 @@ export class ArtifactBridgeHost {
   constructor(
     private readonly options: {
       frameWindow: () => Window | null;
-      transport: ArtifactRecordsTransport | null;
+      /** Read per request, so the host can swap transports without a reconnect. */
+      transport: () => ArtifactRecordsTransport | null;
       onOpenLink: (url: URL) => void;
       requestsPerSecond?: number;
       now?: () => number;
@@ -115,7 +116,7 @@ export class ArtifactBridgeHost {
       return fail("invalid_request", "The storage request is not valid");
     if (!this.takeRequestSlot())
       return fail("rate_limited", "Too many storage requests; slow down");
-    const { transport } = this.options;
+    const transport = this.options.transport();
     if (!transport) return fail("unavailable", "Storage is not available here");
     try {
       reply({

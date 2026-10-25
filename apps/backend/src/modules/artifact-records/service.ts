@@ -184,8 +184,11 @@ export class ArtifactRecordsService {
     versionId: string;
     operation: ArtifactRecordOperation;
   }): Promise<ArtifactRecordResult> {
-    const context = await this.loadVersion(input);
     const { operation } = input;
+    // Charge the limiter before any lookup, so a flood of requests that would
+    // be refused anyway costs a Redis increment and not several queries.
+    await this.limit(`${input.userId}:${input.artifactId}`, isWrite(operation));
+    const context = await this.loadVersion(input);
     if (!context.capabilities.storage)
       throw artifactRecordError(
         "forbidden",
@@ -222,10 +225,6 @@ export class ArtifactRecordsService {
           "Your role in this workspace is read-only",
         );
     }
-    await this.limit(
-      `${input.userId}:${context.artifactId}`,
-      isWrite(operation),
-    );
 
     const partition: RecordPartition = {
       artifactId: context.artifactId,
@@ -274,7 +273,7 @@ export class ArtifactRecordsService {
           teamId: input.teamId,
           workspaceId: input.workspaceId,
           actorUserId: input.actorUserId,
-          data: operation.data,
+          dataJson: check.text,
           sizeBytes: check.sizeBytes,
           ifMatch: operation.ifMatch,
           limits: limitsFor(partition.scope),
@@ -443,6 +442,7 @@ export class ArtifactRecordsService {
     clientKey: string;
     operation: ArtifactRecordOperation;
   }): Promise<ArtifactRecordResult> {
+    await this.limit(`share:${input.token}:${input.clientKey}`, false);
     const share = await findLiveShareByToken(input.token);
     if (
       !share ||
@@ -493,7 +493,6 @@ export class ArtifactRecordsService {
         "Shared data access for this version has not been approved",
         { reason: "capability_not_approved" },
       );
-    await this.limit(`share:${share.id}:${input.clientKey}`, false);
     return this.run({
       operation,
       partition: {

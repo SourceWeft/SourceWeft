@@ -15,14 +15,15 @@ afterEach(() => {
 });
 
 function setup(
-  transport: ArtifactRecordsTransport | null = { execute: vi.fn() },
+  initial: ArtifactRecordsTransport | null = { execute: vi.fn() },
 ) {
+  let transport = initial;
   const frame = { postMessage: vi.fn() } as unknown as Window;
   const onOpenLink = vi.fn();
   let now = 0;
   const bridge = new ArtifactBridgeHost({
     frameWindow: () => frame,
-    transport,
+    transport: () => transport,
     onOpenLink,
     requestsPerSecond: 3,
     now: () => now,
@@ -63,6 +64,8 @@ function setup(
     send,
     connect,
     onOpenLink,
+    swapTransport: (next: ArtifactRecordsTransport | null) =>
+      (transport = next),
     tick: (ms: number) => (now += ms),
   };
 }
@@ -233,4 +236,21 @@ test("runtime URLs keep existing query strings and fragments", () => {
     "https://api/raw?runtime=1",
   );
   assert.equal(artifactRuntimeUrl("/f?a=1#top"), "/f?a=1&runtime=1#top");
+});
+
+test("a new transport for the same document is used without reconnecting", async () => {
+  const first = vi.fn().mockResolvedValue({ op: "get", record: null });
+  const second = vi.fn().mockResolvedValue({ op: "get", record: null });
+  const { connect, swapTransport, frame } = setup({ execute: first });
+  const { request } = connect();
+  const operation = { op: "get", collection: "kv", id: "a" };
+  await request({ requestId: 1, operation });
+  swapTransport({ execute: second });
+  await request({ requestId: 2, operation });
+  assert.equal(first.mock.calls.length, 1);
+  assert.equal(second.mock.calls.length, 1);
+  assert.equal(
+    (frame.postMessage as ReturnType<typeof vi.fn>).mock.calls.length,
+    1,
+  );
 });
