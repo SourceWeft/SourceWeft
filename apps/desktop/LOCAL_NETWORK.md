@@ -53,3 +53,27 @@ The audit is stored with the invocation result; it is not exposed in the UI yet.
   command id); zero or several concurrently active commands deny everything.
 - Setting a request filter makes srt refuse plain-HTTP request targets with dot segments
   or backslashes (400).
+
+## Secrets for local commands (Plan 5)
+
+The device keychain (`sourceweft-local-vault`) can hold secrets that commands use without
+ever seeing them. Metadata (label, env var name, exact bound hosts, read-only flag) lives
+in the host's SQLite; values live only in the OS keychain. Management is desktop-only
+(`vault_list` returns metadata, never values). macOS stores secrets but does not inject
+them until the sidecar switch.
+
+- A command gets `ENV_VAR=fake_value_…` placeholders. The sidecar's TLS-terminating
+  proxy replaces the placeholder with the real value in headers (and bodies) **only** on
+  requests to the secret's exact bound hosts. Everything else receives the placeholder.
+- Bound hosts are exact hostnames (no wildcards), at most 50 per secret and 200 per vault,
+  and are reachable even in `ask`/`strict` mode.
+- With "require approval for writes" on (default), any request to a bound host other than
+  GET/HEAD/OPTIONS asks the user; an approval covers that exact method and path for the
+  rest of the command. A request whose body contains a placeholder always asks.
+- TLS interception is active only while the vault holds a secret. It uses a persistent
+  local CA under `<app data>/sandbox/ca` (key unreadable inside the sandbox) and decrypts
+  all HTTPS of sandboxed commands except hosts the proxy cannot terminate. Tools that pin
+  certificates may fail. Basic-auth/base64 credentials and URL-embedded secrets are not
+  substituted. An upstream that reflects request headers back returns the real value.
+- A locked or unavailable keychain does not fail commands: they run without secrets and
+  the result carries `vaultWarning`.
