@@ -6,8 +6,9 @@
 //! lists `<base>/task-workspaces` plus every currently granted directory as the workspace roots
 //! a wrap may name; each `wrap` grants read and write access to exactly that command's workspace
 //! root (plus read access to the toolchain read roots and the in-sandbox helper files). The
-//! sidecar's Linux policy denies reading `/` and re-allows only its system read set on top of
-//! those (`sandbox-sidecar/src/policy.ts`, Ruling R24). Nothing here ever runs
+//! sidecar's policy denies reading `/` on both Linux and macOS and re-allows only its per-platform
+//! system read set on top of those (`sandbox-sidecar/src/policy.ts`,
+//! `LINUX_SYSTEM_READ_ROOTS` / `DARWIN_SYSTEM_READ_ROOTS`). Nothing here ever runs
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
 use super::{
@@ -19,6 +20,7 @@ use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    process::Command,
     sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
@@ -85,9 +87,15 @@ pub(crate) fn init_config(
 ) -> InitConfig {
     let home = std::env::var("HOME").unwrap_or_default();
     let linux = platform == Platform::Linux;
+    let read_roots = match platform {
+        Platform::Darwin => {
+            darwin_read_roots(Path::new(&home), base, &user_path().0, XCODE_SELECT)
+        }
+        Platform::Linux => read_roots(Path::new(&home), base, &user_path().0),
+    };
     InitConfig {
         platform,
-        read_roots: read_roots(Path::new(&home), base, &user_path().0),
+        read_roots,
         deny_roots: [base.join("local-host"), base.join("sandbox")]
             .iter()
             .map(|path| path.to_string_lossy().into_owned())
@@ -164,6 +172,85 @@ pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String
         }
     }
     roots
+}
+
+/// The system `xcode-select` the production discovery runs; a test passes a stub path instead.
+const XCODE_SELECT: &str = "/usr/bin/xcode-select";
+
+/// Fixed Homebrew prefixes macOS toolchains install under, outside `$HOME`. Added to the read
+/// roots when they exist as directories (`darwin_read_roots`): Apple-silicon Homebrew lives at
+/// `/opt/homebrew`, Intel Homebrew and other third-party toolchains at `/usr/local`. The sidecar's
+/// own `DARWIN_SYSTEM_READ_ROOTS` covers the OS toolchain in `/bin` and `/usr/bin`; these cover
+/// user-installed tools such as `bash`, `python3`, `node` and `git` reached through the login
+/// `PATH`. `$HOME`-relative toolchains (nvm, pyenv, rustup) come from `read_roots` via `PATH`.
+const DARWIN_HOMEBREW_PREFIXES: [&str; 2] = ["/opt/homebrew", "/usr/local"];
+
+/// macOS read roots: the PATH-derived toolchain roots under `$HOME` (`read_roots`), plus the
+/// active developer directory from `xcode-select -p` (only when it resolves to a real, canonical
+/// directory — the `cc`/`clang`/`git` xcode-select shims resolve the real toolchain under it) and
+/// the Homebrew prefixes `DARWIN_HOMEBREW_PREFIXES`. The OS read set (`/bin`, `/usr/bin`, `/etc`,
+/// `/var`, `/dev`, …) is the sidecar's own `DARWIN_SYSTEM_READ_ROOTS`, not here. Each discovered
+/// path is canonicalised and kept only when it is a directory; the result is de-duplicated with
+/// the PATH roots first.
+pub(crate) fn darwin_read_roots(
+    home: &Path,
+    base: &Path,
+    path_var: &str,
+    xcode_select: &str,
+) -> Vec<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = developer_dir(xcode_select) {
+        candidates.push(dir);
+    }
+    candidates.extend(DARWIN_HOMEBREW_PREFIXES.iter().map(PathBuf::from));
+    darwin_read_roots_with(home, base, path_var, &candidates)
+}
+
+/// `darwin_read_roots` with its discovered extra directories supplied directly, so a test can
+/// drive the merge without depending on what the host has installed. Each extra is canonicalised
+/// and kept only when it is a directory; the PATH-derived roots come first and duplicates are
+/// dropped.
+fn darwin_read_roots_with(
+    home: &Path,
+    base: &Path,
+    path_var: &str,
+    extra: &[PathBuf],
+) -> Vec<String> {
+    let mut roots = read_roots(home, base, path_var);
+    for candidate in extra {
+        let Ok(canonical) = candidate.canonicalize() else {
+            continue;
+        };
+        if !canonical.is_dir() {
+            continue;
+        }
+        let Some(text) = canonical.to_str() else {
+            continue;
+        };
+        if !roots.iter().any(|seen| seen == text) {
+            roots.push(text.to_string());
+        }
+    }
+    roots
+}
+
+/// The active developer directory, read by running `<xcode_select> -p`. Returns it only when the
+/// command succeeds and the path it prints canonicalises to an existing directory; a missing
+/// toolchain, an empty or whitespace result, or a path that no longer exists yields `None`, so a
+/// broken `xcode-select` never adds a read root. The canonical form is what is compared and handed
+/// to srt (srt matches literal paths without resolving them against a cwd).
+fn developer_dir(xcode_select: &str) -> Option<PathBuf> {
+    let output = Command::new(xcode_select).arg("-p").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let printed = String::from_utf8(output.stdout).ok()?;
+    let trimmed = printed.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let canonical = Path::new(trimmed).canonicalize().ok()?;
+    canonical.is_dir().then_some(canonical)
 }
 
 /// 32 bytes from two v4 UUIDs (OS randomness), unpadded base64url: 43 unguessable characters,
@@ -652,6 +739,90 @@ mod tests {
             "{:?}",
             read_roots(&home, &base, &path)
         );
+    }
+
+    /// Writes an executable stub `xcode-select` into `dir` that prints `prints` to stdout and
+    /// exits with `code` when invoked (it ignores its arguments, so `-p` behaves like any call).
+    /// Mirrors `bundle_with_stub`'s pattern for a scripted fake binary.
+    fn stub_xcode_select(dir: &Path, prints: &str, code: i32) -> String {
+        let path = dir.join("xcode-select");
+        fs::write(&path, format!("#!/bin/sh\nprintf '%s' {prints}\nexit {code}\n")).unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).unwrap();
+        fs::File::open(&path).unwrap().sync_all().unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn developer_dir_is_read_from_a_stub_xcode_select() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path().canonicalize().unwrap();
+        // A real, canonical directory the stub `xcode-select -p` points at.
+        let developer = dir.join("Developer");
+        fs::create_dir(&developer).unwrap();
+        let stub = stub_xcode_select(&dir, developer.to_str().unwrap(), 0);
+        assert_eq!(developer_dir(&stub), Some(developer));
+
+        // Non-zero exit (no active toolchain): None.
+        let failing = stub_xcode_select(&dir, "/anything", 1);
+        assert_eq!(developer_dir(&failing), None);
+        // Success but the printed path does not exist: None.
+        let gone = dir.join("Developer-gone");
+        let missing = stub_xcode_select(&dir, gone.to_str().unwrap(), 0);
+        assert_eq!(developer_dir(&missing), None);
+        // Success but a file, not a directory: None.
+        let file = dir.join("afile");
+        fs::write(&file, "x").unwrap();
+        let as_file = stub_xcode_select(&dir, file.to_str().unwrap(), 0);
+        assert_eq!(developer_dir(&as_file), None);
+        // Empty output: None.
+        let empty = stub_xcode_select(&dir, "", 0);
+        assert_eq!(developer_dir(&empty), None);
+        // The binary does not exist at all: None, no panic.
+        assert_eq!(developer_dir("/no/such/xcode-select"), None);
+    }
+
+    #[test]
+    fn darwin_read_roots_merge_path_roots_then_discovered_dirs() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        fs::create_dir_all(home.join(".cargo/bin")).unwrap();
+        let base = home.join(".app");
+        // Two discovered extras: one real directory, one that does not exist (dropped).
+        let developer = tempfile::tempdir().unwrap();
+        let developer = developer.path().canonicalize().unwrap();
+        let absent = home.join("opt-homebrew-absent");
+        let h = home.to_str().unwrap();
+        let roots = darwin_read_roots_with(
+            &home,
+            &base,
+            &format!("{h}/.cargo/bin:/usr/bin"),
+            &[developer.clone(), absent.clone(), developer.clone()],
+        );
+        assert_eq!(
+            roots,
+            [
+                // The `$HOME` PATH root (`~/.cargo`) comes first, before the discovered dirs.
+                format!("{h}/.cargo"),
+                // The real discovered directory, added once (the duplicate is dropped).
+                developer.to_str().unwrap().to_string(),
+            ]
+        );
+        assert!(!roots.iter().any(|r| *r == absent.to_string_lossy()));
+    }
+
+    /// The production discovery entry point adds the real `xcode-select -p` developer directory
+    /// when one is active on this machine; otherwise it matches the PATH-derived roots. Either
+    /// way it must not panic and must keep the PATH roots first.
+    #[test]
+    fn darwin_read_roots_runs_the_real_xcode_select_without_panicking() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let base = home.join(".app");
+        let roots = darwin_read_roots(&home, &base, "/usr/bin:/bin", XCODE_SELECT);
+        // Every entry is an absolute, canonical path (no `$HOME` roots in this PATH).
+        assert!(roots.iter().all(|r| Path::new(r).is_absolute()));
     }
 
     #[test]

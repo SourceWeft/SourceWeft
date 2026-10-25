@@ -89,6 +89,60 @@ const LINUX_SYSTEM_READ_ROOTS: readonly string[] = [
 ];
 
 /**
+ * macOS system read roots re-allowed on top of the `"/"` deny (spec §4/§7.2), discovered
+ * empirically by driving real commands through the sandbox on this macOS (26.x, APFS with the
+ * `/etc`→`private/etc` and `/var`→`private/var` symlinks). Each entry names the real command that
+ * failed without it. Narrow literal files and subpaths are preferred over broad directories;
+ * `/Users`, `/Library` (as a whole), `/private/var/db`, `/private/var/folders` and `/Volumes`
+ * stay denied. The developer directory (`xcode-select -p`), `/opt/homebrew`, `/usr/local` and the
+ * PATH-derived toolchain roots are discovered host-side in `srt_exec.rs` and arrive as
+ * `init.readRoots`, not here.
+ *
+ * A top-level directory reached through one of macOS's root symlinks needs BOTH spellings: the
+ * symlink spelling (`/etc`, `/var`) so the kernel can traverse the link, and the resolved
+ * spelling (`/private/etc`, `/private/var/...`) for the file contents behind it. srt only emits
+ * a second (resolved) spelling for the final component of an allow, not for a leading symlink, so
+ * the traversal spelling must be listed explicitly. Granting the `/var` symlink does NOT re-open
+ * `/private/var` contents (verified: `/private/var/db`, `/private/var/folders`, `/var/root`,
+ * `/var/log` stay denied in both spellings) — the kernel resolves `/var`→`/private/var` for every
+ * real file op, and those resolved paths match no allow.
+ */
+const DARWIN_SYSTEM_READ_ROOTS: readonly string[] = [
+  // `cat`, `ls`: the core system executables live here (`/bin/cat`, `/bin/ls`, `/bin/bash` — srt's
+  // `binShell`). Without it, `cat marker.txt` fails with `/bin/bash: cat: command not found`.
+  "/bin",
+  // `grep`, `sed`, `awk`, `find`, `tar`, `gzip`, `curl`, `git`, `make`, `cc`/`clang`, `xcrun`: the
+  // rest of the system toolchain. Without it, `sed -n 2p file` fails with `command not found`.
+  "/usr/bin",
+  // `curl https://…`: curl's default CA bundle is `/etc/ssl/cert.pem`, opened through the `/etc`
+  // symlink; and `/etc/hosts` for name resolution. Without `/etc`, `curl` fails with
+  // `error setting certificate verify locations: CAfile: /etc/ssl/cert.pem` (exit 77).
+  "/etc",
+  // The content `/etc` resolves to (`hosts`, `ssl/cert.pem`, `resolv.conf`, `passwd`/`group`).
+  // With `/etc` but not `/private/etc`, `cat /etc/hosts` is `Operation not permitted` and curl's
+  // CA read still fails. Its secrets (`master.passwd`, private keys) are root-only (mode 0600) and
+  // unreadable to the sandboxed user anyway (verified: `cat /etc/master.passwd` → Permission
+  // denied).
+  "/private/etc",
+  // `cc hello.c` (the `/usr/bin` xcode-select shim): xcrun resolves the active developer dir by
+  // reading `/var/select/developer_dir`, reached through the `/var` symlink. Without `/var`, the
+  // shim fails with `xcode-select: error: unable to read data link at '/var/select/developer_dir'`.
+  "/var",
+  // The directory `/var/select` resolves to, holding the `developer_dir` symlink xcrun reads. With
+  // `/var` but not `/private/var/select`, the same `readlink` is `Operation not permitted`.
+  "/private/var/select",
+  // `head -c4 /dev/urandom`: device nodes (`/dev/null`, `/dev/urandom`, `/dev/random`, tty).
+  // Without it the read is `Operation not permitted`. Sensitive nodes (`/dev/disk*`) are root-only
+  // (mode `brw-r-----`) and stay unreadable to the sandboxed user.
+  "/dev",
+  // `node -e …`: Node's bundled OpenSSL opens `/System/Library/OpenSSL/openssl.cnf` at startup.
+  // Without it Node aborts with `BIO_new_file … fopen(/System/Library/OpenSSL//openssl.cnf …
+  // Operation not permitted)`. The rest of `/System` stays denied — frameworks load from the dyld
+  // shared cache, which srt's base profile already allows.
+  "/System/Library/OpenSSL",
+];
+
+/**
  * Ruling R25 (final review I2): credential files under the home directory that a toolchain read
  * root (Ruling R13: `~/.cargo/bin` on `PATH` re-allows `~/.cargo`), or a granted folder that
  * contains them, could otherwise expose. Each is a literal `denyRead` entry, which srt keeps
@@ -107,10 +161,31 @@ const HOME_CREDENTIAL_FILES: readonly string[] = [
   ".config/gh/hosts.yml",
 ];
 
-/** `HOME_CREDENTIAL_FILES` as absolute paths under `home`. */
-function credentialDenies(home: string): string[] {
+/**
+ * macOS-only credential directory that must stay unreadable even when a granted workspace, a
+ * granted `$HOME`, or a granted `~/Library` would otherwise re-allow it. `~/Library/Keychains`
+ * holds the login keychain (`login.keychain-db`), where Safari/Chrome passwords, app secrets and
+ * certificate private keys live; upstream srt issue #755 is that a `denyRead:["/"]` sandbox can
+ * still read it unless it is denied literally. Listed as a `home`-relative path so it applies to
+ * whatever `init.home` the wrap runs under — including a fake `$HOME` that is itself the granted
+ * workspace (the regression test `a granted fake home ... still hides it`). The system-wide
+ * `/Library/Keychains` is covered by the unconditional `"/"` deny, since `/Library` is never a
+ * re-allowed read root.
+ */
+const DARWIN_CREDENTIAL_DIRS: readonly string[] = ["Library/Keychains"];
+
+/**
+ * `HOME_CREDENTIAL_FILES` (both platforms) plus, on darwin, `DARWIN_CREDENTIAL_DIRS`, as absolute
+ * paths under `home`. srt keeps a literal `denyRead` entry denied even inside an `allowRead`
+ * directory, so these survive a granted parent.
+ */
+function credentialDenies(platform: InitConfig["platform"], home: string): string[] {
   const base = home.endsWith("/") ? home.slice(0, -1) : home;
-  return HOME_CREDENTIAL_FILES.map((relative) => `${base}/${relative}`);
+  const relatives =
+    platform === "darwin"
+      ? [...HOME_CREDENTIAL_FILES, ...DARWIN_CREDENTIAL_DIRS]
+      : HOME_CREDENTIAL_FILES;
+  return relatives.map((relative) => `${base}/${relative}`);
 }
 
 // Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer
@@ -137,7 +212,8 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
 
 /**
  * The read roots every wrapped command gets on top of its own workspace root: on Linux the
- * system read set (`LINUX_SYSTEM_READ_ROOTS`) and the sidecar's own `runtimeDir`, then the init
+ * system read set (`LINUX_SYSTEM_READ_ROOTS`) and the sidecar's own `runtimeDir`, on darwin the
+ * system read set (`DARWIN_SYSTEM_READ_ROOTS`; macOS has no sidecar `runtimeDir`), then the init
  * `readRoots`, then the two helper
  * *files* srt runs or loads inside the sandbox from their host paths — `apply-seccomp`
  * (executed by the wrapped shell) and the Java proxy agent jar (loaded by a JVM). Those live in
@@ -152,14 +228,15 @@ export function perWrapReadRoots(init: InitConfig, runtimeDir?: string): string[
   const system =
     init.platform === "linux"
       ? [...LINUX_SYSTEM_READ_ROOTS, ...(runtimeDir === undefined ? [] : [runtimeDir])]
-      : [];
+      : [...DARWIN_SYSTEM_READ_ROOTS];
   return [...system, ...init.readRoots, ...helpers];
 }
 
 /**
- * The sidecar-lifetime srt config: network policy, read-only filesystem access (on Linux the
- * whole filesystem and on darwin the home directory denied, the home credential files denied,
- * then the workspace roots and read roots re-allowed as literal paths), and helper binary
+ * The sidecar-lifetime srt config: network policy, read-only filesystem access (on both Linux and
+ * darwin the whole filesystem (`/`) and the home directory denied, the home credential files
+ * denied — plus `~/Library/Keychains` on darwin — then the workspace roots and read roots
+ * re-allowed as literal paths), and helper binary
  * paths. Grants no filesystem write access — that is always added
  * per command by `perCommandConfig`. The host's own interface addresses (what `deniedReason`
  * calls `own`) play no part here — srt's own network config has no per-host notion of "own
@@ -199,10 +276,10 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
     },
     filesystem: {
       denyRead: [
-        ...(init.platform === "linux" ? ["/"] : []),
+        "/",
         init.home,
         ...denyRoots,
-        ...credentialDenies(init.home),
+        ...credentialDenies(init.platform, init.home),
       ].map((path) => ({ path, literal: true as const })),
       allowRead: [...init.workspaceRoots, ...perWrapReadRoots(init, runtimeDir)].map((path) => ({
         path,

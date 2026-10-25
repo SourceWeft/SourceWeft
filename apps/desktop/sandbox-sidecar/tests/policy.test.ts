@@ -8,7 +8,18 @@ import {
 } from "../src/policy.js";
 
 const SYSTEM = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt"];
-const CREDENTIALS = [
+// The darwin system read set re-allowed on top of the "/" deny (DARWIN_SYSTEM_READ_ROOTS).
+const DARWIN_SYSTEM = [
+  "/bin",
+  "/usr/bin",
+  "/etc",
+  "/private/etc",
+  "/var",
+  "/private/var/select",
+  "/dev",
+  "/System/Library/OpenSSL",
+];
+const CREDENTIAL_FILES = [
   ".cargo/credentials",
   ".cargo/credentials.toml",
   ".docker/config.json",
@@ -17,7 +28,16 @@ const CREDENTIALS = [
   ".netrc",
   ".git-credentials",
   ".config/gh/hosts.yml",
-].map((relative) => ({ path: `/home/u/${relative}`, literal: true }));
+];
+const CREDENTIALS = CREDENTIAL_FILES.map((relative) => ({
+  path: `/home/u/${relative}`,
+  literal: true,
+}));
+// On darwin the credential set also carries ~/Library/Keychains (upstream srt #755).
+const DARWIN_CREDENTIALS = [...CREDENTIAL_FILES, "Library/Keychains"].map((relative) => ({
+  path: `/home/u/${relative}`,
+  literal: true,
+}));
 const literals = (paths: readonly string[]) => paths.map((path) => ({ path, literal: true }));
 /** The paths of a filesystem entry list (srt also accepts bare strings there). */
 const pathsOf = (entries: ReadonlyArray<string | { path: string }> | undefined): string[] =>
@@ -92,17 +112,43 @@ test("linux denies / and home, re-allows the system set, workspace and read root
   ])
     assert.ok(!(k in c) && !(k in c.network), `${k} must not be set`);
 });
-test("darwin keeps the home deny only, and both spellings of /tmp/claude", () => {
+test("darwin denies / and home (incl. ~/Library/Keychains), re-allows the darwin system set", () => {
   const c = buildConfig(validInit({ platform: "darwin", home: "/home/u" }));
-  assert.deepEqual(c.filesystem.denyRead, [{ path: "/home/u", literal: true }, ...CREDENTIALS]);
+  // "/" and home denied, then the credential files, then ~/Library/Keychains (srt #755).
+  assert.deepEqual(c.filesystem.denyRead, [
+    { path: "/", literal: true },
+    { path: "/home/u", literal: true },
+    ...DARWIN_CREDENTIALS,
+  ]);
+  // Workspace, the darwin system read set, then the init read roots. No /Users, /Library,
+  // /private/var/db, /private/var/folders, /Volumes.
   assert.deepEqual(c.filesystem.allowRead, [
     { path: "/home/u/ws", literal: true },
+    ...literals(DARWIN_SYSTEM),
     { path: "/home/u/.nvm/versions/node/v22.1.0", literal: true },
   ]);
+  const allowed = pathsOf(c.filesystem.allowRead);
+  for (const forbidden of [
+    "/Users",
+    "/Library",
+    "/private/var/db",
+    "/private/var/folders",
+    "/Volumes",
+  ])
+    assert.ok(!allowed.includes(forbidden), `${forbidden} must not be re-allowed`);
   assert.deepEqual(c.filesystem.denyWrite, [
     { path: "/tmp/claude", literal: true },
     { path: "/private/tmp/claude", literal: true },
   ]);
+  // The darwin policy must not loosen any of the forbidden srt knobs either.
+  for (const k of [
+    "allowLocalBinding",
+    "allowUnixSockets",
+    "allowAllUnixSockets",
+    "enableWeakerNestedSandbox",
+    "allowAppleEvents",
+  ])
+    assert.ok(!(k in c) && !(k in c.network), `${k} must not be set`);
 });
 
 // Ruling R25: the credential files stay denied however home is spelled.
@@ -163,6 +209,7 @@ test("per-wrap read roots carve out exactly the in-sandbox helper files", () => 
     "/home/u/.nvm/versions/node/v22.1.0",
   ]);
   assert.deepEqual(perWrapReadRoots(validInit({ platform: "darwin" })), [
+    ...DARWIN_SYSTEM,
     "/home/u/.nvm/versions/node/v22.1.0",
   ]);
 });
