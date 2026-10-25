@@ -125,6 +125,17 @@ export function NavigatedAwayNotice({ onReload }: { onReload: () => void }) {
   );
 }
 
+/** A calm heads-up, not a warning: reports are advisory and nothing changes. */
+export function NavigationAttemptsNote({ count }: { count: number }) {
+  if (!count || count < 1) return null;
+  return (
+    <p className="text-muted-foreground" data-testid="artifact-navigation-note">
+      This version has tried to leave its page {count}{" "}
+      {count === 1 ? "time" : "times"} recently.
+    </p>
+  );
+}
+
 function personName(person: ArtifactRecordPerson | null) {
   return person?.name || "a workspace member";
 }
@@ -195,6 +206,7 @@ export function ArtifactStorageBar({
               ? "Review it before approving."
               : "A workspace editor or admin has to approve this version first."}
           </p>
+          <NavigationAttemptsNote count={sharedState.navigationAttempts} />
           {sharedState.canApprove && !reviewing && (
             <Button
               size="sm"
@@ -247,6 +259,7 @@ export function ArtifactStorageBar({
             Version by {personName(sharedState.author)}, approved by{" "}
             {personName(sharedState.approval.approvedBy)}.
           </p>
+          <NavigationAttemptsNote count={sharedState.navigationAttempts} />
           <Button
             size="sm"
             disabled={busy}

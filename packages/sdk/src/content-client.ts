@@ -354,6 +354,17 @@ export class ContentClient {
     );
   }
 
+  reportArtifactPageNavigation(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ accepted: true }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/navigation`,
+      {},
+    );
+  }
+
   /** Read-only shared records on a public share; the token is the only grant. */
   executePublicArtifactRecord(
     token: string,

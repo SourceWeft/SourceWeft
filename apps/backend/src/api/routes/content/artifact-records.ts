@@ -79,7 +79,7 @@ export async function readHostJsonBody(c: Context): Promise<unknown> {
   }
 }
 
-function versionInput(c: Context, userId: string) {
+export function versionInput(c: Context, userId: string) {
   return {
     workspaceId: requireRouteParam(c, "workspaceId"),
     artifactId: requireRouteParam(c, "id"),
@@ -88,7 +88,7 @@ function versionInput(c: Context, userId: string) {
   };
 }
 
-async function requireUserId(c: Context) {
+export async function requireUserId(c: Context) {
   const session = await requireSession(c);
   if (!session) throw ApiError.unauthorized();
   return getSessionUserId(session);
