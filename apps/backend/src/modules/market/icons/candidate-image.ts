@@ -5,7 +5,6 @@ import {
 } from "./icon-fetcher";
 import type { IconStateStore } from "./icon-state";
 import { validateImage } from "./image-validate";
-import { brandLabel } from "./site-domain";
 import type { HashedIconStore } from "./store";
 
 /**
@@ -79,16 +78,21 @@ export async function fetchCandidateImage(
       height: verdict.height,
     };
   }
-  const stored = await deps.store({
-    sha256: verdict.sha256,
-    bytes: verdict.bytes,
-    contentType: verdict.contentType,
-  });
+  let stored;
+  try {
+    stored = await deps.store({
+      sha256: verdict.sha256,
+      bytes: verdict.bytes,
+      contentType: verdict.contentType,
+    });
+  } catch {
+    // The bucket failing says nothing about the image: try again later.
+    throw new TransientIconError("storage", false);
+  }
   if (servedBy) {
     await deps.state.recordHashDomain({
       sha256: verdict.sha256,
       domain: servedBy,
-      label: brandLabel(servedBy),
     });
   }
   return {

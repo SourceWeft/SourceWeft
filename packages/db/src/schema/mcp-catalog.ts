@@ -505,9 +505,9 @@ export const marketMcpToolRevisions = pgTable(
 // — shared by every worker and listing: it holds the lease that keeps two
 // workers from fetching the same domain at once, the cached outcome, and when
 // the scope may be fetched again (30 days after a success, a bounded backoff
-// after an error). `market_mcp_icon_hash_domains` records which domains served
-// a given image, so one image appearing under several unrelated domains can be
-// flagged as a template for review.
+// after an error). `market_mcp_icon_hash_domains` records which registrable
+// domains served a given image, so one image appearing under several unrelated
+// domains can be flagged as a template for review.
 // ---------------------------------------------------------------------------
 
 type McpIconFetchStatus = "ok" | "denied" | "deferred" | "error";
@@ -541,10 +541,8 @@ export const marketMcpIconHashDomains = pgTable(
   "market_mcp_icon_hash_domains",
   {
     sha256: text("sha256").notNull(),
-    // The registrable domain that served the image, and its brand label
-    // (`notion` for `notion.so`): domains sharing a label count as one.
+    // The registrable domain that served the image.
     domain: text("domain").notNull(),
-    label: text("label").notNull(),
     firstSeenAt: timestamp("first_seen_at", {
       withTimezone: true,
       mode: "date",

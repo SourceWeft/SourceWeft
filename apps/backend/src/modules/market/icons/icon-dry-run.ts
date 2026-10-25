@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { logger } from "../../../shared/logger";
+import { namespaceDomain } from "../claims/targets";
 import {
   firstHttpsIconSrc,
   githubAvatarUrl,
   githubOwner,
   GITHUB_AVATAR_HOSTS,
   isGithubNamespace,
-  namespaceDomain,
 } from "./chain";
 import { fetchCandidateImage, TransientIconError, type ImageOutcome } from "./candidate-image";
 import { decideIcon, decisionDiffers } from "./decision";
@@ -70,6 +70,8 @@ export type IconDryRunTarget = {
   /** Our stored copy of the namespace domain's favicon, when one was fetched. */
   faviconUrl?: string;
   claimedDomains?: readonly string[];
+  /** The registry that listed the entry verifies namespace ownership. */
+  verified?: boolean;
   /** What the pages show today (the chain's answer). */
   current: IconDecision["current"];
 };
@@ -145,9 +147,11 @@ type PlannedUrl = {
 const GITHUB_ASSET_HOSTS = new Set(["raw.githubusercontent.com", "github.com"]);
 
 /**
- * Whether an icon URL names the entry's own identity: a host under the
- * namespace's, the endpoint's or the verified site's domain, or a GitHub path
- * under the declared repository owner.
+ * Whether an icon URL names the entry's own VERIFIED identity: a host under a
+ * domain the platform has evidence for (a verified namespace, a verified
+ * claim, a tier A site — never an endpoint's or a merely declared domain), or
+ * a GitHub path under the owner of an authenticated `io.github.<owner>`
+ * namespace (never an owner read from a repository URL).
  */
 export function iconRelatesToIdentity(
   iconUrl: string,
@@ -172,8 +176,8 @@ export function siteTrustOf(target: IconDryRunTarget): SiteTrust {
   const authMetadata = record(target.authMetadata);
   return evaluateSiteTrust({
     namespace: target.identifier.split("/")[0] ?? target.identifier,
+    namespaceVerified: target.verified === true,
     endpointUrl: target.endpointUrl,
-    repositoryUrl: target.repositoryUrl,
     registryWebsiteUrl: target.registryWebsiteUrl,
     serverInfoWebsiteUrl: str(serverInfo?.websiteUrl),
     resourceDocumentationUrl: str(authMetadata?.resourceDocumentation),
@@ -188,36 +192,47 @@ export function planUrlCandidates(
   ownStorageHost: string | undefined,
 ): PlannedUrl[] {
   const namespace = target.identifier.split("/")[0] ?? target.identifier;
-  const nsDomain = namespaceDomain(namespace);
-  const owner = githubOwner({ namespace, repositoryUrl: target.repositoryUrl });
-  const endpointDomain = target.endpointUrl
-    ? registrableDomainOfUrl(target.endpointUrl)
-    : undefined;
+  const verified = target.verified === true;
+  const nsDomain = verified ? namespaceDomain(namespace) : null;
   const nsRegistrable = nsDomain ? registrableDomainOf(nsDomain) : undefined;
+  const namespaceOwner =
+    verified && isGithubNamespace(namespace)
+      ? githubOwner({ namespace })
+      : undefined;
   const identity = {
     domains: [
       nsRegistrable,
-      endpointDomain,
-      trust.tier === "A" || trust.tier === "B" ? trust.domain : undefined,
+      ...(target.claimedDomains ?? []).map((d) => registrableDomainOf(d)),
+      // Only a site we hold proof for; a tier B site is a declaration.
+      trust.tier === "A" ? trust.domain : undefined,
     ].filter((d): d is string => Boolean(d)),
-    githubOwner: owner,
+    githubOwner: namespaceOwner,
   };
   const planned: PlannedUrl[] = [];
   const open = (url: string): IconRequestOptions | undefined => {
     const host = httpsHostOf(url);
     return host ? { approvedHosts: new Set([host]) } : undefined;
   };
+  /** The registrable domain that serves a declared icon, for the template count. */
+  const servedBy = (url: string) =>
+    GITHUB_ASSET_HOSTS.has(httpsHostOf(url) ?? "") ||
+    GITHUB_AVATAR_HOSTS.includes(httpsHostOf(url) ?? "")
+      ? undefined
+      : registrableDomainOfUrl(url);
 
   if (target.registryIconUrl) {
     const request = open(target.registryIconUrl);
     if (request) {
+      // The registry does not authenticate the icon's host: an icon is the
+      // publisher's own only when it sits on a domain or GitHub account the
+      // platform has evidence for; anywhere else it is a bare declaration.
+      const tier = iconRelatesToIdentity(target.registryIconUrl, identity) ? "A" : "C";
       planned.push({
         source: "registry",
         url: target.registryIconUrl,
-        // The registry authenticated the namespace; the icon is that
-        // publisher's declaration for this listing.
-        tier: iconRelatesToIdentity(target.registryIconUrl, identity) ? "A" : "B",
+        tier,
         request,
+        servedBy: tier === "C" ? undefined : servedBy(target.registryIconUrl),
       });
     }
   }
@@ -227,11 +242,13 @@ export function planUrlCandidates(
   if (serverInfoIcon) {
     const request = open(serverInfoIcon);
     if (request) {
+      const tier = iconRelatesToIdentity(serverInfoIcon, identity) ? "B" : "C";
       planned.push({
         source: "server-info",
         url: serverInfoIcon,
-        tier: iconRelatesToIdentity(serverInfoIcon, identity) ? "B" : "C",
+        tier,
         request,
+        servedBy: tier === "C" ? undefined : servedBy(serverInfoIcon),
       });
     }
   }
@@ -240,15 +257,14 @@ export function planUrlCandidates(
     redirectHosts: new Set(GITHUB_AVATAR_HOSTS),
     skipRobots: true,
   };
+  const owner = githubOwner({ namespace, repositoryUrl: target.repositoryUrl });
   if (owner) {
-    const ownerLabelMatchesDomain =
-      nsRegistrable && owner.toLowerCase() === nsRegistrable.split(".")[0];
     planned.push({
       source: "github-avatar",
       url: githubAvatarUrl(owner),
-      // An `io.github.<owner>` namespace is proof of that GitHub account; an
-      // owner only read from a repository URL is not proof of anything.
-      tier: isGithubNamespace(namespace) ? "A" : ownerLabelMatchesDomain ? "B" : "C",
+      // An authenticated `io.github.<owner>` namespace is proof of that GitHub
+      // account; an owner only read from a repository URL proves nothing.
+      tier: namespaceOwner ? "A" : "C",
       request: githubRequest,
     });
   }
@@ -265,15 +281,15 @@ export function planUrlCandidates(
   if (target.faviconUrl && nsRegistrable) {
     const host = httpsHostOf(target.faviconUrl);
     if (host && host === ownStorageHost) {
+      const tier = trust.tier === "A" && trust.domain === nsRegistrable ? "A" : "C";
       planned.push({
         source: "favicon",
         url: target.faviconUrl,
         // The namespace domain is the publisher's; its favicon stands for the
         // entry only when the endpoint is confirmed under that domain.
-        tier:
-          trust.tier === "A" && trust.domain === nsRegistrable ? "A" : "C",
+        tier,
         request: { approvedHosts: new Set([host]), skipRobots: true },
-        servedBy: nsRegistrable,
+        servedBy: tier === "C" ? undefined : nsRegistrable,
       });
     }
   }
@@ -290,11 +306,15 @@ export type IconDryRunDeps = {
   fetcherOptions?: Omit<IconFetcherOptions, "signal">;
   createFetcher?: (options: IconFetcherOptions) => IconFetcher;
   jobTimeoutMs?: number;
+  /** `Date.now()` after which no further fetch is started (the page deadline). */
+  deadlineAt?: number;
 };
 
 function siteScope(host: string) {
   return `site:${host.replace(/^www\./, "")}`;
 }
+/** Every host of one registrable domain takes turns on this lock. */
+const siteLock = (host: string) => `lock:${registrableDomainOf(host) ?? host}`;
 const urlScope = (url: string) => `url:${sha256Hex(Buffer.from(url))}`;
 
 export type IconDryRunSession = ReturnType<typeof createIconDryRunSession>;
@@ -326,7 +346,7 @@ export function createIconDryRunSession(deps: IconDryRunDeps) {
         const outcome = await withIconScope<SiteScrape>(
           deps.state,
           scope,
-          { owner, now: deps.now },
+          { owner, now: deps.now, lockScope: siteLock(host) },
           () => scrapeSiteIcons(host, siteDeps),
         );
         if (outcome.kind === "busy") return { complete: false, fetched: false };
@@ -420,6 +440,7 @@ export function createIconDryRunSession(deps: IconDryRunDeps) {
         JSON.stringify([
           planned.map((p) => [p.source, p.url, p.tier]).sort(),
           siteHost ? [siteHost, trust.tier] : null,
+          target.verified === true,
         ]),
       )
       .digest("hex")
@@ -456,13 +477,31 @@ export function createIconDryRunSession(deps: IconDryRunDeps) {
     const items: IconCandidate[] = [];
     let complete = true;
     let scraped = 0;
+    const pastDeadline = () =>
+      deps.deadlineAt !== undefined && Date.now() > deps.deadlineAt;
     for (const plan of planned) {
+      if (plan.tier === "C") {
+        // A bare declaration is recorded, never fetched or stored.
+        items.push({
+          source: plan.source,
+          url: plan.url,
+          tier: "C",
+          rejection: "tier-c-not-fetched",
+        });
+        continue;
+      }
+      if (pastDeadline()) {
+        complete = false;
+        continue;
+      }
       const image = await urlCandidate(plan);
       if (!image.complete) complete = false;
       const { complete: _complete, ...fields } = image;
       items.push({ source: plan.source, url: plan.url, tier: plan.tier, ...fields });
     }
-    if (siteHost && (trust.tier === "A" || trust.tier === "B")) {
+    if (siteHost && pastDeadline()) {
+      complete = false;
+    } else if (siteHost && (trust.tier === "A" || trust.tier === "B")) {
       const site = await siteScrape(siteHost);
       if (!site.complete) complete = false;
       if (site.fetched) scraped += 1;
@@ -492,14 +531,14 @@ export function createIconDryRunSession(deps: IconDryRunDeps) {
         });
       }
     }
-    // The same image under several unrelated domains is a template signal
-    // for the reviewer, not proof either way.
+    // The same image served from several unrelated registrable domains is a
+    // template signal for the reviewer, not proof either way. Only domains we
+    // hold evidence for are ever counted (tier A/B candidates record them).
     for (const item of items) {
       if (item.rejection || !item.sha256) continue;
-      if (item.source !== "site" && item.source !== "favicon") continue;
-      const labels = await deps.state.countHashLabels(item.sha256);
-      if (labels >= SHARED_TEMPLATE_DOMAINS) {
-        item.signals = [...(item.signals ?? []), `shared-template:${labels}`];
+      const domains = await deps.state.countHashDomains(item.sha256);
+      if (domains >= SHARED_TEMPLATE_DOMAINS) {
+        item.signals = [...(item.signals ?? []), `shared-template:${domains}`];
       }
     }
     const candidates: IconCandidatesRecord = {
@@ -541,10 +580,10 @@ export async function runIconDryRun(
   results: Map<string, IconDryRunEntryResult>;
   counts: IconDryRunCounts;
 }> {
-  const session = createIconDryRunSession(deps);
+  const deadline = Date.now() + (deps.deadlineMs ?? ICON_DRY_RUN_PAGE_DEADLINE_MS);
+  const session = createIconDryRunSession({ ...deps, deadlineAt: deadline });
   const counts = emptyIconDryRunCounts();
   const results = new Map<string, IconDryRunEntryResult>();
-  const deadline = Date.now() + (deps.deadlineMs ?? ICON_DRY_RUN_PAGE_DEADLINE_MS);
   counts.entries = targets.length;
   let next = 0;
   const worker = async () => {
@@ -555,7 +594,14 @@ export async function runIconDryRun(
         continue;
       }
       try {
+        const previous = record(stored.get(target.key)?.iconCandidates);
         const done = await session.collectEntry(target, stored.get(target.key));
+        if (!done.result.candidates.complete && previous?.complete === true) {
+          // A fetch that was busy, deferred or out of time must not replace a
+          // complete record the version already has: keep the old one.
+          counts.skipped += 1;
+          continue;
+        }
         results.set(target.key, done.result);
         if (done.reused) counts.reused += 1;
         else counts.collected += 1;

@@ -43,7 +43,7 @@ export type ImageVerdict =
       height: number;
       format: ImageFormat;
       contentType: string;
-      /** The bytes to store: the input, or the PNG inside an ICO. */
+      /** The bytes to store: the image re-encoded, never the fetched file. */
       bytes: Buffer;
     }
   | {
@@ -267,8 +267,41 @@ function isBlank(rgba: Buffer) {
 
 const SAMPLE_SIDE = 60;
 
-/** Check `input` and, if it is acceptable, return what to store and record. */
-export async function validateImage(input: Buffer): Promise<ImageVerdict> {
+/** Longest side of the stored copy: icons are shown far smaller than this. */
+export const STORED_ICON_MAX_SIDE = 512;
+export const IMAGE_DECODE_TIMEOUT_SECONDS = 10;
+const MAX_CONCURRENT_DECODES = 2;
+
+let activeDecodes = 0;
+const waitingDecodes: Array<() => void> = [];
+
+/** At most `MAX_CONCURRENT_DECODES` decodes at a time, whoever asks. */
+async function withDecodeSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (activeDecodes >= MAX_CONCURRENT_DECODES) {
+    await new Promise<void>((resolve) => waitingDecodes.push(resolve));
+  }
+  activeDecodes += 1;
+  try {
+    return await run();
+  } finally {
+    activeDecodes -= 1;
+    waitingDecodes.shift()?.();
+  }
+}
+
+/**
+ * Check `input` and, if it is acceptable, return what to store and record.
+ * Decodes are limited in number and in time (libvips is given the same
+ * deadline). What is stored is NOT the fetched file: it is re-encoded as a
+ * metadata-free PNG of at most `STORED_ICON_MAX_SIDE`, so polyglot files,
+ * EXIF/ICC payloads and trailing data never reach our CDN; the recorded hash
+ * is that of the stored bytes.
+ */
+export function validateImage(input: Buffer): Promise<ImageVerdict> {
+  return withDecodeSlot(() => checkImage(input));
+}
+
+async function checkImage(input: Buffer): Promise<ImageVerdict> {
   if (input.length === 0) return { ok: false, reason: "empty" };
   const kind = sniff(input);
   if (kind.kind === "svg") {
@@ -278,16 +311,12 @@ export async function validateImage(input: Buffer): Promise<ImageVerdict> {
   if (kind.kind === "unknown") return { ok: false, reason: "unknown-format" };
 
   let bytes = input;
-  let format: ImageFormat;
   if (kind.kind === "ico") {
     const png = pngInsideIco(input);
     if (!png) {
       return { ok: false, reason: "ico-unsupported", sha256: sha256Hex(input) };
     }
     bytes = Buffer.from(png);
-    format = "png";
-  } else {
-    format = kind.format;
   }
   const sha256 = sha256Hex(bytes);
   const known = KNOWN_DEFAULT_IMAGE_HASHES.get(sha256);
@@ -295,11 +324,13 @@ export async function validateImage(input: Buffer): Promise<ImageVerdict> {
   let width: number;
   let height: number;
   let sample: Buffer;
-  try {
-    const image = sharp(bytes, {
+  const decode = () =>
+    sharp(bytes, {
       limitInputPixels: MAX_ICON_PIXELS,
       failOn: "error",
-    });
+    }).timeout({ seconds: IMAGE_DECODE_TIMEOUT_SECONDS });
+  try {
+    const image = decode();
     const meta = await image.metadata();
     width = meta.width ?? 0;
     height = meta.height ?? 0;
@@ -331,13 +362,26 @@ export async function validateImage(input: Buffer): Promise<ImageVerdict> {
   if (isBlank(sample)) {
     return { ok: false, reason: "blank-image", sha256, width, height };
   }
+  let stored: { data: Buffer; width: number; height: number };
+  try {
+    const { data, info } = await decode()
+      .resize(STORED_ICON_MAX_SIDE, STORED_ICON_MAX_SIDE, {
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .png({ compressionLevel: 9 })
+      .toBuffer({ resolveWithObject: true });
+    stored = { data, width: info.width, height: info.height };
+  } catch {
+    return { ok: false, reason: "decode-failed", sha256 };
+  }
   return {
     ok: true,
-    sha256,
-    width,
-    height,
-    format,
-    contentType: CONTENT_TYPES[format],
-    bytes,
+    sha256: sha256Hex(stored.data),
+    width: stored.width,
+    height: stored.height,
+    format: "png",
+    contentType: CONTENT_TYPES.png,
+    bytes: stored.data,
   };
 }

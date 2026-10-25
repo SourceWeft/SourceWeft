@@ -117,15 +117,29 @@ const escapeHtml = (value: string) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
   );
 
+// Hosts an <img> may load from: GitHub's avatar hosts and our own stored
+// copies. Any other address was supplied by a publisher; it is shown as a
+// link, so opening this page never makes the reviewer's browser call it.
+const IMAGE_HOSTS = new Set(["avatars.githubusercontent.com", "github.com"]);
+
+function isTrustedImage(url: URL) {
+  return IMAGE_HOSTS.has(url.hostname) || url.pathname.includes("/market/mcp-icons/");
+}
+
 function image(url: string | undefined) {
   if (!url) return "<em>letter placeholder</em>";
+  let parsed: URL;
   try {
-    if (new URL(url).protocol !== "https:") return "<em>not shown</em>";
+    parsed = new URL(url);
   } catch {
     return "<em>not shown</em>";
   }
+  if (parsed.protocol !== "https:") return "<em>not shown</em>";
   const safe = escapeHtml(url);
-  return `<a href="${safe}"><img src="${safe}" width="64" height="64" loading="lazy" referrerpolicy="no-referrer" alt=""></a>`;
+  if (!isTrustedImage(parsed)) {
+    return `<a href="${safe}" rel="noreferrer noopener">${escapeHtml(parsed.hostname)}</a>`;
+  }
+  return `<a href="${safe}" rel="noreferrer noopener"><img src="${safe}" width="64" height="64" loading="lazy" referrerpolicy="no-referrer" alt=""></a>`;
 }
 
 /** The review page: one row per sampled entry, old and new image side by side. */

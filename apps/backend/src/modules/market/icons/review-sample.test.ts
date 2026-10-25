@@ -14,7 +14,7 @@ function row(n: number, source: string | null, current = "registry"): ReviewRow 
             source: source as never,
             url: `https://x.test/${n}.png`,
             sha256: String(n).padStart(64, "0"),
-            storedUrl: `https://assets.test/${n}.png`,
+            storedUrl: `https://assets.test/market/mcp-icons/by-hash/${n}.png`,
             width: 128,
             height: 128,
             tier: "A" as const,
@@ -74,7 +74,10 @@ describe("renderReviewHtml", () => {
     expect(html).not.toContain("<img src=x");
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
     expect(html).not.toContain("javascript:");
-    expect(html).toContain('src="https://assets.test/1.png"');
+    expect(html).toContain('src="https://assets.test/market/mcp-icons/by-hash/1.png"');
+    // A publisher-supplied address is a link, never an <img> that loads it.
+    expect(html).not.toContain('src="https://old.test');
+    expect(html).toContain(">old.test</a>");
     expect(html).toContain("letter placeholder");
     expect(stratumOf(row(1, "site").decision)).toBe("site");
   });

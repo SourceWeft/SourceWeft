@@ -52,12 +52,3 @@ export function hostIsUnder(host: string, domain: string) {
 export function wwwTwin(host: string): string {
   return host.startsWith("www.") ? host.slice(4) : `www.${host}`;
 }
-
-/**
- * The label that names a registrable domain apart from its suffix
- * (`notion` for `notion.so` and `notion.com`): two domains sharing it are
- * treated as one brand's, not as unrelated sites.
- */
-export function brandLabel(registrable: string): string {
-  return registrable.split(".")[0] ?? registrable;
-}

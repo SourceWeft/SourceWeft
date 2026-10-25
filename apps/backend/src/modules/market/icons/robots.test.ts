@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { robotsAllows } from "./robots";
+import {
+  robotsAllows,
+  robotsPatternMatches,
+  ROBOTS_MAX_PATTERN_LENGTH,
+  ROBOTS_MAX_RULES,
+  ROBOTS_MAX_WILDCARDS,
+} from "./robots";
 
 describe("robotsAllows", () => {
   test("an empty or rule-less file allows everything", () => {
@@ -37,5 +43,43 @@ describe("robotsAllows", () => {
     const text = `User-agent: googlebot\nUser-agent: sourcewefticonfetcher\nDisallow: /private\n`;
     expect(robotsAllows(text, "/private/x")).toBe(false);
     expect(robotsAllows(text, "/public")).toBe(true);
+  });
+
+  test("wildcard semantics: prefix by default, whole path when anchored", () => {
+    expect(robotsPatternMatches("/a*c", "/abbbc/zzz")).toBe(true);
+    expect(robotsPatternMatches("/a*c$", "/abbbc/zzz")).toBe(false);
+    expect(robotsPatternMatches("/a*c$", "/abbbc")).toBe(true);
+    expect(robotsPatternMatches("/*.png$", "/x/y.png")).toBe(true);
+    expect(robotsPatternMatches("/a*b*c", "/a-b-c")).toBe(true);
+    expect(robotsPatternMatches("/a*b*c", "/a-c-b")).toBe(false);
+    expect(robotsPatternMatches("*", "/anything")).toBe(true);
+    expect(robotsPatternMatches("/x$", "/x")).toBe(true);
+    expect(robotsPatternMatches("/x$", "/xy")).toBe(false);
+    // The tail may not overlap the head part.
+    expect(robotsPatternMatches("/ab*b$", "/ab")).toBe(false);
+  });
+});
+
+describe("hostile robots.txt", () => {
+  const path = "/" + "a".repeat(200);
+
+  test("a catastrophic wildcard rule finishes at once", () => {
+    const started = Date.now();
+    const text = `User-agent: *\nDisallow: /*a*a*a*a*a*b\n`;
+    expect(robotsAllows(text, path)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(200);
+    const wild = `User-agent: *\nDisallow: /${"*a".repeat(ROBOTS_MAX_WILDCARDS)}b\n`;
+    expect(robotsAllows(wild, path)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(400);
+  });
+
+  test("too many wildcards, too long a pattern or too many rules mean do not fetch", () => {
+    const manyStars = `User-agent: *\nDisallow: /${"*a".repeat(ROBOTS_MAX_WILDCARDS + 1)}\n`;
+    expect(robotsAllows(manyStars, "/")).toBe(false);
+    const long = `User-agent: *\nAllow: /${"x".repeat(ROBOTS_MAX_PATTERN_LENGTH)}\n`;
+    expect(robotsAllows(long, "/")).toBe(false);
+    const rules = Array.from({ length: ROBOTS_MAX_RULES + 1 }, (_, i) => `Disallow: /p${i}`).join("\n");
+    expect(robotsAllows(`User-agent: *\n${rules}`, "/")).toBe(false);
+    expect(robotsAllows("User-agent: *\nDisallow: /x", "/" + "y".repeat(3000))).toBe(false);
   });
 });

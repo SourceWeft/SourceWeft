@@ -134,6 +134,11 @@ export async function scrapeSiteIcons(
     const page = await fetcher.checkedFetch(`https://${host}/`, "html", {
       approvedHosts,
     });
+    // A rate limit or a server error says nothing about the site: try later.
+    if (page.status === 429 || page.status >= 500) {
+      result.reason = `http-${page.status}`;
+      return { status: "deferred", result };
+    }
     const head = extractHead(page.body.toString("utf8"), page.url);
     const signal = classifyPage({
       status: page.status,
@@ -142,13 +147,12 @@ export async function scrapeSiteIcons(
     });
     if (signal) {
       result.outcome = signal;
-      return { status: "denied", result };
+      // A bot wall may lift, a parking page rarely does.
+      return { status: signal === "challenge" ? "deferred" : "denied", result };
     }
     if (page.status < 200 || page.status >= 300) {
       result.reason = `http-${page.status}`;
-      return page.status === 429 || page.status >= 500
-        ? { status: "deferred", result }
-        : { status: "error", result };
+      return { status: "error", result };
     }
     const pageOrigin = new URL(page.url).origin;
     const declared: DeclaredIcon[] = [...head.icons];

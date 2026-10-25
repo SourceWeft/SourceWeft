@@ -76,10 +76,21 @@ export type IconFetchResponse = {
   url: string;
 };
 
+/** The connections and the address refusal of ONE resource's fetch. */
+type RequestScope = {
+  agents: Map<string, Agent>;
+  denial?: IconFetchError;
+};
+
 /** The one network call; a test replaces it. */
 export type IconTransport = (
   url: URL,
-  init: { headers: Record<string, string>; signal: AbortSignal },
+  init: {
+    headers: Record<string, string>;
+    signal: AbortSignal;
+    /** Opaque to a replacement transport; the default one connects with it. */
+    scope?: unknown;
+  },
 ) => Promise<Response>;
 
 const KEPT_HEADERS = [
@@ -168,15 +179,18 @@ async function readCapped(
 
 export function createIconFetcher(options: IconFetcherOptions = {}) {
   const timeoutMs = options.resourceTimeoutMs ?? ICON_RESOURCE_TIMEOUT_MS;
-  const agents = new Map<string, Agent>();
-  let denial: IconFetchError | undefined;
   const robotsByOrigin = new Map<
     string,
     Promise<{ text: string } | "none" | "defer">
   >();
 
-  function agentFor(url: URL) {
-    let agent = agents.get(url.origin);
+  /**
+   * One connection pool per origin per resource: an address refusal recorded
+   * by a socket belongs to the request that opened it, never to a neighbour
+   * running at the same time.
+   */
+  function agentFor(url: URL, scope: RequestScope) {
+    let agent = scope.agents.get(url.origin);
     if (agent) return agent;
     agent = new Agent({
       connect: {
@@ -190,7 +204,7 @@ export function createIconFetcher(options: IconFetcherOptions = {}) {
             },
             (error: unknown) => {
               if (error instanceof EndpointPolicyError) {
-                denial ??= new IconFetchError(
+                scope.denial ??= new IconFetchError(
                   "private-address",
                   "Icon host resolves to a non-public address",
                 );
@@ -205,7 +219,7 @@ export function createIconFetcher(options: IconFetcherOptions = {}) {
         },
       },
     });
-    agents.set(url.origin, agent);
+    scope.agents.set(url.origin, agent);
     return agent;
   }
 
@@ -218,7 +232,7 @@ export function createIconFetcher(options: IconFetcherOptions = {}) {
         redirect: "manual",
         credentials: "omit",
         signal: init.signal,
-        dispatcher: agentFor(url),
+        dispatcher: agentFor(url, init.scope as RequestScope),
       } as RequestInit & { dispatcher: Agent }));
 
   function assertStartUrl(url: URL, approved: ReadonlySet<string>) {
@@ -265,6 +279,23 @@ export function createIconFetcher(options: IconFetcherOptions = {}) {
       throw new IconFetchError("scheme", "Icon URL is not valid");
     }
     assertStartUrl(current, request.approvedHosts);
+    const scope: RequestScope = { agents: new Map() };
+    try {
+      return await fetchHops(current, kind, request, scope);
+    } finally {
+      await Promise.all(
+        [...scope.agents.values()].map((agent) => agent.destroy().catch(() => {})),
+      );
+    }
+  }
+
+  async function fetchHops(
+    start: URL,
+    kind: IconFetchKind,
+    request: IconRequestOptions,
+    scope: RequestScope,
+  ): Promise<IconFetchResponse> {
+    let current = start;
     const deadline = AbortSignal.timeout(timeoutMs);
     const signal = options.signal
       ? AbortSignal.any([deadline, options.signal])
@@ -275,13 +306,9 @@ export function createIconFetcher(options: IconFetcherOptions = {}) {
       const headers = { "user-agent": ICON_USER_AGENT, accept: "*/*" };
       let response: Response;
       try {
-        response = await transport(current, { headers, signal });
+        response = await transport(current, { headers, signal, scope });
       } catch (error) {
-        if (denial) {
-          const denied = denial;
-          denial = undefined;
-          throw denied;
-        }
+        if (scope.denial) throw scope.denial;
         if (signal.aborted) throw abortError(signal);
         if (error instanceof IconFetchError) throw error;
         throw new IconFetchError("network", "Icon fetch failed");
@@ -406,10 +433,9 @@ export function createIconFetcher(options: IconFetcherOptions = {}) {
       }
       return fetchBounded(start, kind, request);
     },
+    /** Connections live and die with each resource's fetch: nothing to close. */
     async close() {
-      const pending = [...agents.values()].map((agent) => agent.destroy());
-      agents.clear();
-      await Promise.all(pending);
+      // Nothing to release.
     },
   };
 }

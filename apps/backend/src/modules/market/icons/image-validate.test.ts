@@ -66,11 +66,35 @@ async function identicon(size = 420) {
 }
 
 describe("validateImage: accepted", () => {
-  test.each(["png", "jpeg", "webp", "gif"] as const)("a 128 px %s decodes and is accepted", async (format) => {
+  test.each(["png", "jpeg", "webp", "gif"] as const)("a 128 px %s decodes and is accepted, stored as a PNG", async (format) => {
     const bytes = await solid(128, 128, format);
     const verdict = await validateImage(bytes);
-    expect(verdict).toMatchObject({ ok: true, width: 128, height: 128, format });
-    if (verdict.ok) expect(verdict.sha256).toBe(sha256Hex(bytes));
+    expect(verdict).toMatchObject({ ok: true, width: 128, height: 128, format: "png", contentType: "image/png" });
+    if (verdict.ok) {
+      // The hash is that of what is stored, which is a PNG.
+      expect(verdict.sha256).toBe(sha256Hex(verdict.bytes));
+      expect(verdict.bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    }
+  });
+
+  test("what is stored is re-encoded: no trailing data, no metadata, bounded size", async () => {
+    // A PNG with a script appended after IEND, and a JPEG with EXIF and an ICC profile.
+    const png = Buffer.concat([await solid(128, 128), Buffer.from("<script>alert(1)</script>")]);
+    const stored = await validateImage(png);
+    expect(stored.ok && stored.bytes.includes(Buffer.from("<script>"))).toBe(false);
+    const jpeg = await sharp(await solid(128, 128, "jpeg"))
+      .withExif({ IFD0: { Copyright: "secret-exif-marker" } })
+      .jpeg()
+      .toBuffer();
+    expect(jpeg.includes(Buffer.from("secret-exif-marker"))).toBe(true);
+    const fromJpeg = await validateImage(jpeg);
+    expect(fromJpeg.ok).toBe(true);
+    if (fromJpeg.ok) {
+      expect(fromJpeg.bytes.includes(Buffer.from("secret-exif-marker"))).toBe(false);
+      expect((await sharp(fromJpeg.bytes).metadata()).exif).toBeUndefined();
+    }
+    const big = await validateImage(await solid(2000, 2000));
+    expect(big).toMatchObject({ ok: true, width: 512, height: 512 });
   });
 
   test("a slightly non-square logo is accepted", async () => {
@@ -89,7 +113,7 @@ describe("validateImage: accepted", () => {
     header.writeUInt32LE(header.length, 18);
     const verdict = await validateImage(Buffer.concat([header, png]));
     expect(verdict).toMatchObject({ ok: true, format: "png", width: 128 });
-    if (verdict.ok) expect(verdict.sha256).toBe(sha256Hex(png));
+    if (verdict.ok) expect(verdict.sha256).toBe(sha256Hex(verdict.bytes));
   });
 });
 

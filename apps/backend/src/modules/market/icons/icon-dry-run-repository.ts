@@ -33,7 +33,9 @@ export async function findClaimedDomains(
 
 /**
  * The newest version of each server that carries a dry-run decision, for the
- * review sample (`scripts/icon-dry-run-report.ts`).
+ * review sample (`scripts/icon-dry-run-report.ts`). "Newest" is deliberate:
+ * the latest published version's decision is the one a display switch would
+ * use, so an older version's stale decision is never sampled in its place.
  */
 export async function findReviewRows(): Promise<ReviewRow[]> {
   const result = await db.execute(sql`

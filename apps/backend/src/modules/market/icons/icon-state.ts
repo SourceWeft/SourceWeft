@@ -44,13 +44,9 @@ export interface IconStateStore {
       nextAttemptAt: Date;
     },
   ): Promise<void>;
-  recordHashDomain(input: {
-    sha256: string;
-    domain: string;
-    label: string;
-  }): Promise<void>;
-  /** Distinct brand labels (not domains) that served the image. */
-  countHashLabels(sha256: string): Promise<number>;
+  recordHashDomain(input: { sha256: string; domain: string }): Promise<void>;
+  /** Distinct registrable domains that served the image. */
+  countHashDomains(sha256: string): Promise<number>;
 }
 
 export const ICON_SUCCESS_REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
@@ -99,7 +95,17 @@ export type ScopeResult<T> =
 export async function withIconScope<T extends Record<string, unknown>>(
   store: IconStateStore,
   scope: string,
-  options: { owner: string; now: Date; leaseMs?: number },
+  options: {
+    owner: string;
+    now: Date;
+    leaseMs?: number;
+    /**
+     * A second scope whose lease is held while `fetch` runs, so scopes that
+     * hit one registrable domain (two hosts of one site) never run at once.
+     * It holds no outcome of its own and is due again as soon as it is freed.
+     */
+    lockScope?: string;
+  },
   fetch: () => Promise<ScopeOutcome<T>>,
 ): Promise<ScopeResult<T>> {
   const { owner, now } = options;
@@ -118,11 +124,36 @@ export async function withIconScope<T extends Record<string, unknown>>(
     options.leaseMs ?? ICON_LEASE_MS,
   );
   if (!leased) return { kind: "busy" };
+  const leaseMs = options.leaseMs ?? ICON_LEASE_MS;
+  if (options.lockScope) {
+    const locked = await store.acquireLease(options.lockScope, owner, now, leaseMs);
+    if (!locked) {
+      // Free our own scope again, due at once, without recording an outcome.
+      await store.settle(scope, owner, {
+        status: row?.status ?? "deferred",
+        resultJson: row?.resultJson ?? null,
+        errorCount: row?.errorCount ?? 0,
+        fetchedAt: row?.fetchedAt ?? now,
+        nextAttemptAt: row?.nextAttemptAt ?? now,
+      });
+      return { kind: "busy" };
+    }
+  }
   let outcome: ScopeOutcome<T>;
   try {
     outcome = await fetch();
   } catch {
     outcome = { status: "error" };
+  } finally {
+    if (options.lockScope) {
+      await store.settle(options.lockScope, owner, {
+        status: "ok",
+        resultJson: null,
+        errorCount: 0,
+        fetchedAt: now,
+        nextAttemptAt: now,
+      });
+    }
   }
   const { nextAttemptAt, errorCount } = nextIconAttempt(
     outcome.status,
@@ -144,7 +175,7 @@ export function createMemoryIconStateStore(): IconStateStore & {
   rows: Map<string, FetchStateRow>;
 } {
   const rows = new Map<string, FetchStateRow>();
-  const hashes = new Map<string, Map<string, string>>();
+  const hashes = new Map<string, Set<string>>();
   return {
     rows,
     async read(scope) {
@@ -177,13 +208,13 @@ export function createMemoryIconStateStore(): IconStateStore & {
       if (!row || row.leaseOwner !== owner) return;
       Object.assign(row, outcome, { leaseOwner: null, leaseUntil: null });
     },
-    async recordHashDomain({ sha256, domain, label }) {
-      const byDomain = hashes.get(sha256) ?? new Map<string, string>();
-      byDomain.set(domain, label);
-      hashes.set(sha256, byDomain);
+    async recordHashDomain({ sha256, domain }) {
+      const domains = hashes.get(sha256) ?? new Set<string>();
+      domains.add(domain);
+      hashes.set(sha256, domains);
     },
-    async countHashLabels(sha256) {
-      return new Set(hashes.get(sha256)?.values() ?? []).size;
+    async countHashDomains(sha256) {
+      return hashes.get(sha256)?.size ?? 0;
     },
   };
 }

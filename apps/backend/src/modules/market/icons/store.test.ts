@@ -89,7 +89,7 @@ test("a dry-run candidate is stored under its content hash alone, so one image i
     key: input.key,
     publicUrl: `https://assets.test/${input.key}`,
   }));
-  const store = createHashedIconStore(write);
+  const store = createHashedIconStore(write, async () => false);
   const bytes = Buffer.alloc(2048, 9);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const first = await store({ sha256, bytes, contentType: "image/png" });
@@ -98,4 +98,20 @@ test("a dry-run candidate is stored under its content hash alone, so one image i
   assert.equal(second.url, first.url);
   assert.equal(write.mock.calls[0]?.[0].cacheControl, "public, max-age=31536000, immutable");
   await assert.rejects(() => store({ sha256: "../x", bytes, contentType: "image/png" }));
+});
+
+test("an object that already exists is not written again", async () => {
+  const write = vi.fn<PublicObjectWriter>(async (input) => ({
+    bucket: "public",
+    key: input.key,
+    publicUrl: `https://assets.test/${input.key}`,
+  }));
+  const exists = vi.fn(async (_key: string) => true);
+  const store = createHashedIconStore(write, exists);
+  const bytes = Buffer.alloc(2048, 9);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const stored = await store({ sha256, bytes, contentType: "image/png" });
+  assert.equal(exists.mock.calls[0]?.[0], `market/mcp-icons/by-hash/${sha256}.png`);
+  assert.equal(write.mock.calls.length, 0);
+  assert.match(stored.url, new RegExp(`by-hash/${sha256}\\.png$`));
 });

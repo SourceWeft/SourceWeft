@@ -144,16 +144,56 @@ describe("withIconScope", () => {
   });
 });
 
+describe("lock scope", () => {
+  test("two scopes under one lock never run at once and the lock is freed after", async () => {
+    const state = createMemoryIconStateStore();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const first = withIconScope(
+      state,
+      "site:a.example.com",
+      { owner: "w1", now: T0, lockScope: "lock:example.com" },
+      async () => {
+        await gate;
+        return { status: "ok", result: { host: "a" } };
+      },
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const second = await withIconScope(
+      state,
+      "site:b.example.com",
+      { owner: "w2", now: T0, lockScope: "lock:example.com" },
+      async () => ({ status: "ok", result: { host: "b" } }),
+    );
+    expect(second).toEqual({ kind: "busy" });
+    // The refused scope is free again: not leased, nothing cached for it.
+    expect(state.rows.get("site:b.example.com")).toMatchObject({
+      leaseOwner: null,
+      leaseUntil: null,
+      resultJson: null,
+    });
+    release();
+    await first;
+    const third = await withIconScope(
+      state,
+      "site:b.example.com",
+      { owner: "w2", now: at(1000), lockScope: "lock:example.com" },
+      async () => ({ status: "ok", result: { host: "b" } }),
+    );
+    expect(third).toMatchObject({ kind: "fetched", result: { host: "b" } });
+  });
+});
+
 describe("hash domains", () => {
-  test("counts brand labels, not domains: notion.so and notion.com are one", async () => {
+  test("counts distinct registrable domains", async () => {
     const state = createMemoryIconStateStore();
     const sha = "a".repeat(64);
-    await state.recordHashDomain({ sha256: sha, domain: "notion.so", label: "notion" });
-    await state.recordHashDomain({ sha256: sha, domain: "notion.com", label: "notion" });
-    expect(await state.countHashLabels(sha)).toBe(1);
-    await state.recordHashDomain({ sha256: sha, domain: "acme.io", label: "acme" });
-    await state.recordHashDomain({ sha256: sha, domain: "beta.dev", label: "beta" });
-    expect(await state.countHashLabels(sha)).toBe(3);
-    expect(await state.countHashLabels("b".repeat(64))).toBe(0);
+    await state.recordHashDomain({ sha256: sha, domain: "notion.so" });
+    await state.recordHashDomain({ sha256: sha, domain: "notion.com" });
+    await state.recordHashDomain({ sha256: sha, domain: "notion.com" });
+    expect(await state.countHashDomains(sha)).toBe(2);
+    await state.recordHashDomain({ sha256: sha, domain: "acme.io" });
+    expect(await state.countHashDomains(sha)).toBe(3);
+    expect(await state.countHashDomains("b".repeat(64))).toBe(0);
   });
 });

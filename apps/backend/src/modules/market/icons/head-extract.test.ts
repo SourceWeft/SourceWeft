@@ -127,6 +127,8 @@ describe("classifyPage", () => {
       "This domain is parked",
       "Buy this domain",
       "HugeDomains.com",
+      "This domain may be for sale",
+      "acme.com is for sale",
     ]) {
       expect(classifyPage({ status: 200, title, headers: {} })).toBe("parked");
     }
@@ -136,7 +138,24 @@ describe("classifyPage", () => {
     expect(classifyPage({ status: 200, title: "Just a moment...", headers: {} })).toBe("challenge");
     expect(classifyPage({ status: 403, title: "x", headers: { server: "cloudflare" } })).toBe("challenge");
     expect(classifyPage({ status: 200, headers: { "cf-mitigated": "challenge" } })).toBe("challenge");
-    expect(classifyPage({ status: 429, headers: {} })).toBe("challenge");
+  });
+
+  test("a rate limit is not a challenge (the caller defers it)", () => {
+    expect(classifyPage({ status: 429, headers: {} })).toBeUndefined();
+  });
+
+  test("titles legitimate pages use are not read as parking or challenge pages", () => {
+    for (const title of [
+      "Coming soon — Acme",
+      "Under construction | Acme Labs",
+      "Please wait while we build your report",
+      "Access denied handling in Express",
+      "Security check for developers — Acme",
+      "Sedo: a Japanese word list",
+      "Why we are not for sale",
+    ]) {
+      expect(classifyPage({ status: 200, title, headers: {} })).toBeUndefined();
+    }
   });
 
   test("leaves ordinary product pages alone", () => {

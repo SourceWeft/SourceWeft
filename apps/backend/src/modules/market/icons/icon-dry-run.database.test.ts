@@ -110,15 +110,15 @@ describe("icon dry-run state", () => {
     expect((await state.iconStateStore.read(scope))?.resultJson).toBeNull();
   });
 
-  test("hash domains count distinct brand labels", async () => {
+  test("hash domains count distinct registrable domains", async () => {
     const sha256 = "c".repeat(64);
     const record = state.iconStateStore.recordHashDomain;
-    await record({ sha256, domain: "notion.so", label: "notion" });
-    await record({ sha256, domain: "notion.com", label: "notion" });
-    await record({ sha256, domain: "notion.com", label: "notion" });
-    expect(await state.iconStateStore.countHashLabels(sha256)).toBe(1);
-    await record({ sha256, domain: "acme.io", label: "acme" });
-    expect(await state.iconStateStore.countHashLabels(sha256)).toBe(2);
+    await record({ sha256, domain: "notion.so" });
+    await record({ sha256, domain: "notion.com" });
+    await record({ sha256, domain: "notion.com" });
+    expect(await state.iconStateStore.countHashDomains(sha256)).toBe(2);
+    await record({ sha256, domain: "acme.io" });
+    expect(await state.iconStateStore.countHashDomains(sha256)).toBe(3);
   });
 
   test("stored dry-run records come back with the icon provenance, and the review query finds the newest", async () => {

@@ -54,16 +54,16 @@ export const iconStateStore: IconStateStore = {
         ),
       );
   },
-  async recordHashDomain({ sha256, domain, label }) {
+  async recordHashDomain({ sha256, domain }) {
     await db
       .insert(marketMcpIconHashDomains)
-      .values({ sha256, domain, label })
+      .values({ sha256, domain })
       .onConflictDoNothing();
   },
-  async countHashLabels(sha256) {
+  async countHashDomains(sha256) {
     const [row] = await db
       .select({
-        count: sql<number>`count(distinct ${marketMcpIconHashDomains.label})::int`,
+        count: sql<number>`count(*)::int`,
       })
       .from(marketMcpIconHashDomains)
       .where(eq(marketMcpIconHashDomains.sha256, sha256));

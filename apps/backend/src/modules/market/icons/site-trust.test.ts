@@ -2,20 +2,42 @@ import { describe, expect, test } from "vitest";
 import { evaluateSiteTrust } from "./site-trust";
 
 describe("tier A", () => {
-  test("a domain namespace with the endpoint under that domain", () => {
+  test("a verified domain namespace with the endpoint under that domain", () => {
     const trust = evaluateSiteTrust({
       namespace: "com.notion",
+      namespaceVerified: true,
       endpointUrl: "https://mcp.notion.com/mcp",
     });
     expect(trust).toMatchObject({ tier: "A", host: "notion.com", domain: "notion.com" });
   });
 
+  test("an unverified namespace is not evidence, whatever the endpoint", () => {
+    const trust = evaluateSiteTrust({
+      namespace: "com.notion",
+      endpointUrl: "https://mcp.notion.com/mcp",
+    });
+    expect(trust.tier).not.toBe("A");
+  });
+
   test("a domain namespace whose endpoint is elsewhere is not A", () => {
     const trust = evaluateSiteTrust({
       namespace: "com.acme",
+      namespaceVerified: true,
       endpointUrl: "https://acme-mcp.workers.dev/mcp",
     });
     expect(trust.tier).not.toBe("A");
+  });
+
+  test("reserved and local top-level labels never name a domain", () => {
+    for (const namespace of ["local.printer", "test.acme", "internal.corp"]) {
+      expect(
+        evaluateSiteTrust({
+          namespace,
+          namespaceVerified: true,
+          endpointUrl: "https://mcp.printer.local/mcp",
+        }).tier,
+      ).not.toBe("A");
+    }
   });
 
   test("a verified domain claim is A for the claimed domain only", () => {
@@ -31,6 +53,7 @@ describe("tier A", () => {
     expect(
       evaluateSiteTrust({
         namespace: "io.github.acme",
+        namespaceVerified: true,
         endpointUrl: "https://github.io/acme",
       }).tier,
     ).not.toBe("A");
@@ -38,82 +61,89 @@ describe("tier A", () => {
 });
 
 describe("tier B", () => {
-  test("two independent channels agree on a domain that is the endpoint's", () => {
+  test("a declared website whose domain hosts the endpoint", () => {
     const trust = evaluateSiteTrust({
       namespace: "io.github.acme",
       endpointUrl: "https://mcp.acme.io/sse",
       registryWebsiteUrl: "https://www.acme.io/product",
-      serverInfoWebsiteUrl: "https://acme.io",
     });
-    expect(trust).toMatchObject({ tier: "B", domain: "acme.io" });
-    expect(trust.reasons).toContain("consistent:endpoint-domain");
+    expect(trust).toMatchObject({ tier: "B", host: "www.acme.io", domain: "acme.io" });
+    expect(trust.reasons).toContain("endpoint-under:mcp.acme.io");
   });
 
-  test("agreement is consistent with the declared repository's owner", () => {
-    const trust = evaluateSiteTrust({
-      namespace: "io.github.acme",
-      repositoryUrl: "https://github.com/acme/mcp-server",
-      registryWebsiteUrl: "https://acme.dev",
-      serverInfoWebsiteUrl: "https://acme.dev/docs",
-    });
-    expect(trust).toMatchObject({ tier: "B", domain: "acme.dev" });
-    expect(trust.reasons).toContain("consistent:repository-owner");
+  test("any one declaring field will do when the endpoint proves control", () => {
+    for (const field of ["serverInfoWebsiteUrl", "resourceDocumentationUrl"] as const) {
+      const trust = evaluateSiteTrust({
+        namespace: "io.github.acme",
+        endpointUrl: "https://mcp.acme.io/sse",
+        [field]: "https://acme.io/docs",
+      });
+      expect(trust.tier).toBe("B");
+    }
   });
 });
 
 describe("tier C", () => {
-  test("a single declaration is C and names no site to fetch", () => {
-    const trust = evaluateSiteTrust({
-      namespace: "io.github.acme",
-      endpointUrl: "https://mcp.acme.io/sse",
-      registryWebsiteUrl: "https://acme.io",
-    });
-    expect(trust).toEqual({
-      tier: "C",
-      declaredDomains: ["acme.io"],
-      reasons: ["single-or-unconfirmed-declaration"],
-    });
-  });
-
-  test("two fields copied from one channel count once", () => {
-    // serverInfo.websiteUrl and resource_documentation are both the endpoint's
-    // own words.
-    const trust = evaluateSiteTrust({
-      namespace: "io.github.acme",
-      endpointUrl: "https://mcp.acme.io/sse",
-      serverInfoWebsiteUrl: "https://acme.io",
-      resourceDocumentationUrl: "https://acme.io/docs",
-    });
-    expect(trust.tier).toBe("C");
-  });
-
-  test("channels that name different domains do not corroborate", () => {
-    const trust = evaluateSiteTrust({
-      namespace: "io.github.acme",
-      endpointUrl: "https://mcp.acme.io/sse",
-      registryWebsiteUrl: "https://acme.io",
-      serverInfoWebsiteUrl: "https://acme-corp.com",
-    });
-    expect(trust.tier).toBe("C");
-  });
-
-  test("agreeing channels that match neither endpoint nor repository stay C", () => {
+  test("agreeing declarations without control evidence stay C, however many fields", () => {
     const trust = evaluateSiteTrust({
       namespace: "io.github.acme",
       endpointUrl: "https://mcp.elsewhere.net/sse",
-      repositoryUrl: "https://github.com/acme/x",
       registryWebsiteUrl: "https://bigbrand.com",
       serverInfoWebsiteUrl: "https://bigbrand.com",
+      resourceDocumentationUrl: "https://bigbrand.com/docs",
     });
-    expect(trust.tier).toBe("C");
+    expect(trust).toEqual({
+      tier: "C",
+      declaredDomains: ["bigbrand.com"],
+      reasons: ["declared-website-without-control-evidence"],
+    });
+  });
+
+  test("a hyphen-lookalike GitHub owner does not turn a brand's website into B", () => {
+    // `s-t-r-i-p-e` is not stripe, whatever its name normalizes to.
+    expect(
+      evaluateSiteTrust({
+        namespace: "io.github.s-t-r-i-p-e",
+        repositoryUrl: "https://github.com/s-t-r-i-p-e/x",
+        registryWebsiteUrl: "https://stripe.com",
+        serverInfoWebsiteUrl: "https://stripe.com",
+      } as never).tier,
+    ).toBe("C");
+  });
+
+  test("a repository on a brand's own domain or any other code host proves nothing", () => {
+    for (const repositoryUrl of [
+      "https://git.stripe.com/x/y",
+      "https://huggingface.co/stripe/x",
+      "https://bitbucket.org/stripe/x",
+      "https://codeberg.org/stripe/x",
+    ]) {
+      expect(
+        evaluateSiteTrust({
+          namespace: "io.github.mallory",
+          endpointUrl: "https://mallory.example/mcp",
+          registryWebsiteUrl: "https://stripe.com",
+          serverInfoWebsiteUrl: "https://stripe.com",
+          repositoryUrl,
+        } as never).tier,
+      ).toBe("C");
+    }
   });
 
   test("two projects on one shared host are different sites", () => {
     const trust = evaluateSiteTrust({
       namespace: "io.github.acme",
       endpointUrl: "https://a.github.io/mcp",
-      registryWebsiteUrl: "https://a.github.io",
-      serverInfoWebsiteUrl: "https://b.github.io",
+      registryWebsiteUrl: "https://b.github.io",
+    });
+    expect(trust.tier).toBe("C");
+  });
+
+  test("the endpoint on a shared host does not make that host's other sites B", () => {
+    const trust = evaluateSiteTrust({
+      namespace: "io.github.acme",
+      endpointUrl: "https://acme.workers.dev/mcp",
+      registryWebsiteUrl: "https://victim.workers.dev",
     });
     expect(trust.tier).toBe("C");
   });

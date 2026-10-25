@@ -51,8 +51,11 @@ describe("scrapeSiteIcons", () => {
       ["icon", "https://acme.io/favicon-32.png", "too-small"],
     ]);
     const first = result.candidates[0]!;
-    expect(first).toMatchObject({ sha256: sha256Hex(apple), width: 180, height: 180 });
-    expect(deps.objects.has(first.sha256!)).toBe(true);
+    expect(first).toMatchObject({ width: 180, height: 180 });
+    // Stored by the hash of the re-encoded bytes, not of the fetched file.
+    const stored = deps.objects.get(first.sha256!)!;
+    expect(sha256Hex(stored.bytes)).toBe(first.sha256);
+    expect(first.sha256).not.toBe(sha256Hex(apple));
     expect(first.storedUrl).toContain(first.sha256);
     // og:image was never requested.
     expect(network.calls).not.toContain("https://acme.io/banner.png");
@@ -87,8 +90,20 @@ describe("scrapeSiteIcons", () => {
         403,
       ),
     });
-    expect(outcome.status).toBe("denied");
+    // A bot wall may lift: retried with backoff, not cached as a refusal.
+    expect(outcome.status).toBe("deferred");
     expect(outcome.result).toMatchObject({ outcome: "challenge", candidates: [] });
+  });
+
+  test("a rate-limited homepage is deferred, not read as a challenge or cached", async () => {
+    const { outcome, network } = await scrape("limited.example", {
+      "https://limited.example/": new Response("slow down", { status: 429 }),
+    });
+    expect(outcome).toMatchObject({
+      status: "deferred",
+      result: { outcome: "page-unavailable", reason: "http-429", candidates: [] },
+    });
+    expect(network.calls).toEqual(["https://limited.example/robots.txt", "https://limited.example/"]);
   });
 
   test("robots.txt disallow stops before the page is requested", async () => {
@@ -178,7 +193,7 @@ describe("scrapeSiteIcons", () => {
       "https://acme.io/a.png": imageResponse(await logo(8)),
     });
     const [sha] = [...deps.objects.keys()];
-    expect(await deps.state.countHashLabels(sha!)).toBe(1);
+    expect(await deps.state.countHashDomains(sha!)).toBe(1);
   });
 
   test("a transient image failure on every candidate retries the site later", async () => {

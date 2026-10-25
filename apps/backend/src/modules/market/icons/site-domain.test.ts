@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import {
-  brandLabel,
   hostIsUnder,
   httpsHostOf,
   registrableDomainOf,
@@ -34,12 +33,11 @@ describe("hosts", () => {
     expect(httpsHostOf("not a url")).toBeUndefined();
   });
 
-  test("hostIsUnder, wwwTwin and brandLabel", () => {
+  test("hostIsUnder and wwwTwin", () => {
     expect(hostIsUnder("mcp.notion.com", "notion.com")).toBe(true);
     expect(hostIsUnder("notion.com", "notion.com")).toBe(true);
     expect(hostIsUnder("evilnotion.com", "notion.com")).toBe(false);
     expect(wwwTwin("example.com")).toBe("www.example.com");
     expect(wwwTwin("www.example.com")).toBe("example.com");
-    expect(brandLabel("notion.so")).toBe(brandLabel("notion.com"));
   });
 });

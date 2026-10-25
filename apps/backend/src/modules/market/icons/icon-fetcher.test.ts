@@ -1,3 +1,5 @@
+import { createServer, type Server } from "node:http";
+import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   createIconFetcher,
@@ -395,5 +397,73 @@ describe("socket-time address validation", () => {
     await expect(
       fetcher.fetch("https://mixed.example.com/", "html", approved("mixed.example.com")),
     ).rejects.toMatchObject({ code: "private-address" });
+  });
+});
+
+describe("compressed bodies (real socket)", () => {
+  let server: Server | undefined;
+  afterEach(async () => {
+    await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
+    server = undefined;
+  });
+
+  /** A transport that sends the request to a local plain-HTTP server through real fetch. */
+  async function localTransport(body: Buffer, headers: Record<string, string>) {
+    server = createServer((_request, response) => {
+      response.writeHead(200, headers);
+      response.end(body);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    const transport: IconTransport = (url, init) =>
+      globalThis.fetch(`http://127.0.0.1:${port}${url.pathname}`, {
+        headers: init.headers,
+        signal: init.signal,
+        redirect: "manual",
+      });
+    return transport;
+  }
+
+  test("a gzip bomb is cut off at the decoded cap, not the compressed size", async () => {
+    // 64 MiB of zeros compress to well under 100 KiB.
+    const bomb = gzipSync(Buffer.alloc(64 * 1024 * 1024));
+    expect(bomb.length).toBeLessThan(200 * 1024);
+    const transport = await localTransport(bomb, { "content-encoding": "gzip" });
+    const fetcher = createIconFetcher({ transport });
+    closers.push(() => fetcher.close());
+    const started = Date.now();
+    await expect(
+      fetcher.fetch("https://example.com/bomb.png", "image", approved("example.com")),
+    ).rejects.toMatchObject({ code: "too-large" });
+    expect(Date.now() - started).toBeLessThan(4000);
+  });
+
+  test("an ordinary compressed body under the cap is decoded and delivered", async () => {
+    const transport = await localTransport(gzipSync(Buffer.from("hello icon")), {
+      "content-encoding": "gzip",
+    });
+    const fetcher = createIconFetcher({ transport });
+    closers.push(() => fetcher.close());
+    const response = await fetcher.fetch("https://example.com/a", "html", approved("example.com"));
+    expect(response.body.toString()).toBe("hello icon");
+  });
+});
+
+describe("address refusals belong to their own request", () => {
+  test("a refusal for one host is not blamed on a later request to another", async () => {
+    const fetcher = createIconFetcher({
+      lookup: async (host) =>
+        host === "bad.example.com"
+          ? [{ address: "10.0.0.9", family: 4 }]
+          : [{ address: "93.184.216.34", family: 4 }],
+      resourceTimeoutMs: 600,
+    });
+    closers.push(() => fetcher.close());
+    const bad = fetcher.fetch("https://bad.example.com/", "html", approved("bad.example.com"));
+    const good = fetcher.fetch("https://good.example.com/", "html", approved("good.example.com"));
+    await expect(bad).rejects.toMatchObject({ code: "private-address" });
+    // The good host is not refused for the bad one's address (it may fail to
+    // connect or time out here, but never as a private address).
+    await expect(good).rejects.not.toMatchObject({ code: "private-address" });
   });
 });

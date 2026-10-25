@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   isPublicStorageConfigured,
+  publicObjectExists,
+  publicObjectUrl,
   putPublicObject,
   type PublicObjectWriter,
 } from "../../../shared/public-storage";
@@ -76,13 +78,17 @@ export type HashedIconStore = (input: {
 
 export function createHashedIconStore(
   write: PublicObjectWriter = putPublicObject,
+  exists: (key: string) => Promise<boolean> = publicObjectExists,
 ): HashedIconStore {
   return async ({ sha256, bytes, contentType }) => {
     if (!/^[a-f\d]{64}$/.test(sha256)) {
       throw new Error("Not a sha256 digest");
     }
+    const key = `${MCP_ICON_HASH_KEY_PREFIX}/${sha256}.${imageExtension(contentType)}`;
+    // The key is the content hash: an object that is there is these bytes.
+    if (await exists(key)) return { url: publicObjectUrl(key) };
     const stored = await write({
-      key: `${MCP_ICON_HASH_KEY_PREFIX}/${sha256}.${imageExtension(contentType)}`,
+      key,
       body: bytes,
       contentType,
       cacheControl: "public, max-age=31536000, immutable",

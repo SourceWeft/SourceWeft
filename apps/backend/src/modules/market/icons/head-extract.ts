@@ -178,17 +178,21 @@ export function extractManifestIcons(
   return out;
 }
 
+// Titles only a parking or for-sale page carries. Phrases that legitimate
+// pages use too ("coming soon", "under construction") are not among them.
 const PARKED_TITLE =
-  /\b(parked|for sale|domain (?:is |may be )?for sale|buy this domain|this domain is available|domain expired|sedo|hugedomains|afternic|domain name for sale|under construction|coming soon)\b/i;
+  /\b[a-z\d-]+\.[a-z]{2,}(?:\.[a-z]{2})? (?:is|may be) for sale\b|\b(?:parked|domain (?:is |may be |name )?for sale|for sale:|buy this domain|this domain (?:is|may be) (?:available|for sale)|domain (?:has )?expired|hugedomains|afternic)\b/i;
+// Titles of a bot-challenge interstitial.
 const CHALLENGE_TITLE =
-  /\b(just a moment|attention required|checking your browser|verify you are (?:a )?human|are you a robot|security check|access denied|ddos protection|please wait|one more step)\b/i;
+  /^(?:just a moment\.{0,3}|attention required! \| cloudflare|checking your browser|verify you are (?:a )?human|are you a robot\??|one more step)$|\bddos protection by\b/i;
 
 export type PageSignal = "parked" | "challenge";
 
 /**
  * Whether a fetched page is a parking/for-sale page or a bot-challenge page,
  * from its title and response only. Such a page's icons are the registrar's
- * or the CDN's, not the product's.
+ * or the CDN's, not the product's. A rate limit (429) is not a challenge: the
+ * caller defers it.
  */
 export function classifyPage(input: {
   status: number;
@@ -197,8 +201,8 @@ export function classifyPage(input: {
 }): PageSignal | undefined {
   if (
     input.headers["cf-mitigated"] === "challenge" ||
-    (input.status === 403 && /cloudflare|sucuri|akamai/i.test(input.headers.server ?? "")) ||
-    input.status === 429 ||
+    (input.status === 403 &&
+      /cloudflare|sucuri|akamai/i.test(input.headers.server ?? "")) ||
     (input.title && CHALLENGE_TITLE.test(input.title))
   ) {
     return "challenge";

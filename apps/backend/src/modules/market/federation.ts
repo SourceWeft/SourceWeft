@@ -990,6 +990,7 @@ async function ingestRegistryEntries(
           repositoryUrl: server.repository?.url?.trim() || undefined,
           registryIconUrl: registryIconUrl(server),
           registryWebsiteUrl: server.websiteUrl,
+          verified: input.verified,
           selfDescription: probe?.selfDescription,
           authMetadata: probe?.authMetadata,
           faviconUrl:

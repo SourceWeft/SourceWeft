@@ -2286,6 +2286,7 @@ test("issue #367: the icon dry-run gets each entry's evidence, rides on the prov
       repositoryUrl: "https://github.com/makenotion/notion-mcp",
       registryIconUrl: "https://cdn.notion.test/icon.png",
       registryWebsiteUrl: "https://www.notion.com",
+      verified: true,
       selfDescription: undefined,
       authMetadata: undefined,
       faviconUrl: undefined,
