@@ -2514,15 +2514,15 @@
       "openSourceAria": "Open {name} source",
       "openGithub": "Open GitHub repository",
       "openSource": "Open source",
-      "credentialsRequired": "Credentials required",
+      "credentialsRequired": "Needs connection",
       "toolsSyncedTitle": "{count} tools synced",
       "tested": "Tested {time}",
       "notTestedYet": "Not tested yet",
       "testAria": "Test {name}",
       "testConnection": "Test connection",
-      "configureAria": "Configure {name}",
-      "configureRequired": "Configure required credentials",
-      "settings": "Settings",
+      "configureAria": "Manage the connection for {name}",
+      "configureRequired": "Connect to use this server",
+      "settings": "Connection",
       "uninstallAria": "Uninstall {name}",
       "uninstall": "Uninstall",
       "enableAria": "Enable {name}",
@@ -2530,7 +2530,11 @@
       "enable": "Enable",
       "disable": "Disable",
       "install": "Install",
-      "unverifiedWarning": "Unverified MCP can receive this turn's tool arguments and may perform external actions. Review the server before enabling."
+      "unverifiedWarning": "Unverified MCP can receive this turn's tool arguments and may perform external actions. Review the server before enabling.",
+      "connectedVia": {
+        "oauth": "Connected via OAuth",
+        "header": "Connected via API key"
+      }
     },
     "empty": {
       "none": "No MCP servers are available for this workspace.",
@@ -2553,7 +2557,11 @@
       "testFailed": "Failed to test MCP.",
       "loadMoreFailed": "Failed to load more MCP servers.",
       "connected": "MCP server connected",
-      "authFailed": "MCP authorization failed. Please try again."
+      "authFailed": "MCP authorization failed. Please try again.",
+      "connectUnconfirmed": "Couldn't confirm the connection. Open Connection to check it.",
+      "authInvalid": "This sign-in link expired or was already used. Connect again.",
+      "authDenied": "Sign-in was cancelled.",
+      "authTimeout": "The sign-in service did not answer in time. Try again."
     },
     "risk": {
       "destructive": "Destructive",
@@ -2566,7 +2574,7 @@
       "titleFallback": "MCP details",
       "loadingDescription": "Loading MCP details.",
       "test": "Test",
-      "settings": "Settings",
+      "settings": "Connection",
       "uninstall": "Uninstall",
       "install": "Install",
       "loading": "Loading MCP...",
@@ -2577,7 +2585,7 @@
       "identifierMissing": "MCP identifier is missing.",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "configureCredentials": "Configure credentials",
+      "configureCredentials": "Connect this server",
       "toolsSynced": "{count, plural, one {# tool synced} other {# tools synced}}",
       "testedSuffix": " · tested {time}",
       "notTestedSuffix": " · not tested yet",
@@ -2618,8 +2626,8 @@
       "securityShort": "Credentials are encrypted per workspace and sent only to this server during tool calls."
     },
     "credentials": {
-      "title": "Configure MCP credentials",
-      "description": "Credentials are encrypted in SourceWeft and sent only to this MCP server during tool calls.",
+      "title": "Connection",
+      "description": "Your sign-in or key is encrypted in SourceWeft and sent only to this MCP server during tool calls.",
       "serverFallback": "MCP server",
       "authType": {
         "bearer": "Bearer token",
@@ -2664,14 +2672,34 @@
         "apiKeyRequired": "Enter the header name and API key before saving.",
         "headerRequired": "Add at least one header before saving.",
         "keyRequired": "Enter an API key before saving.",
-        "methodNotAllowed": "This server doesn't accept that connection method."
+        "methodNotAllowed": "This server doesn't accept that connection method.",
+        "authTimeout": "The sign-in service did not answer in time. Try again.",
+        "redirectBlocked": "The sign-in page did not open. Try again, and check that your browser allows the redirect.",
+        "notConnected": "This connection is no longer active. Connect again.",
+        "discoveryFailed": "Couldn't check the tools with your connection.",
+        "discoveryTimeout": "The server did not list its tools in time. Try again."
       },
       "toasts": {
         "saved": "MCP credentials saved",
         "saveFailed": "Failed to save credentials.",
         "alreadyConnected": "MCP server already connected",
         "authStartFailed": "Failed to start authorization."
-      }
+      },
+      "states": {
+        "requesting": "Contacting the sign-in service…",
+        "redirecting": "Opening {provider}…",
+        "testing": "Checking which tools you can use…"
+      },
+      "result": {
+        "title": "{count, plural, one {# tool is available to you} other {# tools are available to you}}",
+        "more": "…and {count} more",
+        "empty": "This server listed no tools for your account.",
+        "truncated": "Showing the first {count}.",
+        "oversize": "{count, plural, one {# tool was left out because its definition is too large.} other {# tools were left out because their definitions are too large.}}",
+        "private": "Only you see this list. It isn't shared with your workspace."
+      },
+      "useInChat": "Use in chat",
+      "retry": "Try again"
     },
     "submit": {
       "trigger": "Submit MCP",

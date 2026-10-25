@@ -64,13 +64,18 @@ export class HttpClient {
     return this.request<T>(path, { method: "GET" });
   }
 
-  async post<T>(path: string, body?: unknown): Promise<T> {
+  async post<T>(
+    path: string,
+    body?: unknown,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<T> {
     return this.request<T>(path, {
       method: "POST",
       body: body === undefined ? undefined : JSON.stringify(body),
       headers: {
         "content-type": "application/json",
       },
+      signal: options.signal,
     });
   }
 

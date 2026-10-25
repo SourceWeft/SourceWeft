@@ -23,6 +23,8 @@ vi.mock("../../../../lib/sdk", () => ({
 }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ identifier: route.identifier }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: ReactNode; href: string }) => (

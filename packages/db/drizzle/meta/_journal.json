@@ -470,6 +470,13 @@
       "when": 1792903417503,
       "tag": "0066_artifact_records",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1792910347642,
+      "tag": "0067_mcp_oauth_attempts",
+      "breakpoints": true
     }
   ]
 }

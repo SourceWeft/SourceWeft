@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import {
   installMarketMcpRequestSchema,
+  startWorkspaceMcpOAuthRequestSchema,
   updateWorkspaceMcpInstallRequestSchema,
   upsertWorkspaceMcpCredentialsRequestSchema,
 } from "@sourceweft/contracts";
@@ -10,6 +11,11 @@ import {
   completeMcpOAuthCallback,
   startMcpOAuthAuthorization,
 } from "../../../modules/mcp/oauth-service";
+import { findMcpOAuthCompletion } from "../../../modules/mcp/oauth-repository";
+import {
+  mcpInvalidAttemptUrl,
+  mcpReturnUrl,
+} from "../../../modules/mcp/oauth-return-to";
 import { config } from "../../../shared/config";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
@@ -229,7 +235,29 @@ export function registerMcpRoutes(app: Hono) {
     if (!session) {
       throw ApiError.unauthorized();
     }
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = startWorkspaceMcpOAuthRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
     const result = await startMcpOAuthAuthorization({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      installId: requireRouteParam(c, "installId"),
+      returnTo: parsed.data.returnTo,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/mcp-installs/:installId/discover-tools", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await mcpService.discoverToolsForMember({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       installId: requireRouteParam(c, "installId"),
@@ -253,23 +281,67 @@ export function registerMcpRoutes(app: Hono) {
 }
 
 /**
- * Top-level (non-workspace) OAuth redirect target. The `state` nonce carries the
- * (install, user) binding, so this route needs no workspace path segment. On
- * completion it bounces the browser back to the dashboard with a status flag.
+ * Top-level (non-workspace) OAuth routes. The `state` nonce carries the whole
+ * pending attempt (user, install, destination), so the callback needs no
+ * workspace path segment and takes nothing else from the request: it consumes
+ * the attempt once, then bounces the browser to the destination stored with it.
+ * An unknown, expired or replayed state goes to a fixed page.
  */
 export function registerMcpOAuthCallbackRoutes(app: Hono) {
   app.get("/v1/mcp/oauth/callback", async (c) => {
-    const base = `${config.auth.webBaseUrl}/dashboard/mcp`;
-    const code = c.req.query("code");
+    const webBase = config.auth.webBaseUrl;
     const state = c.req.query("state");
-    if (c.req.query("error") || !code || !state) {
-      return c.redirect(`${base}?mcpOAuth=error`);
+    if (!state) {
+      return c.redirect(mcpInvalidAttemptUrl(webBase));
     }
     try {
-      await completeMcpOAuthCallback({ code, state });
-      return c.redirect(`${base}?mcpOAuth=connected`);
+      // The callback is a browser navigation: its session, when it has one, is
+      // checked against the member the attempt belongs to.
+      const session = await requireSession(c).catch(() => null);
+      const result = await completeMcpOAuthCallback({
+        state,
+        code: c.req.query("code"),
+        providerError: c.req.query("error"),
+        sessionUserId: session ? getSessionUserId(session) : undefined,
+      });
+      if (result.outcome === "invalid") {
+        return c.redirect(mcpInvalidAttemptUrl(webBase));
+      }
+      if (result.outcome === "connected") {
+        return c.redirect(
+          mcpReturnUrl(webBase, result.returnTo, {
+            mcpOAuth: "connected",
+            mcpRef: result.completionRef,
+          }),
+        );
+      }
+      return c.redirect(
+        mcpReturnUrl(webBase, result.returnTo, {
+          mcpOAuth: "error",
+          mcpReason: result.reason,
+        }),
+      );
     } catch {
-      return c.redirect(`${base}?mcpOAuth=error`);
+      return c.redirect(mcpInvalidAttemptUrl(webBase));
     }
+  });
+
+  // The page the callback returned to confirms a connection here instead of
+  // trusting `?mcpOAuth=connected`: the reference is random, non-secret, and
+  // resolves only for the member it was issued to while they are still
+  // connected.
+  app.get("/v1/mcp/oauth/completions/:ref", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const completion = await findMcpOAuthCompletion({
+      userId: getSessionUserId(session),
+      ref: requireRouteParam(c, "ref"),
+    });
+    if (!completion) {
+      throw ApiError.notFound("Connection not found");
+    }
+    return ApiResponse.success(c, completion);
   });
 }

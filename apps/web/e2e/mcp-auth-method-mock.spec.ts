@@ -83,17 +83,17 @@ async function openDetail(page: Page) {
   await expect(
     page
       .getByRole("button", { name: "Install", exact: true })
-      .or(page.getByRole("button", { name: "Settings", exact: true }))
+      .or(page.getByRole("button", { name: "Connection", exact: true }))
       .first(),
   ).toBeVisible({ timeout: 60_000 });
 }
 
 async function openCredentials(page: Page) {
   const dialog = page.getByRole("dialog", {
-    name: "Configure MCP credentials",
+    name: "Connection",
   });
   if (!(await dialog.isVisible())) {
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Connection", exact: true }).click();
   }
   await expect(dialog).toBeVisible();
   return dialog;
@@ -291,14 +291,24 @@ test("API key → OAuth → API key, each Test using the chosen credential", asy
   await page.waitForURL(`${mockOrigin}/authorize**`);
   await page.screenshot({ path: `${evidenceDir}/2-mock-sign-in.png` });
   await page.getByRole("link", { name: "Allow" }).click();
-  await page.waitForURL(/\/dashboard\/mcp\?mcpOAuth=connected/, {
+  // The callback returns to the page the flow began on, and the confirmed
+  // connection reopens the dialog on this member's own tool list.
+  await page.waitForURL(
+    (url) => url.pathname === decodeURIComponent(detailPath).replace(/\/$/, "") ||
+      url.pathname === detailPath,
+    { timeout: 60_000 },
+  );
+  dialog = page.getByRole("dialog", { name: "Connection" });
+  await expect(dialog.getByText("1 tool is available to you")).toBeVisible({
     timeout: 60_000,
   });
-
+  await expect(dialog.getByText("whoami")).toBeVisible();
+  await page.screenshot({ path: `${evidenceDir}/3-oauth-connected.png` });
+  await dialog.getByRole("button", { name: "Close", exact: true }).first().click();
+  await expect(dialog).toBeHidden();
   await openDetail(page);
   dialog = await openCredentials(page);
   await expect(dialog.getByText("Connected with OAuth")).toBeVisible();
-  await page.screenshot({ path: `${evidenceDir}/3-oauth-connected.png` });
   await page.keyboard.press("Escape");
   const withOAuth = await runTest(page);
   expect(withOAuth).toEqual({ toolCount: 1, credentials: ["oauth"] });

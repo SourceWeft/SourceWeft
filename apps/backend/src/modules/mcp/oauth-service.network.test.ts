@@ -16,11 +16,21 @@ const state = vi.hoisted(() => ({
   origins: [] as string[],
   calls: [] as string[],
   deletedCredentials: [] as Array<Record<string, string>>,
+  registerDelayMs: 0,
+  pending: undefined as
+    | {
+        state: string;
+        codeVerifier: string;
+        issuer: string;
+        returnTo: string | null;
+      }
+    | undefined,
+  lastVerifier: undefined as string | undefined,
+  membership: true,
+  beginAccepts: true,
   stored: {
     client: undefined as OAuthClientInformationFull | undefined,
     tokens: undefined as OAuthTokens | undefined,
-    verifier: undefined as string | undefined,
-    nonce: undefined as string | undefined,
   },
 }));
 vi.mock("../../shared/config", () => ({
@@ -38,10 +48,17 @@ vi.mock("../../shared/config", () => ({
     },
   },
 }));
+vi.mock("./network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./network")>()),
+  // Short deadlines, so the timeout paths run in milliseconds.
+  MCP_OAUTH_START_DEADLINE_MS: 3_000,
+  MCP_OAUTH_EXCHANGE_DEADLINE_MS: 3_000,
+}));
 vi.mock("./permissions", () => ({
-  requireMcpWorkspace: async () => ({
-    workspace: { id: "workspace", organizationId: "team" },
-  }),
+  requireMcpWorkspace: async () => {
+    if (!state.membership) throw new Error("not a member");
+    return { workspace: { id: "workspace", organizationId: "team" } };
+  },
 }));
 vi.mock("./repository", () => ({
   findWorkspaceMcpInstall: async () => ({
@@ -64,31 +81,42 @@ vi.mock("./oauth-repository", () => ({
     saveTokens: async (value: OAuthTokens) => {
       state.stored.tokens = value;
     },
-    loadCodeVerifier: async () => state.stored.verifier,
-    saveCodeVerifier: async (value: string) => {
-      state.stored.verifier = value;
+    // PKCE verifier and state live in the pending attempt, not in the store.
+    loadCodeVerifier: async () => undefined,
+    saveCodeVerifier: async () => {
+      throw new Error("the verifier must be recorded with the attempt");
     },
-    loadState: async () => state.stored.nonce,
-    saveState: async (value: string) => {
-      state.stored.nonce = value;
+    loadState: async () => undefined,
+    saveState: async () => {
+      throw new Error("the state must be recorded with the attempt");
     },
   }),
-  findMcpOAuthSessionByState: async (nonce: string) =>
-    nonce === state.stored.nonce
-      ? {
-          scope: {
-            teamId: "team",
-            workspaceId: "workspace",
-            installId: "install",
-            userId: "user",
-          },
-          issuer: state.issuer,
-        }
-      : null,
-  clearMcpOAuthTransient: async () => {
-    state.stored.nonce = undefined;
-    state.stored.verifier = undefined;
+  beginMcpOAuthAttempt: async (
+    _scope: unknown,
+    attempt: NonNullable<typeof state.pending>,
+  ) => {
+    if (!state.beginAccepts) return false;
+    state.pending = attempt;
+    state.lastVerifier = attempt.codeVerifier;
+    return true;
   },
+  consumeMcpOAuthAttempt: async (nonce: string) => {
+    const pending = state.pending;
+    if (!pending || pending.state !== nonce) return null;
+    state.pending = undefined;
+    return {
+      scope: {
+        teamId: "team",
+        workspaceId: "workspace",
+        installId: "install",
+        userId: "user",
+      },
+      issuer: pending.issuer,
+      codeVerifier: pending.codeVerifier,
+      returnTo: pending.returnTo,
+    };
+  },
+  recordMcpOAuthCompletion: async () => "ref-1",
 }));
 
 import {
@@ -112,12 +140,12 @@ afterEach(async () => {
   state.origins = [];
   state.denyToken = false;
   state.redirectMetadata = false;
-  state.stored = {
-    client: undefined,
-    tokens: undefined,
-    verifier: undefined,
-    nonce: undefined,
-  };
+  state.stored = { client: undefined, tokens: undefined };
+  state.pending = undefined;
+  state.lastVerifier = undefined;
+  state.registerDelayMs = 0;
+  state.membership = true;
+  state.beginAccepts = true;
 });
 
 async function fixture() {
@@ -155,6 +183,10 @@ async function fixture() {
       return;
     }
     if (req.url === "/register") {
+      if (state.registerDelayMs) {
+        setTimeout(() => res.end("{}"), state.registerDelayMs);
+        return;
+      }
       res.end(
         JSON.stringify({
           client_id: "fixture-client",
@@ -170,7 +202,7 @@ async function fixture() {
       });
       req.on("end", () => {
         const fields = new URLSearchParams(body);
-        if (fields.get("code_verifier") !== state.stored.verifier) {
+        if (fields.get("code_verifier") !== state.lastVerifier) {
           res.writeHead(400);
           res.end(JSON.stringify({ error: "invalid_grant" }));
           return;
@@ -206,19 +238,26 @@ test.each([true, false])(
       workspaceId: "workspace",
       installId: "install",
       userId: "user",
+      returnTo: "/dashboard/mcp/io.github.o%2Fexample",
     });
     assert.equal(result.status, "redirect");
     if (result.status !== "redirect") throw new Error("expected redirect");
     const redirect = new URL(result.authorizationUrl);
     assert.equal(redirect.origin, state.issuer);
     assert.equal(redirect.searchParams.get("code_challenge_method"), "S256");
-    assert.equal(redirect.searchParams.get("state"), state.stored.nonce);
+    assert.equal(redirect.searchParams.get("state"), state.pending?.state);
     assert.ok(redirect.searchParams.get("code_challenge"));
-    const nonce = state.stored.nonce!;
+    assert.equal(state.pending?.returnTo, "/dashboard/mcp/io.github.o%2Fexample");
+    assert.equal(state.pending?.issuer, state.issuer);
+    const nonce = state.pending!.state;
     assert.deepEqual(state.deletedCredentials, []);
     assert.deepEqual(
       await completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
-      { workspaceId: "workspace", installId: "install" },
+      {
+        outcome: "connected",
+        returnTo: "/dashboard/mcp/io.github.o%2Fexample",
+        completionRef: "ref-1",
+      },
     );
     assert.equal(state.stored.tokens?.access_token, "fixture-access");
     // Connecting OAuth replaces only this member's static credential.
@@ -230,12 +269,140 @@ test.each([true, false])(
         userId: "user",
       },
     ]);
-    assert.equal(state.stored.nonce, undefined);
-    await assert.rejects(
-      completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
+    // The attempt is single use: a replay finds nothing.
+    assert.deepEqual(
+      await completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
+      { outcome: "invalid" },
     );
   },
 );
+
+test("each attempt gets a fresh state and a later one supersedes the earlier", async () => {
+  await fixture();
+  const input = { workspaceId: "workspace", installId: "install", userId: "user" };
+  await startMcpOAuthAuthorization(input);
+  const first = state.pending!.state;
+  await startMcpOAuthAuthorization(input);
+  const second = state.pending!.state;
+  assert.notEqual(first, second);
+  assert.deepEqual(
+    await completeMcpOAuthCallback({ state: first, code: "fixture-code" }),
+    { outcome: "invalid" },
+  );
+  assert.equal(
+    (await completeMcpOAuthCallback({ state: second, code: "fixture-code" }))
+      .outcome,
+    "connected",
+  );
+});
+
+test("a start that a newer one has already replaced reports it and records nothing", async () => {
+  await fixture();
+  state.beginAccepts = false;
+  await assert.rejects(
+    startMcpOAuthAuthorization({
+      workspaceId: "workspace",
+      installId: "install",
+      userId: "user",
+    }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "MCP_OAUTH_SUPERSEDED",
+  );
+  assert.equal(state.pending, undefined);
+});
+
+test("a callback by another signed-in member is refused after the attempt is spent", async () => {
+  await fixture();
+  await startMcpOAuthAuthorization({
+    workspaceId: "workspace",
+    installId: "install",
+    userId: "user",
+  });
+  const nonce = state.pending!.state;
+  assert.deepEqual(
+    await completeMcpOAuthCallback({
+      state: nonce,
+      code: "fixture-code",
+      sessionUserId: "someone-else",
+    }),
+    { outcome: "invalid" },
+  );
+  assert.equal(state.stored.tokens, undefined);
+  assert.equal(state.pending, undefined);
+});
+
+test("a disallowed return destination is refused before anything is contacted", async () => {
+  await fixture();
+  await assert.rejects(
+    startMcpOAuthAuthorization({
+      workspaceId: "workspace",
+      installId: "install",
+      userId: "user",
+      returnTo: "https://evil.example/dashboard/mcp",
+    }),
+    /return destination/,
+  );
+  assert.deepEqual(state.calls, []);
+  assert.equal(state.pending, undefined);
+});
+
+test("a denial or provider error is handled through the bound attempt", async () => {
+  await fixture();
+  await startMcpOAuthAuthorization({
+    workspaceId: "workspace",
+    installId: "install",
+    userId: "user",
+    returnTo: "/dashboard/mcp",
+  });
+  const nonce = state.pending!.state;
+  assert.deepEqual(
+    await completeMcpOAuthCallback({ state: nonce, providerError: "access_denied" }),
+    { outcome: "denied", returnTo: "/dashboard/mcp", reason: "denied" },
+  );
+  assert.equal(state.stored.tokens, undefined);
+  assert.equal(state.pending, undefined);
+  // The same value cannot be replayed with a code afterwards.
+  assert.deepEqual(
+    await completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
+    { outcome: "invalid" },
+  );
+});
+
+test("membership lost since the attempt started ends the callback without a token exchange", async () => {
+  await fixture();
+  await startMcpOAuthAuthorization({
+    workspaceId: "workspace",
+    installId: "install",
+    userId: "user",
+  });
+  state.membership = false;
+  const callsBefore = state.calls.length;
+  const result = await completeMcpOAuthCallback({
+    state: state.pending!.state,
+    code: "fixture-code",
+  });
+  assert.equal(result.outcome, "failed");
+  assert.equal(state.calls.length, callsBefore);
+  assert.equal(state.stored.tokens, undefined);
+  assert.deepEqual(state.deletedCredentials, []);
+});
+
+test("a stalled registration ends in MCP_OAUTH_TIMEOUT at the deadline", async () => {
+  await fixture();
+  state.registerDelayMs = 20_000;
+  const startedAt = Date.now();
+  await assert.rejects(
+    startMcpOAuthAuthorization({
+      workspaceId: "workspace",
+      installId: "install",
+      userId: "user",
+    }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "MCP_OAUTH_TIMEOUT",
+  );
+  assert.ok(Date.now() - startedAt < 10_000);
+  assert.equal(state.pending, undefined);
+});
 
 test("untrusted token metadata cannot make the host contact a metadata address", async () => {
   await fixture();
@@ -245,13 +412,11 @@ test("untrusted token metadata cannot make the host contact a metadata address",
     userId: "user",
   });
   state.denyToken = true;
-  await assert.rejects(
-    completeMcpOAuthCallback({
-      state: state.stored.nonce!,
-      code: "fixture-code",
-    }),
-    /allowed|HTTPS/,
-  );
+  const result = await completeMcpOAuthCallback({
+    state: state.pending!.state,
+    code: "fixture-code",
+  });
+  assert.equal(result.outcome, "failed");
   assert.equal(state.stored.tokens, undefined);
   assert.ok(!state.calls.includes("/token"));
 });

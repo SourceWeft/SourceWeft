@@ -137,6 +137,9 @@ import type {
   UpsertWorkspaceMcpCredentialsRequest,
   UpsertWorkspaceMcpCredentialsResponse,
   TestWorkspaceMcpInstallResponse,
+  DiscoverWorkspaceMcpToolsResponse,
+  WorkspaceMcpOAuthCompletion,
+  WorkspaceMcpOAuthStartResponse,
   UpdateWorkspaceSkillRequest,
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
@@ -1287,12 +1290,35 @@ export class ContentClient {
     );
   }
 
-  authorizeWorkspaceMcpOAuth(workspaceId: string, installId: string) {
-    return this.http.post<
-      { status: "redirect"; authorizationUrl: string } | { status: "connected" }
-    >(
+  authorizeWorkspaceMcpOAuth(
+    workspaceId: string,
+    installId: string,
+    options: { returnTo?: string; signal?: AbortSignal } = {},
+  ) {
+    return this.http.post<WorkspaceMcpOAuthStartResponse>(
       `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/oauth/authorize`,
+      options.returnTo ? { returnTo: options.returnTo } : {},
+      { signal: options.signal },
+    );
+  }
+
+  /** Resolve the completion reference the OAuth callback put in the URL. */
+  getWorkspaceMcpOAuthCompletion(ref: string) {
+    return this.http.get<WorkspaceMcpOAuthCompletion>(
+      `/v1/mcp/oauth/completions/${encode(ref)}`,
+    );
+  }
+
+  /** The signed-in member's own tool list for an install; nothing is stored. */
+  discoverWorkspaceMcpTools(
+    workspaceId: string,
+    installId: string,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    return this.http.post<DiscoverWorkspaceMcpToolsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/discover-tools`,
       {},
+      { signal: options.signal },
     );
   }
 

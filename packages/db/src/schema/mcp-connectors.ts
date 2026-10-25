@@ -872,6 +872,21 @@ export const workspaceMcpOAuthSessions = pgTable(
     // Transient, single-use across the authorize→callback window.
     codeVerifier: text("code_verifier"),
     state: text("state"),
+    // The pending attempt's expiry and validated post-callback destination (an
+    // enumerated internal route, never a URL); consumed with `state`.
+    pendingExpiresAt: timestamp("pending_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    pendingReturnTo: text("pending_return_to"),
+    // Non-secret reference to the last completed connection, so the page the
+    // callback returns to can confirm it with the API instead of trusting a
+    // query flag.
+    completionRef: text("completion_ref"),
+    completionAt: timestamp("completion_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -893,6 +908,12 @@ export const workspaceMcpOAuthSessions = pgTable(
       table.installId,
       table.userId,
     ),
+    index("workspace_mcp_oauth_sessions_state_idx")
+      .on(table.state)
+      .where(sql`${table.state} is not null`),
+    index("workspace_mcp_oauth_sessions_completion_ref_idx")
+      .on(table.completionRef)
+      .where(sql`${table.completionRef} is not null`),
   ],
 );
 

@@ -213,6 +213,50 @@ export const testWorkspaceMcpInstallResponseSchema = z.object({
   toolCount: z.number(),
 });
 
+export const startWorkspaceMcpOAuthRequestSchema = z.object({
+  /**
+   * An internal route the browser returns to after the provider redirect (the
+   * server validates it against an enumerated set; absolute URLs are refused).
+   */
+  returnTo: z.string().max(512).optional(),
+});
+
+export const workspaceMcpOAuthStartResponseSchema = z.discriminatedUnion(
+  "status",
+  [
+    z.object({ status: z.literal("redirect"), authorizationUrl: z.string() }),
+    z.object({ status: z.literal("connected") }),
+  ],
+);
+
+/** What a completion reference from the OAuth callback resolves to. */
+export const workspaceMcpOAuthCompletionSchema = z.object({
+  workspaceId: z.string(),
+  installId: z.string(),
+});
+
+/**
+ * The connecting member's own view of an install's tools after connecting.
+ * Private to the member: it is neither stored nor shared, and says nothing
+ * about the install's shared health.
+ */
+export const workspaceMcpMemberToolSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  readOnly: z.boolean(),
+  destructive: z.boolean(),
+});
+
+export const discoverWorkspaceMcpToolsResponseSchema = z.object({
+  tools: z.array(workspaceMcpMemberToolSchema),
+  /** Tools the server listed, before the limits below. */
+  toolCount: z.number(),
+  /** More than the response limit were listed; the rest are not shown. */
+  truncated: z.boolean(),
+  /** Tools left out because their definition exceeded the per-tool limit. */
+  skippedOversize: z.number(),
+});
+
 export const workspaceMcpToolRunSchema = z.object({
   id: z.string(),
   teamId: z.string(),
@@ -337,6 +381,21 @@ export type UpsertWorkspaceMcpCredentialsResponse = z.infer<
 >;
 export type TestWorkspaceMcpInstallResponse = z.infer<
   typeof testWorkspaceMcpInstallResponseSchema
+>;
+export type StartWorkspaceMcpOAuthRequest = z.infer<
+  typeof startWorkspaceMcpOAuthRequestSchema
+>;
+export type WorkspaceMcpOAuthStartResponse = z.infer<
+  typeof workspaceMcpOAuthStartResponseSchema
+>;
+export type WorkspaceMcpOAuthCompletion = z.infer<
+  typeof workspaceMcpOAuthCompletionSchema
+>;
+export type WorkspaceMcpMemberTool = z.infer<
+  typeof workspaceMcpMemberToolSchema
+>;
+export type DiscoverWorkspaceMcpToolsResponse = z.infer<
+  typeof discoverWorkspaceMcpToolsResponseSchema
 >;
 export type WorkspaceMcpToolRun = z.infer<typeof workspaceMcpToolRunSchema>;
 export type WorkspaceMcpActionRun = z.infer<
