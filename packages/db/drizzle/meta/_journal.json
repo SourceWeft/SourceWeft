@@ -484,6 +484,13 @@
       "when": 1792912247956,
       "tag": "0068_market_mcp_tool_revision_context",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793019096894,
+      "tag": "0069_local_network_approvals",
+      "breakpoints": true
     }
   ]
 }
