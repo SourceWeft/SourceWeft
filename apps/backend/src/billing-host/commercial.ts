@@ -20,7 +20,10 @@ import { toDisplayCatalog } from "@sourceweft/billing/billing-catalog-schema";
 import {
   createCreemReversalSync,
   createCreemSubscriptionSync,
+  createCreemClient,
   createCreemWebhookHandler,
+  listCatalogCreemProducts,
+  monitorCreemCatalogPrices,
   monitorStrandedCreemReceipts,
 } from "@sourceweft/billing/integrations/creem";
 import { createBillingHttpRoutes } from "@sourceweft/billing/integrations/http";
@@ -171,11 +174,37 @@ export function registerBillingHttpRoutes(app: Hono, host: BillingHttpHost) {
 export const billingSchedulesEnabled =
   ["waffo", "stripe", "creem"].includes(billingConfig.provider) ||
   billingConfig.reconcileEnabled;
+// Creem charges its own product price; flag drift from the catalog without
+// ever blocking checkout or the rest of the schedule.
+async function checkCreemCatalogPrices() {
+  if (!billingConfig.creem.apiKey) return;
+  try {
+    const creem = createCreemClient({
+      apiKey: billingConfig.creem.apiKey,
+      testMode: billingConfig.creem.testMode,
+    });
+    await monitorCreemCatalogPrices({
+      products: listCatalogCreemProducts(billingConfig),
+      getProduct: async (productId) => {
+        const product = await creem.products.get(productId);
+        return { price: product.price, currency: product.currency };
+      },
+      alerts,
+      logger,
+    });
+  } catch (error) {
+    logger.error("Creem catalog price check failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 export async function reconcileBillingSchedule() {
   if (billingConfig.provider === "waffo") await waffo().drain();
   if (billingConfig.provider === "stripe") await stripe().drain();
-  if (billingConfig.provider === "creem")
+  if (billingConfig.provider === "creem") {
     await monitorStrandedCreemReceipts({ store, alerts, logger });
+    await checkCreemCatalogPrices();
+  }
   if (billingConfig.reconcileEnabled)
     return createBillingSchedule(billing().service, alerts, logger)();
 }
