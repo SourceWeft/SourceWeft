@@ -57,3 +57,15 @@ runtime environment explicitly provides `NEXT_PUBLIC_WEB_BASE_URL`. Confirm that
 this service supports the packaged native protocol, sign-in/deep links, local
 files and permission prompts. An installer build alone does not verify those
 production flows.
+
+## Linux sandbox runtime bundle
+
+Signed and updater-signed releases (not `candidate`) also attach
+`sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz` and its `.sig` to the GitHub
+Release. It is the Linux local-execution runtime; the app downloads it from the Release
+URL derived from its own version when the user clicks Install, and verifies the minisign
+signature (the same updater key as the AppImage, `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`)
+with the public key embedded in the build before extracting. The desktop package version
+must therefore match the tag (already enforced), and a release must not be re-tagged
+without re-publishing the bundle. It is not mirrored to `download.sourceweft.com` yet.
+Details and the offline checks are in `scripts/ci/README.desktop-updates.md`.

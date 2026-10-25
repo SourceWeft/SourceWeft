@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 
@@ -335,6 +335,7 @@ export function signTarball(path) {
       process.env.TAURI_SIGNING_PRIVATE_KEY_PATH,
     "TAURI_SIGNING_PRIVATE_KEY is required to sign the sandbox bundle",
   );
+  const absolute = resolve(path);
   run("pnpm", [
     "--filter",
     "@sourceweft/desktop",
@@ -342,9 +343,10 @@ export function signTarball(path) {
     "tauri",
     "signer",
     "sign",
-    path,
+    // pnpm runs the CLI from apps/desktop, so a relative path would point at the wrong file.
+    absolute,
   ]);
-  return `${path}.sig`;
+  return `${absolute}.sig`;
 }
 
 /** Verifies <tarball>.sig with the same minisign-verify tool used for updater packages. */

@@ -198,13 +198,14 @@ jobs:
             release-installers/**/*.exe
             release-installers/**/*.AppImage
             release-installers/**/*.app.tar.gz
+            release-installers/**/sourceweft-sandbox-*.tar.gz
             release-installers/**/*.sig
           fail_on_unmatched_files: true
           body: |
             Self-hosting files for Web/Docker, macOS and Windows installers, and Linux x64 AppImage packages.
 
             ${{ needs.preflight.outputs.desktop_policy == 'signed' && 'macOS installers are Developer ID signed and notarized. Windows installers are code-signed.' || 'These installers have no Apple Developer ID or Windows publisher certificate; macOS is not notarized. Operating systems may warn or block installation. Historical clients without an update key need one manual overwrite upgrade.' }}
-            All application update packages have verified Tauri updater signatures. Local device execution currently requires macOS.
+            All application update packages have verified Tauri updater signatures. Local device execution is available on macOS, and on Linux x86_64 after the app installs its signed sandbox runtime (sourceweft-sandbox-*.tar.gz, verified with the same updater key).
             See docker/README.md in the self-hosting archive for installation and upgrade instructions. Translations are provided in separate README files.
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
@@ -227,7 +228,7 @@ jobs:
             Self-hosting files for Web/Docker, macOS and Windows installers, and Linux x64 AppImage packages.
 
             Desktop installers in this release are not distribution-signed; the macOS installer is not notarized. macOS and Windows may show unidentified-publisher or unverified-app warnings. Install this version manually. This release does not publish automatic application updates.
-            Local device execution currently requires macOS. See docker/README.md in the self-hosting archive for installation and upgrade instructions.
+            Local device execution requires macOS in this release: it contains no sandbox runtime for Linux. See docker/README.md in the self-hosting archive for installation and upgrade instructions.
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
 

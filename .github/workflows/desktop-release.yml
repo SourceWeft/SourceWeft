@@ -127,6 +127,30 @@ jobs:
         env:
           DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
         run: node scripts/ci/prepare-desktop-release.mjs
+      # Local-execution sandbox runtime (Linux x86_64 only). The desktop app downloads it on
+      # demand from this release, so it is signed with the same updater key and verified here
+      # with the same minisign-verify tool before it is uploaded.
+      - uses: oven-sh/setup-bun@v2
+        if: runner.os == 'Linux' && steps.existing.outputs.exists != 'true'
+        with:
+          bun-version: 1.4.2
+      - name: Build, sign and verify the sandbox runtime bundle
+        if: runner.os == 'Linux' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends ripgrep
+          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$DESKTOP_RELEASE_TARGET" --rg "$(command -v rg)"
+          bundle=sandbox-bundle
+          rm -rf "$bundle"
+          node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$bundle"
+          tarball="$bundle/sourceweft-sandbox-$DESKTOP_RELEASE_TARGET.tar.gz"
+          node scripts/ci/sandbox-bundle.mjs verify "$tarball"
+          node scripts/ci/sandbox-bundle.mjs sign "$tarball"
+          node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+          cp "$tarball" "$tarball.sig" desktop-release/
       - uses: actions/upload-artifact@v4
         if: steps.existing.outputs.exists != 'true'
         with:

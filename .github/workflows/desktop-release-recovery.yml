@@ -102,12 +102,13 @@ jobs:
             release-installers/**/*.exe
             release-installers/**/*.AppImage
             release-installers/**/*.app.tar.gz
+            release-installers/**/sourceweft-sandbox-*.tar.gz
             release-installers/**/*.sig
           body: |
             Desktop repair release with verified Tauri updater signatures, plus self-hosting files for Web/Docker.
 
             ${{ steps.source.outputs.policy == 'signed' && 'macOS installers are Developer ID signed and notarized; Windows installers are publisher-signed.' || 'These installers have no Apple Developer ID or Windows publisher certificate; macOS is not notarized. Operating systems may warn or block installation.' }}
-            Historical clients missing the updater key require one manual overwrite installation. Local device execution currently requires macOS.
+            Historical clients missing the updater key require one manual overwrite installation. Local device execution is available on macOS, and on Linux x86_64 after the app installs its signed sandbox runtime.
 
             Publication resumed using unchanged desktop artifacts and image from the original verified release build.
           generate_release_notes: true

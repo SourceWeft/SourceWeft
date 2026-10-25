@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -119,6 +119,28 @@ test("a throwaway-key signature over the packed tarball verifies with the produc
   );
   await writeFile(tarball, original);
   assert.equal(verify(a.publicKey).status, 0);
+
+  // CI passes a path relative to the repository root; the signer runs from apps/desktop.
+  await rm(`${tarball}.sig`);
+  const relativeSign = spawnSync(
+    process.execPath,
+    [script, "sign", relative(repoRoot, tarball)],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        TAURI_SIGNING_PRIVATE_KEY: a.privateKey,
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "test-password",
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(relativeSign.status, 0, relativeSign.stderr);
+  assert.equal(
+    verify(a.publicKey).status,
+    0,
+    "relative-path signature verifies",
+  );
 
   const unsigned = cli("sign", tarball, {
     TAURI_SIGNING_PRIVATE_KEY: "",

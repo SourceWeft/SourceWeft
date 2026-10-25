@@ -99,6 +99,7 @@ Required secrets for both update-capable modes:
 - `TAURI_SIGNING_PRIVATE_KEY` and, if encrypted, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Additional protected secrets for **`signed` only**:
+
 - `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY` (Developer ID Application identity), `APPLE_ID`,
   `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID`.
@@ -270,6 +271,8 @@ require manual installation.
 cargo build --locked --manifest-path scripts/ci/update-verifier/Cargo.toml
 DESKTOP_UPDATE_VERIFIER=scripts/ci/update-verifier/target/debug/sourceweft-update-verifier node --test scripts/ci/desktop-update-signatures.test.mjs
 node --test scripts/ci/desktop-update-manifest.test.mjs scripts/ci/publish-desktop-updates.test.mjs scripts/ci/publish-downloads.test.mjs
+node --test scripts/ci/sandbox-bundle.test.mjs scripts/ci/sandbox-bundle-workflows.test.mjs
+DESKTOP_UPDATE_VERIFIER=scripts/ci/update-verifier/target/debug/sourceweft-update-verifier node --test scripts/ci/sandbox-bundle-signature.test.mjs
 cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
@@ -278,6 +281,48 @@ No account/device telemetry is added. `updater.log` in the local configuration
 directory records update status, versions, channel and safe error codes; it is
 truncated once it exceeds 256 KiB. UI errors and CI receipts provide additional
 diagnostics. Credentials, workfiles and chat content are never included.
+
+## Linux sandbox runtime bundle
+
+Local device execution on Linux x86_64 needs the sandbox runtime (the `srt-sidecar`
+executable, `rg`, `apply-seccomp` and `srt-proxy-agent.jar`). It is not part of the
+AppImage: the app downloads it only after the user clicks Install in the app.
+
+What is published, per `signed` or `updater-signed` release, as GitHub Release assets
+next to the installers:
+
+- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`
+- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz.sig`
+
+`candidate` releases publish neither file (they have no updater key, so the app could not
+verify a download anyway). The bundle is **not** mirrored to `download.sourceweft.com`
+and is not part of the download or update manifests (`publish-downloads.mjs` and
+`publish-desktop-updates.mjs` only look at installers and update packages and ignore
+these files); mirroring it is a follow-up.
+
+How it is built and signed (Linux leg of `desktop-release.yml`, after the AppImage, before
+the artifact upload):
+
+1. `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "$(command -v rg)"`
+   (Bun 1.4.2) writes `dist/bundle/` including `manifest.json`: `schemaVersion` 1,
+   `protocolVersion` (`SANDBOX_PROTOCOL_VERSION`), `appVersion` (the desktop package
+   version), `target`, `srtVersion` and the SHA-256 and size of every other file.
+2. `node scripts/ci/sandbox-bundle.mjs pack` writes a deterministic archive (ustar in
+   gzip; sorted entries, zero mtime/uid/gid, modes 0755/0644, `manifest.json` first,
+   plain files at the archive root only). `verify` re-reads it and rejects absolute, `..`,
+   nested, link, duplicate or unlisted entries and any hash or size mismatch.
+3. `sign` runs `tauri signer sign` with the existing `TAURI_SIGNING_PRIVATE_KEY`
+   (and `_PASSWORD`), the same minisign updater key as the AppImage; `verify-signature`
+   checks the `.sig` with the `update-verifier` (Tauri's `minisign-verify`) against
+   `TAURI_UPDATER_PUBLIC_KEY`. No new secret or variable exists.
+
+The app derives the download location from its own version
+(`https://github.com/SourceWeft/SourceWeft/releases/download/v<version>/sourceweft-sandbox-<target>.tar.gz`
+plus `.sig`), verifies the signature with the public key embedded in the build, and only
+then extracts and checks the manifest. Builds without an embedded key cannot install it.
+Pull requests that touch the desktop app, the sidecar or these scripts run the
+`sandbox-bundle` job in `desktop-build.yml`, which builds the bundle and runs the same
+pack, sign and verify steps with a throwaway key; nothing is uploaded.
 
 ## Linux packaging
 

@@ -16,6 +16,8 @@ on:
       - "scripts/ci/install-desktop-linux-deps.sh"
       - "scripts/ci/Dockerfile.desktop-linux"
       - "scripts/ci/prepare-desktop-release.mjs"
+      - "scripts/ci/sandbox-bundle*.mjs"
+      - "scripts/ci/update-verifier/**"
       - ".github/workflows/desktop-release.yml"
 
 permissions:
@@ -201,3 +203,59 @@ jobs:
             echo "::error::secret_store tests fell back to the no-keyring skip path; the real Secret Service round trip never ran"
             exit 1
           fi
+
+  sandbox-bundle:
+    name: Sandbox bundle pack, sign and verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y --no-install-recommends ripgrep
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Same pin as the release build and the real-sandbox job.
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - run: pnpm install --frozen-lockfile
+      - name: Build the signature verifier used for release packages
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Archive tooling unit tests
+        run: node --test scripts/ci/sandbox-bundle.test.mjs
+      - name: Signing round trip with a throwaway key
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: node --test scripts/ci/sandbox-bundle-signature.test.mjs
+      - name: Build the sandbox bundle for the release target
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "$(command -v rg)"
+      - name: Report the shared libraries the bundled ripgrep needs
+        # Informational: the bundle ships the runner's ripgrep as-is.
+        run: ldd apps/desktop/sandbox-sidecar/dist/bundle/rg || true
+      - name: Pack, sign (throwaway key) and verify exactly as the release does
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: |
+          set -euo pipefail
+          keys=$(mktemp -d)
+          pnpm --filter @sourceweft/desktop exec tauri signer generate --ci -w "$keys/ci-key" -p ci-throwaway-password
+          export TAURI_SIGNING_PRIVATE_KEY="$(cat "$keys/ci-key")"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=ci-throwaway-password
+          export TAURI_UPDATER_PUBLIC_KEY="$(cat "$keys/ci-key.pub")"
+          out="$RUNNER_TEMP/sandbox-bundle"
+          rm -rf "$out"
+          node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out"
+          tarball="$out/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz"
+          node scripts/ci/sandbox-bundle.mjs verify "$tarball"
+          node scripts/ci/sandbox-bundle.mjs sign "$tarball"
+          node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+          tar -tvzf "$tarball"
+          # Packing is deterministic: a second pack of the same bundle is byte-identical.
+          node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out-again"
+          cmp "$tarball" "$out-again/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz"
