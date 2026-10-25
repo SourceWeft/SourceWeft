@@ -28,8 +28,9 @@ driven by a small helper called the sandbox runtime):
 
 ## Requirements
 
-- Linux **x86_64**. Other architectures are not supported; Windows reports local execution as
-  unavailable.
+- Linux **x86_64**. No sandbox runtime is published for other architectures: on them the app
+  reports "No sandbox runtime is published for this platform." with no action to take.
+  Windows reports local execution as unavailable.
 - A desktop session. The app is a graphical application.
 - A Secret Service keyring (GNOME Keyring, KWallet, ...) that is running and unlocked. The
   app keeps this device's credentials there and has no file-based fallback.
@@ -92,6 +93,12 @@ command and two choices:
   run it in a terminal. If `pkexec` is not available, run the same text with `sudo` instead
   of `pkexec`.
 
+The script refuses (exit status 1, nothing written) if `/opt/sourceweft` or
+`/opt/sourceweft/libexec` already exists as a symbolic link, as something that is not a
+directory, or as a directory not owned by root, so that another user cannot steer the
+root-owned files it writes. The message names the path; inspect it, remove or `chown` it
+yourself, and run the setup again. The same checks apply to the `.deb`'s post-install step.
+
 It makes the same two changes as the `.deb` (the copy of bubblewrap under
 `/opt/sourceweft/libexec`, and its scoped AppArmor profile) and nothing else. Click **Check
 again** afterwards, then install the sandbox runtime.
@@ -117,19 +124,32 @@ Updating an AppImage does not re-copy bubblewrap. Run the setup again after a
 The runtime (the sandbox helper program, a bundled `ripgrep`, the seccomp helper and a Java
 proxy agent) is not inside the `.deb` or the AppImage. It is downloaded **only when you
 click "Install sandbox runtime"** in **Settings → This computer**. Nothing is downloaded
-automatically.
+automatically. While it installs, the card shows "Installing the sandbox runtime" and only
+one install can run at a time (a second one fails with `SANDBOX_INSTALL_IN_PROGRESS`).
 
 - Source: the GitHub Release asset for exactly this app's version,
   `https://github.com/SourceWeft/SourceWeft/releases/download/v<version>/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`
-  and its `.sig`.
-- It is checked before anything is installed: the minisign signature over the whole archive
-  is verified with the updater public key built into the app, then the manifest (protocol
-  version, app version, target) and the SHA-256 and size of every file. A build that embeds
-  no key (development builds, pre-release candidates) cannot verify the download and
-  refuses to install it.
+  and its `.sig`. Only `https` is accepted, including across redirects. The small signature
+  is fetched first, so a release without the asset fails quickly.
+- Limits: the archive may be at most 256 MiB. A download is abandoned after 30 seconds
+  without any data, or after 15 minutes in total; a slow but steady connection is fine.
+- Checks, in this order, before anything replaces the installed runtime: the minisign
+  signature over the whole archive is verified with the updater public key built into the
+  app; the archive is then read strictly (plain files at the archive root only, no links,
+  `manifest.json` first, exactly the files it lists, at most 32 files and 512 MiB in total);
+  the manifest must match this app (schema, protocol version, app version, target); every
+  file must match its SHA-256 and size. A build that embeds no usable key (development
+  builds, pre-release candidates) cannot verify the download and refuses to install it.
 - Location: `<app data>/sandbox/current`, normally
   `~/.local/share/nicelab.sourceweft/sandbox/current`. The sandbox cannot read this
   directory.
+- While an install runs it uses `.download-*`, `.staging-*` and `.old-*` directories next to
+  `current`. The new runtime replaces `current` by renaming; the previous one is put aside
+  as `.old-*` and restored if the swap fails, so a failed install leaves the working runtime
+  in place. If the app dies in the middle of a swap, the next check or install moves a lone
+  `.old-*` runtime back to `current`, and the next install deletes leftover `.download-*`,
+  `.staging-*` and `.old-*` directories. After every install attempt the running sandbox
+  process is stopped, so the next command starts from the files now on disk.
 - Reinstall or repair: click **Install sandbox runtime** again; the existing copy is
   replaced as a whole. Remove: quit the app and delete the `sandbox` directory in the app
   data folder; the app then shows "Sandbox runtime is not installed" until you install it
@@ -149,30 +169,52 @@ from an older app keeps working until the protocol changes, and then shows "out 
 The card in **Settings → This computer** shows the reason text from the app. The code
 behind it, the cause and the fix:
 
-| Code                      | Reason shown (start of text)                                                                           | Cause                                                                                                                                                         | Fix                                                                                                                                                                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bundleMissing`           | "Sandbox runtime is not installed"                                                                     | No runtime under the app data folder, or it was deleted.                                                                                                      | Click **Install sandbox runtime**.                                                                                                                                                                                                     |
-| `bundleStale`             | "The sandbox runtime is out of date (protocol N, this app needs M)..."                                 | The installed runtime's protocol is older than this app needs.                                                                                                | Click **Install sandbox runtime** to fetch the one for this app version.                                                                                                                                                               |
-| `bundleNewer`             | "The sandbox runtime (protocol N) is newer than this app supports..."                                  | The runtime is newer than the app (app was downgraded or not yet updated).                                                                                    | Update SourceWeft in **Settings → About → Software update**, then **Check again**.                                                                                                                                                     |
-| `bundleInvalid`           | "sandbox helper not found at <path>"                                                                   | A file inside the installed runtime was removed or damaged.                                                                                                   | Click **Install sandbox runtime** again.                                                                                                                                                                                               |
-| `bwrapMissing`            | "The sandbox helper bubblewrap is missing or not executable at /opt/sourceweft/libexec/bwrap"          | The scoped copy does not exist (package removed, setup never run, `/opt` cleaned).                                                                            | `.deb`: `sudo apt install --reinstall ./SourceWeft_<version>_linux-x86_64.deb` (install `bubblewrap` first if `dpkg -s bubblewrap` says it is missing). AppImage: click **Run setup**, or run the shown command, then **Check again**. |
-| `userNamespaceRestricted` | the message from `bwrap`, for example `Operation not permitted`, `setting up uid map` or `RTM_NEWADDR` | The kernel refused the user namespace. Usually the scoped AppArmor profile is not loaded (profile file deleted, AppArmor reloaded without it, copy replaced). | Same fix as `bwrapMissing`. To check the profile: `sudo cat /sys/kernel/security/apparmor/profiles \| grep sourceweft-bwrap`; reload it with `sudo apparmor_parser -r /etc/apparmor.d/sourceweft-bwrap`.                               |
-| `sandboxFailed`           | the sandbox's own error, verbatim                                                                      | Anything else; the app does not guess.                                                                                                                        | Click **Check again** (the app also re-checks on its own about once a minute). If it persists, report the exact text. "Checking the sandbox runtime" is a transient state while a check runs.                                          |
-| `installing`              | "Installing the sandbox runtime"                                                                       | An install is running (possibly started from another window).                                                                                                 | Wait; the buttons are disabled meanwhile.                                                                                                                                                                                              |
+| Code                      | Reason shown (start of text)                                                                                                                         | Cause                                                                                                                                                                                                                                                     | Fix                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bundleMissing`           | "Sandbox runtime is not installed"                                                                                                                   | No runtime under the app data folder, or it was deleted.                                                                                                                                                                                                  | Click **Install sandbox runtime**.                                                                                                                                                                                                                                                                                                                                  |
+| `bundleStale`             | "The sandbox runtime is out of date (protocol N, this app needs M)..."                                                                               | The installed runtime's protocol is older than this app needs.                                                                                                                                                                                            | Click **Install sandbox runtime** to fetch the one for this app version.                                                                                                                                                                                                                                                                                            |
+| `bundleNewer`             | "The sandbox runtime (protocol N) is newer than this app supports..."                                                                                | The runtime is newer than the app (app was downgraded or not yet updated).                                                                                                                                                                                | Update SourceWeft in **Settings → About → Software update**, then **Check again**.                                                                                                                                                                                                                                                                                  |
+| `bundleInvalid`           | "sandbox helper not found at <path>"                                                                                                                 | A file inside the installed runtime was removed or damaged.                                                                                                                                                                                               | Click **Install sandbox runtime** again.                                                                                                                                                                                                                                                                                                                            |
+| `bwrapMissing`            | "The sandbox helper bubblewrap is missing or not executable at /opt/sourceweft/libexec/bwrap"                                                        | The scoped copy does not exist (package removed, setup never run, `/opt` cleaned).                                                                                                                                                                        | `.deb`: `sudo apt install --reinstall ./SourceWeft_<version>_linux-x86_64.deb` (install `bubblewrap` first if `dpkg -s bubblewrap` says it is missing). AppImage: click **Run setup**, or run the shown command, then **Check again**.                                                                                                                              |
+| `userNamespaceRestricted` | the message from `bwrap` containing `RTM_NEWADDR`, `setting up uid map`, `No permissions to create new namespace` or `Creating new namespace failed` | The kernel refused the user namespace. Usually the scoped AppArmor profile is not loaded (profile file deleted, AppArmor reloaded without it, copy replaced).                                                                                             | Same fix as `bwrapMissing`. To check the profile: `sudo cat /sys/kernel/security/apparmor/profiles \| grep sourceweft-bwrap`; reload it with `sudo apparmor_parser -r /etc/apparmor.d/sourceweft-bwrap`.                                                                                                                                                            |
+| `sandboxFailed`           | the sandbox's own error, verbatim; or "No sandbox runtime is published for this platform."                                                           | Anything else; the app does not guess. This includes `bwrap` mount failures such as `Can't mount proc ... Operation not permitted`, which is what Docker, LXC and some seccomp-filtered containers produce: the setup would not help, so none is offered. | Click **Check again** (the app also re-checks on its own about once a minute while setup is needed). If it persists, report the exact text. In a container, bubblewrap needs a container configuration that allows it to mount; on an unsupported architecture there is nothing to install. "Checking the sandbox runtime" is a transient state while a check runs. |
+| `installing`              | "Installing the sandbox runtime"                                                                                                                     | An install is running (possibly started from another window).                                                                                                                                                                                             | Wait; the buttons are disabled meanwhile.                                                                                                                                                                                                                                                                                                                           |
 
-If `userNamespaceRestricted` persists after the setup ran and the profile is loaded, the
+Only the four messages named above are classified as `userNamespaceRestricted`; a bare
+"Operation not permitted" from any other `bwrap` step is shown as `sandboxFailed`. If
+`userNamespaceRestricted` persists after the setup ran and the profile is loaded, the
 restriction is something the app deliberately does not change: a kernel that disables
 unprivileged user namespaces (for example `kernel.unprivileged_userns_clone=0` or
 `user.max_user_namespaces=0`), or a container or confinement layer around the app. SourceWeft
 never edits sysctls; enable user namespaces yourself if you accept that, or use another
 machine.
 
-Errors from the install button itself are shown verbatim under the button. The host uses
-stable codes: `SANDBOX_DOWNLOAD_FAILED` (could not fetch the release asset: no network, or
-the release has no runtime for this version), `SANDBOX_SIGNATURE_INVALID` (the download does
-not match the signature; it was not installed), `SANDBOX_BUNDLE_INVALID` (the archive or its
-manifest failed validation), `SANDBOX_UNVERIFIABLE_BUILD` (this build has no embedded public
-key) **(not run)**.
+Errors from the install button are shown verbatim under the button, as a stable code
+followed by the reason:
+
+| Code                           | Meaning                                                                                                                                                                                                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SANDBOX_DOWNLOAD_FAILED`      | The release asset could not be fetched: no network, a stalled or too slow connection (30 s idle / 15 min), a non-success answer such as 404 (this version has no runtime), a non-https redirect, or a download larger than allowed. Nothing was installed. |
+| `SANDBOX_SIGNATURE_INVALID`    | The signature file is unreadable or invalid, or the archive was not signed by the SourceWeft update key. Nothing was installed.                                                                                                                            |
+| `SANDBOX_BUNDLE_INVALID`       | The signed archive or its manifest failed validation (unsafe entry, unexpected or missing file, wrong protocol, app version or target, hash or size mismatch, too large). Nothing was installed.                                                           |
+| `SANDBOX_UNVERIFIABLE_BUILD`   | This build has no usable embedded update key, so it cannot verify any download.                                                                                                                                                                            |
+| `SANDBOX_PLATFORM_UNSUPPORTED` | No runtime is published for this operating system or architecture.                                                                                                                                                                                         |
+| `SANDBOX_INSTALL_FAILED`       | A local file operation failed while staging or swapping (disk full, permissions). The previous runtime is kept.                                                                                                                                            |
+| `SANDBOX_INSTALL_IN_PROGRESS`  | An install is already running; wait for it.                                                                                                                                                                                                                |
+
+These behaviours are covered by offline unit tests of the installer; a real download from a
+GitHub Release and a real signed bundle have not been run **(not run)**.
+
+## What the app reports about this computer
+
+When you are signed in and the account service supports it, the app tells it, on connecting
+and whenever it changes: the platform and architecture (for example Linux x64), the shell
+commands run under (`bash` on Linux), the sandbox state (ready, needs setup with its code,
+reason and remedy, or unsupported) and the list of actions this computer can perform. The
+agent uses this to write commands for the right system, and other devices of yours can
+show why this one is not ready. The one-time setup command is never sent, and nothing is
+sent on a platform where the app cannot run commands. The reason text is the same text the
+card shows.
 
 ## Toolchains under the read policy
 
