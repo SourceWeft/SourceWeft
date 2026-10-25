@@ -328,7 +328,10 @@ pub(crate) fn execute_command(
         }) {
             Ok(found) => found,
             Err(error) => {
-                if matches!(error.code, "SANDBOX_UNAVAILABLE" | "HELPER_MISSING") {
+                if matches!(
+                    error.code,
+                    "SANDBOX_UNAVAILABLE" | "HELPER_MISSING" | "BUNDLE_STALE" | "BUNDLE_NEWER"
+                ) {
                     host.invalidate_sandbox_readiness();
                 }
                 return Err(error);
@@ -560,6 +563,44 @@ mod tests {
         .expect("a policy error must be returned");
         assert_eq!(error.code, "POLICY_INVALID");
         assert_eq!(starts, 1);
+    }
+
+    /// A bundle from before the protocol handshake (it would ignore `denyRoots` and wrap
+    /// anything) is refused at start, so `wrap_in_sandbox` never gets an instance to wrap with.
+    #[test]
+    fn stale_bundle_never_reaches_wrap() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("srt-sidecar");
+        fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/stub-sidecar-stale.sh"
+            ),
+            &target,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&target, permissions).unwrap();
+        fs::File::open(&target).unwrap().sync_all().unwrap();
+        let record = tempfile::tempdir().unwrap();
+        let home = record.path().join("home");
+        let log = record.path().join("home.log");
+        let slot = SandboxSlot::default();
+        let error = wrap_in_sandbox(
+            &slot,
+            Path::new("/w"),
+            Path::new("/w"),
+            "echo hi",
+            "id",
+            || stub_instance_at(dir.path(), &["/w"], home.to_str().unwrap()),
+        )
+        .err()
+        .expect("a stale bundle must not run commands");
+        assert_eq!(error.code, "BUNDLE_STALE");
+        assert!(slot.lock().unwrap().is_none());
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(!logged.lines().any(|line| line == "wrap"), "{logged}");
     }
 
     #[test]

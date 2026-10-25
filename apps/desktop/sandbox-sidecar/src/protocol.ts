@@ -5,6 +5,16 @@
  * names and shapes here in sync with that Rust client rather than the other way around.
  */
 
+/**
+ * The bundle protocol version, returned by `init` as `{ protocolVersion }`. The host requires
+ * an exact match with its own copy (`SANDBOX_PROTOCOL_VERSION` in
+ * `apps/desktop/src-tauri/src/local_host/sidecar.rs`; keep the two equal) and refuses to use a
+ * bundle that reports anything else, so a stale sidecar can never silently ignore policy it
+ * does not understand. Bump this whenever the init, policy or wrap semantics change (for
+ * example a new `InitConfig` policy field), in the same change that updates the Rust constant.
+ */
+export const SANDBOX_PROTOCOL_VERSION = 1;
+
 /** Sent once, before any other request, to hand the sidecar its policy inputs. */
 export type InitConfig = {
   platform: "linux" | "darwin";

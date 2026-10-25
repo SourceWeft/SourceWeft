@@ -19,6 +19,7 @@ import {
   perCommandConfig,
   perWrapReadRoots,
 } from "./policy.js";
+import { SANDBOX_PROTOCOL_VERSION } from "./protocol.js";
 import type { InitConfig, Request, Response, SidecarErrorCode, WrapResult } from "./protocol.js";
 
 /**
@@ -250,7 +251,7 @@ export async function startServer(
     return { allow: false, reason: `public internet only: ${reason}` };
   }
 
-  async function handleInit(config: InitConfig): Promise<null> {
+  async function handleInit(config: InitConfig): Promise<{ protocolVersion: number }> {
     checkHelpersExist(config);
     const runtimeConfig = buildConfig(config, deps.runtimeDir);
     ownAddressesCache = deps.ownAddresses();
@@ -264,7 +265,7 @@ export async function startServer(
       );
     }
     state = { config, runtimeConfig, wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir) };
-    return null;
+    return { protocolVersion: SANDBOX_PROTOCOL_VERSION };
   }
 
   async function handleWrap(request: {

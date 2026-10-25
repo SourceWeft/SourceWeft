@@ -433,6 +433,36 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn stale_or_newer_bundles_need_setup_with_the_exact_reason() {
+        let bundle = bundle_with_stub();
+        for (mode, expected) in [
+            (
+                "protocol-null",
+                "The sandbox runtime is out of date (protocol none, this app needs 1). Install the update.",
+            ),
+            (
+                "protocol-0",
+                "The sandbox runtime is out of date (protocol 0, this app needs 1). Install the update.",
+            ),
+            (
+                "protocol-2",
+                "The sandbox runtime (protocol 2) is newer than this app supports (1). Update SourceWeft.",
+            ),
+        ] {
+            let mut init = test_init();
+            init.home = format!("/tmp/sourceweft-readiness-test-home/{mode}");
+            assert_eq!(
+                probe_bundle(bundle.path(), &init),
+                SandboxReadiness::NeedsSetup {
+                    reason: expected.to_string()
+                },
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn slow_login_shell_falls_to_system_path() {
         let started = Instant::now();
         let (path, kind) = resolve_user_path(SLOW_SHELL, USER_PATH_TIMEOUT);
