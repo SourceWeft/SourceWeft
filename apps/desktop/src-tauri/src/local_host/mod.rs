@@ -3,6 +3,7 @@
 pub mod execution;
 pub mod maintenance;
 pub mod network;
+pub mod vault;
 mod files;
 #[cfg(unix)]
 pub(crate) mod process;

@@ -41,6 +41,17 @@ pub struct InitConfig {
     pub helpers: Helpers,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bwrap_path: Option<String>,
+    /// Present only while the device vault holds secrets: turns on TLS termination in the
+    /// sidecar (it creates and keeps its CA under `ca_dir`). Changing it needs a new sidecar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsInit>,
+}
+
+/// `init.tls`: where the sidecar keeps its persistent CA (`ca.crt`, `ca.key`); absolute.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TlsInit {
+    pub ca_dir: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -65,6 +76,31 @@ pub struct Helpers {
 pub(crate) struct WrappedCommand {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// The placeholder the sidecar chose for each secret's variable (`NAME -> fake_value_…`).
+    /// Never the real value; the host puts these in the command's environment.
+    pub secret_env: Vec<(String, String)>,
+}
+
+/// One secret handed to `wrap`, borrowed for the duration of the call. `Debug` redacts the
+/// value; the serialized form (the only place the value exists on the wire) is never logged.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WrapSecret<'a> {
+    pub env_var: &'a str,
+    pub value: &'a str,
+    pub hosts: &'a [String],
+    pub read_only: bool,
+}
+
+impl std::fmt::Debug for WrapSecret<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WrapSecret")
+            .field("env_var", &self.env_var)
+            .field("value", &"<redacted>")
+            .field("hosts", &self.hosts)
+            .field("read_only", &self.read_only)
+            .finish()
+    }
 }
 
 /// One outbound request. Serialize-only: the host never needs to parse its own requests back.
@@ -83,6 +119,9 @@ enum Request<'a> {
         /// Absent means "no policy", which the sidecar treats as `open`.
         #[serde(skip_serializing_if = "Option::is_none")]
         network: Option<&'a NetworkPolicy>,
+        /// Omitted when empty. Needs `init.tls` on the sidecar side.
+        #[serde(skip_serializing_if = "<[WrapSecret]>::is_empty")]
+        secrets: &'a [WrapSecret<'a>],
     },
     #[serde(rename = "violations", rename_all = "camelCase")]
     Violations {
@@ -130,6 +169,8 @@ struct ResponseError {
 struct WrapResult {
     argv: Vec<String>,
     env: BTreeMap<String, String>,
+    #[serde(default)]
+    secret_env: BTreeMap<String, String>,
 }
 
 /// The five sidecar-defined error codes; anything else the sidecar sends is reported as
@@ -217,15 +258,19 @@ fn write_request(
     request: &Request,
 ) -> std::result::Result<(), String> {
     let mut line = serde_json::to_string(request)
-        .map_err(|error| format!("failed to encode sidecar request: {error}"))?;
-    line.push('\n');
-    let mut stdin = stdin
-        .lock()
-        .map_err(|_| "sidecar stdin lock was poisoned".to_string())?;
-    stdin
-        .write_all(line.as_bytes())
-        .and_then(|()| stdin.flush())
-        .map_err(|error| format!("failed to write to sidecar: {error}"))
+        .map_err(|error| format!("failed to encode sidecar request: {error}"))?
+        .into_bytes();
+    line.push(b'\n');
+    let written = match stdin.lock() {
+        Ok(mut stdin) => stdin
+            .write_all(&line)
+            .and_then(|()| stdin.flush())
+            .map_err(|error| format!("failed to write to sidecar: {error}")),
+        Err(_) => Err("sidecar stdin lock was poisoned".to_string()),
+    };
+    // A wrap request can carry secret values; do not leave the encoded line in freed memory.
+    super::vault::wipe(&mut line);
+    written
 }
 
 /// The reply half of the connection, held behind its own lock so only one request is ever in
@@ -462,6 +507,7 @@ impl Sidecar {
         cwd: &Path,
         workspace_root: &Path,
         network: Option<&NetworkPolicy>,
+        secrets: &[WrapSecret],
     ) -> Result<WrappedCommand> {
         let id = self.allocate_id();
         let result = self.call(
@@ -473,6 +519,7 @@ impl Sidecar {
                 cwd: path_to_string(cwd)?,
                 workspace_root: path_to_string(workspace_root)?,
                 network,
+                secrets,
             },
         )?;
         let wrapped: WrapResult = serde_json::from_value(result).map_err(|error| {
@@ -484,6 +531,7 @@ impl Sidecar {
         Ok(WrappedCommand {
             argv: wrapped.argv,
             env: wrapped.env.into_iter().collect(),
+            secret_env: wrapped.secret_env.into_iter().collect(),
         })
     }
 
@@ -727,6 +775,7 @@ pub(crate) mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            tls: None,
         }
     }
 
@@ -741,6 +790,7 @@ pub(crate) mod tests {
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
                 None,
+                &[],
             )
             .unwrap();
         assert_eq!(wrapped.argv, vec!["/bin/echo".to_string(), "hi".to_string()]);
@@ -758,6 +808,7 @@ pub(crate) mod tests {
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
                 None,
+                &[],
             )
             .unwrap_err();
         assert_eq!(error.code, "HELPER_MISSING");
@@ -788,6 +839,7 @@ pub(crate) mod tests {
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
                 None,
+                &[],
             )
             .unwrap_err();
         assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
@@ -810,6 +862,7 @@ pub(crate) mod tests {
                 Path::new("/tmp"),
                 Path::new("/tmp/sourceweft-sidecar-test-workspace"),
                 None,
+                &[],
             )
             .unwrap_err();
         assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
@@ -840,7 +893,7 @@ pub(crate) mod tests {
     const WORKSPACE: &str = "/tmp/sourceweft-sidecar-test-workspace";
 
     fn wrap(sidecar: &Sidecar, command: &str, network: Option<&NetworkPolicy>) -> Result<WrappedCommand> {
-        sidecar.wrap("cmd-ev", command, Path::new("/tmp"), Path::new(WORKSPACE), network)
+        sidecar.wrap("cmd-ev", command, Path::new("/tmp"), Path::new(WORKSPACE), network, &[])
     }
 
     /// A handler that forwards every ask to a channel and answers `allow` from `answer`.
@@ -1079,5 +1132,64 @@ pub(crate) mod tests {
         let started = Instant::now();
         assert_eq!(sidecar.probe().unwrap_err().code, "SANDBOX_UNAVAILABLE");
         assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn wrap_sends_secrets_and_returns_only_the_placeholders() {
+        let bundle = bundle_with_stub();
+        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+        let hosts = vec!["api.example.com".to_string(), "*.example.org".to_string()];
+        let secrets = [WrapSecret {
+            env_var: "API_TOKEN",
+            value: "stub-not-a-real-secret",
+            hosts: &hosts,
+            read_only: true,
+        }];
+        let wrapped = sidecar
+            .wrap("cmd-s", "SHOW_SECRETS", Path::new("/tmp"), Path::new(WORKSPACE), None, &secrets)
+            .unwrap();
+        assert_eq!(
+            wrapped.argv[1],
+            r#"[{"envVar":"API_TOKEN","value":"stub-not-a-real-secret","hosts":["api.example.com","*.example.org"],"readOnly":true}]"#
+        );
+        assert_eq!(
+            wrapped.secret_env,
+            [("API_TOKEN".to_string(), "fake_value_API_TOKEN".to_string())]
+        );
+        // The value is nowhere in the returned environment or placeholders. (The stub's
+        // SHOW_SECRETS deliberately echoes the request into argv; the real sidecar never does.)
+        assert!(!format!("{:?}{:?}", wrapped.env, wrapped.secret_env).contains("stub-not-a-real-secret"));
+        // No secrets: the field is omitted and no placeholders come back.
+        let plain = wrap(&sidecar, "SHOW_SECRETS", None).unwrap();
+        assert_eq!(plain.argv[1], "");
+        assert!(plain.secret_env.is_empty());
+    }
+
+    #[test]
+    fn init_carries_tls_only_when_asked() {
+        let bundle = bundle_with_stub();
+        let mut init = test_init();
+        init.tls = Some(TlsInit { ca_dir: "/data/sandbox/ca".into() });
+        let with = Sidecar::start(bundle.path(), &init).unwrap();
+        assert_eq!(wrap(&with, "SHOW_INIT", None).unwrap().argv[1], r#"{"caDir":"/data/sandbox/ca"}"#);
+        let without = Sidecar::start(bundle.path(), &test_init()).unwrap();
+        assert_eq!(wrap(&without, "SHOW_INIT", None).unwrap().argv[1], "");
+    }
+
+    #[test]
+    fn a_request_ask_event_carries_kind_method_and_path() {
+        let bundle = bundle_with_stub();
+        let (handler, asks) = collecting_handler(false);
+        let sidecar = Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+        wrap(&sidecar, "REQUEST_ASK:api.example.com:443:POST:/v1/issues", None).unwrap();
+        let ask = asks.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(ask.kind.as_deref(), Some("request"));
+        assert_eq!(ask.method.as_deref(), Some("POST"));
+        assert_eq!(ask.path.as_deref(), Some("/v1/issues"));
+        assert_eq!(ask.host, "api.example.com");
+        // A plain host ask has none of them.
+        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+        let host_ask = asks.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(host_ask.kind.is_none() && host_ask.method.is_none() && host_ask.path.is_none());
     }
 }

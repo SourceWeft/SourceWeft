@@ -87,6 +87,36 @@ pub struct AskEvent {
     pub port: u16,
     #[serde(default)]
     pub suggested_by: Option<String>,
+    /// `"request"` for a write request to a secret-bound host; absent (or `"host"`) for the
+    /// original may-this-command-connect question.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// `kind: "request"` only.
+    #[serde(default)]
+    pub method: Option<String>,
+    /// `kind: "request"` only; no query string.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+impl AskEvent {
+    /// The request detail of a `kind: "request"` ask, once validated.
+    fn request_detail(&self) -> Option<(&str, &str)> {
+        match (self.kind.as_deref(), &self.method, &self.path) {
+            (Some("request"), Some(method), Some(path)) => Some((method, path)),
+            _ => None,
+        }
+    }
+}
+
+/// A request ask's method (an HTTP token, upper case, at most 16 characters) and path (at most
+/// 200 characters, no control characters). Both come from the sandboxed command's own request.
+fn is_relayable_request(method: &str, path: &str) -> bool {
+    !method.is_empty()
+        && method.len() <= 16
+        && method.chars().all(|c| c.is_ascii_uppercase())
+        && path.len() <= 200
+        && !path.chars().any(char::is_control)
 }
 
 /// The answer to one ask.
@@ -346,6 +376,14 @@ impl NetworkBridge {
         if !is_relayable_target(&event.host, event.port) {
             return Decision::deny("invalid host");
         }
+        match event.kind.as_deref() {
+            None | Some("host") => {}
+            Some("request") => match event.request_detail() {
+                Some((method, path)) if is_relayable_request(method, path) => {}
+                _ => return Decision::deny("invalid request"),
+            },
+            Some(_) => return Decision::deny("invalid request"),
+        }
         let (answer, receiver) = mpsc::channel();
         let ask_id = uuid::Uuid::new_v4().to_string();
         let cancel = {
@@ -375,13 +413,19 @@ impl NetworkBridge {
                     answer,
                 },
             );
-            let message = json!({
+            let mut message = json!({
                 "type": "network.ask",
                 "id": invocation,
                 "askId": ask_id,
                 "host": event.host,
                 "port": event.port,
             });
+            // Host asks keep exactly the original shape; request asks add three fields.
+            if let Some((method, path)) = event.request_detail() {
+                message["kind"] = json!("request");
+                message["method"] = json!(method);
+                message["path"] = json!(path);
+            }
             if outbound.send(message).is_err() {
                 state.pending.remove(&ask_id);
                 return Decision::deny("device is offline");
@@ -423,6 +467,18 @@ mod tests {
             host: host.into(),
             port: 443,
             suggested_by: None,
+            kind: None,
+            method: None,
+            path: None,
+        }
+    }
+
+    fn request_ask(method: &str, path: &str) -> AskEvent {
+        AskEvent {
+            kind: Some("request".into()),
+            method: Some(method.into()),
+            path: Some(path.into()),
+            ..ask("api.github.com")
         }
     }
 
@@ -774,6 +830,92 @@ mod tests {
                 bridge.resolve(&id, true, None);
                 std::thread::sleep(Duration::from_millis(10));
             }
+            assert!(waiting.join().unwrap().allow);
+        }
+    }
+
+    #[test]
+    fn a_request_ask_is_relayed_with_kind_method_and_path() {
+        let bridge = NetworkBridge::default();
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let waiting = spawn_decide(&bridge, request_ask("POST", "/repos/x/y/issues"));
+        let frame = next_frame(&mut frames);
+        assert_eq!(frame["type"], "network.ask");
+        assert_eq!(frame["kind"], "request");
+        assert_eq!(frame["method"], "POST");
+        assert_eq!(frame["path"], "/repos/x/y/issues");
+        assert_eq!(frame["host"], "api.github.com");
+        assert!(bridge.resolve(frame["askId"].as_str().unwrap(), true, None));
+        assert!(waiting.join().unwrap().allow);
+    }
+
+    #[test]
+    fn a_host_ask_has_no_request_fields() {
+        let bridge = NetworkBridge::default();
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        // Even if the event carries stray method/path, a host ask is relayed in the old shape.
+        let mut event = ask("example.com");
+        event.method = Some("POST".into());
+        event.path = Some("/x".into());
+        let waiting = spawn_decide(&bridge, event);
+        let frame = next_frame(&mut frames);
+        let keys: Vec<&str> = frame.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys.len(), 5, "{frame}");
+        assert!(frame.get("kind").is_none() && frame.get("method").is_none());
+        bridge.resolve(frame["askId"].as_str().unwrap(), true, None);
+        assert!(waiting.join().unwrap().allow);
+    }
+
+    #[test]
+    fn malformed_request_asks_are_refused_without_contacting_the_backend() {
+        let bridge = NetworkBridge::default();
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let long_path = format!("/{}", "a".repeat(200));
+        let mut missing_path = request_ask("POST", "/x");
+        missing_path.path = None;
+        let mut missing_method = request_ask("POST", "/x");
+        missing_method.method = None;
+        let mut odd_kind = request_ask("POST", "/x");
+        odd_kind.kind = Some("everything".into());
+        let mut events = vec![
+            request_ask("post", "/x"),
+            request_ask("PO ST", "/x"),
+            request_ask("POST\r\n", "/x"),
+            request_ask("", "/x"),
+            request_ask(&"A".repeat(17), "/x"),
+            request_ask("POST", "/a\nb"),
+            request_ask("POST", "/a\0b"),
+            request_ask("POST", "/a\u{7f}b"),
+            request_ask("POST", &long_path),
+            missing_path,
+            missing_method,
+            odd_kind,
+        ];
+        // The host check still applies to request asks.
+        let mut bad_host = request_ask("POST", "/x");
+        bad_host.host = "evil\n.com".into();
+        events.push(bad_host);
+        for event in events {
+            let decision = bridge.decide(&event);
+            assert!(!decision.allow, "{event:?}");
+            assert!(
+                decision.reason.as_deref() == Some("invalid request")
+                    || decision.reason.as_deref() == Some("invalid host"),
+                "{event:?}: {decision:?}"
+            );
+        }
+        assert!(frames.try_recv().is_err(), "nothing may be relayed");
+        // The boundary values are relayed.
+        for (method, path) in [("A", "/"), ("PROPPATCH", "/x"), ("POST", &long_path[..200]), ("POST", "")] {
+            let worker = bridge.clone();
+            let event = request_ask(method, path);
+            let waiting = std::thread::spawn(move || worker.decide(&event));
+            let frame = next_frame(&mut frames);
+            assert_eq!(frame["method"], method);
+            bridge.resolve(frame["askId"].as_str().unwrap(), true, None);
             assert!(waiting.join().unwrap().allow);
         }
     }

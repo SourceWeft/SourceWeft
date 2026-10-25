@@ -652,6 +652,9 @@ mod network_decision_tests {
                     host: "example.com".into(),
                     port: 443,
                     suggested_by: None,
+                    kind: None,
+                    method: None,
+                    path: None,
                 })
             })
         };

@@ -35,6 +35,8 @@ pub struct LocalHost {
     /// Relays sandbox network approvals to the backend over the device WebSocket
     /// (`remote_host.rs` installs the outbound channel while connected).
     pub network: super::network::NetworkBridge,
+    /// Where the device vault's secret values live (the OS keychain, supplied by the app).
+    pub(super) vault_store: super::vault::VaultStore,
     // The Linux sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
     #[cfg(target_os = "linux")]
     pub(super) sandbox: super::srt_exec::SandboxSlot,
@@ -141,6 +143,9 @@ impl LocalHost {
                 tx.execute_batch("PRAGMA user_version=4;")?;
                 tx.commit()?;
             }
+            // Like the invocation journal: created if missing, no schema-version bump, so an older
+            // build still opens this database.
+            connection.execute_batch(super::vault::CREATE_TABLE)?;
             Ok(Self {
                 admission: super::maintenance::Admission::default(),
                 db: Mutex::new(connection),
@@ -148,6 +153,7 @@ impl LocalHost {
                 base,
                 sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
                 network: Default::default(),
+                vault_store: Default::default(),
                 #[cfg(target_os = "linux")]
                 sandbox: Default::default(),
             })

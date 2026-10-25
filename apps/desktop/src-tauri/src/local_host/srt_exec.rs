@@ -11,9 +11,10 @@
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
 use super::{
-    network::{ActiveCommand, Decision, NetworkPolicy},
+    network::{ActiveCommand, Decision, NetworkMode, NetworkPolicy},
     readiness::{bundle_dir, user_path, Helpers, InitConfig, Platform},
-    sidecar::{EventHandler, Sidecar, SidecarEvent, WrappedCommand},
+    sidecar::{EventHandler, Sidecar, SidecarEvent, TlsInit, WrapSecret, WrappedCommand},
+    vault::VaultEntry,
     HostError, LocalHost, Result,
 };
 use serde_json::{json, Value};
@@ -27,10 +28,12 @@ use std::{
 /// is never used or loosened.
 pub(crate) const BWRAP_PATH: &str = "/opt/sourceweft/libexec/bwrap";
 
-/// One running sidecar and the workspace roots its `init` was given.
+/// One running sidecar, the workspace roots its `init` was given, and whether it was started
+/// with TLS termination (`init.tls`), which it is only while the device vault holds secrets.
 pub(crate) struct SandboxInstance {
     sidecar: Sidecar,
     workspace_roots: Vec<PathBuf>,
+    tls: bool,
 }
 
 /// `LocalHost::sandbox`: the current sidecar, if one has been started. An instance that failed
@@ -39,17 +42,23 @@ pub(crate) struct SandboxInstance {
 pub(crate) type SandboxSlot = Mutex<Option<Arc<SandboxInstance>>>;
 
 impl SandboxInstance {
-    fn new(sidecar: Sidecar, workspace_roots: Vec<PathBuf>) -> Self {
+    fn new(sidecar: Sidecar, workspace_roots: Vec<PathBuf>, tls: bool) -> Self {
         Self {
             sidecar,
             workspace_roots,
+            tls,
         }
     }
 
-    fn covers(&self, root: &Path) -> bool {
-        self.workspace_roots
-            .iter()
-            .any(|allowed| root.starts_with(allowed))
+    /// Whether this instance can wrap a command in `root` that needs TLS termination iff `tls`.
+    /// A mismatch in either direction means a new sidecar: with an empty vault the sidecar must
+    /// run exactly as without secrets (no interception), and secrets need a terminating one.
+    fn covers(&self, root: &Path, tls: bool) -> bool {
+        self.tls == tls
+            && self
+                .workspace_roots
+                .iter()
+                .any(|allowed| root.starts_with(allowed))
     }
 
     /// Exactly once per successful `wrap` on this instance, after its command exited (or
@@ -68,7 +77,12 @@ impl SandboxInstance {
 /// The `InitConfig` for a Linux sidecar whose helpers live in `bundle`, for a host whose app
 /// data is `base`. `<base>/local-host` (the host database) and `<base>/sandbox` (the runtime
 /// bundles) are denied explicitly, independent of whether `base` lies under `$HOME`.
-pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<String>) -> InitConfig {
+pub(crate) fn init_config(
+    bundle: &Path,
+    base: &Path,
+    workspace_roots: Vec<String>,
+    tls: bool,
+) -> InitConfig {
     let home = std::env::var("HOME").unwrap_or_default();
     InitConfig {
         platform: Platform::Linux,
@@ -90,6 +104,10 @@ pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<Strin
             ),
         },
         bwrap_path: Some(BWRAP_PATH.to_string()),
+        // `<base>/sandbox` is already a deny root, so the CA key is unreadable inside.
+        tls: tls.then(|| TlsInit {
+            ca_dir: base.join("sandbox").join("ca").to_string_lossy().into_owned(),
+        }),
     }
 }
 
@@ -175,10 +193,11 @@ fn try_wrap(
     cwd: &Path,
     root: &Path,
     network: Option<&NetworkPolicy>,
+    secrets: &[WrapSecret],
 ) -> Result<WrappedCommand> {
     let wrapped = instance
         .sidecar
-        .wrap(command_id, script, cwd, root, network)?;
+        .wrap(command_id, script, cwd, root, network, secrets)?;
     if wrapped.argv.is_empty() {
         // srt counted this wrap; balance it before reporting the sidecar unusable.
         instance.finish(command_id);
@@ -194,7 +213,9 @@ fn try_wrap(
 ///
 /// - no sidecar yet: start one;
 /// - the current sidecar's `init` does not cover `root` (e.g. a folder granted after it
-///   started): start a new one with the current roots, once, then wrap;
+///   started), or it was started with the other TLS setting than this command needs (`tls`:
+///   the vault became non-empty or empty): start a new one with the current roots and the
+///   right setting, once, then wrap;
 /// - `wrap` fails with `SANDBOX_UNAVAILABLE` (the instance is poisoned): replace it once and
 ///   retry the wrap once; a second failure is returned.
 ///
@@ -209,39 +230,41 @@ fn wrap_in_sandbox(
     script: &str,
     command_id: &str,
     network: Option<&NetworkPolicy>,
-    mut start: impl FnMut() -> Result<SandboxInstance>,
+    secrets: &[WrapSecret],
+    tls: bool,
+    mut start: impl FnMut(bool) -> Result<SandboxInstance>,
 ) -> Result<(Arc<SandboxInstance>, WrappedCommand)> {
     let instance = {
         let mut current = lock_slot(slot);
         match current.as_ref() {
-            Some(existing) if existing.covers(root) => existing.clone(),
+            Some(existing) if existing.covers(root, tls) => existing.clone(),
             _ => {
-                let fresh = Arc::new(start()?);
+                let fresh = Arc::new(start(tls)?);
                 *current = Some(fresh.clone());
                 fresh
             }
         }
     };
-    match try_wrap(&instance, command_id, script, cwd, root, network) {
+    match try_wrap(&instance, command_id, script, cwd, root, network, secrets) {
         Ok(wrapped) => Ok((instance, wrapped)),
         Err(error) if error.code == "SANDBOX_UNAVAILABLE" => {
             let replacement = {
                 let mut current = lock_slot(slot);
                 match current.as_ref() {
                     // Another command already replaced the dead instance: use its replacement.
-                    Some(other) if !Arc::ptr_eq(other, &instance) && other.covers(root) => {
+                    Some(other) if !Arc::ptr_eq(other, &instance) && other.covers(root, tls) => {
                         other.clone()
                     }
                     _ => {
                         *current = None;
-                        let fresh = Arc::new(start()?);
+                        let fresh = Arc::new(start(tls)?);
                         *current = Some(fresh.clone());
                         fresh
                     }
                 }
             };
             drop(instance);
-            let wrapped = try_wrap(&replacement, command_id, script, cwd, root, network)?;
+            let wrapped = try_wrap(&replacement, command_id, script, cwd, root, network, secrets)?;
             Ok((replacement, wrapped))
         }
         Err(error) => Err(error),
@@ -249,8 +272,8 @@ fn wrap_in_sandbox(
 }
 
 /// Starts a sidecar from this host's installed bundle, with `init.workspaceRoots` set to the
-/// automatic workspace base plus every currently granted directory.
-fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
+/// automatic workspace base plus every currently granted directory, and `init.tls` iff `tls`.
+fn start_instance(host: &LocalHost, tls: bool) -> Result<SandboxInstance> {
     let bundle = bundle_dir(&host.base);
     if !bundle.join("srt-sidecar").is_file() {
         return Err(HostError::new(
@@ -271,10 +294,10 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
     // every sidecar answers its network asks through the host's bridge.
     let sidecar = Sidecar::start_with_events(
         &bundle,
-        &init_config(&bundle, &host.base, names),
+        &init_config(&bundle, &host.base, names, tls),
         event_handler(host.network.clone()),
     )?;
-    Ok(SandboxInstance::new(sidecar, roots))
+    Ok(SandboxInstance::new(sidecar, roots, tls))
 }
 
 /// Routes sidecar `ask` events to the bridge. Runs on the sidecar's reader thread, so it only
@@ -296,11 +319,32 @@ fn event_handler(bridge: super::network::NetworkBridge) -> EventHandler {
     })
 }
 
-/// The wrapped command's environment with the pinned toolchain, home, temp and cache locations
-/// laid over it. The pinned values win over anything the sidecar's own environment supplied.
-fn child_env(root: &Path, wrapped: Vec<(String, String)>) -> Vec<(String, String)> {
+/// Names `child_env` pins for every command; a secret's placeholder may never replace them.
+const PINNED_ENV: [&str; 6] = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "npm_config_cache",
+    "PIP_CACHE_DIR",
+    "NODE_USE_ENV_PROXY",
+];
+
+/// The wrapped command's environment: the sidecar's, then the secrets' placeholders
+/// (`secret_env`), then the pinned toolchain, home, temp and cache locations laid over both. The
+/// pinned values win over anything the sidecar supplied, and a placeholder never takes the place
+/// of a pinned name (the vault refuses such names, this is the second lock).
+fn child_env(
+    root: &Path,
+    wrapped: Vec<(String, String)>,
+    secret_env: Vec<(String, String)>,
+) -> Vec<(String, String)> {
     let root_text = root.to_string_lossy();
     let mut env: BTreeMap<String, String> = wrapped.into_iter().collect();
+    for (name, placeholder) in secret_env {
+        if !PINNED_ENV.contains(&name.as_str()) {
+            env.insert(name, placeholder);
+        }
+    }
     for (key, value) in [
         ("PATH", user_path().0),
         ("HOME", root_text.to_string()),
@@ -312,6 +356,27 @@ fn child_env(root: &Path, wrapped: Vec<(String, String)>) -> Vec<(String, String
         env.insert(key.to_string(), value);
     }
     env.into_iter().collect()
+}
+
+/// `network` with the vault's hosts added to its allow list (decision S7: the user bound the
+/// secret to those hosts, so reaching them is implicitly allowed). `open` (or no policy) already
+/// allows everything and is returned unchanged.
+fn with_vault_hosts(
+    network: Option<&NetworkPolicy>,
+    entries: &[VaultEntry],
+) -> Option<NetworkPolicy> {
+    let mut policy = network?.clone();
+    if policy.mode == NetworkMode::Open {
+        return Some(policy);
+    }
+    for entry in entries {
+        for host in &entry.meta.hosts {
+            if !policy.allow.contains(host) {
+                policy.allow.push(host.clone());
+            }
+        }
+    }
+    Some(policy)
 }
 
 /// Single-quotes `value` for a POSIX shell.
@@ -355,21 +420,43 @@ pub(crate) fn execute_command(
     active: &ActiveCommand,
 ) -> Result<Value> {
     prepare_tmpdir(root)?;
+    // The vault's secrets for this command: all of them (a command cannot know which it will
+    // use). Reading the keychain only happens when the vault has rows.
+    let entries = host.vault_entries()?;
+    let tls = !entries.is_empty();
+    let policy = with_vault_hosts(network, &entries);
+    let network = if tls { policy.as_ref() } else { network };
     let command_id = new_command_id();
     // Before `wrap`: the sidecar's first ask can follow the wrap reply immediately, and the
     // bridge only attributes asks that name this command.
     active.set_command_id(&command_id);
     let script = pinned_script(root, script);
+    let wire: Vec<WrapSecret> = entries
+        .iter()
+        .map(|entry| WrapSecret {
+            env_var: &entry.meta.env_var,
+            value: entry.value.expose(),
+            hosts: &entry.meta.hosts,
+            read_only: entry.meta.read_only,
+        })
+        .collect();
+    let wrapped_in = wrap_in_sandbox(
+        &host.sandbox,
+        root,
+        cwd,
+        &script,
+        &command_id,
+        network,
+        &wire,
+        tls,
+        |tls| start_instance(host, tls),
+    );
+    // The real values have done their job: drop (and so wipe) them before the command runs.
+    let secret_names: Vec<String> = entries.iter().map(|e| e.meta.env_var.clone()).collect();
+    drop(wire);
+    drop(entries);
     let (instance, wrapped) =
-        match wrap_in_sandbox(
-            &host.sandbox,
-            root,
-            cwd,
-            &script,
-            &command_id,
-            network,
-            || start_instance(host),
-        ) {
+        match wrapped_in {
             Ok(found) => found,
             Err(error) => {
                 if matches!(error.code, "SANDBOX_UNAVAILABLE" | "HELPER_MISSING") {
@@ -378,7 +465,13 @@ pub(crate) fn execute_command(
                 return Err(error);
             }
         };
-    let env = child_env(root, wrapped.env);
+    // Only the placeholders for the secrets this command was given; never the real values.
+    let secret_env = wrapped
+        .secret_env
+        .into_iter()
+        .filter(|(name, _)| secret_names.contains(name))
+        .collect();
+    let env = child_env(root, wrapped.env, secret_env);
     let run = super::process::run_wrapped(&wrapped.argv, &env, cwd, timeout_ms, max_chars, cancel);
     let result = run.map(|run| {
         let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
@@ -451,11 +544,13 @@ mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            tls: None,
         };
         let sidecar = Sidecar::start_with_timeout(bundle, &init, Duration::from_secs(5))?;
         Ok(SandboxInstance::new(
             sidecar,
             roots.iter().map(PathBuf::from).collect(),
+            false,
         ))
     }
 
@@ -491,7 +586,9 @@ mod tests {
                 "echo hi",
                 "id",
                 None,
-                || {
+                &[],
+                false,
+                |_| {
                     starts += 1;
                     stub_instance(bundle.path(), &["/w"])
                 },
@@ -517,7 +614,9 @@ mod tests {
             "echo hi",
             "id",
             None,
-            || {
+            &[],
+            false,
+            |_| {
                 starts += 1;
                 stub_instance(bundle.path(), &["/w", "/granted"])
             },
@@ -527,7 +626,7 @@ mod tests {
         assert_eq!(starts, 1);
         let after = slot.lock().unwrap().clone().unwrap();
         assert!(!Arc::ptr_eq(&before, &after));
-        assert!(after.covers(Path::new("/granted")));
+        assert!(after.covers(Path::new("/granted"), false));
     }
 
     /// Requests the recording stub saw with op `op`, as their command ids, in order.
@@ -548,13 +647,13 @@ mod tests {
         let home = home.to_str().unwrap();
         let log = record.path().join("record-ops.log");
         let slot = SandboxSlot::default();
-        let start = || stub_instance_at(bundle.path(), &["/w"], home);
+        let start = |_: bool| stub_instance_at(bundle.path(), &["/w"], home);
         let w = Path::new("/w");
         // Two overlapping commands: the second is wrapped before the first has finished.
-        let (first, _) = wrap_in_sandbox(&slot, w, w, "echo a", "cmd-a", None, start).unwrap();
-        let (second, _) = wrap_in_sandbox(&slot, w, w, "echo b", "cmd-b", None, start).unwrap();
+        let (first, _) = wrap_in_sandbox(&slot, w, w, "echo a", "cmd-a", None, &[], false, start).unwrap();
+        let (second, _) = wrap_in_sandbox(&slot, w, w, "echo b", "cmd-b", None, &[], false, start).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
-        let failed = wrap_in_sandbox(&slot, w, w, "ERROR:POLICY_INVALID", "cmd-c", None, start)
+        let failed = wrap_in_sandbox(&slot, w, w, "ERROR:POLICY_INVALID", "cmd-c", None, &[], false, start)
             .err()
             .expect("a policy error must be returned");
         assert_eq!(failed.code, "POLICY_INVALID");
@@ -580,7 +679,9 @@ mod tests {
             "ERROR:SANDBOX_UNAVAILABLE",
             "id",
             None,
-            || {
+            &[],
+            false,
+            |_| {
                 starts += 1;
                 stub_instance_at(bundle.path(), &["/w"], home)
             },
@@ -606,7 +707,9 @@ mod tests {
             "ERROR:POLICY_INVALID",
             "id",
             None,
-            || {
+            &[],
+            false,
+            |_| {
                 starts += 1;
                 stub_instance(bundle.path(), &["/w"])
             },
@@ -627,7 +730,9 @@ mod tests {
             "true",
             "id",
             None,
-            || Err(HostError::new("HELPER_MISSING", "stub")),
+            &[],
+            false,
+            |_| Err(HostError::new("HELPER_MISSING", "stub")),
         )
         .err()
         .expect("a failed start must be returned");
@@ -693,7 +798,7 @@ mod tests {
     #[test]
     fn init_config_denies_the_host_database_and_bundles() {
         let base = Path::new("/home/u/.local/share/app");
-        let init = init_config(&base.join("sandbox/current"), base, vec![]);
+        let init = init_config(&base.join("sandbox/current"), base, vec![], false);
         assert_eq!(
             init.deny_roots,
             [
@@ -856,14 +961,15 @@ mod tests {
         // Seed the slot with a sidecar that has already desynchronized (a wrap that never
         // answers), so the next wrap replaces it via the production `start_instance`.
         let bundle = bundle_dir(&host.base);
-        let init = init_config(&bundle, &host.base, vec![host.base.join("task-workspaces").to_str().unwrap().to_string()]);
+        let init = init_config(&bundle, &host.base, vec![host.base.join("task-workspaces").to_str().unwrap().to_string()], false);
         let dead = Sidecar::start_with_timeout(&bundle, &init, Duration::from_secs(5)).unwrap();
         assert!(dead
-            .wrap("x", "HANG", &root, &root, None)
+            .wrap("x", "HANG", &root, &root, None, &[])
             .is_err());
         *host.sandbox.lock().unwrap() = Some(Arc::new(SandboxInstance::new(
             dead,
             vec![host.base.join("task-workspaces")],
+            false,
         )));
         let before = host.sandbox.lock().unwrap().clone().unwrap();
 
@@ -873,7 +979,7 @@ mod tests {
         active.set_command_id("cmd");
         let (instance, _) = wrap_in_sandbox(
             &host.sandbox, &root, &root, "SLEEP_ASK:example.com:443", "cmd", None,
-            || start_instance(&host),
+            &[], false, |tls| start_instance(&host, tls),
         )
         .unwrap();
         assert!(!Arc::ptr_eq(&before, &instance));
@@ -889,5 +995,152 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         instance.finish("cmd");
+    }
+
+    use super::super::vault::tests::{secret, MemoryStore};
+
+    fn output(result: &Value) -> &str {
+        result["output"].as_str().unwrap()
+    }
+
+    fn vault_host() -> (tempfile::TempDir, LocalHost, PathBuf) {
+        let (app, host, root) = host_with_stub_bundle();
+        host.set_secret_store(Arc::new(MemoryStore::default()));
+        (app, host, root)
+    }
+
+    fn run(host: &LocalHost, root: &Path, script: &str, network: Option<&NetworkPolicy>) -> Value {
+        let active = host.network.begin("inv-vault", Arc::default());
+        execute_command(host, root, root, script, 20_000, 20_000, Arc::default(), network, &active)
+            .unwrap()
+    }
+
+    fn current(host: &LocalHost) -> Arc<SandboxInstance> {
+        host.sandbox.lock().unwrap().clone().expect("a sidecar is running")
+    }
+
+    #[test]
+    fn the_sidecar_follows_the_vault_in_and_out_of_tls() {
+        let (_app, host, root) = vault_host();
+        // Empty vault: exactly the Plan 4 sidecar, no init.tls.
+        let first = run(&host, &root, "SHOW_INIT", None);
+        assert_eq!(output(&first).trim(), "", "{first}");
+        let plain = current(&host);
+        assert!(!plain.tls);
+        // Same state, same sidecar.
+        run(&host, &root, "SHOW_INIT", None);
+        assert!(Arc::ptr_eq(&plain, &current(&host)));
+        // The vault becomes non-empty: a new sidecar with TLS termination.
+        let meta = host.vault_set(secret("API_TOKEN", "stub-real-value", &["api.example.com"])).unwrap();
+        let with = run(&host, &root, "SHOW_INIT", None);
+        let ca_dir = host.base.join("sandbox").join("ca");
+        assert!(
+            output(&with).contains(&format!(r#""caDir":"{}""#, ca_dir.display())),
+            "{with}"
+        );
+        let tls = current(&host);
+        assert!(tls.tls && !Arc::ptr_eq(&plain, &tls));
+        run(&host, &root, "SHOW_INIT", None);
+        assert!(Arc::ptr_eq(&tls, &current(&host)), "no restart while the vault stays non-empty");
+        // And empty again: back to a sidecar without TLS.
+        host.vault_remove(&meta.id).unwrap();
+        let after = run(&host, &root, "SHOW_INIT", None);
+        assert_eq!(output(&after).trim(), "", "{after}");
+        assert!(!current(&host).tls);
+    }
+
+    #[test]
+    fn the_command_gets_placeholders_never_the_real_value() {
+        let (_app, host, root) = vault_host();
+        host.vault_set(secret("API_TOKEN", "stub-real-value-xyz", &["api.example.com"])).unwrap();
+        host.vault_set(secret("OTHER_KEY", "stub-other-value-abc", &["other.example.com"])).unwrap();
+        let result = run(&host, &root, "ENV_DUMP", None);
+        let text = output(&result);
+        assert!(text.contains("API_TOKEN=fake_value_API_TOKEN"), "{result}");
+        assert!(text.contains("OTHER_KEY=fake_value_OTHER_KEY"), "{result}");
+        // Not in the output, the audit, or anything else the result carries.
+        let everything = result.to_string();
+        assert!(!everything.contains("stub-real-value-xyz"), "{everything}");
+        assert!(!everything.contains("stub-other-value-abc"), "{everything}");
+        // Pinned values are still pinned.
+        assert!(text.contains(&format!("HOME={}", root.display())), "{result}");
+    }
+
+    #[test]
+    fn an_empty_vault_adds_no_environment() {
+        let (_app, host, root) = vault_host();
+        let result = run(&host, &root, "ENV_DUMP", None);
+        assert!(!output(&result).contains("fake_value_"), "{result}");
+    }
+
+    #[test]
+    fn a_placeholder_can_never_replace_a_pinned_variable() {
+        let env = child_env(
+            Path::new("/w/root"),
+            vec![("FOO".into(), "bar".into()), ("PATH".into(), "/sidecar/path".into())],
+            vec![
+                ("PATH".into(), "fake_value_PATH".into()),
+                ("HOME".into(), "fake_value_HOME".into()),
+                ("TMPDIR".into(), "fake_value_TMPDIR".into()),
+                ("API_TOKEN".into(), "fake_value_API_TOKEN".into()),
+            ],
+        );
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("HOME"), Some("/w/root"));
+        assert_eq!(get("TMPDIR"), Some("/w/root/.tmp"));
+        assert_ne!(get("PATH"), Some("fake_value_PATH"));
+        assert_ne!(get("PATH"), Some("/sidecar/path"));
+        assert_eq!(get("API_TOKEN"), Some("fake_value_API_TOKEN"));
+        assert_eq!(get("FOO"), Some("bar"));
+    }
+
+    #[test]
+    fn a_placeholder_for_a_secret_the_command_did_not_get_is_dropped() {
+        // The stub invents a placeholder for every envVar in the request, so build the request
+        // with one secret and check only that one comes through the filter.
+        let (_app, host, root) = vault_host();
+        host.vault_set(secret("API_TOKEN", "v", &["api.example.com"])).unwrap();
+        let result = run(&host, &root, "ENV_DUMP", None);
+        let placeholders = output(&result).lines().filter(|l| l.contains("fake_value_")).count();
+        assert_eq!(placeholders, 1, "{result}");
+    }
+
+    #[test]
+    fn vault_hosts_join_the_allow_list_except_in_open_mode() {
+        let (_app, host, _root) = vault_host();
+        host.vault_set(secret("A_TOKEN", "v", &["api.example.com", "*.example.org"])).unwrap();
+        host.vault_set(secret("B_TOKEN", "v", &["api.example.com"])).unwrap();
+        let entries = host.vault_entries().unwrap();
+        let ask = NetworkPolicy {
+            mode: NetworkMode::Ask,
+            allow: vec!["registry.npmjs.org".into(), "api.example.com".into()],
+            suggested: Default::default(),
+        };
+        let merged = with_vault_hosts(Some(&ask), &entries).unwrap();
+        assert_eq!(
+            merged.allow,
+            ["registry.npmjs.org", "api.example.com", "*.example.org"]
+        );
+        let strict = NetworkPolicy { mode: NetworkMode::Strict, ..ask.clone() };
+        assert_eq!(with_vault_hosts(Some(&strict), &entries).unwrap().mode, NetworkMode::Strict);
+        assert_eq!(with_vault_hosts(Some(&strict), &entries).unwrap().allow.len(), 3);
+        let open = NetworkPolicy { mode: NetworkMode::Open, allow: vec![], suggested: Default::default() };
+        assert_eq!(with_vault_hosts(Some(&open), &entries).unwrap(), open);
+        assert!(with_vault_hosts(None, &entries).is_none());
+        assert_eq!(with_vault_hosts(Some(&ask), &[]).unwrap(), ask);
+    }
+
+    #[test]
+    fn a_secret_missing_from_the_keychain_fails_the_command_before_it_runs() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let store = Arc::new(MemoryStore::default());
+        host.set_secret_store(store.clone());
+        let meta = host.vault_set(secret("API_TOKEN", "v", &["api.example.com"])).unwrap();
+        store.items.lock().unwrap().remove(&meta.id);
+        let active = host.network.begin("inv", Arc::default());
+        let error = execute_command(&host, &root, &root, "echo hi", 20_000, 1000, Arc::default(), None, &active)
+            .unwrap_err();
+        assert_eq!(error.code, "VAULT_VALUE_MISSING");
+        assert!(host.sandbox.lock().unwrap().is_none(), "no sidecar was even started");
     }
 }

@@ -306,6 +306,8 @@ impl LocalHost {
                     &bundle,
                     &self.base,
                     vec![self.workspace_base().to_string_lossy().into_owned()],
+                    // Readiness never needs TLS termination: the probe runs without secrets.
+                    false,
                 );
                 probe_bundle(&bundle, &init)
             },
@@ -366,6 +368,7 @@ mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            tls: None,
         }
     }
 

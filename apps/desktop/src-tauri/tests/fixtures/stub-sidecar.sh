@@ -22,6 +22,7 @@
 #     (an event arriving mid-call)
 #   - wrap.command "SLEEP_ASK:<host>:<port>"   -> like ASK, but the wrapped argv is
 #     `sleep 2` so the command outlives the approval round trip
+#   - wrap.command "REQUEST_ASK:<host>:<port>:<METHOD>:<path>" -> reply, then a kind:"request" ask
 #   - wrap.command "SLEEP_ASK_OTHER:<host>:<port>" -> like SLEEP_ASK, but the event names a
 #     different commandId than the wrap's
 #   - wrap.command "SHOW_NETWORK"  -> reply argv ["/bin/echo", <the request's raw
@@ -32,12 +33,28 @@
 #   - wrap.command "AUDIT_FAIL" -> normal wrap reply, but every later audit is BAD_REQUEST
 #   - A wrap command may be preceded by "...\n" lines (srt_exec prefixes a TMPDIR export);
 #     only the text after the last literal backslash-n is matched.
+#   - wrap.command "ENV_DUMP"      -> argv is /usr/bin/env, so the command prints the environment
+#     it was given (placeholders from secretEnv included)
+#   - wrap.command "SHOW_SECRETS"  -> argv echoes the raw `secrets` JSON of the request (the
+#     wire-shape check; the test values are fake)
+#   - wrap.command "SHOW_INIT"     -> argv echoes the `tls` object init carried (empty if none)
+#   - Every wrap that carries `secrets` replies secretEnv {NAME: "fake_value_NAME"} per envVar,
+#     like the real sidecar's placeholders; a wrap without secrets replies secretEnv {}.
 # Anything else gets a generic canned success reply.
 
 extract() {
     # extract <field> <json-line>: crude single-line string-field extractor,
     # sufficient for the fixed, flat-ish request shapes the Rust client sends.
     printf '%s' "$2" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"
+}
+
+# secret_env <request-line>: the secretEnv members for every "envVar" in the request.
+secret_env() {
+    out=""
+    for name in $(printf '%s' "$1" | grep -o '"envVar":"[A-Z0-9_]*"' | sed 's/"envVar":"\(.*\)"/\1/'); do
+        out="$out${out:+,}\"$name\":\"fake_value_$name\""
+    done
+    printf '%s' "$out"
 }
 
 # Emits the unsolicited ask event for a "<host>:<port>" pair and the given command id.
@@ -49,6 +66,7 @@ emit_ask() {
 
 answered=unanswered
 audit_fails=
+tls_json=
 
 while IFS= read -r line; do
     id=$(extract id "$line")
@@ -65,6 +83,7 @@ while IFS= read -r line; do
     case "$op" in
         init)
             home=$(extract home "$line")
+            tls_json=$(printf '%s' "$line" | sed -n 's/.*"tls":\({[^}]*}\).*/\1/p')
             printf '{"id":"%s","ok":true,"result":null}\n' "$id"
             case "$home" in
                 */exit-after-init) exit 0 ;;
@@ -98,16 +117,35 @@ while IFS= read -r line; do
                     audit_fails=1
                     printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"}}}\n' "$id"
                     ;;
+                REQUEST_ASK:*)
+                    rest=${command#REQUEST_ASK:}
+                    rhost=${rest%%:*}; rest=${rest#*:}
+                    rport=${rest%%:*}; rest=${rest#*:}
+                    rmethod=${rest%%:*}; rpath=${rest#*:}
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"},"secretEnv":{}}}\n' "$id"
+                    printf '{"event":"ask","askId":"ask-1","commandId":"%s","kind":"request","host":"%s","port":%s,"method":"%s","path":"%s"}\n' "$(extract commandId "$line")" "$rhost" "$rport" "$rmethod" "$rpath"
+                    ;;
                 SLEEP_ASK_OTHER:*)
                     printf '{"id":"%s","ok":true,"result":{"argv":["/bin/sleep","2"],"env":{"FOO":"bar"}}}\n' "$id"
                     emit_ask "${command#SLEEP_ASK_OTHER:}" "some-other-command"
+                    ;;
+                ENV_DUMP)
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/usr/bin/env"],"env":{},"secretEnv":{%s}}}\n' "$id" "$(secret_env "$line")"
+                    ;;
+                SHOW_SECRETS)
+                    sec=$(printf '%s' "$line" | sed -n 's/.*"secrets":\(\[.*\]\)}$/\1/p' | sed 's/"/\\"/g')
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","%s"],"env":{},"secretEnv":{%s}}}\n' "$id" "$sec" "$(secret_env "$line")"
+                    ;;
+                SHOW_INIT)
+                    shown=$(printf '%s' "$tls_json" | sed 's/"/\\"/g')
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","%s"],"env":{},"secretEnv":{}}}\n' "$id" "$shown"
                     ;;
                 SHOW_NETWORK)
                     net=$(printf '%s' "$line" | sed -n 's/.*"network":\(.*\)}$/\1/p' | sed 's/"/\\"/g')
                     printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","%s"],"env":{}}}\n' "$id" "$net"
                     ;;
                 *)
-                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"}}}\n' "$id"
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"},"secretEnv":{%s}}}\n' "$id" "$(secret_env "$line")"
                     ;;
             esac
             ;;
