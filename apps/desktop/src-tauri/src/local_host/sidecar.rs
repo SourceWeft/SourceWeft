@@ -1192,4 +1192,24 @@ pub(crate) mod tests {
         let host_ask = asks.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(host_ask.kind.is_none() && host_ask.method.is_none() && host_ask.path.is_none());
     }
+
+    #[test]
+    fn secret_in_body_is_parsed_and_defaults_to_false() {
+        let bundle = bundle_with_stub();
+        let (handler, asks) = collecting_handler(false);
+        let sidecar = Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+        wrap(&sidecar, "REQUEST_ASK_BODY:api.example.com:443:GET:/search", None).unwrap();
+        let with = asks.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(with.secret_in_body);
+        assert_eq!(with.method.as_deref(), Some("GET"));
+        wrap(&sidecar, "REQUEST_ASK:api.example.com:443:POST:/x", None).unwrap();
+        let without = asks.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!without.secret_in_body);
+        // A non-boolean is not a valid event (it is logged and ignored, never read as true).
+        let bad: std::result::Result<SidecarEvent, _> = serde_json::from_value(serde_json::json!({
+            "event": "ask", "askId": "a", "commandId": "c", "host": "h.example.com", "port": 443,
+            "kind": "request", "method": "GET", "path": "/", "secretInBody": "yes"
+        }));
+        assert!(bad.is_err());
+    }
 }

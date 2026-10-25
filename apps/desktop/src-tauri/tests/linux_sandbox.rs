@@ -1398,6 +1398,7 @@ fn add_secret(host: &LocalHost, env_var: &str, value: &str, hosts: &[&str], read
         value: value.to_string(),
         hosts: hosts.iter().map(|h| h.to_string()).collect(),
         read_only,
+        acknowledged_interception: Some(true),
     })
     .unwrap_or_else(|error| panic!("vault_set failed: {error}"));
 }

@@ -23,6 +23,8 @@
 #   - wrap.command "SLEEP_ASK:<host>:<port>"   -> like ASK, but the wrapped argv is
 #     `sleep 2` so the command outlives the approval round trip
 #   - wrap.command "REQUEST_ASK:<host>:<port>:<METHOD>:<path>" -> reply, then a kind:"request" ask
+#   - wrap.command "REQUEST_ASK_BODY:<host>:<port>:<METHOD>:<path>" -> like REQUEST_ASK, with
+#     "secretInBody":true
 #   - wrap.command "SLEEP_ASK_OTHER:<host>:<port>" -> like SLEEP_ASK, but the event names a
 #     different commandId than the wrap's
 #   - wrap.command "SHOW_NETWORK"  -> reply argv ["/bin/echo", <the request's raw
@@ -124,6 +126,14 @@ while IFS= read -r line; do
                     rmethod=${rest%%:*}; rpath=${rest#*:}
                     printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"},"secretEnv":{}}}\n' "$id"
                     printf '{"event":"ask","askId":"ask-1","commandId":"%s","kind":"request","host":"%s","port":%s,"method":"%s","path":"%s"}\n' "$(extract commandId "$line")" "$rhost" "$rport" "$rmethod" "$rpath"
+                    ;;
+                REQUEST_ASK_BODY:*)
+                    rest=${command#REQUEST_ASK_BODY:}
+                    rhost=${rest%%:*}; rest=${rest#*:}
+                    rport=${rest%%:*}; rest=${rest#*:}
+                    rmethod=${rest%%:*}; rpath=${rest#*:}
+                    printf '{"id":"%s","ok":true,"result":{"argv":["/bin/echo","hi"],"env":{"FOO":"bar"},"secretEnv":{}}}\n' "$id"
+                    printf '{"event":"ask","askId":"ask-1","commandId":"%s","kind":"request","host":"%s","port":%s,"method":"%s","path":"%s","secretInBody":true}\n' "$(extract commandId "$line")" "$rhost" "$rport" "$rmethod" "$rpath"
                     ;;
                 SLEEP_ASK_OTHER:*)
                     printf '{"id":"%s","ok":true,"result":{"argv":["/bin/sleep","2"],"env":{"FOO":"bar"}}}\n' "$id"

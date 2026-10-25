@@ -655,6 +655,7 @@ mod network_decision_tests {
                     kind: None,
                     method: None,
                     path: None,
+                    secret_in_body: false,
                 })
             })
         };

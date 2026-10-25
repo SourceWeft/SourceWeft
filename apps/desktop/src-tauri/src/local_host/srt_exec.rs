@@ -358,6 +358,28 @@ fn child_env(
     env.into_iter().collect()
 }
 
+/// The one line appended to a command's stderr (and returned as `vaultWarning`) when the vault
+/// could not be read. It names a short reason, never a label or a value.
+fn vault_warning_line(error: &HostError) -> String {
+    let reason = match error.code {
+        "VAULT_VALUE_MISSING" => "a stored secret is missing from the keychain".to_string(),
+        _ => {
+            let text: String = error
+                .message
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(120)
+                .collect();
+            if text.is_empty() {
+                "the keychain is unavailable".to_string()
+            } else {
+                text
+            }
+        }
+    };
+    format!("[sandbox vault unavailable: {reason}; stored secrets were not available to this command]")
+}
+
 /// `network` with the vault's hosts added to its allow list (decision S7: the user bound the
 /// secret to those hosts, so reaching them is implicitly allowed). `open` (or no policy) already
 /// allows everything and is returned unchanged.
@@ -422,7 +444,16 @@ pub(crate) fn execute_command(
     prepare_tmpdir(root)?;
     // The vault's secrets for this command: all of them (a command cannot know which it will
     // use). Reading the keychain only happens when the vault has rows.
-    let entries = host.vault_entries()?;
+    // A locked or unavailable keychain, or one missing item, must not stop every command: the
+    // command runs without secrets (none passed, vault hosts not merged, no TLS termination)
+    // and says so. Any other failure (the host database) still fails the command.
+    let (entries, vault_warning) = match host.vault_entries() {
+        Ok(entries) => (entries, None),
+        Err(error) if error.code.starts_with("VAULT_") => {
+            (Vec::new(), Some(vault_warning_line(&error)))
+        }
+        Err(error) => return Err(error),
+    };
     let tls = !entries.is_empty();
     let policy = with_vault_hosts(network, &entries);
     let network = if tls { policy.as_ref() } else { network };
@@ -484,6 +515,10 @@ pub(crate) fn execute_command(
                 error.message
             ),
         };
+        let stderr = match &vault_warning {
+            Some(warning) => format!("{stderr}\n{warning}"),
+            None => stderr,
+        };
         let output = format!("{}{}", String::from_utf8_lossy(&run.stdout), stderr);
         let mut result = json!({
             "output": output.chars().take(max_chars).collect::<String>(),
@@ -491,6 +526,9 @@ pub(crate) fn execute_command(
             "truncated": run.truncated || output.chars().count() > max_chars,
             "cancelled": run.cancelled,
         });
+        if let Some(warning) = &vault_warning {
+            result["vaultWarning"] = Value::String(warning.clone());
+        }
         // Drained before `finish`, which makes the sidecar forget the command. A failed audit
         // never fails the command; it is reported honestly instead of as an empty list.
         match instance.sidecar.audit(&command_id) {
@@ -1108,7 +1146,7 @@ mod tests {
     #[test]
     fn vault_hosts_join_the_allow_list_except_in_open_mode() {
         let (_app, host, _root) = vault_host();
-        host.vault_set(secret("A_TOKEN", "v", &["api.example.com", "*.example.org"])).unwrap();
+        host.vault_set(secret("A_TOKEN", "v", &["api.example.com", "api.example.org"])).unwrap();
         host.vault_set(secret("B_TOKEN", "v", &["api.example.com"])).unwrap();
         let entries = host.vault_entries().unwrap();
         let ask = NetworkPolicy {
@@ -1119,7 +1157,7 @@ mod tests {
         let merged = with_vault_hosts(Some(&ask), &entries).unwrap();
         assert_eq!(
             merged.allow,
-            ["registry.npmjs.org", "api.example.com", "*.example.org"]
+            ["registry.npmjs.org", "api.example.com", "api.example.org"]
         );
         let strict = NetworkPolicy { mode: NetworkMode::Strict, ..ask.clone() };
         assert_eq!(with_vault_hosts(Some(&strict), &entries).unwrap().mode, NetworkMode::Strict);
@@ -1131,16 +1169,44 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_missing_from_the_keychain_fails_the_command_before_it_runs() {
+    fn an_unavailable_keychain_runs_the_command_without_secrets_and_says_so() {
         let (_app, host, root) = host_with_stub_bundle();
         let store = Arc::new(MemoryStore::default());
         host.set_secret_store(store.clone());
-        let meta = host.vault_set(secret("API_TOKEN", "v", &["api.example.com"])).unwrap();
+        host.vault_set(secret("API_TOKEN", "stub-real-value-xyz", &["api.example.com"])).unwrap();
+        let ask = NetworkPolicy { mode: NetworkMode::Ask, allow: vec![], suggested: Default::default() };
+
+        // Locked keychain.
+        *store.fail_get.lock().unwrap() = true;
+        let locked = run(&host, &root, "ENV_DUMP", Some(&ask));
+        assert_eq!(locked["exitCode"], 0, "{locked}");
+        assert!(!output(&locked).contains("fake_value_"), "no secrets were passed: {locked}");
+        let warning = locked["vaultWarning"].as_str().expect("vaultWarning");
+        assert!(warning.starts_with("[sandbox vault unavailable: "), "{warning}");
+        assert!(warning.ends_with("stored secrets were not available to this command]"), "{warning}");
+        assert_eq!(output(&locked).matches("[sandbox vault unavailable").count(), 1, "{locked}");
+        assert!(!locked.to_string().contains("stub-real-value-xyz"));
+        // No TLS sidecar was started for it, and the vault hosts were not merged: the stub shows
+        // what reached `wrap`.
+        assert!(!current(&host).tls);
+        let shown = run(&host, &root, "SHOW_NETWORK", Some(&ask));
+        assert!(!output(&shown).contains("api.example.com"), "{shown}");
+
+        // One item missing from the keychain.
+        *store.fail_get.lock().unwrap() = false;
+        let meta = host.vault_list().unwrap().secrets.remove(0);
         store.items.lock().unwrap().remove(&meta.id);
-        let active = host.network.begin("inv", Arc::default());
-        let error = execute_command(&host, &root, &root, "echo hi", 20_000, 1000, Arc::default(), None, &active)
-            .unwrap_err();
-        assert_eq!(error.code, "VAULT_VALUE_MISSING");
-        assert!(host.sandbox.lock().unwrap().is_none(), "no sidecar was even started");
+        let missing = run(&host, &root, "ENV_DUMP", None);
+        assert!(!output(&missing).contains("fake_value_"), "{missing}");
+        let warning = missing["vaultWarning"].as_str().unwrap();
+        assert!(warning.contains("a stored secret is missing from the keychain"), "{warning}");
+        assert!(!warning.contains(&meta.label), "the warning must not name the secret: {warning}");
+
+        // Back to normal once the keychain has the item again.
+        store.items.lock().unwrap().insert(meta.id.clone(), b"stub-real-value-xyz".to_vec());
+        let fine = run(&host, &root, "ENV_DUMP", None);
+        assert!(output(&fine).contains("API_TOKEN=fake_value_API_TOKEN"), "{fine}");
+        assert!(fine.get("vaultWarning").is_none(), "{fine}");
+        assert!(current(&host).tls);
     }
 }

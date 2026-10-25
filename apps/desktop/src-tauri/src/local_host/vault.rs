@@ -25,6 +25,10 @@ pub const MAX_SECRETS: usize = 20;
 pub const MAX_VALUE_BYTES: usize = 4096;
 /// Most hosts one secret may be bound to.
 pub const MAX_HOSTS: usize = 50;
+/// Most distinct hosts across the whole vault. The vault's hosts are merged into a command's
+/// network allow list (S7), and the sidecar accepts at most 500 entries there, so this keeps the
+/// merge from ever being able to overflow it.
+pub const MAX_TOTAL_HOSTS: usize = 200;
 /// Longest label, in characters.
 pub const MAX_LABEL_CHARS: usize = 100;
 
@@ -105,6 +109,11 @@ pub struct NewSecret {
     pub hosts: Vec<String>,
     #[serde(default = "default_read_only")]
     pub read_only: bool,
+    /// The user ticked the interception consent ("this device will decrypt the sandbox's HTTPS
+    /// so the proxy can substitute the secret"). Required for the first secret of an empty
+    /// vault; the web UI sends it after the checkbox.
+    #[serde(default)]
+    pub acknowledged_interception: Option<bool>,
 }
 
 fn default_read_only() -> bool {
@@ -119,6 +128,7 @@ impl std::fmt::Debug for NewSecret {
             .field("value", &"<redacted>")
             .field("hosts", &self.hosts)
             .field("read_only", &self.read_only)
+            .field("acknowledged_interception", &self.acknowledged_interception)
             .finish()
     }
 }
@@ -194,19 +204,21 @@ fn validate_env_var(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// A host a secret may be bound to, normalised to lower case: a domain with at least one dot,
-/// or `*.domain.tld` (a wildcard needs two labels after the star). No port, no IP literal, no
-/// path, no other wildcard. Mirrors the sidecar's own check (`isValidAllowedDomainEntry` plus
-/// "no port, no IP"); the sidecar re-validates every request.
+/// A host a secret may be bound to, normalised to lower case: an EXACT hostname with at least
+/// one dot. No wildcards at all (a wildcard such as `*.github.io` or `*.co.uk` would send the
+/// real value to every tenant of a shared suffix), no port, no IP literal, no path. The sidecar
+/// re-validates every request.
 fn normalise_host(entry: &str) -> Result<String> {
-    let bad = || invalid(format!("{entry:?} is not a valid host pattern."));
+    let bad = || {
+        invalid(format!(
+            "{entry:?} is not a valid host: use an exact hostname such as api.example.com."
+        ))
+    };
     let host = entry.trim().to_ascii_lowercase();
     if host.is_empty() || host.len() > 253 {
         return Err(bad());
     }
-    let name = host.strip_prefix("*.").unwrap_or(host.as_str());
-    let labels: Vec<&str> = name.split('.').collect();
-    // A name needs a dot; a wildcard needs two labels after the star (`*.example.com`).
+    let labels: Vec<&str> = host.split('.').collect();
     if labels.len() < 2
         || labels.iter().any(|label| {
             label.is_empty()
@@ -320,6 +332,27 @@ impl LocalHost {
         if existing.iter().any(|m| m.env_var == new.env_var) {
             return Err(invalid(format!("{} is already used by another secret.", new.env_var)));
         }
+        if existing.is_empty() && new.acknowledged_interception != Some(true) {
+            return Err(HostError::new(
+                "VAULT_CONSENT_REQUIRED",
+                "Storing the first secret turns on TLS interception for sandboxed commands; \
+                 acknowledge it to continue.",
+            ));
+        }
+        let mut distinct: Vec<&str> = existing
+            .iter()
+            .flat_map(|m| m.hosts.iter().map(String::as_str))
+            .collect();
+        for host in &hosts {
+            if !distinct.contains(&host.as_str()) {
+                distinct.push(host);
+            }
+        }
+        if distinct.len() > MAX_TOTAL_HOSTS {
+            return Err(invalid(format!(
+                "The vault can bind at most {MAX_TOTAL_HOSTS} distinct hosts in total."
+            )));
+        }
         let meta = SecretMeta {
             id: uuid::Uuid::new_v4().to_string(),
             label: new.label.trim().to_string(),
@@ -419,10 +452,14 @@ pub(crate) mod tests {
     pub(crate) struct MemoryStore {
         pub items: Mutex<HashMap<String, Vec<u8>>>,
         pub fail_set: Mutex<bool>,
+        pub fail_get: Mutex<bool>,
     }
 
     impl SecretStore for MemoryStore {
         fn get(&self, account: &str) -> std::result::Result<Option<Vec<u8>>, String> {
+            if *self.fail_get.lock().unwrap() {
+                return Err("keychain is locked".into());
+            }
             Ok(self.items.lock().unwrap().get(account).cloned())
         }
         fn set(&self, account: &str, secret: &[u8]) -> std::result::Result<(), String> {
@@ -453,6 +490,7 @@ pub(crate) mod tests {
             value: value.into(),
             hosts: hosts.iter().map(|h| h.to_string()).collect(),
             read_only: true,
+            acknowledged_interception: Some(true),
         }
     }
 
@@ -461,9 +499,9 @@ pub(crate) mod tests {
         let (_app, host, store) = host_with_store();
         assert!(host.vault_is_empty().unwrap());
         let meta = host
-            .vault_set(secret("GITHUB_TOKEN", "ghp_REALVALUE", &["API.github.com", "*.github.com"]))
+            .vault_set(secret("GITHUB_TOKEN", "ghp_REALVALUE", &["API.github.com", "uploads.github.com"]))
             .unwrap();
-        assert_eq!(meta.hosts, ["api.github.com", "*.github.com"]);
+        assert_eq!(meta.hosts, ["api.github.com", "uploads.github.com"]);
         assert!(meta.read_only);
         // Metadata listing carries no value anywhere.
         let listing = host.vault_list().unwrap();
@@ -575,18 +613,65 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn host_patterns_follow_the_sandbox_rules() {
-        for ok in ["example.com", "API.Example.COM", "*.example.com", "*.a.b.example.co.uk", "a-b.example.com", "xn--bcher-kva.example"] {
+    fn hosts_must_be_exact_hostnames() {
+        for ok in ["example.com", "API.Example.COM", "a-b.example.com", "xn--bcher-kva.example", "a.b.c.example.co.uk"] {
             assert!(normalise_host(ok).is_ok(), "{ok}");
         }
         for bad in [
-            "", "*", "*.com", "com", "localhost", "*.", "*example.com", "a.*.com", "*.*.com",
-            "example.com:443", "https://example.com", "example.com/path", "1.2.3.4", "*.1.2.3.4",
-            "[::1]", "::1", "10.0.0.1", ".example.com", "example.com.", "a..com", "-a.com", "a-.com",
-            "exa mple.com", "ex\nample.com", "ünicode.com", "a*.example.com", "127.1", "0x7f.0.0.1",
+            // No wildcards of any shape: a shared suffix would receive the real value.
+            "*", "*.com", "*.example.com", "*.github.io", "*.co.uk", "*.a.b.example.co.uk", "*.",
+            "*example.com", "a.*.com", "*.*.com", "a*.example.com",
+            "", "com", "localhost", "example.com:443", "https://example.com", "example.com/path",
+            "1.2.3.4", "*.1.2.3.4", "[::1]", "::1", "10.0.0.1", ".example.com", "example.com.",
+            "a..com", "-a.com", "a-.com", "exa mple.com", "ex\nample.com", "ünicode.com", "127.1",
+            "0x7f.0.0.1",
         ] {
             assert!(normalise_host(bad).is_err(), "{bad:?} must be rejected");
         }
+    }
+
+    #[test]
+    fn the_first_secret_needs_the_interception_acknowledgement() {
+        let (_app, host, _store) = host_with_store();
+        for ack in [None, Some(false)] {
+            let mut first = secret("API_KEY", "v", &["example.com"]);
+            first.acknowledged_interception = ack;
+            let error = host.vault_set(first).unwrap_err();
+            assert_eq!(error.code, "VAULT_CONSENT_REQUIRED", "{ack:?}");
+        }
+        assert!(host.vault_is_empty().unwrap());
+        host.vault_set(secret("API_KEY", "v", &["example.com"])).unwrap();
+        // Once the vault is non-empty the consent has already been given.
+        let mut second = secret("OTHER_KEY", "v", &["example.com"]);
+        second.acknowledged_interception = None;
+        assert!(host.vault_set(second).is_ok());
+        // A missing field deserialises to "not acknowledged" (and so is refused when first).
+        let parsed: NewSecret = serde_json::from_value(serde_json::json!({
+            "label": "l", "envVar": "X_KEY", "value": "v", "hosts": ["example.com"]
+        }))
+        .unwrap();
+        assert_eq!(parsed.acknowledged_interception, None);
+        assert!(parsed.read_only);
+    }
+
+    #[test]
+    fn at_most_two_hundred_distinct_hosts_in_total() {
+        let (_app, host, _store) = host_with_store();
+        let names = |from: usize, to: usize| -> Vec<String> {
+            (from..to).map(|i| format!("h{i}.example.com")).collect()
+        };
+        for (n, range) in [(0, (0, 50)), (1, (50, 100)), (2, (100, 150)), (3, (150, 200))] {
+            let hosts = names(range.0, range.1);
+            let refs: Vec<&str> = hosts.iter().map(String::as_str).collect();
+            host.vault_set(secret(&format!("S_{n}"), "v", &refs)).unwrap();
+        }
+        // One more distinct host is over the limit...
+        let error = host.vault_set(secret("S_4", "v", &["extra.example.com"])).unwrap_err();
+        assert_eq!(error.code, "VAULT_INVALID");
+        assert!(error.message.contains("200"), "{error}");
+        // ...hosts that are already bound do not count twice.
+        assert!(host.vault_set(secret("S_5", "v", &["h0.example.com", "h199.example.com"])).is_ok());
+        assert_eq!(host.vault_list().unwrap().secrets.len(), 5);
     }
 
     #[test]

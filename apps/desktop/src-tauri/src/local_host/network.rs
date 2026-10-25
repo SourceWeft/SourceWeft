@@ -97,6 +97,10 @@ pub struct AskEvent {
     /// `kind: "request"` only; no query string.
     #[serde(default)]
     pub path: Option<String>,
+    /// `kind: "request"` only: the request body contains a stored secret (for any method, also
+    /// GET with a body). Forwarded to the backend only when true.
+    #[serde(default)]
+    pub secret_in_body: bool,
 }
 
 impl AskEvent {
@@ -425,6 +429,9 @@ impl NetworkBridge {
                 message["kind"] = json!("request");
                 message["method"] = json!(method);
                 message["path"] = json!(path);
+                if event.secret_in_body {
+                    message["secretInBody"] = json!(true);
+                }
             }
             if outbound.send(message).is_err() {
                 state.pending.remove(&ask_id);
@@ -470,6 +477,7 @@ mod tests {
             kind: None,
             method: None,
             path: None,
+            secret_in_body: false,
         }
     }
 
@@ -918,5 +926,33 @@ mod tests {
             bridge.resolve(frame["askId"].as_str().unwrap(), true, None);
             assert!(waiting.join().unwrap().allow);
         }
+    }
+
+    #[test]
+    fn secret_in_body_is_forwarded_only_for_request_asks_and_only_when_true() {
+        let bridge = NetworkBridge::default();
+        let (_lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let relay = |event: AskEvent, frames: &mut tokio::sync::mpsc::UnboundedReceiver<Value>| {
+            let worker = bridge.clone();
+            let waiting = std::thread::spawn(move || worker.decide(&event));
+            let frame = next_frame(frames);
+            bridge.resolve(frame["askId"].as_str().unwrap(), true, None);
+            assert!(waiting.join().unwrap().allow);
+            frame
+        };
+        let mut with_body = request_ask("GET", "/search");
+        with_body.secret_in_body = true;
+        let frame = relay(with_body, &mut frames);
+        assert_eq!(frame["secretInBody"], true);
+        assert_eq!(frame["method"], "GET");
+        // A plain request ask keeps today's frame.
+        let frame = relay(request_ask("POST", "/x"), &mut frames);
+        assert!(frame.get("secretInBody").is_none(), "{frame}");
+        // A host ask never carries it, even if the event does.
+        let mut host_ask = ask("example.com");
+        host_ask.secret_in_body = true;
+        let frame = relay(host_ask, &mut frames);
+        assert!(frame.get("secretInBody").is_none() && frame.get("kind").is_none(), "{frame}");
     }
 }
