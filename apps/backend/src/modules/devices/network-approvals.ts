@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
+  agentToolTrustRules,
   db,
   localDevices,
   localNetworkRequests,
@@ -24,11 +25,11 @@ import { logger } from "../../shared/logger";
 import { requireConnectorWorkspace } from "../connectors/permissions";
 import { listAgentToolTrustRuleRecords } from "../connectors/repository/trust-rule";
 import {
-  findAgentToolTrustRuleForScope,
-  recordAgentToolTrustRule,
   touchAgentToolTrustRuleUse,
   type AgentToolTrustScope,
 } from "../agent-confirmations/trust-rules";
+import { resolveAgentToolTrustRuleExpiry } from "../connectors/agent-tool-trust";
+import { mapAgentToolTrustRule } from "../connectors/mappers";
 import type { AgentToolTrustRuleRecord } from "../connectors/types";
 import { requireDeviceAccess, type LocalExecutionCaller } from "./access";
 import {
@@ -71,7 +72,17 @@ export const NETWORK_REASONS = {
   denied: "denied by user",
   unavailable: "network approval is unavailable",
   invalidHost: "invalid host",
+  invalidAsk: "invalid network request",
+  tooMany: "too many network requests",
 } as const;
+
+/** Bounds on what one command and one computer may leave waiting. */
+export const MAX_NETWORK_REQUESTS_PER_COMMAND = 20;
+export const MAX_PENDING_NETWORK_REQUESTS_PER_DEVICE = 100;
+/** Settled rows are audit-only after the card is gone; keep a week of them. */
+export const NETWORK_REQUEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const NETWORK_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
+let lastPrunedAt = 0;
 
 export function networkTrustScope(host: string): AgentToolTrustScope {
   return {
@@ -222,19 +233,14 @@ export async function handleNetworkAsk(
   ask: NetworkAskMessage,
   now: Date = new Date(),
 ): Promise<NetworkDecisionFrame | null> {
+  // The host and port are whatever the sandboxed program tried to connect to;
+  // anything unusable is a deny, never a protocol error.
+  if (ask.askId.length === 0 || ask.askId.length > 128)
+    return denyFrame(ask.askId, NETWORK_REASONS.invalidAsk);
   const host = canonicalNetworkHost(ask.host);
   if (!host) return denyFrame(ask.askId, NETWORK_REASONS.invalidHost);
-
-  const [existing] = await db
-    .select()
-    .from(localNetworkRequests)
-    .where(
-      and(
-        eq(localNetworkRequests.deviceId, device.id),
-        eq(localNetworkRequests.askId, ask.askId),
-      ),
-    );
-  if (existing) return replyForExisting(existing, ask, host);
+  if (!Number.isInteger(ask.port) || ask.port < 1 || ask.port > 65535)
+    return denyFrame(ask.askId, NETWORK_REASONS.invalidAsk);
 
   const [invocation] = await db
     .select()
@@ -254,16 +260,28 @@ export async function handleNetworkAsk(
   )
     return denyFrame(ask.askId, NETWORK_REASONS.noCommand);
 
+  // The live mode comes before anything stored, so a switch to strict also
+  // governs a re-sent ask whose earlier answer was an allow.
   const [live] = await db
     .select({ networkMode: localDevices.networkMode })
     .from(localDevices)
     .where(and(eq(localDevices.id, device.id), isNull(localDevices.revokedAt)));
   if (!live) return denyFrame(ask.askId, NETWORK_REASONS.noCommand);
-  // The mode may have changed since the command started.
   if (live.networkMode === "open")
     return { type: "network.decision", askId: ask.askId, allow: true };
   if (live.networkMode === "strict")
     return denyFrame(ask.askId, NETWORK_REASONS.strict);
+
+  const [existing] = await db
+    .select()
+    .from(localNetworkRequests)
+    .where(
+      and(
+        eq(localNetworkRequests.deviceId, device.id),
+        eq(localNetworkRequests.askId, ask.askId),
+      ),
+    );
+  if (existing) return replyForExisting(existing, ask, host);
 
   const [thread] = await db
     .select({
@@ -300,6 +318,25 @@ export async function handleNetworkAsk(
     );
     return { type: "network.decision", askId: ask.askId, allow: true };
   }
+
+  const [perCommand] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(localNetworkRequests)
+    .where(eq(localNetworkRequests.invocationId, invocation.id));
+  const [perDevice] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(localNetworkRequests)
+    .where(
+      and(
+        eq(localNetworkRequests.deviceId, device.id),
+        eq(localNetworkRequests.status, "pending"),
+      ),
+    );
+  if (
+    (perCommand?.count ?? 0) >= MAX_NETWORK_REQUESTS_PER_COMMAND ||
+    (perDevice?.count ?? 0) >= MAX_PENDING_NETWORK_REQUESTS_PER_DEVICE
+  )
+    return denyFrame(ask.askId, NETWORK_REASONS.tooMany);
 
   const suggestedBy = suggestedSkillFor(invocation.payload, host, ask.port);
   const [created] = await db
@@ -369,6 +406,34 @@ function suggestedSkillFor(
   return null;
 }
 
+function shouldPruneNow(now: Date): boolean {
+  if (now.getTime() - lastPrunedAt < NETWORK_PRUNE_INTERVAL_MS) return false;
+  lastPrunedAt = now.getTime();
+  return true;
+}
+
+/** Test seam: forget when this process last pruned. */
+export function resetNetworkPruneClock() {
+  lastPrunedAt = 0;
+}
+
+/** Deletes answered or expired requests past retention; pending ones are never touched. */
+export async function pruneSettledNetworkRequests(
+  now: Date = new Date(),
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - NETWORK_REQUEST_RETENTION_MS);
+  const deleted = await db
+    .delete(localNetworkRequests)
+    .where(
+      and(
+        inArray(localNetworkRequests.status, ["allowed", "denied", "expired"]),
+        lt(localNetworkRequests.resolvedAt, cutoff),
+      ),
+    )
+    .returning({ id: localNetworkRequests.id });
+  return deleted.length;
+}
+
 /**
  * One tick of the gateway loop for a connected device: settle what can no
  * longer be answered, then hand every settled-but-undelivered decision to the
@@ -378,10 +443,15 @@ function suggestedSkillFor(
 export async function deliverNetworkDecisions(
   deviceId: string,
   send: (frame: NetworkDecisionFrame) => boolean,
-  options: { sweep?: boolean; now?: Date } = {},
+  options: { sweep?: boolean; now?: Date; prune?: boolean } = {},
 ): Promise<number> {
   const now = options.now ?? new Date();
   if (options.sweep !== false) {
+    // Cheap housekeeping rides the sweep, at most every few minutes per process.
+    if (options.prune ?? shouldPruneNow(now))
+      await pruneSettledNetworkRequests(now).catch((error: unknown) =>
+        logger.warn("Network request pruning failed", { error: String(error) }),
+      );
     const stamp = now.toISOString();
     // Qualified by table name on purpose: the NOT EXISTS subquery would
     // otherwise make `id`/`status` ambiguous inside the UPDATE.
@@ -456,6 +526,8 @@ export async function listPendingNetworkRequests(input: {
         eq(localNetworkRequests.userId, input.userId),
         eq(localNetworkRequests.status, "pending"),
         gt(localNetworkRequests.expiresAt, now),
+        // A card never outlives the command it belongs to.
+        inArray(localToolInvocations.status, ACTIVE_COMMAND_STATUSES),
         isNull(localDevices.revokedAt),
       ),
     )
@@ -537,13 +609,18 @@ export async function respondToNetworkRequest(input: {
     );
   const request = found.request;
 
-  // Standing permission is a workspace-level grant: check it before the row
-  // is settled so a refused "always" can still be answered "once".
-  if (input.decision === "allow_always")
+  // Answering needs the right to run commands here at all (a viewer cannot);
+  // a standing grant is a workspace-level approval. Checked before the row is
+  // settled so a refused "always" can still be answered "once". Denying is
+  // always allowed.
+  if (input.decision !== "deny")
     await requireConnectorWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
-      permission: "connector.action.approve",
+      permission:
+        input.decision === "allow_always"
+          ? "connector.action.approve"
+          : "connector.action.propose",
     });
 
   const settled =
@@ -558,18 +635,40 @@ export async function respondToNetworkRequest(input: {
           scope: input.decision === "allow_always" ? "always" : "once",
           reason: null,
         };
-  const [updated] = await db
-    .update(localNetworkRequests)
-    .set({ ...settled, resolvedAt: now })
-    .where(
-      and(
-        eq(localNetworkRequests.id, request.id),
-        eq(localNetworkRequests.status, "pending"),
-        gt(localNetworkRequests.expiresAt, now),
-      ),
-    )
-    .returning();
-  if (!updated) {
+  // One transaction: the row only becomes "always" together with its rule, so
+  // a failure while storing the rule leaves the request pending and answerable.
+  const outcome = await db.transaction(async (tx) => {
+    if (input.decision === "allow_always")
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`network-rule:${request.teamId}:${request.workspaceId}:${request.userId}:${request.host}`}, 0))`,
+      );
+    const [updated] = await tx
+      .update(localNetworkRequests)
+      .set({ ...settled, resolvedAt: now })
+      .where(
+        and(
+          eq(localNetworkRequests.id, request.id),
+          eq(localNetworkRequests.status, "pending"),
+          gt(localNetworkRequests.expiresAt, now),
+        ),
+      )
+      .returning();
+    if (!updated) return null;
+    return {
+      updated,
+      rule:
+        input.decision === "allow_always"
+          ? await upsertNetworkTrustRule(tx, {
+              row: updated,
+              ...(typeof input.ttlSeconds === "number"
+                ? { ttlSeconds: input.ttlSeconds }
+                : {}),
+              now,
+            })
+          : undefined,
+    };
+  });
+  if (!outcome) {
     const [current] = await db
       .select()
       .from(localNetworkRequests)
@@ -588,38 +687,97 @@ export async function respondToNetworkRequest(input: {
   }
 
   logger.info("Local network request answered", {
-    requestId: updated.id,
-    deviceId: updated.deviceId,
+    requestId: outcome.updated.id,
+    deviceId: outcome.updated.deviceId,
     userId: input.userId,
-    host: updated.host,
-    port: updated.port,
+    host: outcome.updated.host,
+    port: outcome.updated.port,
     decision: input.decision,
+    trustRuleId: outcome.rule?.id,
   });
-  if (input.decision !== "allow_always") return responseFor(updated);
+  return responseFor(outcome.updated, outcome.rule);
+}
 
-  const tenant = {
-    teamId: updated.teamId,
-    workspaceId: updated.workspaceId,
-    userId: updated.userId,
-  };
-  const scope = networkTrustScope(updated.host);
-  const existing = await findAgentToolTrustRuleForScope({
-    scope,
-    tenant,
-    now,
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * One standing rule per (team, workspace, user, host): a new "always" reuses
+ * the active rule and only ever lengthens its expiry. Callers hold an advisory
+ * lock on that identity, which stands in for the unique index the shared
+ * trust-rule table does not have.
+ */
+async function upsertNetworkTrustRule(
+  tx: Transaction,
+  input: { row: NetworkRequestRow; ttlSeconds?: number; now: Date },
+): Promise<AgentToolTrustRule> {
+  const scope = networkTrustScope(input.row.host);
+  const expiresAt = resolveAgentToolTrustRuleExpiry({
+    ...(input.ttlSeconds !== undefined ? { ttlSeconds: input.ttlSeconds } : {}),
+    now: input.now,
   });
-  const rule =
-    existing ??
-    (await recordAgentToolTrustRule({
-      scope,
-      tenant,
-      confirmationId: updated.id,
-      ...(typeof input.ttlSeconds === "number"
-        ? { ttlSeconds: input.ttlSeconds }
-        : {}),
-      now,
-    }));
-  return responseFor(updated, rule);
+  const [existing] = await tx
+    .select()
+    .from(agentToolTrustRules)
+    .where(
+      and(
+        eq(agentToolTrustRules.teamId, input.row.teamId),
+        eq(agentToolTrustRules.workspaceId, input.row.workspaceId),
+        eq(agentToolTrustRules.userId, input.row.userId),
+        eq(agentToolTrustRules.domain, scope.domain),
+        eq(agentToolTrustRules.toolName, scope.toolName),
+        isNull(agentToolTrustRules.connectorId),
+        eq(agentToolTrustRules.targetType, scope.targetType!),
+        eq(agentToolTrustRules.targetId, scope.targetId!),
+        eq(agentToolTrustRules.status, "active"),
+      ),
+    )
+    .orderBy(desc(agentToolTrustRules.createdAt))
+    .limit(1);
+  if (existing) {
+    const levels = existing.allowedRiskLevels.includes(scope.riskLevel)
+      ? existing.allowedRiskLevels
+      : [...existing.allowedRiskLevels, scope.riskLevel];
+    const [extended] = await tx
+      .update(agentToolTrustRules)
+      .set({
+        allowedRiskLevels: levels,
+        // Never shortens a longer grant, never turns a limited one permanent.
+        expiresAt:
+          existing.expiresAt === null || existing.expiresAt > expiresAt
+            ? existing.expiresAt
+            : expiresAt,
+        updatedAt: input.now,
+      })
+      .where(eq(agentToolTrustRules.id, existing.id))
+      .returning();
+    return mapAgentToolTrustRule(extended!);
+  }
+  const [created] = await tx
+    .insert(agentToolTrustRules)
+    .values({
+      id: randomUUID(),
+      teamId: input.row.teamId,
+      workspaceId: input.row.workspaceId,
+      userId: input.row.userId,
+      domain: scope.domain,
+      toolName: scope.toolName,
+      connectorId: null,
+      targetType: scope.targetType,
+      targetId: scope.targetId,
+      allowedRiskLevels: [scope.riskLevel],
+      status: "active",
+      expiresAt,
+      createdFromConfirmationId: input.row.id,
+    })
+    .returning();
+  logger.info("Network trust rule created", {
+    workspaceId: input.row.workspaceId,
+    userId: input.row.userId,
+    trustRuleId: created!.id,
+    host: input.row.host,
+    expiresAt,
+  });
+  return mapAgentToolTrustRule(created!);
 }
 
 /**

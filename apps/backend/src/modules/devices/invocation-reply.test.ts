@@ -63,7 +63,7 @@ test("old hosts and unrelated error states remain fail closed regardless of Engl
   ).toBeNull();
 });
 
-test("network.ask is part of the closed device protocol and nothing looser is accepted", () => {
+test("network.ask has a strict envelope but a lenient payload", () => {
   const ask = {
     type: "network.ask",
     id: "call",
@@ -72,15 +72,22 @@ test("network.ask is part of the closed device protocol and nothing looser is ac
     port: 443,
   };
   expect(localDeviceReplySchema.parse(ask)).toEqual(ask);
-  for (const bad of [
+  // Program-controlled values reach the handler, which answers with a deny.
+  for (const lenient of [
     { ...ask, port: 0 },
     { ...ask, port: 65536 },
     { ...ask, port: 443.5 },
-    { ...ask, port: "443" },
     { ...ask, host: "" },
-    { ...ask, host: "h".repeat(256) },
+    { ...ask, host: "h".repeat(5000) },
     { ...ask, askId: "" },
-    { ...ask, askId: "a".repeat(129) },
+  ])
+    expect(localDeviceReplySchema.safeParse(lenient).success).toBe(true);
+  // A broken envelope is still a protocol error.
+  for (const bad of [
+    { ...ask, port: "443" },
+    { ...ask, host: 7 },
+    { ...ask, askId: "a".repeat(257) },
+    { ...ask, id: 1 },
     { type: "network.ask", id: "call", askId: "a", host: "x" },
     { type: "network.decision", askId: "a", allow: true },
   ])

@@ -127,7 +127,7 @@ async function addMember(
   workspaceId: string,
   teamId: string,
   userId: string,
-  role: "workspace_admin" | "editor",
+  role: "workspace_admin" | "editor" | "viewer",
 ) {
   await schema.db.execute(sql`
     insert into "user"(id, name, email, "emailVerified")
@@ -148,7 +148,7 @@ async function addMember(
 /** An owner with a running `command.execute` on their device. */
 async function world(
   options: {
-    role?: "workspace_admin" | "editor";
+    role?: "workspace_admin" | "editor" | "viewer";
     payload?: Record<string, unknown>;
     status?: string;
   } = {},
@@ -732,14 +732,42 @@ test("a bad ask is denied without storing anything or dropping the connection", 
   assert.equal(reused.allow, false);
   assert.equal((await requests(w.h.id)).length, 1);
 
-  // Malformed ask frames are still a protocol error, as for any other frame.
+  // Values the sandboxed program controls (a CONNECT target of any length, a
+  // port out of range) are denied; they never cost the device its connection.
+  const hostile: Array<[string, string, number]> = [
+    ["long-host", `${"a".repeat(300)}.com`, 443],
+    ["huge-host", "h".repeat(100_000), 443],
+    ["port-zero", "x.example", 0],
+    ["port-high", "x.example", 65536],
+    ["port-fraction", "x.example", 443.5],
+    ["empty-host", "", 443],
+  ];
+  for (const [askId, host, port] of hostile) {
+    device.socket.send(
+      JSON.stringify({
+        type: "network.ask",
+        id: invocationId,
+        askId,
+        host,
+        port,
+      }),
+    );
+    const frame = await device.waitFor(
+      (f) => f.type === "network.decision" && f.askId === askId,
+    );
+    assert.equal(frame.allow, false, askId);
+  }
+  assert.equal((await requests(w.h.id)).length, 1);
+  assert.equal(device.isOpen(), true);
+
+  // A broken envelope is still a protocol error.
   device.socket.send(
     JSON.stringify({
       type: "network.ask",
       id: invocationId,
       askId: "p",
       host: "x.example",
-      port: 0,
+      port: "443",
     }),
   );
   await until(
@@ -906,4 +934,384 @@ test("a retried command keeps its original policy: only the network block may di
   await assert.rejects(retry({ command: "rm -rf build" }), {
     code: "LOCAL_INVOCATION_CONFLICT",
   });
+});
+
+type World = Awaited<ReturnType<typeof world>>;
+
+/** A request row written directly, for states that are awkward to reach by asking. */
+async function insertRow(
+  w: World,
+  invocationId: string,
+  overrides: Partial<typeof schema.localNetworkRequests.$inferInsert> = {},
+) {
+  const [row] = await schema.db
+    .insert(schema.localNetworkRequests)
+    .values({
+      id: randomUUID(),
+      invocationId,
+      deviceId: w.h.id,
+      userId: w.h.userId,
+      teamId: w.teamId,
+      workspaceId: w.workspaceId,
+      threadId: w.threadId,
+      askId: randomUUID(),
+      host: "direct.example",
+      port: 443,
+      expiresAt: new Date(Date.now() + 120_000),
+      ...overrides,
+    })
+    .returning();
+  return row!;
+}
+
+const rulesOf = async (w: World) =>
+  (await schema.db.select().from(schema.agentToolTrustRules)).filter(
+    (rule) => rule.workspaceId === w.workspaceId,
+  );
+
+test("a failure while storing the rule leaves the request pending and answerable", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  const row = await insertRow(w, invocationId, {
+    askId: "fail-1",
+    host: "fail.example",
+  });
+  await schema.db.execute(sql`
+    create or replace function net_rule_fail() returns trigger language plpgsql as $$
+    begin
+      if new.target_id = 'fail.example' then raise exception 'rule store unavailable'; end if;
+      return new;
+    end $$`);
+  await schema.db.execute(
+    sql`create trigger net_rule_fail_t before insert on agent_tool_trust_rules for each row execute function net_rule_fail()`,
+  );
+  try {
+    await assert.rejects(
+      approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision: "allow_always",
+      }),
+    );
+  } finally {
+    await schema.db.execute(
+      sql`drop trigger net_rule_fail_t on agent_tool_trust_rules`,
+    );
+  }
+  const [after] = await requests(w.h.id);
+  assert.equal(after!.status, "pending");
+  assert.equal(after!.resolvedAt, null);
+  assert.deepEqual(await rulesOf(w), []);
+  await quiet(600);
+  assert.equal(
+    device.inbox.some((f) => f.type === "network.decision"),
+    false,
+    "nothing was decided",
+  );
+  // The user can simply try again.
+  const retried = await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: row.id,
+    decision: "allow_always",
+  });
+  assert.equal(retried.request.scope, "always");
+  assert.equal((await rulesOf(w)).length, 1);
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "fail-1",
+    allow: true,
+  });
+});
+
+test("one standing rule per host: concurrent and repeated 'always' answers reuse and only lengthen it", async () => {
+  const w = await world();
+  const invocationId = await w.invoke();
+  const [a, b, c] = await Promise.all(
+    [443, 8443, 9443].map((port) =>
+      insertRow(w, invocationId, { host: "same.example", port }),
+    ),
+  );
+  const answer = (id: string, ttlSeconds?: number) =>
+    approvals.respondToNetworkRequest({
+      userId: w.h.userId,
+      workspaceId: w.workspaceId,
+      requestId: id,
+      decision: "allow_always",
+      ...(ttlSeconds ? { ttlSeconds } : {}),
+    });
+  // The same card answered twice at once, and a second card for the same host.
+  const results = await Promise.all([
+    answer(a!.id, 3600),
+    answer(a!.id, 3600),
+    answer(b!.id, 7200),
+  ]);
+  const rules = await rulesOf(w);
+  assert.equal(rules.length, 1);
+  assert.deepEqual(
+    new Set(results.map((r) => r.trustRule?.id ?? rules[0]!.id)),
+    new Set([rules[0]!.id]),
+  );
+  const expiry = async () => (await rulesOf(w))[0]!.expiresAt!.getTime();
+  const longest = await expiry();
+  assert.ok(longest - Date.now() > 7100_000, "the longer TTL won");
+  // A shorter later grant never shortens it.
+  await answer(c!.id, 60);
+  assert.equal((await rulesOf(w)).length, 1);
+  assert.equal(await expiry(), longest);
+  // An expired rule is revived rather than duplicated.
+  await schema.db
+    .update(schema.agentToolTrustRules)
+    .set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(schema.agentToolTrustRules.workspaceId, w.workspaceId));
+  const d = await insertRow(w, invocationId, {
+    host: "same.example",
+    port: 7443,
+  });
+  await answer(d.id, 600);
+  const [revived, ...rest] = await rulesOf(w);
+  assert.deepEqual(rest, []);
+  assert.ok(revived!.expiresAt!.getTime() > Date.now());
+});
+
+test("a card never outlives its command: finished commands and closed connections take their requests with them", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const finished = await w.invoke();
+  const alive = await w.invoke();
+  await insertRow(w, finished, { host: "finished.example" });
+  await insertRow(w, alive, { host: "alive.example" });
+  const pendingHosts = async () =>
+    (
+      await approvals.listPendingNetworkRequests({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        threadId: w.threadId,
+      })
+    ).requests.map((request) => request.host);
+  assert.deepEqual((await pendingHosts()).sort(), [
+    "alive.example",
+    "finished.example",
+  ]);
+  // Immediately, without waiting for the sweep.
+  await schema.db
+    .update(schema.localToolInvocations)
+    .set({ status: "succeeded" })
+    .where(eq(schema.localToolInvocations.id, finished));
+  assert.deepEqual(await pendingHosts(), ["alive.example"]);
+
+  device.socket.terminate();
+  const rows = await until(
+    () => requests(w.h.id),
+    (list) => list.every((row) => row.status !== "pending"),
+  );
+  assert.ok(rows.every((row) => row.status === "expired"));
+  const lost = rows.find((row) => row.host === "alive.example")!;
+  assert.equal(lost.reason, "device disconnected");
+  assert.ok(lost.deliveredAt, "a later connection is not sent stale decisions");
+  assert.deepEqual(await pendingHosts(), []);
+});
+
+test("a command and a computer can only leave so many requests waiting", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const capped = await w.invoke();
+  for (let i = 0; i < 20; i++)
+    await insertRow(w, capped, {
+      askId: `old-${i}`,
+      status: "expired",
+      resolvedAt: new Date(),
+      deliveredAt: new Date(),
+    });
+  device.ask(capped, "one-too-many", "more.example", 443);
+  const frame = await device.waitFor(
+    (f) => f.type === "network.decision" && f.askId === "one-too-many",
+  );
+  assert.deepEqual(frame, {
+    type: "network.decision",
+    askId: "one-too-many",
+    allow: false,
+    reason: "too many network requests",
+  });
+  assert.equal((await requests(w.h.id)).length, 20);
+
+  // 100 pending across five commands fill the computer's budget.
+  for (let command = 0; command < 5; command++) {
+    const id = await w.invoke();
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        insertRow(w, id, { askId: `p-${command}-${i}` }),
+      ),
+    );
+  }
+  const fresh = await w.invoke();
+  device.ask(fresh, "device-full", "more.example", 443);
+  assert.equal(
+    (
+      await device.waitFor(
+        (f) => f.type === "network.decision" && f.askId === "device-full",
+      )
+    ).allow,
+    false,
+  );
+  assert.equal((await requests(w.h.id)).length, 120);
+  // Allow-listed hosts do not need a row, so they are not limited.
+  await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: (await requests(w.h.id)).find((row) => row.askId === "p-0-0")!
+      .id,
+    decision: "allow_always",
+  });
+  device.ask(fresh, "still-allowed", "direct.example", 443);
+  assert.equal(
+    (
+      await device.waitFor(
+        (f) => f.type === "network.decision" && f.askId === "still-allowed",
+      )
+    ).allow,
+    true,
+  );
+});
+
+test("answered and expired requests are pruned after a week, rarely and never while pending", async () => {
+  const w = await world();
+  const invocationId = await w.invoke();
+  const day = 24 * 60 * 60 * 1000;
+  const settledAt = (daysAgo: number) => new Date(Date.now() - daysAgo * day);
+  const old = (daysAgo: number, status: "allowed" | "expired") =>
+    insertRow(w, invocationId, {
+      status,
+      scope: status === "allowed" ? "once" : null,
+      resolvedAt: settledAt(daysAgo),
+      deliveredAt: settledAt(daysAgo),
+      createdAt: settledAt(daysAgo),
+    });
+  const stale = await old(8, "allowed");
+  await old(8, "expired");
+  const recent = await old(1, "allowed");
+  const pending = await insertRow(w, invocationId, {
+    createdAt: settledAt(9),
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  assert.equal(await approvals.pruneSettledNetworkRequests(new Date()), 2);
+  assert.deepEqual(
+    (await requests(w.h.id)).map((row) => row.id).sort(),
+    [recent.id, pending.id].sort(),
+  );
+  assert.ok(stale.id);
+
+  // Rate limit: the sweep prunes at most once per few minutes per process.
+  approvals.resetNetworkPruneClock();
+  const t0 = new Date();
+  await old(8, "expired");
+  await approvals.deliverNetworkDecisions(w.h.id, () => true, { now: t0 });
+  assert.equal((await requests(w.h.id)).length, 2, "first sweep prunes");
+  await old(8, "expired");
+  await approvals.deliverNetworkDecisions(w.h.id, () => true, {
+    now: new Date(t0.getTime() + 60_000),
+  });
+  assert.equal((await requests(w.h.id)).length, 3, "not again within minutes");
+  await approvals.deliverNetworkDecisions(w.h.id, () => true, {
+    now: new Date(t0.getTime() + 6 * 60_000),
+  });
+  assert.equal((await requests(w.h.id)).length, 2, "and again later");
+});
+
+test("a switch to strict is honoured for a re-sent ask whose first answer was an allow", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  device.ask(invocationId, "replay", "replay.example", 443);
+  const [pending] = (
+    await until(
+      () =>
+        approvals.listPendingNetworkRequests({
+          userId: w.h.userId,
+          workspaceId: w.workspaceId,
+          threadId: w.threadId,
+        }),
+      (result) => result.requests.length === 1,
+    )
+  ).requests;
+  await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: pending!.id,
+    decision: "allow_once",
+  });
+  await device.waitFor((f) => f.type === "network.decision");
+  await schema.db
+    .update(schema.localDevices)
+    .set({ networkMode: "strict" })
+    .where(eq(schema.localDevices.id, w.h.id));
+  device.ask(invocationId, "replay", "replay.example", 443);
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "replay",
+    allow: false,
+    reason: "host is not on the allow list (strict network mode)",
+  });
+});
+
+test("an answer and the expiry sweep racing for one request: exactly one writer wins", async () => {
+  const w = await world();
+  const invocationId = await w.invoke();
+  for (let i = 0; i < 10; i++) {
+    const expiresAt = new Date(Date.now() + 60_000);
+    const row = await insertRow(w, invocationId, { expiresAt });
+    const [answer, swept] = await Promise.allSettled([
+      approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision: "allow_once",
+        now: new Date(expiresAt.getTime() - 1),
+      }),
+      approvals.deliverNetworkDecisions(w.h.id, () => true, {
+        now: new Date(expiresAt.getTime() + 1),
+        prune: false,
+      }),
+    ]);
+    assert.equal(swept.status, "fulfilled");
+    const [final] = (await requests(w.h.id)).filter((r) => r.id === row.id);
+    if (answer.status === "fulfilled") {
+      assert.equal(final!.status, "allowed", `round ${i}`);
+      assert.equal(final!.scope, "once");
+    } else {
+      assert.equal(final!.status, "expired", `round ${i}`);
+      assert.equal(
+        (answer.reason as { code: string }).code,
+        "NETWORK_REQUEST_EXPIRED",
+      );
+    }
+    assert.ok(final!.resolvedAt);
+  }
+});
+
+test("a viewer cannot grant network access, though denying stays possible", async () => {
+  const w = await world({ role: "viewer" });
+  const invocationId = await w.invoke();
+  const row = await insertRow(w, invocationId);
+  for (const decision of ["allow_once", "allow_always"] as const)
+    await assert.rejects(
+      approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision,
+      }),
+      { statusCode: 403 },
+    );
+  assert.equal((await requests(w.h.id))[0]!.status, "pending");
+  assert.deepEqual(await rulesOf(w), []);
+  const denied = await approvals.respondToNetworkRequest({
+    userId: w.h.userId,
+    workspaceId: w.workspaceId,
+    requestId: row.id,
+    decision: "deny",
+  });
+  assert.equal(denied.request.status, "denied");
 });
