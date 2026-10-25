@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { billingModeSchema, billingProviderSchema } from "./billing";
+import { billingDisplayCatalogSchema } from "./billing-catalog";
 
 export const deploymentCapabilitiesSchema = z.discriminatedUnion("edition", [
   z.object({
@@ -24,6 +25,7 @@ export const deploymentCapabilitiesSchema = z.discriminatedUnion("edition", [
       checkout: z.boolean(),
       teamSubscriptions: z.boolean(),
       topup: z.boolean(),
+      catalog: billingDisplayCatalogSchema,
     }),
   }),
 ]);

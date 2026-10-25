@@ -12,9 +12,11 @@ import {
 } from "@sourceweft/billing/server";
 import { PostgresBillingStore } from "@sourceweft/billing/postgres";
 import {
+  findIgnoredLegacyBillingEnv,
   readBillingConfig,
   validateBillingConfiguration,
 } from "@sourceweft/billing/config";
+import { toDisplayCatalog } from "@sourceweft/billing/billing-catalog-schema";
 import {
   createCreemReversalSync,
   createCreemSubscriptionSync,
@@ -40,9 +42,31 @@ import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import { createSourceweftOrganizationMetadata } from "../modules/auth/organization-metadata";
 import { createBillingMembershipSource } from "./membership-source";
+import { loadBillingCatalog } from "./catalog-file";
 import type { BillingHttpHost } from "./http-host";
 import type { CheckResult } from "../checks/types";
-const billingConfig = readBillingConfig(process.env, config.auth.webBaseUrl);
+const loadedCatalog = loadBillingCatalog();
+const billingConfig = readBillingConfig(
+  process.env,
+  config.auth.webBaseUrl,
+  loadedCatalog.catalog,
+);
+// A mounted file that is missing falls back to the shipped one, so make the
+// file in use and its key numbers visible at every start.
+logger.info("Billing catalog loaded", {
+  filePath: loadedCatalog.filePath,
+  fingerprint: loadedCatalog.fingerprint,
+  creditUnitUsd: billingConfig.creditUnitUsd,
+  markupRate: billingConfig.defaultMarkupRate,
+  proPriceCents: billingConfig.catalog.individualProMonthlyAmountCents,
+  proCredits: billingConfig.planQuotas.individual_pro.monthlyCreditsGrant,
+});
+for (const name of findIgnoredLegacyBillingEnv(process.env)) {
+  logger.warn(
+    "Ignoring a retired billing environment variable; edit the billing catalog file instead",
+    { name },
+  );
+}
 const alerts: BillingAlertSink = {
   async trigger(input) {
     return (await import("../modules/ops")).opsAlertService.trigger(input);
@@ -178,6 +202,7 @@ export function getBillingDeploymentCapabilities(): DeploymentCapabilities {
                 : "prod"
               : undefined,
       mode: billingConfig.mode,
+      catalog: toDisplayCatalog(loadedCatalog.catalog),
       checkout,
       teamSubscriptions: checkout && billingConfig.teamBillingEnabled,
       topup:

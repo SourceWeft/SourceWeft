@@ -15,6 +15,7 @@
     "./ui": "./src/ui/index.ts",
     "./catalog": "./src/catalog/pricing.ts",
     "./billing-catalog": "./src/server/catalog-file.ts",
+    "./billing-catalog-schema": "./src/catalog/billing-catalog.ts",
     "./messages": "./src/messages.ts",
     "./provider-sdk": "./src/server/providers/sdk.ts",
     "./integrations/waffo": "./src/integrations/waffo.ts",

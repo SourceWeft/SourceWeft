@@ -11,6 +11,7 @@ import {
 } from "@sourceweft/billing/integrations/waffo";
 import { setupWaffoCatalog } from "@sourceweft/billing/waffo-setup";
 import { database, closeDatabase } from "@sourceweft/db";
+import { loadBillingCatalog } from "../billing-host/catalog-file";
 import { config } from "../shared/config";
 
 const options = Object.fromEntries(
@@ -28,6 +29,7 @@ try {
       BACKEND_BILLING_PROVIDER: "waffo",
     },
     config.auth.webBaseUrl,
+    loadBillingCatalog().catalog,
   );
   validateBillingConfiguration(billingConfig);
   if (billingConfig.waffo.environment !== "test")
