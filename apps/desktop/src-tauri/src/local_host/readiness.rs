@@ -119,12 +119,18 @@ impl SandboxReadiness {
 
     /// A transient answer while another thread's probe is still running and there is no earlier
     /// result to return. Reason only: there is nothing for the user to do.
-    fn checking() -> Self {
+    pub(crate) fn checking() -> Self {
         Self::needs_setup(
             SetupCode::SandboxFailed,
             "Checking the sandbox runtime",
             Remedy::None,
         )
+    }
+
+    /// Whether this is the transient placeholder another thread's still-running probe answers
+    /// with (see `ReadinessCache`): not a real result, so it must not be reported anywhere.
+    pub fn is_checking(&self) -> bool {
+        *self == Self::checking()
     }
 
     /// The scoped bubblewrap at `path` is missing, not executable, or (`code`

@@ -2,6 +2,7 @@
 //! A future authenticated device dispatcher must supply the account and thread identities.
 #[cfg(unix)]
 pub mod bundle_install;
+pub mod device_status;
 pub mod execution;
 pub mod maintenance;
 mod files;
