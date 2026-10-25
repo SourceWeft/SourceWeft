@@ -20,6 +20,8 @@
 # without needing root, skips ownership changes, and looks for apparmor_parser only inside
 # that directory. It must come before the command.
 set -eu
+# Directories the script creates must be traversable whatever umask pkexec or the caller had.
+umask 022
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
@@ -75,6 +77,26 @@ stage() {
   TMP_FILES="$TMP_FILES $1"
 }
 
+# An existing directory we are about to write into must be a real directory owned by root: a
+# symlink, or a directory someone else owns, would let another user steer the root-owned files
+# written below. (Under --root the files belong to the test user, so only the link check runs.)
+require_root_owned_dir() {
+  if [ -L "$1" ]; then
+    echo "sourceweft-sandbox-setup: ${1#"$ROOT"} is a symbolic link; refusing to install through it." >&2
+    exit 1
+  fi
+  if [ -e "$1" ]; then
+    if [ ! -d "$1" ]; then
+      echo "sourceweft-sandbox-setup: ${1#"$ROOT"} exists and is not a directory." >&2
+      exit 1
+    fi
+    if [ -z "$ROOT" ] && [ "$(stat -c %u "$1")" != "0" ]; then
+      echo "sourceweft-sandbox-setup: ${1#"$ROOT"} is not owned by root; refusing to install into it." >&2
+      exit 1
+    fi
+  fi
+}
+
 do_install() {
   source_path=$ROOT$BWRAP_SOURCE
   if [ ! -f "$source_path" ] || [ ! -x "$source_path" ]; then
@@ -83,6 +105,8 @@ do_install() {
   fi
 
   target=$ROOT$BWRAP_TARGET
+  require_root_owned_dir "$ROOT/opt/sourceweft"
+  require_root_owned_dir "$ROOT$LIBEXEC_DIR"
   mkdir -p "$ROOT$LIBEXEC_DIR"
   tmp_bwrap=$target.tmp.$$
   stage "$tmp_bwrap"

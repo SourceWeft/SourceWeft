@@ -168,7 +168,10 @@ fn lock_slot(slot: &SandboxSlot) -> std::sync::MutexGuard<'_, Option<Arc<Sandbox
 /// Drops the current sidecar (the process exits once the last command still using it is done)
 /// so the next command starts one from the files now on disk; used when the runtime is replaced.
 pub(crate) fn stop_sidecar(slot: &SandboxSlot) {
-    lock_slot(slot).take();
+    // Dropping the last reference shuts the sidecar down, which can take seconds: do it after
+    // the slot lock is released, so commands starting meanwhile are not blocked behind it.
+    let old = lock_slot(slot).take();
+    drop(old);
 }
 
 /// Wraps one attempt on `instance`. A failed wrap is never followed by a cleanup: srt has

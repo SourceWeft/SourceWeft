@@ -504,6 +504,31 @@ impl Drop for Sidecar {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_protocol_version_equals_the_sidecars_typescript_constant() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sandbox-sidecar/src/protocol.ts"
+        ))
+        .expect("the sidecar's protocol.ts");
+        let declared: Vec<u32> = source
+            .lines()
+            .filter_map(|line| {
+                line.trim()
+                    .strip_prefix("export const SANDBOX_PROTOCOL_VERSION = ")?
+                    .strip_suffix(';')?
+                    .trim()
+                    .parse()
+                    .ok()
+            })
+            .collect();
+        assert_eq!(
+            declared,
+            [SANDBOX_PROTOCOL_VERSION],
+            "protocol.ts and sidecar.rs must declare the same SANDBOX_PROTOCOL_VERSION"
+        );
+    }
+
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
 

@@ -273,3 +273,51 @@ fn the_script_runs_under_a_posix_only_shell_too() {
         .unwrap();
     assert_ok(&output);
 }
+
+#[test]
+fn directories_are_traversable_even_under_a_restrictive_umask() {
+    let root = FakeRoot::new().with_system_bwrap().with_apparmor();
+    let output = Command::new("/bin/sh")
+        .arg("-c")
+        .arg("umask 077; exec /bin/sh \"$0\" --root \"$1\" install")
+        .arg(SCRIPT)
+        .arg(root.dir.path())
+        .output()
+        .unwrap();
+    assert_ok(&output);
+    assert_eq!(root.mode("opt/sourceweft"), 0o755);
+    assert_eq!(root.mode("opt/sourceweft/libexec"), 0o755);
+    assert_eq!(root.mode("opt/sourceweft/libexec/bwrap"), 0o755);
+    assert_eq!(root.mode("etc/apparmor.d/sourceweft-bwrap"), 0o644);
+}
+
+#[test]
+fn install_refuses_to_write_through_a_symlinked_install_directory() {
+    for link in ["opt/sourceweft", "opt/sourceweft/libexec"] {
+        let root = FakeRoot::new().with_system_bwrap().with_apparmor();
+        let elsewhere = root.path("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        if link == "opt/sourceweft/libexec" {
+            fs::create_dir_all(root.path("opt/sourceweft")).unwrap();
+        } else {
+            fs::create_dir_all(root.path("opt")).unwrap();
+        }
+        std::os::unix::fs::symlink(&elsewhere, root.path(link)).unwrap();
+
+        let output = root.run("install");
+        assert!(!output.status.success(), "{link}: should refuse");
+        assert!(stderr(&output).contains("symbolic link"), "{link}: {}", stderr(&output));
+        assert!(root.listing("elsewhere").is_empty(), "{link}: nothing written through the link");
+        assert!(root.parser_log().is_empty(), "{link}: no profile was loaded");
+        assert!(!root.path("etc/apparmor.d/sourceweft-bwrap").exists());
+    }
+}
+
+#[test]
+fn install_refuses_an_install_path_that_is_a_file() {
+    let root = FakeRoot::new().with_system_bwrap().with_apparmor();
+    root.write("opt/sourceweft", "not a directory", 0o644);
+    let output = root.run("install");
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("not a directory"), "{}", stderr(&output));
+}

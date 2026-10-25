@@ -162,15 +162,46 @@ fn running_as_appimage() -> bool {
 
 /// Whether `message` is one of the known ways bubblewrap reports that the kernel refused the
 /// unprivileged user/network namespace it needs (AppArmor's
-/// `apparmor_restrict_unprivileged_userns`, or a missing uid-map permission). Anything else,
-/// including a bare "Operation not permitted" that did not come from bwrap, is not a match.
+/// `apparmor_restrict_unprivileged_userns`, or a missing uid-map permission). Only these
+/// specific signals match: a bwrap failure that merely says "Operation not permitted" (for
+/// example a mount refused inside Docker/LXC or by a seccomp filter) is NOT a user-namespace
+/// denial, and sending that user to a privileged setup or a package reinstall would not help.
 #[cfg(unix)]
 fn is_user_namespace_denial(message: &str) -> bool {
-    message.contains("RTM_NEWADDR")
-        || message.contains("setting up uid map")
-        || message
-            .lines()
-            .any(|line| line.contains("bwrap:") && line.contains("Operation not permitted"))
+    [
+        "RTM_NEWADDR",
+        "setting up uid map",
+        "No permissions to create new namespace",
+        "Creating new namespace failed",
+    ]
+    .iter()
+    .any(|signal| message.contains(signal))
+}
+
+/// On a platform that has no published runtime, "download the runtime" is not a remedy anyone
+/// can follow: the install would fail with `SANDBOX_PLATFORM_UNSUPPORTED`. Such a result is
+/// reported as a failure without a remedy and with the platform reason instead. Results that do
+/// not offer a download are returned unchanged.
+#[cfg(unix)]
+#[allow(dead_code)]
+fn without_unavailable_download(readiness: SandboxReadiness, published: bool) -> SandboxReadiness {
+    match readiness {
+        SandboxReadiness::NeedsSetup {
+            code,
+            reason,
+            remedy: Remedy::DownloadRuntime,
+            ..
+        } if !published => {
+            let platform = super::bundle_install::NO_RUNTIME_PUBLISHED;
+            let reason = if code == SetupCode::BundleMissing {
+                platform.to_string()
+            } else {
+                format!("{reason} {platform}")
+            };
+            SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
+        }
+        other => other,
+    }
 }
 
 /// Maps a failed `Sidecar::start` / `probe` (the host error `code` and `message`) to the
@@ -439,7 +470,18 @@ impl ReadinessCache {
             state.epoch
         };
 
+        // A panicking probe must not leave `probing` set forever.
+        struct ClearProbing<'a>(&'a Mutex<ReadinessCache>, bool);
+        impl Drop for ClearProbing<'_> {
+            fn drop(&mut self) {
+                if self.1 {
+                    ReadinessCache::lock(self.0).probing = false;
+                }
+            }
+        }
+        let mut clear = ClearProbing(cache, true);
         let result = probe();
+        clear.1 = false;
 
         let mut state = Self::lock(cache);
         state.probing = false;
@@ -542,7 +584,12 @@ impl LocalHost {
                     &self.base,
                     vec![self.workspace_base().to_string_lossy().into_owned()],
                 );
-                probe_bundle(&bundle, &init)
+                // A crash in the middle of a runtime swap leaves the previous runtime aside.
+                super::bundle_install::recover_previous_runtime(&self.base.join("sandbox"));
+                without_unavailable_download(
+                    probe_bundle(&bundle, &init),
+                    super::bundle_install::InstallSpec::runtime_published(),
+                )
             },
         );
 
@@ -972,6 +1019,7 @@ mod tests {
         let userns = "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted";
         let uid_map = "bwrap: setting up uid map: Permission denied";
         let namespace = "bwrap: Creating new namespace failed: Operation not permitted";
+        let no_permissions = "bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.";
         let multi_line = "srt: wrap failed\nbwrap: Creating new namespace failed: Operation not permitted\n";
         for appimage in [false, true] {
             // Bundle problems never depend on how the app was installed.
@@ -992,7 +1040,7 @@ mod tests {
                 )
             );
             // The known user-namespace denials, whatever code carried them.
-            for message in [userns, uid_map, namespace, multi_line] {
+            for message in [userns, uid_map, namespace, no_permissions, multi_line] {
                 for code in ["SANDBOX_UNAVAILABLE", "POLICY_INVALID"] {
                     assert_eq!(
                         classify_probe_failure(code, message, appimage),
@@ -1005,6 +1053,13 @@ mod tests {
             for message in [
                 "bwrap: Can't find source path /nope: No such file or directory",
                 "cp: cannot create regular file: Operation not permitted",
+                // Docker/LXC/seccomp refusals of other bwrap steps: not a user-namespace denial,
+                // so no privileged setup or reinstall is offered for them.
+                "bwrap: Can't mount proc on /newroot/proc: Operation not permitted",
+                "bwrap: Can't mount tmpfs on /newroot: Operation not permitted",
+                "bwrap: mount --make-rslave / failed: Operation not permitted",
+                "bwrap: Can't bind mount /oldroot/usr on /newroot/usr: Operation not permitted",
+                "bwrap: pivot_root: Operation not permitted",
                 "sandbox probe exited with code 1",
                 "Operation not permitted",
                 "",
@@ -1016,6 +1071,59 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_is_only_offered_where_a_runtime_is_published() {
+        let missing = SandboxReadiness::bundle_missing();
+        let unavailable = without_unavailable_download(missing.clone(), false);
+        assert_eq!(
+            unavailable,
+            SandboxReadiness::needs_setup(
+                SetupCode::SandboxFailed,
+                "No sandbox runtime is published for this platform.",
+                Remedy::None
+            )
+        );
+        // Stale and invalid bundles keep their reason, but lose the unusable remedy.
+        for code in [SetupCode::BundleStale, SetupCode::BundleInvalid] {
+            let result = without_unavailable_download(
+                SandboxReadiness::needs_setup(code, "old runtime.", Remedy::DownloadRuntime),
+                false,
+            );
+            assert_eq!(
+                result,
+                SandboxReadiness::needs_setup(
+                    SetupCode::SandboxFailed,
+                    "old runtime. No sandbox runtime is published for this platform.",
+                    Remedy::None
+                )
+            );
+        }
+        // Published platform: untouched. Other remedies and states: untouched everywhere.
+        assert_eq!(without_unavailable_download(missing.clone(), true), missing);
+        for other in [
+            SandboxReadiness::needs_setup(SetupCode::BundleNewer, "n", Remedy::UpdateApp),
+            SandboxReadiness::needs_setup(SetupCode::SandboxFailed, "f", Remedy::None),
+            SandboxReadiness::Unsupported,
+            SandboxReadiness::Ready { toolchain_path: None },
+        ] {
+            assert_eq!(without_unavailable_download(other.clone(), false), other);
+        }
+    }
+
+    #[test]
+    fn a_panicking_probe_does_not_leave_probing_set() {
+        let cache = Mutex::new(ReadinessCache::default());
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || panic!("probe blew up"))
+        }));
+        assert!(panicked.is_err());
+        let result = ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), || {
+            SandboxReadiness::bundle_missing()
+        });
+        assert_eq!(result, SandboxReadiness::bundle_missing(), "the next call probes again");
     }
 
     #[cfg(unix)]

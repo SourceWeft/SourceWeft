@@ -48,7 +48,13 @@ const RELEASE_TARGET: Option<&str> = None;
 /// Largest archive or signature download accepted (the same cap `sandbox-bundle.mjs` packs to).
 const MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES: u64 = 16 * 1024;
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// A download is abandoned when no byte arrives for this long (a stalled connection)...
+const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// ...or, however steadily it trickles, after this long overall. A slow link is fine as long as
+/// it keeps moving; a 256 MiB archive at 0.5 Mbit/s still fits.
+const TOTAL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Shown when the platform has no published runtime.
+pub(crate) const NO_RUNTIME_PUBLISHED: &str = "No sandbox runtime is published for this platform.";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
@@ -100,12 +106,8 @@ impl InstallSpec {
     /// The spec for this build, or `SANDBOX_PLATFORM_UNSUPPORTED` when no runtime is published
     /// for the platform. A missing updater key is reported by [`install`], not here.
     pub fn release() -> Result<Self> {
-        let target = RELEASE_TARGET.ok_or_else(|| {
-            HostError::new(
-                SANDBOX_PLATFORM_UNSUPPORTED,
-                "No sandbox runtime is published for this platform.",
-            )
-        })?;
+        let target = RELEASE_TARGET
+            .ok_or_else(|| HostError::new(SANDBOX_PLATFORM_UNSUPPORTED, NO_RUNTIME_PUBLISHED))?;
         Ok(Self {
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             protocol_version: SANDBOX_PROTOCOL_VERSION,
@@ -115,6 +117,13 @@ impl InstallSpec {
                 .to_string(),
             url_base: RELEASE_BASE.to_string(),
         })
+    }
+
+    /// Whether a runtime is published for this platform at all (readiness uses this to avoid
+    /// offering a download that can only fail).
+    #[allow(dead_code)] // only the Linux readiness probe asks
+    pub(crate) fn runtime_published() -> bool {
+        RELEASE_TARGET.is_some()
     }
 
     fn archive_name(&self) -> String {
@@ -168,7 +177,8 @@ fn url_allowed(url: &reqwest::Url) -> bool {
 }
 
 /// The production [`Fetch`]: reqwest with rustls, https only (also across redirects), streamed
-/// to the destination file, whole request bounded by a timeout. Owns a small runtime, so create
+/// to the destination file. A stalled connection (no bytes for `IDLE_TIMEOUT`) and an overall
+/// `TOTAL_TIMEOUT` both end the download; a slow but steady one does not. Owns a small runtime, so create
 /// and use it from a blocking thread, never from async code.
 pub struct HttpsFetch {
     runtime: tokio::runtime::Runtime,
@@ -177,10 +187,10 @@ pub struct HttpsFetch {
 
 impl HttpsFetch {
     pub fn new() -> Result<Self> {
-        Self::with_timeout(DOWNLOAD_TIMEOUT)
+        Self::with_timeouts(IDLE_TIMEOUT, TOTAL_TIMEOUT)
     }
 
-    fn with_timeout(timeout: Duration) -> Result<Self> {
+    fn with_timeouts(idle: Duration, total: Duration) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -196,8 +206,9 @@ impl HttpsFetch {
         });
         let builder = reqwest::Client::builder()
             .redirect(redirects)
-            .timeout(timeout)
-            .connect_timeout(timeout.min(Duration::from_secs(20)))
+            .read_timeout(idle)
+            .timeout(total)
+            .connect_timeout(idle.min(Duration::from_secs(20)))
             .user_agent(concat!("SourceWeft-Desktop/", env!("CARGO_PKG_VERSION")));
         // The test server is on loopback: never route it through a developer's proxy.
         let builder = if cfg!(test) {
@@ -478,21 +489,76 @@ impl Drop for Scratch {
 
 const SCRATCH_PREFIXES: [&str; 3] = [".download-", ".staging-", ".old-"];
 
-/// Removes working directories a crashed earlier install left behind. Installs never run
-/// concurrently (`LocalHost` refuses a second one), so anything with these names is garbage.
-fn sweep_stale(sandbox_dir: &Path) {
+/// Serialises the moments `current` is being moved (the swap, crash recovery, the sweep), so a
+/// readiness check on another thread can never repair a swap that is half done.
+static SWAP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn swap_lock() -> std::sync::MutexGuard<'static, ()> {
+    SWAP_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A real directory (not a link) that holds what an installed runtime always holds.
+fn looks_like_runtime(dir: &Path) -> bool {
+    let is_dir = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_dir());
+    let is_file = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_file());
+    is_dir(dir) && is_file(&dir.join("srt-sidecar")) && is_file(&dir.join(MANIFEST_FILENAME))
+}
+
+fn current_is_absent(sandbox_dir: &Path) -> bool {
+    matches!(
+        sandbox_dir.join("current").symlink_metadata(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound
+    )
+}
+
+fn stale_entries(sandbox_dir: &Path) -> Vec<(String, PathBuf)> {
     let Ok(entries) = fs::read_dir(sandbox_dir) else {
-        return;
+        return Vec::new();
     };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if SCRATCH_PREFIXES
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        {
-            remove_path(&entry.path());
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            SCRATCH_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+                .then(|| (name, entry.path()))
+        })
+        .collect()
+}
+
+/// Repairs a process death between the swap's two renames: `current` is gone and the previous
+/// runtime sits in `.old-<id>`. When `current` is absent and exactly one `.old-*` directory
+/// looks like a runtime, it is renamed back. With several candidates nothing is guessed. Returns
+/// whether a runtime was restored. Cheap and idempotent: call it before looking at `current`.
+pub(crate) fn recover_previous_runtime(sandbox_dir: &Path) -> bool {
+    let _lock = swap_lock();
+    if !current_is_absent(sandbox_dir) {
+        return false;
+    }
+    let candidates: Vec<PathBuf> = stale_entries(sandbox_dir)
+        .into_iter()
+        .filter(|(name, path)| name.starts_with(".old-") && looks_like_runtime(path))
+        .map(|(_, path)| path)
+        .collect();
+    match candidates.as_slice() {
+        [only] => fs::rename(only, sandbox_dir.join("current")).is_ok(),
+        _ => false,
+    }
+}
+
+/// Removes working directories a crashed earlier install left behind. Installs never run
+/// concurrently (`LocalHost` refuses a second one), so anything with these names is garbage,
+/// except that while `current` is missing a `.old-*` that looks like a runtime may be the only
+/// copy there is (see [`recover_previous_runtime`]) and is never deleted.
+fn sweep_stale(sandbox_dir: &Path) {
+    let _lock = swap_lock();
+    let keep_old_runtimes = current_is_absent(sandbox_dir);
+    for (name, path) in stale_entries(sandbox_dir) {
+        if keep_old_runtimes && name.starts_with(".old-") && looks_like_runtime(&path) {
+            continue;
         }
+        remove_path(&path);
     }
 }
 
@@ -752,6 +818,7 @@ fn swap_into_place(
     staging: &Path,
     rename: &dyn Fn(&Path, &Path) -> io::Result<()>,
 ) -> Result<()> {
+    let _lock = swap_lock();
     let current = sandbox_dir.join("current");
     let aside = sandbox_dir.join(format!(".old-{}", uuid::Uuid::new_v4().simple()));
     let had_old = match current.symlink_metadata() {
@@ -825,13 +892,17 @@ pub fn install(app_data: &Path, spec: &InstallSpec, fetch: &dyn Fetch) -> Result
     let sandbox_dir = app_data.join("sandbox");
     fs::create_dir_all(&sandbox_dir)
         .map_err(|error| install_failed("Could not create the sandbox directory", error))?;
+    // A crash between the swap's renames leaves the previous runtime in `.old-*` and no
+    // `current`: put it back first, so even a failed install leaves the user's runtime in place.
+    recover_previous_runtime(&sandbox_dir);
     sweep_stale(&sandbox_dir);
 
     let download = Scratch::create(&sandbox_dir, ".download-")?;
     let tarball = download.path().join("runtime.tar.gz");
     let signature = download.path().join("runtime.tar.gz.sig");
-    fetch.get_to_file(&spec.archive_url(), &tarball, MAX_DOWNLOAD_BYTES)?;
+    // The small signature first: a release without the asset fails fast, before the big download.
     fetch.get_to_file(&spec.signature_url(), &signature, MAX_SIGNATURE_BYTES)?;
+    fetch.get_to_file(&spec.archive_url(), &tarball, MAX_DOWNLOAD_BYTES)?;
     verify_signature(&key, &tarball, &signature)?;
 
     install_verified_tarball(&sandbox_dir, &tarball, spec, &|from, to| {
@@ -1001,9 +1072,10 @@ mod tests {
         assert_eq!(installed.srt_version, "0.0.0");
         assert_eq!(
             fetch.requests.into_inner(),
+            // The small signature first, so a release without it fails before the big download.
             [
-                "https://example.test/releases/download/v0.0.0-fixture/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz",
                 "https://example.test/releases/download/v0.0.0-fixture/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz.sig",
+                "https://example.test/releases/download/v0.0.0-fixture/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz",
             ]
         );
         assert_eq!(
@@ -1917,8 +1989,52 @@ mod tests {
         finish(stop_b, handle_b);
     }
 
+    /// Sends a 200 with `chunks` pieces of 10 bytes, `pause` apart (until the test is over).
+    fn trickle(chunks: usize, pause: Duration) -> impl Fn(&mut TcpStream, &AtomicBool) + Send {
+        move |stream, stop| {
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    chunks * 10
+                )
+                .as_bytes(),
+            );
+            for _ in 0..chunks {
+                if stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                if stream
+                    .write_all(&[b'x'; 10])
+                    .and_then(|()| stream.flush())
+                    .is_err()
+                {
+                    return;
+                }
+                std::thread::sleep(pause);
+            }
+        }
+    }
+
     #[test]
-    fn the_real_client_gives_up_on_a_stalled_server_within_its_timeout() {
+    fn a_slow_but_steady_download_outlives_the_idle_timeout() {
+        // 12 pieces 100 ms apart take ~1.2 s, three times the 400 ms idle timeout: only
+        // inactivity ends a download, not its duration.
+        let (base, stop, handle) = serve(trickle(12, Duration::from_millis(100)));
+        let dir = tempfile::tempdir().unwrap();
+        let fetch =
+            HttpsFetch::with_timeouts(Duration::from_millis(400), Duration::from_secs(30)).unwrap();
+        let dest = dir.path().join("body");
+        let started = Instant::now();
+        fetch
+            .get_to_file(&format!("{base}/a"), &dest, 1000)
+            .unwrap();
+        assert!(started.elapsed() > Duration::from_millis(900));
+        assert_eq!(fs::read(&dest).unwrap().len(), 120);
+        finish(stop, handle);
+    }
+
+    #[test]
+    fn the_real_client_gives_up_on_a_stalled_server_within_its_idle_timeout() {
         let (base, stop, handle) = serve(|stream, stop| {
             let _ = stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nab");
@@ -1929,7 +2045,8 @@ mod tests {
             }
         });
         let dir = tempfile::tempdir().unwrap();
-        let fetch = HttpsFetch::with_timeout(Duration::from_millis(400)).unwrap();
+        let fetch =
+            HttpsFetch::with_timeouts(Duration::from_millis(400), Duration::from_secs(60)).unwrap();
         let started = Instant::now();
         let error = fetch
             .get_to_file(&format!("{base}/a"), &dir.path().join("body"), 100)
@@ -1941,6 +2058,151 @@ mod tests {
             started.elapsed()
         );
         finish(stop, handle);
+    }
+
+    #[test]
+    fn the_overall_ceiling_ends_a_download_that_never_goes_idle() {
+        // Steady progress, but longer than the 700 ms overall limit.
+        let (base, stop, handle) = serve(trickle(100, Duration::from_millis(100)));
+        let dir = tempfile::tempdir().unwrap();
+        let fetch =
+            HttpsFetch::with_timeouts(Duration::from_millis(400), Duration::from_millis(700))
+                .unwrap();
+        let started = Instant::now();
+        let error = fetch
+            .get_to_file(&format!("{base}/a"), &dir.path().join("body"), 10_000)
+            .unwrap_err();
+        assert_eq!(error.code, SANDBOX_DOWNLOAD_FAILED);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        finish(stop, handle);
+    }
+
+    #[test]
+    fn the_production_timeouts_are_an_idle_limit_and_a_generous_ceiling() {
+        assert_eq!(IDLE_TIMEOUT, Duration::from_secs(30));
+        assert_eq!(TOTAL_TIMEOUT, Duration::from_secs(15 * 60));
+    }
+
+    // --------------------------------------------------------------- crash recovery
+
+    /// What an installed runtime looks like on disk.
+    fn make_runtime(dir: &Path, marker: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("srt-sidecar"), "x").unwrap();
+        fs::write(dir.join("manifest.json"), "{}").unwrap();
+        fs::write(dir.join("marker"), marker).unwrap();
+    }
+
+    fn offline_fetch() -> MemFetch {
+        MemFetch {
+            bodies: HashMap::new(),
+            requests: RefCell::new(vec![]),
+        }
+    }
+
+    #[test]
+    fn a_crash_between_the_renames_is_repaired_before_anything_is_swept() {
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        // The state after `rename(current, .old-X)` and a death before `rename(staging, current)`.
+        make_runtime(&sandbox.join(".old-aaaa"), "previous");
+        make_runtime(&sandbox.join(".staging-bbbb"), "half installed");
+        assert!(!sandbox.join("current").exists());
+
+        // (a) The retry fails offline, and the user still has the previous runtime.
+        let error = install(app_data.path(), &spec(), &offline_fetch()).unwrap_err();
+        assert_eq!(error.code, SANDBOX_DOWNLOAD_FAILED);
+        assert_eq!(
+            fs::read_to_string(sandbox.join("current/marker")).unwrap(),
+            "previous"
+        );
+        assert_eq!(entries(&sandbox), ["current"], "the leftovers are gone");
+    }
+
+    #[test]
+    fn a_repaired_runtime_is_then_replaced_by_a_successful_install() {
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        make_runtime(&sandbox.join(".old-aaaa"), "previous");
+        let spec = spec();
+        install(app_data.path(), &spec, &MemFetch::fixture(&spec)).unwrap();
+        assert!(!sandbox.join("current/marker").exists());
+        assert_eq!(entries(&sandbox), ["current"]);
+    }
+
+    #[test]
+    fn recovery_never_guesses_between_several_candidates_and_never_deletes_them() {
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        make_runtime(&sandbox.join(".old-one"), "one");
+        make_runtime(&sandbox.join(".old-two"), "two");
+        assert!(!recover_previous_runtime(&sandbox));
+        assert!(!sandbox.join("current").exists());
+
+        let error = install(app_data.path(), &spec(), &offline_fetch()).unwrap_err();
+        assert_eq!(error.code, SANDBOX_DOWNLOAD_FAILED);
+        assert_eq!(
+            entries(&sandbox),
+            [".old-one", ".old-two"],
+            "both copies survive a failed retry while current is missing"
+        );
+    }
+
+    #[test]
+    fn garbage_old_directories_are_not_restored_and_are_swept_around_a_real_one() {
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        make_runtime(&sandbox.join(".old-real"), "real");
+        // Not runtimes: empty, only half the files, a file, and a symlink to a real runtime.
+        fs::create_dir_all(sandbox.join(".old-empty")).unwrap();
+        fs::create_dir_all(sandbox.join(".old-partial")).unwrap();
+        fs::write(sandbox.join(".old-partial/srt-sidecar"), "x").unwrap();
+        fs::write(sandbox.join(".old-file"), "x").unwrap();
+        make_runtime(&app_data.path().join("elsewhere"), "elsewhere");
+        std::os::unix::fs::symlink(app_data.path().join("elsewhere"), sandbox.join(".old-link"))
+            .unwrap();
+
+        let error = install(app_data.path(), &spec(), &offline_fetch()).unwrap_err();
+        assert_eq!(error.code, SANDBOX_DOWNLOAD_FAILED);
+        assert_eq!(
+            fs::read_to_string(sandbox.join("current/marker")).unwrap(),
+            "real"
+        );
+        assert_eq!(entries(&sandbox), ["current"]);
+        assert!(
+            app_data.path().join("elsewhere/marker").exists(),
+            "the link's target is not touched"
+        );
+    }
+
+    #[test]
+    fn only_garbage_with_no_current_is_swept_and_nothing_is_invented() {
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        fs::create_dir_all(sandbox.join(".old-empty")).unwrap();
+        assert!(!recover_previous_runtime(&sandbox));
+        let _ = install(app_data.path(), &spec(), &offline_fetch());
+        assert!(entries(&sandbox).is_empty());
+    }
+
+    #[test]
+    fn recovery_does_nothing_while_current_exists() {
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        make_runtime(&sandbox.join("current"), "live");
+        make_runtime(&sandbox.join(".old-aaaa"), "stale");
+        assert!(!recover_previous_runtime(&sandbox));
+        assert_eq!(
+            fs::read_to_string(sandbox.join("current/marker")).unwrap(),
+            "live"
+        );
+        // And a sweep with a live `current` does remove the leftover.
+        let _ = install(app_data.path(), &spec(), &offline_fetch());
+        assert_eq!(entries(&sandbox), ["current"]);
+        assert_eq!(
+            fs::read_to_string(sandbox.join("current/marker")).unwrap(),
+            "live"
+        );
     }
 
     #[test]
