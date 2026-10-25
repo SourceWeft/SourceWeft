@@ -72,6 +72,7 @@ test("a connected callback returns to the stored destination with a completion r
     state: "s1",
     code: "c1",
     providerError: undefined,
+    sessionUserId: "user_1",
   });
 });
 
@@ -79,12 +80,12 @@ test("denials and failures return to the stored destination with a fixed reason"
   reset();
   mocks.completeMcpOAuthCallback.mockResolvedValue({
     outcome: "denied",
-    returnTo: "/dashboard/chat",
+    returnTo: "/dashboard/mcp/io.github.o%2Fexample",
     reason: "denied",
   });
   assert.equal(
     await callback("error=access_denied&state=s1"),
-    `${WEB}/dashboard/chat?mcpOAuth=error&mcpReason=denied`,
+    `${WEB}/dashboard/mcp/io.github.o%2Fexample?mcpOAuth=error&mcpReason=denied`,
   );
   assert.equal(
     mocks.completeMcpOAuthCallback.mock.calls[0]?.[0].providerError,
@@ -154,7 +155,7 @@ test("POST /oauth/authorize forwards the validated-by-the-service returnTo", asy
     "/v1/workspaces/workspace_1/mcp-installs/install_1/oauth/authorize",
     {
       method: "POST",
-      body: JSON.stringify({ returnTo: "/dashboard/chat" }),
+      body: JSON.stringify({ returnTo: "/dashboard/mcp" }),
       headers: { "content-type": "application/json" },
     },
   );
@@ -163,7 +164,7 @@ test("POST /oauth/authorize forwards the validated-by-the-service returnTo", asy
     workspaceId: "workspace_1",
     userId: "user_1",
     installId: "install_1",
-    returnTo: "/dashboard/chat",
+    returnTo: "/dashboard/mcp",
   });
 });
 

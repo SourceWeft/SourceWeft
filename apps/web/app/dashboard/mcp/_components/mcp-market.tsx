@@ -65,10 +65,9 @@ import { CredentialsDialog } from "./mcp-credentials-dialog";
 import { selectInstallForChat } from "./mcp-use-in-chat";
 import { useMcpOAuthReturn } from "./use-mcp-oauth-return";
 import {
-  acceptedMcpReturnTo,
   clearMcpOrigin,
   readMcpOrigin,
-  rememberMcpOrigin,
+  syncMcpOrigin,
 } from "../../../../lib/mcp-return-to";
 import { McpDetailDialog } from "./mcp-detail-dialog";
 import { SubmitMcpDialog } from "./submit-mcp-dialog";
@@ -1349,8 +1348,12 @@ export function McpMarket() {
     onConnected: handleOAuthConnected,
   });
   // Where the flow began, kept across the provider round trip.
+  const originSyncedRef = React.useRef(false);
   React.useEffect(() => {
-    rememberMcpOrigin(acceptedMcpReturnTo(searchParams.get("returnTo")));
+    // Once per load: stripping the return flags later must not forget it.
+    if (originSyncedRef.current) return;
+    originSyncedRef.current = true;
+    syncMcpOrigin(searchParams);
   }, [searchParams]);
   React.useEffect(() => {
     if (!resumeInstallId) return;

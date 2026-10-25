@@ -35,6 +35,7 @@ import {
   mcpAuthHeaderMethod,
   mcpAuthMethod,
 } from "../../../../lib/mcp-auth-method";
+import { acceptedMcpReturnTo } from "../../../../lib/mcp-return-to";
 import { contentClient } from "../../../../lib/sdk";
 
 type ConnectionMethod = "oauth" | "header";
@@ -61,6 +62,15 @@ function hostOf(url: string) {
     return new URL(url).host;
   } catch {
     return url;
+  }
+}
+
+function isWebUrl(url: string) {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
   }
 }
 
@@ -232,16 +242,15 @@ export function CredentialsDialog({
   }, [cancelAttempt, install?.id, open]);
 
   // A page restored from the back/forward cache keeps its JavaScript state, so
-  // a connect that had started would still show as pending: reset it.
+  // a connect that had started would still show as pending, with its timers
+  // still counting: end it.
   React.useEffect(() => {
-    function onPageShow() {
-      setPhase((current) =>
-        current === "requesting" || current === "redirecting" ? "idle" : current,
-      );
+    function onPageShow(event: Event) {
+      if ((event as PageTransitionEvent).persisted) cancelAttempt();
     }
     window.addEventListener("pageshow", onPageShow);
     return () => window.removeEventListener("pageshow", onPageShow);
-  }, []);
+  }, [cancelAttempt]);
 
   function chooseMethod(next: string) {
     setMethod(next === "header" ? "header" : "oauth");
@@ -373,7 +382,10 @@ export function CredentialsDialog({
       if (error.code === "MCP_OAUTH_TIMEOUT") {
         return t("credentials.errors.authTimeout");
       }
-      if (error.code === "MCP_OAUTH_NOT_CONNECTED") {
+      if (
+        error.code === "MCP_OAUTH_NOT_CONNECTED" ||
+        error.code === "MCP_NOT_CONNECTED"
+      ) {
         return t("credentials.errors.notConnected");
       }
     }
@@ -434,12 +446,20 @@ export function CredentialsDialog({
       const result = await contentClient.authorizeWorkspaceMcpOAuth(
         workspaceId,
         install.id,
-        { returnTo, signal },
+        // A path the server would refuse (an identifier with a character
+        // encodeURIComponent leaves alone) must not block Connect.
+        { returnTo: acceptedMcpReturnTo(returnTo) ?? "/dashboard/mcp", signal },
       );
       // Cancelled, closed or timed out meanwhile: do nothing with the answer.
       if (attempt !== attemptRef.current) return;
       clearTimers();
       if (result.status === "redirect") {
+        // Only a web address is ever navigated to.
+        if (!isWebUrl(result.authorizationUrl)) {
+          setFormError(t("credentials.toasts.authStartFailed"));
+          setPhase("idle");
+          return;
+        }
         // Hand off to the provider's consent screen; the callback sends the
         // browser back to `returnTo`. If the page is still here shortly after,
         // the navigation was blocked or abandoned: say so instead of spinning.

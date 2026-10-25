@@ -2167,3 +2167,28 @@ test("discoverToolsForMember on an unconnected OAuth install fails fast without 
   );
   assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
 });
+
+test("discoverToolsForMember on a key-required install without a saved key says so and calls nothing", async () => {
+  resetAuthMethodMocks();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(
+    mcpInstall({
+      id: "mcp_install_key",
+      authType: "bearer",
+      credentialStatus: "required",
+    }),
+  );
+  mocks.findWorkspaceMcpCredential.mockResolvedValue(null);
+  await assert.rejects(
+    () =>
+      new McpService().discoverToolsForMember({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        installId: "mcp_install_key",
+      }),
+    (error: unknown) =>
+      error instanceof McpError &&
+      error.code === "MCP_NOT_CONNECTED" &&
+      error.statusCode === 400,
+  );
+  assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
+});

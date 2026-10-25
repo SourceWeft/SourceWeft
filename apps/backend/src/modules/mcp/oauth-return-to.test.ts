@@ -13,11 +13,6 @@ test("accepts only the enumerated internal routes", () => {
     "/dashboard/mcp",
     "/dashboard/mcp/io.github.o%2Fexample",
     "/dashboard/mcp/plain-server",
-    "/dashboard/chat",
-    "/dashboard/chat/thread_1-a",
-    "/mcp/io.github.o%2Fexample",
-    "/zh-CN/mcp/io.github.o%2Fexample",
-    "/zh-TW/mcp/server",
   ]) {
     assert.equal(parseMcpReturnTo(value), value, value);
   }
@@ -49,7 +44,13 @@ test("rejects absolute, protocol-relative, backslash, encoded and unlisted desti
     "/dashboard/mcp/\u0000",
     "/dashboard/mcp/",
     "/dashboard/mcp/a/b",
-    "/dashboard/chat/a/b",
+    // Routes nothing starts a connection from.
+    "/dashboard/chat",
+    "/dashboard/chat/thread_1-a",
+    "/mcp/io.github.o%2Fexample",
+    "/zh-CN/mcp/io.github.o%2Fexample",
+    // The characters encodeURIComponent leaves alone are not part of an identifier.
+    "/dashboard/mcp/a(b)",
     "/dashboard/billing",
     "/api/auth/sign-out",
     "/v1/mcp/oauth/callback",

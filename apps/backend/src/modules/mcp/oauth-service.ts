@@ -113,6 +113,9 @@ export async function startMcpOAuthAuthorization(input: {
 }): Promise<
   { status: "redirect"; authorizationUrl: string } | { status: "connected" }
 > {
+  // When this start BEGAN orders it against other starts for the same member
+  // and install; see beginMcpOAuthAttempt.
+  const startedAt = new Date();
   let returnTo: string | null = null;
   if (input.returnTo !== undefined) {
     returnTo = parseMcpReturnTo(input.returnTo);
@@ -180,7 +183,7 @@ export async function startMcpOAuthAuthorization(input: {
             "The MCP server's sign-in did not answer in time",
           ),
       },
-      async (fetchFn) => {
+      async (fetchFn, signal) => {
         const issuer = await discoverIssuer(endpointUrl, requests, fetchFn);
         let authorizationUrl: string | null = null;
         // PKCE verifier and state are captured in memory so each attempt gets a
@@ -231,12 +234,29 @@ export async function startMcpOAuthAuthorization(input: {
           );
         }
         await assertSafeOAuthUrl(authorizationUrl);
-        await beginMcpOAuthAttempt(scope, {
+        // A start that was cancelled or ran out of time must not record an
+        // attempt later, over one the member has started since.
+        if (signal.aborted) {
+          throw new McpError(
+            504,
+            "MCP_OAUTH_TIMEOUT",
+            "The MCP server's sign-in did not answer in time",
+          );
+        }
+        const stored = await beginMcpOAuthAttempt(scope, {
           issuer,
           state,
           codeVerifier,
           returnTo,
+          startedAt,
         });
+        if (!stored) {
+          throw new McpError(
+            409,
+            "MCP_OAUTH_SUPERSEDED",
+            "A newer sign-in attempt replaced this one",
+          );
+        }
         return { status: "redirect" as const, authorizationUrl };
       },
     );
@@ -270,15 +290,23 @@ export type McpOAuthCallbackOutcome =
  * destination) is the only context used: membership and the install are
  * rechecked, the code is exchanged under a deadline, and success returns a
  * non-secret completion reference. A provider error or denial is handled
- * through the same bound attempt.
+ * through the same bound attempt. When the request carries a session, it must
+ * be the member the attempt was started for.
  */
 export async function completeMcpOAuthCallback(input: {
   state: string;
   code?: string;
   providerError?: string;
+  /** The signed-in user of the callback request, when it carries a session. */
+  sessionUserId?: string;
 }): Promise<McpOAuthCallbackOutcome> {
   const attempt = await consumeMcpOAuthAttempt(input.state);
   if (!attempt) {
+    return { outcome: "invalid" };
+  }
+  // The state is bound to the member who started it: a browser signed in as
+  // someone else (a link opened in another account) spends it for nothing.
+  if (input.sessionUserId && input.sessionUserId !== attempt.scope.userId) {
     return { outcome: "invalid" };
   }
   const { scope, returnTo } = attempt;

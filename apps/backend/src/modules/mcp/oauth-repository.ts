@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
@@ -172,10 +172,15 @@ export type McpOAuthPendingAttempt = {
 
 /**
  * Record a freshly started attempt as the (install, user)'s one pending
- * attempt, replacing any earlier one: state, PKCE verifier, issuer, expiry and
+ * attempt, replacing an older one: state, PKCE verifier, issuer, expiry and
  * destination are written together, so a superseded callback finds nothing and
  * two concurrent starts can never leave one attempt's state beside the other's
  * verifier.
+ *
+ * The write is ordered by when each start BEGAN (`startedAt`; the expiry is
+ * derived from it): a start that began earlier can never replace one that began
+ * later, nor one made after a connection completed, however late it finishes.
+ * Returns false when the attempt was not stored for that reason.
  */
 export async function beginMcpOAuthAttempt(
   scope: McpOAuthScope,
@@ -184,17 +189,40 @@ export async function beginMcpOAuthAttempt(
     state: string;
     codeVerifier: string;
     returnTo: string | null;
-    now?: Date;
+    startedAt?: Date;
   },
-) {
-  const now = attempt.now ?? new Date();
-  await upsertSession(scope, {
+): Promise<boolean> {
+  const startedAt = attempt.startedAt ?? new Date();
+  const pendingExpiresAt = new Date(startedAt.getTime() + MCP_OAUTH_ATTEMPT_TTL_MS);
+  const changes = {
     issuer: attempt.issuer,
     state: attempt.state,
     codeVerifier: attempt.codeVerifier,
-    pendingExpiresAt: new Date(now.getTime() + MCP_OAUTH_ATTEMPT_TTL_MS),
+    pendingExpiresAt,
     pendingReturnTo: attempt.returnTo,
-  });
+    updatedAt: new Date(),
+  };
+  const stored = await db
+    .insert(workspaceMcpOAuthSessions)
+    .values({
+      id: randomUUID(),
+      teamId: scope.teamId,
+      workspaceId: scope.workspaceId,
+      installId: scope.installId,
+      userId: scope.userId,
+      ...changes,
+    })
+    .onConflictDoUpdate({
+      target: [
+        workspaceMcpOAuthSessions.installId,
+        workspaceMcpOAuthSessions.userId,
+      ],
+      set: changes,
+      // The existing row wins unless this start began after it.
+      setWhere: sql`(${workspaceMcpOAuthSessions.pendingExpiresAt} is null or ${workspaceMcpOAuthSessions.pendingExpiresAt} < ${pendingExpiresAt}) and (${workspaceMcpOAuthSessions.completionAt} is null or ${workspaceMcpOAuthSessions.completionAt} <= ${startedAt})`,
+    })
+    .returning({ id: workspaceMcpOAuthSessions.id });
+  return stored.length > 0;
 }
 
 /**

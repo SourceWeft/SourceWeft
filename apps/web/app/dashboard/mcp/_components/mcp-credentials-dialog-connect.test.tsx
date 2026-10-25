@@ -216,7 +216,7 @@ describe("connecting with OAuth", () => {
     expect(connect().disabled).toBe(false);
   });
 
-  it("resets a pending connect when the page is restored (pageshow)", async () => {
+  it("ends a pending connect when the page is restored from the cache, timers included", async () => {
     api.authorizeWorkspaceMcpOAuth.mockResolvedValue({
       status: "redirect",
       authorizationUrl: "https://auth.vendor.example/authorize",
@@ -227,10 +227,60 @@ describe("connecting with OAuth", () => {
     expect(text()).toContain("Opening auth.vendor.example…");
 
     await act(async () => {
-      window.dispatchEvent(new Event("pageshow"));
+      window.dispatchEvent(
+        Object.assign(new Event("pageshow"), { persisted: true }),
+      );
     });
     expect(spinning()).toBe(false);
     expect(connect().disabled).toBe(false);
+    // The redirect guard died with the attempt: no late "did not open" error.
+    await act(async () => {
+      vi.advanceTimersByTime(16_000);
+    });
+    expect(text()).not.toContain("The sign-in page did not open.");
+  });
+
+  it("ignores a pageshow that is not a cache restore", async () => {
+    api.authorizeWorkspaceMcpOAuth.mockResolvedValue({
+      status: "redirect",
+      authorizationUrl: "https://auth.vendor.example/authorize",
+    });
+    await open();
+    await click(connect());
+    await flush(2);
+    await act(async () => {
+      window.dispatchEvent(
+        Object.assign(new Event("pageshow"), { persisted: false }),
+      );
+    });
+    expect(text()).toContain("Opening auth.vendor.example…");
+  });
+
+  it("falls back to the market page when the page's own path would be refused", async () => {
+    api.authorizeWorkspaceMcpOAuth.mockReturnValue(new Promise(() => {}));
+    await open({ returnTo: "/dashboard/mcp/io.github.o%2Fwhat(is)this!" });
+    await click(connect());
+    expect(api.authorizeWorkspaceMcpOAuth).toHaveBeenCalledWith(
+      "ws-1",
+      "install-1",
+      expect.objectContaining({ returnTo: "/dashboard/mcp" }),
+    );
+  });
+
+  it("never navigates to anything but a web address", async () => {
+    for (const url of ["javascript:alert(1)", "data:text/html,x", "not a url"]) {
+      api.authorizeWorkspaceMcpOAuth.mockResolvedValueOnce({
+        status: "redirect",
+        authorizationUrl: url,
+      });
+      await open();
+      await click(connect());
+      await flush(2);
+      expect(navigate).not.toHaveBeenCalled();
+      expect(spinning()).toBe(false);
+      expect(text()).toContain("Failed to start authorization.");
+      await unmountAll();
+    }
   });
 
   it("recovers when the browser never leaves for the provider", async () => {

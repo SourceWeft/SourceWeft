@@ -1333,8 +1333,16 @@ export class McpService {
         "Connect this MCP server before listing its tools",
       );
     }
-    const { headers, authProvider } =
-      "missing" in auth ? { headers: {}, authProvider: undefined } : auth;
+    // A server that wants a key the member has not saved: say so, instead of
+    // an unauthenticated call that would come back as a 502.
+    if ("missing" in auth) {
+      throw new McpError(
+        400,
+        "MCP_NOT_CONNECTED",
+        "Connect this MCP server before listing its tools",
+      );
+    }
+    const { headers, authProvider } = auth;
     const client = createLangChainMcpClient({ install, headers, authProvider });
     try {
       const tools = await withTimeout(

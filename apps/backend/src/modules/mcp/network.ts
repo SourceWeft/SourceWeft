@@ -32,12 +32,17 @@ export const MCP_OAUTH_EXCHANGE_DEADLINE_MS = 20_000;
  * which the controlled fetch passes to each hop, so discovery, registration
  * and token exchange stop when it fires. Rejects with `timeoutError` (an
  * McpError) on expiry. `work` that is still running is not awaited again; its
- * late failure is swallowed so it cannot surface as an unhandled rejection.
+ * late failure is swallowed so it cannot surface as an unhandled rejection. The
+ * signal is also handed to `work`, which must check it before any write whose
+ * effect outlives the operation.
  */
 export async function withMcpRequestDeadline<T>(
   requests: ReturnType<typeof createMcpRequestScope>,
   options: { ms: number; timeoutError: () => McpError },
-  work: (fetch: typeof globalThis.fetch) => Promise<T>,
+  work: (
+    fetch: typeof globalThis.fetch,
+    signal: AbortSignal,
+  ) => Promise<T>,
 ): Promise<T> {
   const controller = new AbortController();
   const fetchWithDeadline: typeof globalThis.fetch = (input, init) =>
@@ -54,7 +59,7 @@ export async function withMcpRequestDeadline<T>(
       reject(options.timeoutError());
     }, options.ms);
   });
-  const running = work(fetchWithDeadline);
+  const running = work(fetchWithDeadline, controller.signal);
   running.catch(() => undefined);
   try {
     return await Promise.race([running, expired]);

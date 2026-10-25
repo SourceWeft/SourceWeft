@@ -53,10 +53,9 @@ import { CredentialsDialog } from "../_components/mcp-credentials-dialog";
 import { selectInstallForChat } from "../_components/mcp-use-in-chat";
 import { useMcpOAuthReturn } from "../_components/use-mcp-oauth-return";
 import {
-  acceptedMcpReturnTo,
   clearMcpOrigin,
   readMcpOrigin,
-  rememberMcpOrigin,
+  syncMcpOrigin,
 } from "../../../../lib/mcp-return-to";
 import { mcpDetailTools } from "../_components/mcp-detail-tools";
 import { McpOverviewAdmin } from "../_components/mcp-overview-admin";
@@ -143,8 +142,12 @@ export default function McpDetailPage() {
     onConnected: handleOAuthConnected,
   });
   // Where the flow began, kept across the provider round trip.
+  const originSyncedRef = React.useRef(false);
   React.useEffect(() => {
-    rememberMcpOrigin(acceptedMcpReturnTo(searchParams.get("returnTo")));
+    // Once per load: stripping the return flags later must not forget it.
+    if (originSyncedRef.current) return;
+    originSyncedRef.current = true;
+    syncMcpOrigin(searchParams);
   }, [searchParams]);
   // A confirmed connection reopens the dialog on this member's tool list.
   React.useEffect(() => {

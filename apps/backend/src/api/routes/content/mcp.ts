@@ -295,10 +295,14 @@ export function registerMcpOAuthCallbackRoutes(app: Hono) {
       return c.redirect(mcpInvalidAttemptUrl(webBase));
     }
     try {
+      // The callback is a browser navigation: its session, when it has one, is
+      // checked against the member the attempt belongs to.
+      const session = await requireSession(c).catch(() => null);
       const result = await completeMcpOAuthCallback({
         state,
         code: c.req.query("code"),
         providerError: c.req.query("error"),
+        sessionUserId: session ? getSessionUserId(session) : undefined,
       });
       if (result.outcome === "invalid") {
         return c.redirect(mcpInvalidAttemptUrl(webBase));

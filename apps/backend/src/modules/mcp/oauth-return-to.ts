@@ -1,5 +1,3 @@
-import { LOCALE_IDS } from "@sourceweft/i18n/locales";
-
 /**
  * Where the OAuth callback sends the browser once the attempt is over. The
  * callback URL itself stays the registered `/v1/mcp/oauth/callback`; this is an
@@ -16,10 +14,6 @@ const ENCODED_IDENTIFIER = /^[A-Za-z0-9._~:@%-]{1,300}$/;
 const IDENTIFIER_SEGMENT = "[A-Za-z0-9][A-Za-z0-9._~:@-]*";
 const IDENTIFIER = new RegExp(
   `^${IDENTIFIER_SEGMENT}(?:/${IDENTIFIER_SEGMENT}){0,2}$`,
-);
-const THREAD_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const LOCALE_PREFIX = new RegExp(
-  `^/(?:${LOCALE_IDS.map((locale) => locale.replace("-", "\\-")).join("|")})(?=/)`,
 );
 
 /** Backslash, query, fragment, whitespace and control characters. */
@@ -45,10 +39,8 @@ function validIdentifierSegment(encoded: string) {
 
 /**
  * The normalized internal path for `value`, or null if it is not one of the
- * enumerated application routes:
- *  - `/dashboard/mcp` and `/dashboard/mcp/<identifier>`
- *  - `/dashboard/chat` and `/dashboard/chat/<threadId>`
- *  - the public page `/mcp/<identifier>`, with or without a locale prefix
+ * application routes the connection flow starts from: `/dashboard/mcp` and
+ * `/dashboard/mcp/<identifier>`.
  */
 export function parseMcpReturnTo(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -59,22 +51,15 @@ export function parseMcpReturnTo(value: unknown): string | null {
   if (hasForbiddenCharacter(value)) return null;
   if (value.length > 1 && value.endsWith("/")) return null;
 
-  if (value === "/dashboard/mcp" || value === "/dashboard/chat") return value;
+  if (value === "/dashboard/mcp") return value;
 
   const segments = value.slice(1).split("/");
-  if (segments[0] === "dashboard" && segments.length === 3) {
-    if (segments[1] === "mcp" && validIdentifierSegment(segments[2]!))
-      return value;
-    if (segments[1] === "chat" && THREAD_ID.test(segments[2]!)) return value;
-    return null;
-  }
-
-  const rest = LOCALE_PREFIX.test(value)
-    ? segments.slice(1)
-    : segments;
-  if (rest.length === 2 && rest[0] === "mcp" && validIdentifierSegment(rest[1]!))
-    return value;
-  return null;
+  return segments.length === 3 &&
+    segments[0] === "dashboard" &&
+    segments[1] === "mcp" &&
+    validIdentifierSegment(segments[2]!)
+    ? value
+    : null;
 }
 
 /**

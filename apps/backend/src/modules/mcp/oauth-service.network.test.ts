@@ -27,6 +27,7 @@ const state = vi.hoisted(() => ({
     | undefined,
   lastVerifier: undefined as string | undefined,
   membership: true,
+  beginAccepts: true,
   stored: {
     client: undefined as OAuthClientInformationFull | undefined,
     tokens: undefined as OAuthTokens | undefined,
@@ -94,8 +95,10 @@ vi.mock("./oauth-repository", () => ({
     _scope: unknown,
     attempt: NonNullable<typeof state.pending>,
   ) => {
+    if (!state.beginAccepts) return false;
     state.pending = attempt;
     state.lastVerifier = attempt.codeVerifier;
+    return true;
   },
   consumeMcpOAuthAttempt: async (nonce: string) => {
     const pending = state.pending;
@@ -142,6 +145,7 @@ afterEach(async () => {
   state.lastVerifier = undefined;
   state.registerDelayMs = 0;
   state.membership = true;
+  state.beginAccepts = true;
 });
 
 async function fixture() {
@@ -234,7 +238,7 @@ test.each([true, false])(
       workspaceId: "workspace",
       installId: "install",
       userId: "user",
-      returnTo: "/dashboard/chat",
+      returnTo: "/dashboard/mcp/io.github.o%2Fexample",
     });
     assert.equal(result.status, "redirect");
     if (result.status !== "redirect") throw new Error("expected redirect");
@@ -243,7 +247,7 @@ test.each([true, false])(
     assert.equal(redirect.searchParams.get("code_challenge_method"), "S256");
     assert.equal(redirect.searchParams.get("state"), state.pending?.state);
     assert.ok(redirect.searchParams.get("code_challenge"));
-    assert.equal(state.pending?.returnTo, "/dashboard/chat");
+    assert.equal(state.pending?.returnTo, "/dashboard/mcp/io.github.o%2Fexample");
     assert.equal(state.pending?.issuer, state.issuer);
     const nonce = state.pending!.state;
     assert.deepEqual(state.deletedCredentials, []);
@@ -251,7 +255,7 @@ test.each([true, false])(
       await completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
       {
         outcome: "connected",
-        returnTo: "/dashboard/chat",
+        returnTo: "/dashboard/mcp/io.github.o%2Fexample",
         completionRef: "ref-1",
       },
     );
@@ -290,6 +294,41 @@ test("each attempt gets a fresh state and a later one supersedes the earlier", a
       .outcome,
     "connected",
   );
+});
+
+test("a start that a newer one has already replaced reports it and records nothing", async () => {
+  await fixture();
+  state.beginAccepts = false;
+  await assert.rejects(
+    startMcpOAuthAuthorization({
+      workspaceId: "workspace",
+      installId: "install",
+      userId: "user",
+    }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "MCP_OAUTH_SUPERSEDED",
+  );
+  assert.equal(state.pending, undefined);
+});
+
+test("a callback by another signed-in member is refused after the attempt is spent", async () => {
+  await fixture();
+  await startMcpOAuthAuthorization({
+    workspaceId: "workspace",
+    installId: "install",
+    userId: "user",
+  });
+  const nonce = state.pending!.state;
+  assert.deepEqual(
+    await completeMcpOAuthCallback({
+      state: nonce,
+      code: "fixture-code",
+      sessionUserId: "someone-else",
+    }),
+    { outcome: "invalid" },
+  );
+  assert.equal(state.stored.tokens, undefined);
+  assert.equal(state.pending, undefined);
 });
 
 test("a disallowed return destination is refused before anything is contacted", async () => {

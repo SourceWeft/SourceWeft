@@ -160,7 +160,7 @@ test("concurrent callbacks for one state yield one winner", async () => {
 test("an expired attempt is refused and cleared", async () => {
   const started = attempt();
   const startedAt = new Date("2026-10-01T00:00:00.000Z");
-  await beginMcpOAuthAttempt(scope, { ...started, now: startedAt });
+  await beginMcpOAuthAttempt(scope, { ...started, startedAt });
 
   const late = new Date(startedAt.getTime() + MCP_OAUTH_ATTEMPT_TTL_MS + 1);
   assert.equal(await consumeMcpOAuthAttempt(started.state, late), null);
@@ -174,7 +174,7 @@ test("an expired attempt is refused and cleared", async () => {
 test("an attempt is valid up to, not past, its expiry", async () => {
   const started = attempt();
   const startedAt = new Date("2026-10-01T00:00:00.000Z");
-  await beginMcpOAuthAttempt(scope, { ...started, now: startedAt });
+  await beginMcpOAuthAttempt(scope, { ...started, startedAt });
   const justBefore = new Date(startedAt.getTime() + MCP_OAUTH_ATTEMPT_TTL_MS - 1);
   assert.ok(await consumeMcpOAuthAttempt(started.state, justBefore));
 });
@@ -193,14 +193,60 @@ test("a row from before expiry existed (state without an expiry) is refused", as
 
 test("a newer attempt for the same member and install supersedes the earlier one", async () => {
   const first = attempt();
-  const second = attempt({ returnTo: "/dashboard/chat" });
-  await beginMcpOAuthAttempt(scope, first);
-  await beginMcpOAuthAttempt(scope, second);
+  const second = attempt({ returnTo: "/dashboard/mcp" });
+  const t0 = new Date("2026-10-01T00:00:00.000Z");
+  assert.equal(await beginMcpOAuthAttempt(scope, { ...first, startedAt: t0 }), true);
+  assert.equal(
+    await beginMcpOAuthAttempt(scope, {
+      ...second,
+      startedAt: new Date(t0.getTime() + 1_000),
+    }),
+    true,
+  );
 
-  assert.equal(await consumeMcpOAuthAttempt(first.state), null);
-  const consumed = await consumeMcpOAuthAttempt(second.state);
-  assert.equal(consumed?.returnTo, "/dashboard/chat");
+  assert.equal(await consumeMcpOAuthAttempt(first.state, t0), null);
+  const consumed = await consumeMcpOAuthAttempt(second.state, t0);
+  assert.equal(consumed?.returnTo, "/dashboard/mcp");
   assert.equal(consumed?.codeVerifier, second.codeVerifier);
+});
+
+test("a start that began earlier can never replace one that began later, however late it finishes", async () => {
+  const stalled = attempt({ state: "state-stalled" });
+  const newer = attempt({ state: "state-newer" });
+  const t0 = new Date("2026-10-01T00:00:00.000Z");
+  // B began after A but finished first; A's zombie then tries to record itself.
+  assert.equal(
+    await beginMcpOAuthAttempt(scope, {
+      ...newer,
+      startedAt: new Date(t0.getTime() + 5_000),
+    }),
+    true,
+  );
+  assert.equal(
+    await beginMcpOAuthAttempt(scope, { ...stalled, startedAt: t0 }),
+    false,
+  );
+  const now = new Date(t0.getTime() + 6_000);
+  assert.equal(await consumeMcpOAuthAttempt("state-stalled", now), null);
+  assert.equal((await consumeMcpOAuthAttempt("state-newer", now))?.scope.userId, scope.userId);
+});
+
+test("a start that began before a connection completed cannot record an attempt after it", async () => {
+  const store = createDbMcpOAuthStore(scope, ISSUER);
+  await store.saveTokens({ access_token: "t", token_type: "Bearer" });
+  const t0 = new Date("2026-10-01T00:00:00.000Z");
+  await recordMcpOAuthCompletion(scope, new Date(t0.getTime() + 2_000));
+  const zombie = attempt({ state: "state-zombie" });
+  assert.equal(await beginMcpOAuthAttempt(scope, { ...zombie, startedAt: t0 }), false);
+  assert.equal(await consumeMcpOAuthAttempt("state-zombie", t0), null);
+  // A start that begins after the completion is fine.
+  assert.equal(
+    await beginMcpOAuthAttempt(scope, {
+      ...attempt(),
+      startedAt: new Date(t0.getTime() + 3_000),
+    }),
+    true,
+  );
 });
 
 test("two members' attempts on one install do not touch each other", async () => {
