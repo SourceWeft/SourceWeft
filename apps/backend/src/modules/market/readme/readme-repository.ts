@@ -7,6 +7,10 @@ import {
   workspaceMcpInstalls,
 } from "@sourceweft/db";
 import { latestPublishedVersionOf } from "../latest-version";
+import {
+  MCP_REPOSITORY_METADATA_KEY,
+  type McpRepositoryMetadata,
+} from "../metadata/listing-metadata";
 import type { McpReadmeColumns } from "./readme-state";
 
 /**
@@ -131,6 +135,24 @@ export async function writeMcpReadmeColumns(
   await db
     .update(mcpServerVersions)
     .set(columns)
+    .where(eq(mcpServerVersions.id, versionId));
+}
+
+/**
+ * Store what GitHub said about the version's repository (license, primary
+ * language) under the version's provenance, replacing the previous record and
+ * leaving the rest of the provenance as it is. The page reads it through
+ * `resolveListingMetadata`.
+ */
+export async function writeMcpRepositoryMetadata(
+  versionId: string,
+  record: McpRepositoryMetadata,
+): Promise<void> {
+  await db
+    .update(mcpServerVersions)
+    .set({
+      provenanceJson: sql`${mcpServerVersions.provenanceJson} || jsonb_build_object(${MCP_REPOSITORY_METADATA_KEY}::text, ${JSON.stringify(record)}::jsonb)`,
+    })
     .where(eq(mcpServerVersions.id, versionId));
 }
 

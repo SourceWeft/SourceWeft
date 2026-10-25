@@ -235,6 +235,8 @@ export function ownerLayerOf(row: McpOwnerOverridesSource): MarketMcpOwnerLayer 
     "documentationUrl",
     "homepageUrl",
     "repoUrl",
+    "license",
+    "language",
   ] as const) {
     if (setValue(values, key) !== undefined) fields.push(key);
   }
@@ -269,6 +271,12 @@ export function applyOwnerOverridesToItem(
     ...item,
     ...(iconUrl ? { iconUrl, iconSource: "owner" as const } : {}),
     summary: setValue(values, "summary") ?? item.summary,
+    // The owner's own summary is not the text the translation was made from.
+    ...(setValue(values, "summary") !== undefined
+      ? { descriptionLanguage: null, localizedSummary: null }
+      : {}),
+    license: setValue(values, "license") ?? item.license,
+    language: setValue(values, "language") ?? item.language,
     homepageUrl: setValue(values, "homepageUrl") ?? item.homepageUrl,
     repoUrl: setValue(values, "repoUrl") ?? item.repoUrl,
     ...(tools.length > 0
@@ -303,6 +311,8 @@ export function applyOwnerOverridesToManifest(
   put("documentationUrl");
   put("homepageUrl");
   put("repoUrl");
+  put("license");
+  put("language");
   if (tools.length > 0) next.tools = tools;
   next.owner = ownerLayerOf(row);
   return next;

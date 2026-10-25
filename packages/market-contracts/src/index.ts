@@ -94,6 +94,8 @@ export const marketMcpOwnerFieldSchema = z.enum([
   "documentationUrl",
   "homepageUrl",
   "repoUrl",
+  "license",
+  "language",
   "deprecated",
   "tools",
 ]);
@@ -307,6 +309,14 @@ export const marketMcpToolsValidationSchema = marketMcpValidationSchema.pick({
   at: true,
 });
 
+export const marketMcpLocalizedSummarySchema = z.object({
+  locale: z.enum(["zh-CN", "zh-TW"]),
+  text: z.string(),
+});
+export type MarketMcpLocalizedSummary = z.infer<
+  typeof marketMcpLocalizedSummarySchema
+>;
+
 export const marketItemSummarySchema = z.object({
   id: z.string(),
   identifier: z.string(),
@@ -361,6 +371,15 @@ export const marketItemSummarySchema = z.object({
   deprecated: z.boolean().optional(),
   // The owner's corrections applied over the federated data; null when none.
   owner: marketMcpOwnerLayerSchema.nullable().optional(),
+  // The language the description was written in, by script detection
+  // ("en", "zh", "ja", "ko", "ru", ...); null until the translation pass has
+  // looked at it. Optional for answers from before it existed.
+  descriptionLanguage: z.string().nullable().optional(),
+  // An AI translation of `summary` into the requested Chinese variant, only
+  // for an entry without an AI overview whose summary is not already in that
+  // language. Machine output: the page labels it and shows `summary` as the
+  // original. Optional for answers from before it existed.
+  localizedSummary: marketMcpLocalizedSummarySchema.nullable().optional(),
 });
 
 export const marketItemVersionSchema = z.object({

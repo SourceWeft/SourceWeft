@@ -296,7 +296,15 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     authState,
     {
       result,
-      detail: { aiOverview, readme, score, toolsRevision, versions },
+      detail: {
+        aiOverview,
+        descriptionLanguage,
+        localizedSummary,
+        readme,
+        score,
+        toolsRevision,
+        versions,
+      },
       productGroup,
       showIntegrations,
       relatedMarket,
@@ -553,9 +561,39 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 </p>
               </div>
             </div>
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-              {item.summary || description}
-            </p>
+            {localizedSummary && !aiOverview ? (
+              <div className="mt-6 max-w-3xl" data-ai-translated="">
+                <p
+                  className="text-lg leading-8 text-zinc-600 dark:text-zinc-300"
+                  lang={localizedSummary.locale}
+                >
+                  {localizedSummary.text}
+                </p>
+                <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="mr-1.5 rounded border border-zinc-300 px-1.5 py-0.5 dark:border-white/15">
+                    {t("translatedSummary.badge")}
+                  </span>
+                  {t("translatedSummary.note")}
+                </p>
+                <details className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                  <summary className="cursor-pointer">
+                    {t("translatedSummary.original")}
+                  </summary>
+                  <p
+                    className="mt-1"
+                    {...(descriptionLanguage && descriptionLanguage !== "und"
+                      ? { lang: descriptionLanguage }
+                      : {})}
+                  >
+                    {item.summary}
+                  </p>
+                </details>
+              </div>
+            ) : (
+              <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
+                {item.summary || description}
+              </p>
+            )}
             {productGroup?.official ? (
               <p
                 className="mt-3 text-sm text-zinc-500 dark:text-zinc-400"

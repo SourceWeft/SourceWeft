@@ -31,6 +31,8 @@ import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
 import { MCP_README_FETCH_JOB } from "../modules/market/readme/readme-queue";
 import { processMcpOverviewGenerateJob } from "./processors/mcp-overview-generate";
 import { MCP_OVERVIEW_GENERATE_JOB } from "../modules/market/overview/queue";
+import { processMcpSummaryTranslationJob } from "./processors/mcp-summary-translation";
+import { MCP_SUMMARY_TRANSLATION_JOB } from "../modules/market/metadata/summary-translation-queue";
 import { processMcpStdioValidateJob } from "./processors/mcp-stdio-validate";
 import { MCP_STDIO_VALIDATE_JOB } from "../modules/market/validation/stdio-queue";
 import {
@@ -77,6 +79,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
   [MCP_OVERVIEW_GENERATE_JOB]: processMcpOverviewGenerateJob,
   [MCP_STDIO_VALIDATE_JOB]: (job) => processMcpStdioValidateJob(job),
+  [MCP_SUMMARY_TRANSLATION_JOB]: () => processMcpSummaryTranslationJob(),
 };
 
 const skillIngestProcessors: Record<string, JobProcessor> = {

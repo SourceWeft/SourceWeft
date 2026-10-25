@@ -8,6 +8,7 @@ import {
   type GetMarketMcpManifestResponse,
   type GetMarketMcpResponse,
   type MarketMcpAiOverview,
+  type MarketMcpLocalizedSummary,
   type MarketMcpLocale,
   type MarketMcpProductGroup,
   type MarketMcpReadme,
@@ -124,6 +125,12 @@ export type PublicMcpDetail = {
   aiOverview: MarketMcpAiOverview | null;
   // The languages the server has a visible overview in, without fallback.
   overviewLocales: MarketMcpLocale[];
+  // An AI translation of the registry summary into the Chinese variant asked
+  // for, for a server without an overview; null when there is none to show.
+  localizedSummary: MarketMcpLocalizedSummary | null;
+  // The language the registry summary was written in ("en", "zh", "ja", "ko",
+  // "und"), once the translation pass has looked at it.
+  descriptionLanguage: string | null;
   // False when the page stays out of search (`noindex, follow`); true when
   // the market says nothing or cannot be read, so an outage never deindexes.
   searchIndexable: boolean;
@@ -153,6 +160,8 @@ const cachedMcpDetail = unstable_cache(
     return {
       aiOverview: detail.aiOverview ?? null,
       overviewLocales: detail.item.overviewLocales ?? [],
+      localizedSummary: detail.item.localizedSummary ?? null,
+      descriptionLanguage: detail.item.descriptionLanguage ?? null,
       readme: readMcpReadme(detail),
       relatedProduct: detail.relatedProduct ?? null,
       score: detail.score ?? null,
@@ -180,6 +189,8 @@ export async function getPublicMcpDetail(
     return {
       aiOverview: null,
       overviewLocales: [],
+      localizedSummary: null,
+      descriptionLanguage: null,
       readme: null,
       relatedProduct: null,
       score: null,

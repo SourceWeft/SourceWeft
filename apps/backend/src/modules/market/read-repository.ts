@@ -37,6 +37,12 @@ import {
   applyOwnerOverridesToManifest,
   ownerSubmittedTools,
 } from "./claims/overrides";
+import { resolveListingMetadata } from "./metadata/listing-metadata";
+import {
+  MCP_SUMMARY_TRANSLATION_KEY,
+  descriptionLanguageFor,
+  localizedSummaryFor,
+} from "./metadata/summary-translation";
 import { findOwnerLayersByServerIds } from "./claims/repository";
 import { readToolRevisionsPage, readToolsRevision } from "./tool-revisions";
 import {
@@ -263,12 +269,27 @@ function mapItemRow(input: {
   latestVersion?: string | null;
   latestManifestJson?: Record<string, unknown> | null;
   latestProvenanceJson?: Record<string, unknown> | null;
+  /**
+   * Whom the summary is read for: the Chinese translation (stored on the
+   * version's provenance by the translation pass) shows only to a Chinese
+   * locale and only while the entry has no AI overview.
+   */
+  translation?: { locale: string | undefined; hasOverview: boolean };
 }): MarketItemSummary {
   const mergedMeta = mergeMetaSources(
     input.row.metadataJson,
     input.latestManifestJson,
   );
   const meta = toManifestMeta(mergedMeta);
+  // The license and language come from the entry's repository and packages,
+  // not from the blob alone; a hosted service has neither.
+  const listing = resolveListingMetadata({
+    manifestJson: input.latestManifestJson,
+    provenanceJson: input.latestProvenanceJson,
+    repoUrl: input.row.repoUrl,
+  });
+  const translationRecord =
+    input.latestProvenanceJson?.[MCP_SUMMARY_TRANSLATION_KEY];
   return {
     id: input.row.id,
     identifier: input.row.identifier,
@@ -283,8 +304,12 @@ function mapItemRow(input: {
     }),
     sourceUrl: input.row.sourceUrl,
     repoUrl: input.row.repoUrl,
-    license: stringMeta(mergedMeta, "license"),
-    language: stringMeta(mergedMeta, "language"),
+    license: listing.hostedOnly
+      ? null
+      : (listing.license ?? stringMeta(mergedMeta, "license")),
+    language: listing.hostedOnly
+      ? null
+      : (listing.language ?? stringMeta(mergedMeta, "language")),
     status: input.row.status,
     visibility: input.row.visibility,
     categories: input.categories,
@@ -307,6 +332,18 @@ function mapItemRow(input: {
     updatedAt: input.row.updatedAt.toISOString(),
     publishedAt: iso(input.row.publishedAt),
     publisher: publisherMeta(mergedMeta),
+    descriptionLanguage: descriptionLanguageFor({
+      summary: input.row.summary,
+      record: translationRecord,
+    }),
+    localizedSummary: input.translation
+      ? localizedSummaryFor({
+          locale: input.translation.locale,
+          summary: input.row.summary,
+          hasOverview: input.translation.hasOverview,
+          record: translationRecord,
+        })
+      : null,
   };
 }
 
@@ -703,6 +740,7 @@ export async function listMcp(input: {
   ]);
   const items = pageRows.map((row) => {
     const latest = latestVersionMap.get(row.id);
+    const overview = overviewFields(latest?.id);
     // A verified owner's corrections sit on top of the federated data
     // (Issue #367, W7; ./claims/overrides.ts).
     return {
@@ -713,10 +751,14 @@ export async function listMcp(input: {
           latestManifestJson: latest?.manifestJson,
           latestProvenanceJson: latest?.provenanceJson,
           latestVersion: latest?.version ?? null,
+          translation: {
+            locale: input.locale,
+            hasOverview: overview.overviewLocales.length > 0,
+          },
         }),
         ownerLayers.get(row.id) ?? { row: null, claimed: false },
       ),
-      ...overviewFields(latest?.id),
+      ...overview,
     };
   });
   const last = pageRows[pageRows.length - 1];
@@ -812,6 +854,7 @@ async function relatedProductOf(
     officialIdentifier: group.officialIdentifier,
     members: rows.map((member) => {
       const latest = latestVersionMap.get(member.id);
+      const overview = overviewFields(latest?.id);
       return {
         // The same owner layer as the catalog list (Issue #367, W7).
         ...applyOwnerOverridesToItem(
@@ -821,10 +864,14 @@ async function relatedProductOf(
             latestManifestJson: latest?.manifestJson,
             latestProvenanceJson: latest?.provenanceJson,
             latestVersion: latest?.version ?? null,
+            translation: {
+              locale,
+              hasOverview: overview.overviewLocales.length > 0,
+            },
           }),
           ownerLayers.get(member.id) ?? { row: null, claimed: false },
         ),
-        ...overviewFields(latest?.id),
+        ...overview,
         publisherMatch: isOfficialEntry(productGroupEntryOf(member)),
       };
     }),
@@ -913,6 +960,11 @@ export async function findMcp(
         latestManifestJson: latest?.manifestJson,
         latestProvenanceJson: latest?.provenanceJson,
         latestVersion: latest?.version ?? null,
+        translation: {
+          locale,
+          hasOverview:
+            (latest ? (overviewLocales?.get(latest.id)?.length ?? 0) : 0) > 0,
+        },
       }),
       ownerLayer,
     );

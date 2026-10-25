@@ -1,5 +1,7 @@
 import { chunk } from "../../../shared/chunk";
 import { logger } from "../../../shared/logger";
+import { repositoryMetadataFromGithub } from "../metadata/listing-metadata";
+import type { McpRepositoryMetadata } from "../metadata/listing-metadata";
 import { hasGitHubToken } from "../parser/github";
 import {
   fetchGitHubReadmes,
@@ -14,6 +16,7 @@ import {
   deferMcpReadmes,
   findDueMcpReadmes,
   writeMcpReadmeColumns,
+  writeMcpRepositoryMetadata,
   type ClaimedMcpReadme,
   type DueMcpReadme,
 } from "./readme-repository";
@@ -108,6 +111,10 @@ export type FetchMcpReadmeBatchDeps = {
     now: Date;
   }) => Promise<ClaimedMcpReadme[]>;
   write: (versionId: string, columns: McpReadmeColumns) => Promise<void>;
+  writeRepositoryMetadata: (
+    versionId: string,
+    record: McpRepositoryMetadata,
+  ) => Promise<void>;
   defer: (input: {
     versionIds: string[];
     until: Date;
@@ -122,6 +129,7 @@ export type FetchMcpReadmeBatchDeps = {
 const defaultFetchDeps: FetchMcpReadmeBatchDeps = {
   claim: claimMcpReadmes,
   write: writeMcpReadmeColumns,
+  writeRepositoryMetadata: writeMcpRepositoryMetadata,
   defer: deferMcpReadmes,
   fetchReadmes: (targets) => fetchGitHubReadmes(targets),
   hasToken: hasGitHubToken,
@@ -260,7 +268,23 @@ export async function fetchMcpReadmeBatch(
       summary.pointsRemaining = batch.remaining;
     }
 
-    for (const [index, { row }] of reading.entries()) {
+    for (const [index, { row, target }] of reading.entries()) {
+      // What GitHub says about the repository is stored whatever became of
+      // the README: a repository without one still has a license.
+      const facts = batch.repositories[index];
+      if (facts) {
+        await deps.writeRepositoryMetadata(
+          row.versionId,
+          repositoryMetadataFromGithub({
+            owner: target.owner,
+            repo: target.repo,
+            subfolder: target.subfolder,
+            licenseInfo: { spdxId: facts.licenseSpdxId },
+            primaryLanguage: { name: facts.primaryLanguage },
+            observedAt: deps.now(),
+          }),
+        );
+      }
       const result: GitHubReadmeResult = batch.results[index] ?? {
         status: "error",
         message: "GitHub left the README unanswered",

@@ -1312,6 +1312,41 @@ describe("public MCP detail page top card", () => {
   });
 });
 
+// Issue #367: the registry summary in Chinese, labelled as AI-translated.
+describe("public MCP detail page translated summary", () => {
+  const useDetail = (detail: Record<string, unknown>) =>
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: undefined,
+      versions: [],
+      ...detail,
+    });
+
+  it("shows the translation labelled as AI-translated, with the original behind it", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(manifestResponse);
+    useDetail({
+      aiOverview: null,
+      descriptionLanguage: "en",
+      localizedSummary: { locale: "zh-CN", text: "任意城市的天气预报。" },
+    });
+    const html = await render();
+    expect(html).toContain("任意城市的天气预报。");
+    expect(html).toContain("AI-translated");
+    expect(html).toMatch(
+      /<details[^>]*>\s*<summary[^>]*>Original description<\/summary>\s*<p[^>]*lang="en"[^>]*>Forecasts for any city\.<\/p>/,
+    );
+  });
+
+  it("shows the original summary where there is no translation", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(manifestResponse);
+    useDetail({ aiOverview: null, descriptionLanguage: null, localizedSummary: null });
+    const html = await render();
+    expect(html).toContain("Forecasts for any city.");
+    expect(html).not.toContain("AI-translated");
+    expect(html).not.toContain("Original description");
+  });
+});
+
 // Issue #367 A1: "More servers like X".
 describe("public MCP detail page related servers", () => {
   function candidate(identifier: string, name: string, summary: string) {

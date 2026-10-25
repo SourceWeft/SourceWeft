@@ -112,6 +112,8 @@ test("saves the whole set, null for every emptied field", async () => {
   typeInto(field("iconUrl"), "");
   typeInto(field("summary"), "  New summary ");
   typeInto(field("description"), "A longer text.");
+  typeInto(field("license"), "Apache-2.0");
+  typeInto(field("language"), " ");
   typeInto(field("repoUrl"), "https://github.com/o/r");
   await click(button("Save"));
 
@@ -119,6 +121,8 @@ test("saves the whole set, null for every emptied field", async () => {
     iconUrl: null,
     summary: "New summary",
     description: "A longer text.",
+    license: "Apache-2.0",
+    language: null,
     documentationUrl: "https://docs.example.com",
     homepageUrl: null,
     repoUrl: "https://github.com/o/r",
