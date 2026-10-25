@@ -258,6 +258,7 @@ test("an ask parks as a pending row and the user's answer reaches the device exa
       kind: "host",
       method: null,
       path: null,
+      secretInBody: false,
       host: "example.com",
       port: 443,
       commandPreview: "curl https://example.com/data",
@@ -1522,6 +1523,7 @@ test("a write request to a secret-bound host always goes to the user: no mode, r
       kind: "request",
       method: "POST",
       path: "/v1/items",
+      secretInBody: false,
       host: "api.example.com",
       port: 443,
       commandPreview: "curl https://example.com/data",
@@ -1836,4 +1838,104 @@ test("a viewer cannot allow a write request but may deny it", async () => {
     ).request.status,
     "denied",
   );
+});
+
+test("a write request whose body carries a stored secret is flagged on the card, and the flag is part of its identity", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  device.ask(invocationId, "body-1", "api.example.com", 443, {
+    ...WRITE,
+    secretInBody: true,
+  });
+  device.ask(invocationId, "plain-1", "api.example.com", 443, WRITE);
+  const rows = await until(
+    () => requests(w.h.id),
+    (list) => list.length === 2,
+  );
+  assert.equal(rows.find((r) => r.askId === "body-1")!.secretInBody, true);
+  assert.equal(rows.find((r) => r.askId === "plain-1")!.secretInBody, false);
+  const listed = (await pendingFor(w)).requests;
+  assert.deepEqual(listed.map((r) => [r.path, r.secretInBody]).sort(), [
+    ["/v1/items", false],
+    ["/v1/items", true],
+  ]);
+
+  // A re-sent ask only replays when the flag matches.
+  device.ask(invocationId, "body-1", "api.example.com", 443, {
+    ...WRITE,
+    secretInBody: true,
+  });
+  await quiet(400);
+  assert.equal(
+    device.inbox.some((f) => f.type === "network.decision"),
+    false,
+    "same question, still waiting",
+  );
+  device.ask(invocationId, "body-1", "api.example.com", 443, WRITE);
+  assert.equal(
+    (await device.waitFor((f) => f.type === "network.decision")).allow,
+    false,
+  );
+  device.ask(invocationId, "plain-1", "api.example.com", 443, {
+    ...WRITE,
+    secretInBody: true,
+  });
+  assert.equal(
+    (await device.waitFor((f) => f.type === "network.decision")).allow,
+    false,
+  );
+  assert.equal((await requests(w.h.id)).length, 2);
+
+  // Allowing it is still an ordinary one-command answer.
+  const flagged = listed.find((r) => r.secretInBody)!;
+  assert.equal(
+    (
+      await approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: flagged.id,
+        decision: "allow_once",
+      })
+    ).request.status,
+    "allowed",
+  );
+  assert.equal(
+    (await device.waitFor((f) => f.type === "network.decision")).allow,
+    true,
+  );
+});
+
+test("the body flag is only valid on a write request", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  for (const [askId, extra] of [
+    ["host-flag", { secretInBody: true }],
+    ["host-kind-flag", { kind: "host", secretInBody: true }],
+  ] as const) {
+    device.ask(invocationId, askId, "api.example.com", 443, extra);
+    assert.deepEqual(
+      await device.waitFor(
+        (f) => f.type === "network.decision" && f.askId === askId,
+      ),
+      {
+        type: "network.decision",
+        askId,
+        allow: false,
+        reason: "invalid request",
+      },
+    );
+  }
+  assert.equal((await requests(w.h.id)).length, 0);
+  assert.equal(device.isOpen(), true);
+  // A false flag on a host question is just absent.
+  device.ask(invocationId, "host-false", "api.example.com", 443, {
+    secretInBody: false,
+  });
+  await until(
+    () => requests(w.h.id),
+    (rows) => rows.length === 1,
+  );
+  assert.equal((await requests(w.h.id))[0]!.secretInBody, false);
 });

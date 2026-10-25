@@ -32,6 +32,8 @@ export const localDeviceReplySchema = z.discriminatedUnion("type", [
     kind: z.string().optional(),
     method: z.string().optional(),
     path: z.string().optional(),
+    // `kind: "request"` only; the handler rejects it anywhere else.
+    secretInBody: z.boolean().optional(),
   }),
 ]);
 

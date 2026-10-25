@@ -64,11 +64,13 @@ export type NetworkAskMessage = {
   kind?: string | undefined;
   method?: string | undefined;
   path?: string | undefined;
+  /** `request` only: a stored secret's value is in the request body. */
+  secretInBody?: boolean | undefined;
 };
 
 type AskShape =
-  | { kind: "host"; method: null; path: null }
-  | { kind: "request"; method: string; path: string };
+  | { kind: "host"; method: null; path: null; secretInBody: false }
+  | { kind: "request"; method: string; path: string; secretInBody: boolean };
 
 type NetworkRequestRow = typeof localNetworkRequests.$inferSelect;
 
@@ -120,10 +122,13 @@ export function readAskShape(ask: {
   kind?: string | undefined;
   method?: string | undefined;
   path?: string | undefined;
+  secretInBody?: boolean | undefined;
 }): AskShape | null {
   if (ask.kind === undefined || ask.kind === "host")
-    return ask.method === undefined && ask.path === undefined
-      ? { kind: "host", method: null, path: null }
+    return ask.method === undefined &&
+      ask.path === undefined &&
+      ask.secretInBody !== true
+      ? { kind: "host", method: null, path: null, secretInBody: false }
       : null;
   if (ask.kind !== "request") return null;
   if (typeof ask.method !== "string" || !/^[A-Z]{1,16}$/.test(ask.method))
@@ -136,7 +141,12 @@ export function readAskShape(ask: {
     /[\u0000-\u001f\u007f]/.test(ask.path)
   )
     return null;
-  return { kind: "request", method: ask.method, path: ask.path };
+  return {
+    kind: "request",
+    method: ask.method,
+    path: ask.path,
+    secretInBody: ask.secretInBody === true,
+  };
 }
 
 export function networkTrustScope(host: string): AgentToolTrustScope {
@@ -431,6 +441,7 @@ export async function handleNetworkAsk(
       port: ask.port,
       method: shape.method,
       path: shape.path,
+      secretInBody: shape.secretInBody,
       suggestedBy,
       createdAt: now,
       expiresAt,
@@ -466,7 +477,8 @@ function replyForExisting(
     row.host !== host ||
     row.kind !== shape.kind ||
     row.method !== shape.method ||
-    row.path !== shape.path
+    row.path !== shape.path ||
+    row.secretInBody !== shape.secretInBody
   )
     return denyFrame(ask.askId, NETWORK_REASONS.noCommand);
   return row.status === "pending" ? null : decisionFrameForRow(row);
@@ -624,6 +636,7 @@ export async function listPendingNetworkRequests(input: {
       kind: request.kind as "host" | "request",
       method: request.method,
       path: request.path,
+      secretInBody: request.secretInBody,
       host: request.host,
       port: request.port,
       commandPreview:
@@ -697,13 +710,14 @@ export async function respondToNetworkRequest(input: {
     );
   const request = found.request;
 
-  // A write request is approved for this one request only; there is nothing a
-  // standing rule could safely match (and no rule is ever read or written).
+  // An approved write request covers this exact method and path for the rest
+  // of the command; it never becomes a standing rule, so there is nothing a
+  // rule could safely match (and no rule is ever read or written).
   if (request.kind === "request" && input.decision === "allow_always")
     throw new ApiError(
       400,
       LOCAL_NETWORK_REQUEST_ONCE_ONLY_CODE,
-      "A write request can only be allowed once or denied.",
+      "A write request cannot be allowed permanently: allow it for this command or deny it.",
     );
 
   // A standing rule for a host the device can never match would be a promise

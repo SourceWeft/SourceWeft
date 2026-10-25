@@ -28,9 +28,9 @@ async function migrate(client: Client, schema: string) {
 }
 
 const insert = (
-  overrides: Record<string, string | number | null> = {},
+  overrides: Record<string, string | number | boolean | null> = {},
 ): [string, unknown[]] => {
-  const row: Record<string, string | number | null> = {
+  const row: Record<string, string | number | boolean | null> = {
     id: "r1",
     invocation_id: "inv",
     device_id: "pc",
@@ -87,6 +87,13 @@ describe("0065_local_network_request_kind", () => {
             )
           ).rows,
         ).toEqual([{ kind: "host", method: null, path: null }]);
+        expect(
+          (
+            await client.query(
+              "SELECT secret_in_body FROM local_network_requests",
+            )
+          ).rows,
+        ).toEqual([{ secret_in_body: false }]);
       },
     );
   });
@@ -147,6 +154,21 @@ describe("0065_local_network_request_kind", () => {
             method: "PUT",
             path: `/${"x".repeat(200)}`,
           }),
+          "local_network_requests_request_shape_check",
+        );
+        // The body flag exists on request rows only.
+        await client.query(
+          ...insert({
+            id: "sb",
+            ask_id: "sb",
+            kind: "request",
+            method: "PUT",
+            path: "/s",
+            secret_in_body: true,
+          }),
+        );
+        await rejected(
+          insert({ id: "h", ask_id: "h", secret_in_body: true }),
           "local_network_requests_request_shape_check",
         );
         // The dedupe key is unchanged: one row per (device, ask).

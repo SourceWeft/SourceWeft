@@ -294,22 +294,54 @@ describe("approvalExpiry", () => {
   });
 });
 
+describe("NETWORK_REASONS", () => {
+  test("the user's denial text is pinned, and no other denial reuses it", () => {
+    // The sidecar remembers non-user denials briefly but a user's denial for
+    // the whole command; it tells them apart by this exact text. Its
+    // USER_DENIAL_REASONS (sandbox-sidecar/src/network-policy.ts) must match.
+    expect(NETWORK_REASONS.denied).toBe("denied by user");
+    const userTexts = ["denied by user", "denied by the user"];
+    for (const [name, reason] of Object.entries(NETWORK_REASONS))
+      if (name !== "denied") expect(userTexts, name).not.toContain(reason);
+  });
+});
+
 describe("readAskShape", () => {
   test("a plain ask is a host ask and may not carry request fields", () => {
     expect(readAskShape({})).toEqual({
       kind: "host",
       method: null,
       path: null,
+      secretInBody: false,
     });
     expect(readAskShape({ kind: "host" })).toMatchObject({ kind: "host" });
     expect(readAskShape({ method: "POST" })).toBeNull();
+    // The body flag belongs to write requests only.
+    expect(readAskShape({ secretInBody: true })).toBeNull();
+    expect(readAskShape({ kind: "host", secretInBody: true })).toBeNull();
+    expect(readAskShape({ kind: "host", secretInBody: false })).toMatchObject({
+      secretInBody: false,
+    });
     expect(readAskShape({ kind: "host", path: "/x" })).toBeNull();
   });
 
   test("a request ask needs an upper-case method and an origin-form path", () => {
     expect(
       readAskShape({ kind: "request", method: "POST", path: "/v1/items/1" }),
-    ).toEqual({ kind: "request", method: "POST", path: "/v1/items/1" });
+    ).toEqual({
+      kind: "request",
+      method: "POST",
+      path: "/v1/items/1",
+      secretInBody: false,
+    });
+    expect(
+      readAskShape({
+        kind: "request",
+        method: "POST",
+        path: "/x",
+        secretInBody: true,
+      }),
+    ).toMatchObject({ secretInBody: true });
     for (const bad of [
       { kind: "request" },
       { kind: "request", method: "POST" },

@@ -78,8 +78,14 @@ test("network.ask has a strict envelope but a lenient payload", () => {
       kind: "request",
       method: "POST",
       path: "/v1/items",
+      secretInBody: true,
     }),
-  ).toMatchObject({ kind: "request", method: "POST", path: "/v1/items" });
+  ).toMatchObject({
+    kind: "request",
+    method: "POST",
+    path: "/v1/items",
+    secretInBody: true,
+  });
   // Program-controlled values reach the handler, which answers with a deny.
   for (const lenient of [
     { ...ask, port: 0 },
@@ -100,6 +106,8 @@ test("network.ask has a strict envelope but a lenient payload", () => {
     { ...ask, kind: 1 },
     { ...ask, method: 5 },
     { ...ask, path: {} },
+    { ...ask, secretInBody: "yes" },
+    { ...ask, secretInBody: 1 },
     { type: "network.ask", id: "call", askId: "a", host: "x" },
     { type: "network.decision", askId: "a", allow: true },
   ])

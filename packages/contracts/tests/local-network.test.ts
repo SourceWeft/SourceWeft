@@ -56,10 +56,17 @@ test("a pending request may be a write request with method and path, and old sha
     expiresAt: "2026-10-25T00:02:00.000Z",
   };
   assert.deepEqual(localNetworkRequestSchema.parse(base), base);
-  const write = { ...base, kind: "request", method: "POST", path: "/v1/items" };
+  const write = {
+    ...base,
+    kind: "request",
+    method: "POST",
+    path: "/v1/items",
+    secretInBody: true,
+  };
   assert.deepEqual(localNetworkRequestSchema.parse(write), write);
   for (const bad of [
     { ...base, kind: "rule" },
+    { ...base, kind: "request", method: "POST", secretInBody: "yes" },
     { ...base, kind: "request", method: "P".repeat(17) },
     { ...base, kind: "request", method: "POST", path: "/".repeat(201) },
   ])

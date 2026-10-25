@@ -145,6 +145,11 @@ export const localNetworkRequests = pgTable(
     port: integer("port").notNull(),
     method: text("method"),
     path: text("path"),
+    /**
+     * `request` rows only: the device saw a stored secret's value in the
+     * request body, so the approval card says the secret would be sent.
+     */
+    secretInBody: boolean("secret_in_body").notNull().default(false),
     status: text("status").notNull().default("pending"),
     scope: text("scope"),
     reason: text("reason"),
@@ -190,7 +195,7 @@ export const localNetworkRequests = pgTable(
     ),
     check(
       "local_network_requests_request_shape_check",
-      sql`(${table.kind} = 'host' and ${table.method} is null and ${table.path} is null) or (${table.kind} = 'request' and ${table.method} is not null and char_length(${table.method}) <= 16 and (${table.path} is null or char_length(${table.path}) <= 200))`,
+      sql`(${table.kind} = 'host' and ${table.method} is null and ${table.path} is null and not ${table.secretInBody}) or (${table.kind} = 'request' and ${table.method} is not null and char_length(${table.method}) <= 16 and (${table.path} is null or char_length(${table.path}) <= 200))`,
     ),
     check(
       "local_network_requests_port_check",

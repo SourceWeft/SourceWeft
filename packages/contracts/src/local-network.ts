@@ -47,7 +47,8 @@ export type LocalNetworkRequestStatus = z.infer<
 /**
  * `host`: may the command connect to this host. `request`: may it send this
  * write request to a host whose secret the user bound read-only. A request
- * approval is only ever "once" and never becomes a standing rule.
+ * approval covers that exact method and path for the rest of the command and
+ * never becomes a standing rule.
  */
 export const localNetworkRequestKindSchema = z.enum(["host", "request"]);
 export type LocalNetworkRequestKind = z.infer<
@@ -63,6 +64,11 @@ export const localNetworkRequestSchema = z.object({
   /** `kind: "request"` only: HTTP method and path (no query string). */
   method: z.string().max(16).nullable().optional(),
   path: z.string().max(200).nullable().optional(),
+  /**
+   * `kind: "request"` only: a stored secret's value is in the request body, so
+   * allowing it sends that secret to the host. Absent from older backends.
+   */
+  secretInBody: z.boolean().optional(),
   host: z.string().min(1).max(255),
   port: z.number().int().min(1).max(65535),
   /** First 200 characters of the command that opened the connection. */
