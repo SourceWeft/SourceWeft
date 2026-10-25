@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 /**
  * Host matching for the network allow list, written to agree with the
  * sandbox runtime's own matcher on the device so a rule the backend honours
@@ -83,4 +85,40 @@ export function matchesAnyNetworkPattern(
   patterns: readonly string[],
 ): boolean {
   return patterns.some((pattern) => matchesNetworkPattern(host, port, pattern));
+}
+
+/**
+ * The form of an allow-list entry the device's sandbox runtime will accept, or
+ * null when it would silently drop it. The runtime requires a dotted host (or a
+ * `*.` wildcard with at least two labels behind it) or an IPv6 literal in
+ * brackets; single-label names, bare `*` and unbracketed IPv6 are discarded,
+ * which in strict mode would make a stored rule look honoured when it is not.
+ */
+export function sidecarAllowEntry(pattern: string): string | null {
+  const value = pattern.trim().toLowerCase();
+  if (value.startsWith("*.")) {
+    const suffix = value.slice(2);
+    const labels = suffix.split(".");
+    return canonicalNetworkHost(suffix) === suffix &&
+      labels.length >= 2 &&
+      labels.every((label) => label.length > 0)
+      ? value
+      : null;
+  }
+  if (value.includes("*")) return null;
+  const host = canonicalNetworkHost(value);
+  if (!host) return null;
+  if (host.includes(":")) return isIP(host) === 6 ? `[${host}]` : null;
+  return host.includes(".") && !host.startsWith(".") ? host : null;
+}
+
+/**
+ * Whether a host can ever be matched by a stored rule: a dotted host name.
+ * Single-label names are not valid allow entries, and IP literals are the
+ * device guard's business, not something a standing approval should cover.
+ */
+export function isAllowableRuleHost(host: string): boolean {
+  const canonical = canonicalNetworkHost(host);
+  if (!canonical || isIP(canonical) !== 0) return false;
+  return sidecarAllowEntry(canonical) === canonical;
 }

@@ -27,6 +27,13 @@ export const LOCAL_NETWORK_TRUST_DOMAIN = "network";
 export const LOCAL_NETWORK_TRUST_TOOL_NAME = "network_access";
 export const LOCAL_NETWORK_TRUST_TARGET_TYPE = "host";
 
+/**
+ * "Allow for this workspace" is refused for a host no allow-list entry can
+ * match (a single-label name or an IP literal); "allow once" still works.
+ */
+export const LOCAL_NETWORK_HOST_NOT_ALLOWABLE_CODE =
+  "NETWORK_HOST_NOT_ALLOWABLE";
+
 export const localNetworkRequestStatusSchema = z.enum([
   "pending",
   "allowed",

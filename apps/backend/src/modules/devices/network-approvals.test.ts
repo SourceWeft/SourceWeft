@@ -26,6 +26,7 @@ vi.mock("./access", () => ({ requireDeviceAccess: vi.fn() }));
 import type { AgentToolTrustRuleRecord } from "../connectors/types";
 import {
   allowPatternsFromRules,
+  approvalExpiry,
   buildCommandNetworkPolicy,
   decisionFrameForRow,
   matchingNetworkRule,
@@ -238,5 +239,56 @@ describe("decisionFrameForRow", () => {
       decisionFrameForRow({ askId: "a", status: "pending", reason: null })
         .allow,
     ).toBe(false);
+  });
+});
+
+describe("allow list sent to the device", () => {
+  test("holds only entries the sandbox runtime keeps", () => {
+    const policy = buildCommandNetworkPolicy({
+      mode: "strict",
+      rules: [
+        rule({ id: "1", targetId: "api.example.com" }),
+        rule({ id: "2", targetId: "intranet" }),
+        rule({ id: "3", targetId: "2001:db8::1" }),
+        rule({ id: "4", targetId: "8.8.8.8" }),
+      ],
+      skills: [
+        {
+          name: "pdf",
+          sourceType: "builtin",
+          skillMd: '---\nname: pdf\nnetwork-domains:\n  - "*.cdn.example"\n---',
+        },
+      ],
+      now,
+    });
+    expect(policy.allow).toEqual([
+      "api.example.com",
+      "[2001:db8::1]",
+      "8.8.8.8",
+      "*.cdn.example",
+    ]);
+  });
+});
+
+describe("approvalExpiry", () => {
+  const T = new Date("2026-10-25T12:00:00Z");
+  test("is the approval window unless the command ends sooner", () => {
+    expect(
+      approvalExpiry(T, new Date(T.getTime() + 600_000)).toISOString(),
+    ).toBe("2026-10-25T12:02:00.000Z");
+    expect(
+      approvalExpiry(T, new Date(T.getTime() + 30_000)).toISOString(),
+    ).toBe("2026-10-25T12:00:30.000Z");
+  });
+  test("a missing or unusable deadline falls back to the window", () => {
+    for (const deadline of [null, undefined, new Date("garbage")])
+      expect(approvalExpiry(T, deadline).toISOString()).toBe(
+        "2026-10-25T12:02:00.000Z",
+      );
+  });
+  test("an already-passed deadline is not in the future", () => {
+    expect(
+      approvalExpiry(T, new Date(T.getTime() - 1)).getTime() <= T.getTime(),
+    ).toBe(true);
   });
 });

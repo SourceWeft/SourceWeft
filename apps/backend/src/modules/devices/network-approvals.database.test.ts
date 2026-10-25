@@ -200,7 +200,7 @@ async function world(
         ...extra.payload,
       },
       status: extra.status ?? options.status ?? "running",
-      deadline: new Date(Date.now() + 120_000),
+      deadline: new Date(Date.now() + 600_000),
     });
     return id;
   };
@@ -1314,4 +1314,126 @@ test("a viewer cannot grant network access, though denying stays possible", asyn
     decision: "deny",
   });
   assert.equal(denied.request.status, "denied");
+});
+
+test("a standing rule is refused for a host the device can never match; the request stays answerable once", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  for (const host of ["intranet", "8.8.8.8", "2001:db8::1"]) {
+    const row = await insertRow(w, invocationId, { host });
+    await assert.rejects(
+      approvals.respondToNetworkRequest({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        requestId: row.id,
+        decision: "allow_always",
+      }),
+      { code: "NETWORK_HOST_NOT_ALLOWABLE", statusCode: 400 },
+      host,
+    );
+    const [after] = (await requests(w.h.id)).filter((r) => r.id === row.id);
+    assert.equal(after!.status, "pending", host);
+    assert.equal(after!.resolvedAt, null, host);
+    const once = await approvals.respondToNetworkRequest({
+      userId: w.h.userId,
+      workspaceId: w.workspaceId,
+      requestId: row.id,
+      decision: "allow_once",
+    });
+    assert.equal(once.request.scope, "once");
+  }
+  assert.deepEqual(await rulesOf(w), []);
+  assert.equal(
+    (await device.waitFor((f) => f.type === "network.decision")).allow,
+    true,
+  );
+});
+
+test("the allow list in the next command's policy keeps only runtime-valid entries", async () => {
+  const w = await world();
+  const tenant = {
+    teamId: w.teamId,
+    workspaceId: w.workspaceId,
+    userId: w.h.userId,
+  };
+  for (const targetId of ["api.example.com", "intranet", "2001:db8::1"])
+    await schema.db.insert(schema.agentToolTrustRules).values({
+      id: randomUUID(),
+      ...tenant,
+      domain: "network",
+      toolName: "network_access",
+      targetType: "host",
+      targetId,
+      allowedRiskLevels: ["medium"],
+      status: "active",
+      expiresAt: new Date(Date.now() + 3600_000),
+    });
+  const policy = await approvals.resolveCommandNetworkPolicy({
+    deviceId: w.h.id,
+    tenant,
+    skills: [],
+  });
+  assert.deepEqual([...policy.allow].sort(), [
+    "[2001:db8::1]",
+    "api.example.com",
+  ]);
+});
+
+test("a pending request lapses with its command: min(window, the command's own deadline)", async () => {
+  const w = await world();
+  const device = await connectDevice(w.h.token);
+  const soon = await w.invoke();
+  const deadline = new Date(Date.now() + 30_000);
+  await schema.db
+    .update(schema.localToolInvocations)
+    .set({ deadline })
+    .where(eq(schema.localToolInvocations.id, soon));
+  device.ask(soon, "short", "short.example", 443);
+  const [short] = await until(
+    () => requests(w.h.id),
+    (rows) => rows.length === 1,
+  );
+  assert.equal(short!.expiresAt.getTime(), deadline.getTime());
+  const [card] = (
+    await approvals.listPendingNetworkRequests({
+      userId: w.h.userId,
+      workspaceId: w.workspaceId,
+      threadId: w.threadId,
+    })
+  ).requests;
+  assert.equal(new Date(card!.expiresAt).getTime(), deadline.getTime());
+
+  // A long-running command keeps the full window.
+  const long = await w.invoke();
+  device.ask(long, "long", "long.example", 443);
+  const rows = await until(
+    () => requests(w.h.id),
+    (list) => list.length === 2,
+  );
+  const longRow = rows.find((r) => r.askId === "long")!;
+  assert.equal(
+    longRow.expiresAt.getTime() - longRow.createdAt.getTime(),
+    120_000,
+  );
+
+  // A command already past its deadline gets a deny, not a card.
+  const late = await w.invoke();
+  await schema.db
+    .update(schema.localToolInvocations)
+    .set({ deadline: new Date(Date.now() - 1000) })
+    .where(eq(schema.localToolInvocations.id, late));
+  device.ask(late, "late", "late.example", 443);
+  assert.deepEqual(
+    await device.waitFor(
+      (f) => f.type === "network.decision" && f.askId === "late",
+    ),
+    {
+      type: "network.decision",
+      askId: "late",
+      allow: false,
+      reason: "approval timed out",
+    },
+  );
+  assert.equal((await requests(w.h.id)).length, 2);
 });

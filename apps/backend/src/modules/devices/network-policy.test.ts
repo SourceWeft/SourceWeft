@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
+  isAllowableRuleHost,
+  sidecarAllowEntry,
   canonicalNetworkHost,
   matchesAnyNetworkPattern,
   matchesNetworkPattern,
@@ -109,4 +113,75 @@ describe("matchesNetworkPattern (sandbox runtime semantics)", () => {
     );
     expect(matchesAnyNetworkPattern("a.x.io", 443, [])).toBe(false);
   });
+});
+
+const SRT_MODULE = new URL(
+  "../../../../desktop/sandbox-sidecar/node_modules/@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js",
+  import.meta.url,
+);
+
+describe("sidecarAllowEntry", () => {
+  test("keeps dotted hosts and wildcards, brackets IPv6, drops what the runtime would drop", () => {
+    expect(sidecarAllowEntry("API.Example.com")).toBe("api.example.com");
+    expect(sidecarAllowEntry("*.example.com")).toBe("*.example.com");
+    expect(sidecarAllowEntry("2001:DB8::1")).toBe("[2001:db8::1]");
+    expect(sidecarAllowEntry("8.8.8.8")).toBe("8.8.8.8");
+    for (const dropped of [
+      "intranet",
+      "localhost",
+      "*",
+      "*.com",
+      "*.",
+      "a.*.example.com",
+      "",
+      ".example.com",
+      "exa mple.com",
+      "not:an:ip",
+    ])
+      expect(sidecarAllowEntry(dropped), dropped).toBeNull();
+  });
+
+  test("only dotted host names can back a standing rule", () => {
+    expect(isAllowableRuleHost("api.example.com")).toBe(true);
+    for (const host of [
+      "intranet",
+      "localhost",
+      "8.8.8.8",
+      "2001:db8::1",
+      "[::1]",
+      "",
+      "*.example.com",
+    ])
+      expect(isAllowableRuleHost(host), host).toBe(false);
+  });
+
+  test.skipIf(!existsSync(SRT_MODULE))(
+    "agrees with the runtime's own list check",
+    async () => {
+      const srt = (await import(pathToFileURL(SRT_MODULE.pathname).href)) as {
+        isValidAllowedDomainEntry: (value: string) => boolean;
+      };
+      for (const entry of [
+        "api.example.com",
+        "*.example.com",
+        "2001:db8::1",
+        "8.8.8.8",
+        "intranet",
+        "localhost",
+        "*.com",
+        "*",
+        "a.*.example.com",
+        "foo",
+        ".example.com",
+        "example.com.",
+        "xn--bcher-kva.example",
+      ]) {
+        const ours = sidecarAllowEntry(entry);
+        // Whatever we emit, the runtime keeps; what we drop is never kept for us.
+        if (ours) expect(srt.isValidAllowedDomainEntry(ours), entry).toBe(true);
+        else if (!entry.includes(":") && entry !== "localhost")
+          expect(srt.isValidAllowedDomainEntry(entry), entry).toBe(false);
+      }
+    },
+  );
 });

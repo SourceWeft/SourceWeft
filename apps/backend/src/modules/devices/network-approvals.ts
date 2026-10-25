@@ -10,6 +10,7 @@ import {
 } from "@sourceweft/db";
 import {
   LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS,
+  LOCAL_NETWORK_HOST_NOT_ALLOWABLE_CODE,
   LOCAL_NETWORK_TRUST_DOMAIN,
   LOCAL_NETWORK_TRUST_TARGET_TYPE,
   LOCAL_NETWORK_TRUST_TOOL_NAME,
@@ -34,7 +35,9 @@ import type { AgentToolTrustRuleRecord } from "../connectors/types";
 import { requireDeviceAccess, type LocalExecutionCaller } from "./access";
 import {
   canonicalNetworkHost,
+  isAllowableRuleHost,
   matchesAnyNetworkPattern,
+  sidecarAllowEntry,
 } from "./network-policy";
 import {
   MAX_NETWORK_POLICY_ENTRIES,
@@ -83,6 +86,20 @@ export const MAX_PENDING_NETWORK_REQUESTS_PER_DEVICE = 100;
 export const NETWORK_REQUEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const NETWORK_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 let lastPrunedAt = 0;
+
+/**
+ * When a pending request lapses: the approval window, or the command's own
+ * deadline if that comes first. A missing or unparseable deadline falls back to
+ * the window alone.
+ */
+export function approvalExpiry(
+  now: Date,
+  deadline: Date | null | undefined,
+): Date {
+  const window = now.getTime() + LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS * 1000;
+  const limit = deadline ? deadline.getTime() : Number.NaN;
+  return new Date(Number.isFinite(limit) ? Math.min(window, limit) : window);
+}
 
 export function networkTrustScope(host: string): AgentToolTrustScope {
   return {
@@ -164,11 +181,13 @@ export function buildCommandNetworkPolicy(input: {
   // still an allow-list mode, so only open needs no list.
   if (input.mode === "open") return { mode: "open", allow: [], suggested: {} };
   const skills = resolveSkillNetworkDomains(input.skills);
+  // Only entries the device's runtime will actually keep.
   const allow = [
-    ...new Set([
-      ...allowPatternsFromRules(input.rules, input.now),
-      ...skills.trusted,
-    ]),
+    ...new Set(
+      [...allowPatternsFromRules(input.rules, input.now), ...skills.trusted]
+        .map(sidecarAllowEntry)
+        .filter((entry): entry is string => entry !== null),
+    ),
   ].slice(0, MAX_NETWORK_POLICY_ENTRIES);
   return { mode: input.mode, allow, suggested: skills.suggested };
 }
@@ -338,6 +357,11 @@ export async function handleNetworkAsk(
   )
     return denyFrame(ask.askId, NETWORK_REASONS.tooMany);
 
+  // The card's countdown never outlives the command it belongs to.
+  const expiresAt = approvalExpiry(now, invocation.deadline);
+  if (expiresAt.getTime() <= now.getTime())
+    return denyFrame(ask.askId, NETWORK_REASONS.timedOut);
+
   const suggestedBy = suggestedSkillFor(invocation.payload, host, ask.port);
   const [created] = await db
     .insert(localNetworkRequests)
@@ -354,9 +378,7 @@ export async function handleNetworkAsk(
       port: ask.port,
       suggestedBy,
       createdAt: now,
-      expiresAt: new Date(
-        now.getTime() + LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS * 1000,
-      ),
+      expiresAt,
     })
     .onConflictDoNothing()
     .returning({ id: localNetworkRequests.id });
@@ -608,6 +630,15 @@ export async function respondToNetworkRequest(input: {
       "This network request was not found.",
     );
   const request = found.request;
+
+  // A standing rule for a host the device can never match would be a promise
+  // the sandbox does not keep. Refused up front: the request stays answerable.
+  if (input.decision === "allow_always" && !isAllowableRuleHost(request.host))
+    throw new ApiError(
+      400,
+      LOCAL_NETWORK_HOST_NOT_ALLOWABLE_CODE,
+      "This host cannot be allowed permanently. Allow it once instead.",
+    );
 
   // Answering needs the right to run commands here at all (a viewer cannot);
   // a standing grant is a workspace-level approval. Checked before the row is
