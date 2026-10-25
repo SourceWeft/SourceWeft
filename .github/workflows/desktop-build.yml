@@ -278,7 +278,7 @@ jobs:
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
           --test macos_sandbox --test macos_signing --test local_execution
           --test local_workspaces --test local_binary_reads --no-run
-      - name: Real-sandbox suite (readiness, Seatbelt execution, signing)
+      - name: Real-sandbox suite (readiness, Seatbelt execution, allow-jit signing)
         env:
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
@@ -291,6 +291,16 @@ jobs:
           export http_proxy=http://127.0.0.1:9
           export https_proxy=http://127.0.0.1:9
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
-            --test macos_sandbox --test macos_signing --test local_execution \
+            --test macos_sandbox --test local_execution \
             --test local_workspaces --test local_binary_reads \
             -- --include-ignored --test-threads=1
+          # Signing: only the positive test runs on the hosted VM. The negative test
+          # (`bundle_signed_without_allow_jit_loses_jit`) needs a host that enforces the
+          # hardened-runtime JIT entitlement; the hosted macos-14 VM does not (run 40186818886:
+          # the copy signed without allow-jit still mapped "JS JIT generated code"), so there it
+          # would fail for a reason that says nothing about our bundle. It is run locally on
+          # real hardware instead (see the macos_signing.rs module doc).
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
+            --test macos_signing \
+            -- --include-ignored --test-threads=1 --exact \
+            bundle_signed_with_allow_jit_runs_with_jit

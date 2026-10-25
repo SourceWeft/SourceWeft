@@ -16,6 +16,12 @@
 //! generated code" region in `vmmap`, which exists only when the entitlement is present, so
 //! that region is the assertion; the functional probe and wrapped command are asserted to pass
 //! in both cases so a regression in either direction is visible.
+//!
+//! `bundle_signed_without_allow_jit_loses_jit` requires a host that enforces the hardened-runtime
+//! JIT entitlement, i.e. real hardware. The hosted GitHub macOS VM (macos-14, CI run 40186818886)
+//! does not: the copy signed without `allow-jit` still mapped "JS JIT generated code" there, so
+//! the `macos-sandbox` CI job runs only `bundle_signed_with_allow_jit_runs_with_jit`; run the
+//! negative test locally.
 use serde_json::{json, Value};
 use sourceweft_desktop::local_host::{
     execution::Executions,
