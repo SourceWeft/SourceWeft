@@ -771,6 +771,12 @@ export function CredentialsDialog({
 
           {!keyMethod && authType === "oauth" ? oauthPanel : null}
 
+          {install?.source === "market" ? (
+            <p className="text-[11px] text-muted-foreground">
+              {t("credentials.catalogNotice")}
+            </p>
+          ) : null}
+
           {formError ? (
             <p className="text-xs text-destructive" role="alert">
               {formError}

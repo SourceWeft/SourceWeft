@@ -482,6 +482,16 @@ export const marketMcpToolRevisions = pgTable(
       withTimezone: true,
       mode: "date",
     }).notNull(),
+    // sha256 of the pinned endpoint (scheme, host, port, path, query) the list
+    // was read from, so a later change of the listing's endpoint shows the
+    // list as stale. Null for the owner's lists, which are not pinned. Never
+    // the endpoint itself.
+    endpointKey: text("endpoint_key"),
+    // The platform snapshot's approved reference profile (tier, role, scopes,
+    // date); never an account identifier. Null for the other sources.
+    referenceProfileJson: jsonb("reference_profile_json").$type<
+      Record<string, unknown>
+    >(),
   },
   (table) => [
     check(

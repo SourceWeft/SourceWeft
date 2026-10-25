@@ -1361,11 +1361,10 @@ export class McpService {
           ),
         ),
       );
-      await recordMemberToolObservation({
-        workspaceId: workspace.id,
-        installId: install.id,
-        userId: input.userId,
+      recordMemberToolObservation({
+        install,
         tools: accepted,
+        complete: !response.truncated && response.skippedOversize === 0,
       });
       return response;
     } catch (error) {

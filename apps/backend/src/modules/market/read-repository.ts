@@ -38,7 +38,13 @@ import {
   ownerSubmittedTools,
 } from "./claims/overrides";
 import { findOwnerLayersByServerIds } from "./claims/repository";
-import { readToolRevisionsPage, readToolsRevision } from "./tool-revisions";
+import {
+  applyReferenceToolsToManifest,
+  manifestListsTools,
+  readReferenceTools,
+  readToolRevisionsPage,
+  readToolsRevision,
+} from "./tool-revisions";
 import {
   findBrandPublisherDomains,
   findProductGroupMembers,
@@ -878,13 +884,24 @@ export async function findMcp(
       findOwnerLayersByServerIds([row.id]),
     ]);
     const ownerLayer = ownerLayers.get(row.id) ?? { row: null, claimed: false };
-    const toolsRevision = options.toolsRevision
-      ? await readToolsRevision(
-          row.id,
-          ownerSubmittedTools(ownerLayer.row?.toolsJson).length > 0,
-        )
-      : null;
     const latest = versions[0];
+    // The platform's snapshot or the members' observation fills in for a
+    // server whose owner has not listed its tools and whose registry entry or
+    // probe found none (Issue #367).
+    const ownerToolsVisible =
+      ownerSubmittedTools(ownerLayer.row?.toolsJson).length > 0;
+    const baseToolsListed = manifestListsTools(latest?.manifestJson);
+    const [toolsRevision, referenceTools] = await Promise.all([
+      options.toolsRevision
+        ? readToolsRevision(row.id, ownerToolsVisible, baseToolsListed)
+        : null,
+      readReferenceTools(row.id, ownerToolsVisible, baseToolsListed),
+    ]);
+    const withReference = (manifestJson: Record<string, unknown>) =>
+      applyReferenceToolsToManifest(
+        applyOwnerOverridesToManifest(manifestJson, ownerLayer.row),
+        referenceTools,
+      );
     const locale = options.locale ?? "en";
     const [[readme, overviews, overviewLocales, readmeShared], relatedProduct] =
       await Promise.all([
@@ -906,7 +923,7 @@ export async function findMcp(
     // The owner's corrections (Issue #367, W7) are the top layer of the item
     // and of every published version's manifest, so the manifest route, the
     // page and the scorecard agree whichever version is asked for.
-    const item = applyOwnerOverridesToItem(
+    const ownerItem = applyOwnerOverridesToItem(
       mapItemRow({
         row,
         categories: categoryMap.get(row.id) ?? [],
@@ -916,6 +933,13 @@ export async function findMcp(
       }),
       ownerLayer,
     );
+    const item = referenceTools
+      ? {
+          ...ownerItem,
+          toolsCount: referenceTools.tools.length,
+          toolsValidation: null,
+        }
+      : ownerItem;
     return {
       item: {
         ...item,
@@ -924,10 +948,7 @@ export async function findMcp(
       },
       versions: versions.map((version) => ({
         ...mapVersionRow(version),
-        manifestJson: applyOwnerOverridesToManifest(
-          version.manifestJson,
-          ownerLayer.row,
-        ),
+        manifestJson: withReference(version.manifestJson),
       })),
       readme: readme
         ? mcpReadmeView({ repoUrl: row.repoUrl, ...readme })
@@ -952,10 +973,7 @@ export async function findMcp(
       // carries the owner's layer (W7), so owner corrections count.
       score: latest
         ? scoreMcp({
-            manifestJson: applyOwnerOverridesToManifest(
-              latest.manifestJson,
-              ownerLayer.row,
-            ),
+            manifestJson: withReference(latest.manifestJson),
             provenanceJson: latest.provenanceJson,
             readmeStatus: readme?.readmeStatus ?? null,
             // Any visible overview language, not only the one asked for.
@@ -988,11 +1006,15 @@ export async function listMcpToolRevisions(
     )
     .limit(1);
   if (!row) return null;
-  const ownerLayers = await findOwnerLayersByServerIds([row.id]);
+  const [ownerLayers, latestVersion] = await Promise.all([
+    findOwnerLayersByServerIds([row.id]),
+    latestVersionsByItemIds([row.id]),
+  ]);
   return readToolRevisionsPage({
     itemId: row.id,
     ownerToolsVisible:
       ownerSubmittedTools(ownerLayers.get(row.id)?.row?.toolsJson).length > 0,
+    baseToolsListed: manifestListsTools(latestVersion.get(row.id)?.manifestJson),
     limit: query.limit,
     before: query.before,
   });

@@ -433,6 +433,11 @@
         "unsupportedPackage": "該軟體包類型無法在沙箱中執行"
       }
     },
+    "toolsReference": {
+      "platformIndexed": "由 SourceWeft 使用標準測試帳號讀取 · {date}",
+      "memberObserved": "來自已連接帳號的觀測 · {date}。不同帳號看到的可能不同。",
+      "stale": "自讀取以來，伺服器地址已變更。"
+    },
     "toolChangeLog": {
       "heading": "變更記錄",
       "intro": "每條記錄是此條目工具列表的一次變化，並不是伺服器自身的版本。",
@@ -2648,6 +2653,7 @@
       },
       "headersHint": "每行填寫一個請求標頭。儲存後將不再顯示機密值。",
       "noAuthNote": "此 MCP 伺服器無需憑證。",
+      "catalogNotice": "SourceWeft 會保留此伺服器公開的工具的名稱、描述和參數結構，方便其他人瞭解它提供什麼。絕不保留你的資料或憑證。",
       "oauthNote": "此 MCP 伺服器使用 OAuth。請與提供方連接你的帳戶——你將被重新導向以授予存取權限，然後返回此處。你的權杖將加密儲存並自動重新整理。",
       "optionalKeyNote": "此 MCP 伺服器無需憑證即可使用。如有 API 金鑰，可在此新增。",
       "method": {

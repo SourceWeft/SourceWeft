@@ -129,6 +129,23 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
+describe("the catalog notice", () => {
+  const notice =
+    "SourceWeft keeps the names, descriptions and schemas of the tools this server exposes so others can see what it offers. It never keeps your data or credentials.";
+
+  it("tells a member connecting a catalog server what is kept, in one small line", async () => {
+    await open();
+    expect(text()).toContain(notice);
+  });
+
+  it("is not shown for a server that is not from the catalog", async () => {
+    await open({
+      install: oauthInstall({ source: "custom", marketIdentifier: null }),
+    });
+    expect(text()).not.toContain("SourceWeft keeps the names");
+  });
+});
+
 describe("connecting with OAuth", () => {
   it("asks for the provider's URL with the return destination, then says where it is going", async () => {
     api.authorizeWorkspaceMcpOAuth.mockResolvedValue({

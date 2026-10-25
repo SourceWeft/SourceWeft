@@ -1,5 +1,7 @@
 import type { DynamicStructuredTool } from "@langchain/core/tools";
 import type { DiscoverWorkspaceMcpToolsResponse } from "@sourceweft/contracts";
+import { recordMemberObservedTools } from "../market/tool-revisions/member-observed";
+import { logger } from "../../shared/logger";
 
 /** Limits on what one member's discovery may return, whatever the server lists. */
 export const MEMBER_DISCOVERY_MAX_TOOLS = 200;
@@ -85,17 +87,44 @@ export function boundMemberTools(
 }
 
 /**
- * Hook for tool-list observations: called with the bounded tools one member
- * just discovered through their own connection. It deliberately does nothing
- * today — nothing discovered here is written to the catalog or to the
- * install's shared tool rows. A later change may record it here, with its own
- * consent and quality rules.
+ * Keeps what one member's own connection returned in the public listing's
+ * tool history (Issue #367), when the install is a catalog listing connected
+ * at that listing's own address (see `recordMemberObservedTools` for every
+ * condition). Only the tools are passed on: no member, workspace or install
+ * identifier, so nothing about who connected can reach the catalog.
+ *
+ * Fire-and-forget: it returns at once, and a failure to record is logged and
+ * never reaches the member's connection.
  */
-export async function recordMemberToolObservation(_input: {
-  workspaceId: string;
-  installId: string;
-  userId: string;
+export function recordMemberToolObservation(input: {
+  install: {
+    source: string;
+    marketIdentifier: string | null;
+    endpointUrl: string | null;
+  };
   tools: MemberToolInput[];
-}): Promise<void> {
-  // Intentionally empty.
+  /** False when the member's list was cut off (count or size bounds). */
+  complete: boolean;
+  record?: typeof recordMemberObservedTools;
+}): void {
+  if (input.install.source !== "market") return;
+  const record = input.record ?? recordMemberObservedTools;
+  void Promise.resolve()
+    .then(() =>
+      record({
+        marketIdentifier: input.install.marketIdentifier,
+        endpointUrl: input.install.endpointUrl,
+        tools: input.tools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        })),
+        complete: input.complete,
+      }),
+    )
+    .catch((error: unknown) => {
+      logger.warn("MCP member tool observation was not recorded", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
