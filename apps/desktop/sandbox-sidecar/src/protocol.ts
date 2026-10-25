@@ -165,6 +165,11 @@ export type SidecarEvent = {
   /** `kind: "request"` only: the write request awaiting approval. `path` has no query string. */
   method?: string;
   path?: string;
+  /**
+   * `kind: "request"` only: the request's body carries a placeholder of a stored secret, so
+   * approving it lets the real value be sent in that body. Absent for an ordinary write approval.
+   */
+  secretInBody?: true;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -176,7 +181,7 @@ export type TlsInit = { caDir: string };
 
 /**
  * One secret to mask for a command. The command sees only a placeholder in `envVar`; the proxy
- * puts `value` into requests to `hosts` (domain patterns, no port, no IP literal) and nowhere
+ * puts `value` into requests to `hosts` (exact host names: no wildcard, no port, no IP literal) and nowhere
  * else. For a `readOnly` secret, requests other than GET, HEAD and OPTIONS to those hosts need the
  * user's approval (an `ask` event with `kind: "request"`). `value` is never logged, audited,
  * echoed in an error, or returned.

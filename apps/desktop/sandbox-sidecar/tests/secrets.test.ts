@@ -28,7 +28,7 @@ function code(fn: () => unknown): string | undefined {
 }
 
 test("parseSecrets accepts a well-formed list and returns plain copies", () => {
-  const input = [secret(), secret({ envVar: "NPM_TOKEN", hosts: ["registry.npmjs.org", "*.npmjs.org"], readOnly: true })];
+  const input = [secret(), secret({ envVar: "NPM_TOKEN", hosts: ["registry.npmjs.org", "npm.example.org"], readOnly: true })];
   assert.deepEqual(parseSecrets(input), input);
   assert.deepEqual(parseSecrets([]), []);
 });
@@ -54,6 +54,13 @@ test("parseSecrets enforces the shape and the limits, always as BAD_REQUEST", ()
     [secret({ hosts: [7 as unknown as string] })],
     [secret({ hosts: ["*"] })],
     [secret({ hosts: ["*.com"] })],
+    // Secret hosts are exact names: no wildcard at all, even a narrow one, or one under a public
+    // suffix that many unrelated parties share.
+    [secret({ hosts: ["*.github.com"] })],
+    [secret({ hosts: ["*.github.io"] })],
+    [secret({ hosts: ["*.co.uk"] })],
+    [secret({ hosts: ["*.vercel.app"] })],
+    [secret({ hosts: ["api.*.com"] })],
     [secret({ hosts: ["api.github.com:443"] })],
     [secret({ hosts: ["10.0.0.1"] })],
     [secret({ hosts: ["8.8.8.8"] })],
@@ -68,15 +75,17 @@ test("parseSecrets enforces the shape and the limits, always as BAD_REQUEST", ()
   for (const input of bad) {
     assert.equal(code(() => parseSecrets(input)), "BAD_REQUEST", JSON.stringify(input).slice(0, 120));
   }
-  // The largest accepted: 20 secrets, a 4096-byte value, 50 hosts.
+  // The largest accepted: 20 secrets, a 4096-byte value, 50 hosts for one secret, 200 hosts in all.
+  const hosts = (n: number, tag: string) => Array.from({ length: n }, (_, j) => `h${j}.${tag}.example.com`);
   const biggest = Array.from({ length: 20 }, (_, i) =>
-    secret({
-      envVar: `S${i}`,
-      value: "x".repeat(4096),
-      hosts: Array.from({ length: 50 }, (_, j) => `h${j}.example.com`),
-    }),
+    secret({ envVar: `S${i}`, value: "x".repeat(4096), hosts: hosts(10, `s${i}`) }),
   );
   assert.equal(parseSecrets(biggest).length, 20);
+  assert.equal(parseSecrets([secret({ hosts: hosts(50, "one") })]).length, 1);
+  // One host more across the whole wrap is refused, and the message names the limit.
+  const tooMany = [...biggest.slice(0, 19), secret({ envVar: "LAST", hosts: hosts(11, "last") })];
+  assert.equal(code(() => parseSecrets(tooMany)), "BAD_REQUEST");
+  assert.throws(() => parseSecrets(tooMany), /at most 200 hosts across all secrets/);
 });
 
 test("registerSecrets refuses when TLS termination is not active, before registering anything", () => {

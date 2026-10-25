@@ -28,6 +28,12 @@ const MAX_SECRETS = 20;
 const MAX_VALUE_BYTES = 4096;
 /** The most hosts one secret may be bound to. */
 const MAX_HOSTS = 50;
+/**
+ * The most hosts across all of one command's secrets. The host adds every bound host to the
+ * command's network allow list (which the sidecar caps at 500 entries), so this leaves room
+ * for the user's own rules.
+ */
+const MAX_TOTAL_HOSTS = 200;
 /** The longest environment variable name. */
 const MAX_NAME_LENGTH = 128;
 const NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
@@ -51,11 +57,14 @@ export type SentinelRegistryLike = {
 const bad = (message: string): SecretsError => new SecretsError("BAD_REQUEST", message);
 
 /**
- * A host a secret may be bound to: a domain or `*.domain` pattern srt accepts, with no port
- * (srt matches secret hosts by name only, so a port would silently never match) and no IP
- * literal (a placeholder bound to an address cannot be told apart from its spellings).
+ * A host a secret may be bound to: an exact domain name srt accepts, with no wildcard (a pattern
+ * such as `*.github.io` or `*.vercel.app` would hand the secret to every tenant of a shared
+ * suffix, and even a narrow one widens what a leaked placeholder can reach), no port (srt matches
+ * secret hosts by name only, so a port would silently never match) and no IP literal (a
+ * placeholder bound to an address cannot be told apart from its spellings).
  */
 function isBindableHost(entry: string): boolean {
+  if (entry.includes("*")) return false;
   if (!isValidAllowedDomainEntry(entry)) return false;
   const { hostPattern, port } = splitDomainPatternPort(entry);
   if (port !== undefined) return false;
@@ -65,9 +74,9 @@ function isBindableHost(entry: string): boolean {
 /**
  * Validates the `secrets` of a `wrap` request: at most 20; names `[A-Z_][A-Z0-9_]*` and unique;
  * values non-empty, at most 4096 bytes and free of control characters (a value is put into an HTTP
- * header, where a line break would let it forge headers); one to 50 bound hosts that each pass
- * `isValidAllowedDomainEntry` and are neither wider than `*.domain.tld` nor an IP literal; and a
- * boolean `readOnly`. Returns plain copies. Throws `BAD_REQUEST` without ever quoting a value.
+ * header, where a line break would let it forge headers); one to 50 bound hosts (200 across all
+ * the secrets) that each pass `isValidAllowedDomainEntry` and are exact names: no wildcard, no port,
+ * no IP literal; and a boolean `readOnly`. Returns plain copies. Throws `BAD_REQUEST` without ever quoting a value.
  */
 export function parseSecrets(value: unknown): WrapSecret[] {
   if (!Array.isArray(value)) throw bad("\"wrap\" request secrets must be an array");
@@ -75,6 +84,7 @@ export function parseSecrets(value: unknown): WrapSecret[] {
     throw bad(`"wrap" request secrets must have at most ${MAX_SECRETS} entries`);
   }
   const seen = new Set<string>();
+  let totalHosts = 0;
   return value.map((raw: unknown, index): WrapSecret => {
     const at = `secrets[${index}]`;
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
@@ -99,10 +109,12 @@ export function parseSecrets(value: unknown): WrapSecret[] {
     }
     for (const host of hosts) {
       if (typeof host !== "string" || !isBindableHost(host)) {
-        throw bad(
-          `${at}.hosts entries must be domains or *.domain patterns without a port or an IP literal`,
-        );
+        throw bad(`${at}.hosts entries must be exact domain names: no wildcard, port or IP literal`);
       }
+    }
+    totalHosts += hosts.length;
+    if (totalHosts > MAX_TOTAL_HOSTS) {
+      throw bad(`"wrap" request secrets must bind at most ${MAX_TOTAL_HOSTS} hosts across all secrets`);
     }
     if (typeof readOnly !== "boolean") throw bad(`${at}.readOnly must be a boolean`);
     return { envVar, value: secretValue, hosts: [...(hosts as string[])], readOnly };

@@ -643,7 +643,7 @@ test("decideRequest: the address guard runs first and nothing is asked", async (
   }
 });
 
-test("decideRequest: raises a request ask in any mode, then caches the approval per command and host", async () => {
+test("decideRequest: raises a request ask in any mode, then caches the approval per command, method, host and path", async () => {
   for (const mode of ["open", "ask", "strict"] as const) {
     const h = makeHarness();
     h.policy.register("c1", net(mode));
@@ -661,14 +661,20 @@ test("decideRequest: raises a request ask in any mode, then caches the approval 
     });
     h.answer({ allow: true });
     assert.deepEqual(await first, { allow: true });
-    // Any later write to that host in this command is covered, whatever the method or path.
-    assert.deepEqual(await h.policy.decideRequest({ ...WRITE, method: "DELETE", path: "/other" }), { allow: true });
+    // The same method and path (the query is not part of it) is covered...
+    assert.deepEqual(await h.policy.decideRequest({ ...WRITE, host: "api.example.com", path: "/v1/things/7?x=2" }), {
+      allow: true,
+    });
     assert.equal(h.asks.length, 1);
-    // Another host is a new question.
-    const other = h.policy.decideRequest({ ...WRITE, host: "other.example.com" });
-    assert.equal(h.asks.length, 2);
-    h.answer({ allow: true });
-    await other;
+    // ...but another method, path or host is a new question each time.
+    let expected = 1;
+    for (const change of [{ method: "DELETE" }, { path: "/v1/things/8" }, { host: "other.example.com" }]) {
+      const next = h.policy.decideRequest({ ...WRITE, ...change });
+      expected += 1;
+      assert.equal(h.asks.length, expected, JSON.stringify(change));
+      h.answer({ allow: true });
+      await next;
+    }
   }
 });
 
@@ -702,14 +708,56 @@ test("decideRequest: a host approval is not a write approval, and the other way 
   assert.equal(await h.policy.decide({ host: "api.example.com", port: 443 }), true);
 });
 
-test("decideRequest: concurrent writes to one host share a single ask", async () => {
+test("decideRequest: concurrent identical writes share a single ask; different ones do not", async () => {
   const h = makeHarness();
   h.policy.register("c1", net("ask"));
   const a = h.policy.decideRequest(WRITE);
-  const b = h.policy.decideRequest({ ...WRITE, method: "POST", path: "/x" });
+  const b = h.policy.decideRequest({ ...WRITE, path: "/v1/things/7?other=1" });
   assert.equal(h.asks.length, 1);
+  const c = h.policy.decideRequest({ ...WRITE, method: "POST", path: "/x" });
+  assert.equal(h.asks.length, 2);
   h.answer({ allow: true });
-  assert.deepEqual(await Promise.all([a, b]), [{ allow: true }, { allow: true }]);
+  h.answer({ allow: true });
+  assert.deepEqual(await Promise.all([a, b, c]), [{ allow: true }, { allow: true }, { allow: true }]);
+});
+
+test("decideRequest: an approved POST on one path does not authorise another path or another method", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const comment = { ...WRITE, method: "POST", path: "/issues/1/comments" };
+  const first = h.policy.decideRequest(comment);
+  h.answer({ allow: true });
+  assert.deepEqual(await first, { allow: true });
+  const gist = h.policy.decideRequest({ ...comment, path: "/gists" });
+  assert.equal(h.asks.length, 2, "POST /gists is its own question");
+  h.answer({ allow: false, reason: "denied by user" });
+  assert.equal((await gist).allow, false);
+  // Paths that differ only after the 200 characters shown on the card are still different.
+  const long = `/${"a".repeat(250)}`;
+  const one = h.policy.decideRequest({ ...comment, path: `${long}1` });
+  h.answer({ allow: true });
+  await one;
+  const two = h.policy.decideRequest({ ...comment, path: `${long}2` });
+  assert.equal(h.asks.length, 4, "the cache key is the whole path");
+  h.answer({ allow: true });
+  await two;
+});
+
+test("decideRequest: a request whose body holds a stored secret is its own question, flagged on the ask", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const body = h.policy.decideRequest({ ...WRITE, secretInBody: true });
+  assert.equal(h.asks[0]?.secretInBody, true);
+  h.answer({ allow: true });
+  assert.deepEqual(await body, { allow: true });
+  // Approving the body does not approve the write, nor the write the body.
+  const plain = h.policy.decideRequest(WRITE);
+  assert.equal(h.asks.length, 2);
+  assert.equal(h.asks[1]?.secretInBody, undefined);
+  h.answer({ allow: true });
+  await plain;
+  await h.policy.decideRequest({ ...WRITE, secretInBody: true });
+  assert.equal(h.asks.length, 2, "the body approval is remembered for that exact request");
 });
 
 test("decideRequest: a user denial is cached; a timeout is cached for 60 s", async () => {
@@ -718,7 +766,7 @@ test("decideRequest: a user denial is cached; a timeout is cached for 60 s", asy
   const denied = h.policy.decideRequest(WRITE);
   h.answer({ allow: false, reason: "denied by user" });
   assert.deepEqual(await denied, { allow: false, reason: "denied by user", source: "user" });
-  assert.deepEqual(await h.policy.decideRequest({ ...WRITE, method: "POST" }), {
+  assert.deepEqual(await h.policy.decideRequest({ ...WRITE, path: "/v1/things/7?again=1" }), {
     allow: false,
     reason: "denied by user",
     source: "user",
@@ -836,7 +884,7 @@ test("decideRequest: a user denial is remembered for the whole command", async (
     h.answer({ allow: false, reason });
     assert.deepEqual(await first, { allow: false, reason, source: "user" });
     h.clock.now += 10 * DAY_MS;
-    assert.equal((await h.policy.decideRequest({ ...WRITE, method: "DELETE" })).allow, false);
+    assert.equal((await h.policy.decideRequest(WRITE)).allow, false);
     assert.equal(h.asks.length, 1, `"${reason}" is still remembered after ten days`);
   }
 });

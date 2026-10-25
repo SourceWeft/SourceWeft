@@ -92,6 +92,8 @@ export type AskHostRequest = {
   /** `request` asks only: the HTTP method and the path (never the query or fragment). */
   method?: string;
   path?: string;
+  /** `request` asks only: the request body carries a placeholder of a stored secret. */
+  secretInBody?: true;
   /** Name of the skill that declared this host, when one did (display only). */
   suggestedBy?: string;
   /**
@@ -174,9 +176,12 @@ export type NetworkPolicy = {
   activeCommandId(): string | undefined;
   /**
    * Whether the single active command may send this write request to a host that holds a
-   * read-only secret. The address guard still runs first; the question is asked of the user in
-   * any network mode, once per command and host (the answer is cached, and so is a denial), and
-   * shares the pending-approval cap with connection asks. Records no audit entry itself: the
+   * read-only secret, or whose body carries a secret's placeholder. The address guard still runs
+   * first; the question is asked of the user in any network mode, and the answer (a denial too)
+   * is remembered for the command for exactly that method, host and path (the query does not
+   * count), so approving `POST /issues/1/comments` says nothing about `POST /gists`. A body
+   * question and a plain write question are separate. Shares the pending-approval cap with
+   * connection asks. Records no audit entry itself: the
    * request policy records the http entry, with the denial, through `beginHttp`.
    */
   decideRequest(params: {
@@ -184,6 +189,8 @@ export type NetworkPolicy = {
     port: number;
     method: string;
     path: string;
+    /** The body holds a placeholder: a separate question from an ordinary write approval. */
+    secretInBody?: boolean;
   }): Promise<RequestVerdict>;
   /**
    * For a plain-HTTP request srt's proxy has parsed: attributes it to the single active command
@@ -224,6 +231,12 @@ function matchesAny(patterns: readonly string[], host: string, port: number): bo
 function auditPath(path: string): string {
   const end = path.search(/[?#]/);
   return (end === -1 ? path : path.slice(0, end)).slice(0, MAX_AUDIT_PATH);
+}
+
+/** A request path without its query string or fragment, not shortened. */
+function pathWithoutQuery(path: string): string {
+  const end = path.search(/[?#]/);
+  return end === -1 ? path : path.slice(0, end);
 }
 
 /** Two entries that differ only in their timestamp. */
@@ -278,7 +291,7 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
   function askUser(
     commandId: string,
     state: CommandState,
-    question: Pick<AskHostRequest, "kind" | "host" | "port" | "method" | "path">,
+    question: Pick<AskHostRequest, "kind" | "host" | "port" | "method" | "path" | "secretInBody">,
   ): Promise<Verdict> {
     const { host, port } = question;
     return new Promise<Verdict>((resolve) => {
@@ -320,6 +333,7 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         port,
         ...(question.method === undefined ? {} : { method: question.method }),
         ...(question.path === undefined ? {} : { path: question.path }),
+        ...(question.secretInBody === true ? { secretInBody: true as const } : {}),
         ...(suggestedBy === undefined ? {} : { suggestedBy }),
         signal: controller.signal,
       };
@@ -403,7 +417,7 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
     commandId: string,
     state: CommandState,
     key: string,
-    question: Pick<AskHostRequest, "kind" | "host" | "port" | "method" | "path">,
+    question: Pick<AskHostRequest, "kind" | "host" | "port" | "method" | "path" | "secretInBody">,
   ): Promise<Verdict> {
     if (state.approved.has(key)) return { allow: true, source: "approval" };
     const remembered = state.denied.get(key);
@@ -419,7 +433,11 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         return { allow: false, reason: "too many pending network approvals", source: "limit" };
       }
       flight = askUser(commandId, state, question).then((verdict) => {
-        if (verdict.allow) state.approved.add(key);
+        // Request approvals are keyed by exact path, so unlike host approvals they are not bounded
+        // by the host cap; past it an approval simply is not remembered (the next one asks again).
+        if (verdict.allow) {
+          if (state.approved.size < MAX_TRACKED_HOSTS) state.approved.add(key);
+        }
         else if (
           verdict.cacheMs !== undefined &&
           verdict.reason !== undefined &&
@@ -523,7 +541,7 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       return singleActive()?.[0];
     },
 
-    async decideRequest({ host, port, method, path }) {
+    async decideRequest({ host, port, method, path, secretInBody }) {
       const reason = deniedReason(host, options.ownAddresses());
       if (reason !== null) {
         return { allow: false, reason: `public internet only: ${reason}`, source: "guard" };
@@ -534,12 +552,17 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       }
       const [commandId, state] = active;
       const spelled = canonical(host);
-      const verdict = await askCached(commandId, state, `request:${spelled}`, {
+      // The key is the whole request line without its query: the card shows a path cut to 200
+      // characters, but two paths that agree only that far are different requests.
+      const verb = method.toUpperCase();
+      const key = `${secretInBody === true ? "body" : "write"}:${verb} ${spelled}:${port} ${pathWithoutQuery(path)}`;
+      const verdict = await askCached(commandId, state, key, {
         kind: "request",
         host: spelled,
         port,
-        method: method.slice(0, 16),
+        method: verb.slice(0, 16),
         path: auditPath(path),
+        ...(secretInBody === true ? { secretInBody: true as const } : {}),
       });
       return verdict.allow
         ? { allow: true }

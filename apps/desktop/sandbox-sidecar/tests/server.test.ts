@@ -1411,9 +1411,9 @@ test("the address guard stays first: a secret-bound name does not make a private
   const { harness } = await initWithTls(srt);
   assert.ok(srt.ask);
   // localhost is a legal name to bind; it must still be denied at the connection.
-  await wrapWithSecrets(harness, [tokenSecret({ hosts: ["localhost", "*.localhost"] })], {
+  await wrapWithSecrets(harness, [tokenSecret({ hosts: ["localhost", "app.localhost"] })], {
     mode: "open",
-    allow: ["localhost", "*.localhost"],
+    allow: ["localhost", "app.localhost"],
   });
   for (const host of ["localhost", "app.localhost", "127.0.0.1", "10.0.0.1"]) {
     const answer = await srt.ask({ host, port: 443 });
@@ -1475,4 +1475,43 @@ test("the real secret value appears in nothing the sidecar emits", async () => {
   assert.ok(!scan.includes(REAL), "the real value leaked into an emitted artefact");
   assert.ok(scan.includes("fake_value_"), "the scan really covered a wrap result");
   assert.ok(!harness.raw.join("\n").includes(REAL));
+});
+
+test("a request body carrying the command's placeholder raises a flagged request ask over the wire", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  assert.ok(srt.ask);
+  const wrapped = await wrapWithSecrets(harness, [tokenSecret()], { mode: "open", allow: [] });
+  assert.ok(wrapped.ok);
+  const placeholder = (wrapped as { ok: true; result: { secretEnv: Record<string, string> } }).result.secretEnv
+    .GITHUB_TOKEN as string;
+  assert.equal(await srt.ask({ host: "api.github.com", port: 443 }), true);
+  const hook = srt.initConfig?.network.filterRequest as (
+    request: globalThis.Request,
+    info?: unknown,
+  ) => Promise<{ action: string; status?: number; reason?: string }>;
+  const info = { scheme: "https", target: { host: "api.github.com", port: 443 } };
+
+  const clean = await hook(new globalThis.Request("https://api.github.com/gists", { method: "POST", body: "{}" }), info);
+  assert.equal(clean.action, "allow");
+  assert.equal(harness.events.length, 0);
+
+  const pending = hook(
+    new globalThis.Request("https://api.github.com/gists?x=1", { method: "POST", body: `{"content":"${placeholder}"}` }),
+    { ...info, requestTarget: "/gists?x=1" },
+  );
+  const event = await harness.nextAsk();
+  assert.deepEqual(Object.keys(event).sort(), [
+    "askId", "commandId", "event", "host", "kind", "method", "path", "port", "secretInBody",
+  ]);
+  assert.equal(event.secretInBody, true);
+  assert.equal(event.path, "/gists");
+  assert.ok(!JSON.stringify(event).includes(placeholder));
+  await harness.send({ op: "ask.reply", askId: event.askId, allow: false, reason: "denied by user" });
+  assert.deepEqual(await pending, {
+    action: "deny",
+    status: 403,
+    reason: "request body contains a stored secret: denied by user",
+  });
+  await harness.stop();
 });

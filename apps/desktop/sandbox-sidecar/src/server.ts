@@ -287,6 +287,7 @@ export async function startServer(
         ...(request.suggestedBy === undefined ? {} : { suggestedBy: request.suggestedBy }),
         ...(request.method === undefined ? {} : { method: request.method }),
         ...(request.path === undefined ? {} : { path: request.path }),
+        ...(request.secretInBody === true ? { secretInBody: true as const } : {}),
       });
     });
   }
@@ -436,7 +437,7 @@ export async function startServer(
       secretEnv = registerSecrets(deps.srt.getSentinelRegistry(), secrets, state.tlsActive);
       if (secrets.length > 0) commandsWithSecrets.add(request.commandId);
       networkPolicy.register(request.commandId, request.network ?? { mode: "open", allow: [] });
-      requestPolicy.registerCommand(request.commandId, secrets);
+      requestPolicy.registerCommand(request.commandId, secrets, secretEnv);
     } catch (error) {
       // srt already counted this wrap: undo it, and everything registered so far.
       networkPolicy.unregister(request.commandId);
