@@ -125,11 +125,9 @@ const RESET_TIMEOUT_MS = 5_000;
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
-    // Fix round 2 review: this timer must never be the thing keeping the process's event loop
-    // alive — it is always cleared once `promise` settles, but `unref()` it too so that, if
-    // something else is also waiting for the loop to drain (e.g. around `main.ts`'s own exit),
-    // this timer's mere existence for up to `ms` doesn't hold that up.
-    timer.unref?.();
+    // Not unref'd: if `promise` hangs, this timer is what ends the wait, and on Node 22 an event
+    // loop with nothing else alive would drain first and abandon the awaiting caller. It is always
+    // cleared once `promise` settles, so it never holds the process up beyond that.
     promise.then(
       (value) => {
         clearTimeout(timer);

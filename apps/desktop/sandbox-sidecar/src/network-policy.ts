@@ -266,7 +266,11 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       };
       const cancel = (): void =>
         finish({ allow: false, reason: "command finished", source: "unavailable" }, true);
-      // Never keep the process alive on this timer: the approval is moot once the host is gone.
+      // Deliberately not unref'd: this timer is the only thing a caller awaiting a timeout has left
+      // to wait on (the host that should have answered is gone), and an unref'd timer lets the event
+      // loop drain first. Node 22 then cancels the pending test with "Promise resolution is still
+      // pending"; the running sidecar is kept alive by its stdin anyway, and a pending ask is
+      // cancelled (clearing this timer) on `cleanup`, and abandoned at shutdown.
       const timer = setTimeout(
         () =>
           finish(
@@ -275,7 +279,6 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
           ),
         askTimeoutMs,
       );
-      timer.unref?.();
       state.cancelPending.add(cancel);
 
       const suggestedBy = state.suggested.find(([pattern]) =>
