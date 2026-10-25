@@ -433,6 +433,11 @@
         "unsupportedPackage": "该软件包类型无法在沙箱中运行"
       }
     },
+    "toolsReference": {
+      "platformIndexed": "由 SourceWeft 使用标准测试账号读取 · {date}",
+      "memberObserved": "来自已连接账号的观测 · {date}。不同账号看到的可能不同。",
+      "stale": "自读取以来，服务器地址已变更。"
+    },
     "toolChangeLog": {
       "heading": "变更记录",
       "intro": "每条记录是此条目工具列表的一次变化，并不是服务器自身的版本。",
@@ -2659,6 +2664,7 @@
       },
       "headersHint": "每行填写一个请求头。保存后将不再显示机密值。",
       "noAuthNote": "此 MCP 服务器无需凭据。",
+      "catalogNotice": "此服务器返回的工具名称、描述和参数结构可能会公开显示在其目录页面上。绝不保留你的凭据或你发送的数据。",
       "oauthNote": "此 MCP 服务器使用 OAuth。请与提供方连接你的账户——你将被重定向以授予访问权限，然后返回此处。你的令牌将加密存储并自动刷新。",
       "optionalKeyNote": "此 MCP 服务器无需凭据即可使用。如有 API 密钥，可在此添加。",
       "method": {

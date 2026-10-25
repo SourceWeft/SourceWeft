@@ -129,6 +129,55 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
+describe("the catalog notice", () => {
+  const notice =
+    "The names, descriptions and schemas this server returns may be shown publicly on its catalog page. Your credentials and the data you send are never kept.";
+  const manifestFor = (patch: Record<string, unknown> = {}) => ({
+    ...oauthInstall().manifestJson,
+    ...patch,
+  });
+
+  it("tells a member connecting a catalog server at its own address, in one small line", async () => {
+    await open();
+    expect(text()).toContain(notice);
+  });
+
+  it("is not shown for a server that is not from the catalog", async () => {
+    await open({
+      install: oauthInstall({ source: "custom", marketIdentifier: null }),
+    });
+    expect(text()).not.toContain("may be shown publicly");
+  });
+
+  it("is not shown when the address was changed away from the listing's", async () => {
+    await open({
+      install: oauthInstall({ endpointUrl: "https://my-proxy.example/mcp" }),
+    });
+    expect(text()).not.toContain("may be shown publicly");
+  });
+
+  it("is not shown for an account-specific gateway", async () => {
+    const endpointUrl = "https://mcp.zapier.com/api/mcp/mcp";
+    await open({
+      install: oauthInstall({
+        endpointUrl,
+        manifestJson: manifestFor({ endpointUrl }),
+      }),
+    });
+    expect(text()).not.toContain("may be shown publicly");
+  });
+
+  it("is not shown for custom headers, which could narrow what the server lists", async () => {
+    await open({
+      install: oauthInstall({
+        authType: "custom_headers",
+        manifestJson: manifestFor({ auth: { type: "custom_headers", required: true } }),
+      }),
+    });
+    expect(text()).not.toContain("may be shown publicly");
+  });
+});
+
 describe("connecting with OAuth", () => {
   it("asks for the provider's URL with the return destination, then says where it is going", async () => {
     api.authorizeWorkspaceMcpOAuth.mockResolvedValue({

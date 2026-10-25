@@ -121,3 +121,31 @@ export function declaredMcpHeaderMethodFor(
   }
   return null;
 }
+
+/**
+ * Whether a member's saved static credential sends ONLY the header the
+ * listing declares (Issue #367): `bearer` when a declared method is the
+ * `Authorization` header, `api_key_header` when its header is a declared one.
+ * A credential with headers of the member's own choosing (`custom_headers`, or
+ * a header the listing does not declare) can narrow what the server lists
+ * (toolset or read-only headers, scopes), so a tool list obtained with it says
+ * nothing about the listing and must not reach the public catalog.
+ */
+export function staticCredentialUsesOnlyDeclaredHeader(
+  install: Pick<WorkspaceMcpInstallRecord, "authType" | "manifestJson">,
+  credential: { authType: McpAuthType; headerName?: string | null },
+): boolean {
+  const declared = mcpInstallAuthMethods(install)
+    .methods.filter(
+      (method): method is McpHeaderAuthMethod => method.type === "header",
+    )
+    .map((method) => method.name.trim().toLowerCase());
+  if (credential.authType === "bearer") {
+    return declared.includes("authorization");
+  }
+  if (credential.authType === "api_key_header") {
+    const name = credential.headerName?.trim().toLowerCase() ?? "";
+    return name !== "" && declared.includes(name);
+  }
+  return false;
+}

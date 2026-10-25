@@ -66,6 +66,7 @@ import { mcpToolsStatus } from "../../../../lib/mcp-tools-status";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
 import { McpAgentPrompt } from "../_components/mcp-agent-prompt";
 import { McpFactsPanel } from "../_components/mcp-facts-panel";
+import { McpToolsReference } from "../_components/mcp-tools-reference";
 import {
   ExternalTextLink,
   formatDate,
@@ -1001,6 +1002,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     </span>{" "}
                     {t("toolsListedByOwnerHint")}
                   </p>
+                ) : null}
+                {manifest.toolsReference ? (
+                  <McpToolsReference reference={manifest.toolsReference} />
                 ) : null}
                 <McpToolRows status={toolsStatus} tools={manifest.tools} />
                 {toolRevisions ? (

@@ -117,6 +117,43 @@ export const marketMcpOwnerLayerSchema = z.object({
 // server's owner with their own credentials and are shown but never trusted
 // for unattended execution (their risk is always `unknown`).
 export const MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED = "owner-submitted";
+// Tools read by SourceWeft itself with a reference account, and tools observed
+// through members' own connections (Issue #367). Both are shown, neither is
+// trusted for unattended execution (risk `unknown`).
+export const MARKET_MCP_TOOL_SOURCE_PLATFORM_INDEXED = "platform-indexed";
+export const MARKET_MCP_TOOL_SOURCE_MEMBER_OBSERVED = "member-observed";
+
+// The approved reference profile a platform snapshot was read with. Describes
+// the kind of account, never which account. Free text written by an admin: it
+// is stored with the snapshot and never part of a public answer.
+export const marketMcpReferenceProfileSchema = z
+  .object({
+    tier: z.string().trim().min(1).max(64),
+    role: z.string().trim().min(1).max(64),
+    scopes: z.array(z.string().trim().min(1).max(128)).max(32),
+    // The day the profile was approved or last reviewed, `YYYY-MM-DD`.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .strict();
+export type MarketMcpReferenceProfile = z.infer<
+  typeof marketMcpReferenceProfileSchema
+>;
+
+// Where the tool list on a page came from when it is not the owner's, and
+// whether it is still about the server at the listing's current address.
+export const marketMcpToolsReferenceSchema = z.object({
+  source: z.enum([
+    MARKET_MCP_TOOL_SOURCE_PLATFORM_INDEXED,
+    MARKET_MCP_TOOL_SOURCE_MEMBER_OBSERVED,
+  ]),
+  // When the list was read (a member observation: the day only).
+  observedAt: z.string(),
+  // The listing's endpoint changed since the list was read.
+  stale: z.boolean(),
+});
+export type MarketMcpToolsReference = z.infer<
+  typeof marketMcpToolsReferenceSchema
+>;
 
 /**
  * Where an MCP server's logo came from, first hit of the chain: the registry's
@@ -198,6 +235,9 @@ export const marketMcpManifestSchema = z.object({
   // Present when a verified owner's corrections were applied over the
   // federated data (Issue #367, W7).
   owner: marketMcpOwnerLayerSchema.optional(),
+  // Present when the tools came from a platform snapshot or members'
+  // observation instead of the registry, a probe or the owner (Issue #367).
+  toolsReference: marketMcpToolsReferenceSchema.optional(),
   // Absent on manifests written before it existed and on servers without a
   // domain publisher.
   publisher: marketMcpPublisherSchema.optional(),
@@ -1009,6 +1049,7 @@ export type MarketMcpGithubRegistryProvenance = z.infer<
 >;
 
 export * from "./sitemaps";
+export * from "./endpoint-pin";
 
 // ---------------------------------------------------------------------------
 // Owner-submitted tool lists (Issue #367, W7). `sourceweft mcp inspect` runs
@@ -1144,4 +1185,64 @@ export const submitMarketMcpOwnerToolsRequestSchema = z
   .strict();
 export type SubmitMarketMcpOwnerToolsRequest = z.infer<
   typeof submitMarketMcpOwnerToolsRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Platform reference snapshot (Issue #367). A market admin's private tool reads
+// a server's tools with a reference account on its own machine and submits the
+// list here. The platform records it as source `platform-indexed`, risk
+// `unknown`; an owner's list outranks it.
+// ---------------------------------------------------------------------------
+
+export const MARKET_MCP_SNAPSHOT_LIMITS = Object.freeze({
+  endpointChars: 2_048,
+  // How far ahead of the server clock `observedAt` may be.
+  clockSkewMs: 5 * 60 * 1000,
+});
+
+// POST /v1/market/admin/mcp/platform-snapshots
+export const submitMarketMcpPlatformSnapshotRequestSchema = z
+  .object({
+    identifier: z.string().min(1).max(256),
+    // Both must name the listing's CURRENT `manifest.endpointUrl`: the origin
+    // as `scheme://host[:port]`, the URL in full. Compared after
+    // normalisation (case, trailing dot, default port); userinfo is refused.
+    endpointOrigin: z.string().min(1).max(MARKET_MCP_SNAPSHOT_LIMITS.endpointChars),
+    endpointUrl: z.string().min(1).max(MARKET_MCP_SNAPSHOT_LIMITS.endpointChars),
+    tools: z.array(marketMcpInspectedToolSchema).max(MARKET_MCP_INSPECT_LIMITS.tools),
+    referenceProfile: marketMcpReferenceProfileSchema,
+    // When the list was read, ISO 8601 with offset.
+    observedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+export type SubmitMarketMcpPlatformSnapshotRequest = z.infer<
+  typeof submitMarketMcpPlatformSnapshotRequestSchema
+>;
+
+export const submitMarketMcpPlatformSnapshotResponseSchema = z.object({
+  identifier: z.string(),
+  // `created`: a new revision; `confirmed`: same list as the latest revision,
+  // only confirmed again; `throttled`: the daily revision ceiling was reached
+  // and nothing was recorded.
+  outcome: z.enum(["created", "confirmed", "throttled"]),
+  revision: z.number().int().min(1).nullable(),
+  toolsHash: z.string(),
+  toolsCount: z.number().int().min(0),
+});
+export type SubmitMarketMcpPlatformSnapshotResponse = z.infer<
+  typeof submitMarketMcpPlatformSnapshotResponseSchema
+>;
+
+// POST /v1/market/admin/mcp/tool-sources — take a source's recorded tools
+// down (`takedown`: removes its whole history and keeps the source from being
+// recorded again) or allow it again (`restore`).
+export const marketMcpToolSourceActionRequestSchema = z
+  .object({
+    identifier: z.string().min(1).max(256),
+    source: z.enum(["platform-indexed", "member-observed"]),
+    action: z.enum(["takedown", "restore"]),
+  })
+  .strict();
+export type MarketMcpToolSourceActionRequest = z.infer<
+  typeof marketMcpToolSourceActionRequestSchema
 >;

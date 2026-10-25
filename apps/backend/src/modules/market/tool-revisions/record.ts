@@ -49,6 +49,36 @@ export type RecordToolRevisionInput = {
   serverVersion?: string | null;
   /** When the list was obtained. Defaults to now. */
   observedAt?: Date;
+  /**
+   * What the list was read from, for the pinned sources (the platform snapshot
+   * and a member's observation): the hash of the pinned endpoint, and the
+   * platform snapshot's reference profile. Stored with a new revision and
+   * moved forward when the same list is confirmed again, so "this list is
+   * about the listing's current address" is judged at the latest confirmation.
+   */
+  endpointKey?: string | null;
+  referenceProfile?: Record<string, unknown> | null;
+  /**
+   * Record nothing while the source's latest revision is a withdrawal (an
+   * admin's takedown), decided under the same lock as the write, so a takedown
+   * can never be overtaken by a recording that read the state before it.
+   */
+  skipWhenTakenDown?: boolean;
+  /**
+   * New revisions this source may make in a rolling 24 hours (default
+   * {@link TOOL_REVISIONS_PER_DAY}).
+   */
+  maxRevisionsPerDay?: number;
+  /**
+   * Record nothing when the list's tool names are a strict subset of the
+   * source's latest list, confirmed less than this long before `observedAt`.
+   */
+  skipSubsetWithinMs?: number;
+  /**
+   * Record nothing when `observedAt` is older than the source's latest
+   * confirmation, decided under the same lock as the write.
+   */
+  rejectOlderThanLatest?: boolean;
 };
 
 export type ToolRevisionOutcome =
@@ -74,6 +104,27 @@ export type ToolRevisionOutcome =
        * against the latest revision as usual.
        */
       outcome: "throttled";
+      revision: null;
+      toolsHash: string;
+      diff: null;
+    }
+  | {
+      /** `skipWhenTakenDown` was set and the source is taken down. */
+      outcome: "taken-down";
+      revision: null;
+      toolsHash: string;
+      diff: null;
+    }
+  | {
+      /** `rejectOlderThanLatest` was set and a newer observation is recorded. */
+      outcome: "older";
+      revision: null;
+      toolsHash: string;
+      diff: null;
+    }
+  | {
+      /** `skipSubsetWithinMs` was set and the list is a reduction of the latest. */
+      outcome: "subset";
       revision: null;
       toolsHash: string;
       diff: null;
@@ -131,12 +182,30 @@ export async function recordToolRevision(
   const run = async (tx: ToolRevisionTx): Promise<ToolRevisionOutcome> => {
     await lockSource(tx, input.itemId, input.source);
     const latest = await latestRevision(tx, input.itemId, input.source);
+    if (input.skipWhenTakenDown && latest?.withdrawn) {
+      return { outcome: "taken-down", revision: null, toolsHash, diff: null };
+    }
+    if (
+      input.rejectOlderThanLatest &&
+      latest &&
+      observedAt.getTime() < latest.lastConfirmedAt.getTime()
+    ) {
+      return { outcome: "older", revision: null, toolsHash, diff: null };
+    }
     const previous = previousList(latest);
     if (latest && previous.hash === toolsHash) {
       await tx
         .update(marketMcpToolRevisions)
         .set({
           lastConfirmedAt: sql`greatest(${marketMcpToolRevisions.lastConfirmedAt}, ${observedAt})`,
+          // Only a confirmation that is not older than the latest one moves
+          // the pin forward: a late, older read must not mark the list fresh.
+          ...(input.endpointKey !== undefined && observedAt >= latest.lastConfirmedAt
+            ? {
+                endpointKey: input.endpointKey,
+                referenceProfileJson: input.referenceProfile ?? null,
+              }
+            : {}),
           // A revision made under an older canonical form moves to the
           // current one, so its hash and version never disagree with the form.
           ...(latest.canonicalVersion !== TOOL_CANONICAL_VERSION
@@ -150,7 +219,24 @@ export async function recordToolRevision(
         .where(eq(marketMcpToolRevisions.id, latest.id));
       return { outcome: "confirmed", revision: latest.revision, toolsHash, diff: null };
     }
-    if (await madeTooMany(tx, input.itemId, input.source, observedAt)) {
+    if (
+      input.skipSubsetWithinMs !== undefined &&
+      latest &&
+      !latest.withdrawn &&
+      observedAt.getTime() - latest.lastConfirmedAt.getTime() < input.skipSubsetWithinMs &&
+      isStrictSubset(canonical, previous.tools)
+    ) {
+      return { outcome: "subset", revision: null, toolsHash, diff: null };
+    }
+    if (
+      await madeTooMany(
+        tx,
+        input.itemId,
+        input.source,
+        observedAt,
+        input.maxRevisionsPerDay ?? TOOL_REVISIONS_PER_DAY,
+      )
+    ) {
       return { outcome: "throttled", revision: null, toolsHash, diff: null };
     }
     const diff = diffTools(previous.tools, canonical);
@@ -165,6 +251,8 @@ export async function recordToolRevision(
       diff,
       serverVersion: input.serverVersion ?? null,
       observedAt,
+      endpointKey: input.endpointKey ?? null,
+      referenceProfile: input.referenceProfile ?? null,
     });
     return { outcome: "created", revision, toolsHash, diff };
   };
@@ -199,6 +287,8 @@ export async function withdrawToolRevision(
       diff,
       serverVersion: null,
       observedAt,
+      endpointKey: null,
+      referenceProfile: null,
     });
     return { outcome: "withdrawn", revision, diff };
   };
@@ -218,12 +308,23 @@ async function lockSource(
   );
 }
 
+/** Every name of `next` is in `previous`, and `previous` has more. */
+function isStrictSubset(
+  next: readonly CanonicalTool[],
+  previous: readonly CanonicalTool[],
+): boolean {
+  if (next.length >= previous.length) return false;
+  const names = new Set(previous.map((tool) => tool.name));
+  return next.every((tool) => names.has(tool.name));
+}
+
 /** Revisions this item and source already made in the 24 hours up to `at`. */
 async function madeTooMany(
   tx: ToolRevisionTx,
   itemId: string,
   source: McpToolRevisionSource,
   at: Date,
+  limit: number,
 ): Promise<boolean> {
   const since = new Date(at.getTime() - 24 * 60 * 60 * 1000);
   const [row] = await tx
@@ -236,11 +337,11 @@ async function madeTooMany(
         gt(marketMcpToolRevisions.observedAt, since),
       ),
     );
-  return (row?.count ?? 0) >= TOOL_REVISIONS_PER_DAY;
+  return (row?.count ?? 0) >= limit;
 }
 
 async function latestRevision(
-  tx: ToolRevisionTx,
+  tx: ToolRevisionTx | typeof db,
   itemId: string,
   source: McpToolRevisionSource,
 ): Promise<RevisionRow | null> {
@@ -295,6 +396,8 @@ async function insertRevision(
     diff: ToolRevisionDiff;
     serverVersion: string | null;
     observedAt: Date;
+    endpointKey: string | null;
+    referenceProfile: Record<string, unknown> | null;
   },
 ) {
   await tx.insert(marketMcpToolRevisions).values({
@@ -311,6 +414,8 @@ async function insertRevision(
     serverVersion: row.serverVersion?.slice(0, 200) ?? null,
     observedAt: row.observedAt,
     lastConfirmedAt: row.observedAt,
+    endpointKey: row.endpointKey,
+    referenceProfileJson: row.referenceProfile,
   });
   // Older revisions keep their diff summary only.
   await tx
@@ -361,4 +466,78 @@ export async function purgeToolRevisions(
       );
   };
   await (options.tx ? run(options.tx) : db.transaction(run));
+}
+
+/**
+ * An admin takes a source's recorded tools down: the whole history of the
+ * source is deleted and replaced by one `withdrawn` marker, which keeps
+ * `isToolSourceTakenDown` true so the source is not recorded again until
+ * {@link restoreToolSource}. Only the platform snapshot and the members'
+ * observation are taken down this way; an owner's list belongs to its claim.
+ */
+export async function takedownToolSource(
+  input: { itemId: string; source: Exclude<McpToolRevisionSource, "owner">; at?: Date },
+  options: { tx?: ToolRevisionTx } = {},
+): Promise<void> {
+  const at = input.at ?? new Date();
+  const run = async (tx: ToolRevisionTx) => {
+    await lockSource(tx, input.itemId, input.source);
+    await tx
+      .delete(marketMcpToolRevisions)
+      .where(
+        and(
+          eq(marketMcpToolRevisions.itemId, input.itemId),
+          eq(marketMcpToolRevisions.source, input.source),
+        ),
+      );
+    await insertRevision(tx, {
+      itemId: input.itemId,
+      source: input.source,
+      revision: 1,
+      toolsHash: WITHDRAWN_TOOLS_HASH,
+      withdrawn: true,
+      tools: [],
+      diff: { added: [], removed: [], changed: [] },
+      serverVersion: null,
+      observedAt: at,
+      endpointKey: null,
+      referenceProfile: null,
+    });
+  };
+  await (options.tx ? run(options.tx) : db.transaction(run));
+}
+
+/**
+ * Lets a taken-down source be recorded again. Deletes the marker (and anything
+ * else of the source, which a takedown already emptied); false when the source
+ * was not taken down, in which case nothing is touched.
+ */
+export async function restoreToolSource(
+  input: { itemId: string; source: Exclude<McpToolRevisionSource, "owner"> },
+  options: { tx?: ToolRevisionTx } = {},
+): Promise<boolean> {
+  const run = async (tx: ToolRevisionTx) => {
+    await lockSource(tx, input.itemId, input.source);
+    const latest = await latestRevision(tx, input.itemId, input.source);
+    if (!latest?.withdrawn) return false;
+    await tx
+      .delete(marketMcpToolRevisions)
+      .where(
+        and(
+          eq(marketMcpToolRevisions.itemId, input.itemId),
+          eq(marketMcpToolRevisions.source, input.source),
+        ),
+      );
+    return true;
+  };
+  return options.tx ? run(options.tx) : db.transaction(run);
+}
+
+/** Whether the source's latest revision is a withdrawal (an admin's takedown). */
+export async function isToolSourceTakenDown(
+  input: { itemId: string; source: McpToolRevisionSource },
+  options: { tx?: ToolRevisionTx } = {},
+): Promise<boolean> {
+  const latest = await latestRevision(options.tx ?? db, input.itemId, input.source);
+  return latest?.withdrawn === true;
 }

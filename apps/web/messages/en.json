@@ -433,6 +433,11 @@
         "unsupportedPackage": "the package type cannot run in the sandbox"
       }
     },
+    "toolsReference": {
+      "platformIndexed": "Read by SourceWeft with a standard test account · {date}",
+      "memberObserved": "Observed through connected accounts · {date}. It can differ by account.",
+      "stale": "The server address changed since this was read."
+    },
     "toolChangeLog": {
       "heading": "Change log",
       "intro": "Each entry is a change to this listing's tool list. It is not a version of the server itself.",
@@ -2659,6 +2664,7 @@
       },
       "headersHint": "Use one header per line. Secret values are not shown again after saving.",
       "noAuthNote": "This MCP server does not require credentials.",
+      "catalogNotice": "The names, descriptions and schemas this server returns may be shown publicly on its catalog page. Your credentials and the data you send are never kept.",
       "oauthNote": "This MCP server uses OAuth. Connect your account with the provider — you'll be redirected to grant access, then returned here. Your token is stored encrypted and refreshed automatically.",
       "optionalKeyNote": "This MCP server works without a credential. Add an API key if you have one.",
       "method": {

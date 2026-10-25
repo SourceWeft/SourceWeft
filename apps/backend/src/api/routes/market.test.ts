@@ -236,6 +236,10 @@ test("an identifier is decoded once: %2F is a slash, and a literal % is a name t
     mocks.findMcpVersion.mock.calls[1]?.[0],
     "io.github.acme/weather",
   );
+  // The public manifest is a visitor's view: it shows the reference tools.
+  assert.deepEqual(mocks.findMcpVersion.mock.calls[1]?.[2], {
+    referenceTools: true,
+  });
 });
 
 test("an admin route answers 404, not 500, for an identifier with a literal %", async () => {
@@ -356,8 +360,14 @@ test("the detail answer carries the AI overview in the asked-for locale", async 
   assert.deepEqual(body.item.overviewLocales, ["en", "zh-TW"]);
   assert.deepEqual(mocks.findMcp.mock.calls[0], [
     "io.github.acme/weather",
-    // The detail also asks for the tools revision; no other reader does.
-    { locale: "zh-TW", relatedProduct: true, toolsRevision: true },
+    // The detail also asks for the tools revision and the reference tools (a
+    // visitor's view); no other reader does.
+    {
+      locale: "zh-TW",
+      relatedProduct: true,
+      toolsRevision: true,
+      referenceTools: true,
+    },
   ]);
 
   // English when not asked; a language the market does not write is refused.
@@ -366,6 +376,7 @@ test("the detail answer carries the AI overview in the asked-for locale", async 
     locale: undefined,
     relatedProduct: true,
     toolsRevision: true,
+    referenceTools: true,
   });
   const invalid = await createTestApp().request(
     "/v1/mcp/io.github.acme%2Fweather?locale=fr",

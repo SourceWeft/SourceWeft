@@ -118,6 +118,12 @@ test("getMcpManifest maps the found version, 404s when missing", async () => {
   });
   assert.equal(found.version.version, "1.2.0");
   assert.deepEqual(found.manifest, { identifier: "x" });
+  // What an install seeds from is never the platform's snapshot or members'
+  // observation: the in-process read asks for no reference tools.
+  assert.deepEqual(mocks.findMcpVersion.mock.calls.at(-1), [
+    "io.github.acme/mcp",
+    "1.2.0",
+  ]);
 
   mocks.findMcpVersion.mockResolvedValue(null);
   await assert.rejects(() =>

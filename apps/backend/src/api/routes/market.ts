@@ -116,6 +116,7 @@ export function registerMarketRoutes(app: Hono) {
       locale,
       relatedProduct: true,
       toolsRevision: true,
+      referenceTools: true,
     });
     if (!record) {
       throw ApiError.notFound("MCP item not found");
@@ -159,6 +160,8 @@ export function registerMarketRoutes(app: Hono) {
     const found = await findMcpVersion(
       c.req.param("identifier"),
       c.req.query("version"),
+      // What a visitor sees; installs read the manifest in-process without it.
+      { referenceTools: true },
     );
     if (!found) {
       throw ApiError.notFound("MCP manifest not found");
