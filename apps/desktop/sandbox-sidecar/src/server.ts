@@ -9,15 +9,19 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path/posix";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { createNetworkPolicy, PROBE_COMMAND_ID } from "./network-policy.js";
+import { createRequestPolicy } from "./request-policy.js";
+import { assertSecretsAllowed, parseSecrets, registerSecrets } from "./secrets.js";
+import type { SentinelRegistryLike } from "./secrets.js";
+import { ensureCa } from "./tls.js";
 import type { AskHostAnswer, AskHostRequest } from "./network-policy.js";
 import {
   assertCwdWithinWorkspace,
   assertWorkspaceRootAllowed,
-  auditFilterRequest,
   buildConfig,
   perCommandConfig,
   perWrapReadRoots,
@@ -31,6 +35,7 @@ import type {
   SidecarEvent,
   WrapNetwork,
   WrapResult,
+  WrapSecret,
 } from "./protocol.js";
 
 /**
@@ -65,6 +70,11 @@ export type SrtLike = {
    * see `askCallback` below.
    */
   readonly askCallbackDenyReason?: true;
+  /**
+   * srt's per-session sentinel registry. Secrets are registered here per command (never read from
+   * this process's environment) and dropped with `clear()` when the command is cleaned up.
+   */
+  getSentinelRegistry(): SentinelRegistryLike & { clear(): void };
 };
 
 export type ServerDeps = {
@@ -146,6 +156,8 @@ type InitializedState = {
   runtimeConfig: SandboxRuntimeConfig;
   /** `perWrapReadRoots(config, deps.runtimeDir)`, computed once at `init`. */
   wrapReadRoots: string[];
+  /** Whether `init.tls` enabled TLS termination, which secrets need (see `secrets.ts`). */
+  tlsActive: boolean;
 };
 
 /**
@@ -269,9 +281,12 @@ export async function startServer(
         event: "ask",
         askId,
         commandId: request.commandId,
+        ...(request.kind === undefined ? {} : { kind: request.kind }),
         host: request.host,
         port: request.port,
         ...(request.suggestedBy === undefined ? {} : { suggestedBy: request.suggestedBy }),
+        ...(request.method === undefined ? {} : { method: request.method }),
+        ...(request.path === undefined ? {} : { path: request.path }),
       });
     });
   }
@@ -281,6 +296,9 @@ export async function startServer(
     askHost,
     ...(deps.askTimeoutMs === undefined ? {} : { askTimeoutMs: deps.askTimeoutMs }),
   });
+  const requestPolicy = createRequestPolicy(networkPolicy);
+  /** Commands that registered secrets in srt's registry, which is cleared when the last one ends. */
+  const commandsWithSecrets = new Set<string>();
 
   function getOwnAddresses(): Set<string> {
     const now = Date.now();
@@ -311,12 +329,33 @@ export async function startServer(
 
   async function handleInit(config: InitConfig): Promise<null> {
     checkHelpersExist(config);
-    const base = buildConfig(config, deps.runtimeDir);
-    // The plain-HTTP audit hook is attached here rather than in `buildConfig` because it closes
-    // over this server's network policy; it never denies (see `auditFilterRequest`).
+    // `init.tls` is what switches TLS termination on. Its directory is created below, so a
+    // relative one (which would land wherever the sidecar's cwd happens to be) is refused first.
+    let ca: { certPath: string; keyPath: string } | undefined;
+    if (config.tls !== undefined) {
+      const { caDir } = config.tls as { caDir?: unknown } | null ?? {};
+      if (typeof caDir !== "string") {
+        throw new SidecarError("BAD_REQUEST", "\"init\" config tls must be an object with a string caDir");
+      }
+      if (!isAbsolute(caDir)) {
+        throw new SidecarError("POLICY_INVALID", `tls.caDir must be an absolute path, got ${JSON.stringify(caDir)}`);
+      }
+      try {
+        ca = await ensureCa(caDir);
+      } catch (error) {
+        throw new SidecarError(
+          "SANDBOX_UNAVAILABLE",
+          `cannot prepare the TLS CA in ${caDir}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    const base = buildConfig(config, deps.runtimeDir, ca);
+    // The request hook is attached here rather than in `buildConfig` because it closes over this
+    // server's network policy. It audits every parsed request and gates writes to the hosts of
+    // read-only secrets; it never widens what a connection was already allowed to reach.
     const runtimeConfig: SandboxRuntimeConfig = {
       ...base,
-      network: { ...base.network, filterRequest: auditFilterRequest(networkPolicy.beginHttp) },
+      network: { ...base.network, filterRequest: requestPolicy.filterRequest },
     };
     ownAddressesCache = deps.ownAddresses();
     ownAddressesCachedAt = Date.now();
@@ -328,7 +367,12 @@ export async function startServer(
         error instanceof Error ? error.message : String(error),
       );
     }
-    state = { config, runtimeConfig, wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir) };
+    state = {
+      config,
+      runtimeConfig,
+      wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir),
+      tlsActive: ca !== undefined,
+    };
     return null;
   }
 
@@ -338,6 +382,7 @@ export async function startServer(
     cwd: string;
     workspaceRoot: string;
     network?: WrapNetwork;
+    secrets?: WrapSecret[];
   }): Promise<WrapResult> {
     if (state === null) throw notInitialized();
     // A command id names live policy state (network rules, approvals, audit) until its `cleanup`:
@@ -351,6 +396,9 @@ export async function startServer(
         `commandId ${JSON.stringify(request.commandId)} is already wrapped; send cleanup first`,
       );
     }
+    // Secrets need TLS termination (see `secrets.ts`): refuse before srt wraps anything.
+    const secrets = request.secrets ?? [];
+    assertSecretsAllowed(secrets, state.tlsActive);
     // Fix round 1 review: `workspaceRoot` is the only input that widens write access, and
     // `cwd` is what srt resolves a relative literal path against — neither is otherwise
     // constrained, so a bad value here (relative, outside every init workspace root, or
@@ -365,8 +413,9 @@ export async function startServer(
       state.wrapReadRoots,
       workspaceRoot,
     );
+    let wrapped: { argv: string[]; env: NodeJS.ProcessEnv };
     try {
-      const { argv, env } = await deps.srt.wrapWithSandboxArgv(
+      wrapped = await deps.srt.wrapWithSandboxArgv(
         request.command,
         undefined,
         customConfig,
@@ -374,15 +423,43 @@ export async function startServer(
         cwd,
         { commandId: request.commandId },
       );
-      // Registered before the reply, so the policy is in place before the host can spawn the
-      // command; a failed wrap (above) registers nothing. No `network` means `open`.
-      networkPolicy.register(request.commandId, request.network ?? { mode: "open", allow: [] });
-      return { argv, env: cleanEnv(env) };
     } catch (error) {
       throw new SidecarError(
         "SANDBOX_UNAVAILABLE",
         error instanceof Error ? error.message : String(error),
       );
+    }
+    // Registered before the reply, so the policy and the secrets are in place before the host can
+    // spawn the command; a failed wrap (above) registers nothing. No `network` means `open`.
+    let secretEnv: Record<string, string>;
+    try {
+      secretEnv = registerSecrets(deps.srt.getSentinelRegistry(), secrets, state.tlsActive);
+      if (secrets.length > 0) commandsWithSecrets.add(request.commandId);
+      networkPolicy.register(request.commandId, request.network ?? { mode: "open", allow: [] });
+      requestPolicy.registerCommand(request.commandId, secrets);
+    } catch (error) {
+      // srt already counted this wrap: undo it, and everything registered so far.
+      networkPolicy.unregister(request.commandId);
+      requestPolicy.unregisterCommand(request.commandId);
+      releaseSecrets(request.commandId);
+      deps.srt.cleanupAfterCommand();
+      throw new SidecarError(
+        "SANDBOX_UNAVAILABLE",
+        // A secrets failure never quotes its cause: it must not be able to carry a value.
+        secrets.length > 0
+          ? "could not set up this command's secrets and network policy"
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
+    }
+    return { argv: wrapped.argv, env: cleanEnv(wrapped.env), secretEnv };
+  }
+
+  /** Forgets `commandId`'s secrets in srt's registry once no command is using any. */
+  function releaseSecrets(commandId: string): void {
+    if (commandsWithSecrets.delete(commandId) && commandsWithSecrets.size === 0) {
+      deps.srt.getSentinelRegistry().clear();
     }
   }
 
@@ -395,6 +472,8 @@ export async function startServer(
     if (state === null) throw notInitialized();
     // The host drains the command's audit (`audit`) before it cleans up; this drops what is left.
     networkPolicy.unregister(commandId);
+    requestPolicy.unregisterCommand(commandId);
+    releaseSecrets(commandId);
     deps.srt.cleanupAfterCommand();
     return null;
   }
@@ -531,7 +610,9 @@ export async function startServer(
           ok: false,
           error: {
             code: "BAD_REQUEST",
-            message: `invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+            // Not the parser's message: it quotes the text around the error, and a request line
+            // can carry secrets.
+            message: "invalid JSON",
           },
         });
         continue;
@@ -613,6 +694,7 @@ function asRequest(parsed: unknown, id: string): Request {
         cwd: value.cwd,
         workspaceRoot: value.workspaceRoot,
         ...(value.network === undefined ? {} : { network: asWrapNetwork(value.network) }),
+        ...(value.secrets === undefined ? {} : { secrets: parseSecrets(value.secrets) }),
       };
     case "violations":
       if (typeof value.commandId !== "string" || typeof value.stderr !== "string") {

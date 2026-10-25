@@ -7,8 +7,7 @@
  * two before handing the result to srt.
  */
 import { isAbsolute, normalize as normalizePosix } from "node:path/posix";
-import type { FilterRequestCallback, SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import type { NetworkPolicy } from "./network-policy.js";
+import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { InitConfig } from "./protocol.js";
 
 /**
@@ -162,10 +161,21 @@ export function perWrapReadRoots(init: InitConfig, runtimeDir?: string): string[
  * them again; re-allowing exactly this directory keeps them reachable without re-allowing `/tmp`.
  * It holds only srt's sockets and empty mount-source directories for this one sidecar.
  *
- * @throws {PolicyInvalidError} if `init.home`, `runtimeDir`, or any entry of
- * `init.workspaceRoots` or `init.readRoots`, is not an absolute path.
+ * `ca` (present only when the sidecar was started with `init.tls`) turns on TLS termination with
+ * that persistent CA, plus the empty `credentials` block that wires srt's placeholder substitution
+ * into the proxy. Secrets are never part of this config: they are registered per command (see
+ * `secrets.ts`). The CA key path is also read-denied here, on top of the host's sandbox data
+ * directory being denied, so the key stays unreadable to a command even if that directory is
+ * ever moved or re-allowed.
+ *
+ * @throws {PolicyInvalidError} if `init.home`, `runtimeDir`, any entry of
+ * `init.workspaceRoots` or `init.readRoots`, or a `ca` path, is not an absolute path.
  */
-export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRuntimeConfig {
+export function buildConfig(
+  init: InitConfig,
+  runtimeDir?: string,
+  ca?: { certPath: string; keyPath: string },
+): SandboxRuntimeConfig {
   assertAbsolute("home", init.home);
   if (runtimeDir !== undefined) assertAbsolute("runtimeDir", runtimeDir);
   init.workspaceRoots.forEach((path, i) =>
@@ -177,6 +187,10 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
   }
   if (init.helpers.javaAgentJar !== undefined) {
     assertAbsolute("helpers.javaAgentJar", init.helpers.javaAgentJar);
+  }
+  if (ca !== undefined) {
+    assertAbsolute("tls ca certificate", ca.certPath);
+    assertAbsolute("tls ca key", ca.keyPath);
   }
   const denyRoots = init.denyRoots ?? [];
   denyRoots.forEach((path, i) => assertAbsolute(`denyRoots[${i}]`, path));
@@ -193,6 +207,7 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
         init.home,
         ...denyRoots,
         ...credentialDenies(init.home),
+        ...(ca === undefined ? [] : [ca.keyPath]),
       ].map((path) => ({ path, literal: true as const })),
       allowRead: [...init.workspaceRoots, ...perWrapReadRoots(init, runtimeDir)].map((path) => ({
         path,
@@ -208,6 +223,10 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
     ripgrep: { command: init.helpers.ripgrep },
   };
 
+  if (ca !== undefined) {
+    config.network.tlsTerminate = { caCertPath: ca.certPath, caKeyPath: ca.keyPath };
+    config.credentials = {};
+  }
   if (init.bwrapPath !== undefined) config.bwrapPath = init.bwrapPath;
   if (init.helpers.applySeccomp !== undefined) {
     config.seccomp = { applyPath: init.helpers.applySeccomp };
@@ -313,49 +332,4 @@ export function assertCwdWithinWorkspace(cwd: string, workspaceRoot: string): st
     );
   }
   return normalized;
-}
-
-/**
- * The srt `network.filterRequest` hook that audits plain-HTTP traffic. It is not a policy point:
- * it always allows, because every connection was already judged by the ask callback
- * (`NetworkPolicy.decide`) before srt's proxy got as far as parsing an HTTP request. Its only job
- * is to record method, host, port, path (no query) and the response status through
- * `NetworkPolicy.beginHttp`, which attributes the request to the single active command; a request
- * it cannot attribute is allowed and recorded nowhere.
- *
- * srt only calls a `filterRequest` for plain HTTP, and for HTTPS only when it terminates TLS, which
- * this sidecar does not do yet — so HTTPS appears in the audit as connections, never as requests.
- *
- * A throw here would deny the request (srt fails closed on a throwing callback), and an audit
- * must never change what a command can do, so everything that can fail is contained.
- *
- * Setting any `filterRequest` makes srt judge the request-target of plain HTTP: its default
- * `ambiguousRequestTarget` is `refuse`, so a target with dot segments or a backslash is refused
- * with a 400 where srt without a filter would have normalised and forwarded it.
- */
-export function auditFilterRequest(begin: NetworkPolicy["beginHttp"]): FilterRequestCallback {
-  return async (request, info) => {
-    try {
-      const url = new URL(request.url);
-      const secure = info?.scheme === undefined ? url.protocol === "https:" : info.scheme === "https";
-      const host = info?.target?.host ?? url.hostname;
-      const port =
-        info?.target?.port ?? (url.port === "" ? (secure ? 443 : 80) : Number(url.port));
-      const path = info?.requestTarget ?? url.pathname;
-      const done = begin({ host, port, method: request.method, path });
-      if (done === null) return { action: "allow" };
-      return {
-        action: "allow",
-        onResponse: (status) => {
-          try {
-            done(status);
-          } catch {
-            // Recording is best effort; srt would only log a failing callback anyway.
-          }
-        },
-      };
-    } catch {
-      return { action: "allow" };
-    }
-  };
 }

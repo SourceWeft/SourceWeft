@@ -19,6 +19,13 @@ export type InitConfig = {
     javaAgentJar?: string;
   };
   bwrapPath?: string;
+  /**
+   * Presence turns on TLS termination (the sandbox's HTTPS is decrypted and re-originated by the
+   * sidecar, which is what lets it audit requests and swap secret placeholders for real values).
+   * Absent, the sidecar behaves exactly as without secrets. Changing it needs a new sidecar.
+   * See "Secrets and request policy" below.
+   */
+  tls?: TlsInit;
 };
 
 /** One inbound request line, always carrying its own `id` for correlation with the reply. */
@@ -32,6 +39,8 @@ export type Request = { id: string } & (
       workspaceRoot: string;
       /** Per-command network policy; absent means `open`. See "Network approvals" below. */
       network?: WrapNetwork;
+      /** Secrets to mask for this command; needs `init.tls`. See "Secrets" below. */
+      secrets?: WrapSecret[];
     }
   | { op: "violations"; commandId: string; stderr: string }
   | { op: "cleanup"; commandId: string }
@@ -58,7 +67,16 @@ export type SidecarErrorCode =
   | "BAD_REQUEST";
 
 /** The `result` payload of a successful `wrap` response. */
-export type WrapResult = { argv: string[]; env: Record<string, string> };
+export type WrapResult = {
+  argv: string[];
+  env: Record<string, string>;
+  /**
+   * The placeholder for each of the request's `secrets`, by environment variable name. The host
+   * must put these in the command's environment; they are never in `argv` or `env`. Empty when
+   * the request had no secrets.
+   */
+  secretEnv: Record<string, string>;
+};
 
 // ---------------------------------------------------------------------------------------------
 // Network approvals (additive: nothing above changes shape).
@@ -139,7 +157,33 @@ export type SidecarEvent = {
   event: "ask";
   askId: string;
   commandId: string;
+  /** Absent for the original question (may the command connect to this host); see `request`. */
+  kind?: "request";
   host: string;
   port: number;
   suggestedBy?: string;
+  /** `kind: "request"` only: the write request awaiting approval. `path` has no query string. */
+  method?: string;
+  path?: string;
+};
+
+// ---------------------------------------------------------------------------------------------
+// Secrets and request policy (additive).
+// ---------------------------------------------------------------------------------------------
+
+/** Where the persistent TLS-termination CA lives (`ca.crt`, `ca.key`); absolute. */
+export type TlsInit = { caDir: string };
+
+/**
+ * One secret to mask for a command. The command sees only a placeholder in `envVar`; the proxy
+ * puts `value` into requests to `hosts` (domain patterns, no port, no IP literal) and nowhere
+ * else. For a `readOnly` secret, requests other than GET, HEAD and OPTIONS to those hosts need the
+ * user's approval (an `ask` event with `kind: "request"`). `value` is never logged, audited,
+ * echoed in an error, or returned.
+ */
+export type WrapSecret = {
+  envVar: string;
+  value: string;
+  hosts: string[];
+  readOnly: boolean;
 };

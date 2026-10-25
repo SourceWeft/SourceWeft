@@ -81,9 +81,17 @@ export const PROBE_COMMAND_ID = "probe";
 /** What the policy asks the host (and through it the user) about one unknown connection. */
 export type AskHostRequest = {
   commandId: string;
+  /**
+   * `request` asks whether the command may send a write request (`method`, `path`) to a host
+   * that holds a read-only secret; absent means the connection itself is the question.
+   */
+  kind?: "request";
   /** Canonical host: the spelling srt will dial, and the one a trust rule is keyed on. */
   host: string;
   port: number;
+  /** `request` asks only: the HTTP method and the path (never the query or fragment). */
+  method?: string;
+  path?: string;
   /** Name of the skill that declared this host, when one did (display only). */
   suggestedBy?: string;
   /**
@@ -109,6 +117,11 @@ export type NetworkPolicyOptions = {
 
 /** What `decide` answers srt: `true` allows, the object denies with a reason srt shows the model. */
 export type NetworkDecision = true | { allow: false; reason: string };
+
+/** What `decideRequest` answers: the request may be sent, or it is refused and audited. */
+export type RequestVerdict =
+  | { allow: true }
+  | { allow: false; reason: string; source: AuditSource };
 
 type Verdict = {
   allow: boolean;
@@ -157,6 +170,21 @@ export type NetworkPolicy = {
   /** Stops counting it, denies its pending approvals and drops its audit buffer. */
   unregister(commandId: string): void;
   decide(params: { host: string; port: number | undefined }): Promise<NetworkDecision>;
+  /** The id of the single active command, or `undefined` when there are none or several. */
+  activeCommandId(): string | undefined;
+  /**
+   * Whether the single active command may send this write request to a host that holds a
+   * read-only secret. The address guard still runs first; the question is asked of the user in
+   * any network mode, once per command and host (the answer is cached, and so is a denial), and
+   * shares the pending-approval cap with connection asks. Records no audit entry itself: the
+   * request policy records the http entry, with the denial, through `beginHttp`.
+   */
+  decideRequest(params: {
+    host: string;
+    port: number;
+    method: string;
+    path: string;
+  }): Promise<RequestVerdict>;
   /**
    * For a plain-HTTP request srt's proxy has parsed: attributes it to the single active command
    * now and returns the function that records it once the response status is known, or `null`
@@ -167,7 +195,7 @@ export type NetworkPolicy = {
     port: number;
     method: string;
     path: string;
-  }): ((status: number) => void) | null;
+  }): ((status: number, denied?: { source: AuditSource; reason: string }) => void) | null;
   /** Returns, and clears, the audit entries recorded for `commandId`. */
   drainAudit(commandId: string): AuditEntry[];
 };
@@ -250,9 +278,9 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
   function askUser(
     commandId: string,
     state: CommandState,
-    host: string,
-    port: number,
+    question: Pick<AskHostRequest, "kind" | "host" | "port" | "method" | "path">,
   ): Promise<Verdict> {
+    const { host, port } = question;
     return new Promise<Verdict>((resolve) => {
       const controller = new AbortController();
       let settled = false;
@@ -281,13 +309,17 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       );
       state.cancelPending.add(cancel);
 
-      const suggestedBy = state.suggested.find(([pattern]) =>
-        matchesDomainPatternWithPort(host, port, pattern),
-      )?.[1];
+      const suggestedBy =
+        question.kind === "request"
+          ? undefined
+          : state.suggested.find(([pattern]) => matchesDomainPatternWithPort(host, port, pattern))?.[1];
       const request: AskHostRequest = {
         commandId,
+        ...(question.kind === undefined ? {} : { kind: question.kind }),
         host,
         port,
+        ...(question.method === undefined ? {} : { method: question.method }),
+        ...(question.path === undefined ? {} : { path: question.path }),
         ...(suggestedBy === undefined ? {} : { suggestedBy }),
         signal: controller.signal,
       };
@@ -359,6 +391,20 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
         source: "strict",
       };
     }
+    return askCached(commandId, state, key, { host, port });
+  }
+
+  /**
+   * The approval path shared by connections and write requests: an earlier approval or remembered
+   * denial under `key` answers at once; otherwise one question is asked of the user (concurrent
+   * callers join it), within the pending cap, and its outcome is remembered for the command.
+   */
+  async function askCached(
+    commandId: string,
+    state: CommandState,
+    key: string,
+    question: Pick<AskHostRequest, "kind" | "host" | "port" | "method" | "path">,
+  ): Promise<Verdict> {
     if (state.approved.has(key)) return { allow: true, source: "approval" };
     const remembered = state.denied.get(key);
     if (remembered !== undefined) {
@@ -372,7 +418,7 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       if (state.inflight.size >= MAX_PENDING_ASKS) {
         return { allow: false, reason: "too many pending network approvals", source: "limit" };
       }
-      flight = askUser(commandId, state, host, port).then((verdict) => {
+      flight = askUser(commandId, state, question).then((verdict) => {
         if (verdict.allow) state.approved.add(key);
         else if (
           verdict.cacheMs !== undefined &&
@@ -473,6 +519,33 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       return verdict.allow ? true : { allow: false, reason: verdict.reason ?? "denied" };
     },
 
+    activeCommandId() {
+      return singleActive()?.[0];
+    },
+
+    async decideRequest({ host, port, method, path }) {
+      const reason = deniedReason(host, options.ownAddresses());
+      if (reason !== null) {
+        return { allow: false, reason: `public internet only: ${reason}`, source: "guard" };
+      }
+      const active = singleActive();
+      if (active === undefined) {
+        return { allow: false, reason: "no single active command", source: "unavailable" };
+      }
+      const [commandId, state] = active;
+      const spelled = canonical(host);
+      const verdict = await askCached(commandId, state, `request:${spelled}`, {
+        kind: "request",
+        host: spelled,
+        port,
+        method: method.slice(0, 16),
+        path: auditPath(path),
+      });
+      return verdict.allow
+        ? { allow: true }
+        : { allow: false, reason: verdict.reason ?? "denied", source: verdict.source };
+    },
+
     beginHttp({ host, port, method, path }) {
       const active = singleActive();
       if (active === undefined) return null;
@@ -483,15 +556,16 @@ export function createNetworkPolicy(options: NetworkPolicyOptions): NetworkPolic
       // to write, so the request is not recorded rather than recorded with an invented source.
       const source = state.allowedBy.get(`${spelled}:${port}`);
       if (source === undefined) return null;
-      return (status) => {
+      return (status, denied) => {
         if (commands.get(commandId) !== state) return;
         record(state, {
           t: now(),
           kind: "http",
           host: spelled,
           port,
-          decision: "allow",
-          source,
+          decision: denied === undefined ? "allow" : "deny",
+          source: denied?.source ?? source,
+          ...(denied === undefined ? {} : { reason: denied.reason }),
           method: method.slice(0, 16),
           path: auditPath(path),
           status,

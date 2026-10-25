@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { SentinelRegistry } from "@anthropic-ai/sandbox-runtime/dist/sandbox/credential-sentinel.js";
+import { matchesDomainPattern } from "@anthropic-ai/sandbox-runtime/dist/sandbox/domain-pattern.js";
 import { deniedReason } from "../src/address-guard.js";
+import { ensureCa } from "../src/tls.js";
 import { buildConfig, perWrapReadRoots } from "../src/policy.js";
 import type {
   AuditEntry,
@@ -15,6 +18,7 @@ import type {
   Response,
   SidecarEvent,
   WrapNetwork,
+  WrapSecret,
 } from "../src/protocol.js";
 import { startServer } from "../src/server.js";
 import type { ServerDeps, SrtLike } from "../src/server.js";
@@ -50,6 +54,11 @@ function makeFakeSrt(): SrtLike & {
     params: { host: string; port: number | undefined },
   ) => Promise<boolean | { allow: false; reason: string }>;
   lastCustomConfig?: unknown;
+  /** The config `initialize` last received. */
+  initConfig?: { network: Record<string, unknown>; credentials?: unknown; filesystem: { denyRead: unknown } };
+  wrapCalls: number;
+  /** srt's real sentinel registry, so substitution can be exercised end to end. */
+  registry: SentinelRegistry;
   probeExit: { code: number; stderr: string };
   initError?: Error;
   wrapError?: Error;
@@ -59,6 +68,10 @@ function makeFakeSrt(): SrtLike & {
   const fake = {
     askCallbackDenyReason: true as const,
     probeExit: { code: 0, stderr: "" },
+    wrapCalls: 0,
+    registry: new SentinelRegistry(),
+    initConfig: undefined as ReturnType<typeof makeFakeSrt>["initConfig"],
+    getSentinelRegistry: () => fake.registry,
     cleanupCalls: 0,
     resetCalls: 0,
     ask: undefined as
@@ -70,12 +83,13 @@ function makeFakeSrt(): SrtLike & {
     initError: undefined as Error | undefined,
     wrapError: undefined as Error | undefined,
     async initialize(
-      _config: unknown,
+      config: unknown,
       askCallback?: (
         params: { host: string; port: number | undefined },
       ) => Promise<boolean | { allow: false; reason: string }>,
     ): Promise<void> {
       if (fake.initError) throw fake.initError;
+      fake.initConfig = config as typeof fake.initConfig;
       fake.ask = askCallback;
     },
     async wrapWithSandboxArgv(
@@ -87,6 +101,7 @@ function makeFakeSrt(): SrtLike & {
       _options?: { commandId?: string },
     ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
       fake.lastCustomConfig = customConfig;
+      fake.wrapCalls += 1;
       if (fake.wrapError) throw fake.wrapError;
       if (command === "true") {
         const script = `process.stderr.write(${JSON.stringify(fake.probeExit.stderr)});process.exit(${fake.probeExit.code})`;
@@ -117,6 +132,10 @@ type Harness = {
   send: (request: RequestInput) => Promise<Response>;
   /** Unsolicited `event` lines the sidecar has written so far, oldest first. */
   events: SidecarEvent[];
+  /** Every line the sidecar wrote, verbatim. */
+  raw: string[];
+  /** Writes one line as-is (not necessarily valid JSON) and waits for the reply to it. */
+  sendRaw: (line: string) => Promise<Response>;
   /** Resolves with the next `ask` event beyond the `seen` that were already consumed. */
   nextAsk: () => Promise<SidecarEvent>;
   stop: () => Promise<void>;
@@ -137,6 +156,7 @@ function startHarness(
   const output = new PassThrough();
   const responses: Response[] = [];
   const events: SidecarEvent[] = [];
+  const raw: string[] = [];
   let consumedEvents = 0;
   let buffer = "";
   output.on("data", (chunk: Buffer) => {
@@ -146,6 +166,7 @@ function startHarness(
       const line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
       if (line.trim() !== "") {
+        raw.push(line);
         const parsed = JSON.parse(line) as Response | SidecarEvent;
         if ("event" in parsed) events.push(parsed);
         else responses.push(parsed);
@@ -182,7 +203,16 @@ function startHarness(
     return event;
   }
 
-  return { send, events, nextAsk, stop };
+  async function sendRaw(line: string): Promise<Response> {
+    const before = responses.length;
+    input.write(`${line}\n`);
+    while (responses.length === before) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return responses[responses.length - 1] as Response;
+  }
+
+  return { send, raw, sendRaw, events, nextAsk, stop };
 }
 
 function expectError(response: Response, code: string): asserts response is Response & { ok: false } {
@@ -1138,3 +1168,311 @@ test(
     assert.equal(lines[1]?.ok, true, `shutdown failed: ${JSON.stringify(lines[1])}`);
   },
 );
+
+
+// ---- Secrets, TLS termination and write approvals (Plan 5) ------------------------------------
+
+const REAL = "ghp_REAL-secret-value-0123456789";
+
+/** One CA generated once (RSA key generation is slow); each test gets its own copy of the files. */
+let templateCaDir: Promise<string> | undefined;
+async function freshCaDir(): Promise<string> {
+  templateCaDir ??= (async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "srt-sidecar-template-ca-")), "ca");
+    await ensureCa(dir);
+    return dir;
+  })();
+  const target = join(mkdtempSync(join(tmpdir(), "srt-sidecar-test-ca-")), "ca");
+  cpSync(await templateCaDir, target, { recursive: true });
+  return target;
+}
+
+async function initWithTls(
+  srt: ReturnType<typeof makeFakeSrt>,
+  extra: Partial<ServerDeps> = {},
+): Promise<{ harness: Harness; caDir: string }> {
+  const caDir = await freshCaDir();
+  const harness = await initHarness(srt, undefined, linuxInit({ tls: { caDir } }), extra);
+  return { harness, caDir };
+}
+
+const tokenSecret = (overrides: Partial<WrapSecret> = {}): WrapSecret => ({
+  envVar: "GITHUB_TOKEN",
+  value: REAL,
+  hosts: ["api.github.com"],
+  readOnly: false,
+  ...overrides,
+});
+
+async function wrapWithSecrets(
+  harness: Harness,
+  secrets: WrapSecret[],
+  network?: WrapNetwork,
+  commandId = "c".repeat(22),
+): Promise<Response> {
+  return harness.send({
+    op: "wrap",
+    commandId,
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+    secrets,
+    ...(network === undefined ? {} : { network }),
+  });
+}
+
+test("without init.tls the sidecar is dormant: no TLS termination, no credentials, empty secretEnv", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  assert.equal(srt.initConfig?.network.tlsTerminate, undefined);
+  assert.equal(srt.initConfig?.credentials, undefined);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+  });
+  assert.equal(response.ok, true);
+  if (response.ok) assert.deepEqual((response.result as { secretEnv: unknown }).secretEnv, {});
+  await harness.stop();
+});
+
+test("init.tls creates the CA and enables TLS termination with an empty credentials block", async () => {
+  const srt = makeFakeSrt();
+  const { harness, caDir } = await initWithTls(srt);
+  assert.deepEqual(srt.initConfig?.network.tlsTerminate, {
+    caCertPath: join(caDir, "ca.crt"),
+    caKeyPath: join(caDir, "ca.key"),
+  });
+  assert.deepEqual(srt.initConfig?.credentials, {});
+  assert.deepEqual(srt.initConfig?.network.allowedDomains, [], "the policy still lives in the ask callback");
+  const denied = (srt.initConfig?.filesystem.denyRead as Array<{ path: string }>).map((entry) => entry.path);
+  assert.ok(denied.includes(join(caDir, "ca.key")));
+  assert.equal(statSync(join(caDir, "ca.key")).mode & 0o777, 0o600);
+  assert.equal(typeof srt.initConfig?.network.filterRequest, "function");
+  await harness.stop();
+});
+
+test("init.tls must be an object with an absolute caDir", async () => {
+  for (const tls of [{ caDir: "relative/ca" }, { caDir: 7 }, {}, "yes"]) {
+    const harness = startHarness(makeFakeSrt());
+    const response = await harness.send({
+      op: "init",
+      config: linuxInit({ tls: tls as unknown as { caDir: string } }),
+    });
+    assert.equal(response.ok, false, JSON.stringify(tls));
+    if (!response.ok) assert.ok(["POLICY_INVALID", "BAD_REQUEST"].includes(response.error.code));
+    await harness.stop();
+  }
+});
+
+test("init.tls surfaces an srt that cannot terminate TLS as SANDBOX_UNAVAILABLE", async () => {
+  const srt = makeFakeSrt();
+  srt.initError = new Error("tlsTerminate needs Node, or Bun 1.4 or later (this is Bun 1.2.14)");
+  const harness = startHarness(srt);
+  const response = await harness.send({
+    op: "init",
+    config: linuxInit({ tls: { caDir: await freshCaDir() } }),
+  });
+  expectError(response, "SANDBOX_UNAVAILABLE");
+  if (!response.ok) assert.match(response.error.message, /tlsTerminate/);
+  await harness.stop();
+});
+
+test("wrap with secrets but no init.tls is refused (POLICY_INVALID), before srt wraps anything", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt);
+  const response = await wrapWithSecrets(harness, [tokenSecret()]);
+  expectError(response, "POLICY_INVALID");
+  assert.equal(srt.wrapCalls, 0);
+  assert.equal(srt.registry.size, 0);
+  assert.ok(!JSON.stringify(response).includes(REAL));
+  await harness.stop();
+});
+
+test("wrap with secrets returns placeholders in secretEnv and registers the real value only in srt's registry", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  const response = await wrapWithSecrets(harness, [
+    tokenSecret(),
+    tokenSecret({ envVar: "NPM_TOKEN", value: "npm-REAL-xyz", hosts: ["registry.npmjs.org"] }),
+  ]);
+  assert.equal(response.ok, true, JSON.stringify(response));
+  if (!response.ok) return;
+  const result = response.result as { argv: string[]; env: Record<string, string>; secretEnv: Record<string, string> };
+  assert.deepEqual(Object.keys(result.secretEnv).sort(), ["GITHUB_TOKEN", "NPM_TOKEN"]);
+  for (const sentinel of Object.values(result.secretEnv)) assert.match(sentinel, /^fake_value_/);
+  assert.ok(!JSON.stringify(result).includes(REAL));
+  assert.ok(!JSON.stringify(result).includes("npm-REAL-xyz"));
+  // The placeholder, sent to its own host, is swapped for the real value; to any other it is not.
+  const headers = (host: string): string => {
+    const h: Record<string, string> = { authorization: `Bearer ${result.secretEnv.GITHUB_TOKEN}` };
+    srt.registry.substituteInHeaders(h, host, matchesDomainPattern);
+    return h.authorization as string;
+  };
+  assert.equal(headers("api.github.com"), `Bearer ${REAL}`);
+  assert.notEqual(headers("evil.example.com"), `Bearer ${REAL}`);
+  await harness.stop();
+});
+
+test("cleanup drops the command's secrets from srt's registry", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  await wrapWithSecrets(harness, [tokenSecret()]);
+  assert.equal(srt.registry.size, 1);
+  await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  assert.equal(srt.registry.size, 0);
+  await harness.stop();
+});
+
+test("a wrap that srt fails leaves no secret registered", async () => {
+  const srt = makeFakeSrt();
+  srt.wrapError = new Error("proxy failed to start");
+  const { harness } = await initWithTls(srt);
+  expectError(await wrapWithSecrets(harness, [tokenSecret()]), "SANDBOX_UNAVAILABLE");
+  assert.equal(srt.registry.size, 0);
+  await harness.stop();
+});
+
+test("invalid secrets are BAD_REQUEST and never echo a value", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  for (const secrets of [
+    [tokenSecret({ envVar: "lower" })],
+    [tokenSecret({ hosts: ["10.0.0.1"] })],
+    [tokenSecret({ hosts: [] })],
+    [tokenSecret({ value: `${REAL}\n` })],
+    [tokenSecret({ readOnly: "x" as unknown as boolean })],
+  ]) {
+    const response = await wrapWithSecrets(harness, secrets);
+    expectError(response, "BAD_REQUEST");
+    assert.ok(!JSON.stringify(response).includes(REAL), JSON.stringify(response));
+  }
+  assert.equal(srt.wrapCalls, 0);
+  await harness.stop();
+});
+
+test("a read-only secret host: a write raises a request ask, the reply decides, reads never ask", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  assert.ok(srt.ask);
+  await wrapWithSecrets(harness, [tokenSecret({ readOnly: true })], { mode: "open", allow: [] });
+  assert.equal(await srt.ask({ host: "api.github.com", port: 443 }), true);
+  const hook = srt.initConfig?.network.filterRequest as (
+    request: globalThis.Request,
+    info?: unknown,
+  ) => Promise<{ action: string; status?: number; reason?: string; onResponse?: (s: number, h: object) => void }>;
+  const info = { scheme: "https", target: { host: "api.github.com", port: 443 } };
+
+  const read = await hook(new globalThis.Request("https://api.github.com/user"), { ...info, requestTarget: "/user" });
+  assert.equal(read.action, "allow");
+  assert.equal(harness.events.length, 0);
+
+  const write = hook(new globalThis.Request("https://api.github.com/repos/a/b/issues?x=1", { method: "POST" }), {
+    ...info,
+    requestTarget: "/repos/a/b/issues?x=1",
+  });
+  const event = await harness.nextAsk();
+  assert.deepEqual(Object.keys(event).sort(), ["askId", "commandId", "event", "host", "kind", "method", "path", "port"]);
+  assert.equal(event.kind, "request");
+  assert.equal(event.method, "POST");
+  assert.equal(event.path, "/repos/a/b/issues");
+  assert.equal(event.host, "api.github.com");
+  assert.equal(event.port, 443);
+  assert.equal((await harness.send({ op: "ask.reply", askId: event.askId, allow: false, reason: "denied by user" })).ok, true);
+  assert.deepEqual(await write, { action: "deny", status: 403, reason: "denied by user" });
+
+  const entries = await auditOf(harness);
+  const denial = entries.find((e) => e.kind === "http" && e.decision === "deny");
+  assert.deepEqual(
+    [denial?.method, denial?.path, denial?.status, denial?.source, denial?.reason],
+    ["POST", "/repos/a/b/issues", 403, "user", "denied by user"],
+  );
+  assert.ok(!JSON.stringify(entries).includes(REAL));
+  await harness.stop();
+});
+
+test("a host ask still has no kind, method or path on the wire", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  assert.ok(srt.ask);
+  await wrapCommand(harness, { mode: "ask", allow: [] });
+  const pending = srt.ask({ host: "example.com", port: 443 });
+  const event = await harness.nextAsk();
+  assert.deepEqual(Object.keys(event).sort(), ["askId", "commandId", "event", "host", "port"]);
+  await harness.send({ op: "ask.reply", askId: event.askId, allow: true });
+  await pending;
+  await harness.stop();
+});
+
+test("the address guard stays first: a secret-bound name does not make a private address reachable", async () => {
+  const srt = makeFakeSrt();
+  const { harness } = await initWithTls(srt);
+  assert.ok(srt.ask);
+  // localhost is a legal name to bind; it must still be denied at the connection.
+  await wrapWithSecrets(harness, [tokenSecret({ hosts: ["localhost", "*.localhost"] })], {
+    mode: "open",
+    allow: ["localhost", "*.localhost"],
+  });
+  for (const host of ["localhost", "app.localhost", "127.0.0.1", "10.0.0.1"]) {
+    const answer = await srt.ask({ host, port: 443 });
+    assert.equal(typeof answer, "object", host);
+    assert.match((answer as { reason: string }).reason, /^public internet only/);
+  }
+  await harness.stop();
+});
+
+test("the real secret value appears in nothing the sidecar emits", async () => {
+  const stderrLines: string[] = [];
+  const realWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderrLines.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  const srt = makeFakeSrt();
+  let harness: Harness;
+  const everything: unknown[] = [];
+  try {
+    ({ harness } = await initWithTls(srt));
+    assert.ok(srt.ask);
+    const wrapped = await wrapWithSecrets(
+      harness,
+      [tokenSecret({ readOnly: true }), tokenSecret({ envVar: "BAD name", value: `${REAL}-second` })],
+      { mode: "ask", allow: ["api.github.com"] },
+    );
+    everything.push(wrapped); // BAD_REQUEST: the second secret has an invalid name
+    const ok = await wrapWithSecrets(harness, [tokenSecret({ readOnly: true })], {
+      mode: "ask",
+      allow: ["api.github.com", "bad entry with spaces"],
+    });
+    everything.push(ok);
+    // A write approval, an audit, the violations text, and cleanup.
+    const hook = srt.initConfig?.network.filterRequest as (r: globalThis.Request, i?: unknown) => Promise<{ onResponse?: (s: number, h: object) => void }>;
+    await srt.ask?.({ host: "api.github.com", port: 443 });
+    const write = hook(new globalThis.Request("https://api.github.com/x", { method: "DELETE" }), {
+      scheme: "https",
+      target: { host: "api.github.com", port: 443 },
+    });
+    const event = await harness.nextAsk();
+    await harness.send({ op: "ask.reply", askId: event.askId, allow: true });
+    (await write).onResponse?.(204, {});
+    everything.push(await auditOf(harness));
+    everything.push(await harness.send({ op: "violations", commandId: "c".repeat(22), stderr: "boom" }));
+    // Errors: a malformed line that contains the value, and a bad secret shape.
+    everything.push(await harness.sendRaw(`{"id":"r1","op":"wrap","commandId":"x","secrets":[{"value":"${REAL}"`));
+    everything.push(
+      await harness.send({ op: "wrap", commandId: "y", command: "x", cwd: workspaceRoot, workspaceRoot, secrets: [{ envVar: "A", value: REAL }] } as unknown as Request),
+    );
+    await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+    // What the fake srt was handed (everything it would hand a child) and what the host received.
+    everything.push(srt.lastCustomConfig, srt.initConfig, harness.raw, harness.events);
+    await harness.stop();
+  } finally {
+    process.stderr.write = realWrite;
+  }
+  const scan = JSON.stringify([everything, stderrLines]);
+  assert.ok(!scan.includes(REAL), "the real value leaked into an emitted artefact");
+  assert.ok(scan.includes("fake_value_"), "the scan really covered a wrap result");
+  assert.ok(!harness.raw.join("\n").includes(REAL));
+});

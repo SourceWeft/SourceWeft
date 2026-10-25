@@ -615,3 +615,263 @@ test("a denial with no reason, or only spacing around the user text, is a system
     await again;
   }
 });
+
+// ---- Write-request approvals (Plan 5): decideRequest ------------------------------------------
+
+const WRITE = { host: "api.example.com", port: 443, method: "PUT", path: "/v1/things/7" };
+
+test("decideRequest: no single active command denies", async () => {
+  const h = makeHarness();
+  assert.deepEqual(await h.policy.decideRequest(WRITE), {
+    allow: false,
+    reason: "no single active command",
+    source: "unavailable",
+  });
+  assert.equal(h.asks.length, 0);
+});
+
+test("decideRequest: the address guard runs first and nothing is asked", async () => {
+  for (const mode of ["open", "ask", "strict"] as const) {
+    const h = makeHarness();
+    h.policy.register("c1", net(mode, ["10.0.0.1", "app.localhost"]));
+    for (const host of ["10.0.0.1", "app.localhost", "[::ffff:10.0.0.1]", OWN]) {
+      const verdict = await h.policy.decideRequest({ ...WRITE, host });
+      assert.equal(verdict.allow, false);
+      assert.equal((verdict as { source: string }).source, "guard", `${mode} ${host}`);
+    }
+    assert.equal(h.asks.length, 0);
+  }
+});
+
+test("decideRequest: raises a request ask in any mode, then caches the approval per command and host", async () => {
+  for (const mode of ["open", "ask", "strict"] as const) {
+    const h = makeHarness();
+    h.policy.register("c1", net(mode));
+    const first = h.policy.decideRequest({ ...WRITE, host: "API.Example.com.", path: "/v1/things/7?token=abc#f" });
+    assert.equal(h.asks.length, 1);
+    const { signal, ...ask } = h.asks[0] as AskHostRequest;
+    assert.ok(signal instanceof AbortSignal);
+    assert.deepEqual(ask, {
+      commandId: "c1",
+      kind: "request",
+      host: "api.example.com",
+      port: 443,
+      method: "PUT",
+      path: "/v1/things/7",
+    });
+    h.answer({ allow: true });
+    assert.deepEqual(await first, { allow: true });
+    // Any later write to that host in this command is covered, whatever the method or path.
+    assert.deepEqual(await h.policy.decideRequest({ ...WRITE, method: "DELETE", path: "/other" }), { allow: true });
+    assert.equal(h.asks.length, 1);
+    // Another host is a new question.
+    const other = h.policy.decideRequest({ ...WRITE, host: "other.example.com" });
+    assert.equal(h.asks.length, 2);
+    h.answer({ allow: true });
+    await other;
+  }
+});
+
+test("decideRequest: the approval does not carry over to another command", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const first = h.policy.decideRequest(WRITE);
+  h.answer({ allow: true });
+  await first;
+  h.policy.unregister("c1");
+  h.policy.register("c2", net("ask"));
+  const second = h.policy.decideRequest(WRITE);
+  assert.equal(h.asks.length, 2);
+  assert.equal(h.asks[1]?.commandId, "c2");
+  h.answer({ allow: true });
+  await second;
+});
+
+test("decideRequest: a host approval is not a write approval, and the other way round", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const connection = h.policy.decide({ host: "api.example.com", port: 443 });
+  h.answer({ allow: true });
+  assert.equal(await connection, true);
+  const write = h.policy.decideRequest(WRITE);
+  assert.equal(h.asks.length, 2, "approving the connection does not approve writes");
+  assert.equal(h.asks[1]?.kind, "request");
+  h.answer({ allow: false });
+  assert.equal((await write).allow, false);
+  // A denied write does not deny the connection itself.
+  assert.equal(await h.policy.decide({ host: "api.example.com", port: 443 }), true);
+});
+
+test("decideRequest: concurrent writes to one host share a single ask", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const a = h.policy.decideRequest(WRITE);
+  const b = h.policy.decideRequest({ ...WRITE, method: "POST", path: "/x" });
+  assert.equal(h.asks.length, 1);
+  h.answer({ allow: true });
+  assert.deepEqual(await Promise.all([a, b]), [{ allow: true }, { allow: true }]);
+});
+
+test("decideRequest: a user denial is cached; a timeout is cached for 60 s", async () => {
+  const h = makeHarness({ askTimeoutMs: 15 });
+  h.policy.register("c1", net("ask"));
+  const denied = h.policy.decideRequest(WRITE);
+  h.answer({ allow: false, reason: "denied by user" });
+  assert.deepEqual(await denied, { allow: false, reason: "denied by user", source: "user" });
+  assert.deepEqual(await h.policy.decideRequest({ ...WRITE, method: "POST" }), {
+    allow: false,
+    reason: "denied by user",
+    source: "user",
+  });
+  assert.equal(h.asks.length, 1);
+
+  const timed = await h.policy.decideRequest({ ...WRITE, host: "slow.example.com" });
+  assert.deepEqual(timed, { allow: false, reason: "approval timed out", source: "timeout" });
+  assert.equal(h.asks.length, 2);
+  await h.policy.decideRequest({ ...WRITE, host: "slow.example.com" });
+  assert.equal(h.asks.length, 2, "cached");
+  h.clock.now += 61_000;
+  await h.policy.decideRequest({ ...WRITE, host: "slow.example.com" });
+  assert.equal(h.asks.length, 3);
+});
+
+test("decideRequest: a reason is sanitised, and one that is not the user's own is a system denial", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const pending = h.policy.decideRequest(WRITE);
+  h.answer({ allow: false, reason: "no <b>way</b>\n" });
+  assert.deepEqual(await pending, { allow: false, reason: "no bway/b", source: "unavailable" });
+});
+
+test("decideRequest: the five-pending cap is shared with connection asks", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const pending = [
+    h.policy.decide({ host: "a.example.com", port: 443 }),
+    h.policy.decide({ host: "b.example.com", port: 443 }),
+    h.policy.decideRequest({ ...WRITE, host: "c.example.com" }),
+    h.policy.decideRequest({ ...WRITE, host: "d.example.com" }),
+    h.policy.decideRequest({ ...WRITE, host: "e.example.com" }),
+  ];
+  assert.equal(h.asks.length, 5);
+  assert.deepEqual(await h.policy.decideRequest({ ...WRITE, host: "f.example.com" }), {
+    allow: false,
+    reason: "too many pending network approvals",
+    source: "limit",
+  });
+  for (let i = 0; i < 5; i += 1) h.answer({ allow: true });
+  await Promise.all(pending);
+});
+
+test("decideRequest: finishing the command denies a pending request ask", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("ask"));
+  const pending = h.policy.decideRequest(WRITE);
+  h.policy.unregister("c1");
+  assert.deepEqual(await pending, { allow: false, reason: "command finished", source: "unavailable" });
+  assert.equal(h.asks[0]?.signal.aborted, true);
+});
+
+test("decideRequest: a failing or malformed askHost denies without caching", async () => {
+  let calls = 0;
+  const policy = createNetworkPolicy({
+    ownAddresses: () => new Set(),
+    askHost: () => {
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error("boom")) : Promise.resolve(null as unknown as AskHostAnswer);
+    },
+    now: () => 1,
+    warn: () => {},
+  });
+  policy.register("c1", net("ask"));
+  for (let i = 0; i < 2; i += 1) {
+    assert.deepEqual(await policy.decideRequest(WRITE), {
+      allow: false,
+      reason: "approval unavailable",
+      source: "unavailable",
+    });
+  }
+  assert.equal(calls, 2);
+});
+
+test("activeCommandId names the single active command only", () => {
+  const h = makeHarness();
+  assert.equal(h.policy.activeCommandId(), undefined);
+  h.policy.register("c1", net("open"));
+  assert.equal(h.policy.activeCommandId(), "c1");
+  h.policy.register("c2", net("open"));
+  assert.equal(h.policy.activeCommandId(), undefined);
+});
+
+test("a recorded http entry can carry a denial from the request policy", async () => {
+  const h = makeHarness();
+  h.policy.register("c1", net("open"));
+  await h.policy.decide({ host: "api.example.com", port: 443 });
+  h.policy.beginHttp({ host: "api.example.com", port: 443, method: "PUT", path: "/a?x=1" })?.(403, {
+    source: "user",
+    reason: "denied by the user",
+  });
+  const [, entry] = h.policy.drainAudit("c1");
+  assert.deepEqual(entry, {
+    t: 1_000,
+    kind: "http",
+    host: "api.example.com",
+    port: 443,
+    decision: "deny",
+    source: "user",
+    reason: "denied by the user",
+    method: "PUT",
+    path: "/a",
+    status: 403,
+  });
+});
+
+// ---- The user-versus-system rule applies to write requests too --------------------------------
+
+test("decideRequest: a user denial is remembered for the whole command", async () => {
+  for (const reason of USER_DENIAL_REASONS) {
+    const h = makeHarness();
+    h.policy.register("c1", net("ask"));
+    const first = h.policy.decideRequest(WRITE);
+    h.answer({ allow: false, reason });
+    assert.deepEqual(await first, { allow: false, reason, source: "user" });
+    h.clock.now += 10 * DAY_MS;
+    assert.equal((await h.policy.decideRequest({ ...WRITE, method: "DELETE" })).allow, false);
+    assert.equal(h.asks.length, 1, `"${reason}" is still remembered after ten days`);
+  }
+});
+
+test("decideRequest: every other denial is a system denial, remembered for 30 s and never `user`", async () => {
+  for (const reason of SYSTEM_REASONS) {
+    const h = makeHarness();
+    h.policy.register("c1", net("ask"));
+    const first = h.policy.decideRequest(WRITE);
+    h.answer({ allow: false, reason });
+    assert.deepEqual(await first, { allow: false, reason, source: "unavailable" });
+    h.clock.now += 29_000;
+    await h.policy.decideRequest(WRITE);
+    assert.equal(h.asks.length, 1, `"${reason}" is remembered for 29 s`);
+    h.clock.now += 2_000;
+    const again = h.policy.decideRequest(WRITE);
+    assert.equal(h.asks.length, 2, `"${reason}" is asked again after 31 s`);
+    h.answer({ allow: true });
+    assert.deepEqual(await again, { allow: true });
+  }
+});
+
+test("decideRequest: a denial with no reason, or padded or re-cased user text, is a system denial", async () => {
+  for (const reply of [{ allow: false }, { allow: false, reason: " denied by user " }, { allow: false, reason: "Denied by user" }]) {
+    const h = makeHarness();
+    h.policy.register("c1", net("ask"));
+    const first = h.policy.decideRequest(WRITE);
+    h.answer(reply);
+    const denied = await first;
+    assert.equal(denied.allow, false);
+    assert.equal((denied as { source: string }).source, "unavailable", JSON.stringify(reply));
+    h.clock.now += 31_000;
+    const again = h.policy.decideRequest(WRITE);
+    assert.equal(h.asks.length, 2, JSON.stringify(reply));
+    h.answer({ allow: true });
+    await again;
+  }
+});
