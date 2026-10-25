@@ -2348,6 +2348,42 @@
     "video": {
       "previewTitle": "Video Preview"
     },
+    "pageData": {
+      "title": "Page data",
+      "description": "Records this page keeps between visits. Export a copy or clear them here.",
+      "scopes": {
+        "user": {
+          "label": "Your data",
+          "hint": "Only you can see this."
+        },
+        "shared": {
+          "label": "Shared data",
+          "hint": "Seen by everyone who opens this page. Only the creator or a workspace admin can export or clear it."
+        }
+      },
+      "actions": {
+        "export": "Export data",
+        "clear": "Clear data",
+        "clearing": "Clearing…",
+        "clearConfirm": "Clear data"
+      },
+      "clearDialog": {
+        "user": {
+          "title": "Clear your data?",
+          "description": "This permanently deletes the records this page saved for you. Other people's data is not affected. This action cannot be undone."
+        },
+        "shared": {
+          "title": "Clear shared data?",
+          "description": "This permanently deletes the shared records this page saved for everyone who uses it. This action cannot be undone."
+        }
+      },
+      "toasts": {
+        "exported": "Data exported.",
+        "exportFailed": "Could not export the data.",
+        "cleared": "{count, plural, =0 {No records to clear.} one {Cleared # record.} other {Cleared # records.}}",
+        "clearFailed": "Could not clear the data."
+      }
+    },
     "share": {
       "title": "Share artifact",
       "anyoneWithLink": "Anyone with the link",
