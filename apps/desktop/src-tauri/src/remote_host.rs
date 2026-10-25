@@ -478,7 +478,8 @@ fn resolve_network_decision(
     let ask_id = frame["askId"].as_str().ok_or("Missing network ask ID")?;
     let allow = frame["allow"].as_bool() == Some(true);
     let reason = frame["reason"].as_str().map(str::to_owned);
-    lease.resolve(ask_id, allow, reason);
+    // `kind` echoes the ask's kind; a request ask is only honoured when it is "request".
+    lease.resolve_kind(ask_id, allow, reason, frame["kind"].as_str());
     Ok(())
 }
 
@@ -706,6 +707,56 @@ mod network_decision_tests {
         resolve_network_decision(&lease, &frame).unwrap();
         // The backend delivers at least once: the repeat is a harmless no-op.
         resolve_network_decision(&lease, &json!({"askId":ask_id,"allow":false})).unwrap();
+        assert!(waiting.join().unwrap().allow);
+    }
+
+    #[test]
+    fn a_decision_frame_without_the_kind_echo_cannot_allow_a_request_ask() {
+        let request_ask = |bridge: &NetworkBridge| {
+            let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
+            let lease = bridge.attach(sender);
+            let active = bridge.begin("inv", Arc::default());
+            active.set_command_id("c");
+            let worker = bridge.clone();
+            let waiting = std::thread::spawn(move || {
+                let _active = active;
+                worker.decide(&AskEvent {
+                    ask_id: "a".into(),
+                    command_id: "c".into(),
+                    host: "api.example.com".into(),
+                    port: 443,
+                    suggested_by: None,
+                    kind: Some("request".into()),
+                    method: Some("POST".into()),
+                    path: Some("/x".into()),
+                    secret_in_body: false,
+                })
+            });
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let frame = loop {
+                if let Ok(frame) = frames.try_recv() {
+                    break frame;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            (lease, frame["askId"].as_str().unwrap().to_string(), waiting)
+        };
+        let bridge = NetworkBridge::default();
+        let (lease, ask_id, waiting) = request_ask(&bridge);
+        resolve_network_decision(&lease, &json!({"type":"network.decision","askId":ask_id,"allow":true})).unwrap();
+        let denied = waiting.join().unwrap();
+        assert!(!denied.allow);
+        assert_eq!(denied.reason.as_deref(), Some("backend does not support request approvals"));
+        drop(lease);
+
+        let bridge = NetworkBridge::default();
+        let (lease, ask_id, waiting) = request_ask(&bridge);
+        resolve_network_decision(
+            &lease,
+            &json!({"type":"network.decision","askId":ask_id,"allow":true,"kind":"request"}),
+        )
+        .unwrap();
         assert!(waiting.join().unwrap().allow);
     }
 }

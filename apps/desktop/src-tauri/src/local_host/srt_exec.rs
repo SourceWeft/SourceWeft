@@ -358,6 +358,9 @@ fn child_env(
     env.into_iter().collect()
 }
 
+/// The most `network.allow` entries the sidecar accepts for one command.
+const MAX_ALLOW_ENTRIES: usize = 500;
+
 /// The one line appended to a command's stderr (and returned as `vaultWarning`) when the vault
 /// could not be read. It names a short reason, never a label or a value.
 fn vault_warning_line(error: &HostError) -> String {
@@ -391,13 +394,37 @@ fn with_vault_hosts(
     if policy.mode == NetworkMode::Open {
         return Some(policy);
     }
-    for entry in entries {
-        for host in &entry.meta.hosts {
-            if !policy.allow.contains(host) {
-                policy.allow.push(host.clone());
-            }
+    let mut vault_hosts: Vec<String> = Vec::new();
+    for host in entries.iter().flat_map(|entry| entry.meta.hosts.iter()) {
+        let host = host.to_ascii_lowercase();
+        if !vault_hosts.contains(&host) {
+            vault_hosts.push(host);
         }
     }
+    // The rest of the list, de-duplicated case-insensitively and without the vault's own hosts
+    // (they are appended below), in its original order.
+    let mut others: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = vault_hosts.iter().cloned().collect();
+    for host in std::mem::take(&mut policy.allow) {
+        if seen.insert(host.to_ascii_lowercase()) {
+            others.push(host);
+        }
+    }
+    // The sidecar rejects more than MAX_ALLOW_ENTRIES entries, and it would do so for every
+    // command. Vault hosts win: trailing non-vault entries are dropped to fit.
+    let room = MAX_ALLOW_ENTRIES.saturating_sub(vault_hosts.len());
+    if others.len() > room {
+        static LOGGED: AtomicBool = AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            eprintln!(
+                "sourceweft-desktop: the network allow list plus the vault's hosts exceeds {MAX_ALLOW_ENTRIES} entries; dropping {} trailing non-vault entries (logged once)",
+                others.len() - room
+            );
+        }
+        others.truncate(room);
+    }
+    others.extend(vault_hosts);
+    policy.allow = others;
     Some(policy)
 }
 
@@ -1208,5 +1235,44 @@ mod tests {
         assert!(output(&fine).contains("API_TOKEN=fake_value_API_TOKEN"), "{fine}");
         assert!(fine.get("vaultWarning").is_none(), "{fine}");
         assert!(current(&host).tls);
+    }
+
+    #[test]
+    fn the_merged_allow_list_never_exceeds_the_sidecar_limit() {
+        let (_app, host, _root) = vault_host();
+        // 200 distinct vault hosts (the vault's own cap).
+        for n in 0..4 {
+            let hosts: Vec<String> = (0..50).map(|i| format!("v{n}-{i}.vault.example.com")).collect();
+            let refs: Vec<&str> = hosts.iter().map(String::as_str).collect();
+            host.vault_set(secret(&format!("S_{n}"), "v", &refs)).unwrap();
+        }
+        let entries = host.vault_entries().unwrap();
+        // 500 backend entries: one a case-variant duplicate of a vault host, one repeated.
+        let mut allow: Vec<String> = (0..498).map(|i| format!("site{i}.example.org")).collect();
+        allow.insert(10, "V0-0.Vault.Example.com".into());
+        allow.push("SITE0.example.org".into());
+        assert_eq!(allow.len(), 500);
+        let ask = NetworkPolicy { mode: NetworkMode::Ask, allow, suggested: Default::default() };
+        let merged = with_vault_hosts(Some(&ask), &entries).unwrap();
+        assert_eq!(merged.allow.len(), MAX_ALLOW_ENTRIES, "{}", merged.allow.len());
+        // All vault hosts are present, once, lower-cased.
+        for n in 0..4 {
+            for i in 0..50 {
+                let name = format!("v{n}-{i}.vault.example.com");
+                assert_eq!(merged.allow.iter().filter(|h| h.eq_ignore_ascii_case(&name)).count(), 1, "{name}");
+            }
+        }
+        // Non-vault entries keep their order; the case-variant duplicates are gone, and the
+        // trailing ones were dropped to make room.
+        let others: Vec<&String> = merged.allow.iter().filter(|h| h.starts_with("site") || h.starts_with("SITE")).collect();
+        assert_eq!(others.len(), 300);
+        assert_eq!(others[0], "site0.example.org");
+        assert_eq!(others[299], "site299.example.org");
+        assert!(!merged.allow.iter().any(|h| h == "SITE0.example.org"));
+        // The vault hosts come last.
+        assert!(merged.allow[300..].iter().all(|h| h.ends_with(".vault.example.com")));
+        // Already within limits: nothing is dropped.
+        let small = NetworkPolicy { mode: NetworkMode::Strict, allow: vec!["a.example.org".into()], suggested: Default::default() };
+        assert_eq!(with_vault_hosts(Some(&small), &entries).unwrap().allow.len(), 201);
     }
 }

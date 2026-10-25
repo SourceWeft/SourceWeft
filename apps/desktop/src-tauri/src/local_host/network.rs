@@ -147,6 +147,9 @@ struct Pending {
     /// The connection whose channel carried the `network.ask`; only that connection's close or
     /// decisions touch this ask.
     connection: u64,
+    /// A `kind: "request"` ask. Only a backend that understands request approvals can answer
+    /// it, and it proves so by echoing `kind: "request"` in its `network.decision`.
+    request: bool,
     answer: mpsc::Sender<Decision>,
 }
 
@@ -233,8 +236,20 @@ impl OutboundLease {
     /// connection was waiting; unknown, already-settled (the backend delivers at least once) and
     /// other connections' asks are ignored.
     pub fn resolve(&self, ask_id: &str, allow: bool, reason: Option<String>) -> bool {
+        self.resolve_kind(ask_id, allow, reason, None)
+    }
+
+    /// Like `resolve`, with the `kind` the decision frame carried. A request-kind ask is
+    /// allowed only by a decision that echoes `"request"` (see [`NetworkBridge::resolve_kind`]).
+    pub fn resolve_kind(
+        &self,
+        ask_id: &str,
+        allow: bool,
+        reason: Option<String>,
+        kind: Option<&str>,
+    ) -> bool {
         self.bridge
-            .settle(ask_id, Some(self.connection), Decision { allow, reason })
+            .settle(ask_id, Some(self.connection), Decision { allow, reason }, kind)
     }
 }
 
@@ -335,10 +350,30 @@ impl NetworkBridge {
     /// The backend answered (`network.decision`), from any connection. Returns whether an ask
     /// was waiting. Connections use [`OutboundLease::resolve`].
     pub fn resolve(&self, ask_id: &str, allow: bool, reason: Option<String>) -> bool {
-        self.settle(ask_id, None, Decision { allow, reason })
+        self.resolve_kind(ask_id, allow, reason, None)
     }
 
-    fn settle(&self, ask_id: &str, connection: Option<u64>, decision: Decision) -> bool {
+    /// A decision that carries the `kind` the backend echoed. Version skew guard: an old
+    /// backend ignores `kind`/`method`/`path` and would answer a request ask as if it were a
+    /// host ask (possibly allowing it). So a request-kind ask is allowed only by a decision that
+    /// echoes `kind: "request"`; any other answer to it is a denial. Host asks need no echo.
+    pub fn resolve_kind(
+        &self,
+        ask_id: &str,
+        allow: bool,
+        reason: Option<String>,
+        kind: Option<&str>,
+    ) -> bool {
+        self.settle(ask_id, None, Decision { allow, reason }, kind)
+    }
+
+    fn settle(
+        &self,
+        ask_id: &str,
+        connection: Option<u64>,
+        decision: Decision,
+        echoed_kind: Option<&str>,
+    ) -> bool {
         let pending = {
             let mut state = self.state();
             match state.pending.get(ask_id) {
@@ -350,6 +385,11 @@ impl NetworkBridge {
         };
         match pending {
             Some(pending) => {
+                let decision = if pending.request && echoed_kind != Some("request") {
+                    Decision::deny("backend does not support request approvals")
+                } else {
+                    decision
+                };
                 let _ = pending.answer.send(decision);
                 true
             }
@@ -414,6 +454,7 @@ impl NetworkBridge {
                 Pending {
                     invocation: invocation.clone(),
                     connection,
+                    request: event.request_detail().is_some(),
                     answer,
                 },
             );
@@ -854,7 +895,7 @@ mod tests {
         assert_eq!(frame["method"], "POST");
         assert_eq!(frame["path"], "/repos/x/y/issues");
         assert_eq!(frame["host"], "api.github.com");
-        assert!(bridge.resolve(frame["askId"].as_str().unwrap(), true, None));
+        assert!(bridge.resolve_kind(frame["askId"].as_str().unwrap(), true, None, Some("request")));
         assert!(waiting.join().unwrap().allow);
     }
 
@@ -923,7 +964,7 @@ mod tests {
             let waiting = std::thread::spawn(move || worker.decide(&event));
             let frame = next_frame(&mut frames);
             assert_eq!(frame["method"], method);
-            bridge.resolve(frame["askId"].as_str().unwrap(), true, None);
+            bridge.resolve_kind(frame["askId"].as_str().unwrap(), true, None, Some("request"));
             assert!(waiting.join().unwrap().allow);
         }
     }
@@ -937,7 +978,7 @@ mod tests {
             let worker = bridge.clone();
             let waiting = std::thread::spawn(move || worker.decide(&event));
             let frame = next_frame(frames);
-            bridge.resolve(frame["askId"].as_str().unwrap(), true, None);
+            bridge.resolve_kind(frame["askId"].as_str().unwrap(), true, None, Some("request"));
             assert!(waiting.join().unwrap().allow);
             frame
         };
@@ -954,5 +995,51 @@ mod tests {
         host_ask.secret_in_body = true;
         let frame = relay(host_ask, &mut frames);
         assert!(frame.get("secretInBody").is_none() && frame.get("kind").is_none(), "{frame}");
+    }
+
+    #[test]
+    fn a_request_ask_is_allowed_only_by_a_decision_that_echoes_the_kind() {
+        let bridge = NetworkBridge::default();
+        let (lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let ask_it = |frames: &mut tokio::sync::mpsc::UnboundedReceiver<Value>| {
+            let worker = bridge.clone();
+            let waiting = std::thread::spawn(move || worker.decide(&request_ask("POST", "/x")));
+            let frame = next_frame(frames);
+            (waiting, frame["askId"].as_str().unwrap().to_string())
+        };
+        // An old backend answers it like a host ask: no echo, even with allow:true => deny.
+        let (waiting, id) = ask_it(&mut frames);
+        assert!(lease.resolve_kind(&id, true, None, None));
+        assert_eq!(
+            waiting.join().unwrap(),
+            Decision::deny("backend does not support request approvals")
+        );
+        // A wrong echo is no echo.
+        let (waiting, id) = ask_it(&mut frames);
+        assert!(bridge.resolve_kind(&id, true, None, Some("host")));
+        assert!(!waiting.join().unwrap().allow);
+        // With the echo, allow:true allows...
+        let (waiting, id) = ask_it(&mut frames);
+        assert!(lease.resolve_kind(&id, true, None, Some("request")));
+        assert!(waiting.join().unwrap().allow);
+        // ...and an echoed denial keeps the backend's own reason.
+        let (waiting, id) = ask_it(&mut frames);
+        assert!(lease.resolve_kind(&id, false, Some("denied by user".into()), Some("request")));
+        assert_eq!(
+            waiting.join().unwrap(),
+            Decision { allow: false, reason: Some("denied by user".into()) }
+        );
+    }
+
+    #[test]
+    fn host_asks_need_no_echo() {
+        let bridge = NetworkBridge::default();
+        let (lease, mut frames) = connected(&bridge);
+        let _active = begin_cmd(&bridge, "inv", Arc::default());
+        let waiting = spawn_decide(&bridge, ask("example.com"));
+        let id = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
+        assert!(lease.resolve_kind(&id, true, None, None));
+        assert!(waiting.join().unwrap().allow);
     }
 }

@@ -950,7 +950,10 @@ impl ApprovalBridge {
                             if let Some(answer) = &answer {
                                 std::thread::sleep(answer.delay);
                                 let ask_id = frame["askId"].as_str().unwrap();
-                                bridge.resolve(ask_id, answer.allow, answer.reason.map(str::to_string));
+                                // Like the updated backend, echo `kind` for request asks (a decision
+                                // without it cannot allow a request ask).
+                                let kind = (frame["kind"] == "request").then_some("request");
+                                bridge.resolve_kind(ask_id, answer.allow, answer.reason.map(str::to_string), kind);
                             }
                         }
                         Err(_) => std::thread::sleep(Duration::from_millis(10)),
