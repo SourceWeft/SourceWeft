@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -50,6 +50,14 @@ import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-v
 import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "../_components/mcp-credentials-dialog";
+import { selectInstallForChat } from "../_components/mcp-use-in-chat";
+import { useMcpOAuthReturn } from "../_components/use-mcp-oauth-return";
+import {
+  acceptedMcpReturnTo,
+  clearMcpOrigin,
+  readMcpOrigin,
+  rememberMcpOrigin,
+} from "../../../../lib/mcp-return-to";
 import { mcpDetailTools } from "../_components/mcp-detail-tools";
 import { McpOverviewAdmin } from "../_components/mcp-overview-admin";
 
@@ -114,9 +122,36 @@ export default function McpDetailPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const [credentialsOpen, setCredentialsOpen] = React.useState(false);
+  const [resumeInstallId, setResumeInstallId] = React.useState<string | null>(
+    null,
+  );
   const [error, setError] = React.useState<string | null>(null);
   const [iconFailed, setIconFailed] = React.useState(false);
   const detailGenerationRef = React.useRef(0);
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const handleOAuthConnected = React.useCallback(
+    (completion: { workspaceId: string; installId: string }) => {
+      invalidateWorkspaceMcpCache(completion.workspaceId);
+      setResumeInstallId(completion.installId);
+    },
+    [],
+  );
+  useMcpOAuthReturn({
+    workspaceId: workspace?.id ?? null,
+    onConnected: handleOAuthConnected,
+  });
+  // Where the flow began, kept across the provider round trip.
+  React.useEffect(() => {
+    rememberMcpOrigin(acceptedMcpReturnTo(searchParams.get("returnTo")));
+  }, [searchParams]);
+  // A confirmed connection reopens the dialog on this member's tool list.
+  React.useEffect(() => {
+    if (resumeInstallId && install?.id === resumeInstallId) {
+      setCredentialsOpen(true);
+    }
+  }, [install?.id, resumeInstallId]);
 
   const resolveWorkspace = React.useCallback(async () => {
     if (dashboardState.workspaceId) {
@@ -812,9 +847,37 @@ export default function McpDetailPage() {
 
       <CredentialsDialog
         install={install}
-        onClose={() => setCredentialsOpen(false)}
+        onClose={() => {
+          // A flow that began elsewhere (a chat, the public page) returns there
+          // once the member closes the result.
+          const origin = resumeInstallId ? readMcpOrigin() : null;
+          clearMcpOrigin();
+          setCredentialsOpen(false);
+          setResumeInstallId(null);
+          if (origin) router.push(origin);
+        }}
         onSaved={setInstall}
+        onUseInChat={(target) => {
+          if (!workspace) return;
+          const destination = selectInstallForChat({
+            workspaceId: workspace.id,
+            installId: target.id,
+            origin: readMcpOrigin(),
+          });
+          clearMcpOrigin();
+          setCredentialsOpen(false);
+          setResumeInstallId(null);
+          router.push(destination);
+        }}
         open={credentialsOpen}
+        resumeConnected={
+          Boolean(install) && install?.id === resumeInstallId
+        }
+        // From the loaded item, never the route param: the param may still be
+        // percent-encoded, and encoding it again is refused as a bypass.
+        returnTo={
+          item ? `/dashboard/mcp/${encodeURIComponent(item.identifier)}` : undefined
+        }
         workspaceId={workspace?.id ?? null}
       />
     </main>

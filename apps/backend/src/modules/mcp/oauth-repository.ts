@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
+import { and, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
@@ -24,6 +24,8 @@ type SessionPatch = {
   encryptedTokens?: string | null;
   codeVerifier?: string | null;
   state?: string | null;
+  pendingExpiresAt?: Date | null;
+  pendingReturnTo?: string | null;
 };
 
 async function loadSessionRow(scope: McpOAuthScope) {
@@ -60,6 +62,8 @@ async function upsertSession(scope: McpOAuthScope, patch: SessionPatch) {
       encryptedTokens: patch.encryptedTokens ?? null,
       codeVerifier: patch.codeVerifier ?? null,
       state: patch.state ?? null,
+      pendingExpiresAt: patch.pendingExpiresAt ?? null,
+      pendingReturnTo: patch.pendingReturnTo ?? null,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -79,6 +83,12 @@ async function upsertSession(scope: McpOAuthScope, patch: SessionPatch) {
           ? { codeVerifier: patch.codeVerifier }
           : {}),
         ...(patch.state !== undefined ? { state: patch.state } : {}),
+        ...(patch.pendingExpiresAt !== undefined
+          ? { pendingExpiresAt: patch.pendingExpiresAt }
+          : {}),
+        ...(patch.pendingReturnTo !== undefined
+          ? { pendingReturnTo: patch.pendingReturnTo }
+          : {}),
         updatedAt: now,
       },
     });
@@ -148,36 +158,150 @@ export function createDbMcpOAuthStore(
   };
 }
 
-/**
- * Resolve the pending session for an authorization `state` (CSRF check on
- * callback). The state is a single-use nonce we persisted during authorize, so a
- * match both authenticates the callback and tells us which (install, user) it is
- * for.
- */
-export async function findMcpOAuthSessionByState(state: string): Promise<{
+/** How long a started authorization may wait for its callback. */
+export const MCP_OAUTH_ATTEMPT_TTL_MS = 10 * 60_000;
+/** How long the page the callback returns to may ask to confirm a connection. */
+export const MCP_OAUTH_COMPLETION_TTL_MS = 15 * 60_000;
+
+export type McpOAuthPendingAttempt = {
   scope: McpOAuthScope;
   issuer: string | null;
-} | null> {
+  codeVerifier: string | null;
+  returnTo: string | null;
+};
+
+/**
+ * Record a freshly started attempt as the (install, user)'s one pending
+ * attempt, replacing any earlier one: state, PKCE verifier, issuer, expiry and
+ * destination are written together, so a superseded callback finds nothing and
+ * two concurrent starts can never leave one attempt's state beside the other's
+ * verifier.
+ */
+export async function beginMcpOAuthAttempt(
+  scope: McpOAuthScope,
+  attempt: {
+    issuer: string;
+    state: string;
+    codeVerifier: string;
+    returnTo: string | null;
+    now?: Date;
+  },
+) {
+  const now = attempt.now ?? new Date();
+  await upsertSession(scope, {
+    issuer: attempt.issuer,
+    state: attempt.state,
+    codeVerifier: attempt.codeVerifier,
+    pendingExpiresAt: new Date(now.getTime() + MCP_OAUTH_ATTEMPT_TTL_MS),
+    pendingReturnTo: attempt.returnTo,
+  });
+}
+
+/**
+ * Atomically consume the pending attempt for an authorization `state`: the
+ * row is locked, the state, verifier and destination are cleared in the same
+ * transaction, and the attempt is returned exactly once. An unknown, already
+ * consumed or expired state yields null (an expired one is still cleared). The
+ * state both authenticates the callback (CSRF) and identifies the
+ * (install, user) it was started for.
+ */
+export async function consumeMcpOAuthAttempt(
+  state: string,
+  now: Date = new Date(),
+): Promise<McpOAuthPendingAttempt | null> {
   if (!state) {
     return null;
   }
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(workspaceMcpOAuthSessions)
+      .where(eq(workspaceMcpOAuthSessions.state, state))
+      .limit(1)
+      .for("update");
+    if (!row) {
+      return null;
+    }
+    await tx
+      .update(workspaceMcpOAuthSessions)
+      .set({
+        state: null,
+        codeVerifier: null,
+        pendingExpiresAt: null,
+        pendingReturnTo: null,
+        updatedAt: now,
+      })
+      .where(eq(workspaceMcpOAuthSessions.id, row.id));
+    // A row written before expiry existed has none: treat it as expired.
+    if (!row.pendingExpiresAt || row.pendingExpiresAt.getTime() <= now.getTime()) {
+      return null;
+    }
+    return {
+      scope: {
+        teamId: row.teamId,
+        workspaceId: row.workspaceId,
+        installId: row.installId,
+        userId: row.userId,
+      },
+      issuer: row.issuer ?? null,
+      codeVerifier: row.codeVerifier ?? null,
+      returnTo: row.pendingReturnTo ?? null,
+    };
+  });
+}
+
+/**
+ * Remember that this (install, user) just connected and return a random,
+ * non-secret reference for it. The callback puts the reference in its redirect;
+ * the page asks the API to resolve it for the signed-in user, so a bare
+ * `?mcpOAuth=connected` proves nothing.
+ */
+export async function recordMcpOAuthCompletion(
+  scope: McpOAuthScope,
+  now: Date = new Date(),
+) {
+  const ref = randomBytes(16).toString("hex");
+  await db
+    .update(workspaceMcpOAuthSessions)
+    .set({ completionRef: ref, completionAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(workspaceMcpOAuthSessions.installId, scope.installId),
+        eq(workspaceMcpOAuthSessions.userId, scope.userId),
+      ),
+    );
+  return ref;
+}
+
+/**
+ * The (workspace, install) a completion reference was issued for, only to the
+ * member it was issued to, only while still connected and recent.
+ */
+export async function findMcpOAuthCompletion(input: {
+  userId: string;
+  ref: string;
+  now?: Date;
+}): Promise<{ workspaceId: string; installId: string } | null> {
+  if (!/^[0-9a-f]{32}$/.test(input.ref)) {
+    return null;
+  }
+  const now = input.now ?? new Date();
   const [row] = await db
     .select()
     .from(workspaceMcpOAuthSessions)
-    .where(eq(workspaceMcpOAuthSessions.state, state))
+    .where(
+      and(
+        eq(workspaceMcpOAuthSessions.completionRef, input.ref),
+        eq(workspaceMcpOAuthSessions.userId, input.userId),
+        isNotNull(workspaceMcpOAuthSessions.encryptedTokens),
+        gt(
+          workspaceMcpOAuthSessions.completionAt,
+          new Date(now.getTime() - MCP_OAUTH_COMPLETION_TTL_MS),
+        ),
+      ),
+    )
     .limit(1);
-  if (!row) {
-    return null;
-  }
-  return {
-    scope: {
-      teamId: row.teamId,
-      workspaceId: row.workspaceId,
-      installId: row.installId,
-      userId: row.userId,
-    },
-    issuer: row.issuer ?? null,
-  };
+  return row ? { workspaceId: row.workspaceId, installId: row.installId } : null;
 }
 
 /** Whether a user has a usable (token-bearing) OAuth session for an install. */
@@ -221,7 +345,13 @@ export async function listUserConnectedOAuthInstallIds(input: {
 export async function clearMcpOAuthTransient(scope: McpOAuthScope) {
   await db
     .update(workspaceMcpOAuthSessions)
-    .set({ codeVerifier: null, state: null, updatedAt: new Date() })
+    .set({
+      codeVerifier: null,
+      state: null,
+      pendingExpiresAt: null,
+      pendingReturnTo: null,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(workspaceMcpOAuthSessions.installId, scope.installId),

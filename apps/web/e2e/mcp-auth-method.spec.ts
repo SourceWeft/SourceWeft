@@ -44,13 +44,13 @@ async function signIn(browser: Browser) {
 
 async function openCredentials(page: Page) {
   const dialog = page.getByRole("dialog", {
-    name: "Configure MCP credentials",
+    name: "Connection",
   });
   // Installing a server that needs a credential opens the dialog itself.
   if (await dialog.isVisible()) return dialog;
-  // "Settings" opens it whether or not a member is already connected;
-  // "Configure credentials" shows only while not.
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  // "Connection" opens it whether or not a member is already connected;
+  // "Connect this server" shows only while not.
+  await page.getByRole("button", { name: "Connection", exact: true }).click();
   await expect(dialog).toBeVisible();
   return dialog;
 }
@@ -93,7 +93,7 @@ test("a member saves an API key and it is sent as a Bearer token", async ({
   const page = await context.newPage();
   await page.goto(detailPath, { timeout: 180_000 });
   const install = page.getByRole("button", { name: "Install", exact: true });
-  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  const settings = page.getByRole("button", { name: "Connection", exact: true });
   await expect(install.or(settings).first()).toBeVisible({ timeout: 60_000 });
   if (await install.isVisible()) {
     const installed = page.waitForResponse(
@@ -103,7 +103,7 @@ test("a member saves an API key and it is sent as a Bearer token", async ({
     expect((await installed).ok()).toBe(true);
     // A server that needs a credential opens the dialog on install.
     await expect(
-      page.getByRole("dialog", { name: "Configure MCP credentials" }),
+      page.getByRole("dialog", { name: "Connection" }),
     ).toBeVisible();
   }
 

@@ -21,3 +21,44 @@ export function createMcpRequestScope() {
     },
   };
 }
+
+/** Application deadlines for the OAuth operations that run before a redirect. */
+export const MCP_OAUTH_START_DEADLINE_MS = 20_000;
+export const MCP_OAUTH_EXCHANGE_DEADLINE_MS = 20_000;
+
+/**
+ * Run `work` with a deadline that aborts its in-flight requests, not just the
+ * wait for them: every fetch handed to `work` carries the deadline's signal,
+ * which the controlled fetch passes to each hop, so discovery, registration
+ * and token exchange stop when it fires. Rejects with `timeoutError` (an
+ * McpError) on expiry. `work` that is still running is not awaited again; its
+ * late failure is swallowed so it cannot surface as an unhandled rejection.
+ */
+export async function withMcpRequestDeadline<T>(
+  requests: ReturnType<typeof createMcpRequestScope>,
+  options: { ms: number; timeoutError: () => McpError },
+  work: (fetch: typeof globalThis.fetch) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const fetchWithDeadline: typeof globalThis.fetch = (input, init) =>
+    requests.fetch(input, {
+      ...init,
+      signal: init?.signal
+        ? AbortSignal.any([init.signal, controller.signal])
+        : controller.signal,
+    });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(options.timeoutError());
+    }, options.ms);
+  });
+  const running = work(fetchWithDeadline);
+  running.catch(() => undefined);
+  try {
+    return await Promise.race([running, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}

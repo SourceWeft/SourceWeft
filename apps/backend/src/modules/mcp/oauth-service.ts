@@ -4,14 +4,16 @@ import {
 } from "@modelcontextprotocol/sdk/client/auth.js";
 import { config } from "../../shared/config";
 import { McpError } from "./errors";
-import { McpOAuthClientProvider } from "./oauth-provider";
+import { McpOAuthClientProvider, type McpOAuthStore } from "./oauth-provider";
 import {
-  clearMcpOAuthTransient,
+  beginMcpOAuthAttempt,
+  consumeMcpOAuthAttempt,
   createDbMcpOAuthStore,
-  findMcpOAuthSessionByState,
   getMcpOAuthStatus,
+  recordMcpOAuthCompletion,
   type McpOAuthScope,
 } from "./oauth-repository";
+import { parseMcpReturnTo } from "./oauth-return-to";
 import { mcpInstallAllowsOAuth } from "./auth-methods";
 import { requireMcpWorkspace } from "./permissions";
 import {
@@ -19,7 +21,12 @@ import {
   findWorkspaceMcpInstall,
 } from "./repository";
 import { assertSafeMcpEndpoint } from "./security";
-import { createMcpRequestScope } from "./network";
+import {
+  createMcpRequestScope,
+  MCP_OAUTH_EXCHANGE_DEADLINE_MS,
+  MCP_OAUTH_START_DEADLINE_MS,
+  withMcpRequestDeadline,
+} from "./network";
 
 /**
  * The OAuth flow fetches URLs the tool-execution path never touches — the
@@ -47,12 +54,13 @@ async function assertSafeOAuthUrl(value: string) {
 async function discoverIssuer(
   endpointUrl: string,
   requests: ReturnType<typeof createMcpRequestScope>,
+  fetchFn: typeof globalThis.fetch,
 ): Promise<string> {
   try {
     const metadata = await discoverOAuthProtectedResourceMetadata(
       endpointUrl,
       undefined,
-      requests.fetch,
+      fetchFn,
     );
     const issuer = metadata?.authorization_servers?.[0];
     if (issuer) {
@@ -65,6 +73,10 @@ async function discoverIssuer(
       // The declared issuer failed SSRF validation — refuse, don't fall back.
       throw error;
     }
+    // A deadline abort must end the attempt, not fall through to the origin.
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
     // No protected-resource metadata document; fall through.
   }
   return new URL(endpointUrl).origin;
@@ -73,31 +85,45 @@ async function discoverIssuer(
 function buildProvider(
   scope: McpOAuthScope,
   issuer: string,
-  onRedirect?: (url: URL) => void,
+  options: { store?: McpOAuthStore; onRedirect?: (url: URL) => void } = {},
 ) {
   return new McpOAuthClientProvider({
     redirectUrl: config.mcpOAuth.redirectUrl,
     clientName: config.mcpOAuth.clientName,
     issuer,
     configuredClients: config.mcpOAuth.clients,
-    store: createDbMcpOAuthStore(scope, issuer),
-    onRedirect,
+    store: options.store ?? createDbMcpOAuthStore(scope, issuer),
+    onRedirect: options.onRedirect,
   });
 }
 
 /**
  * Begin the OAuth authorization-code flow for an install: discover the issuer,
- * (dynamically) register or select a client, generate PKCE, and return the
+ * (dynamically) register or select a client, generate PKCE and a fresh state,
+ * record them as the pending attempt with its destination, and return the
  * authorization URL to send the user to. Returns "connected" if valid tokens
- * already exist.
+ * already exist. Everything before the redirect runs under one deadline that
+ * aborts the in-flight requests (MCP_OAUTH_TIMEOUT).
  */
 export async function startMcpOAuthAuthorization(input: {
   workspaceId: string;
   userId: string;
   installId: string;
+  returnTo?: string;
 }): Promise<
   { status: "redirect"; authorizationUrl: string } | { status: "connected" }
 > {
+  let returnTo: string | null = null;
+  if (input.returnTo !== undefined) {
+    returnTo = parseMcpReturnTo(input.returnTo);
+    if (!returnTo) {
+      throw new McpError(
+        400,
+        "MCP_OAUTH_RETURN_INVALID",
+        "The return destination is not allowed",
+      );
+    }
+  }
   const { workspace } = await requireMcpWorkspace({
     workspaceId: input.workspaceId,
     userId: input.userId,
@@ -125,9 +151,10 @@ export async function startMcpOAuthAuthorization(input: {
       "MCP endpoint is required",
     );
   }
+  const endpointUrl = install.endpointUrl;
   // Execution-time SSRF re-check, mirroring the tool path: the stored endpoint
   // may have been repointed (DNS or re-install) since install time.
-  await assertSafeOAuthUrl(install.endpointUrl);
+  await assertSafeOAuthUrl(endpointUrl);
 
   const scope: McpOAuthScope = {
     teamId: workspace.organizationId,
@@ -142,31 +169,77 @@ export async function startMcpOAuthAuthorization(input: {
 
   const requests = createMcpRequestScope();
   try {
-    const issuer = await discoverIssuer(install.endpointUrl, requests);
-    let authorizationUrl: string | null = null;
-    const provider = buildProvider(scope, issuer, (url) => {
-      authorizationUrl = url.toString();
-    });
+    return await withMcpRequestDeadline(
+      requests,
+      {
+        ms: MCP_OAUTH_START_DEADLINE_MS,
+        timeoutError: () =>
+          new McpError(
+            504,
+            "MCP_OAUTH_TIMEOUT",
+            "The MCP server's sign-in did not answer in time",
+          ),
+      },
+      async (fetchFn) => {
+        const issuer = await discoverIssuer(endpointUrl, requests, fetchFn);
+        let authorizationUrl: string | null = null;
+        // PKCE verifier and state are captured in memory so each attempt gets a
+        // fresh state (a persisted one would be reused across attempts) and the
+        // whole attempt is stored atomically once the redirect is known.
+        let state: string | null = null;
+        let codeVerifier: string | null = null;
+        const persistent = createDbMcpOAuthStore(scope, issuer);
+        const provider = buildProvider(scope, issuer, {
+          store: {
+            ...persistent,
+            loadState: async () => state ?? undefined,
+            saveState: async (value) => {
+              state = value;
+            },
+            loadCodeVerifier: async () => codeVerifier ?? undefined,
+            saveCodeVerifier: async (value) => {
+              codeVerifier = value;
+            },
+          },
+          onRedirect: (url) => {
+            authorizationUrl = url.toString();
+          },
+        });
 
-    const result = await auth(provider, {
-      serverUrl: install.endpointUrl,
-      fetchFn: requests.fetch,
-    });
-    requests.throwIfDenied();
-    if (result === "AUTHORIZED") {
-      // The SDK found still-valid tokens and skipped the redirect.
-      await deleteWorkspaceMcpCredential(scope);
-      return { status: "connected" };
-    }
-    if (!authorizationUrl) {
-      throw new McpError(
-        502,
-        "MCP_OAUTH_NO_REDIRECT",
-        "Authorization server did not produce a redirect URL",
-      );
-    }
-    await assertSafeOAuthUrl(authorizationUrl);
-    return { status: "redirect", authorizationUrl };
+        const result = await auth(provider, {
+          serverUrl: endpointUrl,
+          fetchFn,
+        });
+        requests.throwIfDenied();
+        if (result === "AUTHORIZED") {
+          // The SDK found still-valid tokens and skipped the redirect.
+          await deleteWorkspaceMcpCredential(scope);
+          return { status: "connected" as const };
+        }
+        if (!authorizationUrl) {
+          throw new McpError(
+            502,
+            "MCP_OAUTH_NO_REDIRECT",
+            "Authorization server did not produce a redirect URL",
+          );
+        }
+        if (!state || !codeVerifier) {
+          throw new McpError(
+            502,
+            "MCP_OAUTH_NO_REDIRECT",
+            "Authorization server did not produce a redirect URL",
+          );
+        }
+        await assertSafeOAuthUrl(authorizationUrl);
+        await beginMcpOAuthAttempt(scope, {
+          issuer,
+          state,
+          codeVerifier,
+          returnTo,
+        });
+        return { status: "redirect" as const, authorizationUrl };
+      },
+    );
   } catch (error) {
     requests.throwIfDenied();
     throw error;
@@ -175,70 +248,137 @@ export async function startMcpOAuthAuthorization(input: {
   }
 }
 
+export type McpOAuthCallbackOutcome =
+  | {
+      outcome: "connected";
+      returnTo: string | null;
+      completionRef: string;
+    }
+  | {
+      outcome: "denied" | "failed";
+      returnTo: string | null;
+      /** A fixed, non-secret reason the destination page can show. */
+      reason: "denied" | "timeout" | "failed";
+    }
+  | { outcome: "invalid" };
+
 /**
- * Finish the flow from the OAuth redirect: the `state` nonce both authenticates
- * the callback (CSRF) and identifies the (install, user); exchange the code for
- * tokens and clear the single-use PKCE/state.
+ * Finish the flow from the OAuth redirect. The `state` is consumed first,
+ * atomically and exactly once, so a replay, an expired attempt or an unknown
+ * value ends at `invalid` and nothing else is read from the request. The
+ * consumed attempt (user, workspace, install, issuer, PKCE verifier,
+ * destination) is the only context used: membership and the install are
+ * rechecked, the code is exchanged under a deadline, and success returns a
+ * non-secret completion reference. A provider error or denial is handled
+ * through the same bound attempt.
  */
 export async function completeMcpOAuthCallback(input: {
-  code: string;
   state: string;
-}): Promise<{ workspaceId: string; installId: string }> {
-  const session = await findMcpOAuthSessionByState(input.state);
-  if (!session) {
-    throw new McpError(
-      400,
-      "MCP_OAUTH_STATE_INVALID",
-      "Invalid or expired authorization state",
-    );
+  code?: string;
+  providerError?: string;
+}): Promise<McpOAuthCallbackOutcome> {
+  const attempt = await consumeMcpOAuthAttempt(input.state);
+  if (!attempt) {
+    return { outcome: "invalid" };
   }
-  const { scope } = session;
-  const install = await findWorkspaceMcpInstall({
-    teamId: scope.teamId,
-    workspaceId: scope.workspaceId,
-    installId: scope.installId,
+  const { scope, returnTo } = attempt;
+  const failed = (
+    reason: "denied" | "timeout" | "failed",
+  ): McpOAuthCallbackOutcome => ({
+    outcome: reason === "denied" ? "denied" : "failed",
+    returnTo,
+    reason,
   });
-  if (!install?.endpointUrl) {
-    throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
+  if (input.providerError || !input.code) {
+    return failed(input.providerError === "access_denied" ? "denied" : "failed");
   }
-  await assertSafeOAuthUrl(install.endpointUrl);
+
+  let endpointUrl: string;
+  try {
+    // The member may have lost access, or the install been removed or
+    // repointed, since the attempt started.
+    const { workspace } = await requireMcpWorkspace({
+      workspaceId: scope.workspaceId,
+      userId: scope.userId,
+      permission: "mcp.manage",
+    });
+    if (workspace.organizationId !== scope.teamId) {
+      return failed("failed");
+    }
+    const install = await findWorkspaceMcpInstall({
+      teamId: scope.teamId,
+      workspaceId: scope.workspaceId,
+      installId: scope.installId,
+    });
+    if (!install?.endpointUrl || !mcpInstallAllowsOAuth(install)) {
+      return failed("failed");
+    }
+    endpointUrl = install.endpointUrl;
+    await assertSafeOAuthUrl(endpointUrl);
+    // A stored issuer is validated again at use time for the same reason.
+    if (attempt.issuer) {
+      await assertSafeOAuthUrl(attempt.issuer);
+    }
+  } catch {
+    return failed("failed");
+  }
 
   const requests = createMcpRequestScope();
   try {
-    const issuer =
-      session.issuer ?? (await discoverIssuer(install.endpointUrl, requests));
-    if (session.issuer) {
-      // A stored issuer is validated again at use time for the same reason.
-      await assertSafeOAuthUrl(session.issuer);
-    }
-    const provider = buildProvider(scope, issuer);
-    const result = await auth(provider, {
-      serverUrl: install.endpointUrl,
-      authorizationCode: input.code,
-      fetchFn: requests.fetch,
-    });
-    requests.throwIfDenied();
-    if (result !== "AUTHORIZED") {
-      throw new McpError(
-        502,
-        "MCP_OAUTH_EXCHANGE_FAILED",
-        "Token exchange did not complete",
-      );
-    }
-    await clearMcpOAuthTransient(scope);
-    // One connection method per member: OAuth replaces THIS member's static
-    // credential for the install (e.g. an API key saved earlier), no one else's.
-    await deleteWorkspaceMcpCredential(scope);
-    // Credential status is now derived per-user (from this user's token-bearing
-    // OAuth session), NOT written install-level: flipping the shared install flag
-    // to "configured" here would make every other member appear connected. The
-    // token we just stored is what a per-user overlay reads to report "configured"
-    // for this user only.
-    return { workspaceId: scope.workspaceId, installId: scope.installId };
+    await withMcpRequestDeadline(
+      requests,
+      {
+        ms: MCP_OAUTH_EXCHANGE_DEADLINE_MS,
+        timeoutError: () =>
+          new McpError(
+            504,
+            "MCP_OAUTH_TIMEOUT",
+            "The MCP server's sign-in did not answer in time",
+          ),
+      },
+      async (fetchFn) => {
+        const issuer =
+          attempt.issuer ?? (await discoverIssuer(endpointUrl, requests, fetchFn));
+        const persistent = createDbMcpOAuthStore(scope, issuer);
+        const provider = buildProvider(scope, issuer, {
+          // The verifier was consumed with the state; hand it to the exchange
+          // in memory instead of leaving it stored.
+          store: {
+            ...persistent,
+            loadCodeVerifier: async () => attempt.codeVerifier ?? undefined,
+          },
+        });
+        const result = await auth(provider, {
+          serverUrl: endpointUrl,
+          authorizationCode: input.code,
+          fetchFn,
+        });
+        requests.throwIfDenied();
+        if (result !== "AUTHORIZED") {
+          throw new McpError(
+            502,
+            "MCP_OAUTH_EXCHANGE_FAILED",
+            "Token exchange did not complete",
+          );
+        }
+      },
+    );
   } catch (error) {
-    requests.throwIfDenied();
-    throw error;
+    return failed(
+      error instanceof McpError && error.code === "MCP_OAUTH_TIMEOUT"
+        ? "timeout"
+        : "failed",
+    );
   } finally {
     await requests.close();
   }
+
+  // One connection method per member: OAuth replaces THIS member's static
+  // credential for the install (e.g. an API key saved earlier), no one else's.
+  await deleteWorkspaceMcpCredential(scope);
+  // Credential status is derived per-user (from this user's token-bearing
+  // OAuth session), NOT written install-level: flipping the shared install flag
+  // to "configured" here would make every other member appear connected.
+  const completionRef = await recordMcpOAuthCompletion(scope);
+  return { outcome: "connected", returnTo, completionRef };
 }

@@ -2514,15 +2514,15 @@
       "openSourceAria": "打开 {name} 来源",
       "openGithub": "打开 GitHub 仓库",
       "openSource": "打开来源",
-      "credentialsRequired": "需要凭据",
+      "credentialsRequired": "需要连接",
       "toolsSyncedTitle": "已同步 {count} 个工具",
       "tested": "已测试 {time}",
       "notTestedYet": "尚未测试",
       "testAria": "测试 {name}",
       "testConnection": "测试连接",
-      "configureAria": "配置 {name}",
-      "configureRequired": "配置所需凭据",
-      "settings": "设置",
+      "configureAria": "管理 {name} 的连接",
+      "configureRequired": "连接后才能使用此服务器",
+      "settings": "连接",
       "uninstallAria": "卸载 {name}",
       "uninstall": "卸载",
       "enableAria": "启用 {name}",
@@ -2530,7 +2530,11 @@
       "enable": "启用",
       "disable": "停用",
       "install": "安装",
-      "unverifiedWarning": "未验证的 MCP 可以接收本回合的工具参数，并可能执行外部操作。启用前请先查看该服务器。"
+      "unverifiedWarning": "未验证的 MCP 可以接收本回合的工具参数，并可能执行外部操作。启用前请先查看该服务器。",
+      "connectedVia": {
+        "oauth": "已使用 OAuth 连接",
+        "header": "已使用 API 密钥连接"
+      }
     },
     "empty": {
       "none": "此工作区暂无可用的 MCP 服务器。",
@@ -2553,7 +2557,11 @@
       "testFailed": "测试 MCP 失败。",
       "loadMoreFailed": "加载更多 MCP 服务器失败。",
       "connected": "MCP 服务器已连接",
-      "authFailed": "MCP 授权失败。请重试。"
+      "authFailed": "MCP 授权失败。请重试。",
+      "connectUnconfirmed": "无法确认连接。请打开“连接”进行检查。",
+      "authInvalid": "此登录链接已过期或已被使用。请重新连接。",
+      "authDenied": "登录已取消。",
+      "authTimeout": "登录服务未能及时响应。请重试。"
     },
     "risk": {
       "destructive": "破坏性",
@@ -2566,7 +2574,7 @@
       "titleFallback": "MCP 详情",
       "loadingDescription": "正在加载 MCP 详情。",
       "test": "测试",
-      "settings": "设置",
+      "settings": "连接",
       "uninstall": "卸载",
       "install": "安装",
       "loading": "正在加载 MCP…",
@@ -2577,7 +2585,7 @@
       "identifierMissing": "缺少 MCP 标识符。",
       "enabled": "已启用",
       "disabled": "已停用",
-      "configureCredentials": "配置凭据",
+      "configureCredentials": "连接此服务器",
       "toolsSynced": "已同步 {count} 个工具",
       "testedSuffix": " · 已测试 {time}",
       "notTestedSuffix": " · 尚未测试",
@@ -2618,8 +2626,8 @@
       "securityShort": "凭据按工作区加密，且仅在工具调用期间发送给此服务器。"
     },
     "credentials": {
-      "title": "配置 MCP 凭据",
-      "description": "凭据在 SourceWeft 中加密存储，且仅在工具调用期间发送给此 MCP 服务器。",
+      "title": "连接",
+      "description": "你的登录凭证或密钥在 SourceWeft 中加密存储，且仅在工具调用期间发送给此 MCP 服务器。",
       "serverFallback": "MCP 服务器",
       "authType": {
         "bearer": "Bearer 令牌",
@@ -2664,14 +2672,34 @@
         "apiKeyRequired": "保存前请输入请求头名称和 API 密钥。",
         "headerRequired": "保存前请至少添加一个请求头。",
         "keyRequired": "保存前需输入 API 密钥。",
-        "methodNotAllowed": "此服务器不接受这种连接方式。"
+        "methodNotAllowed": "此服务器不接受这种连接方式。",
+        "authTimeout": "登录服务未能及时响应。请重试。",
+        "redirectBlocked": "登录页面未能打开。请重试，并检查浏览器是否允许重定向。",
+        "notConnected": "此连接已失效。请重新连接。",
+        "discoveryFailed": "无法使用你的连接检查工具。",
+        "discoveryTimeout": "服务器未能及时列出工具。请重试。"
       },
       "toasts": {
         "saved": "MCP 凭据已保存",
         "saveFailed": "保存凭据失败。",
         "alreadyConnected": "MCP 服务器已连接",
         "authStartFailed": "启动授权失败。"
-      }
+      },
+      "states": {
+        "requesting": "正在联系登录服务…",
+        "redirecting": "正在打开 {provider}…",
+        "testing": "正在检查你可以使用的工具…"
+      },
+      "result": {
+        "title": "你可以使用 {count} 个工具",
+        "more": "…另有 {count} 个",
+        "empty": "此服务器没有为你的账户列出任何工具。",
+        "truncated": "仅显示前 {count} 个。",
+        "oversize": "有 {count} 个工具因定义过大而被省略。",
+        "private": "只有你能看到此列表，不会与工作空间共享。"
+      },
+      "useInChat": "在对话中使用",
+      "retry": "重试"
     },
     "submit": {
       "trigger": "提交 MCP",

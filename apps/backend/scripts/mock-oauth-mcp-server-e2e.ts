@@ -23,7 +23,9 @@ import type { AddressInfo } from "node:net";
  *
  * It also serves a two-entry registry (`/v0/servers`) for federation, a server
  * card at `/.well-known/mcp/server-card.json`, and `/_e2e/requests` lists
- * which credential each request to the OAuth-or-key server carried.
+ * which credential each request to the OAuth-or-key server carried, and
+ * `POST /_e2e/delay?path=/register&ms=60000` makes a path answer slowly
+ * (ms=0 restores it) to reproduce stalled authorization.
  *
  * Run from `apps/backend`: `pnpm exec tsx scripts/mock-oauth-mcp-server-e2e.ts`.
  * Prints `{"origin": ...}` once listening. Never use outside a test.
@@ -62,6 +64,8 @@ const codes = new Map<
   string,
   { clientId: string; redirectUri: string; challenge: string }
 >();
+/** Pathname -> ms to wait before answering, set through `/_e2e/delay`. */
+const delays = new Map<string, number>();
 const accessTokens = new Set<string>();
 const refreshTokens = new Set<string>();
 
@@ -170,6 +174,16 @@ async function handle(request: IncomingMessage, reply: ServerResponse) {
   }
 
   if (url.pathname === "/_e2e/requests") return json(reply, 200, requests);
+  if (url.pathname === "/_e2e/delay" && request.method === "POST") {
+    // Makes one path slow (or fast again with ms=0), to reproduce stalls.
+    const target = url.searchParams.get("path") ?? "";
+    const ms = Number(url.searchParams.get("ms") ?? 0);
+    if (ms > 0) delays.set(target, ms);
+    else delays.delete(target);
+    return json(reply, 200, { path: target, ms });
+  }
+  const delay = delays.get(url.pathname);
+  if (delay) await new Promise((done) => setTimeout(done, delay));
 
   if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
     return json(reply, 200, {
