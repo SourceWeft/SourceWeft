@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   names: vi.fn(),
   deleteUserData: vi.fn(),
   allow: vi.fn(),
+  navAllow: vi.fn(),
+  countNavigation: vi.fn(),
 }));
 
 vi.mock("../workspace", () => ({
@@ -42,6 +44,11 @@ vi.mock("../sharing/store", () => ({
 vi.mock("../team-audit", () => ({ teamAuditService: { record: mocks.audit } }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("./navigation", () => ({
+  NAVIGATION_ATTEMPT_ACTION: "artifact.page_navigation_attempt",
+  countNavigationAttempts: mocks.countNavigation,
+  redisNavigationReportLimiter: { allow: vi.fn() },
 }));
 vi.mock("./rate-limit", () => ({ redisRecordRateLimiter: { allow: vi.fn() } }));
 vi.mock("./repository", async () => {
@@ -67,7 +74,10 @@ import { ContentError } from "../content/errors";
 import { RecordQueryTimeoutError } from "./repository";
 import { ArtifactRecordsService } from "./service";
 
-const service = new ArtifactRecordsService({ allow: mocks.allow });
+const service = new ArtifactRecordsService(
+  { allow: mocks.allow },
+  { allow: mocks.navAllow },
+);
 
 function version(
   capabilities: string[] | undefined,
@@ -128,6 +138,9 @@ beforeEach(() => {
   mocks.resolveAccess.mockResolvedValue(access("editor"));
   mocks.findReadyVersion.mockResolvedValue(version(["storage"]));
   mocks.allow.mockResolvedValue(true);
+  mocks.navAllow.mockReset();
+  mocks.countNavigation.mockReset();
+  mocks.countNavigation.mockResolvedValue(0);
   mocks.findApproval.mockResolvedValue({
     approvedBy: "editor-1",
     approvedAt: new Date(0),
@@ -675,5 +688,78 @@ test("status tells the host what to prompt for", async () => {
     },
     consented: false,
     canApprove: false,
+    navigationAttempts: 0,
   });
+});
+
+test("status carries the recent navigation count and survives a failed count", async () => {
+  mocks.author.mockResolvedValue("author-1");
+  mocks.names.mockResolvedValue(new Map());
+  mocks.countNavigation.mockResolvedValue(3);
+  assert.equal((await service.status(versionInput)).navigationAttempts, 3);
+  assert.deepEqual(mocks.countNavigation.mock.calls[0]![0], {
+    teamId: "team-1",
+    artifactId: "artifact-1",
+    versionId: "version-1",
+  });
+  mocks.countNavigation.mockRejectedValue(new Error("db down"));
+  assert.equal((await service.status(versionInput)).navigationAttempts, 0);
+});
+
+test("a navigation report is recorded once per window with only the version", async () => {
+  mocks.resolveAccess.mockResolvedValue(access("viewer"));
+  mocks.navAllow.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  assert.deepEqual(await service.reportNavigation(versionInput), {
+    accepted: true,
+  });
+  assert.deepEqual(await service.reportNavigation(versionInput), {
+    accepted: true,
+  });
+  assert.equal(mocks.audit.mock.calls.length, 1);
+  assert.deepEqual(mocks.audit.mock.calls[0]![0], {
+    teamId: "team-1",
+    actorUserId: "user-1",
+    action: "artifact.page_navigation_attempt",
+    targetType: "artifact",
+    targetId: "artifact-1",
+    metadata: { versionId: "version-1" },
+  });
+  assert.equal(mocks.navAllow.mock.calls[0]![0], "user-1:version-1");
+});
+
+test("a navigation report needs a viewable storage version and writes nothing otherwise", async () => {
+  mocks.navAllow.mockResolvedValue(true);
+  mocks.resolveAccess.mockResolvedValue(access(null));
+  await rejectsWith(
+    service.reportNavigation(versionInput),
+    "ARTIFACT_RECORD_UNAVAILABLE",
+  );
+  mocks.resolveAccess.mockResolvedValue(access("viewer"));
+  mocks.findReadyVersion.mockResolvedValue(null);
+  await rejectsWith(
+    service.reportNavigation(versionInput),
+    "ARTIFACT_RECORD_UNAVAILABLE",
+  );
+  mocks.findReadyVersion.mockResolvedValue(version(undefined));
+  await rejectsWith(
+    service.reportNavigation(versionInput),
+    "ARTIFACT_RECORD_FORBIDDEN",
+    403,
+  );
+  mocks.findReadyVersion.mockResolvedValue(
+    version(["storage"], { artifactType: "doc" }),
+  );
+  await rejectsWith(
+    service.reportNavigation(versionInput),
+    "ARTIFACT_RECORD_UNAVAILABLE",
+  );
+  assert.equal(mocks.audit.mock.calls.length, 0);
+});
+
+test("a failing navigation limiter writes nothing and does not error", async () => {
+  mocks.navAllow.mockRejectedValue(new Error("redis down"));
+  assert.deepEqual(await service.reportNavigation(versionInput), {
+    accepted: true,
+  });
+  assert.equal(mocks.audit.mock.calls.length, 0);
 });

@@ -402,6 +402,8 @@ export type ArtifactRecordsStatus = {
   } | null;
   consented: boolean;
   canApprove: boolean;
+  /** Advisory reports that this version tried to leave its page, last 7 days. */
+  navigationAttempts: number;
 };
 
 /** Failures a transport reports; `code` is what the page receives. */
@@ -426,6 +428,11 @@ export type ArtifactRecordsTransport = {
   approveShared?: () => Promise<void>;
   revokeShared?: () => Promise<void>;
   grantSharedConsent?: () => Promise<void>;
+  /**
+   * Tells the backend this version's page tried to navigate its frame.
+   * Advisory and fire-and-forget; carries nothing from the page.
+   */
+  reportNavigation?: () => Promise<void>;
 };
 
 /* -------------------------------------------------------------------------- */

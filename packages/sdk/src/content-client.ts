@@ -367,6 +367,17 @@ export class ContentClient {
     );
   }
 
+  reportArtifactPageNavigation(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ accepted: true }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/navigation`,
+      {},
+    );
+  }
+
   /**
    * Page data as one JSON document. `user` is the caller's own records;
    * `shared` needs the artifact's creator or a workspace admin.

@@ -62,6 +62,12 @@ const WRITE_RULES: WriteRule[] = [
       /^\/artifacts\/[^/]+\/versions\/[^/]+\/records\/(approval|consent)$/,
     requirement: { plane: "none" },
   },
+  // A viewer's host reports a page that tried to leave its frame; the records
+  // service checks access itself and records at most one report per minute.
+  {
+    pattern: /^\/artifacts\/[^/]+\/versions\/[^/]+\/records\/navigation$/,
+    requirement: { plane: "none" },
+  },
   {
     pattern: /^\/model-gateway\/byok-model-capabilities$/,
     requirement: { plane: "none" },
