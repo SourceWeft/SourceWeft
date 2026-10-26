@@ -4111,10 +4111,12 @@ name = "sourceweft-desktop"
 version = "0.3.0-rc.9"
 dependencies = [
  "base64 0.22.1",
+ "flate2",
  "futures-util",
  "httpdate",
  "keyring",
  "libc",
+ "minisign-verify",
  "regex",
  "reqwest 0.12.28",
  "reqwest 0.13.4",
@@ -4124,6 +4126,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "sys-locale",
  "tauri",
  "tauri-build",

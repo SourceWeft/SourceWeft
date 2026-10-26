@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
 import { buildConfig, perWrapReadRoots } from "../src/policy.js";
+import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
 import type {
   AuditEntry,
   InitConfig,
@@ -203,6 +204,19 @@ async function initHarness(
   assert.equal(response.ok, true, `init failed: ${JSON.stringify(response)}`);
   return harness;
 }
+
+test("init replies with the bundle's protocol version", async () => {
+  const harness = startHarness(makeFakeSrt());
+  const response = await harness.send({ op: "init", config: linuxInit() });
+  assert.equal(response.ok, true);
+  if (response.ok) {
+    assert.deepEqual(response.result, { protocolVersion: SANDBOX_PROTOCOL_VERSION });
+    assert.deepEqual(response.result, { protocolVersion: 2 });
+  }
+  // Pinned: bumping the constant is deliberate, and the Rust host's copy must move with it.
+  assert.equal(SANDBOX_PROTOCOL_VERSION, 2);
+  await harness.stop();
+});
 
 test("wrap before init is NOT_INITIALIZED", async () => {
   const harness = startHarness(makeFakeSrt());

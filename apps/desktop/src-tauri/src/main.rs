@@ -157,6 +157,8 @@ fn main() {
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
             local_bridge::choose_working_directory,
+            local_bridge::run_sandbox_privileged_setup,
+            local_bridge::install_sandbox_runtime,
             tray_locale::sync_tray_locale,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))

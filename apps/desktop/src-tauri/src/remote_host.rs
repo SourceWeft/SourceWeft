@@ -1,7 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sourceweft_desktop::local_host::{execution::Executions, LocalHost};
+use sourceweft_desktop::local_host::{
+    device_status::StatusReporter, execution::Executions, readiness::SandboxReadiness, LocalHost,
+};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -482,6 +484,35 @@ fn resolve_network_decision(
     Ok(())
 }
 
+/// How long the connection loop waits between heartbeats; the readiness check for the `status`
+/// report rides on the same tick.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+
+/// The host's current sandbox readiness. Blocking (it may probe a sidecar), so the connection
+/// loop only ever runs it on a blocking thread.
+type ReadinessProbe = Arc<dyn Fn() -> SandboxReadiness + Send + Sync>;
+
+/// What `run_connection` takes besides the host's state, so tests can drive a fast heartbeat and a
+/// scripted readiness.
+struct Tuning {
+    heartbeat: Duration,
+    readiness: ReadinessProbe,
+}
+
+/// Runs `probe` on a blocking thread and delivers the result on `results`, never blocking the
+/// connection loop (`None`: the probe task failed).
+fn spawn_readiness_probe(
+    probe: &ReadinessProbe,
+    results: &tokio::sync::mpsc::Sender<Option<SandboxReadiness>>,
+) {
+    let probe = probe.clone();
+    let results = results.clone();
+    tokio::spawn(async move {
+        let readiness = tokio::task::spawn_blocking(move || probe()).await.ok();
+        let _ = results.send(readiness).await;
+    });
+}
+
 async fn connection(
     host: &Arc<LocalHost>,
     executions: &Arc<Executions>,
@@ -490,6 +521,25 @@ async fn connection(
     stop: &Arc<AtomicBool>,
     generation: &Arc<AtomicU64>,
     current: u64,
+) -> Result<(), String> {
+    let readiness_host = host.clone();
+    let tuning = Tuning {
+        heartbeat: HEARTBEAT_INTERVAL,
+        readiness: Arc::new(move || readiness_host.sandbox_readiness()),
+    };
+    run_connection(host, executions, credential, status, stop, generation, current, tuning).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_connection(
+    host: &Arc<LocalHost>,
+    executions: &Arc<Executions>,
+    credential: &Credentials,
+    status: &Arc<Mutex<RemoteStatus>>,
+    stop: &Arc<AtomicBool>,
+    generation: &Arc<AtomicU64>,
+    current: u64,
+    tuning: Tuning,
 ) -> Result<(), String> {
     let mut url = url::Url::parse(&credential.api_base).map_err(|e| e.to_string())?;
     let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
@@ -518,8 +568,14 @@ async fn connection(
     let (network_out, mut network_frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let network_lease = host.network.attach(network_out);
     let serial = Arc::new(tokio::sync::Semaphore::new(1));
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+    let mut heartbeat = tokio::time::interval(tuning.heartbeat);
     let mut last_received = tokio::time::Instant::now();
+    // `status` goes only to a gateway that announced it in `connected.features` (an older backend
+    // closes the socket on an unknown message type), right after `connected` and again whenever
+    // the readiness changes.
+    let mut report = StatusReporter::default();
+    let (readiness_results, mut readiness_rx) =
+        tokio::sync::mpsc::channel::<Option<SandboxReadiness>>(1);
     loop {
         tokio::select! {
             _=heartbeat.tick()=>{
@@ -527,6 +583,10 @@ async fn connection(
                 // The server confirms heartbeats; silent half-open connections stop work.
                 if last_received.elapsed()>Duration::from_secs(30){return Err("Device connection lease expired".into());}
                 sender.send(Message::Text(json!({"type":"heartbeat"}).to_string().into())).await.map_err(|e|e.to_string())?;
+                if report.begin_probe(){spawn_readiness_probe(&tuning.readiness,&readiness_results);}
+            },
+            Some(readiness)=readiness_rx.recv()=>{
+                if let Some(message)=report.on_readiness(readiness){sender.send(Message::Text(message.to_string().into())).await.map_err(|e|e.to_string())?;}
             },
             Some((result, _lease))=results.recv()=>{sender.send(Message::Text(result.to_string().into())).await.map_err(|e|e.to_string())?;},
             Some(frame)=network_frames.recv()=>{sender.send(Message::Text(frame.to_string().into())).await.map_err(|e|e.to_string())?;},
@@ -536,7 +596,7 @@ async fn connection(
                 if let Message::Text(text)=message {
                     let value:Value=serde_json::from_str(&text).map_err(|_|"Invalid server message")?;
                     match value["type"].as_str(){
-                        Some("connected")=>{if value["deviceId"]!=credential.id||value["userId"]!=credential.user_id{return Err("Device identity mismatch".into());}if let Ok(mut state)=status.lock(){state.connected=true;state.error=None;}},
+                        Some("connected")=>{if value["deviceId"]!=credential.id||value["userId"]!=credential.user_id{return Err("Device identity mismatch".into());}if let Ok(mut state)=status.lock(){state.connected=true;state.error=None;}report.on_connected(&value);if report.begin_probe(){spawn_readiness_probe(&tuning.readiness,&readiness_results);}},
                         Some("heartbeat")=>{},
                         Some("network.decision")=>{resolve_network_decision(&network_lease,&value)?;},
                         Some("cancel")=>{if let Some(id)=value["id"].as_str(){executions.cancel(id);}},
@@ -703,5 +763,165 @@ mod network_decision_tests {
         // The backend delivers at least once: the repeat is a harmless no-op.
         resolve_network_decision(&lease, &json!({"askId":ask_id,"allow":false})).unwrap();
         assert!(waiting.join().unwrap().allow);
+    }
+}
+
+/// The `status` report on a real WebSocket against a fake backend (a loopback `ws://` server that
+/// speaks the gateway's side), driving the production `run_connection` with a short heartbeat and
+/// a scripted readiness.
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+mod status_report_tests {
+    use super::*;
+    use sourceweft_desktop::local_host::readiness::{Remedy, SetupCode};
+    use tokio::net::TcpListener;
+
+    const HEARTBEAT: Duration = Duration::from_millis(40);
+
+    fn ready() -> SandboxReadiness {
+        SandboxReadiness::Ready { toolchain_path: None }
+    }
+
+    fn broken() -> SandboxReadiness {
+        SandboxReadiness::NeedsSetup {
+            code: SetupCode::BundleMissing,
+            reason: "Sandbox runtime is not installed".into(),
+            remedy: Remedy::DownloadRuntime,
+            setup_command: None,
+        }
+    }
+
+    /// Everything the host wrote to the fake backend, by message type.
+    struct Wire {
+        frames: Arc<Mutex<Vec<Value>>>,
+    }
+
+    impl Wire {
+        fn of_type(&self, kind: &str) -> Vec<Value> {
+            self.frames.lock().unwrap().iter().filter(|f| f["type"] == kind).cloned().collect()
+        }
+
+        async fn until(&self, what: &str, done: impl Fn(&Wire) -> bool) {
+            let started = std::time::Instant::now();
+            while !done(self) {
+                assert!(started.elapsed() < Duration::from_secs(10), "timed out waiting for {what}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
+
+    /// Starts the host's connection against a fake gateway whose `connected` message carries
+    /// `features` (omitted when `None`), and returns what it receives. `current` scripts the
+    /// readiness the host reads.
+    async fn connect(
+        features: Option<Value>,
+        current: Arc<Mutex<SandboxReadiness>>,
+    ) -> (Wire, tokio::task::JoinHandle<Result<(), String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let frames = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let seen = frames.clone();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let (mut sender, mut receiver) = socket.split();
+            let mut connected = json!({"type": "connected", "deviceId": "dev-1", "userId": "user-1"});
+            if let Some(features) = features {
+                connected["features"] = features;
+            }
+            sender.send(Message::Text(connected.to_string().into())).await.unwrap();
+            while let Some(Ok(message)) = receiver.next().await {
+                if let Message::Text(text) = message {
+                    let value: Value = serde_json::from_str(&text).unwrap();
+                    // the gateway echoes heartbeats so the host's lease check stays happy
+                    if value["type"] == "heartbeat" {
+                        let _ = sender.send(Message::Text(json!({"type": "heartbeat"}).to_string().into())).await;
+                    }
+                    seen.lock().unwrap().push(value);
+                }
+            }
+        });
+        let data = tempfile::tempdir().unwrap();
+        let host = Arc::new(LocalHost::open(data.path()).unwrap());
+        let credential = Credentials {
+            id: "dev-1".into(),
+            user_id: "user-1".into(),
+            token: "token".into(),
+            api_base: format!("http://127.0.0.1:{port}"),
+        };
+        let probe_current = current.clone();
+        let task = tokio::spawn(async move {
+            let _keep_data_alive = data;
+            let tuning = Tuning {
+                heartbeat: HEARTBEAT,
+                readiness: Arc::new(move || probe_current.lock().unwrap().clone()),
+            };
+            run_connection(
+                &host,
+                &Arc::new(Executions::default()),
+                &credential,
+                &Arc::new(Mutex::new(RemoteStatus::default())),
+                &Arc::new(AtomicBool::new(false)),
+                &Arc::new(AtomicU64::new(1)),
+                1,
+                tuning,
+            )
+            .await
+        });
+        (Wire { frames }, task)
+    }
+
+    #[tokio::test]
+    async fn reports_after_connected_then_only_when_the_readiness_changes() {
+        let current = Arc::new(Mutex::new(ready()));
+        let (wire, task) = connect(Some(json!(["status"])), current.clone()).await;
+
+        wire.until("the first status", |w| !w.of_type("status").is_empty()).await;
+        let first = wire.of_type("status").remove(0);
+        assert_eq!(first["sandbox"], json!({"state": "ready"}));
+        assert_eq!(first["shell"], sourceweft_desktop::local_host::device_status::command_shell().unwrap());
+        assert_eq!(first["capabilities"].as_array().unwrap().len(), sourceweft_desktop::local_host::device_status::CAPABILITIES.len());
+
+        // Many heartbeat ticks with an unchanged readiness: still exactly one report.
+        let beats = wire.of_type("heartbeat").len();
+        wire.until("more heartbeats", |w| w.of_type("heartbeat").len() >= beats + 8).await;
+        assert_eq!(wire.of_type("status").len(), 1);
+
+        *current.lock().unwrap() = broken();
+        wire.until("the changed status", |w| w.of_type("status").len() >= 2).await;
+        let second = wire.of_type("status")[1].clone();
+        assert_eq!(
+            second["sandbox"],
+            json!({"state": "needsSetup", "code": "bundleMissing", "reason": "Sandbox runtime is not installed", "remedy": "downloadRuntime"})
+        );
+        let beats = wire.of_type("heartbeat").len();
+        wire.until("more heartbeats", |w| w.of_type("heartbeat").len() >= beats + 8).await;
+        assert_eq!(wire.of_type("status").len(), 2);
+
+        *current.lock().unwrap() = ready();
+        wire.until("the recovery status", |w| w.of_type("status").len() >= 3).await;
+        assert_eq!(wire.of_type("status")[2]["sandbox"], json!({"state": "ready"}));
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn never_reports_to_a_gateway_that_did_not_announce_the_feature() {
+        for features in [None, Some(json!([])), Some(json!(["other"]))] {
+            let (wire, task) = connect(features.clone(), Arc::new(Mutex::new(ready()))).await;
+            wire.until("heartbeats", |w| w.of_type("heartbeat").len() >= 10).await;
+            assert!(wire.of_type("status").is_empty(), "features {features:?}");
+            assert!(!task.is_finished(), "the connection must stay up: {features:?}");
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn every_connection_reports_on_its_own() {
+        let current = Arc::new(Mutex::new(ready()));
+        let (wire, task) = connect(Some(json!(["status"])), current.clone()).await;
+        wire.until("the first status", |w| !w.of_type("status").is_empty()).await;
+        task.abort();
+        let (again, task) = connect(Some(json!(["status"])), current).await;
+        again.until("a status on the new connection", |w| !w.of_type("status").is_empty()).await;
+        task.abort();
     }
 }

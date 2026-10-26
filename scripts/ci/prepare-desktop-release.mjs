@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, writeFile, open } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { digest } from "./desktop-release-artifacts.mjs";
+import { findDeb } from "./desktop-deb.mjs";
 import {
   updatePublicationPolicy,
   distributionClaims,
@@ -129,6 +130,14 @@ await verifyUpdateSignature(updateSource, `${updateSource}.sig`);
 await copyFile(installerSource, join(output, installerName));
 if (mac) await copyFile(updateSource, join(output, updateName));
 await copyFile(`${updateSource}.sig`, join(output, `${updateName}.sig`));
+// The Linux .deb (it installs the sandbox helper and its AppArmor profile) is released next to
+// the AppImage. It is not an installer entry in the manifests: no download-page or updater
+// metadata mentions it.
+if (linux)
+  await copyFile(
+    await findDeb(join(bundle, "deb")),
+    join(output, `${name}.deb`),
+  );
 const common = {
   schemaVersion: 1,
   version,

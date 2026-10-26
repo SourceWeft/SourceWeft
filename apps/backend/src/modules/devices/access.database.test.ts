@@ -207,6 +207,224 @@ test("gateway persists dispatch and does not replay a command after the socket d
   }
 });
 
+test("gateway persists host status reports; old hosts keep null columns; malformed status closes 1008", async () => {
+  const { attachLocalDeviceGateway } = await import("./gateway");
+  const old = await host(),
+    modern = await host();
+  const server = createServer();
+  const dispose = attachLocalDeviceGateway(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as { port: number };
+  const sockets: WebSocket[] = [];
+  const connect = async (token: string) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/v1/local-devices/socket`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    sockets.push(socket);
+    const [message] = await once(socket, "message");
+    const connected = JSON.parse(String(message));
+    assert.equal(connected.type, "connected");
+    // A host may only send `status` to a backend that announces it.
+    assert.deepEqual(connected.features, ["status"]);
+    return socket;
+  };
+  const row = (id: string) =>
+    schema.db.query.localDevices.findFirst({
+      where: eq(schema.localDevices.id, id),
+    });
+  const waitFor = async (check: () => Promise<boolean>) => {
+    for (let i = 0; i < 100; i++) {
+      if (await check()) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.fail("condition not reached");
+  };
+  const report = (sandbox: Record<string, unknown>) => ({
+    type: "status",
+    platform: "linux",
+    arch: "x64",
+    shell: "bash",
+    protocolVersion: 3,
+    sandbox,
+    capabilities: ["sandbox"],
+  });
+  try {
+    const oldSocket = await connect(old.token);
+    const heartbeat = once(oldSocket, "message");
+    oldSocket.send(JSON.stringify({ type: "heartbeat" }));
+    assert.equal(JSON.parse(String((await heartbeat)[0])).type, "heartbeat");
+    const oldRow = await row(old.id);
+    assert.equal(oldRow?.platform, null);
+    assert.equal(oldRow?.sandboxState, null);
+    assert.equal(oldRow?.capabilities, null);
+    assert.equal(oldRow?.statusReportedAt, null);
+
+    const socket = await connect(modern.token);
+    const seeded = {
+      id: randomUUID(),
+      deviceId: modern.id,
+      userId: modern.userId,
+      action: "folder.list",
+      payload: { folderId: "grant" },
+      status: "succeeded",
+      result: { ok: true },
+      error: null,
+      deadline: new Date(Date.now() + 3_600_000),
+    };
+    await schema.db.insert(schema.localToolInvocations).values(seeded);
+    const invocations = () =>
+      schema.db.query.localToolInvocations.findMany({
+        where: eq(schema.localToolInvocations.deviceId, modern.id),
+      });
+    const before = await invocations();
+    assert.equal(before.length, 1);
+    socket.send(
+      JSON.stringify(
+        report({
+          state: "needsSetup",
+          code: "bwrapMissing",
+          reason: "bubblewrap is not installed",
+          remedy: "privilegedSetup",
+        }),
+      ),
+    );
+    await waitFor(async () => (await row(modern.id))?.sandboxState != null);
+    const first = await row(modern.id);
+    assert.equal(first?.platform, "linux");
+    assert.equal(first?.arch, "x64");
+    assert.equal(first?.shell, "bash");
+    assert.equal(first?.sandboxCode, "bwrapMissing");
+    assert.equal(first?.sandboxReason, "bubblewrap is not installed");
+    assert.equal(first?.sandboxRemedy, "privilegedSetup");
+    assert.deepEqual(first?.capabilities, ["sandbox"]);
+    assert.ok(first?.statusReportedAt);
+
+    // A later report replaces the previous one, including clearing the code.
+    socket.send(JSON.stringify(report({ state: "ready" })));
+    await waitFor(async () => (await row(modern.id))?.sandboxState === "ready");
+    const ready = await row(modern.id);
+    assert.equal(ready?.sandboxCode, null);
+    assert.equal(ready?.sandboxReason, null);
+    assert.equal(ready?.sandboxRemedy, null);
+    assert.equal(socket.readyState, WebSocket.OPEN);
+
+    // Last frame wins even when frames arrive back to back.
+    for (let i = 0; i < 25; i++)
+      socket.send(
+        JSON.stringify(
+          report({
+            state: "needsSetup",
+            code: "installing",
+            reason: `step ${i}`,
+            remedy: "none",
+          }),
+        ),
+      );
+    socket.send(JSON.stringify(report({ state: "ready" })));
+    await waitFor(async () => (await row(modern.id))?.sandboxState === "ready");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const settled = await row(modern.id);
+    assert.equal(settled?.sandboxState, "ready");
+    assert.equal(settled?.sandboxCode, null);
+    assert.equal(settled?.sandboxReason, null);
+
+    // Status reports never create or alter invocations.
+    assert.deepEqual(await invocations(), before);
+
+    const closed = once(socket, "close");
+    socket.send(
+      JSON.stringify({ ...report({ state: "ready" }), shell: "/bin/sh" }),
+    );
+    const [code] = await closed;
+    assert.equal(code, 1008);
+    assert.equal((await row(modern.id))?.shell, "bash");
+  } finally {
+    for (const socket of sockets) socket.terminate();
+    dispose();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    for (const id of [old.id, modern.id])
+      for (let i = 0; i < 50; i++) {
+        if (!(await row(id))?.connectionId) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+  }
+});
+
+test("status from a replaced or revoked connection is dropped and closes the socket", async () => {
+  const { attachLocalDeviceGateway } = await import("./gateway");
+  const h = await host();
+  const server = createServer();
+  const dispose = attachLocalDeviceGateway(server);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address() as { port: number };
+  const sockets: WebSocket[] = [];
+  const connect = async () => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/v1/local-devices/socket`,
+      { headers: { Authorization: `Bearer ${h.token}` } },
+    );
+    sockets.push(socket);
+    const [message] = await once(socket, "message");
+    assert.equal(JSON.parse(String(message)).type, "connected");
+    return socket;
+  };
+  const row = () =>
+    schema.db.query.localDevices.findFirst({
+      where: eq(schema.localDevices.id, h.id),
+    });
+  const status = (shell: string) =>
+    JSON.stringify({
+      type: "status",
+      platform: "macos",
+      arch: "arm64",
+      shell,
+      sandbox: { state: "ready" },
+      capabilities: [],
+    });
+  try {
+    const stale = await connect();
+    const current = await connect();
+    const staleClosed = once(stale, "close");
+    stale.send(status("stale"));
+    assert.equal((await staleClosed)[0], 1008);
+    const untouched = await row();
+    assert.equal(untouched?.shell, null);
+    assert.equal(untouched?.sandboxState, null);
+    assert.equal(untouched?.statusReportedAt, null);
+
+    // The current connection still works...
+    current.send(status("zsh"));
+    for (let i = 0; i < 100 && (await row())?.shell !== "zsh"; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal((await row())?.shell, "zsh");
+
+    // ...until the device is revoked.
+    await schema.db
+      .update(schema.localDevices)
+      .set({ revokedAt: new Date() })
+      .where(eq(schema.localDevices.id, h.id));
+    const currentClosed = once(current, "close");
+    current.send(status("fish"));
+    assert.equal((await currentClosed)[0], 1008);
+    assert.equal((await row())?.shell, "zsh");
+  } finally {
+    for (const socket of sockets) socket.terminate();
+    dispose();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    for (let i = 0; i < 50; i++) {
+      if (!(await row())?.connectionId) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+});
+
 test("native use does not enable remote; pairing cannot expand PC policy", async () => {
   const h = await host();
   assert.equal(
@@ -303,6 +521,52 @@ test("creation context cannot cross sessions, change targets, or revive revoked 
   await access.setRemotePolicy(h.userId, h.id, h.caller, false);
   await assert.rejects(access.resolveCreationContext(h.userId, remote, id), {
     code: "REMOTE_ACCESS_DISABLED",
+  });
+});
+test("the bound device's reported environment is read through the thread binding", async () => {
+  const h = await host(),
+    workspaceId = randomUUID(),
+    threadId = randomUUID(),
+    teamId = randomUUID();
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Environment",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.threads).values({
+    id: threadId,
+    teamId,
+    workspaceId,
+    createdBy: h.userId,
+    title: "Environment",
+    executionTargetJson: { kind: "local", deviceId: h.id },
+  });
+  // A thread with no binding has no device environment.
+  assert.equal(await provider.boundDeviceEnvironment(randomUUID()), null);
+  // Inserting a local thread creates its binding (database trigger); the device has not
+  // reported yet, so every field is null.
+  assert.deepEqual(await provider.boundDeviceEnvironment(threadId), {
+    platform: null,
+    arch: null,
+    shell: null,
+    sandboxState: null,
+  });
+  await schema.db
+    .update(schema.localDevices)
+    .set({
+      platform: "linux",
+      arch: "x64",
+      shell: "bash",
+      sandboxState: "needsSetup",
+      sandboxReason: "free text that must not be selected",
+    })
+    .where(eq(schema.localDevices.id, h.id));
+  assert.deepEqual(await provider.boundDeviceEnvironment(threadId), {
+    platform: "linux",
+    arch: "x64",
+    shell: "bash",
+    sandboxState: "needsSetup",
   });
 });
 test("offline local Provider assembly does not dispatch a workspace or use cloud", async () => {

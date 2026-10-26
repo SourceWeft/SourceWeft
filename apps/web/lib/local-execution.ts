@@ -14,6 +14,16 @@ export type LocalDevice = {
   remoteEnabled: boolean;
   networkMode?: import("@sourceweft/contracts").LocalNetworkMode;
   connected: boolean;
+  /** Last status report from the host; null/absent until it has reported. */
+  platform?: "macos" | "linux" | "windows" | null;
+  arch?: "x64" | "arm64" | null;
+  shell?: string | null;
+  sandbox?: {
+    state: "ready" | "needsSetup" | "unsupported";
+    code?: string;
+    reason?: string;
+    remedy?: string;
+  } | null;
 };
 
 export type LocalRequestOptions = {

@@ -164,6 +164,7 @@ export function HtmlPreview({
 
   function frameLoaded() {
     if (bridge.current?.frameLoaded() === "navigated") {
+      bridge.current.reportNavigation();
       setNavigatedAway(true);
       setPendingLink(null);
       return;

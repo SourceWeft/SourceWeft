@@ -76,7 +76,7 @@ export class SharingService {
    * publish right over content they are walled out of. Returns a discriminated
    * failure rather than throwing so routes map it to a status.
    */
-  private async requireShareableArtifact(input: {
+  async requireShareableArtifact(input: {
     workspaceId: string;
     artifactId: string;
     userId: string;

@@ -1,5 +1,5 @@
 {
-  "id": "af938236-be5c-4685-a28e-4e54717f886c",
+  "id": "c09cbecf-3fd4-4033-9a6b-af1e35f26951",
   "prevId": "4d6a3d5f-aca5-44f3-9095-515a93cbc549",
   "version": "7",
   "dialect": "postgresql",
@@ -20789,15 +20789,62 @@
           "primaryKey": false,
           "notNull": false
         },
-        "network_mode": {
-          "name": "network_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'ask'"
-        },
         "revoked_at": {
           "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arch": {
+          "name": "arch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shell": {
+          "name": "shell",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_state": {
+          "name": "sandbox_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_code": {
+          "name": "sandbox_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_reason": {
+          "name": "sandbox_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_remedy": {
+          "name": "sandbox_remedy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capabilities": {
+          "name": "capabilities",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status_reported_at": {
+          "name": "status_reported_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -20831,12 +20878,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "local_devices_network_mode_check": {
-          "name": "local_devices_network_mode_check",
-          "value": "\"local_devices\".\"network_mode\" in ('open', 'ask', 'strict')"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.local_folder_grants": {
@@ -20900,250 +20942,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.local_network_requests": {
-      "name": "local_network_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "invocation_id": {
-          "name": "invocation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "device_id": {
-          "name": "device_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ask_id": {
-          "name": "ask_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "host": {
-          "name": "host",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "port": {
-          "name": "port",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suggested_by": {
-          "name": "suggested_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "local_network_requests_device_ask_uq": {
-          "name": "local_network_requests_device_ask_uq",
-          "columns": [
-            {
-              "expression": "device_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "ask_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "local_network_requests_thread_status_idx": {
-          "name": "local_network_requests_thread_status_idx",
-          "columns": [
-            {
-              "expression": "thread_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "local_network_requests_device_delivered_idx": {
-          "name": "local_network_requests_device_delivered_idx",
-          "columns": [
-            {
-              "expression": "device_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "delivered_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "local_network_requests_invocation_id_local_tool_invocations_id_fk": {
-          "name": "local_network_requests_invocation_id_local_tool_invocations_id_fk",
-          "tableFrom": "local_network_requests",
-          "tableTo": "local_tool_invocations",
-          "columnsFrom": [
-            "invocation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "local_network_requests_device_id_local_devices_id_fk": {
-          "name": "local_network_requests_device_id_local_devices_id_fk",
-          "tableFrom": "local_network_requests",
-          "tableTo": "local_devices",
-          "columnsFrom": [
-            "device_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "local_network_requests_thread_id_threads_id_fk": {
-          "name": "local_network_requests_thread_id_threads_id_fk",
-          "tableFrom": "local_network_requests",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "local_network_requests_status_check": {
-          "name": "local_network_requests_status_check",
-          "value": "\"local_network_requests\".\"status\" in ('pending', 'allowed', 'denied', 'expired')"
-        },
-        "local_network_requests_scope_check": {
-          "name": "local_network_requests_scope_check",
-          "value": "\"local_network_requests\".\"scope\" is null or (\"local_network_requests\".\"scope\" in ('once', 'always') and \"local_network_requests\".\"status\" = 'allowed')"
-        },
-        "local_network_requests_port_check": {
-          "name": "local_network_requests_port_check",
-          "value": "\"local_network_requests\".\"port\" between 1 and 65535"
-        },
-        "local_network_requests_resolved_check": {
-          "name": "local_network_requests_resolved_check",
-          "value": "(\"local_network_requests\".\"status\" = 'pending') = (\"local_network_requests\".\"resolved_at\" is null)"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.local_thread_bindings": {

@@ -99,6 +99,7 @@ Required secrets for both update-capable modes:
 - `TAURI_SIGNING_PRIVATE_KEY` and, if encrypted, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Additional protected secrets for **`signed` only**:
+
 - `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY` (Developer ID Application identity), `APPLE_ID`,
   `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID`.
@@ -126,7 +127,7 @@ update-capable mode:
 - `aarch64-apple-darwin`
 - `x86_64-apple-darwin`
 - `x86_64-pc-windows-msvc`
-- `x86_64-unknown-linux-gnu` (Ubuntu 22.04 baseline, AppImage)
+- `x86_64-unknown-linux-gnu` (Ubuntu 22.04 baseline, AppImage; a `.deb` is built beside it)
 
 The generated Tauri release config always enables updater artifacts and enables
 platform distribution signing only for `signed`. `build.rs` embeds the public
@@ -270,6 +271,8 @@ require manual installation.
 cargo build --locked --manifest-path scripts/ci/update-verifier/Cargo.toml
 DESKTOP_UPDATE_VERIFIER=scripts/ci/update-verifier/target/debug/sourceweft-update-verifier node --test scripts/ci/desktop-update-signatures.test.mjs
 node --test scripts/ci/desktop-update-manifest.test.mjs scripts/ci/publish-desktop-updates.test.mjs scripts/ci/publish-downloads.test.mjs
+node --test scripts/ci/sandbox-bundle.test.mjs scripts/ci/sandbox-bundle-workflows.test.mjs
+DESKTOP_UPDATE_VERIFIER=scripts/ci/update-verifier/target/debug/sourceweft-update-verifier node --test scripts/ci/sandbox-bundle-signature.test.mjs
 cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
@@ -279,13 +282,69 @@ directory records update status, versions, channel and safe error codes; it is
 truncated once it exceeds 256 KiB. UI errors and CI receipts provide additional
 diagnostics. Credentials, workfiles and chat content are never included.
 
+## Linux sandbox runtime bundle
+
+Local device execution on Linux x86_64 needs the sandbox runtime (the `srt-sidecar`
+executable, `rg`, `apply-seccomp` and `srt-proxy-agent.jar`). It is not part of the
+AppImage: the app downloads it only after the user clicks Install in the app.
+
+What is published, per `signed` or `updater-signed` release, as GitHub Release assets
+next to the installers:
+
+- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`
+- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz.sig`
+
+`candidate` releases publish neither file (they have no updater key, so the app could not
+verify a download anyway). The bundle is **not** mirrored to `download.sourceweft.com`
+and is not part of the download or update manifests (`publish-downloads.mjs` and
+`publish-desktop-updates.mjs` only look at installers and update packages and ignore
+these files); mirroring it is a follow-up.
+
+How it is built and signed (Linux leg of `desktop-release.yml`, after the AppImage, before
+the artifact upload):
+
+0. `scripts/ci/install-static-ripgrep.sh` downloads the pinned official static (musl)
+   ripgrep release named in `scripts/ci/ripgrep-release.json` (version, asset, URL, SHA-256),
+   checks the SHA-256 before extracting and refuses a dynamically linked binary. Both the
+   release leg and the `sandbox-bundle` PR job use it; the runner's apt ripgrep is never
+   bundled. To bump ripgrep, change that one file with the checksum from the official release.
+1. `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "$(command -v rg)"`
+   (Bun 1.4.2) writes `dist/bundle/` including `manifest.json`: `schemaVersion` 1,
+   `protocolVersion` (`SANDBOX_PROTOCOL_VERSION`), `appVersion` (the desktop package
+   version), `target`, `srtVersion` and the SHA-256 and size of every other file.
+2. `node scripts/ci/sandbox-bundle.mjs pack` writes a deterministic archive (ustar in
+   gzip; sorted entries, zero mtime/uid/gid, modes 0755/0644, `manifest.json` first,
+   plain files at the archive root only). `verify` re-reads it and rejects absolute, `..`,
+   nested, link, duplicate or unlisted entries and any hash or size mismatch.
+3. `sign` runs `tauri signer sign` with the existing `TAURI_SIGNING_PRIVATE_KEY`
+   (and `_PASSWORD`), the same minisign updater key as the AppImage; `verify-signature`
+   checks the `.sig` with the `update-verifier` (Tauri's `minisign-verify`) against
+   `TAURI_UPDATER_PUBLIC_KEY`. No new secret or variable exists.
+
+The app derives the download location from its own version
+(`https://github.com/SourceWeft/SourceWeft/releases/download/v<version>/sourceweft-sandbox-<target>.tar.gz`
+plus `.sig`), verifies the signature with the public key embedded in the build, and only
+then extracts and checks the manifest. Builds without an embedded key cannot install it.
+Pull requests that touch the desktop app, the sidecar or these scripts run the
+`sandbox-bundle` job in `desktop-build.yml`, which builds the bundle and runs the same
+pack, sign and verify steps with a throwaway key; nothing is uploaded.
+
 ## Linux packaging
 
-Linux x64 is distributed as an AppImage, which is also the signed updater payload.
+Linux x64 is distributed as an AppImage, which is also the signed updater payload, and
+as a `.deb`. The `.deb` is attached to the GitHub Release as
+`SourceWeft_<version>_linux-x86_64.deb` (signed releases only); it is not a download-page or
+update-manifest entry, and in-app updates apply to the AppImage only. The `.deb` depends on
+`bubblewrap` and `socat` and its maintainer scripts run the sandbox setup script (copy of
+bubblewrap at `/opt/sourceweft/libexec/bwrap` plus a scoped AppArmor profile; removed on
+package removal). The AppImage runs the same script through `pkexec` when the user asks the
+app to. Linux ARM64 is not supported. Local device execution on Linux x64 additionally
+needs the signed sandbox runtime described above, which the app downloads when the user
+clicks Install. User-facing setup is documented in `apps/desktop/LINUX_SANDBOX.md`.
+
 The verification and signed workflows use Ubuntu 22.04, install WebKitGTK 4.1,
 GTK/AppIndicator and AppImage dependencies via `install-desktop-linux-deps.sh`,
-and bundle GStreamer base/good support. AppImage is the only supported Linux
-package format; Linux ARM64 and local device execution are not enabled.
+and bundle GStreamer base/good support.
 
 Linux descriptors set `distributionSigned=false` and `notarized=false`: these
 fields refer to OS code signing, not the mandatory `.AppImage.sig` updater

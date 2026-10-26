@@ -61,6 +61,19 @@ test("complete explicitly targeted release generates immutable signed-package re
   );
   assert.equal(prepared.manifest.sourceweft.distribution, "active");
 });
+test("sandbox bundle assets beside the update packages are not update packages", async (t) => {
+  const dir = await fixture(t);
+  const without = await prepare(dir);
+  const bundle = "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz";
+  await writeFile(join(dir, bundle), "bundle bytes");
+  await writeFile(join(dir, `${bundle}.sig`), "c2ln");
+  const withBundle = await prepare(dir);
+  assert.deepEqual(withBundle.manifest, without.manifest);
+  assert.deepEqual(
+    withBundle.uploads.map((upload) => upload.key),
+    without.uploads.map((upload) => upload.key),
+  );
+});
 test("tampering is rejected before signature verification", async (t) => {
   const dir = await fixture(t);
   await writeFile(join(dir, "darwin-aarch64.app.tar.gz"), "tampered");

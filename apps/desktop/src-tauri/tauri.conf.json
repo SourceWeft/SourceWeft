@@ -24,6 +24,14 @@
     "linux": {
       "appimage": {
         "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": ["bubblewrap", "socat"],
+        "files": {
+          "/opt/sourceweft/libexec/sourceweft-sandbox-setup": "resources/linux/sourceweft-sandbox-setup.sh"
+        },
+        "postInstallScript": "resources/linux/deb-postinst.sh",
+        "preRemoveScript": "resources/linux/deb-prerm.sh"
       }
     }
   },

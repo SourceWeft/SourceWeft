@@ -22,6 +22,7 @@ import {
   perCommandConfig,
   perWrapReadRoots,
 } from "./policy.js";
+import { SANDBOX_PROTOCOL_VERSION } from "./protocol.js";
 import type {
   AuditResult,
   InitConfig,
@@ -309,7 +310,7 @@ export async function startServer(
     return decision;
   }
 
-  async function handleInit(config: InitConfig): Promise<null> {
+  async function handleInit(config: InitConfig): Promise<{ protocolVersion: number }> {
     checkHelpersExist(config);
     const base = buildConfig(config, deps.runtimeDir);
     // The plain-HTTP audit hook is attached here rather than in `buildConfig` because it closes
@@ -329,7 +330,7 @@ export async function startServer(
       );
     }
     state = { config, runtimeConfig, wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir) };
-    return null;
+    return { protocolVersion: SANDBOX_PROTOCOL_VERSION };
   }
 
   async function handleWrap(request: {
