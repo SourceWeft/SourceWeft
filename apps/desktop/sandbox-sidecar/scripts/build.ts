@@ -18,8 +18,16 @@
  *
  * Run as `bun run build -- --rg <path> [--target <rust triple>]` (or
  * `bun run scripts/build.ts ...` directly) from this package's directory. `--target` is
- * optional only on Linux x64; elsewhere it is required (no guessing) and must be the build
- * host's own triple, because the sidecar is compiled for the host.
+ * optional only on Linux x64; elsewhere it is required (no guessing) and must be a triple for
+ * the build host's OS (a same-OS cross-architecture build, e.g. macOS x86_64 on the arm64
+ * runner, is compiled with an explicit Bun `--target`).
+ *
+ * `--remanifest` rewrites `manifest.json` over the files already in `dist/bundle` (preserving
+ * the protocol/app/srt versions and target from the existing manifest) WITHOUT recompiling or
+ * recopying anything. The macOS release legs run it after `scripts/sign-macos.sh` has code-signed
+ * the binaries in place: code-signing changes the binaries' bytes, so the build-time manifest no
+ * longer matches them and `sandbox-bundle.mjs pack` would reject the stale hashes. The Linux legs
+ * never code-sign the bundle, so they never run this and their behaviour is unchanged.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -34,7 +42,12 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
-import { MANIFEST_FILENAME, buildManifest, resolveTarget } from "./manifest.js";
+import {
+  MANIFEST_FILENAME,
+  buildManifest,
+  bunCompileTarget,
+  resolveTarget,
+} from "./manifest.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(packageRoot, "dist", "bundle");
@@ -105,8 +118,45 @@ function copyExecutable(source: string, destName: string): void {
   chmodSync(dest, 0o755);
 }
 
+/**
+ * Rewrites `manifest.json` over the current contents of `dist/bundle`, keeping the version and
+ * target fields from the existing manifest. Used after the macOS bundle is code-signed in place.
+ */
+function remanifest(): void {
+  const manifestPath = join(outDir, MANIFEST_FILENAME);
+  requireFile(manifestPath, "manifest.json (run the build before --remanifest)");
+  const previous: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const p = previous as {
+    protocolVersion?: unknown;
+    appVersion?: unknown;
+    target?: unknown;
+    srtVersion?: unknown;
+  };
+  if (
+    typeof p.protocolVersion !== "number" ||
+    typeof p.appVersion !== "string" ||
+    typeof p.target !== "string" ||
+    typeof p.srtVersion !== "string"
+  ) {
+    throw new Error(`existing manifest is missing fields: ${manifestPath}`);
+  }
+  const manifest = buildManifest({
+    bundleDir: outDir,
+    protocolVersion: p.protocolVersion,
+    appVersion: p.appVersion,
+    target: p.target,
+    srtVersion: p.srtVersion,
+  });
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`re-manifested ${outDir} (${manifest.target}) over signed files`);
+}
+
 function main(): void {
   requireBunVersion();
+  if (process.argv.slice(2).includes("--remanifest")) {
+    remanifest();
+    return;
+  }
   const rgPath = parseRgPath(process.argv.slice(2));
   requireFile(rgPath, "ripgrep binary (--rg)");
   const target = resolveTarget(
@@ -143,11 +193,16 @@ function main(): void {
   requireFile(jarSource, "srt-proxy-agent.jar");
   copyFileSync(jarSource, join(outDir, "srt-proxy-agent.jar"));
 
+  // A native build compiles with no `--target` (byte-identical to the historical Linux build);
+  // a same-OS cross build (macOS x86_64 on the arm64 runner) passes the explicit Bun target so
+  // Bun fetches and uses that runtime instead of the host's.
+  const crossTarget = bunCompileTarget(target, process.platform, process.arch);
   const compile = spawnSync(
     "bun",
     [
       "build",
       "--compile",
+      ...(crossTarget ? [`--target=${crossTarget}`] : []),
       "--define",
       '__SRT_WIN_NAMESPACE__="sourceweft"',
       join(packageRoot, "src/main.ts"),
