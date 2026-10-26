@@ -184,6 +184,7 @@ test("artifact page storage leaves role checks to the records service", async ()
   withAccess({ role: "viewer" });
   for (const [method, path] of [
     ["POST", "/artifacts/a-1/records"],
+    ["DELETE", "/artifacts/a-1/records"],
     ["POST", "/artifacts/a-1/versions/v-1/records/consent"],
     ["POST", "/artifacts/a-1/versions/v-1/records/approval"],
     ["DELETE", "/artifacts/a-1/versions/v-1/records/approval"],

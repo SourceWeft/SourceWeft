@@ -2364,6 +2364,42 @@
     "video": {
       "previewTitle": "影片預覽"
     },
+    "pageData": {
+      "title": "頁面資料",
+      "description": "此頁面在多次存取之間儲存的記錄。可在此匯出副本或清除。",
+      "scopes": {
+        "user": {
+          "label": "你的資料",
+          "hint": "僅你自己可見。"
+        },
+        "shared": {
+          "label": "共享資料",
+          "hint": "開啟此頁面的所有人都能看到。僅建立者或工作區管理員可匯出或清除。"
+        }
+      },
+      "actions": {
+        "export": "匯出資料",
+        "clear": "清除資料",
+        "clearing": "正在清除…",
+        "clearConfirm": "清除資料"
+      },
+      "clearDialog": {
+        "user": {
+          "title": "清除你的資料？",
+          "description": "這將永久刪除此頁面為你儲存的記錄，不影響其他人的資料。此操作無法撤銷。"
+        },
+        "shared": {
+          "title": "清除共享資料？",
+          "description": "這將永久刪除此頁面為所有使用者儲存的共享記錄。此操作無法撤銷。"
+        }
+      },
+      "toasts": {
+        "exported": "資料已匯出。",
+        "exportFailed": "無法匯出資料。",
+        "cleared": "{count, plural, =0 {沒有可清除的記錄。} other {已清除 # 條記錄。}}",
+        "clearFailed": "無法清除資料。"
+      }
+    },
     "share": {
       "title": "分享製品",
       "anyoneWithLink": "任何擁有連結的人",

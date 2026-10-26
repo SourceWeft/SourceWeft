@@ -2364,6 +2364,42 @@
     "video": {
       "previewTitle": "视频预览"
     },
+    "pageData": {
+      "title": "页面数据",
+      "description": "此页面在多次访问之间保存的记录。可在此导出副本或清除。",
+      "scopes": {
+        "user": {
+          "label": "你的数据",
+          "hint": "仅你自己可见。"
+        },
+        "shared": {
+          "label": "共享数据",
+          "hint": "打开此页面的所有人都能看到。仅创建者或工作区管理员可导出或清除。"
+        }
+      },
+      "actions": {
+        "export": "导出数据",
+        "clear": "清除数据",
+        "clearing": "正在清除…",
+        "clearConfirm": "清除数据"
+      },
+      "clearDialog": {
+        "user": {
+          "title": "清除你的数据？",
+          "description": "这将永久删除此页面为你保存的记录，不影响其他人的数据。此操作无法撤销。"
+        },
+        "shared": {
+          "title": "清除共享数据？",
+          "description": "这将永久删除此页面为所有使用者保存的共享记录。此操作无法撤销。"
+        }
+      },
+      "toasts": {
+        "exported": "数据已导出。",
+        "exportFailed": "无法导出数据。",
+        "cleared": "{count, plural, =0 {没有可清除的记录。} other {已清除 # 条记录。}}",
+        "clearFailed": "无法清除数据。"
+      }
+    },
     "share": {
       "title": "分享制品",
       "anyoneWithLink": "任何拥有链接的人",
