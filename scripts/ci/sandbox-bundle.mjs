@@ -41,6 +41,36 @@ export function tarballName(target) {
   return `sourceweft-sandbox-${target}.tar.gz`;
 }
 
+// The files `build.ts` lays down, by platform. Both platforms carry the compiled sidecar, the
+// ripgrep binary srt runs and the Java proxy agent; Linux additionally carries srt's
+// `apply-seccomp` helper, which has no macOS build and which the macOS daemon never needs
+// (Seatbelt, not seccomp). The set is validated against the manifest target on pack and verify
+// so a Linux bundle can never ship without apply-seccomp and a macOS bundle can never ship one.
+const COMMON_FILES = ["rg", "srt-proxy-agent.jar", "srt-sidecar"];
+const LINUX_ONLY_FILES = ["apply-seccomp"];
+
+/** Maps a Rust target triple to the sandbox platform, or throws for an unsupported one. */
+export function platformOfTarget(target) {
+  if (target.endsWith("-apple-darwin")) return "darwin";
+  if (target.includes("-linux-")) return "linux";
+  assert.fail(`unsupported bundle target platform: ${target}`);
+}
+
+/** The bundle's file names (manifest.json excluded) must be exactly the set for its platform. */
+export function validateFileSet(target, names) {
+  const platform = platformOfTarget(target);
+  const expected = [
+    ...COMMON_FILES,
+    ...(platform === "linux" ? LINUX_ONLY_FILES : []),
+  ].sort();
+  const actual = [...names].sort();
+  assert.deepEqual(
+    actual,
+    expected,
+    `bundle file set is not the ${platform} set for ${target} (expected: ${expected.join(", ")}; actual: ${actual.join(", ")})`,
+  );
+}
+
 // ---------------------------------------------------------------- manifest
 
 /** Validates the manifest shape; returns it unchanged. Throws with an exact reason. */
@@ -283,6 +313,7 @@ export async function packBundle(bundleDir, outDir) {
     modes.set(entry.name, mode & 0o111 ? 0o755 : 0o644);
   }
   checkAgainstManifest(manifest, files);
+  validateFileSet(manifest.target, files.keys());
   const entries = [
     { name: MANIFEST_FILENAME, bytes: manifestBytes, mode: 0o644 },
   ];
@@ -314,6 +345,10 @@ export async function verifyTarball(path) {
   checkAgainstManifest(
     manifest,
     new Map(entries.slice(1).map(({ name, bytes }) => [name, bytes])),
+  );
+  validateFileSet(
+    manifest.target,
+    entries.slice(1).map(({ name }) => name),
   );
   return manifest;
 }
