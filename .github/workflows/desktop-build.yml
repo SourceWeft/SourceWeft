@@ -337,8 +337,10 @@ jobs:
         run: |
           export http_proxy=http://127.0.0.1:9
           export https_proxy=http://127.0.0.1:9
+          # One test at a time, as in the linux-sandbox job: parallel sidecars share the runner's
+          # real `~/.cargo` and delete each other's denyRead placeholder files.
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
-            --test linux_sandbox -- --include-ignored
+            --test linux_sandbox -- --include-ignored --test-threads=1
       - name: Remove the package (runs its prerm)
         run: |
           set -eu
