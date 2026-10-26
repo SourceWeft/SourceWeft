@@ -25,7 +25,7 @@ use common::*;
 use serde_json::json;
 use sourceweft_desktop::local_host::{
     execution::Executions,
-    readiness::{bundle_dir, SandboxReadiness},
+    readiness::{bundle_dir, Remedy, SandboxReadiness, SetupCode},
     LocalHost,
 };
 use std::{fs, path::Path, sync::Arc, time::Duration};
@@ -641,11 +641,19 @@ fn readiness_needs_setup_without_bundle() {
     let app = tempfile::tempdir().unwrap();
     let host = LocalHost::open(app.path()).unwrap();
     assert!(!bundle_dir(app.path()).exists());
-    assert_eq!(
-        host.sandbox_readiness(),
-        SandboxReadiness::NeedsSetup {
-            reason: "Sandbox runtime is not installed".to_string()
-        }
+    // macOS has a published runtime, so the remedy is `downloadRuntime` (Linux's equivalent),
+    // which `install_sandbox_runtime` can actually follow — never a downgraded no-download failure.
+    let readiness = host.sandbox_readiness();
+    assert!(
+        matches!(
+            readiness,
+            SandboxReadiness::NeedsSetup {
+                code: SetupCode::BundleMissing,
+                remedy: Remedy::DownloadRuntime,
+                ..
+            }
+        ),
+        "expected bundleMissing/downloadRuntime, got {readiness:?}"
     );
 }
 

@@ -943,13 +943,19 @@ mod tests {
     fn macos_missing_bundle_is_needs_setup() {
         let app_data = tempfile::tempdir().unwrap();
         let host = LocalHost::open(app_data.path()).unwrap();
-        // No bundle was ever placed under `app_data`: macOS must not report Ready.
+        // No bundle was ever placed under `app_data`: macOS must not report Ready. A runtime IS
+        // published for macOS now, so the remedy is `downloadRuntime` (same as Linux), not the
+        // downgraded no-download failure.
         assert!(!bundle_dir(app_data.path()).exists());
+        assert_eq!(host.sandbox_readiness(), SandboxReadiness::bundle_missing());
         assert_eq!(
-            host.sandbox_readiness(),
-            SandboxReadiness::NeedsSetup {
-                reason: "Sandbox runtime is not installed".to_string()
-            }
+            serde_json::to_value(host.sandbox_readiness()).unwrap(),
+            serde_json::json!({
+                "state": "needsSetup",
+                "code": "bundleMissing",
+                "reason": "Sandbox runtime is not installed",
+                "remedy": "downloadRuntime",
+            })
         );
     }
 
