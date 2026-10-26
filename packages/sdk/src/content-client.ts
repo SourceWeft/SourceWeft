@@ -4,6 +4,7 @@ import type {
   ArtifactRecordResult,
   ArtifactRecordScope,
   ArtifactRecordsStatus,
+  ArtifactSharedCollectionsResponse,
 } from "@sourceweft/contracts/artifact-records";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
@@ -404,6 +405,13 @@ export class ContentClient {
   ) {
     return this.http.delete<{ removed: number }>(
       artifactRecordsDataPath(workspaceId, artifactId, scope, collection),
+    );
+  }
+
+  /** Shared collections (name + record count) an owner may mark public. */
+  listArtifactSharedCollections(workspaceId: string, artifactId: string) {
+    return this.http.get<ArtifactSharedCollectionsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/records/collections`,
     );
   }
 

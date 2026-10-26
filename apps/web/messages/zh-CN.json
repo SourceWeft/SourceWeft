@@ -2411,8 +2411,17 @@
       "hideFromSearchDescription": "公开链接默认会被索引以扩大触达；如果是敏感的一次性内容，请开启此项。",
       "views": "浏览量",
       "publicRecords": "公开数据集合",
-      "publicRecordsDescription": "此页面可以向持有链接的任何人只读展示的共享数据。填写集合名称；留空则不展示任何数据。",
-      "publicRecordsPlaceholder": "例如 scores, results"
+      "publicRecordsDescription": "选择此页面可以向持有链接的任何人只读展示的共享数据集合。未开启的集合保持私有。",
+      "publicRecordsPlaceholder": "尚未列出的集合，例如 scores",
+      "publicRecordsLoading": "正在加载集合…",
+      "publicRecordsLoadFailed": "无法加载此页面的数据集合。",
+      "publicRecordsEmpty": "此页面还没有共享数据。你仍可在下方添加集合名称。",
+      "publicRecordsCount": "{count, plural, other {# 条记录}}",
+      "publicRecordsNoData": "暂无数据",
+      "publicRecordsRemove": "移除 {name}",
+      "publicRecordsAdd": "添加",
+      "publicRecordsAddLabel": "添加集合名称",
+      "publicRecordsLimit": "最多可公开 {count} 个集合。"
     },
     "filePreview": {
       "titleFallback": "文件预览",
