@@ -40,6 +40,7 @@ import {
   forgetArtifactShare,
   loadArtifactShare,
 } from "./artifact-share-lookup";
+import { ArtifactPageData } from "./artifact-page-data";
 import { ShareArtifactDialog } from "./share-artifact-dialog";
 import {
   artifactTitle,
@@ -378,6 +379,13 @@ export function ArtifactPreviewPanel({
         {/* Decides for itself whether this artifact is a ready HTML report with
             a member-readable source file; the shell stays feature-agnostic. */}
         <ReportEvidencePanel artifact={artifact} workspaceId={workspaceId} />
+
+        {/* Likewise decides for itself: only HTML pages that declare storage. */}
+        <ArtifactPageData
+          artifact={artifact}
+          title={title}
+          workspaceId={workspaceId}
+        />
 
         {artifact.promptText ? (
           <div className="mt-3 rounded-xl border bg-background/70 p-3">

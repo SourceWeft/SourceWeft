@@ -35,7 +35,7 @@ export type RecordKey = RecordPartition & {
   recordId: string;
 };
 
-function partitionWhere(partition: RecordPartition): SQL {
+export function partitionWhere(partition: RecordPartition): SQL {
   return and(
     eq(artifactRecords.artifactId, partition.artifactId),
     eq(artifactRecords.scope, partition.scope),

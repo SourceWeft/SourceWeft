@@ -19,8 +19,11 @@
  * orders by call, not by `observedAt`.
  */
 export {
+  isToolSourceTakenDown,
   purgeToolRevisions,
   recordToolRevision,
+  restoreToolSource,
+  takedownToolSource,
   withdrawToolRevision,
   type RecordToolRevisionInput,
   type ToolRevisionOutcome,
@@ -36,4 +39,13 @@ export {
   ToolRevisionInputError,
   type ToolRevisionDiff,
 } from "./canonical";
-export { readToolRevisionsPage, readToolsRevision } from "./read";
+export {
+  applyReferenceToolsToManifest,
+  baseToolsOf,
+  readReferenceTools,
+  readToolRevisionsPage,
+  readToolsRevision,
+  referenceIsStale,
+  type BaseTools,
+  type ReferenceTools,
+} from "./read";

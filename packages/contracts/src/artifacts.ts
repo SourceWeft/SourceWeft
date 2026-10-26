@@ -272,6 +272,10 @@ export const artifactSummarySchema = z.object({
   promptExcerpt: z.string().max(300).nullable(),
   visibility: z.enum(["private", "workspace"]),
   isPublic: z.boolean(),
+  // True only for callers who may approve (workspace editor or admin) when the
+  // current ready version declares `storage.shared` and has no active approval.
+  // Defaults false so older servers and viewers parse unchanged.
+  awaitingSharedApproval: z.boolean().default(false),
   createdAt: z.string(),
   completedAt: z.string().nullable(),
   updatedAt: z.string(),

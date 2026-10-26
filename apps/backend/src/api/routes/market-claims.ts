@@ -5,7 +5,11 @@ import {
   setMcpOwnerOverridesRequestSchema,
   startMcpClaimRequestSchema,
 } from "@sourceweft/contracts";
-import { submitMarketMcpOwnerToolsRequestSchema } from "@sourceweft/market-contracts";
+import {
+  marketMcpToolSourceActionRequestSchema,
+  submitMarketMcpOwnerToolsRequestSchema,
+  submitMarketMcpPlatformSnapshotRequestSchema,
+} from "@sourceweft/market-contracts";
 import { isMarketAdmin } from "../../modules/market/admin";
 import {
   adminBlockMcpMember,
@@ -22,6 +26,10 @@ import {
   startMcpClaim,
   verifyMcpClaim,
 } from "../../modules/market/claims/service";
+import {
+  applyToolSourceAction,
+  submitPlatformSnapshot,
+} from "../../modules/market/tool-revisions/platform-snapshot";
 import { logger } from "../../shared/logger";
 import { requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
@@ -236,5 +244,39 @@ export function registerMarketClaimRoutes(app: Hono) {
     return ApiResponse.success(c, {
       items: await listMcpClaimBlocksForAdmin({ identifier }),
     });
+  });
+
+  // The platform's reference snapshot of a listing's tools (Issue #367): read
+  // by a market admin's own tool with a reference account, submitted here
+  // pinned to the listing's current endpoint. Nothing is fetched server-side.
+  app.post(
+    "/v1/market/admin/mcp/platform-snapshots",
+    limitBody(TOOLS_BODY_LIMIT),
+    async (c) => {
+      const adminUserId = await requireMarketAdminId(c);
+      const body = await parseBody(c, submitMarketMcpPlatformSnapshotRequestSchema);
+      const result = await submitPlatformSnapshot(body);
+      logger.info("MCP catalog platform snapshot submitted", {
+        adminUserId,
+        identifier: result.identifier,
+        outcome: result.outcome,
+        revision: result.revision,
+        tools: result.toolsCount,
+      });
+      return ApiResponse.success(c, result, result.outcome === "created" ? 201 : 200);
+    },
+  );
+
+  // Takes the recorded tools of a source down (the platform snapshot, or the
+  // members' observation) or lets it be recorded again.
+  app.post("/v1/market/admin/mcp/tool-sources", async (c) => {
+    const adminUserId = await requireMarketAdminId(c);
+    const body = await parseBody(c, marketMcpToolSourceActionRequestSchema);
+    const result = await applyToolSourceAction(body);
+    logger.info("MCP catalog tool source changed by a market admin", {
+      adminUserId,
+      ...result,
+    });
+    return ApiResponse.success(c, result);
   });
 }

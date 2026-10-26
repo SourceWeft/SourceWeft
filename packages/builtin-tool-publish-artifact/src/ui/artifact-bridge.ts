@@ -28,6 +28,7 @@ export class ArtifactBridgeHost {
   private port: MessagePort | null = null;
   private loads = 0;
   private closed = false;
+  private reported = false;
   private windowStartedAt = 0;
   private windowCount = 0;
 
@@ -65,6 +66,23 @@ export class ArtifactBridgeHost {
     if (this.loads === 1) return "first";
     this.close();
     return "navigated";
+  }
+
+  /**
+   * Tell the backend, once per document, that the page tried to leave its
+   * frame. Fire-and-forget and advisory: no failure reaches the caller, and
+   * nothing from the page (not even the destination) is sent.
+   */
+  reportNavigation() {
+    if (this.reported) return;
+    this.reported = true;
+    const report = this.options.transport()?.reportNavigation;
+    if (!report) return;
+    try {
+      void Promise.resolve(report()).catch(() => undefined);
+    } catch {
+      // A throwing transport must not disturb the disconnect.
+    }
   }
 
   close() {

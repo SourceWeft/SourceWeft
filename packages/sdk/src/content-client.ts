@@ -2,6 +2,7 @@ import type {
   ArtifactRecordOperation,
   ArtifactRecordRequest,
   ArtifactRecordResult,
+  ArtifactRecordScope,
   ArtifactRecordsStatus,
   ArtifactSharedCollectionsResponse,
 } from "@sourceweft/contracts/artifact-records";
@@ -184,6 +185,18 @@ function artifactVersionRecordsPath(
   return `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/versions/${encode(artifactVersionId)}/records`;
 }
 
+function artifactRecordsDataPath(
+  workspaceId: string,
+  artifactId: string,
+  scope: ArtifactRecordScope,
+  collection?: string,
+  suffix = "",
+) {
+  const query = new URLSearchParams({ scope });
+  if (collection) query.set("collection", collection);
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/records${suffix}?${query.toString()}`;
+}
+
 function encode(value: string) {
   return encodeURIComponent(value);
 }
@@ -352,6 +365,46 @@ export class ContentClient {
     return this.http.post<{ consented: true }>(
       `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/consent`,
       {},
+    );
+  }
+
+  reportArtifactPageNavigation(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ accepted: true }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/navigation`,
+      {},
+    );
+  }
+
+  /**
+   * Page data as one JSON document. `user` is the caller's own records;
+   * `shared` needs the artifact's creator or a workspace admin.
+   */
+  exportArtifactRecords(
+    workspaceId: string,
+    artifactId: string,
+    scope: ArtifactRecordScope,
+    collection?: string,
+    signal?: AbortSignal,
+  ) {
+    return this.http.getBlob(
+      artifactRecordsDataPath(workspaceId, artifactId, scope, collection, "/export"),
+      signal,
+    );
+  }
+
+  /** Deletes the same slice an export would cover and returns how many rows went. */
+  clearArtifactRecords(
+    workspaceId: string,
+    artifactId: string,
+    scope: ArtifactRecordScope,
+    collection?: string,
+  ) {
+    return this.http.delete<{ removed: number }>(
+      artifactRecordsDataPath(workspaceId, artifactId, scope, collection),
     );
   }
 

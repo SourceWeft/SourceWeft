@@ -42,6 +42,35 @@ test("unsupported desktops keep cloud without enrolling a local host", async () 
   assert.equal(native.authenticateLocalHost.mock.calls.length, 0);
 });
 
+test("a desktop whose sandbox still needs setup is not enrolled on dashboard load", async () => {
+  native.localHostStatus.mockResolvedValue({
+    platformSupported: true,
+    protocolVersion: 2,
+    readiness: { state: "needsSetup", reason: "Sandbox runtime is not installed" },
+  });
+  await synchronizeLocalHostScope("user", "session");
+  assert.equal(await ensureLocalHostSession("user"), null);
+  assert.equal(native.authenticateLocalHost.mock.calls.length, 0);
+  assert.equal(vi.mocked(fetch).mock.calls.length, 0);
+  await synchronizeLocalHostScope();
+});
+
+test("a desktop whose sandbox is ready is enrolled on dashboard load", async () => {
+  native.localHostStatus.mockResolvedValue({
+    platformSupported: true,
+    protocolVersion: 2,
+    readiness: { state: "ready", toolchainPath: "loginShell" },
+  });
+  native.authenticateLocalHost.mockResolvedValue({
+    deviceId: "device",
+    proof: "proof",
+    expiresAt: new Date(Date.now() + 600000).toISOString(),
+  });
+  await synchronizeLocalHostScope("user", "session");
+  assert.equal(native.authenticateLocalHost.mock.calls.length, 1);
+  await synchronizeLocalHostScope();
+});
+
 test.each(["/dashboard/hub-window", "/dashboard/preview-window"])("auxiliary %s never initializes or disconnects the main native host", async (path) => {
   window.history.replaceState({}, "", path);
   await synchronizeLocalHostScope("hub-user", "hub-session");

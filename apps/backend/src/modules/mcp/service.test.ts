@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   listMcpToolRuns: vi.fn(),
   listWorkspaceMcpInstalls: vi.fn(),
   logInfo: vi.fn(),
+  recordMemberObservedTools: vi.fn(),
   requireMcpWorkspace: vi.fn(),
   setWorkspaceMcpToolsEnabled: vi.fn(),
   updateMcpActionRun: vi.fn(),
@@ -51,6 +52,10 @@ vi.mock("../../shared/config", () => ({
       clients: {},
     },
   },
+}));
+
+vi.mock("../market/tool-revisions/member-observed", () => ({
+  recordMemberObservedTools: mocks.recordMemberObservedTools,
 }));
 
 vi.mock("./oauth-repository", () => ({
@@ -2092,6 +2097,129 @@ test("a member's failing credential fails only their own discovery and never mar
   // testInstall would have set status "error" and a lastError here.
   assert.equal(mocks.updateWorkspaceMcpInstall.mock.calls.length, 0);
   assert.equal(mocks.upsertWorkspaceMcpTools.mock.calls.length, 0);
+});
+
+test("a member's discovery is offered to the catalog without anything about them", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: true, outcome: "created" });
+  memberAccounts(oauthOrKeyInstall({ endpointUrl: "https://mcp.arcmira.com/mcp" }), {
+    user_a: ["get_a", "put_a"],
+  });
+  await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_a",
+    installId: "mcp_install_arcmira",
+  });
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+  const offered = mocks.recordMemberObservedTools.mock.calls[0]![0] as Record<string, unknown>;
+  assert.equal(offered.marketIdentifier, "arcmira");
+  assert.equal(offered.endpointUrl, "https://mcp.arcmira.com/mcp");
+  assert.equal(offered.complete, true);
+  assert.deepEqual(
+    (offered.tools as Array<{ name: string }>).map((tool) => tool.name),
+    ["get_a", "put_a"],
+  );
+  // Nothing that says who connected, or where, is passed on.
+  assert.deepEqual(Object.keys(offered).sort(), ["complete", "endpointUrl", "marketIdentifier", "tools"]);
+  assert.ok(!JSON.stringify(offered).match(/user_a|workspace_1|team_1|mcp_install_arcmira/));
+});
+
+test("a key under a header the listing does not declare is never offered to the catalog", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: true, outcome: "created" });
+  const install = oauthOrKeyInstall({ authType: "api_key_header" });
+  install.manifestJson = {
+    auth: {
+      type: "api_key_header",
+      required: true,
+      headerName: "X-Api-Key",
+      methods: [{ type: "header", name: "X-Api-Key" }],
+    },
+  };
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.createLangChainMcpClient.mockImplementation(() => ({
+    close: vi.fn(async () => undefined),
+    getTools: vi.fn(async () => [originalTool({ name: "mcp__arcmira__get_a" })]),
+  }));
+  const discover = () =>
+    new McpService().discoverToolsForMember({
+      workspaceId: "workspace_1",
+      userId: "user_a",
+      installId: "mcp_install_arcmira",
+    });
+
+  // The member narrows the server with a toolset header of their own choosing.
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    headerName: "X-MCP-Toolsets",
+    encryptedSecret: "enc:narrow",
+  });
+  const result = await discover();
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["get_a"]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 0);
+
+  // The same member under the declared header is offered.
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    headerName: "x-api-key",
+    encryptedSecret: "enc:key",
+  });
+  await discover();
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+});
+
+test("a failing observation never fails the member's discovery", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockRejectedValue(new Error("database is down"));
+  memberAccounts(oauthOrKeyInstall(), { user_a: ["get_a"] });
+  const result = await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_a",
+    installId: "mcp_install_arcmira",
+  });
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["get_a"]);
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+});
+
+test("a cut-off discovery is offered as incomplete, a failed one not at all", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: false, reason: "incomplete" });
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:key",
+  });
+  toolsByInstallId.set(
+    install.id,
+    Array.from({ length: 250 }, (_, index) =>
+      originalTool({ name: `mcp__arcmira__tool_${index}` }),
+    ),
+  );
+  await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+  assert.equal(
+    (mocks.recordMemberObservedTools.mock.calls[0]![0] as { complete: boolean }).complete,
+    false,
+  );
+
+  resetAuthMethodMocks();
+  memberAccounts(oauthOrKeyInstall(), {
+    user_b: new Error("401 Unauthorized"),
+  });
+  await assert.rejects(() =>
+    new McpService().discoverToolsForMember({
+      workspaceId: "workspace_1",
+      userId: "user_b",
+      installId: "mcp_install_arcmira",
+    }),
+  );
+  assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 0);
 });
 
 test("a member without permission to manage MCP cannot discover, and no client is created", async () => {

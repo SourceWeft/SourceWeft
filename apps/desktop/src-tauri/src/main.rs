@@ -4,6 +4,8 @@ mod preview_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod secret_store;
 mod tray_locale;
 mod window_chrome;
 mod updater;
@@ -94,6 +96,29 @@ struct SetAutostartInput {
     enabled: bool,
 }
 
+/// Opens the Linux local host and its remote-dispatch wrapper, or says why it could not.
+#[cfg(target_os = "linux")]
+fn open_linux_local_host(
+    app: &tauri::App,
+) -> Result<
+    (
+        std::sync::Arc<sourceweft_desktop::local_host::LocalHost>,
+        remote_host::RemoteHost,
+    ),
+    String,
+> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("app data directory: {error}"))?;
+    let host = std::sync::Arc::new(
+        sourceweft_desktop::local_host::LocalHost::open(&base)
+            .map_err(|error| format!("local host storage at {base:?}: {error}"))?,
+    );
+    let remote = remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())?;
+    Ok((host, remote))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -151,6 +176,21 @@ fn main() {
                         .map_err(std::io::Error::other)?,
                 );
                 app.manage(host);
+            }
+            // Linux local execution is new and optional: a storage failure (SQLite, permissions,
+            // a read-only home) must not stop the rest of the desktop app from starting. The
+            // error is logged and the local host left unmanaged, which `local_host_status`
+            // reports as `storageInitialized: false` and every local command reports as
+            // UNSUPPORTED_PLATFORM; nothing falls back to running commands another way.
+            #[cfg(target_os = "linux")]
+            match open_linux_local_host(app) {
+                Ok((host, remote)) => {
+                    app.manage(remote);
+                    app.manage(host);
+                }
+                Err(error) => {
+                    eprintln!("sourceweft-desktop: local execution is unavailable: {error}");
+                }
             }
             let settings_path = resolve_settings_path(app.handle())?;
             let settings = read_settings(&settings_path);

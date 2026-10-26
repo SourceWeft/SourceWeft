@@ -27,6 +27,7 @@ import {
   isStaticMcpAuthType,
   mcpInstallAllowsOAuth,
   mcpInstallAllowsStaticCredential,
+  staticCredentialUsesOnlyDeclaredHeader,
 } from "./auth-methods";
 import { McpError } from "./errors";
 import {
@@ -639,6 +640,13 @@ async function resolveMemberMcpAuth(input: {
   | {
       headers: Record<string, string>;
       authProvider?: OAuthClientProvider;
+      /**
+       * The tool list this connection returns may be shown on the public
+       * catalog: it is the member's OAuth session, a credential that sends
+       * only the listing's declared header, or no credential at all. Never a
+       * credential with headers of the member's own choosing.
+       */
+      publishable: boolean;
     }
   | { missing: "oauth" | "credential" }
 > {
@@ -654,6 +662,7 @@ async function resolveMemberMcpAuth(input: {
     if (status.connected && status.issuer) {
       return {
         headers: {},
+        publishable: true,
         authProvider: new McpOAuthClientProvider({
           redirectUrl: config.mcpOAuth.redirectUrl,
           clientName: config.mcpOAuth.clientName,
@@ -671,7 +680,10 @@ async function resolveMemberMcpAuth(input: {
   ) {
     const credential = await findWorkspaceMcpCredential(scope);
     if (credential && isStaticMcpAuthType(credential.authType)) {
-      return { headers: await headersFromCredential(credential) };
+      return {
+        headers: await headersFromCredential(credential),
+        publishable: staticCredentialUsesOnlyDeclaredHeader(install, credential),
+      };
     }
   }
   if (install.authType === "oauth") {
@@ -680,7 +692,7 @@ async function resolveMemberMcpAuth(input: {
   if (install.authType !== "none") {
     return { missing: "credential" };
   }
-  return { headers: {} };
+  return { headers: {}, publishable: true };
 }
 
 export class McpService {
@@ -1342,7 +1354,7 @@ export class McpService {
         "Connect this MCP server before listing its tools",
       );
     }
-    const { headers, authProvider } = auth;
+    const { headers, authProvider, publishable } = auth;
     const client = createLangChainMcpClient({ install, headers, authProvider });
     try {
       const tools = await withTimeout(
@@ -1361,11 +1373,11 @@ export class McpService {
           ),
         ),
       );
-      await recordMemberToolObservation({
-        workspaceId: workspace.id,
-        installId: install.id,
-        userId: input.userId,
+      recordMemberToolObservation({
+        install,
+        publishable,
         tools: accepted,
+        complete: !response.truncated && response.skippedOversize === 0,
       });
       return response;
     } catch (error) {

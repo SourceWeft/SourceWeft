@@ -200,6 +200,26 @@ export function McpOwnerPanel({
             </p>
           </div>
 
+          {(["license", "language"] as const).map((field) => (
+            <div className="space-y-1.5" key={field}>
+              <Label htmlFor={`mcp-owner-${field}`}>
+                {t(`owner.form.${field}`)}
+              </Label>
+              <Input
+                aria-invalid={Boolean(problemOf(field))}
+                autoComplete="off"
+                id={`mcp-owner-${field}`}
+                maxLength={OWNER_TEXT_LIMITS[field]}
+                onChange={(event) => setField(field, event.target.value)}
+                spellCheck={false}
+                value={form[field]}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t(`owner.form.${field}Hint`)}
+              </p>
+            </div>
+          ))}
+
           {(["documentationUrl", "homepageUrl", "repoUrl"] as const).map(
             (field) => (
               <div className="space-y-1.5" key={field}>

@@ -8,6 +8,7 @@ const sent = vi.hoisted(() => ({
 vi.mock("./client", () => ({ trackEvent: sent.trackEvent }));
 
 import {
+  setAnalyticsCatalog,
   trackArtifactShared,
   trackBadgeSnippetCopied,
   trackBeginCheckout,
@@ -23,14 +24,69 @@ import {
 
 afterEach(() => {
   sent.trackEvent.mockReset();
+  setAnalyticsCatalog(null);
+});
+
+const catalog = {
+  plans: {
+    free: { credits: 3000, pages: 300 },
+    pro: {
+      credits: 8000,
+      pages: 6000,
+      priceCents: { monthly: 990, yearly: 9900 },
+    },
+    team: {
+      credits: 8000,
+      pages: 6000,
+      priceCents: { monthly: 990, yearly: 9900 },
+      minSeats: 2,
+    },
+  },
+  topups: {
+    credit: { units: 10000, priceCents: 1250 },
+    page: { units: 1000, priceCents: 500 },
+  },
+};
+
+test("trackBeginCheckout values come from the capabilities catalog", () => {
+  setAnalyticsCatalog(catalog);
+  trackBeginCheckout({
+    billingInterval: "monthly",
+    plan: "pro",
+    source: "landing",
+  });
+  trackBeginCheckout({
+    billingInterval: "yearly",
+    plan: "team",
+    seatCount: 3,
+    source: "dashboard",
+  });
+  assert.equal(sent.trackEvent.mock.calls[0]![1]?.value, 9.9);
+  assert.equal(sent.trackEvent.mock.calls[1]![1]?.value, 297);
+});
+
+test("trackBeginCheckout leaves the value out while no catalog is known", () => {
+  trackBeginCheckout({
+    billingInterval: "monthly",
+    plan: "pro",
+    source: "landing",
+  });
+  assert.equal(sent.trackEvent.mock.calls[0]![1]?.value, undefined);
 });
 
 test("trackBeginCheckout sends GA4 ecommerce fields", () => {
-  trackBeginCheckout({ billingInterval: "yearly", plan: "pro", source: "landing" });
+  trackBeginCheckout({
+    billingInterval: "yearly",
+    plan: "pro",
+    source: "landing",
+  });
   const [name, params] = sent.trackEvent.mock.calls[0]!;
   assert.equal(name, "begin_checkout");
   assert.equal(params?.currency, "USD");
-  assert.deepEqual((params?.items as { item_id: string }[])[0]?.item_id, "pro_yearly");
+  assert.deepEqual(
+    (params?.items as { item_id: string }[])[0]?.item_id,
+    "pro_yearly",
+  );
 });
 
 test("trackPurchase skips the free plan", () => {

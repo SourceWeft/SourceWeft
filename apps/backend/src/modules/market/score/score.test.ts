@@ -426,12 +426,69 @@ test("hasDocs: a fetched README or RFC 9728 resource documentation", () => {
 
 // --- hasLicense ---------------------------------------------------------------
 
-test("hasLicense: the manifest's license, or the GitHub registry's", () => {
+test("hasLicense: the manifest's license, GitHub's for the repository, or the registry's for a name match", () => {
   assert.equal(item(remote({ license: "MIT" }), "hasLicense").met, true);
   assert.equal(item(remote({ license: "  " }), "hasLicense").met, false);
   assert.equal(
-    item(remote({}, { githubRegistry: { license: "Apache-2.0" } }), "hasLicense").met,
+    item(
+      remote(
+        {},
+        { githubRegistry: { license: "Apache-2.0", matchedBy: "name" } },
+      ),
+      "hasLicense",
+    ).met,
     true,
+  );
+  assert.equal(
+    item(
+      remote(
+        {},
+        {
+          githubRegistry: {
+            license: "Apache-2.0",
+            matchedBy: "endpoint-domain-org",
+          },
+        },
+      ),
+      "hasLicense",
+    ).met,
+    false,
+    "a row matched by the endpoint's domain describes another repository",
+  );
+  assert.equal(
+    item(
+      remote(
+        { repoUrl: "https://github.com/acme/server" },
+        {
+          repositoryMetadata: {
+            repository: "acme/server",
+            subfolder: "",
+            license: "MIT",
+            observedAt: "2026-10-25T00:00:00.000Z",
+          },
+        },
+      ),
+      "hasLicense",
+    ).met,
+    true,
+  );
+  assert.equal(
+    item(
+      remote(
+        { repoUrl: "https://github.com/acme/moved" },
+        {
+          repositoryMetadata: {
+            repository: "acme/server",
+            subfolder: "",
+            license: "MIT",
+            observedAt: "2026-10-25T00:00:00.000Z",
+          },
+        },
+      ),
+      "hasLicense",
+    ).met,
+    false,
+    "values read from another repository than the entry names now",
   );
   assert.equal(item(remote(), "hasLicense").met, false);
   assert.equal(item(remote(), "hasLicense").required, false);

@@ -27,9 +27,18 @@ The host adds the rendered version. `POST /artifacts/:id/records` re-resolves wo
 
 - Public shares read only collections the owner lists in `share_links.public_record_collections`. They use the token and never a session, and they cannot write.
 
+Page data can be exported and cleared by the people it belongs to, from the artifact preview panel. Both work on the artifact, not a version, and need no shared-storage approval:
+
+- `GET /artifacts/:id/records/export?scope=user|shared[&collection=name]` streams one JSON document (`format`, `version`, `artifactId`, `scope`, `exportedAt`, `records[]` with scope, collection, id, data, etag and timestamps). Rows are read in keyset pages of 500 by collection and record id, so memory does not grow with the data; pages are not one snapshot. A failure part way errors the stream, so a truncated file is invalid JSON.
+- `DELETE /artifacts/:id/records?scope=user|shared[&collection=name]` returns `{ "removed": n }`.
+- `user` is always the caller's own records, for any member, viewers included; no input names another owner. `shared` needs the artifact's creator or a workspace admin, the rule share links use. The role guard leaves both paths to the handler.
+- Both are audited as `artifact.records_exported` and `artifact.records_cleared` with scope, collection and counts, never the data, and are rate limited per viewer and artifact.
+
 Queries run through a fixed DSL translated to parameterized SQL inside the caller's partition, with a statement timeout. Writes serialize per artifact for quota checks.
 
 A page can still navigate its own frame and so send what it read to another site. No browser policy prevents that. Treat shared data as readable by whoever can get a version approved, which is why approval is per version and by a person.
+
+When the host sees the frame navigate, it disconnects storage and sends one advisory report (`POST .../versions/:versionId/records/navigation`, no destination, nothing from the page). The backend records at most one `artifact.page_navigation_attempt` audit row per viewer and version per minute, and `records/status` returns the last seven days as `navigationAttempts`. The approval and consent prompts show that count calmly. Reports never change what a page may do.
 
 ## Generation runtime
 

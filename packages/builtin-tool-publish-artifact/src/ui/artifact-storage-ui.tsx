@@ -125,6 +125,17 @@ export function NavigatedAwayNotice({ onReload }: { onReload: () => void }) {
   );
 }
 
+/** A calm heads-up, not a warning: reports are advisory and nothing changes. */
+export function NavigationAttemptsNote({ count }: { count: number }) {
+  if (!count || count < 1) return null;
+  return (
+    <p className="text-muted-foreground" data-testid="artifact-navigation-note">
+      This version has tried to leave its page {count}{" "}
+      {count === 1 ? "time" : "times"} recently.
+    </p>
+  );
+}
+
 function personName(person: ArtifactRecordPerson | null) {
   return person?.name || "a workspace member";
 }
@@ -187,14 +198,27 @@ export function ArtifactStorageBar({
         This page saves data under your account.
       </p>
       {shared && sharedState && !sharedState.approval && (
-        <div className="mt-2 space-y-2">
+        <div
+          className="mt-2 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+          role="region"
+          aria-label="Shared data approval"
+          data-testid="artifact-approval-pending"
+        >
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200">
+            <ShieldAlert className="size-4 shrink-0" />
+            {sharedState.canApprove
+              ? "Waiting for your approval"
+              : "Waiting for approval"}
+          </p>
           <p>
             This version asks to read and change <strong>shared data</strong>{" "}
-            that everyone who can open it sees.{" "}
+            that everyone who can open it sees. It cannot use shared data until
+            it is approved.{" "}
             {sharedState.canApprove
-              ? "Review it before approving."
-              : "A workspace editor or admin has to approve this version first."}
+              ? "Review the request before approving."
+              : "Only a workspace editor or admin can approve this version."}
           </p>
+          <NavigationAttemptsNote count={sharedState.navigationAttempts} />
           {sharedState.canApprove && !reviewing && (
             <Button
               size="sm"
@@ -247,6 +271,7 @@ export function ArtifactStorageBar({
             Version by {personName(sharedState.author)}, approved by{" "}
             {personName(sharedState.approval.approvedBy)}.
           </p>
+          <NavigationAttemptsNote count={sharedState.navigationAttempts} />
           <Button
             size="sm"
             disabled={busy}

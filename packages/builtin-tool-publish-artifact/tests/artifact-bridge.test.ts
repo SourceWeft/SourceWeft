@@ -192,6 +192,44 @@ test("a second load closes the bridge for good", async () => {
   );
 });
 
+test("a navigation is reported once per document and carries nothing", async () => {
+  const reportNavigation = vi.fn().mockResolvedValue(undefined);
+  const { bridge } = setup({ execute: vi.fn(), reportNavigation });
+  assert.equal(bridge.frameLoaded(), "first");
+  assert.equal(reportNavigation.mock.calls.length, 0);
+  assert.equal(bridge.frameLoaded(), "navigated");
+  bridge.reportNavigation();
+  bridge.reportNavigation();
+  assert.equal(bridge.frameLoaded(), "navigated");
+  bridge.reportNavigation();
+  assert.equal(reportNavigation.mock.calls.length, 1);
+  assert.deepEqual(reportNavigation.mock.calls[0], []);
+});
+
+test("a failing or missing report never disturbs the disconnect", async () => {
+  const rejecting = vi.fn().mockRejectedValue(new Error("offline"));
+  const first = setup({ execute: vi.fn(), reportNavigation: rejecting });
+  first.bridge.frameLoaded();
+  assert.equal(first.bridge.frameLoaded(), "navigated");
+  assert.doesNotThrow(() => first.bridge.reportNavigation());
+  const throwing = vi.fn(() => {
+    throw new Error("sync failure");
+  });
+  const second = setup({ execute: vi.fn(), reportNavigation: throwing });
+  second.bridge.frameLoaded();
+  second.bridge.frameLoaded();
+  assert.doesNotThrow(() => second.bridge.reportNavigation());
+  // No transport, or one without the method (public shares): a no-op.
+  for (const transport of [null, { execute: vi.fn() }]) {
+    const quiet = setup(transport);
+    quiet.bridge.frameLoaded();
+    quiet.bridge.frameLoaded();
+    assert.doesNotThrow(() => quiet.bridge.reportNavigation());
+  }
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(rejecting.mock.calls.length, 1);
+});
+
 test("only one handshake per document", () => {
   const { send, frame } = setup();
   send({ type: "sourceweft.storage/hello", v: 1 });

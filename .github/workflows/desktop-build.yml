@@ -85,3 +85,119 @@ jobs:
             desktop-manifest-*.json
           if-no-files-found: error
           retention-days: 14
+
+  linux-sandbox:
+    name: Real sandbox suite on Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: sudo bash scripts/ci/install-desktop-linux-deps.sh
+      - name: Install sandbox CI dependencies
+        run: sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep gnome-keyring dbus-x11
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Matches the version the bundle is built with locally (srt requires >= 1.4).
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          # Distinct from the `package` job's key so the two jobs never race to save the
+          # same cache entry.
+          key: desktop-linux-sandbox-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Sandbox sidecar unit tests
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar test
+      - name: Build sandbox sidecar bundle
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --rg "$(command -v rg)"
+      - name: Assert the restricted-userns sysctl is enabled (before setup)
+        run: |
+          value=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
+          echo "kernel.apparmor_restrict_unprivileged_userns=${value}"
+          test "${value}" = "1"
+      - name: Install the production bwrap path and its scoped AppArmor profile
+        run: |
+          set -eu
+          sudo install -d /opt/sourceweft/libexec
+          sudo install -m 0755 /usr/bin/bwrap /opt/sourceweft/libexec/bwrap
+          # Scoped to the production path only: never loosens /usr/bin/bwrap's own profile
+          # or the restricted-userns sysctl.
+          cat <<'EOF' | sudo tee /etc/apparmor.d/sourceweft-bwrap > /dev/null
+          profile sourceweft-bwrap /opt/sourceweft/libexec/bwrap flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/sourceweft-bwrap
+      - name: Assert the restricted-userns sysctl is still enabled (after setup)
+        run: |
+          value=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
+          echo "kernel.apparmor_restrict_unprivileged_userns=${value}"
+          test "${value}" = "1"
+      - name: Add the /etc/hosts entries the proxy hostname tests require
+        # hostnames_resolving_to_private_addresses_are_refused asserts these exist: names that
+        # resolve to host loopback and to a private address, without depending on live DNS.
+        run: |
+          set -eu
+          printf '127.0.0.1 sw-loop.test\n10.0.0.1 sw-private.test\n' | sudo tee -a /etc/hosts > /dev/null
+          getent hosts sw-loop.test sw-private.test
+      - name: Pre-build the real-sandbox test binary
+        # Compiles (but does not run) before the next step sets a poisoned proxy: cargo
+        # itself honours HTTP_PROXY/HTTPS_PROXY for its own crates.io/registry access, and a
+        # cold cache would otherwise make that step fail to even compile, not just prove the
+        # sidecar strips the variables.
+        run: >-
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          --test linux_sandbox --no-run
+      - name: Real-sandbox suite (readiness + bwrap execution)
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+        run: |
+          # Both cases, matching what the sidecar's Command::env_clear strips before
+          # spawning bwrap (lowercase set here rather than in `env:`, since GitHub Actions
+          # treats env keys as case-insensitive and would reject HTTP_PROXY/http_proxy as
+          # duplicates there); this proves neither ever reaches the sandboxed child. The
+          # binary was already compiled by the previous step, so this invocation only runs
+          # it, never touching cargo's own (now-poisoned) network access.
+          export http_proxy=http://127.0.0.1:9
+          export https_proxy=http://127.0.0.1:9
+          # One test at a time: every test starts its own sidecar against the runner's real
+          # `~/.cargo` and `~`, and each srt instance creates and removes the placeholder files
+          # behind the literal denyRead entries (e.g. `~/.cargo/credentials.toml`), so parallel
+          # instances delete each other's placeholders. Production has a single sidecar.
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
+            --test linux_sandbox -- --include-ignored --test-threads=1
+      - name: Real keyring round trip (fails if it falls back to the no-keyring skip)
+        working-directory: apps/desktop/src-tauri
+        run: |
+          set -u
+          set +e
+          output=$(dbus-run-session -- sh -c '
+            echo -n "throwaway-password" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            cargo test --locked --bin sourceweft-desktop secret_store -- --test-threads=1 --nocapture
+          ' 2>&1)
+          status=$?
+          set -e
+          echo "${output}"
+          if [ "${status}" -ne 0 ]; then
+            echo "::error::secret_store tests failed (exit ${status})"
+            exit 1
+          fi
+          # Only the round-trip tests' no-keyring fallback uses this phrase; a different
+          # test's expected "a usable Secret Service is present" skip does not match it.
+          if echo "${output}" | grep -q "has no usable Secret Service"; then
+            echo "::error::secret_store tests fell back to the no-keyring skip path; the real Secret Service round trip never ran"
+            exit 1
+          fi

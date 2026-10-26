@@ -1,0 +1,2 @@
+{"id":"1","op":"init","config":{"platform":"linux","home":"/home/dev","workspaceRoots":["/tmp/srt-sidecar-probe-workspace"],"readRoots":[],"helpers":{"ripgrep":"/w/apps/desktop/sandbox-sidecar/dist/bundle/rg","applySeccomp":"/w/apps/desktop/sandbox-sidecar/dist/bundle/apply-seccomp"},"bwrapPath":"/usr/bin/bwrap"}}
+{"id":"2","op":"probe"}

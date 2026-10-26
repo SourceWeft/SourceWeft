@@ -433,6 +433,11 @@
         "unsupportedPackage": "該軟體包類型無法在沙箱中執行"
       }
     },
+    "toolsReference": {
+      "platformIndexed": "由 SourceWeft 使用標準測試帳號讀取 · {date}",
+      "memberObserved": "來自已連接帳號的觀測 · {date}。不同帳號看到的可能不同。",
+      "stale": "自讀取以來，伺服器地址已變更。"
+    },
     "toolChangeLog": {
       "heading": "變更記錄",
       "intro": "每條記錄是此條目工具列表的一次變化，並不是伺服器自身的版本。",
@@ -623,6 +628,10 @@
       "otherClients": "其他 MCP 客戶端",
       "otherClientsConfig": "把它新增到你客戶端的 <code>mcpServers</code> 設定中。",
       "oauthNote": " 客戶端會在首次連接時完成 OAuth 登入。",
+      "agentHeading": "交給代理程式安裝",
+      "agentLead": "把這段提示詞貼上到 Claude Code、Codex、Cursor 等代理程式，或 SourceWeft 對話中。代理程式會讀取該伺服器的安裝指南，先向你展示發布者、端點和登入方式，經你同意後再把它新增到你的客戶端。金鑰不會寫進任何命令。",
+      "agentPrompt": "閱讀 {url}，並按其中說明把這個 MCP 伺服器接入我的客戶端。修改任何設定之前，先告訴我它的發布者、端點和登入方式，等我確認。不要把 API 金鑰寫進命令或我會提交的檔案；問我金鑰應從哪裡取得。",
+      "agentGuideLink": "檢視代理程式所依據的安裝指南",
       "followRepo": "參照 <link>儲存庫</link> 中的啟動說明。",
       "readmeHeading": "README",
       "toolsHeading": "工具",
@@ -658,6 +667,11 @@
       "publishedByGithub": "由 GitHub 帳號 {owner} 發布",
       "delivery": "交付方式",
       "hostedService": "託管服務",
+      "translatedSummary": {
+        "badge": "AI 翻譯",
+        "note": "由 AI 模型根據下方的原文描述翻譯，可能有誤。",
+        "original": "原文描述"
+      },
       "integrationsShowMore": "顯示更多"
     },
     "readme": {
@@ -679,6 +693,8 @@
       "requirements": "執行需求",
       "englishFallback": "暫無中文概覽，以下為英文版本。",
       "cardSummaryTitle": "AI 產生的簡介",
+      "translatedTag": "AI 翻譯",
+      "translatedCardTitle": "根據原文描述由 AI 翻譯",
       "admin": {
         "title": "AI 概覽",
         "loading": "正在載入概覽…",
@@ -2348,6 +2364,42 @@
     "video": {
       "previewTitle": "影片預覽"
     },
+    "pageData": {
+      "title": "頁面資料",
+      "description": "此頁面在多次存取之間儲存的記錄。可在此匯出副本或清除。",
+      "scopes": {
+        "user": {
+          "label": "你的資料",
+          "hint": "僅你自己可見。"
+        },
+        "shared": {
+          "label": "共享資料",
+          "hint": "開啟此頁面的所有人都能看到。僅建立者或工作區管理員可匯出或清除。"
+        }
+      },
+      "actions": {
+        "export": "匯出資料",
+        "clear": "清除資料",
+        "clearing": "正在清除…",
+        "clearConfirm": "清除資料"
+      },
+      "clearDialog": {
+        "user": {
+          "title": "清除你的資料？",
+          "description": "這將永久刪除此頁面為你儲存的記錄，不影響其他人的資料。此操作無法撤銷。"
+        },
+        "shared": {
+          "title": "清除共享資料？",
+          "description": "這將永久刪除此頁面為所有使用者儲存的共享記錄。此操作無法撤銷。"
+        }
+      },
+      "toasts": {
+        "exported": "資料已匯出。",
+        "exportFailed": "無法匯出資料。",
+        "cleared": "{count, plural, =0 {沒有可清除的記錄。} other {已清除 # 條記錄。}}",
+        "clearFailed": "無法清除資料。"
+      }
+    },
     "share": {
       "title": "分享製品",
       "anyoneWithLink": "任何擁有連結的人",
@@ -2657,6 +2709,7 @@
       },
       "headersHint": "每行填寫一個請求標頭。儲存後將不再顯示機密值。",
       "noAuthNote": "此 MCP 伺服器無需憑證。",
+      "catalogNotice": "此伺服器回傳的工具名稱、描述和參數結構可能會公開顯示在其目錄頁面上。絕不保留你的憑證或你傳送的資料。",
       "oauthNote": "此 MCP 伺服器使用 OAuth。請與提供方連接你的帳戶——你將被重新導向以授予存取權限，然後返回此處。你的權杖將加密儲存並自動重新整理。",
       "optionalKeyNote": "此 MCP 伺服器無需憑證即可使用。如有 API 金鑰，可在此新增。",
       "method": {
@@ -2913,6 +2966,7 @@
       "preview": "預覽 {title}",
       "completed": "完成於 {date}",
       "public": "公開",
+      "awaitingApproval": "等待核准",
       "couldNotLoad": "無法載入該製品。",
       "loadFailed": "載入製品失敗。",
       "loadMoreFailed": "載入更多製品失敗。"
@@ -4097,6 +4151,10 @@
         "documentationUrl": "文件 URL",
         "homepageUrl": "首頁 URL",
         "repoUrl": "儲存庫 URL",
+        "license": "授權條款",
+        "licenseHint": "SPDX 編號或名稱，例如 MIT。託管服務不顯示。",
+        "language": "主要語言",
+        "languageHint": "服務使用的程式語言，例如 TypeScript。託管服務不顯示。",
         "deprecated": "標記為已棄用",
         "deprecatedHint": "告知訪客此服務已不再維護。它仍會保留在列表中。",
         "urlInvalid": "請輸入以 https:// 開頭的完整網址。",

@@ -1,1 +1,1 @@
-export { getPricingConfig } from "@sourceweft/billing/catalog";
+export { buildPricingPlans, type PlansCopy } from "@sourceweft/billing/catalog";

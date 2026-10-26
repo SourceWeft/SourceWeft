@@ -106,3 +106,31 @@ export const mcpOwnerOverridesResponseSchema = z.union([
   mcpOwnerOverrides,
 ]);
 export type McpOwnerOverridesResponse = z.infer<typeof mcpOwnerOverrides>;
+
+/**
+ * What `GET /v1/mcp/:identifier/manifest` answers, as `mcp install` and
+ * `mcp test` read it: the fields they use, nothing more, and tolerant of
+ * values a newer registry may add (a transport or auth type this CLI does not
+ * know is reported as unsupported by the command, not as a broken response).
+ */
+export const mcpManifestResponseSchema = z.looseObject({
+  manifest: z.looseObject({
+    identifier: z.string(),
+    name: z.string(),
+    version: z.string().optional(),
+    transport: z.string(),
+    endpointUrl: z.string().optional(),
+    repoUrl: z.string().optional(),
+    publisher: z.looseObject({ domain: z.string().optional() }).optional(),
+    auth: z
+      .looseObject({
+        type: z.string().default("none"),
+        required: z.boolean().default(false),
+        headerName: z.string().optional(),
+        allowedHeaderNames: z.array(z.string()).default([]),
+      })
+      .default({ type: "none", required: false, allowedHeaderNames: [] }),
+  }),
+});
+export type McpManifestResponse = z.infer<typeof mcpManifestResponseSchema>;
+export type McpManifestView = McpManifestResponse["manifest"];

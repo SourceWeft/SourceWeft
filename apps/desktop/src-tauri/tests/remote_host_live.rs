@@ -2,6 +2,8 @@
 //! Opt-in execution E2E host. This runs the production RemoteHost, Keychain,
 //! WebSocket, SQLite and Seatbelt code. Only the UI enrollment interaction is
 //! supplied by the isolated E2E fixture. It is not a simulated device.
+#[path = "../src/secret_store.rs"]
+mod secret_store;
 #[path = "../src/remote_host.rs"]
 mod remote_host;
 

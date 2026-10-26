@@ -33,6 +33,12 @@ import {
   encodeQueryCursor,
   queryFingerprint,
 } from "./query";
+import {
+  countNavigationAttempts,
+  NAVIGATION_ATTEMPT_ACTION,
+  redisNavigationReportLimiter,
+  type NavigationReportLimiter,
+} from "./navigation";
 import { redisRecordRateLimiter, type RecordRateLimiter } from "./rate-limit";
 import {
   approveShared,
@@ -116,6 +122,7 @@ function filterValueProblem(filter: ArtifactRecordFilter): string | null {
 export class ArtifactRecordsService {
   constructor(
     private readonly rateLimiter: RecordRateLimiter = redisRecordRateLimiter,
+    private readonly navigationLimiter: NavigationReportLimiter = redisNavigationReportLimiter,
   ) {}
 
   private async loadVersion(input: {
@@ -515,18 +522,31 @@ export class ArtifactRecordsService {
     userId: string;
   }) {
     const context = await this.loadVersion(input);
-    const [approval, consented, author] = await Promise.all([
-      context.capabilities.shared
-        ? findActiveSharedApproval(context.versionId)
-        : Promise.resolve(null),
-      context.capabilities.shared
-        ? hasSharedConsent({
-            userId: input.userId,
-            versionId: context.versionId,
-          })
-        : Promise.resolve(false),
-      findVersionAuthor(context.versionId),
-    ]);
+    const [approval, consented, author, navigationAttempts] = await Promise.all(
+      [
+        context.capabilities.shared
+          ? findActiveSharedApproval(context.versionId)
+          : Promise.resolve(null),
+        context.capabilities.shared
+          ? hasSharedConsent({
+              userId: input.userId,
+              versionId: context.versionId,
+            })
+          : Promise.resolve(false),
+        findVersionAuthor(context.versionId),
+        // Advisory only: a failed count must not hide the approval prompts.
+        countNavigationAttempts({
+          teamId: context.teamId,
+          artifactId: context.artifactId,
+          versionId: context.versionId,
+        }).catch((error: unknown) => {
+          logger.warn("artifact_navigation_count_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return 0;
+        }),
+      ],
+    );
     const names = await findUserNames(
       [author, approval?.approvedBy].filter((id): id is string => Boolean(id)),
     );
@@ -546,7 +566,49 @@ export class ArtifactRecordsService {
       canApprove:
         context.capabilities.shared &&
         workspaceRoleSatisfies(context.access.role, "editor"),
+      navigationAttempts,
     };
+  }
+
+  /**
+   * The host saw this version's page try to navigate its own frame. Any member
+   * who can view the version may report; at most one report per viewer and
+   * version is written per minute and the rest are accepted without a write.
+   * Advisory: nothing about what the page may do changes.
+   */
+  async reportNavigation(input: {
+    workspaceId: string;
+    artifactId: string;
+    versionId: string;
+    userId: string;
+  }) {
+    const context = await this.loadVersion(input);
+    if (!context.capabilities.storage)
+      throw artifactRecordError(
+        "forbidden",
+        "This version does not declare storage",
+      );
+    let admitted = false;
+    try {
+      admitted = await this.navigationLimiter.allow(
+        `${input.userId}:${context.versionId}`,
+      );
+    } catch (error) {
+      // Without a limiter nothing is written, so a flood cannot fill the log.
+      logger.error("artifact_navigation_rate_limit_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (admitted)
+      await teamAuditService.record({
+        teamId: context.teamId,
+        actorUserId: input.userId,
+        action: NAVIGATION_ATTEMPT_ACTION,
+        targetType: "artifact",
+        targetId: context.artifactId,
+        metadata: { versionId: context.versionId },
+      });
+    return { accepted: true };
   }
 
   private async requireApprover(input: {

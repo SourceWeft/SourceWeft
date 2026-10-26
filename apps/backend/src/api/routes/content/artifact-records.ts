@@ -23,7 +23,7 @@ import { requireRouteParam } from "./helpers";
  * preflight the API answers only for trusted origins. DELETE is never a simple
  * cross-site request, so it needs only the origin check.
  */
-function rejectOpaqueOrigin(c: Context) {
+export function rejectOpaqueOrigin(c: Context) {
   if (c.req.header("origin") === "null")
     throw artifactRecordError(
       "forbidden",
@@ -79,7 +79,7 @@ export async function readHostJsonBody(c: Context): Promise<unknown> {
   }
 }
 
-function versionInput(c: Context, userId: string) {
+export function versionInput(c: Context, userId: string) {
   return {
     workspaceId: requireRouteParam(c, "workspaceId"),
     artifactId: requireRouteParam(c, "id"),
@@ -88,7 +88,7 @@ function versionInput(c: Context, userId: string) {
   };
 }
 
-async function requireUserId(c: Context) {
+export async function requireUserId(c: Context) {
   const session = await requireSession(c);
   if (!session) throw ApiError.unauthorized();
   return getSessionUserId(session);

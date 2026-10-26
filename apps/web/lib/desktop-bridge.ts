@@ -45,6 +45,15 @@ export type AutostartState = {
   reason?: string | null;
 };
 
+/**
+ * Readiness of local sandboxed execution. Absent when no LocalHost is managed, and on macOS,
+ * whose Seatbelt sandbox needs no setup (the status there is unchanged from earlier builds).
+ */
+export type SandboxReadiness =
+  | { state: "ready"; toolchainPath?: "loginShell" | "system" }
+  | { state: "needsSetup"; reason: string }
+  | { state: "unsupported" };
+
 /** Native capability discovery only; does not authorize local execution. */
 export type LocalHostStatus = {
   protocolVersion: number;
@@ -54,6 +63,7 @@ export type LocalHostStatus = {
   deviceId: string | null;
   connected: boolean;
   connectionError: string | null;
+  readiness?: SandboxReadiness;
 };
 
 type DesktopListener<TPayload> = (payload: TPayload) => void;
