@@ -282,52 +282,76 @@ directory records update status, versions, channel and safe error codes; it is
 truncated once it exceeds 256 KiB. UI errors and CI receipts provide additional
 diagnostics. Credentials, workfiles and chat content are never included.
 
-## Linux sandbox runtime bundle
+## Sandbox runtime bundle (macOS and Linux)
 
-Local device execution on Linux x86_64 needs the sandbox runtime (the `srt-sidecar`
-executable, `rg`, `apply-seccomp` and `srt-proxy-agent.jar`). It is not part of the
-AppImage: the app downloads it only after the user clicks Install in the app.
+Local device execution needs the sandbox runtime. It is not part of the installer: the app
+downloads it only after the user clicks Install in the app. The file set is per platform:
+
+- Linux x86_64: `srt-sidecar`, `rg`, `apply-seccomp`, `srt-proxy-agent.jar`.
+- macOS (`aarch64-apple-darwin`, `x86_64-apple-darwin`): `srt-sidecar`, `rg`,
+  `srt-proxy-agent.jar` — **no** `apply-seccomp` (Seatbelt, not seccomp). `pack`/`verify`
+  in `sandbox-bundle.mjs` validate the file set against the manifest target, so a Linux
+  bundle can never ship without `apply-seccomp` and a macOS bundle can never ship one.
 
 What is published, per `signed` or `updater-signed` release, as GitHub Release assets
-next to the installers:
+next to the installers (one pair per target):
 
-- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`
-- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz.sig`
+- `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz` (+ `.sig`)
+- `sourceweft-sandbox-aarch64-apple-darwin.tar.gz` (+ `.sig`)
+- `sourceweft-sandbox-x86_64-apple-darwin.tar.gz` (+ `.sig`)
 
-`candidate` releases publish neither file (they have no updater key, so the app could not
-verify a download anyway). The bundle is **not** mirrored to `download.sourceweft.com`
-and is not part of the download or update manifests (`publish-downloads.mjs` and
+`candidate` releases publish none of them (they have no updater key, so the app could not
+verify a download anyway). The bundles are **not** mirrored to `download.sourceweft.com`
+and are not part of the download or update manifests (`publish-downloads.mjs` and
 `publish-desktop-updates.mjs` only look at installers and update packages and ignore
-these files); mirroring it is a follow-up.
+these files); mirroring is a follow-up.
 
-How it is built and signed (Linux leg of `desktop-release.yml`, after the AppImage, before
-the artifact upload):
+How it is built and signed (per OS leg of `desktop-release.yml`, after the installer and
+before the artifact upload):
 
-0. `scripts/ci/install-static-ripgrep.sh` downloads the pinned official static (musl)
-   ripgrep release named in `scripts/ci/ripgrep-release.json` (version, asset, URL, SHA-256),
-   checks the SHA-256 before extracting and refuses a dynamically linked binary. Both the
-   release leg and the `sandbox-bundle` PR job use it; the runner's apt ripgrep is never
-   bundled. To bump ripgrep, change that one file with the checksum from the official release.
-1. `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target x86_64-unknown-linux-gnu --rg "$(command -v rg)"`
+0. ripgrep is a pinned official release from `scripts/ci/ripgrep-release.json`, checksum-
+   verified before extraction. Linux uses `install-static-ripgrep.sh` (static musl, rejects
+   a dynamically linked binary); macOS uses `install-ripgrep-macos.sh <dir> <triple>` (the
+   `darwin` block of the same JSON; a Mach-O binary of the requested architecture). The
+   runner's package-manager ripgrep is never bundled. To bump ripgrep, change that one file
+   with the checksums from the official release.
+1. `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target <triple> --rg <rg>`
    (Bun 1.4.2) writes `dist/bundle/` including `manifest.json`: `schemaVersion` 1,
    `protocolVersion` (`SANDBOX_PROTOCOL_VERSION`), `appVersion` (the desktop package
-   version), `target`, `srtVersion` and the SHA-256 and size of every other file.
-2. `node scripts/ci/sandbox-bundle.mjs pack` writes a deterministic archive (ustar in
+   version), `target`, `srtVersion` and the SHA-256 and size of every other file. On the
+   macOS arm64 runner the `x86_64-apple-darwin` target cross-compiles (Bun `bun-darwin-x64`),
+   exactly as the Tauri installers cross-compile their x86_64 build.
+2. **macOS only:** `apps/desktop/sandbox-sidecar/scripts/sign-macos.sh <bundle> [identity]`
+   code-signs `srt-sidecar` (hardened runtime + `allow-jit` entitlement) and `rg` (hardened
+   runtime, no entitlements) **before** packing. The identity is the Developer ID Application
+   identity in the `signed` policy (with `--timestamp`; a dedicated keychain holds the imported
+   `APPLE_CERTIFICATE`, the same secret the installers use — no new secret) or `-` (ad-hoc) in
+   `updater-signed`, exactly like the installers. Code-signing rewrites the binaries, so
+   `build.ts --remanifest` then rebuilds `manifest.json` over the signed files so their hashes
+   match what is packed. Linux never code-signs and never runs these steps.
+3. `node scripts/ci/sandbox-bundle.mjs pack` writes a deterministic archive (ustar in
    gzip; sorted entries, zero mtime/uid/gid, modes 0755/0644, `manifest.json` first,
    plain files at the archive root only). `verify` re-reads it and rejects absolute, `..`,
    nested, link, duplicate or unlisted entries and any hash or size mismatch.
-3. `sign` runs `tauri signer sign` with the existing `TAURI_SIGNING_PRIVATE_KEY`
-   (and `_PASSWORD`), the same minisign updater key as the AppImage; `verify-signature`
+4. `sign` runs `tauri signer sign` with the existing `TAURI_SIGNING_PRIVATE_KEY`
+   (and `_PASSWORD`), the same minisign updater key as the installers; `verify-signature`
    checks the `.sig` with the `update-verifier` (Tauri's `minisign-verify`) against
    `TAURI_UPDATER_PUBLIC_KEY`. No new secret or variable exists.
+
+The macOS Developer ID signing and notarization are **UNVERIFIED** here: the authors have no
+Apple Developer ID certificate, so only the ad-hoc path (`-`) is exercised (locally and in CI).
+A bare Mach-O binary cannot carry a stapled notarization ticket, and a file the app downloads
+and writes itself carries no `com.apple.quarantine` attribute, so Gatekeeper does not assess it;
+notarizing a zip/pkg wrapper is an optional owner-decided follow-up (see `sign-macos.sh`).
 
 The app derives the download location from its own version
 (`https://github.com/SourceWeft/SourceWeft/releases/download/v<version>/sourceweft-sandbox-<target>.tar.gz`
 plus `.sig`), verifies the signature with the public key embedded in the build, and only
 then extracts and checks the manifest. Builds without an embedded key cannot install it.
 Pull requests that touch the desktop app, the sidecar or these scripts run the
-`sandbox-bundle` job in `desktop-build.yml`, which builds the bundle and runs the same
-pack, sign and verify steps with a throwaway key; nothing is uploaded.
+`sandbox-bundle` job (Linux) and `sandbox-bundle-macos` job (both macOS targets) in
+`desktop-build.yml`, which build the bundle and run the same pack, sign and verify steps with
+a throwaway key (ad-hoc code-signing on macOS); nothing is uploaded.
 
 ## Linux packaging
 

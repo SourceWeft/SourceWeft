@@ -58,14 +58,21 @@ this service supports the packaged native protocol, sign-in/deep links, local
 files and permission prompts. An installer build alone does not verify those
 production flows.
 
-## Linux sandbox runtime bundle
+## Sandbox runtime bundle (macOS and Linux)
 
-Signed and updater-signed releases (not `candidate`) also attach
-`sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz` and its `.sig` to the GitHub
-Release. It is the Linux local-execution runtime; the app downloads it from the Release
-URL derived from its own version when the user clicks Install, and verifies the minisign
-signature (the same updater key as the AppImage, `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`)
-with the public key embedded in the build before extracting. The desktop package version
-must therefore match the tag (already enforced), and a release must not be re-tagged
-without re-publishing the bundle. It is not mirrored to `download.sourceweft.com` yet.
-Details and the offline checks are in `scripts/ci/README.desktop-updates.md`.
+Signed and updater-signed releases (not `candidate`) also attach the local-execution
+runtime for each supported platform, with its `.sig`, to the GitHub Release:
+`sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`,
+`sourceweft-sandbox-aarch64-apple-darwin.tar.gz` and
+`sourceweft-sandbox-x86_64-apple-darwin.tar.gz`. The app downloads the one for its own
+platform from the Release URL derived from its own version when the user clicks Install, and
+verifies the minisign signature (the same updater key as the installers,
+`TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`) with the public key embedded in the build before
+extracting and checking the manifest. On macOS the binaries inside the bundle are additionally
+code-signed before packing (Developer ID + hardened runtime + `allow-jit` entitlement in the
+`signed` policy, ad-hoc in `updater-signed`); the macOS x86_64 bundle cross-compiles on the
+arm64 runner as the installers do. The desktop package version must therefore match the tag
+(already enforced), and a release must not be re-tagged without re-publishing the bundles. They
+are not mirrored to `download.sourceweft.com` yet. Developer ID signing and notarization of the
+macOS bundle are unverified here (no Apple credentials). Details and the offline checks are in
+`scripts/ci/README.desktop-updates.md`.
