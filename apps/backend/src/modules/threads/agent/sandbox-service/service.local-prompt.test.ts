@@ -32,6 +32,9 @@ import { agentSandboxService } from "./service";
 const BASE_TEXT =
   "Commands execute on the user's bound PC inside its authorized working folder. In user-facing updates and answers, describe this as running a command on the computer or in the working folder. Do not call it a cloud sandbox. Mention implementation terms such as sandbox/provider only if the user asks about implementation. Internal tool names do not change this execution location. Do not assume cloud-image packages are installed on this PC.";
 
+const NETWORK_BLOCK =
+  "<local_network_access>\nOutbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.\n</local_network_access>";
+
 const request = {
   filesystem: {},
   executionTarget: { kind: "local" },
@@ -57,14 +60,14 @@ describe("local execution prompt", () => {
       sandboxState: null,
     };
     expect(await prompt()).toBe(
-      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>`,
+      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
     );
     expect(state.loadedFor).toEqual(["thread-1"]);
   });
 
   test("a missing device row also leaves the text unchanged", async () => {
     expect(await prompt()).toBe(
-      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>`,
+      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
     );
   });
 
@@ -82,6 +85,10 @@ describe("local execution prompt", () => {
       ),
     ).toBe(true);
     expect(text).toContain("Shell: bash (commands run under this shell)");
-    expect(text.endsWith("\n</local_execution_presentation>")).toBe(true);
+    expect(
+      text.endsWith(
+        `\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
+      ),
+    ).toBe(true);
   });
 });
