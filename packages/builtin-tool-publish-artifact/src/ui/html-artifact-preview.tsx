@@ -11,7 +11,23 @@ import {
   htmlArtifactPayloadSchema,
   htmlArtifactRecordCapabilities,
 } from "@sourceweft/contracts/html-artifact";
+import { DEFAULT_ARTIFACT_STORAGE_TEXT } from "@sourceweft/contracts/artifact-storage-text";
 import { HtmlPreview, type HtmlPreviewFile } from "./html-preview";
+
+const useDefaultStorageText = () => DEFAULT_ARTIFACT_STORAGE_TEXT;
+
+/**
+ * The host's translated prompts, or the English defaults where none is
+ * installed (an unconfigured host throws). The choice is fixed for the life of
+ * the app, so the same hook runs on every render.
+ */
+function storageTextHook() {
+  try {
+    return artifactRenderHost().useArtifactStorageText ?? useDefaultStorageText;
+  } catch {
+    return useDefaultStorageText;
+  }
+}
 
 const fileProjectionSchema = z.array(
   z.object({
@@ -71,6 +87,9 @@ function HtmlArtifactPreviewContent({
   files: readonly HtmlPreviewFile[];
   payload: z.infer<typeof htmlArtifactPayloadSchema>;
 }) {
+  const useStorageText = storageTextHook();
+  const hostText = useStorageText();
+  const text = context.storageText ?? hostText;
   const storage = htmlArtifactRecordCapabilities(payload);
   const isShare = context.surface === "share";
   const versionId = renderedVersionId(context.payload, fileUrl);
@@ -98,6 +117,7 @@ function HtmlArtifactPreviewContent({
       files={files}
       storage={storage}
       records={isShare ? (context.records ?? null) : appRecords}
+      text={text}
     />
   );
 }
