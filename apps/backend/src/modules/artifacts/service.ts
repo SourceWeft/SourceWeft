@@ -53,6 +53,7 @@ import {
   revokeShareLink,
 } from "../sharing/store";
 import { teamAuditService } from "../team-audit";
+import { findPendingSharedApprovalArtifactIdsForViewer } from "./pending-shared-approval";
 import { logger } from "../../shared/logger";
 import {
   deleteArtifactRecord,
@@ -888,9 +889,16 @@ export class ContentArtifactsService {
       limit: input.limit,
       viewerUserId: input.userId,
     });
-    const publicArtifactIds = await findPubliclySharedArtifactIds(
-      artifacts.items.map((artifact) => artifact.id),
-    );
+    const summaryArtifactIds = artifacts.items.map((artifact) => artifact.id);
+    const [publicArtifactIds, awaitingApprovalIds] = await Promise.all([
+      findPubliclySharedArtifactIds(summaryArtifactIds),
+      findPendingSharedApprovalArtifactIdsForViewer({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: input.userId,
+        artifactIds: summaryArtifactIds,
+      }),
+    ]);
 
     return {
       items: artifacts.items.map((artifact) => ({
@@ -903,6 +911,7 @@ export class ContentArtifactsService {
         promptExcerpt: artifact.promptExcerpt,
         visibility: artifact.visibility,
         isPublic: publicArtifactIds.has(artifact.id),
+        awaitingSharedApproval: awaitingApprovalIds.has(artifact.id),
         createdAt: artifact.createdAt,
         completedAt: artifact.completedAt,
         updatedAt: artifact.updatedAt,

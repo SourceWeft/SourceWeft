@@ -18,6 +18,7 @@ function summary(updatedAt = "2026-08-23T01:00:00.000Z"): ArtifactSummaryItem {
     promptExcerpt: "Report prompt",
     visibility: "private",
     isPublic: false,
+    awaitingSharedApproval: false,
     createdAt: "2026-08-23T00:00:00.000Z",
     completedAt: "2026-08-23T01:00:00.000Z",
     updatedAt,

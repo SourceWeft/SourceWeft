@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./agent-tool-defs": "./src/agent-tool-defs.ts",
     "./ui": "./src/ui/index.tsx",
+    "./ui/artifact-storage-ui": "./src/ui/artifact-storage-ui.tsx",
     "./visual-deck/*": "./src/visual-deck/*.ts"
   },
   "scripts": {

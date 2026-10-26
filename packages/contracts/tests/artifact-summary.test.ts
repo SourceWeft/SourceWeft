@@ -17,6 +17,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     promptExcerpt: "Summarize the quarter.",
     visibility: "private",
     isPublic: false,
+    awaitingSharedApproval: false,
     createdAt: "2026-08-23T01:00:00.000Z",
     completedAt: "2026-08-23T01:01:00.000Z",
     updatedAt: "2026-08-23T01:01:00.000Z",
@@ -32,6 +33,19 @@ function summary(overrides: Record<string, unknown> = {}) {
 
 test("artifact summary accepts the bounded gallery projection", () => {
   assert.deepEqual(artifactSummarySchema.parse(summary()), summary());
+});
+
+test("artifact summary defaults awaitingSharedApproval to false for older servers", () => {
+  const { awaitingSharedApproval: _omitted, ...legacy } = summary();
+  assert.equal(
+    artifactSummarySchema.parse(legacy).awaitingSharedApproval,
+    false,
+  );
+  assert.equal(
+    artifactSummarySchema.parse(summary({ awaitingSharedApproval: true }))
+      .awaitingSharedApproval,
+    true,
+  );
 });
 
 test("artifact summary strips detail-only and raw storage fields", () => {

@@ -46,6 +46,7 @@ function artifactSummary(
     promptExcerpt: "A cat in a sunbeam",
     visibility: "private",
     isPublic: false,
+    awaitingSharedApproval: false,
     createdAt: "2026-06-01T00:00:00.000Z",
     completedAt: "2026-06-01T00:00:01.000Z",
     updatedAt: "2026-06-01T00:00:01.000Z",
