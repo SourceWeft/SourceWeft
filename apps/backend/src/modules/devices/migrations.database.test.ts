@@ -129,7 +129,7 @@ describe("device-status-migration", () => {
         prefix: "device_status",
         setupSql: `CREATE TABLE local_devices(id text primary key, user_id text);
       INSERT INTO local_devices VALUES ('old','owner');`,
-        migrations: ["0064_local_device_status_report.sql"],
+        migrations: ["0069_local_device_status_report.sql"],
       },
       async (client) => {
         const old = (
