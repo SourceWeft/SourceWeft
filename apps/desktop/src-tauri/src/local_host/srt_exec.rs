@@ -165,6 +165,15 @@ fn lock_slot(slot: &SandboxSlot) -> std::sync::MutexGuard<'_, Option<Arc<Sandbox
     slot.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Drops the current sidecar (the process exits once the last command still using it is done)
+/// so the next command starts one from the files now on disk; used when the runtime is replaced.
+pub(crate) fn stop_sidecar(slot: &SandboxSlot) {
+    // Dropping the last reference shuts the sidecar down, which can take seconds: do it after
+    // the slot lock is released, so commands starting meanwhile are not blocked behind it.
+    let old = lock_slot(slot).take();
+    drop(old);
+}
+
 /// Wraps one attempt on `instance`. A failed wrap is never followed by a cleanup: srt has
 /// already undone its own count for it.
 fn try_wrap(
@@ -328,7 +337,10 @@ pub(crate) fn execute_command(
         }) {
             Ok(found) => found,
             Err(error) => {
-                if matches!(error.code, "SANDBOX_UNAVAILABLE" | "HELPER_MISSING") {
+                if matches!(
+                    error.code,
+                    "SANDBOX_UNAVAILABLE" | "HELPER_MISSING" | "BUNDLE_STALE" | "BUNDLE_NEWER"
+                ) {
                     host.invalidate_sandbox_readiness();
                 }
                 return Err(error);
@@ -425,6 +437,35 @@ mod tests {
         assert!(first
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn stopping_the_sidecar_empties_the_slot_so_the_next_command_starts_a_new_one() {
+        let bundle = bundle_with_stub();
+        let slot = SandboxSlot::default();
+        let mut starts = 0;
+        let mut run = |slot: &SandboxSlot| {
+            let (instance, _) = wrap_in_sandbox(
+                slot,
+                Path::new("/w/a/files"),
+                Path::new("/w/a/files"),
+                "echo hi",
+                "id",
+                || {
+                    starts += 1;
+                    stub_instance(bundle.path(), &["/w"])
+                },
+            )
+            .unwrap();
+            instance.finish("id");
+        };
+        run(&slot);
+        stop_sidecar(&slot);
+        assert!(slot.lock().unwrap().is_none());
+        run(&slot);
+        stop_sidecar(&slot);
+        stop_sidecar(&slot); // idempotent on an empty slot
+        assert_eq!(starts, 2);
     }
 
     #[test]
@@ -560,6 +601,44 @@ mod tests {
         .expect("a policy error must be returned");
         assert_eq!(error.code, "POLICY_INVALID");
         assert_eq!(starts, 1);
+    }
+
+    /// A bundle from before the protocol handshake (it would ignore `denyRoots` and wrap
+    /// anything) is refused at start, so `wrap_in_sandbox` never gets an instance to wrap with.
+    #[test]
+    fn stale_bundle_never_reaches_wrap() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("srt-sidecar");
+        fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/stub-sidecar-stale.sh"
+            ),
+            &target,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&target, permissions).unwrap();
+        fs::File::open(&target).unwrap().sync_all().unwrap();
+        let record = tempfile::tempdir().unwrap();
+        let home = record.path().join("home");
+        let log = record.path().join("home.log");
+        let slot = SandboxSlot::default();
+        let error = wrap_in_sandbox(
+            &slot,
+            Path::new("/w"),
+            Path::new("/w"),
+            "echo hi",
+            "id",
+            || stub_instance_at(dir.path(), &["/w"], home.to_str().unwrap()),
+        )
+        .err()
+        .expect("a stale bundle must not run commands");
+        assert_eq!(error.code, "BUNDLE_STALE");
+        assert!(slot.lock().unwrap().is_none());
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(!logged.lines().any(|line| line == "wrap"), "{logged}");
     }
 
     #[test]

@@ -21,7 +21,9 @@
 use serde_json::{json, Value};
 use sourceweft_desktop::local_host::{
     execution::Executions,
-    readiness::{bundle_dir, probe_bundle, Helpers, InitConfig, Platform, SandboxReadiness},
+    readiness::{
+        bundle_dir, probe_bundle, Helpers, InitConfig, Platform, SandboxReadiness, SetupCode,
+    },
     LocalHost, Workspace,
 };
 use std::{
@@ -93,7 +95,13 @@ fn readiness_needs_setup_without_profile() {
 
     let readiness = probe_bundle(&bundle, &harness_init("/usr/bin/bwrap", &workspace));
     match readiness {
-        SandboxReadiness::NeedsSetup { reason } => {
+        SandboxReadiness::NeedsSetup { code, reason, .. } => {
+            assert_eq!(
+                code,
+                SetupCode::UserNamespaceRestricted,
+                "the AppArmor-restricted-userns failure must classify as userNamespaceRestricted, \
+                 got {code:?}: {reason}"
+            );
             assert!(
                 reason.contains("RTM_NEWADDR"),
                 "expected the AppArmor-restricted-userns failure to surface RTM_NEWADDR, got: \

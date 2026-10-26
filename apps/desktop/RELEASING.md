@@ -21,8 +21,8 @@ Before creating a `vMAJOR.MINOR.PATCH` tag (optionally with a semver prerelease)
 ## Desktop installers
 
 `.github/workflows/desktop-build.yml` is reusable, manually dispatchable, and runs
-for desktop changes in pull requests. It builds a macOS app/DMG and Windows NSIS
-installer with the committed lockfile, then retains them as workflow artifacts.
+for desktop changes in pull requests. It builds a macOS app/DMG, a Windows NSIS
+installer and a Linux AppImage and `.deb` with the committed lockfile, then retains them as workflow artifacts.
 Standalone verification runs do not install the app or publish customer downloads.
 The tag Release workflow calls this same builder, waits for both platforms and CI,
 then attaches the DMG and NSIS EXE to GitHub Release alongside the self-hosting archive.
@@ -57,3 +57,15 @@ runtime environment explicitly provides `NEXT_PUBLIC_WEB_BASE_URL`. Confirm that
 this service supports the packaged native protocol, sign-in/deep links, local
 files and permission prompts. An installer build alone does not verify those
 production flows.
+
+## Linux sandbox runtime bundle
+
+Signed and updater-signed releases (not `candidate`) also attach
+`sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz` and its `.sig` to the GitHub
+Release. It is the Linux local-execution runtime; the app downloads it from the Release
+URL derived from its own version when the user clicks Install, and verifies the minisign
+signature (the same updater key as the AppImage, `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`)
+with the public key embedded in the build before extracting. The desktop package version
+must therefore match the tag (already enforced), and a release must not be re-tagged
+without re-publishing the bundle. It is not mirrored to `download.sourceweft.com` yet.
+Details and the offline checks are in `scripts/ci/README.desktop-updates.md`.

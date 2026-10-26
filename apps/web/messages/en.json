@@ -1329,10 +1329,31 @@
     "localHost": {
       "title": "This computer",
       "checkingAccount": "Checking your account…",
-      "description": "Work with files and run commands on this Mac. Each conversation gets its own folder unless you select one.",
+      "description": "Work with files and run commands on this computer. Each conversation gets its own folder unless you select one.",
       "statusOnline": "This computer is online",
       "statusConnecting": "Connecting this computer…",
       "statusSettingUp": "Setting up this computer…",
+      "statusNeedsSetup": "This computer needs one-time setup",
+      "statusUnsupported": "Local execution is not available on this computer",
+      "deviceSystem": "System: {system}",
+      "deviceShell": "Shell: {shell}",
+      "setup": {
+        "title": "Set up local execution",
+        "installingInProgress": "The sandbox runtime is being installed…",
+        "downloadRuntimeDescription": "Local execution runs commands inside a sandbox that needs the SourceWeft sandbox runtime. It is downloaded from the official SourceWeft release for this app version, and its signature is verified before anything is installed. Nothing is downloaded until you click Install.",
+        "install": "Install sandbox runtime",
+        "installing": "Installing…",
+        "updateAppDescription": "This app and its sandbox runtime do not match. Update SourceWeft (Settings → About → Software update), then check again.",
+        "reinstallPackageDescription": "The sandbox helper that the SourceWeft .deb package installs is missing or cannot run. Reinstall the .deb package (it depends on the bubblewrap package, so install bubblewrap first if it is missing), then check again.",
+        "privilegedSetupDescription": "A one-time administrator step is needed. It installs a private copy of bubblewrap under /opt/sourceweft and an AppArmor profile that applies only to that copy; the system bubblewrap and your system security settings are not changed. Run the command below in a terminal, or click Run setup to open your system’s administrator prompt. SourceWeft never sees your password.",
+        "privilegedSetupNoCommandDescription": "A one-time administrator step is needed. It installs a private copy of bubblewrap under /opt/sourceweft and an AppArmor profile that applies only to that copy; the system bubblewrap and your system security settings are not changed. Click Run setup to open your system’s administrator prompt. SourceWeft never sees your password.",
+        "commandLabel": "Setup command",
+        "copy": "Copy",
+        "copied": "Copied",
+        "runSetup": "Run setup",
+        "runningSetup": "Running setup…",
+        "checkAgain": "Check again"
+      },
       "remoteAccessTitle": "Allow access from other devices",
       "remoteAccessDescription": "Let your other devices use this computer with the same account. They can access task folders and authorized working directories. You can still work on this computer when remote access is off.",
       "turnOffRemoteAccess": "Turn off remote access",
@@ -5205,7 +5226,7 @@
       "badgePreview": "Preview build",
       "badgeDefault": "Desktop app",
       "heading": "Download SourceWeft.",
-      "subtitle": "Native apps for macOS and Windows today, with iOS and Android on the way. Every app signs in to the same account and workspaces as the web; local device capabilities arrive on macOS first.",
+      "subtitle": "Native apps for macOS and Windows today, with iOS and Android on the way. Every app signs in to the same account and workspaces as the web; local device execution works on macOS and Linux x64, and is not available on Windows yet.",
       "releaseNotes": "Release notes",
       "changelog": "Changelog",
       "screenshotAlt": "SourceWeft desktop app on macOS: a workspace with a selected reading-notes source, a drafted question in the composer, and the Hub panel listing sources"
@@ -5213,7 +5234,7 @@
     "highlights": [
       "The same account, workspaces, and chats as the web app",
       "A native window instead of a browser tab",
-      "Local working directories and file panels on macOS",
+      "Local working directories and file panels on macOS and Linux",
       "Desktop MCP servers that need a local process"
     ],
     "channels": {
@@ -5297,8 +5318,8 @@
       "account": "Account",
       "accountDescription": "the desktop app signs in with your existing SourceWeft account",
       "localExecution": "Local device execution",
-      "localExecutionAvailable": "{platforms} only for now",
-      "localExecutionFallback": "macOS first; Windows support is in progress",
+      "localExecutionAvailable": "Supported on {platforms}; Linux x64 needs a one-time runtime install from the app",
+      "localExecutionFallback": "macOS and Linux x64; Windows is not available yet",
       "listJoiner": " and ",
       "unsignedEyebrow": "Unsigned builds",
       "verifyingEyebrow": "Verifying your download",
@@ -5339,7 +5360,7 @@
       "items": {
         "desktopVsWeb": {
           "question": "Is the desktop app different from the web app?",
-          "answer": "It signs in to the same SourceWeft account and opens the same workspaces, chats, and sources. On top of that it adds a native window and, on macOS, local device capabilities such as working directories and file panels."
+          "answer": "It signs in to the same SourceWeft account and opens the same workspaces, chats, and sources. On top of that it adds a native window and, on macOS and Linux x64, local device capabilities such as working directories and file panels."
         },
         "macosVerification": {
           "question": "Why does macOS say the app cannot be verified?",
@@ -5359,7 +5380,7 @@
         },
         "linuxBuild": {
           "question": "Is there a Linux build?",
-          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution still requires macOS."
+          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: open Settings → This computer and install the sandbox runtime (a signed download that starts only when you click Install). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution is not available on Windows yet."
         }
       }
     }

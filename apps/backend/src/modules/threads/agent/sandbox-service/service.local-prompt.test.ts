@@ -1,0 +1,87 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
+
+const state = vi.hoisted(() => ({
+  device: null as null | Record<string, string | null>,
+  loadedFor: [] as string[],
+}));
+
+vi.mock("../../../devices/provider", () => ({
+  localProviderForTurn: async () => ({ id: "local" }),
+  boundDeviceEnvironment: async (threadId: string) => {
+    state.loadedFor.push(threadId);
+    return state.device;
+  },
+}));
+vi.mock("./stores", () => ({
+  DrizzleSandboxStore: class {},
+  DrizzleSandboxOperationStore: class {},
+}));
+vi.mock("@sourceweft/builtin-tool-sandbox", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@sourceweft/builtin-tool-sandbox")>();
+  class FakeService {
+    async createRuntimeForTurn() {
+      return { buildRuntimePrompt: () => "BASE" };
+    }
+  }
+  return { ...actual, AgentSandboxService: FakeService };
+});
+
+import { agentSandboxService } from "./service";
+
+const BASE_TEXT =
+  "Commands execute on the user's bound PC inside its authorized working folder. In user-facing updates and answers, describe this as running a command on the computer or in the working folder. Do not call it a cloud sandbox. Mention implementation terms such as sandbox/provider only if the user asks about implementation. Internal tool names do not change this execution location. Do not assume cloud-image packages are installed on this PC.";
+
+const request = {
+  filesystem: {},
+  executionTarget: { kind: "local" },
+  context: { threadId: "thread-1" },
+} as never;
+
+async function prompt() {
+  const runtime = await agentSandboxService.createRuntimeForTurn(request);
+  return runtime!.buildRuntimePrompt();
+}
+
+describe("local execution prompt", () => {
+  beforeEach(() => {
+    state.device = null;
+    state.loadedFor = [];
+  });
+
+  test("an old host leaves the presentation text byte-for-byte unchanged", async () => {
+    state.device = {
+      platform: null,
+      arch: null,
+      shell: null,
+      sandboxState: null,
+    };
+    expect(await prompt()).toBe(
+      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>`,
+    );
+    expect(state.loadedFor).toEqual(["thread-1"]);
+  });
+
+  test("a missing device row also leaves the text unchanged", async () => {
+    expect(await prompt()).toBe(
+      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>`,
+    );
+  });
+
+  test("a Linux host appends its factual lines inside the block", async () => {
+    state.device = {
+      platform: "linux",
+      arch: "arm64",
+      shell: "bash",
+      sandboxState: "ready",
+    };
+    const text = await prompt();
+    expect(
+      text.startsWith(
+        `BASE\n<local_execution_presentation>\n${BASE_TEXT}\nOperating system: Linux (arm64)\n`,
+      ),
+    ).toBe(true);
+    expect(text).toContain("Shell: bash (commands run under this shell)");
+    expect(text.endsWith("\n</local_execution_presentation>")).toBe(true);
+  });
+});

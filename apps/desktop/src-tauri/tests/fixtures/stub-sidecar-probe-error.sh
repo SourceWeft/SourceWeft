@@ -21,7 +21,7 @@ while IFS= read -r line; do
 
     case "$op" in
         init)
-            printf '{"id":"%s","ok":true,"result":null}\n' "$id"
+            printf '{"id":"%s","ok":true,"result":{"protocolVersion":1}}\n' "$id"
             ;;
         probe)
             printf '{"id":"%s","ok":false,"error":{"code":"SANDBOX_UNAVAILABLE","message":"stub probe failure for readiness test"}}\n' "$id"
