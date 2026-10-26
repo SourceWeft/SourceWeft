@@ -238,9 +238,9 @@ jobs:
           echo "Depends: ${depends}"
           case ",${depends}," in *" bubblewrap"*|*",bubblewrap"*) ;; *) echo "::error::Depends lacks bubblewrap"; exit 1 ;; esac
           case ",${depends}," in *" socat"*|*",socat"*) ;; *) echo "::error::Depends lacks socat"; exit 1 ;; esac
-          dpkg-deb -c "${DEB_PATH}" | grep -E ' \./opt/sourceweft/libexec/sourceweft-sandbox-setup$'
-          # Tauri writes numeric owner 0/0 without names; dpkg installs both as root.
-          dpkg-deb -c "${DEB_PATH}" | grep -E '^-rwxr-xr-x (root/root|0/0) .* \./opt/sourceweft/libexec/sourceweft-sandbox-setup$'
+          dpkg-deb -c "${DEB_PATH}" | grep -E ' (\./)?opt/sourceweft/libexec/sourceweft-sandbox-setup$'
+          # Tauri writes numeric owner 0/0 without names (and no leading ./); dpkg installs both as root.
+          dpkg-deb -c "${DEB_PATH}" | grep -E '^-rwxr-xr-x (root/root|0/0) .* (\./)?opt/sourceweft/libexec/sourceweft-sandbox-setup$'
       - name: Assert the restricted-userns sysctl is enabled (before install)
         run: |
           value=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
