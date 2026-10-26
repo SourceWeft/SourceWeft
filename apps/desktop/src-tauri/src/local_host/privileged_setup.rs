@@ -106,7 +106,8 @@ mod tests {
     #[test]
     fn pkexec_is_spawned_by_absolute_path() {
         assert_eq!(PKEXEC_PATH, "/usr/bin/pkexec");
-        assert!(std::path::Path::new(PKEXEC_PATH).is_absolute());
+        // A Unix absolute path; `Path::is_absolute` would be false for it on Windows.
+        assert!(PKEXEC_PATH.starts_with('/'));
     }
 
     #[test]

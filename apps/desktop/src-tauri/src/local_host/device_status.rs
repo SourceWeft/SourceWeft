@@ -411,7 +411,8 @@ mod tests {
     #[test]
     fn macos_shell_is_the_one_execution_rs_execs() {
         // `execute_command` for macOS: `sandbox-exec -p <policy> /bin/sh -c <script>`.
-        let source = include_str!("execution.rs");
+        // Normalise line endings: a Windows checkout may convert the source to CRLF.
+        let source = include_str!("execution.rs").replace("\r\n", "\n");
         assert!(source.contains("\"/usr/bin/sandbox-exec\".to_string(),"));
         assert!(source.contains("\"/bin/sh\".to_string(),\n        \"-c\".to_string(),"));
         assert_eq!(MACOS_COMMAND_SHELL, "sh");
