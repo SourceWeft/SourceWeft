@@ -1,6 +1,6 @@
 "use client";
 import { authClient } from "../../../../lib/auth-client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -12,6 +12,8 @@ import {
   type LocalDevice,
 } from "../../../../lib/local-execution";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
+import { deviceSystemLabel } from "../../../../lib/sandbox-setup";
+import { LocalSandboxSetupCard } from "./local-sandbox-setup-card";
 export function LocalHostPanel() {
   const t = useTranslations("dashboardSettings");
   const userId = authClient.useSession().data?.user.id;
@@ -21,20 +23,42 @@ export function LocalHostPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  // Every status write carries a sequence number: a poll that started before an install or a
+  // setup attempt finished must not overwrite the status read after it.
+  const statusSeq = useRef(0);
+  // Re-reads the native status after an install or a setup attempt without waiting for the 5s
+  // poll. The returned readiness is used only if that read fails.
+  const applyReadiness = useCallback(
+    async (readiness?: LocalHostStatus["readiness"]) => {
+      const seq = ++statusSeq.current;
+      try {
+        const state = await desktopBridge.localHostStatus();
+        if (seq === statusSeq.current) setStatus(state);
+      } catch {
+        if (readiness && seq === statusSeq.current)
+          setStatus((previous) =>
+            previous ? { ...previous, readiness } : previous,
+          );
+      }
+    },
+    [],
+  );
   useEffect(() => {
     if (!desktopBridge.isAvailable() || !userId) return;
     let active = true;
     const refresh = async () => {
       try {
+        const seq = ++statusSeq.current;
         const native = await ensureLocalHostSession(userId);
-        const [state, list] = await Promise.all([
-          desktopBridge.localHostStatus(),
-          localRequest<{ devices: LocalDevice[] }>(
-            "/v1/local-devices",
-            undefined,
-            { localProof: true },
-          ),
-        ]);
+        // Publish the native status before the device list is fetched: a computer that still
+        // needs setup must show its setup card even if listing devices fails.
+        const state = await desktopBridge.localHostStatus();
+        if (active && seq === statusSeq.current) setStatus(state);
+        const list = await localRequest<{ devices: LocalDevice[] }>(
+          "/v1/local-devices",
+          undefined,
+          { localProof: true },
+        );
         const listFolders = native?.deviceId
           ? await localRequest<{ folders: { id: string; name: string }[] }>(
               `/v1/local-devices/${native.deviceId}/folders`,
@@ -45,7 +69,6 @@ export function LocalHostPanel() {
         if (active) {
           setDataOwner(userId);
           setFolders(listFolders.folders);
-          setStatus(state);
           setDevice(
             list.devices.find((d) => d.id === native?.deviceId) ?? null,
           );
@@ -72,6 +95,13 @@ export function LocalHostPanel() {
         </p>
       </section>
     );
+  const needsSetup = status?.readiness?.state === "needsSetup";
+  const unsupported = status?.readiness?.state === "unsupported";
+  const systemLabel = device ? deviceSystemLabel(device) : null;
+  const environment = [
+    systemLabel && t("localHost.deviceSystem", { system: systemLabel }),
+    device?.shell && t("localHost.deviceShell", { shell: device.shell }),
+  ].filter(Boolean);
   return (
     <section className="space-y-6">
       <div>
@@ -82,11 +112,24 @@ export function LocalHostPanel() {
         <p role="status" className="mt-3 text-sm">
           {status?.connected
             ? t("localHost.statusOnline")
-            : status?.deviceId
-              ? t("localHost.statusConnecting")
-              : t("localHost.statusSettingUp")}
+            : needsSetup
+              ? t("localHost.statusNeedsSetup")
+              : unsupported
+                ? t("localHost.statusUnsupported")
+                : status?.deviceId
+                  ? t("localHost.statusConnecting")
+                  : t("localHost.statusSettingUp")}
         </p>
+        {environment.length > 0 && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            {environment.join(" · ")}
+          </p>
+        )}
       </div>
+      <LocalSandboxSetupCard
+        readiness={status?.readiness}
+        onChanged={applyReadiness}
+      />
       <div className="space-y-3 rounded-lg border p-4">
         <h3 className="font-medium">{t("localHost.remoteAccessTitle")}</h3>
         <p className="text-sm text-muted-foreground">

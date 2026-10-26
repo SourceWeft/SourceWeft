@@ -9,12 +9,36 @@ import { logger } from "../../shared/logger";
 import { ContentError } from "../content/errors";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, localDevices, localThreadBindings, threads } from "@sourceweft/db";
+import type { LocalExecutionDevice } from "./local-execution-prompt";
 import type {
   SandboxProvider,
   SandboxProviderFactory,
   SandboxRuntimeContext,
 } from "@sourceweft/builtin-tool-sandbox";
 import { localCall } from "./service";
+
+/**
+ * The environment the host last reported for the computer a local thread is
+ * bound to, or null when the thread has no binding or the device row is gone.
+ * Authorisation is not re-checked here: callers run it after
+ * `localProviderForTurn` has validated the binding for this user.
+ */
+export async function boundDeviceEnvironment(
+  threadId: string,
+): Promise<LocalExecutionDevice | null> {
+  const [row] = await db
+    .select({
+      platform: localDevices.platform,
+      arch: localDevices.arch,
+      shell: localDevices.shell,
+      sandboxState: localDevices.sandboxState,
+    })
+    .from(localThreadBindings)
+    .innerJoin(localDevices, eq(localDevices.id, localThreadBindings.deviceId))
+    .where(eq(localThreadBindings.threadId, threadId))
+    .limit(1);
+  return row ?? null;
+}
 
 export async function localProviderForTurn(
   context: Pick<

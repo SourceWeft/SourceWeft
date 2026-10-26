@@ -12,6 +12,7 @@ import {
 } from "../../modules/devices/access";
 import type { Hono } from "hono";
 import { z } from "zod";
+import { serializeDeviceSandbox } from "../../modules/devices/invocation-reply";
 import { localProviderForTurn } from "../../modules/devices/provider";
 import { and, eq, isNull } from "drizzle-orm";
 import {
@@ -355,6 +356,10 @@ export function registerLocalDeviceRoutes(app: Hono) {
           name: row.name,
           online: isOnline(row),
           remoteEnabled: row.remoteEnabled,
+          platform: row.platform,
+          arch: row.arch,
+          shell: row.shell,
+          sandbox: serializeDeviceSandbox(row),
           connected: await requireDeviceAccess(
             session.user.id,
             row.id,

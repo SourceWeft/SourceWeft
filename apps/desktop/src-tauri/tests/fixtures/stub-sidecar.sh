@@ -14,6 +14,11 @@
 #   - wrap.command "HANG"          -> never reply (simulates a stuck sidecar)
 #   - violations.stderr "DUMP_ENV" -> reply with the sidecar's own env var
 #     names, so the test can assert no `*_PROXY` variable reached it
+#   - init.config.home ending in "/protocol-<X>" -> reply to init with a different
+#     protocolVersion result: "protocol-0" -> 0, "protocol-2" -> 2, "protocol-string" ->
+#     "1" (a string), "protocol-float" -> 1.5, "protocol-missing" -> {} (no field),
+#     "protocol-null" -> null (the pre-handshake reply). Anything else replies 1, which is
+#     SANDBOX_PROTOCOL_VERSION in sandbox-sidecar/src/protocol.ts.
 #   - init.config.home ending in "/record-ops" -> append "<op> <commandId>"
 #     for every later request to "<home>.log" (srt_exec.rs cleanup tests)
 # Anything else gets a generic canned success reply.
@@ -34,7 +39,16 @@ while IFS= read -r line; do
     case "$op" in
         init)
             home=$(extract home "$line")
-            printf '{"id":"%s","ok":true,"result":null}\n' "$id"
+            case "$home" in
+                */protocol-0) result='{"protocolVersion":0}' ;;
+                */protocol-2) result='{"protocolVersion":2}' ;;
+                */protocol-string) result='{"protocolVersion":"1"}' ;;
+                */protocol-float) result='{"protocolVersion":1.5}' ;;
+                */protocol-missing) result='{}' ;;
+                */protocol-null) result='null' ;;
+                *) result='{"protocolVersion":1}' ;;
+            esac
+            printf '{"id":"%s","ok":true,"result":%s}\n' "$id" "$result"
             case "$home" in
                 */exit-after-init) exit 0 ;;
                 */record-ops) record="$home.log" ;;

@@ -38,6 +38,8 @@ Queries run through a fixed DSL translated to parameterized SQL inside the calle
 
 A page can still navigate its own frame and so send what it read to another site. No browser policy prevents that. Treat shared data as readable by whoever can get a version approved, which is why approval is per version and by a person.
 
+When the host sees the frame navigate, it disconnects storage and sends one advisory report (`POST .../versions/:versionId/records/navigation`, no destination, nothing from the page). The backend records at most one `artifact.page_navigation_attempt` audit row per viewer and version per minute, and `records/status` returns the last seven days as `navigationAttempts`. The approval and consent prompts show that count calmly. Reports never change what a page may do.
+
 ## Generation runtime
 
 Rebuild the existing Daytona/Cloudflare sandbox images with `docker/sourceweft-sandbox/html-runtime`. Both images expose:

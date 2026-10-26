@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
 import { buildConfig, perWrapReadRoots, perWrapWriteDenies } from "../src/policy.js";
+import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
 import type { InitConfig, Request, Response } from "../src/protocol.js";
 import { startServer } from "../src/server.js";
 import type { SrtLike } from "../src/server.js";
@@ -179,6 +180,17 @@ async function initHarness(
   assert.equal(response.ok, true, `init failed: ${JSON.stringify(response)}`);
   return harness;
 }
+
+test("init replies with the bundle's protocol version", async () => {
+  const harness = startHarness(makeFakeSrt());
+  const response = await harness.send({ op: "init", config: linuxInit() });
+  assert.equal(response.ok, true);
+  if (response.ok) {
+    assert.deepEqual(response.result, { protocolVersion: SANDBOX_PROTOCOL_VERSION });
+  }
+  assert.equal(SANDBOX_PROTOCOL_VERSION, 1);
+  await harness.stop();
+});
 
 test("wrap before init is NOT_INITIALIZED", async () => {
   const harness = startHarness(makeFakeSrt());

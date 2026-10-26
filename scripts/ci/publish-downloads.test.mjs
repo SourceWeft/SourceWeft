@@ -126,6 +126,27 @@ test("signed publication includes Linux AppImage and both Mac architectures", as
   );
 });
 
+test("sandbox bundle assets beside the installers are not installers", async (t) => {
+  const { root, prepared } = await fixture(t);
+  const dir = join(root, "linux-bundle");
+  await mkdir(dir);
+  const bundle = "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz";
+  await writeFile(join(dir, bundle), "bundle bytes");
+  await writeFile(join(dir, `${bundle}.sig`), "c2ln");
+  const again = await prepareManifest(
+    config,
+    root,
+    "v1.2.3-rc.1",
+    "SourceWeft/SourceWeft",
+  );
+  // Same installers, manifest and uploads: the bundle is a GitHub Release asset only.
+  assert.deepEqual(again.manifest, prepared.manifest);
+  assert.deepEqual(
+    again.uploads.map((upload) => upload.key),
+    prepared.uploads.map((upload) => upload.key),
+  );
+});
+
 test("manifest preserves actual architectures and separates preview/stable", async (t) => {
   const { root, prepared } = await fixture(t);
   assert.equal(prepared.manifest.channel, "preview");

@@ -45,13 +45,39 @@ export type AutostartState = {
   reason?: string | null;
 };
 
+/** Why local execution is not ready yet. Mirrors the Rust `SetupCode` wire values. */
+export type SandboxSetupCode =
+  | "bundleMissing"
+  | "bundleStale"
+  | "bundleNewer"
+  | "bundleInvalid"
+  | "bwrapMissing"
+  | "userNamespaceRestricted"
+  | "sandboxFailed"
+  | "installing";
+
+/** What the user can do about it. Mirrors the Rust `Remedy` wire values. */
+export type SandboxRemedy =
+  | "downloadRuntime"
+  | "updateApp"
+  | "reinstallPackage"
+  | "privilegedSetup"
+  | "none";
+
 /**
  * Readiness of local sandboxed execution. Absent when no LocalHost is managed. macOS and Linux
- * both report it, from the sandbox bundle's probe.
+ * both report it, from the sandbox bundle's probe. `setupCommand` is present only for the
+ * `privilegedSetup` remedy.
  */
 export type SandboxReadiness =
   | { state: "ready"; toolchainPath?: "loginShell" | "system" }
-  | { state: "needsSetup"; reason: string }
+  | {
+      state: "needsSetup";
+      code: SandboxSetupCode;
+      reason: string;
+      remedy: SandboxRemedy;
+      setupCommand?: string;
+    }
   | { state: "unsupported" };
 
 /** Native capability discovery only; does not authorize local execution. */
@@ -141,6 +167,17 @@ export const desktopBridge = {
   },
   localHostStatus() {
     return invokeDesktop<LocalHostStatus>("local_host_status");
+  },
+  /**
+   * Downloads, verifies and installs the sandbox runtime (explicit user consent: only ever
+   * called from an Install button). Resolves with the readiness after the install.
+   */
+  installSandboxRuntime() {
+    return invokeDesktop<SandboxReadiness>("install_sandbox_runtime");
+  },
+  /** Linux AppImage: runs the one-time privileged setup through the system admin prompt. */
+  runSandboxPrivilegedSetup() {
+    return invokeDesktop<void>("run_sandbox_privileged_setup");
   },
   authenticateLocalHost(ticket: string, userId: string) {
     return invokeDesktop<{

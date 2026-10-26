@@ -484,6 +484,13 @@
       "when": 1792912247956,
       "tag": "0068_market_mcp_tool_revision_context",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793019086002,
+      "tag": "0069_local_device_status_report",
+      "breakpoints": true
     }
   ]
 }

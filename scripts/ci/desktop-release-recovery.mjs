@@ -396,7 +396,7 @@ if (
       ...(await filesUnder("release-download-aliases")),
       `sourceweft-selfhost-${tag}.tar.gz`,
     ].filter((file) =>
-      /\.(dmg|exe|AppImage|app\.tar\.gz|sig|tar\.gz)$/.test(file),
+      /\.(dmg|exe|AppImage|deb|app\.tar\.gz|sig|tar\.gz)$/.test(file),
     );
     const expected = await Promise.all(
       files.map(async (file) => ({

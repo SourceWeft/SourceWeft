@@ -5,6 +5,10 @@ gateway, immutable conversation targets, and real test results are described in
 `E2E_REPORT.md`; statements below about unavailable dispatch refer to that earlier
 checkpoint, not the current working tree.
 
+This file describes the macOS foundation only. Linux local execution (bubblewrap-based
+sandbox, `.deb` and AppImage setup, the runtime download, toolchain access) is documented
+in [LINUX_SANDBOX.md](./LINUX_SANDBOX.md).
+
 The desktop client continues to load the existing Web URL and reuse the existing
 chat/settings UI. There is no separate desktop homepage or native settings page.
 Windows implementation is deferred.

@@ -1,5 +1,8 @@
 //! Native services. These methods are deliberately not exposed as generic IPC commands.
 //! A future authenticated device dispatcher must supply the account and thread identities.
+#[cfg(unix)]
+pub mod bundle_install;
+pub mod device_status;
 pub mod execution;
 pub mod maintenance;
 mod files;
@@ -9,6 +12,7 @@ pub(crate) mod process;
 mod sidecar;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod srt_exec;
+pub mod privileged_setup;
 pub mod readiness;
 mod workspace;
 
