@@ -161,6 +161,8 @@ fn main() {
             local_bridge::vault_list,
             local_bridge::vault_set,
             local_bridge::vault_remove,
+            local_bridge::run_sandbox_privileged_setup,
+            local_bridge::install_sandbox_runtime,
             tray_locale::sync_tray_locale,
         ])
         .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))

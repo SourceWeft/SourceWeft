@@ -1,6 +1,6 @@
 {
-  "id": "7425ee94-9a51-4c91-9dc0-6d4f3b9cc879",
-  "prevId": "af938236-be5c-4685-a28e-4e54717f886c",
+  "id": "4b3cb787-336b-457d-ac9f-63b687a654bb",
+  "prevId": "c09cbecf-3fd4-4033-9a6b-af1e35f26951",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -20802,6 +20802,60 @@
           "primaryKey": false,
           "notNull": false
         },
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arch": {
+          "name": "arch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shell": {
+          "name": "shell",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_state": {
+          "name": "sandbox_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_code": {
+          "name": "sandbox_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_reason": {
+          "name": "sandbox_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_remedy": {
+          "name": "sandbox_remedy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capabilities": {
+          "name": "capabilities",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status_reported_at": {
+          "name": "status_reported_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -20954,13 +21008,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'host'"
-        },
         "host": {
           "name": "host",
           "type": "text",
@@ -20972,25 +21019,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
-        },
-        "method": {
-          "name": "method",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "secret_in_body": {
-          "name": "secret_in_body",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "status": {
           "name": "status",
@@ -21160,14 +21188,6 @@
         "local_network_requests_scope_check": {
           "name": "local_network_requests_scope_check",
           "value": "\"local_network_requests\".\"scope\" is null or (\"local_network_requests\".\"scope\" in ('once', 'always') and \"local_network_requests\".\"status\" = 'allowed')"
-        },
-        "local_network_requests_kind_check": {
-          "name": "local_network_requests_kind_check",
-          "value": "\"local_network_requests\".\"kind\" in ('host', 'request')"
-        },
-        "local_network_requests_request_shape_check": {
-          "name": "local_network_requests_request_shape_check",
-          "value": "(\"local_network_requests\".\"kind\" = 'host' and \"local_network_requests\".\"method\" is null and \"local_network_requests\".\"path\" is null and not \"local_network_requests\".\"secret_in_body\") or (\"local_network_requests\".\"kind\" = 'request' and \"local_network_requests\".\"method\" is not null and char_length(\"local_network_requests\".\"method\") <= 16 and (\"local_network_requests\".\"path\" is null or char_length(\"local_network_requests\".\"path\") <= 200))"
         },
         "local_network_requests_port_check": {
           "name": "local_network_requests_port_check",

@@ -402,6 +402,8 @@ export type ArtifactRecordsStatus = {
   } | null;
   consented: boolean;
   canApprove: boolean;
+  /** Advisory reports that this version tried to leave its page, last 7 days. */
+  navigationAttempts: number;
 };
 
 /** Failures a transport reports; `code` is what the page receives. */
@@ -426,6 +428,11 @@ export type ArtifactRecordsTransport = {
   approveShared?: () => Promise<void>;
   revokeShared?: () => Promise<void>;
   grantSharedConsent?: () => Promise<void>;
+  /**
+   * Tells the backend this version's page tried to navigate its frame.
+   * Advisory and fire-and-forget; carries nothing from the page.
+   */
+  reportNavigation?: () => Promise<void>;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -523,3 +530,21 @@ export function describeArtifactLinkHost(hostname: string): {
   const unicode = labels.join(".");
   return { ascii, unicode, isInternationalized: unicode !== ascii };
 }
+
+/**
+ * The shared collections an artifact actually has, with their record counts.
+ * Lets the owner pick what a public share exposes instead of typing names.
+ */
+export const artifactSharedCollectionSchema = z.object({
+  collection: artifactRecordCollectionSchema,
+  count: z.number().int().nonnegative(),
+});
+export const artifactSharedCollectionsResponseSchema = z.object({
+  collections: z.array(artifactSharedCollectionSchema),
+});
+export type ArtifactSharedCollection = z.infer<
+  typeof artifactSharedCollectionSchema
+>;
+export type ArtifactSharedCollectionsResponse = z.infer<
+  typeof artifactSharedCollectionsResponseSchema
+>;

@@ -68,6 +68,14 @@ export function createAppArtifactRecordsTransport(
           artifactVersionId,
         );
       }),
+    reportNavigation: () =>
+      translated(async () => {
+        await client.reportArtifactPageNavigation(
+          workspaceId,
+          artifactId,
+          artifactVersionId,
+        );
+      }),
   };
 }
 

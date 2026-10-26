@@ -4,6 +4,8 @@ import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import {
+  deviceStatusColumns,
+  GATEWAY_FEATURES,
   localDeviceReplySchema,
   persistLocalFailureCode,
 } from "./invocation-reply";
@@ -75,8 +77,24 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
   }
   const delivered = new Set<string>();
   ws.send(
-    JSON.stringify({ type: "connected", deviceId, userId, connectionId }),
+    JSON.stringify({
+      type: "connected",
+      deviceId,
+      userId,
+      connectionId,
+      features: GATEWAY_FEATURES,
+    }),
   );
+  // Frames are handled concurrently, but `status` is a last-writer-wins
+  // snapshot: serialise it per connection, in arrival order, so the last frame
+  // the host sent is the one that is stored.
+  let statusChain: Promise<void> = Promise.resolve();
+  const touchConnection = () =>
+    db
+      .update(localDevices)
+      .set({ heartbeatAt: new Date() })
+      .where(activeConnection)
+      .returning({ id: localDevices.id });
   ws.on("message", (bytes) => {
     void (async () => {
       const parsed = localDeviceReplySchema.safeParse(
@@ -86,11 +104,26 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
         ws.close(1008, "Invalid device message");
         return;
       }
-      const [live] = await db
-        .update(localDevices)
-        .set({ heartbeatAt: new Date() })
-        .where(activeConnection)
-        .returning({ id: localDevices.id });
+      if (parsed.data.type === "status") {
+        const status = parsed.data;
+        // Enqueued synchronously on arrival (before any await) to keep order.
+        const job = statusChain.then(async () => {
+          if (!(await touchConnection()).length) {
+            ws.close(1008, "Connection revoked");
+            return;
+          }
+          // Informational only; never touches invocations. The live-connection
+          // guard keeps a replaced or revoked connection from writing.
+          await db
+            .update(localDevices)
+            .set(deviceStatusColumns(status, new Date()))
+            .where(activeConnection);
+        });
+        statusChain = job.catch(() => undefined);
+        await job;
+        return;
+      }
+      const [live] = await touchConnection();
       if (!live) {
         ws.close(1008, "Connection revoked");
         return;

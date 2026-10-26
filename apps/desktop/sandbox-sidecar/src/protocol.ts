@@ -5,6 +5,28 @@
  * names and shapes here in sync with that Rust client rather than the other way around.
  */
 
+/**
+ * The bundle protocol version, returned by `init` as `{ protocolVersion }`. The host requires
+ * an exact match with its own copy (`SANDBOX_PROTOCOL_VERSION` in
+ * `apps/desktop/src-tauri/src/local_host/sidecar.rs`; keep the two equal) and refuses to use a
+ * bundle that reports anything else, so a stale sidecar can never silently ignore policy it
+ * does not understand. Bump this whenever the init, policy or wrap semantics change (for
+ * example a new `InitConfig` policy field), in the same change that updates the Rust constant.
+ *
+ * History:
+ *  - 1: the first handshake (init, wrap, violations, cleanup, probe, shutdown).
+ *  - 2: network approvals (Plan 4). `wrap.network` (mode, allow list, suggested), the
+ *    unsolicited `ask` event lines, the `ask.reply` and `audit` ops, and `AuditSource`. A
+ *    version-1 sidecar would ignore `wrap.network` and allow every public host, which is why a
+ *    host that needs approvals must refuse it.
+ *  - 3: secret masking and request policy (Plan 5). `init.tls`, `wrap.secrets` and the
+ *    `secretEnv` in the wrap result, and the `kind`, `method`, `path` and `secretInBody` fields
+ *    of the `ask` event. A version-2 sidecar would ignore `init.tls` and `wrap.secrets`, so it
+ *    would neither mask secrets nor gate write requests to the hosts that hold them, and the
+ *    command would run without its placeholders.
+ */
+export const SANDBOX_PROTOCOL_VERSION = 3;
+
 /** Sent once, before any other request, to hand the sidecar its policy inputs. */
 export type InitConfig = {
   platform: "linux" | "darwin";

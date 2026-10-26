@@ -26,6 +26,7 @@ import {
   perCommandConfig,
   perWrapReadRoots,
 } from "./policy.js";
+import { SANDBOX_PROTOCOL_VERSION } from "./protocol.js";
 import type {
   AuditResult,
   InitConfig,
@@ -328,7 +329,7 @@ export async function startServer(
     return decision;
   }
 
-  async function handleInit(config: InitConfig): Promise<null> {
+  async function handleInit(config: InitConfig): Promise<{ protocolVersion: number }> {
     checkHelpersExist(config);
     // `init.tls` is what switches TLS termination on. Its directory is created below, so a
     // relative one (which would land wherever the sidecar's cwd happens to be) is refused first.
@@ -374,7 +375,7 @@ export async function startServer(
       wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir),
       tlsActive: ca !== undefined,
     };
-    return null;
+    return { protocolVersion: SANDBOX_PROTOCOL_VERSION };
   }
 
   async function handleWrap(request: {

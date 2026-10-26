@@ -46,7 +46,12 @@ test("a desktop whose sandbox still needs setup is not enrolled on dashboard loa
   native.localHostStatus.mockResolvedValue({
     platformSupported: true,
     protocolVersion: 2,
-    readiness: { state: "needsSetup", reason: "Sandbox runtime is not installed" },
+    readiness: {
+      state: "needsSetup",
+      code: "bundleMissing",
+      reason: "Sandbox runtime is not installed",
+      remedy: "downloadRuntime",
+    },
   });
   await synchronizeLocalHostScope("user", "session");
   assert.equal(await ensureLocalHostSession("user"), null);

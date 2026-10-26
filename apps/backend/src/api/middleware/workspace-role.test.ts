@@ -188,6 +188,7 @@ test("artifact page storage leaves role checks to the records service", async ()
     ["POST", "/artifacts/a-1/versions/v-1/records/consent"],
     ["POST", "/artifacts/a-1/versions/v-1/records/approval"],
     ["DELETE", "/artifacts/a-1/versions/v-1/records/approval"],
+    ["POST", "/artifacts/a-1/versions/v-1/records/navigation"],
   ] as const)
     assert.equal((await call(method, path)).status, 200, `${method} ${path}`);
   // Neighbouring artifact writes keep the default editor requirement.

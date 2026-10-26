@@ -32,6 +32,8 @@ fn main() {
             "vault_list",
             "vault_set",
             "vault_remove",
+            "run_sandbox_privileged_setup",
+            "install_sandbox_runtime",
         ]),
     ))
     .expect("failed to build Tauri application metadata");

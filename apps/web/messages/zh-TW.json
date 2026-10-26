@@ -1329,10 +1329,31 @@
     "localHost": {
       "title": "這臺電腦",
       "checkingAccount": "正在核對你的帳戶…",
-      "description": "在這臺 Mac 上處理檔案並執行命令。除非你自行選擇，否則每個對話都會獲得各自的資料夾。",
+      "description": "在這臺電腦上處理檔案並執行命令。除非你自行選擇，否則每個對話都會獲得各自的資料夾。",
       "statusOnline": "這臺電腦已線上",
       "statusConnecting": "正在連接這臺電腦…",
       "statusSettingUp": "正在設定這臺電腦…",
+      "statusNeedsSetup": "這臺電腦需要一次性設定",
+      "statusUnsupported": "這臺電腦不支援本機執行",
+      "deviceSystem": "系統：{system}",
+      "deviceShell": "Shell：{shell}",
+      "setup": {
+        "title": "設定本機執行",
+        "installingInProgress": "正在安裝沙箱執行環境…",
+        "downloadRuntimeDescription": "本機執行會在沙箱中執行命令，這需要 SourceWeft 沙箱執行環境。它會從目前應用版本對應的 SourceWeft 官方發布下載，並在安裝任何內容之前驗證其簽名。在你點選「安裝」之前不會下載任何內容。",
+        "install": "安裝沙箱執行環境",
+        "installing": "正在安裝…",
+        "updateAppDescription": "此應用與其沙箱執行環境不符。請更新 SourceWeft（設定 → 關於 → 軟體更新），然後重新檢查。",
+        "reinstallPackageDescription": "SourceWeft .deb 軟體包所附帶的沙箱輔助程式缺失或無法執行。請重新安裝 .deb 軟體包（它依賴 bubblewrap 軟體包，如果缺少請先安裝 bubblewrap），然後重新檢查。",
+        "privilegedSetupDescription": "需要執行一次管理員操作。它會在 /opt/sourceweft 下安裝一份私有的 bubblewrap 副本，以及僅對該副本生效的 AppArmor 設定；系統自帶的 bubblewrap 和你的系統安全設定都不會被更改。你可以在命令列中執行下面的命令，也可以點選「執行設定」開啟系統的管理員授權視窗。SourceWeft 不會取得你的密碼。",
+        "privilegedSetupNoCommandDescription": "需要執行一次管理員操作。它會在 /opt/sourceweft 下安裝一份私有的 bubblewrap 副本，以及僅對該副本生效的 AppArmor 設定；系統自帶的 bubblewrap 和你的系統安全設定都不會被更改。點選「執行設定」即可開啟系統的管理員授權視窗。SourceWeft 不會取得你的密碼。",
+        "commandLabel": "設定命令",
+        "copy": "複製",
+        "copied": "已複製",
+        "runSetup": "執行設定",
+        "runningSetup": "正在執行設定…",
+        "checkAgain": "重新檢查"
+      },
       "remoteAccessTitle": "允許其他裝置存取",
       "remoteAccessDescription": "讓使用同一帳戶的其他裝置存取這臺電腦。它們可以存取任務資料夾和已授權的工作目錄。即使關閉遠端存取，你仍可在這臺電腦上繼續工作。",
       "turnOffRemoteAccess": "關閉遠端存取",
@@ -2473,8 +2494,17 @@
       "hideFromSearchDescription": "公開連結預設會被索引以擴大觸及；如果是敏感的一次性內容，請開啟此項。",
       "views": "瀏覽量",
       "publicRecords": "公開資料集合",
-      "publicRecordsDescription": "此頁面可以向持有連結的任何人唯讀展示的共享資料。填寫集合名稱；留空則不展示任何資料。",
-      "publicRecordsPlaceholder": "例如 scores, results"
+      "publicRecordsDescription": "選擇此頁面可以向持有連結的任何人唯讀展示的共享資料集合。未開啟的集合保持私有。",
+      "publicRecordsPlaceholder": "尚未列出的集合，例如 scores",
+      "publicRecordsLoading": "正在載入集合…",
+      "publicRecordsLoadFailed": "無法載入此頁面的資料集合。",
+      "publicRecordsEmpty": "此頁面還沒有共享資料。你仍可在下方新增集合名稱。",
+      "publicRecordsCount": "{count, plural, other {# 條記錄}}",
+      "publicRecordsNoData": "暫無資料",
+      "publicRecordsRemove": "移除 {name}",
+      "publicRecordsAdd": "新增",
+      "publicRecordsAddLabel": "新增集合名稱",
+      "publicRecordsLimit": "最多可公開 {count} 個集合。"
     },
     "filePreview": {
       "titleFallback": "檔案預覽",
@@ -5258,7 +5288,7 @@
       "badgePreview": "預覽版",
       "badgeDefault": "桌面版",
       "heading": "下載 SourceWeft。",
-      "subtitle": "macOS 和 Windows 原生應用程式已上線，iOS 與 Android 正在路上。每個客戶端都登入同一帳戶和工作區，與網頁版保持一致；本機裝置能力率先登陸 macOS。",
+      "subtitle": "macOS 和 Windows 原生應用程式已上線，iOS 與 Android 正在路上。每個客戶端都登入同一帳戶和工作區，與網頁版保持一致；本機裝置執行可在 macOS 和 Linux x64 上使用，Windows 暫不支援。",
       "releaseNotes": "更新說明",
       "changelog": "更新日誌",
       "screenshotAlt": "macOS 上的 SourceWeft 桌面版：已選中一個閱讀筆記來源，輸入框中有草擬的問題，Hub 面板列出了各個來源"
@@ -5266,7 +5296,7 @@
     "highlights": [
       "與網頁版共用同一帳戶、工作區和對話",
       "原生視窗，而非瀏覽器分頁",
-      "macOS 上的本機工作目錄和檔案面板",
+      "macOS 和 Linux 上的本機工作目錄和檔案面板",
       "需要本機處理程序的桌面版 MCP 伺服器"
     ],
     "channels": {
@@ -5350,8 +5380,8 @@
       "account": "帳戶",
       "accountDescription": "桌面版使用你已有的 SourceWeft 帳戶登入",
       "localExecution": "本機裝置執行",
-      "localExecutionAvailable": "目前僅支援{platforms}",
-      "localExecutionFallback": "率先登陸 macOS；Windows 支援正在開發中",
+      "localExecutionAvailable": "支援 {platforms}；Linux x64 需要先在應用內一次性安裝執行環境",
+      "localExecutionFallback": "支援 macOS 和 Linux x64；Windows 暫不支援",
       "listJoiner": "和",
       "unsignedEyebrow": "未簽名安裝程式",
       "verifyingEyebrow": "驗證你的下載",
@@ -5392,7 +5422,7 @@
       "items": {
         "desktopVsWeb": {
           "question": "桌面版和網頁版有什麼不同？",
-          "answer": "桌面版登入同一個 SourceWeft 帳戶，開啟的也是同樣的工作區、對話和來源。在此基礎上，它還提供原生視窗，以及在 macOS 上的本機裝置能力，比如工作目錄和檔案面板。"
+          "answer": "桌面版登入同一個 SourceWeft 帳戶，開啟的也是同樣的工作區、對話和來源。在此基礎上，它還提供原生視窗，以及在 macOS 和 Linux x64 上的本機裝置能力，比如工作目錄和檔案面板。"
         },
         "macosVerification": {
           "question": "為什麼 macOS 提示該應用程式無法驗證？",
@@ -5412,7 +5442,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本嗎？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。本機裝置執行目前仍僅限 macOS。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：開啟「設定 → 這臺電腦」並安裝沙箱執行環境（帶簽名的下載，只有在你點選「安裝」後才會開始）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 暫不支援本機裝置執行。"
         }
       }
     }

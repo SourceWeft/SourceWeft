@@ -23,6 +23,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// The bundle protocol version this app speaks. Must equal `SANDBOX_PROTOCOL_VERSION` in
+/// `apps/desktop/sandbox-sidecar/src/protocol.ts`; keep the two in sync, and bump both whenever
+/// the init, policy or wrap semantics change (for example a new `InitConfig` policy field).
+/// `Sidecar::start` requires the bundle's `init` reply to report exactly this version, so a
+/// bundle that predates a policy field can never run commands while ignoring that field.
+pub(crate) const SANDBOX_PROTOCOL_VERSION: u32 = 3;
+
 /// `InitConfig` as sent on `init`, mirroring the TypeScript type (camelCase on the wire).
 ///
 /// `pub`, not `pub(crate)`: this module is private, but `readiness.rs` re-exports this type
@@ -180,8 +187,15 @@ struct WrapResult {
 /// before any request is written when a path the host would put on the wire (bundle, cwd,
 /// workspace root, granted folder) is not valid UTF-8, since the JSON protocol carries paths
 /// as strings. It reaches the backend like any other `HostError` code.
+///
+/// Two more host-generated codes the sidecar never sends are accepted here as passthrough so
+/// they stay recognized if they ever travel through this mapping: `BUNDLE_STALE` and
+/// `BUNDLE_NEWER`, produced by `check_protocol_version` when the bundle's `init` reply reports
+/// a lower (or no) / higher protocol version than `SANDBOX_PROTOCOL_VERSION`.
 fn map_error_code(code: &str) -> &'static str {
     match code {
+        "BUNDLE_STALE" => "BUNDLE_STALE",
+        "BUNDLE_NEWER" => "BUNDLE_NEWER",
         "NOT_INITIALIZED" => "NOT_INITIALIZED",
         "HELPER_MISSING" => "HELPER_MISSING",
         "SANDBOX_UNAVAILABLE" => "SANDBOX_UNAVAILABLE",
@@ -189,6 +203,49 @@ fn map_error_code(code: &str) -> &'static str {
         "BAD_REQUEST" => "BAD_REQUEST",
         _ => "SANDBOX_UNAVAILABLE",
     }
+}
+
+/// Checks the `result` of the `init` reply: it must be an object with an integer
+/// `protocolVersion` equal to `SANDBOX_PROTOCOL_VERSION`. A missing result (`null`, the
+/// pre-handshake reply), a missing or non-integer field, or a lower number is `BUNDLE_STALE`
+/// (the bundle may silently ignore policy this app now sends); a higher number is
+/// `BUNDLE_NEWER`.
+fn check_protocol_version(result: &serde_json::Value) -> Result<()> {
+    let ours = i64::from(SANDBOX_PROTOCOL_VERSION);
+    let version = result
+        .get("protocolVersion")
+        .filter(|value| value.is_i64() || value.is_u64());
+    match version {
+        // Larger than `i64::MAX` is certainly newer than ours.
+        Some(value) if value.as_i64().is_none() => Err(newer_error(&value.to_string())),
+        Some(value) => {
+            let theirs = value.as_i64().unwrap_or_default();
+            match theirs.cmp(&ours) {
+                std::cmp::Ordering::Equal => Ok(()),
+                std::cmp::Ordering::Greater => Err(newer_error(&theirs.to_string())),
+                std::cmp::Ordering::Less => Err(stale_error(&theirs.to_string())),
+            }
+        }
+        None => Err(stale_error("none")),
+    }
+}
+
+fn stale_error(theirs: &str) -> HostError {
+    HostError::new(
+        "BUNDLE_STALE",
+        format!(
+            "The sandbox runtime is out of date (protocol {theirs}, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
+        ),
+    )
+}
+
+fn newer_error(theirs: &str) -> HostError {
+    HostError::new(
+        "BUNDLE_NEWER",
+        format!(
+            "The sandbox runtime (protocol {theirs}) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
+        ),
+    )
 }
 
 fn path_to_string(path: &Path) -> Result<String> {
@@ -496,7 +553,14 @@ impl Sidecar {
             poisoned: AtomicBool::new(false),
         };
         let id = sidecar.allocate_id();
-        sidecar.call(&id, &Request::Init { id: id.clone(), config: init })?;
+        let init_result =
+            sidecar.call(&id, &Request::Init { id: id.clone(), config: init })?;
+        if let Err(rejection) = check_protocol_version(&init_result) {
+            // A bundle that fails the handshake must never be used, and must not linger either:
+            // kill it now rather than relying on `Drop`'s polite shutdown-then-wait.
+            sidecar.kill_now();
+            return Err(rejection);
+        }
         Ok(sidecar)
     }
 
@@ -635,6 +699,16 @@ impl Sidecar {
         Ok(())
     }
 
+    /// Kills the child immediately (bounded wait for it to be reaped) and latches `poisoned`,
+    /// for a sidecar that has been rejected and is about to be dropped.
+    fn kill_now(&self) {
+        self.poisoned.store(true, Ordering::SeqCst);
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = wait_up_to(&mut child, Duration::from_secs(2));
+        }
+    }
+
     fn allocate_id(&self) -> String {
         self.next_id.fetch_add(1, Ordering::SeqCst).to_string()
     }
@@ -743,6 +817,31 @@ pub(crate) mod tests {
     use super::*;
     use super::super::network::NetworkMode;
     use std::{fs, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn the_protocol_version_equals_the_sidecars_typescript_constant() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sandbox-sidecar/src/protocol.ts"
+        ))
+        .expect("the sidecar's protocol.ts");
+        let declared: Vec<u32> = source
+            .lines()
+            .filter_map(|line| {
+                line.trim()
+                    .strip_prefix("export const SANDBOX_PROTOCOL_VERSION = ")?
+                    .strip_suffix(';')?
+                    .trim()
+                    .parse()
+                    .ok()
+            })
+            .collect();
+        assert_eq!(
+            declared,
+            [SANDBOX_PROTOCOL_VERSION],
+            "protocol.ts and sidecar.rs must declare the same SANDBOX_PROTOCOL_VERSION"
+        );
+    }
 
     const STUB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stub-sidecar.sh");
 
@@ -1211,5 +1310,181 @@ pub(crate) mod tests {
             "kind": "request", "method": "GET", "path": "/", "secretInBody": "yes"
         }));
         assert!(bad.is_err());
+    }
+
+    const STALE_STUB: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/stub-sidecar-stale.sh"
+    );
+
+    fn bundle_with_script(script: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("srt-sidecar");
+        fs::copy(script, &target).unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&target, permissions).unwrap();
+        // See `bundle_with_stub`: avoids an observed ETXTBSY race on overlayfs.
+        fs::File::open(&target).unwrap().sync_all().unwrap();
+        dir
+    }
+
+    /// `test_init` with the stub's `init.home`-suffix behaviour selector appended.
+    fn init_with_stub_mode(mode: &str) -> InitConfig {
+        let mut init = test_init();
+        init.home = format!("/tmp/sourceweft-sidecar-test-home/{mode}");
+        init
+    }
+
+    fn start_expecting_error(init: &InitConfig) -> HostError {
+        let bundle = bundle_with_stub();
+        match Sidecar::start_with_timeout(bundle.path(), init, Duration::from_secs(5)) {
+            Ok(_) => panic!("start must reject this init reply"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn matching_protocol_version_starts() {
+        let bundle = bundle_with_stub();
+        Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(5))
+            .expect("the current protocolVersion is accepted");
+    }
+
+    #[test]
+    fn older_or_malformed_protocol_versions_are_bundle_stale() {
+        for (mode, shown) in [
+            ("protocol-null", "none"),
+            ("protocol-missing", "none"),
+            ("protocol-string", "none"),
+            ("protocol-float", "none"),
+            ("protocol-0", "0"),
+            // A bundle from before the network-approval protocol (version 1): the host would
+            // wrap commands with a policy it ignores, so it is rejected as out of date.
+            ("protocol-1", "1"),
+            // A bundle from before secrets (version 2): it has no TLS termination, so it would
+            // run commands with `wrap.secrets` ignored or rejected. Out of date as well.
+            ("protocol-2", "2"),
+        ] {
+            let error = start_expecting_error(&init_with_stub_mode(mode));
+            assert_eq!(error.code, "BUNDLE_STALE", "{mode}");
+            assert_eq!(
+                error.message,
+                format!(
+                    "The sandbox runtime is out of date (protocol {shown}, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
+                ),
+                "{mode}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_version_1_bundle_is_rejected_with_the_install_the_update_message() {
+        let error = start_expecting_error(&init_with_stub_mode("protocol-1"));
+        assert_eq!(error.code, "BUNDLE_STALE");
+        assert_eq!(
+            error.message,
+            format!(
+                "The sandbox runtime is out of date (protocol 1, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
+            )
+        );
+        assert!(error.message.ends_with("Install the update."));
+    }
+
+    #[test]
+    fn a_version_2_bundle_is_rejected_with_the_install_the_update_message() {
+        let error = start_expecting_error(&init_with_stub_mode("protocol-2"));
+        assert_eq!(error.code, "BUNDLE_STALE");
+        assert_eq!(
+            error.message,
+            format!(
+                "The sandbox runtime is out of date (protocol 2, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
+            )
+        );
+        assert!(error.message.ends_with("Install the update."));
+    }
+
+    #[test]
+    fn newer_protocol_version_is_bundle_newer() {
+        let error = start_expecting_error(&init_with_stub_mode("protocol-4"));
+        assert_eq!(error.code, "BUNDLE_NEWER");
+        assert_eq!(
+            error.message,
+            format!(
+                "The sandbox runtime (protocol 4) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
+            )
+        );
+    }
+
+    #[test]
+    fn check_protocol_version_edge_cases() {
+        use serde_json::json;
+        let ours = u64::from(SANDBOX_PROTOCOL_VERSION);
+        assert!(check_protocol_version(&json!({"protocolVersion": ours, "extra": true})).is_ok());
+        for stale in [
+            json!(null),
+            json!([]),
+            json!("1"),
+            json!({}),
+            json!({"protocolVersion": null}),
+            json!({"protocolVersion": -1}),
+            json!({"protocolVersion": 1.5}),
+            json!({"protocolVersion": 0}),
+        ] {
+            assert_eq!(
+                check_protocol_version(&stale).unwrap_err().code,
+                "BUNDLE_STALE",
+                "{stale}"
+            );
+        }
+        assert_eq!(
+            check_protocol_version(&json!({"protocolVersion": u64::MAX}))
+                .unwrap_err()
+                .code,
+            "BUNDLE_NEWER"
+        );
+    }
+
+    #[test]
+    fn host_generated_bundle_codes_pass_through_map_error_code() {
+        assert_eq!(map_error_code("BUNDLE_STALE"), "BUNDLE_STALE");
+        assert_eq!(map_error_code("BUNDLE_NEWER"), "BUNDLE_NEWER");
+        assert_eq!(map_error_code("anything else"), "SANDBOX_UNAVAILABLE");
+    }
+
+    fn process_is_alive(pid: &str) -> bool {
+        std::process::Command::new("/bin/kill")
+            .args(["-0", pid])
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    /// An old sidecar that ignores policy fields it does not know (here `denyRoots`) and acks
+    /// `init` with `null` must be refused, killed, and never be asked to wrap anything.
+    #[test]
+    fn stale_sidecar_that_ignores_deny_roots_is_rejected_and_killed() {
+        let bundle = bundle_with_script(STALE_STUB);
+        let record = tempfile::tempdir().unwrap();
+        let home = record.path().join("home");
+        let log = record.path().join("home.log");
+        let mut init = test_init();
+        init.home = home.to_string_lossy().into_owned();
+        init.deny_roots = vec!["/tmp/sourceweft-denied".to_string()];
+        let error = match Sidecar::start_with_timeout(bundle.path(), &init, Duration::from_secs(5))
+        {
+            Ok(_) => panic!("a bundle that does not report its protocol must be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "BUNDLE_STALE");
+        let logged = fs::read_to_string(&log).unwrap();
+        assert!(logged.lines().any(|line| line == "init"), "{logged}");
+        assert!(!logged.lines().any(|line| line == "wrap"), "{logged}");
+        let pid = logged
+            .lines()
+            .find_map(|line| line.strip_prefix("pid "))
+            .expect("the stub logs its pid");
+        assert!(!process_is_alive(pid), "rejected sidecar {pid} is still running");
     }
 }

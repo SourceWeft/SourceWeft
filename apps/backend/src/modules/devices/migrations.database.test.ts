@@ -121,3 +121,44 @@ describe("draft-folder-migration", () => {
     );
   });
 });
+
+describe("device-status-migration", () => {
+  test("status columns are nullable and existing devices stay unreported", async () => {
+    await withIsolatedSchema(
+      {
+        prefix: "device_status",
+        setupSql: `CREATE TABLE local_devices(id text primary key, user_id text);
+      INSERT INTO local_devices VALUES ('old','owner');`,
+        migrations: ["0069_local_device_status_report.sql"],
+      },
+      async (client) => {
+        const old = (
+          await client.query("SELECT * FROM local_devices WHERE id='old'")
+        ).rows[0];
+        for (const column of [
+          "platform",
+          "arch",
+          "shell",
+          "sandbox_state",
+          "sandbox_code",
+          "sandbox_reason",
+          "sandbox_remedy",
+          "capabilities",
+          "status_reported_at",
+        ])
+          expect(old[column]).toBeNull();
+        await client.query(
+          "UPDATE local_devices SET platform='linux', sandbox_state='ready', capabilities=$1, status_reported_at=now() WHERE id='old'",
+          [JSON.stringify(["sandbox"])],
+        );
+        expect(
+          (
+            await client.query(
+              "SELECT capabilities FROM local_devices WHERE id='old'",
+            )
+          ).rows[0].capabilities,
+        ).toEqual(["sandbox"]);
+      },
+    );
+  });
+});

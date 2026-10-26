@@ -14,6 +14,12 @@
 #   - wrap.command "HANG"          -> never reply (simulates a stuck sidecar)
 #   - violations.stderr "DUMP_ENV" -> reply with the sidecar's own env var
 #     names, so the test can assert no `*_PROXY` variable reached it
+#   - init.config.home ending in "/protocol-<X>" -> reply to init with a different
+#     protocolVersion result: "protocol-0" -> 0, "protocol-1" -> 1 and "protocol-2" -> 2 (bundles
+#     from before the network-approval and secrets protocols), "protocol-4" -> 4, "protocol-string" ->
+#     "1" (a string), "protocol-float" -> 1.5, "protocol-missing" -> {} (no field),
+#     "protocol-null" -> null (the pre-handshake reply). Anything else replies 3, which is
+#     SANDBOX_PROTOCOL_VERSION in sandbox-sidecar/src/protocol.ts.
 #   - init.config.home ending in "/record-ops" -> append "<op> <commandId>"
 #     for every later request to "<home>.log" (srt_exec.rs cleanup tests)
 #   - wrap.command "ASK:<host>:<port>"        -> reply to the wrap, then emit an
@@ -86,7 +92,18 @@ while IFS= read -r line; do
         init)
             home=$(extract home "$line")
             tls_json=$(printf '%s' "$line" | sed -n 's/.*"tls":\({[^}]*}\).*/\1/p')
-            printf '{"id":"%s","ok":true,"result":null}\n' "$id"
+            case "$home" in
+                */protocol-0) result='{"protocolVersion":0}' ;;
+                */protocol-1) result='{"protocolVersion":1}' ;;
+                */protocol-2) result='{"protocolVersion":2}' ;;
+                */protocol-4) result='{"protocolVersion":4}' ;;
+                */protocol-string) result='{"protocolVersion":"1"}' ;;
+                */protocol-float) result='{"protocolVersion":1.5}' ;;
+                */protocol-missing) result='{}' ;;
+                */protocol-null) result='null' ;;
+                *) result='{"protocolVersion":3}' ;;
+            esac
+            printf '{"id":"%s","ok":true,"result":%s}\n' "$id" "$result"
             case "$home" in
                 */exit-after-init) exit 0 ;;
                 */record-ops) record="$home.log" ;;
