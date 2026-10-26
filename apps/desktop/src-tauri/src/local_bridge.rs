@@ -1,6 +1,7 @@
 //! Narrow discovery bridge for the existing Web UI. No separate native pages.
 //! Workspace/file operations stay internal until authenticated dispatch is wired.
 use serde::Serialize;
+use sourceweft_desktop::local_host::readiness::SandboxReadiness;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 #[derive(Serialize)]
@@ -13,6 +14,8 @@ pub struct LocalHostStatus {
     device_id: Option<String>,
     connected: bool,
     connection_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    readiness: Option<SandboxReadiness>,
 }
 
 #[tauri::command]
@@ -30,23 +33,57 @@ pub async fn authenticate_local_host(
     host.authenticate(ticket, user_id).await
 }
 
+/// Async, so Tauri runs it on its async runtime instead of the main thread: on Linux, the first
+/// call (and every recheck while setup is needed) starts a sidecar, round-trips `init` + `probe`
+/// through bwrap and spawns a login shell, which would otherwise stall the UI for seconds. The
+/// probing itself is blocking I/O, so it runs on the blocking pool rather than an async worker.
 #[tauri::command]
-pub fn local_host_status(app: AppHandle, window: WebviewWindow) -> Result<LocalHostStatus, String> {
+pub async fn local_host_status(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<LocalHostStatus, String> {
     crate::authorize_desktop_window(&app, &window, true)?;
     let remote = app
         .try_state::<crate::remote_host::RemoteHost>()
         .map(|host| host.status())
         .unwrap_or_default();
+    let host = app
+        .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
+        .map(|host| host.inner().clone());
+    let storage_initialized = host.is_some();
+    // macOS keeps its Seatbelt path, is always supported, and reports exactly the status it
+    // reported before sandbox readiness existed: no `readiness` field, and no probing (which
+    // there would spawn a login shell for nothing). Linux is supported only once a readiness
+    // probe on the managed LocalHost reports something other than Unsupported; every other
+    // platform is unsupported.
+    let readiness = if cfg!(target_os = "macos") {
+        None
+    } else {
+        match host {
+            Some(host) => Some(
+                tauri::async_runtime::spawn_blocking(move || host.sandbox_readiness())
+                    .await
+                    .map_err(|error| format!("Sandbox readiness check failed: {error}"))?,
+            ),
+            None => None,
+        }
+    };
+    let platform_supported = if cfg!(target_os = "macos") {
+        true
+    } else if cfg!(target_os = "linux") {
+        matches!(readiness, Some(ref r) if !matches!(r, SandboxReadiness::Unsupported))
+    } else {
+        false
+    };
     Ok(LocalHostStatus {
         protocol_version: 2,
-        platform_supported: cfg!(target_os = "macos"),
-        storage_initialized: app
-            .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
-            .is_some(),
+        platform_supported,
+        storage_initialized,
         authenticated_dispatch_available: remote.connected,
         device_id: remote.device_id,
         connected: remote.connected,
         connection_error: remote.error,
+        readiness,
     })
 }
 
@@ -59,7 +96,7 @@ pub async fn enable_local_host(
     crate::authorize_desktop_window(&app, &window, true)?;
     let host = app
         .try_state::<crate::remote_host::RemoteHost>()
-        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?;
+        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.")?;
     let _lease = host.host.admission.enter().map_err(str::to_owned)?;
     host.enroll(ticket).await
 }
@@ -68,7 +105,7 @@ pub async fn enable_local_host(
 pub fn disconnect_local_host(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     crate::authorize_desktop_window(&app, &window, true)?;
     app.try_state::<crate::remote_host::RemoteHost>()
-        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?
+        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.")?
         .disconnect();
     Ok(())
 }
@@ -85,7 +122,7 @@ pub async fn choose_local_folder(
         .try_state::<crate::remote_host::RemoteHost>()
         .ok_or("UNSUPPORTED_PLATFORM")?;
     let _lease = host.host.admission.enter().map_err(str::to_owned)?;
-    host.choose_folder(ticket, user_id).await
+    host.choose_folder(&app, ticket, user_id).await
 }
 
 /// Compatibility entry point; all folder selection uses account-bound authorization.

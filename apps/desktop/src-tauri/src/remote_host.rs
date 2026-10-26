@@ -11,6 +11,9 @@ use std::{
 };
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::secret_store;
+
 #[cfg(target_os = "macos")]
 fn computer_name() -> Result<String, String> {
     let output = std::process::Command::new("/usr/sbin/scutil")
@@ -25,6 +28,64 @@ fn computer_name() -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("macOS computer name is empty".into());
+    }
+    Ok(name.to_owned())
+}
+
+/// Parses `PRETTY_HOSTNAME` out of `/etc/machine-info` content (systemd's
+/// `hostnamectl --pretty` store: `KEY=VALUE` lines, value optionally quoted).
+/// A pure function so the quoting/emptiness rules are unit-testable without
+/// touching the filesystem.
+#[cfg(target_os = "linux")]
+fn parse_pretty_hostname(machine_info: &str) -> Option<String> {
+    for line in machine_info.lines() {
+        let Some(value) = line.trim().strip_prefix("PRETTY_HOSTNAME=") else {
+            continue;
+        };
+        let value = value.trim();
+        let unquoted = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value)
+            .trim();
+        // The key only ever appears once in a well-formed machine-info file;
+        // stop here either way instead of letting a later, unrelated line
+        // (or a second malformed occurrence) override this decision.
+        return if unquoted.is_empty() {
+            None
+        } else {
+            Some(unquoted.to_owned())
+        };
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn computer_name() -> Result<String, String> {
+    let pretty = std::fs::read_to_string("/etc/machine-info")
+        .ok()
+        .and_then(|contents| parse_pretty_hostname(&contents));
+    let name = match pretty {
+        Some(name) => name,
+        None => {
+            let mut buffer = vec![0u8; 256];
+            // SAFETY: `buffer` is valid for `buffer.len()` bytes for the
+            // duration of the call, as required by `gethostname(3)`.
+            let status = unsafe {
+                libc::gethostname(buffer.as_mut_ptr() as *mut libc::c_char, buffer.len())
+            };
+            if status != 0 {
+                return Err("Could not read Linux hostname".into());
+            }
+            let end = buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len());
+            buffer.truncate(end);
+            String::from_utf8(buffer).map_err(|_| "Computer name is not valid UTF-8")?
+        }
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Linux computer name is empty".into());
     }
     Ok(name.to_owned())
 }
@@ -55,45 +116,121 @@ pub struct RemoteHost {
     keychain_service: String,
 }
 
+#[cfg(target_os = "macos")]
+async fn pick_folder(_app: &tauri::AppHandle) -> Result<String, String> {
+    let output = tauri::async_runtime::spawn_blocking(|| {
+        std::process::Command::new("/usr/bin/osascript")
+            .args([
+                "-e",
+                "POSIX path of (choose folder with prompt \"Choose a working directory\")",
+            ])
+            .output()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("Folder selection cancelled or unavailable".into());
+    }
+    String::from_utf8(output.stdout).map_err(|_| "Invalid folder path".into())
+}
+
+#[cfg(target_os = "linux")]
+async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::{DialogExt, FilePath};
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        match app.dialog().file().blocking_pick_folder() {
+            Some(FilePath::Path(path)) => path
+                .into_os_string()
+                .into_string()
+                .map_err(|_| "Invalid folder path".to_string()),
+            // `blocking_pick_folder` runs on Linux's own GTK/XDG-portal event
+            // loop, not ours, so it can only yield `None` (dialog dismissed)
+            // or a `FilePath::Url` (never produced for a folder picker); both
+            // are treated the same way the macOS cancel path is.
+            Some(FilePath::Url(_)) | None => {
+                Err("Folder selection cancelled or unavailable".to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The exact message `choose_folder` surfaces when the stored device
+/// credential is missing. On macOS this must byte-match what the raw
+/// Keychain lookup used to return before `secret_store` existed (see
+/// `secret_store::not_found_message`); `choose_folder` never existed on
+/// Linux before this port, so it gets a plain, friendlier message instead.
+#[cfg(target_os = "macos")]
+fn missing_device_credential_error() -> String {
+    secret_store::not_found_message()
+}
+
+#[cfg(target_os = "linux")]
+fn missing_device_credential_error() -> String {
+    "Authenticate this computer before choosing a folder".to_string()
+}
+
+/// `enroll`'s credential-store write used to be wrapped in this prefix only
+/// on macOS (there was no Linux path before this port). Linux's
+/// `secret_store::set` error is already the exact user-facing text (e.g.
+/// the no-keyring message), so it must pass through unprefixed.
+#[cfg(target_os = "macos")]
+fn enrollment_store_error(error: String) -> String {
+    format!("Keychain enrollment failed: {error}")
+}
+
+#[cfg(target_os = "linux")]
+fn enrollment_store_error(error: String) -> String {
+    error
+}
+
+/// `authenticate`'s direct/legacy credential lookup used to wrap a real
+/// (non-not-found) error in this prefix only on macOS. On Linux, the error
+/// coming out of `secret_store::get` may already be the exact required
+/// no-keyring message, so it must not be re-wrapped.
+#[cfg(target_os = "macos")]
+fn keychain_lookup_error(error: String) -> String {
+    format!("Keychain access failed: {error}")
+}
+
+#[cfg(target_os = "linux")]
+fn keychain_lookup_error(error: String) -> String {
+    error
+}
+
 impl RemoteHost {
-    #[cfg(target_os = "macos")]
-    pub async fn choose_folder(&self, ticket: String, user_id: String) -> Result<Value, String> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub async fn choose_folder(
+        &self,
+        app: &tauri::AppHandle,
+        ticket: String,
+        user_id: String,
+    ) -> Result<Value, String> {
         let owner = user_id.clone();
         let authenticated = self.authenticate(ticket, user_id).await?;
         if authenticated["needsProof"] == true || self.status().user_id.as_deref() != Some(&owner) {
             return Err("Authenticate the current account before choosing a folder".into());
         }
         let folder_generation = self.generation.load(Ordering::SeqCst);
-        let bytes = security_framework::passwords::get_generic_password(
-            &self.keychain_service,
-            &format!(
-                "local-device:{}",
-                self.status()
-                    .user_id
-                    .ok_or("Authenticate this account first")?
-            ),
-        )
-        .map_err(|e| e.to_string())?;
+        let account = format!(
+            "local-device:{}",
+            self.status()
+                .user_id
+                .ok_or("Authenticate this account first")?
+        );
+        let bytes = match secret_store::get(&self.keychain_service, &account)? {
+            Some(bytes) => bytes,
+            None => return Err(missing_device_credential_error()),
+        };
         let credential: Credentials =
             serde_json::from_slice(&bytes).map_err(|_| "Invalid device credentials")?;
         if self.status().device_id.as_deref() != Some(&credential.id) {
             return Err("Authenticate this computer before choosing a folder".into());
         }
-        let output = tauri::async_runtime::spawn_blocking(|| {
-            std::process::Command::new("/usr/bin/osascript")
-                .args([
-                    "-e",
-                    "POSIX path of (choose folder with prompt \"Choose a working directory\")",
-                ])
-                .output()
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            return Err("Folder selection cancelled or unavailable".into());
-        }
-        let path = String::from_utf8(output.stdout).map_err(|_| "Invalid folder path")?;
+        let path = pick_folder(app).await?;
         if self.generation.load(Ordering::SeqCst) != folder_generation
             || self.status().user_id.as_deref() != Some(&owner)
         {
@@ -118,49 +255,53 @@ impl RemoteHost {
         }
         response.json().await.map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "macos"))]
-    pub async fn choose_folder(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub async fn choose_folder(
+        &self,
+        _app: &tauri::AppHandle,
+        _ticket: String,
+        _user_id: String,
+    ) -> Result<Value, String> {
         Err("UNSUPPORTED_PLATFORM".into())
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub async fn authenticate(&self, ticket: String, user_id: String) -> Result<Value, String> {
         if self.status().device_id.is_some() && self.status().user_id.as_deref() != Some(&user_id) {
             self.disconnect();
         }
         let auth_generation = self.generation.load(Ordering::SeqCst);
         let account = format!("local-device:{user_id}");
-        let saved =
-            security_framework::passwords::get_generic_password(&self.keychain_service, &account);
+        let direct = secret_store::get(&self.keychain_service, &account);
         // Adopt only this account's pre-release credential; never another user's.
-        let saved = match saved {
-            Err(error) if error.code() == -25300 => {
-                match security_framework::passwords::get_generic_password(
-                    &self.keychain_service,
-                    "local-device",
-                ) {
-                    Ok(bytes) => {
-                        let legacy: Credentials = serde_json::from_slice(&bytes)
-                            .map_err(|_| "Invalid saved legacy credentials")?;
-                        if legacy.user_id == user_id {
-                            Ok(bytes)
-                        } else {
-                            Err(error)
-                        }
-                    }
-                    Err(legacy_error) if legacy_error.code() != -25300 => Err(legacy_error),
-                    Err(_) => Err(error),
+        // Any real (non-not-found) error, from either lookup, surfaces below
+        // with the same "Keychain access failed:" wording this call site
+        // always used — bare from `secret_store` itself, since `choose_folder`
+        // needs its own `get` call to stay unprefixed.
+        let saved = match direct {
+            Ok(Some(bytes)) => Ok(Some(bytes)),
+            Ok(None) => match secret_store::get(&self.keychain_service, "local-device") {
+                Ok(Some(bytes)) => {
+                    let legacy: Credentials = serde_json::from_slice(&bytes)
+                        .map_err(|_| "Invalid saved legacy credentials")?;
+                    Ok(if legacy.user_id == user_id {
+                        Some(bytes)
+                    } else {
+                        None
+                    })
                 }
-            }
-            other => other,
+                Ok(None) => Ok(None),
+                Err(legacy_error) => Err(legacy_error),
+            },
+            Err(direct_error) => Err(direct_error),
         };
         let bytes = match saved {
-            Ok(bytes) => bytes,
-            Err(error) if error.code() == -25300 => {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
                 self.enroll(ticket).await?;
                 return Ok(json!({"needsProof":true}));
             }
-            Err(error) => return Err(format!("Keychain access failed: {error}")),
+            Err(error) => return Err(keychain_lookup_error(error)),
         };
         let credentials: Credentials =
             serde_json::from_slice(&bytes).map_err(|_| "Invalid saved device credentials")?;
@@ -182,12 +323,11 @@ impl RemoteHost {
             return Err(format!("Native identity rejected: {}", response.status()));
         }
         let proof: Value = response.json().await.map_err(|e| e.to_string())?;
-        security_framework::passwords::set_generic_password(
+        secret_store::set(
             &self.keychain_service,
             &format!("local-device:{}", credentials.user_id),
             &bytes,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         if self.generation.load(Ordering::SeqCst) != auth_generation {
             return Err("Local authentication was cancelled".into());
         }
@@ -197,9 +337,9 @@ impl RemoteHost {
         Ok(proof)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     pub async fn authenticate(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
-        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.".into())
+        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.".into())
     }
     pub fn new(host: Arc<LocalHost>, service: String) -> Result<Self, String> {
         host.initialize_invocation_journal()
@@ -225,12 +365,12 @@ impl RemoteHost {
             status.device_id = None;
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     pub async fn enroll(&self, _ticket: String) -> Result<RemoteStatus, String> {
-        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.".into())
+        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.".into())
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub async fn enroll(&self, ticket: String) -> Result<RemoteStatus, String> {
         if self.status().device_id.is_some() {
             return Err("A local host is already enrolled in this application session.".into());
@@ -273,12 +413,12 @@ impl RemoteHost {
             token: value["token"].as_str().ok_or("Missing credential")?.into(),
             api_base,
         };
-        security_framework::passwords::set_generic_password(
+        secret_store::set(
             &self.keychain_service,
             &format!("local-device:{}", credential.user_id),
             &serde_json::to_vec(&credential).map_err(|e| e.to_string())?,
         )
-        .map_err(|e| format!("Keychain enrollment failed: {e}"))?;
+        .map_err(enrollment_store_error)?;
         if self.generation.load(Ordering::SeqCst) != enroll_generation {
             return Err("Device enrollment was cancelled".into());
         }
@@ -403,5 +543,66 @@ async fn connection(
                 }else if message.is_close(){return Ok(());}
             }
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_computer_name_tests {
+    use super::parse_pretty_hostname;
+
+    #[test]
+    fn reads_unquoted_pretty_hostname() {
+        let machine_info = "CHASSIS=vm\nPRETTY_HOSTNAME=Dev Box\n";
+        assert_eq!(
+            parse_pretty_hostname(machine_info),
+            Some("Dev Box".to_owned())
+        );
+    }
+
+    #[test]
+    fn strips_double_quotes() {
+        let machine_info = "PRETTY_HOSTNAME=\"Dev Box\"\n";
+        assert_eq!(
+            parse_pretty_hostname(machine_info),
+            Some("Dev Box".to_owned())
+        );
+    }
+
+    #[test]
+    fn strips_single_quotes() {
+        let machine_info = "PRETTY_HOSTNAME='Dev Box'\n";
+        assert_eq!(
+            parse_pretty_hostname(machine_info),
+            Some("Dev Box".to_owned())
+        );
+    }
+
+    #[test]
+    fn missing_key_is_none() {
+        let machine_info = "CHASSIS=vm\nDEPLOYMENT=production\n";
+        assert_eq!(parse_pretty_hostname(machine_info), None);
+    }
+
+    #[test]
+    fn empty_value_is_none() {
+        let machine_info = "PRETTY_HOSTNAME=\n";
+        assert_eq!(parse_pretty_hostname(machine_info), None);
+    }
+
+    #[test]
+    fn empty_quoted_value_is_none() {
+        let machine_info = "PRETTY_HOSTNAME=\"\"\n";
+        assert_eq!(parse_pretty_hostname(machine_info), None);
+    }
+
+    #[test]
+    fn whitespace_only_value_is_none() {
+        let machine_info = "PRETTY_HOSTNAME=   \n";
+        assert_eq!(parse_pretty_hostname(machine_info), None);
+    }
+
+    #[test]
+    fn empty_file_is_none() {
+        assert_eq!(parse_pretty_hostname(""), None);
     }
 }

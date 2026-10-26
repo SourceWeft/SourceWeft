@@ -38,6 +38,13 @@ updater-http = { version = "0.13", package = "reqwest", default-features = false
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# sync-secret-service talks to the Secret Service (gnome-keyring, KWallet,
+# ...) over DBus. crypto-rust is the pure-Rust session-encryption backend
+# for that transport (vs. crypto-openssl); it needs no system OpenSSL and
+# avoids an extra native build dependency on the Linux desktop image.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"

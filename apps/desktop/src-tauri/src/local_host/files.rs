@@ -403,7 +403,7 @@ fn open_file_beneath(_: &Path, _: &[&std::ffi::OsStr], _: i32) -> Result<File> {
 impl LocalHost {
     /// All directory traversal and file opening are descriptor-relative. Existing
     /// files require a previously read version and are backed up before replacement.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub fn write_bytes(
         &self,
         owner: &str,
@@ -525,19 +525,8 @@ impl LocalHost {
             staged.set_permissions(std::fs::Permissions::from_mode(mode))?;
             staged.write_all(content)?;
             staged.sync_all()?;
-            // RENAME_EXCL protects a concurrently created destination for new files.
-            let renamed = unsafe {
-                libc::renameatx_np(
-                    parent.as_raw_fd(),
-                    temporary.as_ptr(),
-                    parent.as_raw_fd(),
-                    name.as_ptr(),
-                    if exists { 0 } else { libc::RENAME_EXCL },
-                )
-            };
-            if renamed != 0 {
-                return Err(std::io::Error::last_os_error().into());
-            }
+            // No-replace protects a concurrently created destination for new files.
+            rename_noreplace(parent.as_raw_fd(), &temporary, &name, exists)?;
             parent.sync_all()?;
             Ok(())
         })();
@@ -549,7 +538,7 @@ impl LocalHost {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 impl LocalHost {
     pub fn write_bytes(
         &self,
@@ -562,14 +551,93 @@ impl LocalHost {
     ) -> Result<serde_json::Value> {
         Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
-            "Local file writes require macOS",
+            "Local file writes require macOS or Linux",
         ))
+    }
+}
+
+/// Renames `from` to `to`, both relative to `dir`. When `exists` is false the rename fails
+/// instead of replacing a destination that appeared concurrently; when it is true (the caller
+/// already verified and backed up the destination) it is a plain rename.
+#[cfg(target_os = "macos")]
+fn rename_noreplace(
+    dir: std::os::fd::RawFd,
+    from: &std::ffi::CStr,
+    to: &std::ffi::CStr,
+    exists: bool,
+) -> std::io::Result<()> {
+    let renamed = unsafe {
+        libc::renameatx_np(
+            dir,
+            from.as_ptr(),
+            dir,
+            to.as_ptr(),
+            if exists { 0 } else { libc::RENAME_EXCL },
+        )
+    };
+    if renamed != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Linux counterpart of the macOS `renameatx_np(RENAME_EXCL)` shim: `renameat2` with
+/// `RENAME_NOREPLACE`, through the raw syscall so it does not depend on the glibc wrapper.
+#[cfg(target_os = "linux")]
+fn rename_noreplace(
+    dir: std::os::fd::RawFd,
+    from: &std::ffi::CStr,
+    to: &std::ffi::CStr,
+    exists: bool,
+) -> std::io::Result<()> {
+    let flags: libc::c_uint = if exists { 0 } else { libc::RENAME_NOREPLACE };
+    let renamed = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            dir,
+            from.as_ptr(),
+            dir,
+            to.as_ptr(),
+            flags,
+        )
+    };
+    if renamed != 0 {
+        let error = std::io::Error::last_os_error();
+        // Some filesystems (certain FUSE mounts, older NFS) and old kernels do not implement
+        // RENAME_NOREPLACE; say so instead of a bare "Invalid argument". There is deliberately
+        // no fallback to a plain rename, which could replace a file that appeared concurrently.
+        return Err(match error.raw_os_error() {
+            Some(libc::EINVAL | libc::ENOSYS) if !exists => std::io::Error::new(
+                error.kind(),
+                format!(
+                    "this folder's filesystem does not support creating a file without \
+                     replacing one (renameat2 RENAME_NOREPLACE): {error}"
+                ),
+            ),
+            _ => error,
+        });
+    }
+    Ok(())
+}
+
+/// Resets `errno` so a following `readdir` end-of-directory can be told apart from an error.
+#[cfg(target_os = "macos")]
+fn clear_errno() {
+    unsafe {
+        *libc::__error() = 0;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn clear_errno() {
+    unsafe {
+        *libc::__errno_location() = 0;
     }
 }
 
 /// Enumerate through a held descriptor: a renamed parent or swapped symlink must
 /// not redirect a draft listing outside the picker-authorized directory.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn list_granted_directory(
     root: &Path,
     relative: &Path,
@@ -614,9 +682,7 @@ pub(crate) fn list_granted_directory(
     let directory = Directory(raw);
     let mut files = Vec::new();
     loop {
-        unsafe {
-            *libc::__error() = 0;
-        }
+        clear_errno();
         let entry = unsafe { libc::readdir(directory.0) };
         if entry.is_null() {
             let error = std::io::Error::last_os_error();

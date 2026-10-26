@@ -1,4 +1,4 @@
-#![cfg(target_os = "macos")]
+#![cfg(unix)]
 use sourceweft_desktop::local_host::LocalHost;
 use std::{fs, os::unix::fs::symlink};
 
