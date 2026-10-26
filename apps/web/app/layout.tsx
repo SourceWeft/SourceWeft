@@ -14,6 +14,10 @@ import {
   isLocale,
 } from "@sourceweft/i18n/locales";
 
+import {
+  CLIENT_NAMESPACES,
+  pickMessages,
+} from "../i18n/client-messages";
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
 import { resolveRequireEmailVerification } from "../lib/auth/auth-config-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
@@ -78,12 +82,13 @@ export default async function RootLayout({
 
   // The proxy resolves the locale per request and next-intl surfaces it here, so
   // `<html lang/dir>` is correct even for crawlers (D6). `getMessages()` returns
-  // the catalog from `i18n/request.ts` for the client provider.
+  // the catalog from `i18n/request.ts`. Only the shell's namespaces go to the
+  // client here; route areas that need more nest their own provider.
   const resolvedLocale = await getLocale();
   const localeMeta = getLocaleMeta(
     isLocale(resolvedLocale) ? resolvedLocale : DEFAULT_LOCALE,
   );
-  const messages = await getMessages();
+  const messages = pickMessages(await getMessages(), CLIENT_NAMESPACES.root);
 
   return (
     <html

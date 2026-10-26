@@ -209,6 +209,12 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                 {artifact.isPublic ? (
                   <TypeBadge label={t("artifacts.public")} tone="public" />
                 ) : null}
+                {artifact.awaitingSharedApproval ? (
+                  <TypeBadge
+                    label={t("artifacts.awaitingApproval")}
+                    tone="attention"
+                  />
+                ) : null}
               </div>
               {artifact.promptExcerpt ? (
                 <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">

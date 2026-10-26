@@ -1,3 +1,4 @@
+import { printable } from "./oauth/redact";
 import { McpInspectError } from "../errors";
 
 /**
@@ -70,7 +71,7 @@ export function resultOf(
     const code =
       isRecord(error) && typeof error.code === "number" ? ` (${error.code})` : "";
     throw new McpInspectError(
-      `The server answered ${method} with an error${code}: ${String(text).slice(0, 300)}`,
+      `The server answered ${method} with an error${code}: ${printable(String(text), 300)}`,
     );
   }
   return message.result;

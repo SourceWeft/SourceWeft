@@ -238,6 +238,23 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           ? {
               async beforeDelete(user) {
                 await assertUserHardDeleteAllowed(user.id);
+                // Artifact page records carry the owner as plain text (the auth
+                // tables live outside the drizzle schema), so a viewer's own
+                // records and consents are erased here rather than by FK. This
+                // runs before the user row goes: after it nothing could retry a
+                // failed cleanup, and the records would outlive the account.
+                const { artifactRecordsService } =
+                  await import("../artifact-records");
+                try {
+                  await artifactRecordsService.deleteUserData(user.id);
+                } catch (error) {
+                  logger.error("artifact_record_user_cleanup_failed", {
+                    userId: user.id,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  });
+                  throw error;
+                }
               },
               async sendDeleteAccountVerification(data, request) {
                 const { mailService } = await import("../mail");

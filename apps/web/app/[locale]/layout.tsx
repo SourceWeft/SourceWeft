@@ -3,11 +3,13 @@ import { setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 
 import { routing } from "../../i18n/routing";
+import { ClientMessagesProvider } from "../_components/client-messages-provider";
 
 /**
  * Layout for the localized marketing tree. The root `app/layout.tsx` already
- * renders `<html>`, `<body>` and the providers, so this only validates the
- * segment and pins the request locale for static rendering. An unknown segment
+ * renders `<html>`, `<body>` and the providers, so this validates the
+ * segment, pins the request locale for static rendering and narrows the client
+ * messages to what the marketing client components read. An unknown segment
  * (e.g. `/foo`) is a 404, not a silently-accepted "locale" (§4.1).
  */
 export function generateStaticParams() {
@@ -23,5 +25,7 @@ export default async function LocaleLayout({
     notFound();
   }
   setRequestLocale(locale);
-  return children;
+  return (
+    <ClientMessagesProvider area="marketing">{children}</ClientMessagesProvider>
+  );
 }

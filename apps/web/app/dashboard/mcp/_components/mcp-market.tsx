@@ -62,6 +62,13 @@ import { GitHubIcon } from "../../../_components/brand-icons";
 import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "./mcp-credentials-dialog";
+import { selectInstallForChat } from "./mcp-use-in-chat";
+import { useMcpOAuthReturn } from "./use-mcp-oauth-return";
+import {
+  clearMcpOrigin,
+  readMcpOrigin,
+  syncMcpOrigin,
+} from "../../../../lib/mcp-return-to";
 import { McpDetailDialog } from "./mcp-detail-dialog";
 import { SubmitMcpDialog } from "./submit-mcp-dialog";
 import { trackMcpServerInstalled } from "../../../../lib/analytics-events";
@@ -712,6 +719,13 @@ function McpCard({
     install &&
     install.authType !== "none" &&
     install.credentialStatus !== "configured";
+  // How this member is connected, or that they still have to be; nothing for a
+  // server that needs no connection.
+  const connectionLabel = install?.connectedVia
+    ? t(`card.connectedVia.${install.connectedVia}`)
+    : needsCredentials
+      ? t("card.credentialsRequired")
+      : null;
   const [iconFailed, setIconFailed] = React.useState(false);
   const showRegistryIcon = Boolean(market.iconUrl) && !iconFailed;
 
@@ -790,6 +804,11 @@ function McpCard({
                 }
               >
                 <McpStatusIndicator install={install} />
+                {connectionLabel ? (
+                  <span className="mt-0.5 block truncate">
+                    {connectionLabel}
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -833,9 +852,19 @@ function McpCard({
               "data-ai-summary": "",
               title: tOverview("cardSummaryTitle"),
             }
-          : {})}
+          : cardText.translated
+            ? {
+                "data-ai-translated": "",
+                title: tOverview("translatedCardTitle"),
+              }
+            : {})}
       >
         {cardText.text}
+        {cardText.translated ? (
+          <span className="ml-1 whitespace-nowrap text-[10px] text-muted-foreground/70">
+            {tOverview("translatedTag")}
+          </span>
+        ) : null}
       </button>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1311,31 +1340,36 @@ export function McpMarket() {
     setSelectedIdentifier(null);
   }
 
-  // Surface the result of the OAuth redirect (GET /v1/mcp/oauth/callback bounces
-  // back here with ?mcpOAuth=connected|error), then strip the query so a refresh
-  // doesn't re-toast.
-  const oauthCallbackHandledRef = React.useRef(false);
+  // The browser coming back from a provider's sign-in: the callback names a
+  // completion reference, which the API confirms before anything is shown.
+  // A confirmed connection reopens the connection dialog on its tool list.
+  const [resumeInstallId, setResumeInstallId] = React.useState<string | null>(
+    null,
+  );
+  const handleOAuthConnected = React.useCallback(
+    (completion: { workspaceId: string; installId: string }) => {
+      invalidateWorkspaceMcpCache(completion.workspaceId);
+      setResumeInstallId(completion.installId);
+    },
+    [],
+  );
+  useMcpOAuthReturn({
+    workspaceId: workspace?.id ?? null,
+    onConnected: handleOAuthConnected,
+  });
+  // Where the flow began, kept across the provider round trip.
+  const originSyncedRef = React.useRef(false);
   React.useEffect(() => {
-    const status = searchParams.get("mcpOAuth");
-    if (!status || oauthCallbackHandledRef.current) return;
-    // Wait for the workspace to resolve before handling — marking handled while
-    // workspace is still null would permanently skip the cache invalidation.
-    if (!workspace?.id) return;
-    oauthCallbackHandledRef.current = true;
-    if (status === "connected") {
-      toast.success(t("toasts.connected"));
-      if (workspace?.id) {
-        invalidateWorkspaceMcpCache(workspace.id);
-      }
-    } else {
-      toast.error(t("toasts.authFailed"));
-    }
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("mcpOAuth");
-    router.replace(
-      `/dashboard/mcp${params.toString() ? `?${params.toString()}` : ""}`,
-    );
-  }, [router, searchParams, workspace?.id, t]);
+    // Once per load: stripping the return flags later must not forget it.
+    if (originSyncedRef.current) return;
+    originSyncedRef.current = true;
+    syncMcpOrigin(searchParams);
+  }, [searchParams]);
+  React.useEffect(() => {
+    if (!resumeInstallId) return;
+    const match = items.find((item) => item.install?.id === resumeInstallId);
+    if (match?.install) setCredentialsInstall(match.install);
+  }, [items, resumeInstallId]);
 
   async function handleWorkspaceChange(
     nextWorkspaceId: string,
@@ -1800,9 +1834,34 @@ export function McpMarket() {
 
       <CredentialsDialog
         install={credentialsInstall}
-        onClose={() => setCredentialsInstall(null)}
+        onClose={() => {
+          // A flow that began elsewhere (a chat, the public page) returns there
+          // once the member closes the result.
+          const origin = resumeInstallId ? readMcpOrigin() : null;
+          clearMcpOrigin();
+          setCredentialsInstall(null);
+          setResumeInstallId(null);
+          if (origin) router.push(origin);
+        }}
         onSaved={updateInstallInItems}
+        onUseInChat={(target) => {
+          if (!workspace?.id) return;
+          const destination = selectInstallForChat({
+            workspaceId: workspace.id,
+            installId: target.id,
+            origin: readMcpOrigin(),
+          });
+          clearMcpOrigin();
+          setCredentialsInstall(null);
+          setResumeInstallId(null);
+          router.push(destination);
+        }}
         open={Boolean(credentialsInstall)}
+        resumeConnected={
+          Boolean(credentialsInstall) &&
+          credentialsInstall?.id === resumeInstallId
+        }
+        returnTo="/dashboard/mcp"
         workspaceId={workspace?.id ?? null}
       />
     </div>

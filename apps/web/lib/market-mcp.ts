@@ -8,6 +8,7 @@ import {
   type GetMarketMcpManifestResponse,
   type GetMarketMcpResponse,
   type MarketMcpAiOverview,
+  type MarketMcpLocalizedSummary,
   type MarketMcpLocale,
   type MarketMcpProductGroup,
   type MarketMcpReadme,
@@ -16,6 +17,8 @@ import {
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
   type ListMarketMcpResponse,
+  type ListMarketMcpToolRevisionsResponse,
+  type MarketMcpToolsRevision,
 } from "@sourceweft/market-sdk";
 
 import type { Locale } from "@sourceweft/i18n/locales";
@@ -122,6 +125,12 @@ export type PublicMcpDetail = {
   aiOverview: MarketMcpAiOverview | null;
   // The languages the server has a visible overview in, without fallback.
   overviewLocales: MarketMcpLocale[];
+  // An AI translation of the registry summary into the Chinese variant asked
+  // for, for a server without an overview; null when there is none to show.
+  localizedSummary: MarketMcpLocalizedSummary | null;
+  // The language the registry summary was written in ("en", "zh", "ja", "ko",
+  // "und"), once the translation pass has looked at it.
+  descriptionLanguage: string | null;
   // False when the page stays out of search (`noindex, follow`); true when
   // the market says nothing or cannot be read, so an outage never deindexes.
   searchIndexable: boolean;
@@ -131,6 +140,10 @@ export type PublicMcpDetail = {
   // The latest version's quality scorecard (Issue #367, W6); null when the
   // market has none or cannot be read, and the page shows no Score section.
   score: MarketMcpScore | null;
+  // The current revision of the source whose tool list the page shows (Issue
+  // #367, tool revisions); null when that list has no history or the market
+  // cannot be read, and the page shows no change log.
+  toolsRevision: MarketMcpToolsRevision | null;
 };
 
 // A hidden or regenerated overview shows within about two minutes: this
@@ -147,10 +160,13 @@ const cachedMcpDetail = unstable_cache(
     return {
       aiOverview: detail.aiOverview ?? null,
       overviewLocales: detail.item.overviewLocales ?? [],
+      localizedSummary: detail.item.localizedSummary ?? null,
+      descriptionLanguage: detail.item.descriptionLanguage ?? null,
       readme: readMcpReadme(detail),
       relatedProduct: detail.relatedProduct ?? null,
       score: detail.score ?? null,
       searchIndexable: detail.searchIndexable ?? true,
+      toolsRevision: detail.toolsRevision ?? null,
       versions: detail.versions,
     };
   },
@@ -173,12 +189,36 @@ export async function getPublicMcpDetail(
     return {
       aiOverview: null,
       overviewLocales: [],
+      localizedSummary: null,
+      descriptionLanguage: null,
       readme: null,
       relatedProduct: null,
       score: null,
       searchIndexable: true,
+      toolsRevision: null,
       versions: [],
     };
+  }
+}
+
+const cachedMcpToolRevisions = unstable_cache(
+  async (identifier: string) => marketClient().listMcpToolRevisions(identifier),
+  ["public-mcp-tool-revisions"],
+  { revalidate: MCP_DETAIL_REVALIDATE_SECONDS },
+);
+
+/**
+ * The newest page of the change log of the tool list the page shows
+ * (`GET /v1/mcp/:identifier/tools/revisions`); null when it cannot be read —
+ * the page then goes without the change log.
+ */
+export async function getPublicMcpToolRevisions(
+  identifier: string,
+): Promise<ListMarketMcpToolRevisionsResponse | null> {
+  try {
+    return await cachedMcpToolRevisions(identifier);
+  } catch {
+    return null;
   }
 }
 

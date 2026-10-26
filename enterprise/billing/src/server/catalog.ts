@@ -33,12 +33,6 @@ export type BillingCatalog = {
   topups: Record<TopupUnitType, TopupCatalogEntry>;
 };
 
-export type PricingDisplayPlan = {
-  id: "free" | "pro" | "team";
-  monthlyPrice: number;
-  yearlyPrice: number;
-};
-
 export function createBillingCatalog(
   runtimeConfig: BillingRuntimeConfig,
 ): BillingCatalog {
@@ -142,7 +136,6 @@ export function resolveSubscriptionProduct(input: {
 
 export function validateBillingCatalog(input: {
   runtimeConfig: BillingRuntimeConfig;
-  pricingDisplay?: PricingDisplayPlan[];
   subscriptionPlanFamilies?: SubscriptionPlanFamily[];
   topupUnitTypes?: TopupUnitType[];
 }) {
@@ -159,7 +152,11 @@ export function validateBillingCatalog(input: {
     : Object.values(catalog.topups);
 
   for (const entry of subscriptionEntries) {
-    const quota = getPlanQuota(entry.planFamily, entry.quotaSeatCount);
+    const quota = getPlanQuota(
+      input.runtimeConfig,
+      entry.planFamily,
+      entry.quotaSeatCount,
+    );
     if (quota.monthlyCreditsGrant <= 0 || quota.monthlyPagesLimit <= 0) {
       errors.push(`Missing quota for active plan ${entry.planFamily}`);
     }
@@ -186,30 +183,6 @@ export function validateBillingCatalog(input: {
 
     if (providerRequiresProducts && !entry.productId) {
       errors.push(`Missing provider product for ${entry.unitType} top-up`);
-    }
-  }
-
-  if (input.pricingDisplay) {
-    const pro = input.pricingDisplay.find((plan) => plan.id === "pro");
-    const team = input.pricingDisplay.find((plan) => plan.id === "team");
-    if (
-      pro &&
-      (pro.monthlyPrice !==
-        catalog.subscriptions.individual_pro.monthlyAmountCents ||
-        pro.yearlyPrice !==
-          catalog.subscriptions.individual_pro.yearlyAmountCents)
-    ) {
-      errors.push("Pricing display amount differs from individual_pro catalog");
-    }
-
-    if (
-      team &&
-      (team.monthlyPrice !==
-        catalog.subscriptions.team_standard.monthlyAmountCents ||
-        team.yearlyPrice !==
-          catalog.subscriptions.team_standard.yearlyAmountCents)
-    ) {
-      errors.push("Pricing display amount differs from team_standard catalog");
     }
   }
 

@@ -227,7 +227,13 @@ export async function findStoredIconProvenance(
 ): Promise<
   Map<
     string,
-    { selfDescription?: unknown; githubRegistry?: unknown; iconProbe?: unknown }
+    {
+      selfDescription?: unknown;
+      githubRegistry?: unknown;
+      iconProbe?: unknown;
+      iconCandidates?: unknown;
+      iconDecision?: unknown;
+    }
   >
 > {
   if (versionIds.length === 0) {
@@ -239,6 +245,8 @@ export async function findStoredIconProvenance(
       selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
       githubRegistry: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'githubRegistry'`,
       iconProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconProbe'`,
+      iconCandidates: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconCandidates'`,
+      iconDecision: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconDecision'`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
@@ -249,6 +257,8 @@ export async function findStoredIconProvenance(
         selfDescription: row.selfDescription ?? undefined,
         githubRegistry: row.githubRegistry ?? undefined,
         iconProbe: row.iconProbe ?? undefined,
+        iconCandidates: row.iconCandidates ?? undefined,
+        iconDecision: row.iconDecision ?? undefined,
       },
     ]),
   );
@@ -381,7 +391,9 @@ export async function upsertMarketMcp(input: {
         // tools, so a manifest that arrives with none keeps the tools a
         // stdio start listed; and the provenance keys the validation owns
         // are carried over unless this sync supplies them itself (a remote
-        // probe's `selfDescription` and `validatedAt` win).
+        // probe's `selfDescription` and `validatedAt` win). So are the
+        // records the README fetch (`repositoryMetadata`) and the summary
+        // translation pass (`summaryTranslation`) keep on the version.
         manifestJson: sql`case
           when jsonb_array_length(coalesce(excluded.manifest_json -> 'tools', '[]'::jsonb)) = 0
             and ${mcpServerVersions.provenanceJson} #>> '{selfDescription,source}' = 'stdio-sandbox'
@@ -393,7 +405,9 @@ export async function upsertMarketMcp(input: {
           'selfDescription', ${mcpServerVersions.provenanceJson} -> 'selfDescription',
           'validatedAt', ${mcpServerVersions.provenanceJson} -> 'validatedAt',
           'validation', ${mcpServerVersions.provenanceJson} -> 'validation',
-          'stdioValidation', ${mcpServerVersions.provenanceJson} -> 'stdioValidation'
+          'stdioValidation', ${mcpServerVersions.provenanceJson} -> 'stdioValidation',
+          'repositoryMetadata', ${mcpServerVersions.provenanceJson} -> 'repositoryMetadata',
+          'summaryTranslation', ${mcpServerVersions.provenanceJson} -> 'summaryTranslation'
         )) || excluded.provenance_json`,
         // Same first-publish preservation as the item row.
         publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,

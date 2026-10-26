@@ -1,13 +1,12 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import {
   mcpEndpointHost,
   type McpPublicFacts,
 } from "../../../../lib/mcp-facts";
-import { transportLabel } from "../../../../lib/mcp-labels";
 import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 
 /**
@@ -26,13 +25,14 @@ export function McpFactsPanel({
   facts: McpPublicFacts;
 }) {
   const t = useTranslations("mcp.facts");
-  const tAuth = useTranslations("mcp.authMethod");
+  const locale = useLocale();
   const tTemplate = useTranslations("mcp.template");
+  // Only what the top card and the badges do not already say: transport,
+  // auth, tool count and the repository/homepage links are all there.
   const rows: Array<{
     key: string;
     label: string;
     value: React.ReactNode;
-    note?: string;
   }> = [
     ...(facts.publisherDomain
       ? [
@@ -46,29 +46,6 @@ export function McpFactsPanel({
     ...(facts.endpointHost
       ? [{ key: "endpoint", label: t("endpoint"), value: facts.endpointHost }]
       : []),
-    {
-      key: "transport",
-      label: t("transport"),
-      value: transportLabel(facts.transport),
-    },
-    {
-      key: "auth",
-      label: t("auth"),
-      value: tAuth(facts.authMethod),
-      note: tAuth(
-        `explain.${facts.authExplanation.key}`,
-        facts.authExplanation.values,
-      ),
-    },
-    ...(facts.toolCount > 0
-      ? [
-          {
-            key: "tools",
-            label: t("tools"),
-            value: t("toolsCount", { count: facts.toolCount }),
-          },
-        ]
-      : []),
     ...(facts.documentationUrl
       ? [
           {
@@ -78,21 +55,19 @@ export function McpFactsPanel({
           },
         ]
       : []),
-    ...(facts.repoUrl
+    ...(facts.probedAt
       ? [
           {
-            key: "repository",
-            label: t("repository"),
-            value: <FactLink href={facts.repoUrl} />,
-          },
-        ]
-      : []),
-    ...(facts.homepageUrl
-      ? [
-          {
-            key: "homepage",
-            label: t("homepage"),
-            value: <FactLink href={facts.homepageUrl} />,
+            key: "probed",
+            label: t("probed"),
+            value: (
+              <time dateTime={facts.probedAt}>{new Intl.DateTimeFormat(locale, {
+                  day: "numeric",
+                  month: "short",
+                  timeZone: "UTC",
+                  year: "numeric",
+                }).format(new Date(facts.probedAt))}</time>
+            ),
           },
         ]
       : []),
@@ -111,19 +86,16 @@ export function McpFactsPanel({
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         {t("lead")}
       </p>
-      <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-        {rows.map((row) => (
-          <div className="min-w-0" data-fact={row.key} key={row.key}>
-            <dt className="text-xs text-zinc-500">{row.label}</dt>
-            <dd className="mt-1 break-words font-medium">{row.value}</dd>
-            {row.note ? (
-              <dd className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                {row.note}
-              </dd>
-            ) : null}
-          </div>
-        ))}
-      </dl>
+      {rows.length > 0 ? (
+        <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+          {rows.map((row) => (
+            <div className="min-w-0" data-fact={row.key} key={row.key}>
+              <dt className="text-xs text-zinc-500">{row.label}</dt>
+              <dd className="mt-1 break-words font-medium">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
     </section>
   );
 }

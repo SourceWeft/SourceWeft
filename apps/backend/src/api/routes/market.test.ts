@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   findMcp: vi.fn(),
   findMcpVersion: vi.fn(),
   listMcp: vi.fn(),
+  listMcpToolRevisions: vi.fn(),
   isMarketAdmin: vi.fn(),
   requireSession: vi.fn(),
   readmeStatus: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../../modules/market/read-repository", () => ({
   findMcp: mocks.findMcp,
   findMcpVersion: mocks.findMcpVersion,
   listMcp: mocks.listMcp,
+  listMcpToolRevisions: mocks.listMcpToolRevisions,
 }));
 vi.mock("../../modules/market/overview/admin", () => ({
   findMcpOverviewAdminState: mocks.overviewState,
@@ -234,6 +236,10 @@ test("an identifier is decoded once: %2F is a slash, and a literal % is a name t
     mocks.findMcpVersion.mock.calls[1]?.[0],
     "io.github.acme/weather",
   );
+  // The public manifest is a visitor's view: it shows the reference tools.
+  assert.deepEqual(mocks.findMcpVersion.mock.calls[1]?.[2], {
+    referenceTools: true,
+  });
 });
 
 test("an admin route answers 404, not 500, for an identifier with a literal %", async () => {
@@ -354,7 +360,14 @@ test("the detail answer carries the AI overview in the asked-for locale", async 
   assert.deepEqual(body.item.overviewLocales, ["en", "zh-TW"]);
   assert.deepEqual(mocks.findMcp.mock.calls[0], [
     "io.github.acme/weather",
-    { locale: "zh-TW", relatedProduct: true },
+    // The detail also asks for the tools revision and the reference tools (a
+    // visitor's view); no other reader does.
+    {
+      locale: "zh-TW",
+      relatedProduct: true,
+      toolsRevision: true,
+      referenceTools: true,
+    },
   ]);
 
   // English when not asked; a language the market does not write is refused.
@@ -362,6 +375,8 @@ test("the detail answer carries the AI overview in the asked-for locale", async 
   assert.deepEqual(mocks.findMcp.mock.calls[1]?.[1], {
     locale: undefined,
     relatedProduct: true,
+    toolsRevision: true,
+    referenceTools: true,
   });
   const invalid = await createTestApp().request(
     "/v1/mcp/io.github.acme%2Fweather?locale=fr",
@@ -619,4 +634,50 @@ test("categories are named and described in the language asked for", async () =>
     description: "股票、加密貨幣、交易、會計、銀行、市場行情與金融資料。",
   });
   assert.equal((await app.request("/v1/mcp/categories?locale=fr")).status, 400);
+});
+
+test("the tool revision history is paged, bounded and 404 for an unknown server", async () => {
+  const page = {
+    source: "owner",
+    nextBefore: 3,
+    items: [
+      {
+        source: "owner",
+        revision: 5,
+        current: true,
+        withdrawn: false,
+        toolsCount: 2,
+        serverVersion: null,
+        observedAt: "2026-10-24T10:00:00.000Z",
+        lastConfirmedAt: "2026-10-24T10:00:00.000Z",
+        added: ["a"],
+        removed: [],
+        changed: [],
+      },
+    ],
+  };
+  mocks.listMcpToolRevisions.mockReset().mockResolvedValue(page);
+  const url = `/v1/mcp/${encodeURIComponent("io.github.acme/weather")}/tools/revisions`;
+
+  const ok = await createTestApp().request(`${url}?limit=2&before=7`);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), page);
+  // The query is validated and defaulted; a `source` parameter is not a thing.
+  assert.deepEqual(mocks.listMcpToolRevisions.mock.calls[0], [
+    "io.github.acme/weather",
+    { limit: 2, before: 7 },
+  ]);
+  await createTestApp().request(`${url}?source=member-observed`);
+  assert.deepEqual(mocks.listMcpToolRevisions.mock.calls[1], [
+    "io.github.acme/weather",
+    { limit: 20, before: undefined },
+  ]);
+
+  for (const bad of ["?limit=0", "?limit=51", "?before=0", "?before=3000000000", "?limit=x"]) {
+    assert.equal((await createTestApp().request(`${url}${bad}`)).status, 400, bad);
+  }
+  assert.equal(mocks.listMcpToolRevisions.mock.calls.length, 2);
+
+  mocks.listMcpToolRevisions.mockResolvedValue(null);
+  assert.equal((await createTestApp().request(url)).status, 404);
 });

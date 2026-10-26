@@ -17,14 +17,16 @@ import {
   LockKeyhole,
 } from "lucide-react";
 import { MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED } from "@sourceweft/market-contracts";
-import type {
-  MarketItemSummary,
-  MarketMcpProductGroup,
-} from "@sourceweft/market-sdk";
+import type { MarketMcpProductGroup } from "@sourceweft/market-sdk";
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
-import { mcpDocumentationUrl, publicMcpFacts } from "../../../../lib/mcp-facts";
+import {
+  mcpDocumentationUrl,
+  mcpGithubAccount,
+  publicMcpFacts,
+} from "../../../../lib/mcp-facts";
+import { relatedMcpItems } from "../../../../lib/mcp-related";
 import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -46,6 +48,7 @@ import {
 } from "../../../seo";
 import {
   getPublicMcpDetail,
+  getPublicMcpToolRevisions,
   getPublicMcpManifest,
   isMarketNotFound,
   listPublicMcp,
@@ -59,12 +62,11 @@ import {
   mcpAuthExplanation,
   mcpAuthMethod,
 } from "../../../../lib/mcp-auth-method";
-import {
-  mcpToolsValidation,
-  mcpToolsValidationReasonKey,
-} from "../../../../lib/mcp-tools-validation";
+import { mcpToolsStatus } from "../../../../lib/mcp-tools-status";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
+import { McpAgentPrompt } from "../_components/mcp-agent-prompt";
 import { McpFactsPanel } from "../_components/mcp-facts-panel";
+import { McpToolsReference } from "../_components/mcp-tools-reference";
 import {
   ExternalTextLink,
   formatDate,
@@ -74,9 +76,12 @@ import {
   McpClaimedBadge,
   McpDeprecatedBadge,
   mcpDetailSeoDescription,
+  McpOfficialPublisherMark,
   mcpPath,
+  mcpPrimaryCategory,
   McpRuntimeBadge,
   McpToolRows,
+  mcpToolsStatusText,
   McpTransportBadge,
   McpVerificationBadge,
   publicMcpDescription,
@@ -89,6 +94,7 @@ import { remoteMcpClientConfig } from "../_components/mcp-install";
 import { mcpClaimHref } from "../../../../lib/mcp-claims";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 import { McpScoreCard } from "../_components/mcp-score";
+import { McpToolChangeLog } from "../_components/mcp-tool-change-log";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
 // is injected at container start, so a build-time render would bake in the
@@ -96,6 +102,7 @@ import { McpScoreCard } from "../_components/mcp-score";
 export const dynamic = "force-dynamic";
 
 const MAX_JSON_LD_FEATURES = 50;
+const INTEGRATIONS_INITIAL = 5;
 
 type PageProps = {
   params: Promise<{ locale: string; identifier: string }>;
@@ -111,30 +118,6 @@ async function loadMcp(identifier: string) {
     }
     throw error;
   }
-}
-
-function relatedMcpItems(input: {
-  currentIdentifier: string;
-  items: MarketItemSummary[];
-  categories: string[];
-  runtime: string;
-  transport: string;
-}) {
-  const categorySet = new Set(input.categories);
-  return input.items
-    .filter((item) => item.identifier !== input.currentIdentifier)
-    .map((item) => ({
-      item,
-      score:
-        item.categories.filter((category) => categorySet.has(category)).length *
-          4 +
-        (item.runtime === input.runtime ? 1 : 0) +
-        (item.transport === input.transport ? 1 : 0) +
-        (item.official || item.verified ? 1 : 0),
-    }))
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 3)
-    .map((entry) => entry.item);
 }
 
 /**
@@ -160,9 +143,14 @@ export function productGroupView(
   if (!group) {
     return null;
   }
-  const others = group.members.filter(
-    (member) => member.identifier !== currentIdentifier,
-  );
+  // The product's own server first, the rest in the catalog's order.
+  const others = group.members
+    .filter((member) => member.identifier !== currentIdentifier)
+    .sort(
+      (left, right) =>
+        Number(right.identifier === group.officialIdentifier) -
+        Number(left.identifier === group.officialIdentifier),
+    );
   const official =
     group.officialIdentifier === currentIdentifier
       ? null
@@ -301,26 +289,82 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const t = await getTranslations("mcp.detail");
   const tAuth = await getTranslations("mcp.authMethod");
   const tValidation = await getTranslations("mcp.toolsValidation");
+  const tStatus = await getTranslations("mcp.toolsStatus");
   const tScore = await getTranslations("mcp.score");
   const decodedIdentifier = decodeURIComponent(identifier);
   // AI text in the visitor's language, English when there is none in it.
   const overviewLocale = mcpOverviewLocale(locale);
   const [
     authState,
-    result,
-    { aiOverview, readme, relatedProduct, score, versions },
+    {
+      result,
+      detail: {
+        aiOverview,
+        descriptionLanguage,
+        localizedSummary,
+        readme,
+        score,
+        toolsRevision,
+        versions,
+      },
+      productGroup,
+      showIntegrations,
+      relatedMarket,
+    },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadMcp(decodedIdentifier),
-    getPublicMcpDetail(decodedIdentifier, overviewLocale),
+    // The related read needs the manifest's categories and the detail's
+    // product group, so it starts as soon as those two cached reads resolve,
+    // alongside auth and categories instead of after them (#389). A manifest
+    // failure (notFound / market outage) rejects this branch before any
+    // related read starts, with the same semantics as before.
+    Promise.all([
+      loadMcp(decodedIdentifier),
+      getPublicMcpDetail(decodedIdentifier, overviewLocale),
+    ]).then(async ([loaded, detail]) => {
+      const group = productGroupView(
+        detail.relatedProduct,
+        loaded.item.identifier,
+      );
+      // "More servers like X" only where "Other X integrations" is not shown,
+      // and then only for servers that share meaningful words, not just a
+      // category.
+      const integrations = Boolean(group && group.others.length > 0);
+      return {
+        result: loaded,
+        detail,
+        productGroup: group,
+        showIntegrations: integrations,
+        relatedMarket:
+          !integrations && loaded.item.categories.length > 0
+            ? await listPublicMcp({
+                category: loaded.item.categories.join(","),
+                includeDesktopOnly: true,
+                limit: 12,
+                locale: overviewLocale,
+              })
+            : { items: [] },
+      };
+    }),
     listPublicMcpCategories(locale),
   ]);
   const { item, manifest, version } = result;
+  // Only a list with a history has a change log: one more read, not one per card.
+  const toolRevisions = toolsRevision
+    ? await getPublicMcpToolRevisions(decodedIdentifier)
+    : null;
   const authExplanation = mcpAuthExplanation(manifest.auth);
-  // A stdio package the sandbox could not list tools for says so in place
-  // of "0 tools": in the facts, the section nav and the empty tool list.
-  const toolsValidation = mcpToolsValidation(item, versions);
+  // An empty list says why (sign-in required, not validated, failed, read
+  // and empty, not indexed yet) in place of "0 tools": in the facts, the
+  // section nav and the empty tool list.
+  const toolsStatus = mcpToolsStatus({
+    count: manifest.tools.length,
+    item: { ...item, transport: manifest.transport },
+    provenanceJson: version.provenanceJson,
+    versions,
+  });
+  const toolsStatusText = mcpToolsStatusText(toolsStatus, tStatus, tValidation);
   // The verified owner listed the tools from their own session (Issue #367,
   // W7): said beside the list, since the registry/probe did not find them.
   const toolsListedByOwner =
@@ -328,29 +372,23 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     manifest.tools.some(
       (tool) => tool.source === MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED,
     );
-  const toolsValidationReason = toolsValidation
-    ? tValidation(
-        `reason.${mcpToolsValidationReasonKey(toolsValidation.reason)}`,
-      )
-    : null;
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
-  const relatedMarket =
-    item.categories.length > 0
-      ? await listPublicMcp({
-          category: item.categories.join(","),
-          includeDesktopOnly: true,
-          limit: 12,
-          locale: overviewLocale,
-        })
-      : { items: [] };
   const relatedItems = relatedMcpItems({
-    categories: item.categories,
-    currentIdentifier: item.identifier,
-    items: relatedMarket.items,
-    runtime: item.runtime,
-    transport: manifest.transport,
+    candidates: relatedMarket.items,
+    current: item,
   });
-  const productGroup = productGroupView(relatedProduct, item.identifier);
+  // Delivery: a hosted-only service (a remote endpoint with nothing to
+  // install or read) has no license or language to declare; the score
+  // decides this from the registry entry, so the page follows it.
+  const hostedOnly =
+    score?.items.find((entry) => entry.key === "hasLicense")?.applicable ===
+    false;
+  const githubAccount = mcpGithubAccount(item);
+  // The item's values are the resolved ones (GitHub, packages, registry,
+  // then the owner's, normalised); the manifest's raw package value would
+  // hide them.
+  const license = item.license ?? null;
+  const language = item.language ?? null;
   const trusted = Boolean(item.official || item.verified);
   const description = publicMcpDescription({ item, manifest });
   const providerName = item.providerName ?? manifest.providerName;
@@ -371,7 +409,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       ? manifest.description
       : null;
   const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
-  const primaryCategory = item.categories[0];
+  const primaryCategory = mcpPrimaryCategory(item.categories);
   const installHref = authState.isSignedIn
     ? `/dashboard/mcp?mcp=${encodeURIComponent(item.identifier)}`
     : "/auth/sign-in";
@@ -381,24 +419,16 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     ...(shownReadme ? [["readme", t("nav.readme")]] : []),
     [
       "tools",
-      toolsValidation
-        ? t("nav.toolsNotValidated")
-        : t("nav.tools", { count: manifest.tools.length }),
+      toolsStatus.kind === "listed"
+        ? t("nav.tools", { count: manifest.tools.length })
+        : t("nav.toolsPlain"),
     ],
     ...(versions.length > 0
       ? [["versions", t("nav.versions", { count: versions.length })]]
       : []),
     ...(score ? [["score", tScore("nav")]] : []),
-    ...(productGroup && productGroup.others.length > 0
-      ? [
-          [
-            "integrations",
-            t("nav.integrations", {
-              brand: productGroup.brand,
-              count: productGroup.others.length,
-            }),
-          ],
-        ]
+    ...(productGroup && showIntegrations
+      ? [["integrations", t("nav.integrations", { brand: productGroup.brand })]]
       : []),
     ...(relatedItems.length > 0 ? [["related", t("nav.related")]] : []),
   ];
@@ -521,6 +551,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     <span data-publisher-domain={item.publisher.domain}>
                       {t("publishedBy", { domain: item.publisher.domain })}
                     </span>
+                  ) : githubAccount ? (
+                    <span data-github-account={githubAccount}>
+                      {t("publishedByGithub", { owner: githubAccount })}
+                    </span>
+                  ) : null}
+                  {item.publisher?.endpointMatch ? (
+                    <McpOfficialPublisherMark domain={item.publisher.domain} />
                   ) : null}
                   <span>v{version.version}</span>
                   <span>
@@ -529,9 +566,39 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 </p>
               </div>
             </div>
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-              {item.summary || description}
-            </p>
+            {localizedSummary && !aiOverview ? (
+              <div className="mt-6 max-w-3xl" data-ai-translated="">
+                <p
+                  className="text-lg leading-8 text-zinc-600 dark:text-zinc-300"
+                  lang={localizedSummary.locale}
+                >
+                  {localizedSummary.text}
+                </p>
+                <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="mr-1.5 rounded border border-zinc-300 px-1.5 py-0.5 dark:border-white/15">
+                    {t("translatedSummary.badge")}
+                  </span>
+                  {t("translatedSummary.note")}
+                </p>
+                <details className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                  <summary className="cursor-pointer">
+                    {t("translatedSummary.original")}
+                  </summary>
+                  <p
+                    className="mt-1"
+                    {...(descriptionLanguage && descriptionLanguage !== "und"
+                      ? { lang: descriptionLanguage }
+                      : {})}
+                  >
+                    {item.summary}
+                  </p>
+                </details>
+              </div>
+            ) : (
+              <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
+                {item.summary || description}
+              </p>
+            )}
             {productGroup?.official ? (
               <p
                 className="mt-3 text-sm text-zinc-500 dark:text-zinc-400"
@@ -556,15 +623,17 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
               {item.deprecated ? <McpDeprecatedBadge /> : null}
               <McpTransportBadge transport={manifest.transport} />
               <McpRuntimeBadge item={item} />
-              {item.categories.map((category) => (
-                <LocaleLink
-                  className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
-                  href={`/mcp?category=${encodeURIComponent(category)}`}
-                  key={category}
-                >
-                  {mcpCategoryLabel(category, categoryNames)}
-                </LocaleLink>
-              ))}
+              {item.categories
+                .filter((category) => category !== "other")
+                .map((category) => (
+                  <LocaleLink
+                    className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
+                    href={`/mcp?category=${encodeURIComponent(category)}`}
+                    key={category}
+                  >
+                    {mcpCategoryLabel(category, categoryNames)}
+                  </LocaleLink>
+                ))}
             </div>
           </div>
 
@@ -573,17 +642,12 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {[
-                  toolsValidationReason
-                    ? {
-                        label: t("tools"),
-                        value: tValidation("notValidated"),
-                        explanation: tValidation("explain", {
-                          reason: toolsValidationReason,
-                        }),
-                      }
+                  toolsStatus.kind === "listed"
+                    ? { label: t("tools"), value: String(toolsStatus.count) }
                     : {
                         label: t("tools"),
-                        value: String(manifest.tools.length),
+                        value: toolsStatusText.label,
+                        explanation: toolsStatusText.explain,
                       },
                   {
                     label: t("auth"),
@@ -595,33 +659,47 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       authExplanation.values,
                     ),
                   },
-                  {
-                    label: t("license"),
-                    value: manifest.license ?? item.license ?? t("unknown"),
-                  },
-                  {
-                    label: t("language"),
-                    value: manifest.language ?? item.language ?? t("unknown"),
-                  },
-                ].map(({ label, value, explanation }) => (
-                  <div className="min-w-0" key={label}>
-                    <dt className="text-xs text-zinc-500">{label}</dt>
-                    <dd
-                      className={
-                        explanation
-                          ? "mt-1 break-words font-medium"
-                          : "mt-1 truncate font-medium"
-                      }
-                    >
-                      {value}
-                    </dd>
-                    {explanation ? (
-                      <dd className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                        {explanation}
+                  // Unknown values are left out, not shown as "Unknown"; a
+                  // hosted-only service shows what it is instead.
+                  ...(hostedOnly
+                    ? [{ label: t("delivery"), value: t("hostedService") }]
+                    : [
+                        ...(license
+                          ? [{ label: t("license"), value: license }]
+                          : []),
+                        ...(language
+                          ? [{ label: t("language"), value: language }]
+                          : []),
+                      ]),
+                ].map(
+                  ({
+                    label,
+                    value,
+                    explanation,
+                  }: {
+                    label: string;
+                    value: string;
+                    explanation?: string;
+                  }) => (
+                    <div className="min-w-0" key={label}>
+                      <dt className="text-xs text-zinc-500">{label}</dt>
+                      <dd
+                        className={
+                          explanation
+                            ? "mt-1 break-words font-medium"
+                            : "mt-1 truncate font-medium"
+                        }
+                      >
+                        {value}
                       </dd>
-                    ) : null}
-                  </div>
-                ))}
+                      {explanation ? (
+                        <dd className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                          {explanation}
+                        </dd>
+                      ) : null}
+                    </div>
+                  ),
+                )}
               </dl>
               <LocaleLink
                 className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
@@ -700,7 +778,25 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   )}
                   {t("securityHeading")}
                 </div>
-                <p>{t("securityBody")}</p>
+                <div className="space-y-2">
+                  <p>{t("security.base")}</p>
+                  <p data-security-provenance>
+                    {item.publisher
+                      ? t(
+                          !manifest.endpointUrl
+                            ? "security.domainNoEndpoint"
+                            : item.publisher.endpointMatch
+                              ? "security.domain"
+                              : "security.domainOther",
+                          { domain: item.publisher.domain },
+                        )
+                      : githubAccount
+                        ? t("security.github", { owner: githubAccount })
+                        : t("security.unknown")}
+                  </p>
+                  {item.claimed ? <p>{t("security.claimed")}</p> : null}
+                  <p>{t("security.scope")}</p>
+                </div>
               </section>
 
               <section className={panelClassName}>
@@ -822,6 +918,14 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   </div>
 
                   {clientConfig ? (
+                    <McpAgentPrompt
+                      className={panelClassName}
+                      identifier={item.identifier}
+                      siteUrl={SITE_URL}
+                    />
+                  ) : null}
+
+                  {clientConfig ? (
                     <div className={panelClassName}>
                       <div className="flex items-center justify-between gap-3">
                         <div>
@@ -899,10 +1003,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     {t("toolsListedByOwnerHint")}
                   </p>
                 ) : null}
-                <McpToolRows
-                  tools={manifest.tools}
-                  validation={toolsValidation}
-                />
+                {manifest.toolsReference ? (
+                  <McpToolsReference reference={manifest.toolsReference} />
+                ) : null}
+                <McpToolRows status={toolsStatus} tools={manifest.tools} />
+                {toolRevisions ? (
+                  <McpToolChangeLog history={toolRevisions} />
+                ) : null}
               </section>
 
               {versions.length > 0 ? (
@@ -944,18 +1051,22 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 </section>
               ) : null}
 
-              {productGroup && productGroup.others.length > 0 ? (
+              {productGroup && showIntegrations ? (
                 <section className="scroll-mt-32" id="integrations">
-                  <SectionHeading
-                    count={productGroup.others.length}
-                    icon={Layers}
-                  >
+                  <SectionHeading icon={Layers}>
                     {t("integrationsHeading", { brand: productGroup.brand })}
                   </SectionHeading>
+                  {/* Five cards, the product's own first; the catalog loaded
+                      only part of the group, so no total is claimed. Every
+                      card here is the same product, so none repeats the
+                      verification badge. */}
                   <McpCardGrid
                     categoryNames={categoryNames}
                     className="md:grid-cols-2 xl:grid-cols-2"
+                    hideVerification
+                    initialCount={INTEGRATIONS_INITIAL}
                     items={productGroup.others}
+                    showMoreLabel={t("integrationsShowMore")}
                   />
                 </section>
               ) : null}

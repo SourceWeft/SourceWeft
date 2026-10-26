@@ -126,8 +126,12 @@ export async function updateShareLink(input: {
   targetId: string;
   noindex?: boolean;
   expiresAt?: Date | null;
+  publicRecordCollections?: readonly string[];
 }) {
   const set: Partial<ShareLinkRow> = {};
+  if (input.publicRecordCollections !== undefined) {
+    set.publicRecordCollections = [...input.publicRecordCollections];
+  }
   if (input.noindex !== undefined) {
     set.noindex = input.noindex;
   }

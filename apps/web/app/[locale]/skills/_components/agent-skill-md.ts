@@ -12,6 +12,8 @@
  */
 import type { GetMarketSkillResponse } from "@sourceweft/market-sdk";
 
+import { untrustedLine } from "../../../../lib/untrusted-line";
+
 import {
   safeExternalUrl,
   scanFlagLabel,
@@ -26,7 +28,7 @@ export const CLI_DEFAULT_REGISTRY = "https://api.sourceweft.com";
  * A deployment other than SourceWeft's own has its own registry, which the CLI
  * has to be told about on every command.
  */
-function registryFlag(registryUrl: string) {
+export function registryFlag(registryUrl: string) {
   const registry = registryUrl.replace(/\/+$/, "");
   return registry === CLI_DEFAULT_REGISTRY ? "" : ` --registry ${registry}`;
 }
@@ -134,18 +136,6 @@ Browse the directory: ${site}/skills
 }
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/i;
-
-/**
- * One line of third-party text, safe to quote: no line breaks, control or
- * bidirectional-override characters, no backticks, capped in length.
- */
-function untrustedLine(value: string, max: number) {
-  const line = value
-    .replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}`]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
-}
 
 /**
  * `/skills/<slug>/install.md`: how an agent installs one skill — the facts to
@@ -304,6 +294,7 @@ export function llmsText(siteUrl: string): string {
 
 - [Installing skills with the SourceWeft CLI](${site}/skills/SKILL.md): how an agent searches, inspects and installs skills from the directory. Read this instead of scraping skill pages.
 - One skill's install guide: \`${site}/skills/<slug>/install.md\`, for the skill whose page is \`${site}/skills/<slug>\`.
+- One MCP server's connect guide: \`${site}/mcp/<identifier>/install.md\`, for the server whose page is \`${site}/mcp/<identifier>\` (the identifier URL-encoded, so its \`/\` is \`%2F\`).
 - [Skills directory](${site}/skills): the directory for people.
 `;
 }

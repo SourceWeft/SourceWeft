@@ -435,3 +435,135 @@ export const marketMcpOwnerOverrides = pgTable("market_mcp_owner_overrides", {
     .notNull()
     .defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// Tool revisions (Issue #367). Every source of a server's tool list — the
+// owner's submission, the platform's own snapshot, a member's authenticated
+// discovery — records a new revision whenever its canonicalised list differs
+// from the source's previous one. A revision number is the history of THIS
+// listing, not the server's own version (`server_version` is context only).
+// No member or team identifier is stored here. Written only by
+// `modules/market/tool-revisions`.
+// ---------------------------------------------------------------------------
+
+export type McpToolRevisionSource =
+  | "owner"
+  | "platform-indexed"
+  | "member-observed";
+
+export const marketMcpToolRevisions = pgTable(
+  "market_mcp_tool_revisions",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => mcpServers.id, { onDelete: "cascade" }),
+    source: text("source").$type<McpToolRevisionSource>().notNull(),
+    // 1, 2, 3 … per item and source; never reused or skipped.
+    revision: integer("revision").notNull(),
+    // sha256 of the canonical list (or of the withdrawal marker).
+    toolsHash: text("tools_hash").notNull(),
+    // The version of the canonicalisation that produced the hash.
+    canonicalVersion: integer("canonical_version").notNull(),
+    // The source took its list back (an owner cleared it, a block removed it):
+    // not the same as publishing a valid empty list.
+    withdrawn: boolean("withdrawn").notNull().default(false),
+    toolsCount: integer("tools_count").notNull().default(0),
+    // The bounded tool list as recorded. Null once the revision fell out of
+    // the latest fifty, when only `diff_json` is kept.
+    toolsJson: jsonb("tools_json").$type<unknown[]>(),
+    diffJson: jsonb("diff_json").$type<Record<string, unknown>>().notNull(),
+    // What the server called its own version at the time. Context only.
+    serverVersion: text("server_version"),
+    observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" })
+      .notNull(),
+    // Last time the same list was seen again.
+    lastConfirmedAt: timestamp("last_confirmed_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    // sha256 of the pinned endpoint (scheme, host, port, path, query) the list
+    // was read from, so a later change of the listing's endpoint shows the
+    // list as stale. Null for the owner's lists, which are not pinned. Never
+    // the endpoint itself.
+    endpointKey: text("endpoint_key"),
+    // The platform snapshot's approved reference profile (tier, role, scopes,
+    // date); never an account identifier. Null for the other sources.
+    referenceProfileJson: jsonb("reference_profile_json").$type<
+      Record<string, unknown>
+    >(),
+  },
+  (table) => [
+    check(
+      "market_mcp_tool_revisions_source_check",
+      sql`${table.source} in ('owner', 'platform-indexed', 'member-observed')`,
+    ),
+    check(
+      "market_mcp_tool_revisions_revision_check",
+      sql`${table.revision} >= 1`,
+    ),
+    uniqueIndex("market_mcp_tool_revisions_item_source_revision_uq").on(
+      table.itemId,
+      table.source,
+      table.revision,
+    ),
+  ],
+);
+
+// Icon dry-run state (Issue #367). One row per fetch scope — `site:<domain>`
+// for an official site's icons, `url:<sha256 of the URL>` for a declared image
+// — shared by every worker and listing: it holds the lease that keeps two
+// workers from fetching the same domain at once, the cached outcome, and when
+// the scope may be fetched again (30 days after a success, a bounded backoff
+// after an error). `market_mcp_icon_hash_domains` records which registrable
+// domains served a given image, so one image appearing under several unrelated
+// domains can be flagged as a template for review.
+// ---------------------------------------------------------------------------
+
+type McpIconFetchStatus = "ok" | "denied" | "deferred" | "error";
+
+export const marketMcpIconFetchState = pgTable(
+  "market_mcp_icon_fetch_state",
+  {
+    scope: text("scope").primaryKey(),
+    status: text("status").$type<McpIconFetchStatus>().notNull(),
+    resultJson: jsonb("result_json").$type<Record<string, unknown>>(),
+    errorCount: integer("error_count").notNull().default(0),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    check(
+      "market_mcp_icon_fetch_state_status_check",
+      sql`${table.status} in ('ok', 'denied', 'deferred', 'error')`,
+    ),
+  ],
+);
+
+export const marketMcpIconHashDomains = pgTable(
+  "market_mcp_icon_hash_domains",
+  {
+    sha256: text("sha256").notNull(),
+    // The registrable domain that served the image.
+    domain: text("domain").notNull(),
+    firstSeenAt: timestamp("first_seen_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "market_mcp_icon_hash_domains_pk",
+      columns: [table.sha256, table.domain],
+    }),
+  ],
+);

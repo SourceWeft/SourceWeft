@@ -103,6 +103,10 @@ export const mcpOwnerOverridesInputSchema = z
     documentationUrl: mcpOwnerUrlSchema.nullable().optional(),
     homepageUrl: mcpOwnerUrlSchema.nullable().optional(),
     repoUrl: mcpOwnerUrlSchema.nullable().optional(),
+    // The SPDX id or name of the license the code is released under, and its
+    // main programming language. Short labels, never HTML.
+    license: z.string().trim().max(120).nullable().optional(),
+    language: z.string().trim().max(64).nullable().optional(),
     deprecated: z.boolean().optional(),
   })
   .strict();

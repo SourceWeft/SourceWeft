@@ -12,5 +12,6 @@ export * from "./schema/skills-market";
 export * from "./schema/mcp-catalog";
 export * from "./schema/notes";
 export * from "./schema/artifacts";
+export * from "./schema/artifact-records";
 export * from "./schema/personas";
 export * from "./schema/local-execution";

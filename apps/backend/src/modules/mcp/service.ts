@@ -7,7 +7,10 @@ import {
 } from "@sourceweft/market-sdk";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { InterruptOnConfig } from "langchain";
-import type { ToolConfirmationRequest } from "@sourceweft/contracts";
+import type {
+  DiscoverWorkspaceMcpToolsResponse,
+  ToolConfirmationRequest,
+} from "@sourceweft/contracts";
 import type { Locale } from "@sourceweft/i18n";
 import { config } from "../../shared/config";
 import { createMcpRequestScope } from "./network";
@@ -24,6 +27,7 @@ import {
   isStaticMcpAuthType,
   mcpInstallAllowsOAuth,
   mcpInstallAllowsStaticCredential,
+  staticCredentialUsesOnlyDeclaredHeader,
 } from "./auth-methods";
 import { McpError } from "./errors";
 import {
@@ -31,6 +35,11 @@ import {
   langChainMcpServerKey,
   langChainMcpToolName,
 } from "./langchain-client";
+import {
+  boundMemberTools,
+  memberToolInput,
+  recordMemberToolObservation,
+} from "./member-tools";
 import { McpOAuthClientProvider } from "./oauth-provider";
 import {
   createDbMcpOAuthStore,
@@ -631,6 +640,13 @@ async function resolveMemberMcpAuth(input: {
   | {
       headers: Record<string, string>;
       authProvider?: OAuthClientProvider;
+      /**
+       * The tool list this connection returns may be shown on the public
+       * catalog: it is the member's OAuth session, a credential that sends
+       * only the listing's declared header, or no credential at all. Never a
+       * credential with headers of the member's own choosing.
+       */
+      publishable: boolean;
     }
   | { missing: "oauth" | "credential" }
 > {
@@ -646,6 +662,7 @@ async function resolveMemberMcpAuth(input: {
     if (status.connected && status.issuer) {
       return {
         headers: {},
+        publishable: true,
         authProvider: new McpOAuthClientProvider({
           redirectUrl: config.mcpOAuth.redirectUrl,
           clientName: config.mcpOAuth.clientName,
@@ -663,7 +680,10 @@ async function resolveMemberMcpAuth(input: {
   ) {
     const credential = await findWorkspaceMcpCredential(scope);
     if (credential && isStaticMcpAuthType(credential.authType)) {
-      return { headers: await headersFromCredential(credential) };
+      return {
+        headers: await headersFromCredential(credential),
+        publishable: staticCredentialUsesOnlyDeclaredHeader(install, credential),
+      };
     }
   }
   if (install.authType === "oauth") {
@@ -672,7 +692,7 @@ async function resolveMemberMcpAuth(input: {
   if (install.authType !== "none") {
     return { missing: "credential" };
   }
-  return { headers: {} };
+  return { headers: {}, publishable: true };
 }
 
 export class McpService {
@@ -1258,6 +1278,119 @@ export class McpService {
         },
         recoverable: true,
       });
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
+  /**
+   * The connecting member's own tool list for an install, discovered through
+   * THEIR connection (OAuth session or key) and returned to them only. Unlike
+   * testInstall it writes nothing: no shared `workspace_mcp_tools` rows and no
+   * change to the install's shared status or last error, so one member's
+   * account or failing credential never changes what another member sees.
+   * Bounded in count, per-tool size and time.
+   */
+  async discoverToolsForMember(input: {
+    workspaceId: string;
+    userId: string;
+    installId: string;
+  }): Promise<DiscoverWorkspaceMcpToolsResponse> {
+    const { workspace } = await requireMcpWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      permission: "mcp.manage",
+    });
+    const install = await findWorkspaceMcpInstall({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      installId: input.installId,
+    });
+    if (!install) {
+      throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
+    }
+    if (
+      install.transport === "stdio" ||
+      install.desktopOnly ||
+      !install.webExecutable
+    ) {
+      throw new McpError(
+        400,
+        "MCP_DESKTOP_ONLY",
+        "This MCP can only run from SourceWeft Desktop",
+      );
+    }
+    if (!install.endpointUrl) {
+      throw new McpError(
+        400,
+        "MCP_ENDPOINT_REQUIRED",
+        "MCP endpoint is required",
+      );
+    }
+    await assertSafeMcpEndpoint(install.endpointUrl, {
+      enforceAddressChecks: config.endpointAddressChecksEnabled,
+      allowedInternalOrigins: config.mcpAllowedInternalOrigins,
+    });
+
+    const auth = await resolveMemberMcpAuth({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      install,
+    });
+    if ("missing" in auth && auth.missing === "oauth") {
+      throw new McpError(
+        400,
+        "MCP_OAUTH_NOT_CONNECTED",
+        "Connect this MCP server before listing its tools",
+      );
+    }
+    // A server that wants a key the member has not saved: say so, instead of
+    // an unauthenticated call that would come back as a 502.
+    if ("missing" in auth) {
+      throw new McpError(
+        400,
+        "MCP_NOT_CONNECTED",
+        "Connect this MCP server before listing its tools",
+      );
+    }
+    const { headers, authProvider, publishable } = auth;
+    const client = createLangChainMcpClient({ install, headers, authProvider });
+    try {
+      const tools = await withTimeout(
+        client.getTools(),
+        MCP_GET_TOOLS_TIMEOUT_MS,
+        `MCP ${install.name} tool discovery`,
+      );
+      const { response, accepted } = boundMemberTools(
+        tools.map((tool) =>
+          memberToolInput(
+            tool,
+            stripLangChainMcpToolPrefix({
+              serverKey: langChainMcpServerKey(install),
+              toolName: tool.name,
+            }),
+          ),
+        ),
+      );
+      recordMemberToolObservation({
+        install,
+        publishable,
+        tools: accepted,
+        complete: !response.truncated && response.skippedOversize === 0,
+      });
+      return response;
+    } catch (error) {
+      if (error instanceof McpError) {
+        throw error;
+      }
+      throw new McpError(
+        502,
+        "MCP_MEMBER_DISCOVERY_FAILED",
+        redactErrorMessage(
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
     } finally {
       await client.close().catch(() => undefined);
     }

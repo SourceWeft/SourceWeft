@@ -36,6 +36,35 @@ const mocks = vi.hoisted(() => ({
       url: `https://assets.test/market/mcp-icons/${input.domain}/stored.png`,
     }),
   ),
+  // The icon dry-run step (Issue #367) is covered by its own tests; here it
+  // only has to hand its provenance to the upsert and never change the icon.
+  iconDryRun: vi.fn(
+    async (
+      _entries: unknown[],
+      _now: Date,
+    ): Promise<{
+      provenance: Map<string, { iconCandidates?: unknown; iconDecision?: unknown }>;
+      counts: Record<string, number>;
+    }> => ({
+      provenance: new Map(),
+      counts: {
+        entries: 0,
+        collected: 0,
+        reused: 0,
+        skipped: 0,
+        failed: 0,
+        sitesScraped: 0,
+        candidatesAccepted: 0,
+        picks: 0,
+        placeholders: 0,
+        differs: 0,
+      },
+    }),
+  ),
+}));
+
+vi.mock("./icons/federation-step", () => ({
+  registryIconDryRun: mocks.iconDryRun,
 }));
 
 vi.mock("./icons/store", () => ({
@@ -2201,4 +2230,104 @@ test("issue #367: a failed fresh probe keeps the version's stored one, however o
     input.provenanceJson.toolsListing.listedAt,
     probedAt.toISOString(),
   );
+});
+
+test("issue #367: the icon dry-run gets each entry's evidence, rides on the provenance and leaves the displayed icon alone", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const versionId = mcpServerVersionId("com.notion/mcp", "1.0.1");
+  const iconCandidates = { version: 1, checkedAt: "2026-10-24T00:00:00.000Z", items: [] };
+  const iconDecision = { version: 1, outcome: "placeholder", reasons: ["no-candidates"] };
+  mocks.iconDryRun.mockResolvedValueOnce({
+    provenance: new Map([[versionId, { iconCandidates, iconDecision }]]),
+    counts: {
+      entries: 1,
+      collected: 1,
+      reused: 0,
+      skipped: 0,
+      failed: 0,
+      sitesScraped: 1,
+      candidatesAccepted: 2,
+      picks: 0,
+      placeholders: 1,
+      differs: 1,
+    },
+  });
+  stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          websiteUrl: "https://www.notion.com",
+          repository: { url: "https://github.com/makenotion/notion-mcp" },
+          icons: [{ src: "https://cdn.notion.test/icon.png" }],
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  // The step was handed the entry's declarations and today's icon.
+  const [entries] = mocks.iconDryRun.mock.calls[0]!;
+  assert.deepEqual(entries, [
+    {
+      key: versionId,
+      identifier: "com.notion/mcp",
+      endpointUrl: "https://mcp.notion.com/mcp",
+      repositoryUrl: "https://github.com/makenotion/notion-mcp",
+      registryIconUrl: "https://cdn.notion.test/icon.png",
+      registryWebsiteUrl: "https://www.notion.com",
+      verified: true,
+      selfDescription: undefined,
+      authMetadata: undefined,
+      faviconUrl: undefined,
+      current: {
+        iconSource: "registry",
+        iconUrl: "https://cdn.notion.test/icon.png",
+      },
+    },
+  ]);
+  // Its records are stored; the displayed icon is still the chain's.
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.provenanceJson.iconCandidates, iconCandidates);
+  assert.deepEqual(input.provenanceJson.iconDecision, iconDecision);
+  assert.equal(input.manifest.iconUrl, "https://cdn.notion.test/icon.png");
+  assert.equal(input.manifest.iconSource, "registry");
+  // Counts reach the run summary.
+  assert.equal(result.iconDryRun.sitesScraped, 1);
+  assert.equal(result.iconDryRun.differs, 1);
+});
+
+test("issue #367: the displayed icon is the same whatever the dry-run decides", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const versionId = mcpServerVersionId("io.github.acme/server-1", "1.0.0");
+  const run = async (provenance: Map<string, { iconCandidates?: unknown; iconDecision?: unknown }>) => {
+    mocks.upsert.mockClear();
+    mocks.iconDryRun.mockResolvedValueOnce({
+      provenance,
+      counts: {
+        entries: 1, collected: 1, reused: 0, skipped: 0, failed: 0, sitesScraped: 0,
+        candidatesAccepted: 0, picks: 0, placeholders: 0, differs: 0,
+      },
+    });
+    stubRegistryAndEndpoints([serverEntry(1)], () => new Response("{}", { status: 200 }));
+    await ingestFromRegistry({ source: "registry.test", baseUrl: "https://registry.test", verified: true });
+    const input = mocks.upsert.mock.calls[0]?.[0];
+    return [input.manifest.iconUrl, input.manifest.iconSource];
+  };
+  const withPick = await run(
+    new Map([[versionId, { iconDecision: { outcome: "pick", pick: { storedUrl: "https://assets.test/x.png" } } }]]),
+  );
+  const withNothing = await run(new Map());
+  assert.deepEqual(withPick, withNothing);
+  assert.deepEqual(withNothing, ["https://github.com/acme.png?size=128", "github-avatar"]);
 });

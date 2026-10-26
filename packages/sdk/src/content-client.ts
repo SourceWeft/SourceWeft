@@ -1,3 +1,10 @@
+import type {
+  ArtifactRecordOperation,
+  ArtifactRecordRequest,
+  ArtifactRecordResult,
+  ArtifactRecordScope,
+  ArtifactRecordsStatus,
+} from "@sourceweft/contracts/artifact-records";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
@@ -131,6 +138,9 @@ import type {
   UpsertWorkspaceMcpCredentialsRequest,
   UpsertWorkspaceMcpCredentialsResponse,
   TestWorkspaceMcpInstallResponse,
+  DiscoverWorkspaceMcpToolsResponse,
+  WorkspaceMcpOAuthCompletion,
+  WorkspaceMcpOAuthStartResponse,
   UpdateWorkspaceSkillRequest,
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
@@ -164,6 +174,26 @@ export type StopThreadRunResponse =
 /** `?locale=…` when a language is asked for, nothing otherwise. */
 function localeQuery(locale: string | undefined) {
   return locale ? `?${new URLSearchParams({ locale }).toString()}` : "";
+}
+
+function artifactVersionRecordsPath(
+  workspaceId: string,
+  artifactId: string,
+  artifactVersionId: string,
+) {
+  return `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/versions/${encode(artifactVersionId)}/records`;
+}
+
+function artifactRecordsDataPath(
+  workspaceId: string,
+  artifactId: string,
+  scope: ArtifactRecordScope,
+  collection?: string,
+  suffix = "",
+) {
+  const query = new URLSearchParams({ scope });
+  if (collection) query.set("collection", collection);
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/records${suffix}?${query.toString()}`;
 }
 
 function encode(value: string) {
@@ -280,6 +310,100 @@ export class ContentClient {
     return this.http.patch<ShareResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
       input,
+    );
+  }
+
+  /** Host-side storage call for one rendered artifact version. */
+  executeArtifactRecord(
+    workspaceId: string,
+    artifactId: string,
+    request: ArtifactRecordRequest,
+  ) {
+    return this.http.post<ArtifactRecordResult>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/records`,
+      request,
+    );
+  }
+
+  getArtifactRecordsStatus(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.get<ArtifactRecordsStatus>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/status`,
+    );
+  }
+
+  approveArtifactSharedRecords(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ approvedAt: string }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/approval`,
+      {},
+    );
+  }
+
+  revokeArtifactSharedRecords(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.delete<{ revoked: boolean }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/approval`,
+    );
+  }
+
+  grantArtifactSharedRecordsConsent(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+  ) {
+    return this.http.post<{ consented: true }>(
+      `${artifactVersionRecordsPath(workspaceId, artifactId, artifactVersionId)}/consent`,
+      {},
+    );
+  }
+
+  /**
+   * Page data as one JSON document. `user` is the caller's own records;
+   * `shared` needs the artifact's creator or a workspace admin.
+   */
+  exportArtifactRecords(
+    workspaceId: string,
+    artifactId: string,
+    scope: ArtifactRecordScope,
+    collection?: string,
+    signal?: AbortSignal,
+  ) {
+    return this.http.getBlob(
+      artifactRecordsDataPath(workspaceId, artifactId, scope, collection, "/export"),
+      signal,
+    );
+  }
+
+  /** Deletes the same slice an export would cover and returns how many rows went. */
+  clearArtifactRecords(
+    workspaceId: string,
+    artifactId: string,
+    scope: ArtifactRecordScope,
+    collection?: string,
+  ) {
+    return this.http.delete<{ removed: number }>(
+      artifactRecordsDataPath(workspaceId, artifactId, scope, collection),
+    );
+  }
+
+  /** Read-only shared records on a public share; the token is the only grant. */
+  executePublicArtifactRecord(
+    token: string,
+    operation: ArtifactRecordOperation,
+  ) {
+    return this.http.post<ArtifactRecordResult>(
+      `/v1/public/shares/${encode(token)}/records`,
+      { operation },
     );
   }
 
@@ -1208,12 +1332,35 @@ export class ContentClient {
     );
   }
 
-  authorizeWorkspaceMcpOAuth(workspaceId: string, installId: string) {
-    return this.http.post<
-      { status: "redirect"; authorizationUrl: string } | { status: "connected" }
-    >(
+  authorizeWorkspaceMcpOAuth(
+    workspaceId: string,
+    installId: string,
+    options: { returnTo?: string; signal?: AbortSignal } = {},
+  ) {
+    return this.http.post<WorkspaceMcpOAuthStartResponse>(
       `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/oauth/authorize`,
+      options.returnTo ? { returnTo: options.returnTo } : {},
+      { signal: options.signal },
+    );
+  }
+
+  /** Resolve the completion reference the OAuth callback put in the URL. */
+  getWorkspaceMcpOAuthCompletion(ref: string) {
+    return this.http.get<WorkspaceMcpOAuthCompletion>(
+      `/v1/mcp/oauth/completions/${encode(ref)}`,
+    );
+  }
+
+  /** The signed-in member's own tool list for an install; nothing is stored. */
+  discoverWorkspaceMcpTools(
+    workspaceId: string,
+    installId: string,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    return this.http.post<DiscoverWorkspaceMcpToolsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/mcp-installs/${encode(installId)}/discover-tools`,
       {},
+      { signal: options.signal },
     );
   }
 

@@ -72,6 +72,7 @@ describe("llms.txt", () => {
     expect(text.startsWith("# SourceWeft\n")).toBe(true);
     expect(text).toContain("(https://sourceweft.com/skills/SKILL.md)");
     expect(text).toContain("`https://sourceweft.com/skills/<slug>/install.md`");
+    expect(text).toContain("`https://sourceweft.com/mcp/<identifier>/install.md`");
     expect(text).toContain("(https://sourceweft.com/skills)");
   });
 });

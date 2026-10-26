@@ -25,7 +25,7 @@ import {
   type LandingAuthState,
   useLandingAuthState,
 } from "../components/use-landing-auth-state";
-import { getPricingConfig } from "../pricing-config";
+import { buildPricingPlans, type PlansCopy } from "../pricing-config";
 import { useDeploymentCapabilities } from "../../../lib/billing-edition/capabilities";
 import { PricingToggle } from "./pricing-toggle";
 
@@ -456,18 +456,29 @@ function PricingSection({ authState }: { authState: LandingAuthState }) {
   const t = useTranslations("landing.pricing");
   const tp = useTranslations("pricing");
   const state = useDeploymentCapabilities();
-  const plans = getPricingConfig();
-  // Overlay localized display copy onto the canonical plans; prices, ids and CTA
-  // hrefs stay untouched (the marketing-vs-canonical split, §20).
-  const localizedPlans = plans.map((plan) => ({
-    ...plan,
-    name: tp(`plans.${plan.id}.name`),
-    description: tp(`plans.${plan.id}.description`),
-    cta: tp(`plans.${plan.id}.cta`),
-    features: tp.raw(`plans.${plan.id}.features`) as string[],
-  }));
-  if (state.status !== "ready" || !state.capabilities.billing.checkout)
+  if (
+    state.status !== "ready" ||
+    state.capabilities.edition !== "commercial" ||
+    !state.capabilities.billing.checkout
+  )
     return null;
+  // Prices, quotas and ids come from the deployment's catalog; only the wording
+  // is localized (the marketing-vs-canonical split, §20).
+  const planCopy = (id: keyof PlansCopy) => ({
+    name: tp(`plans.${id}.name`),
+    description: tp(`plans.${id}.description`),
+    cta: tp(`plans.${id}.cta`),
+    features: tp.raw(`plans.${id}.features`) as string[],
+  });
+  const copy: PlansCopy = {
+    free: planCopy("free"),
+    pro: planCopy("pro"),
+    team: planCopy("team"),
+  };
+  const localizedPlans = buildPricingPlans(
+    state.capabilities.billing.catalog,
+    copy,
+  );
 
   return (
     <section

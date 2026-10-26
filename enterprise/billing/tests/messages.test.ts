@@ -195,20 +195,17 @@ test("formatCopy replaces placeholders and keeps unknown ones", () => {
   );
 });
 
-test("pro and team copy show 8,000 credits", () => {
+test("plan feature lines use placeholders instead of numbers", () => {
   for (const catalogue of [en, zhCN, zhTW]) {
     const { plans } = catalogue;
-    expect(plans.pro.features.some((line) => line.includes("8,000"))).toBe(
-      true,
-    );
-    expect(plans.pro.features.some((line) => line.includes("20,000"))).toBe(
-      false,
-    );
-    expect(plans.team.features.some((line) => line.includes("8,000"))).toBe(
-      true,
-    );
-    expect(plans.team.features.some((line) => line.includes("20,000"))).toBe(
-      false,
-    );
+    for (const plan of [plans.free, plans.pro, plans.team]) {
+      expect(plan.features.some((line) => line.includes("{pages}"))).toBe(true);
+      expect(plan.features.some((line) => line.includes("{credits}"))).toBe(
+        true,
+      );
+      expect(
+        plan.features.some((line) => /\d,\d{3}|\b\d{3,}\b/.test(line)),
+      ).toBe(false);
+    }
   }
 });

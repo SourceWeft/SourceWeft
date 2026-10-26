@@ -19,6 +19,7 @@ import {
   artifactVersionMediaProjectionSchema,
   type ShareLink,
 } from "@sourceweft/contracts";
+import { htmlArtifactRecordCapabilities } from "@sourceweft/contracts/html-artifact";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,6 +40,7 @@ import {
   forgetArtifactShare,
   loadArtifactShare,
 } from "./artifact-share-lookup";
+import { ArtifactPageData } from "./artifact-page-data";
 import { ShareArtifactDialog } from "./share-artifact-dialog";
 import {
   artifactTitle,
@@ -378,6 +380,13 @@ export function ArtifactPreviewPanel({
             a member-readable source file; the shell stays feature-agnostic. */}
         <ReportEvidencePanel artifact={artifact} workspaceId={workspaceId} />
 
+        {/* Likewise decides for itself: only HTML pages that declare storage. */}
+        <ArtifactPageData
+          artifact={artifact}
+          title={title}
+          workspaceId={workspaceId}
+        />
+
         {artifact.promptText ? (
           <div className="mt-3 rounded-xl border bg-background/70 p-3">
             <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -399,6 +408,9 @@ export function ArtifactPreviewPanel({
           title={title}
           share={share}
           isShareLoading={isShareLoading}
+          showPublicRecords={
+            htmlArtifactRecordCapabilities(artifact.payloadJson).shared
+          }
           onShareChange={(next) => {
             // A mutation makes any briefly remembered lookup stale for other
             // mounted panels; forget it before the local state moves on.

@@ -8,7 +8,8 @@
  * capability component has already configured it.
  */
 import { configureArtifactRenderHost } from "@sourceweft/agent-tool-registry/ui";
-import { apiBaseUrl } from "../../../../lib/sdk";
+import { createAppArtifactRecordsTransport } from "../../../../lib/artifact-records-transport";
+import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
 import {
   resolveArtifactPageUrlFromArtifact,
   resolveArtifactPreviewImageUrlFromArtifact,
@@ -19,6 +20,25 @@ import {
   getToolOutputValue,
 } from "./chat-canvas/message-assets";
 import { useArtifactSnapshot } from "./chat-canvas/use-artifact-snapshot";
+import { emitArtifactApprovalChanged } from "./sources-hub/artifacts/artifact-approval-events";
+
+/** Tell the hub list its "waiting for approval" marker may have changed. */
+function announcingApprovalChanges(
+  transport: ReturnType<typeof createAppArtifactRecordsTransport>,
+  detail: { workspaceId: string; artifactId: string },
+) {
+  const announce = (action: (() => Promise<void>) | undefined) =>
+    action &&
+    (async () => {
+      await action();
+      emitArtifactApprovalChanged(detail);
+    });
+  return {
+    ...transport,
+    approveShared: announce(transport.approveShared),
+    revokeShared: announce(transport.revokeShared),
+  };
+}
 
 configureArtifactRenderHost({
   readToolOutputField: getToolOutputField,
@@ -29,4 +49,9 @@ configureArtifactRenderHost({
   resolveArtifactFileUrl: resolveArtifactProxyFileUrlFromArtifact,
   resolveArtifactPreviewImageUrl: resolveArtifactPreviewImageUrlFromArtifact,
   useArtifactSnapshot,
+  createArtifactRecordsTransport: (input) =>
+    announcingApprovalChanges(
+      createAppArtifactRecordsTransport(contentClient, input),
+      { workspaceId: input.workspaceId, artifactId: input.artifactId },
+    ),
 });

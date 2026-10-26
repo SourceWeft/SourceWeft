@@ -14,6 +14,8 @@
     "./ledger": "./src/server/ledger.ts",
     "./ui": "./src/ui/index.ts",
     "./catalog": "./src/catalog/pricing.ts",
+    "./billing-catalog": "./src/server/catalog-file.ts",
+    "./billing-catalog-schema": "./src/catalog/billing-catalog.ts",
     "./messages": "./src/messages.ts",
     "./provider-sdk": "./src/server/providers/sdk.ts",
     "./integrations/waffo": "./src/integrations/waffo.ts",
@@ -43,7 +45,8 @@
     "@sourceweft/ui-web": "workspace:*",
     "@sourceweft/sdk": "workspace:*",
     "@waffo/pancake-ts": "0.25.0",
-    "stripe": "22.6.1"
+    "stripe": "22.6.1",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

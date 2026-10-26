@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+  ARTIFACT_RECORD_CAPABILITIES,
+  artifactRecordCapabilitySchema,
+} from "./artifact-records";
+import {
   artifactContentDigestSchema,
   artifactFileNameSchema,
 } from "./artifact-version-files";
@@ -36,13 +40,42 @@ export const presentationCapabilitySchema = z
     }
   });
 
+/**
+ * Host capabilities a page asks for. Declaring is a request, not a grant: the
+ * backend reads it from the immutable version, and `storage.shared` still
+ * needs a person's approval for that exact version.
+ */
+export const htmlArtifactCapabilitiesSchema = z
+  .array(artifactRecordCapabilitySchema)
+  .max(ARTIFACT_RECORD_CAPABILITIES.length)
+  .refine(
+    (values) => new Set(values).size === values.length,
+    "Capabilities must be unique",
+  );
+
 /** Optional metadata is a display protocol, not a generation format. */
 export const htmlArtifactMetadataSchema = z
   .object({
     schemaVersion: z.literal(1),
     presentation: presentationCapabilitySchema.optional(),
+    capabilities: htmlArtifactCapabilitiesSchema.optional(),
   })
   .strict();
+
+/** `storage.shared` implies `storage`; anything unparsable declares nothing. */
+export function htmlArtifactRecordCapabilities(payload: unknown): {
+  storage: boolean;
+  shared: boolean;
+} {
+  const metadata =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as { metadata?: unknown }).metadata
+      : undefined;
+  const parsed = htmlArtifactMetadataSchema.safeParse(metadata);
+  const capabilities = parsed.success ? (parsed.data.capabilities ?? []) : [];
+  const shared = capabilities.includes("storage.shared");
+  return { storage: shared || capabilities.includes("storage"), shared };
+}
 
 export const htmlArtifactPayloadSchema = z
   .object({

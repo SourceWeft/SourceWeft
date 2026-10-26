@@ -21,6 +21,11 @@ import {
   type AuthorMap,
   type McpOwnerOverridesRow,
 } from "./overrides";
+import {
+  purgeToolRevisions,
+  recordToolRevision,
+  withdrawToolRevision,
+} from "../tool-revisions";
 import { CLAIM_THROTTLE, throttleVerdict } from "./throttle";
 
 /**
@@ -438,6 +443,14 @@ export async function blockMember(input: {
           updatedAt: input.now,
         })
         .where(eq(marketMcpOwnerOverrides.serverId, input.serverId));
+      // The blocked member's list is gone, and so is the history of it: it
+      // would otherwise stay public beside whatever another owner submits.
+      if (cleared.clearTools) {
+        await purgeToolRevisions(
+          { itemId: input.serverId, source: "owner" },
+          { tx },
+        );
+      }
     }
     return block!;
   });
@@ -625,13 +638,17 @@ export async function saveOwnerFields(input: {
 /**
  * Saves (or, with no tools, removes) the owner's tool list, under the same
  * locks and claim check as `saveOwnerFields`. The saver becomes the list's
- * author.
+ * author. The tool-revision history is written in the same transaction: a
+ * list is recorded as an `owner` revision (a new one only when it differs from
+ * the previous), and removing the list records a withdrawal.
  */
 export async function saveOwnerTools(input: {
   serverId: string;
   userId: string;
   tools: unknown[] | null;
   meta: Record<string, unknown> | null;
+  /** The server's own version string from the submission, context only. */
+  serverVersion?: string | null;
   now: Date;
 }): Promise<{ row: McpOwnerOverridesRow; verified: string[] }> {
   return db.transaction(async (tx) => {
@@ -670,6 +687,23 @@ export async function saveOwnerTools(input: {
         },
       })
       .returning();
+    if (input.tools) {
+      await recordToolRevision(
+        {
+          itemId: input.serverId,
+          source: "owner",
+          tools: input.tools,
+          serverVersion: input.serverVersion ?? null,
+          observedAt: input.now,
+        },
+        { tx },
+      );
+    } else {
+      await withdrawToolRevision(
+        { itemId: input.serverId, source: "owner", observedAt: input.now },
+        { tx },
+      );
+    }
     return { row: row!, verified };
   });
 }

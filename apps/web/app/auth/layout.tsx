@@ -1,6 +1,8 @@
 import type { Viewport } from "next";
 import type * as React from "react";
 
+import { ClientMessagesProvider } from "../_components/client-messages-provider";
+
 // Sign-in is the first screen the native mobile shell renders. iOS auto-zooms onto a
 // focused input unless scaling is pinned, which leaves the form scrolled off-centre.
 export const viewport: Viewport = {
@@ -15,5 +17,7 @@ export default function AuthLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <ClientMessagesProvider area="auth">{children}</ClientMessagesProvider>
+  );
 }

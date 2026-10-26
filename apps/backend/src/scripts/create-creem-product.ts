@@ -3,7 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 import { createCreemClient } from "@sourceweft/billing/provider-sdk";
-import { getPricingConfig, type PlanConfig } from "@sourceweft/billing/catalog";
+import {
+  buildPricingPlans,
+  type PlanConfig,
+} from "@sourceweft/billing/catalog";
+import { toDisplayCatalog } from "@sourceweft/billing/billing-catalog-schema";
+import { getBillingMessages } from "@sourceweft/billing/messages";
+import { loadBillingCatalog } from "../billing-host/catalog-file";
 
 type BillingInterval = "monthly" | "yearly";
 type PaidPlanId = Extract<PlanConfig["id"], "pro" | "team">;
@@ -13,7 +19,7 @@ type Args = {
 };
 
 type ProductPayload = {
-  envVar: string;
+  catalogPath: string;
   name: string;
   description: string;
   price: number;
@@ -22,7 +28,7 @@ type ProductPayload = {
 
 type CreatedProduct = {
   productId: string;
-  envVar: string;
+  catalogPath: string;
   plan: PaidPlanId;
   interval: BillingInterval;
   name: string;
@@ -56,7 +62,8 @@ const USAGE = [
   "Environment:",
   "  CREEM_API_KEY is required.",
   "  CREEM_TEST_MODE controls test vs live Creem API mode and defaults to true.",
-  "  NEXT_PUBLIC_PRICING_* values are loaded from apps/web env files for pricing.",
+  "  Prices and plan copy come from the billing catalog file (enterprise/billing/config/billing-catalog.json).",
+  "  Put each printed productId at the printed catalogPath in that file.",
 ].join("\n");
 
 function readOption(argv: string[], name: string) {
@@ -167,24 +174,20 @@ function loadEnvFiles() {
 }
 
 function resolvePlan(planId: PaidPlanId): PlanConfig & { id: PaidPlanId } {
-  const plan = getPricingConfig().find((entry) => entry.id === planId);
+  const plan = buildPricingPlans(
+    toDisplayCatalog(loadBillingCatalog().catalog),
+    getBillingMessages("en").plans,
+  ).find((entry) => entry.id === planId);
   if (!plan) {
-    throw new Error(`Pricing config is missing plan: ${planId}`);
+    throw new Error(`Billing catalog is missing plan: ${planId}`);
   }
 
   return plan as PlanConfig & { id: PaidPlanId };
 }
 
-function resolveEnvVar(plan: PaidPlanId, interval: BillingInterval) {
-  if (plan === "pro") {
-    return interval === "monthly"
-      ? "CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID"
-      : "CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID";
-  }
-
-  return interval === "monthly"
-    ? "CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID"
-    : "CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID";
+// Where the new product ID goes in the billing catalog file.
+function resolveCatalogPath(plan: PaidPlanId, interval: BillingInterval) {
+  return `plans.${plan}.creemProductId.${interval}`;
 }
 
 function formatInterval(interval: BillingInterval) {
@@ -214,12 +217,12 @@ function buildProductPayload(
   const price = interval === "monthly" ? plan.monthlyPrice : plan.yearlyPrice;
   if (!Number.isInteger(price) || price < 100) {
     throw new Error(
-      `Invalid ${plan.id} ${interval} price from pricing config: ${price}`,
+      `Invalid ${plan.id} ${interval} price from the billing catalog: ${price}`,
     );
   }
 
   return {
-    envVar: resolveEnvVar(plan.id, interval),
+    catalogPath: resolveCatalogPath(plan.id, interval),
     name: `SourceWeft ${plan.name} ${formatInterval(interval)}`,
     description: buildDescription(plan, interval),
     price,
@@ -260,7 +263,7 @@ async function main() {
 
     products.push({
       productId: product.id,
-      envVar: payload.envVar,
+      catalogPath: payload.catalogPath,
       plan: args.plan,
       interval,
       name: payload.name,

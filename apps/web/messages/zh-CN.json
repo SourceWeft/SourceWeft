@@ -411,10 +411,11 @@
       "officialPublisher": "官方发布者",
       "officialPublisherTitle": "由 {domain} 发布，该域名同时运行此服务的端点。",
       "tools": "{count, plural, other {# 个工具}}",
-      "viewAll": "查看全部"
+      "viewAll": "查看全部",
+      "githubAccount": "由 GitHub 账号 {owner} 发布",
+      "githubAccountTitle": "注册中心已验证发布此条目的 GitHub 账号。这并不表明该账号就是产品方。"
     },
     "tools": {
-      "empty": "工具元数据尚未被收录。",
       "parameters": "输入参数",
       "required": "必填",
       "moreParameters": "另有 {count} 个",
@@ -432,24 +433,50 @@
         "unsupportedPackage": "该软件包类型无法在沙箱中运行"
       }
     },
+    "toolsReference": {
+      "platformIndexed": "由 SourceWeft 使用标准测试账号读取 · {date}",
+      "memberObserved": "来自已连接账号的观测 · {date}。不同账号看到的可能不同。",
+      "stale": "自读取以来，服务器地址已变更。"
+    },
+    "toolChangeLog": {
+      "heading": "变更记录",
+      "intro": "每条记录是此条目工具列表的一次变化，并不是服务器自身的版本。",
+      "current": "当前",
+      "emptyList": "不含任何工具",
+      "withdrawn": "已撤回",
+      "addedLabel": "新增 {count} 个工具",
+      "removedLabel": "移除 {count} 个工具",
+      "changedLabel": "变更 {count} 个工具",
+      "addedHeading": "新增",
+      "removedHeading": "移除",
+      "changedHeading": "变更",
+      "serverVersion": "服务器当时报告的版本为 {version}。",
+      "truncated": "显示最近 {count} 条记录。",
+      "sources": {
+        "owner": "所有者",
+        "platform-indexed": "平台索引",
+        "member-observed": "已连接账号"
+      },
+      "fields": {
+        "title": "标题",
+        "description": "描述",
+        "inputSchema": "输入结构",
+        "outputSchema": "输出结构",
+        "annotations": "注解"
+      }
+    },
     "score": {
       "heading": "评分",
       "nav": "评分",
-      "gradeLabel": "评级 {grade}",
-      "percentage": "已满足 {percentage}% 的收录检查项",
-      "intro": "该评分衡量此收录条目的完整程度，依据注册中心条目、端点与公开来源计算得出。它不是对服务器本身的评价，也不包含安装量或用户评价。",
-      "gradeExplain": {
-        "A": "完整的收录：所有必需检查项均通过，且已满足至少 80% 的权重。",
-        "B": "良好的收录：所有必需检查项均通过，且已满足至少 60% 的权重。",
-        "F": "不完整的收录：某项必需检查未通过，或已满足的权重不足 60%。"
-      },
+      "percentage": "已满足适用检查项的 {percentage}%",
+      "intro": "该评分衡量此收录条目的完整程度，依据注册中心条目、端点与公开来源计算得出。它不是对服务器本身的评价，也不表示服务器安全或当前可用：可连通性是带日期的检查结果，评分也不包含安装量或用户评价。",
       "required": "必需",
       "met": "已满足",
       "notMet": "未满足",
       "weight": "{weight} 分",
       "items": {
         "reachable": {
-          "label": "可连通",
+          "label": "近 30 天内可连通",
           "hint": "请保持端点能够响应 MCP 握手；SourceWeft 每 30 天探测一次。"
         },
         "authDeclared": {
@@ -474,17 +501,11 @@
         },
         "hasLicense": {
           "label": "许可证",
-          "hint": "请在仓库或注册中心条目中声明许可证。"
-        },
-        "officialPublisher": {
-          "label": "官方发布者",
-          "hint": "请使用与端点主机名匹配的域名命名空间（例如 com.example）发布。"
-        },
-        "claimed": {
-          "label": "所有者已认领",
-          "hint": "待已验证的所有者认领此服务器后即视为满足：在服务器页面上，通过 GitHub 账号或域名认领。"
+          "hint": "请在仓库或注册中心条目中声明许可证。",
+          "notApplicableHint": "托管服务按其提供方的条款使用，因此这里不要求许可证。此检查项不计入百分比。"
         }
-      }
+      },
+      "notApplicable": "不适用"
     },
     "faq": {
       "eyebrow": "MCP 常见问答",
@@ -558,13 +579,8 @@
       "lead": "暂无 AI 概览：以下信息来自注册中心条目和服务本身。",
       "publisher": "发布者",
       "endpoint": "端点",
-      "transport": "传输",
-      "auth": "鉴权",
-      "tools": "工具",
-      "toolsCount": "{count, plural, other {# 个工具}}",
       "documentation": "文档",
-      "repository": "仓库",
-      "homepage": "主页"
+      "probed": "最近检查"
     },
     "detail": {
       "documentation": "文档",
@@ -595,7 +611,8 @@
         "toolsNotValidated": "工具（未验证）",
         "versions": "版本（{count}）",
         "related": "相关",
-        "integrations": "{brand} 集成（{count}）"
+        "integrations": "{brand} 集成",
+        "toolsPlain": "工具"
       },
       "overviewHeading": "概览",
       "riskSummary": "风险摘要：",
@@ -611,6 +628,10 @@
       "otherClients": "其他 MCP 客户端",
       "otherClientsConfig": "把它添加到你客户端的 <code>mcpServers</code> 配置中。",
       "oauthNote": " 客户端会在首次连接时完成 OAuth 登录。",
+      "agentHeading": "交给智能体安装",
+      "agentLead": "把这段提示词粘贴到 Claude Code、Codex、Cursor 等智能体，或 SourceWeft 对话中。智能体会读取该服务器的安装指南，先向你展示发布者、端点和登录方式，经你同意后再把它添加到你的客户端。密钥不会写进任何命令。",
+      "agentPrompt": "阅读 {url}，并按其中说明把这个 MCP 服务器接入我的客户端。修改任何配置之前，先告诉我它的发布者、端点和登录方式，等我确认。不要把 API 密钥写进命令或我会提交的文件；问我密钥应从哪里获取。",
+      "agentGuideLink": "查看智能体所依据的安装指南",
       "followRepo": "参照 <link>仓库</link> 中的启动说明。",
       "readmeHeading": "README",
       "toolsHeading": "工具",
@@ -625,7 +646,6 @@
       "trust": "信任",
       "published": "发布于",
       "securityHeading": "安全提示",
-      "securityBody": "MCP 服务会从对话中接收工具参数，并可能执行外部操作。允许列出未验证的服务，但 SourceWeft 会对其加以标记，以便你在启用前先审查该服务。",
       "relatedHeading": "更多类似 {name} 的服务",
       "integrationsHeading": "其他 {brand} 集成",
       "officialPointer": "发布方自己的服务：<link>{name}</link>",
@@ -633,7 +653,26 @@
       "sections": "章节导航",
       "copy": "复制",
       "copied": "已复制",
-      "copyFailed": "复制失败"
+      "copyFailed": "复制失败",
+      "security": {
+        "base": "MCP 服务会接收对话中的工具调用请求，并可能执行外部操作。启用前请先了解该服务能做什么，并只授予它所需的权限。",
+        "domain": "注册中心已验证此服务的命名空间属于 {domain}，且该域名同时运行其端点。这可以确认发布者，但并不代表该服务的工具是安全的。",
+        "domainOther": "注册中心已验证此服务的命名空间属于 {domain}，但其端点不在该域名下，因此发布者未必运行此服务。",
+        "github": "注册中心已验证此条目所属的 GitHub 账号 {owner}。这并不表明该账号就是产品方。",
+        "unknown": "SourceWeft 尚未验证谁发布了此服务。",
+        "claimed": "已验证的所有者管理着此条目；这同样不代表该服务的工具是安全的。",
+        "scope": "SourceWeft 的检查只涵盖条目是否完整、端点是否响应；不审查服务器的代码，也不审查其工具的行为。",
+        "domainNoEndpoint": "注册中心已验证此服务的命名空间属于 {domain}。它以软件包形式运行，而不是托管端点，因此没有可与该域名比对的端点。"
+      },
+      "publishedByGithub": "由 GitHub 账号 {owner} 发布",
+      "delivery": "交付方式",
+      "hostedService": "托管服务",
+      "translatedSummary": {
+        "badge": "AI 翻译",
+        "note": "由 AI 模型根据下方的原文描述翻译，可能有误。",
+        "original": "原文描述"
+      },
+      "integrationsShowMore": "显示更多"
     },
     "readme": {
       "imagePlaceholder": "图片",
@@ -654,6 +693,8 @@
       "requirements": "运行要求",
       "englishFallback": "暂无中文概览，以下为英文版本。",
       "cardSummaryTitle": "AI 生成的简介",
+      "translatedTag": "AI 翻译",
+      "translatedCardTitle": "根据原文描述由 AI 翻译",
       "admin": {
         "title": "AI 概览",
         "loading": "正在加载概览…",
@@ -702,6 +743,25 @@
         "show": "显示",
         "hiddenDone": "概览已隐藏。",
         "shownDone": "概览已显示。"
+      }
+    },
+    "toolsStatus": {
+      "label": {
+        "partial": "{count}+ 个工具",
+        "authRequired": "需要登录",
+        "notValidated": "尚未验证",
+        "empty": "没有工具",
+        "unindexed": "尚未收录",
+        "credentialRequired": "需要凭据"
+      },
+      "explain": {
+        "partial": "SourceWeft 对每个服务器最多列出 {count} 个工具，因此实际可能不止这些。",
+        "authRequired": "该服务器需要登录，因此 SourceWeft 无法在没有账号的情况下读取其工具，也未收录。已连接账号所能看到的内容可能因账号及其权限而异。",
+        "failed": "SourceWeft 曾在隔离沙箱中以无凭据方式启动该软件包一次，以列出其工具，但未能完成：{reason}。",
+        "notValidated": "SourceWeft 尚未在沙箱中启动过该软件包，因此其工具未知。",
+        "empty": "SourceWeft 已读取该服务器，它没有列出任何工具。",
+        "unindexed": "SourceWeft 尚未读取此服务器的工具。",
+        "credentialRequired": "该服务器需要 API 密钥等凭据，因此 SourceWeft 无法在没有凭据的情况下读取其工具，也未收录。"
       }
     }
   },
@@ -2286,7 +2346,9 @@
       "searchVisibilityFailed": "无法更新搜索可见性。",
       "copyLinkFailed": "无法复制链接。",
       "noCitationContent": "此网页暂无可用的引用内容。",
-      "saveNotWired": "保存到来源功能尚未接入。"
+      "saveNotWired": "保存到来源功能尚未接入。",
+      "publicRecordsFailed": "无法更新公开数据集合。",
+      "publicRecordsInvalid": "集合名称只能包含字母、数字、_ 或 -。"
     },
     "deleteDialog": {
       "title": "删除制品？",
@@ -2302,6 +2364,42 @@
     "video": {
       "previewTitle": "视频预览"
     },
+    "pageData": {
+      "title": "页面数据",
+      "description": "此页面在多次访问之间保存的记录。可在此导出副本或清除。",
+      "scopes": {
+        "user": {
+          "label": "你的数据",
+          "hint": "仅你自己可见。"
+        },
+        "shared": {
+          "label": "共享数据",
+          "hint": "打开此页面的所有人都能看到。仅创建者或工作区管理员可导出或清除。"
+        }
+      },
+      "actions": {
+        "export": "导出数据",
+        "clear": "清除数据",
+        "clearing": "正在清除…",
+        "clearConfirm": "清除数据"
+      },
+      "clearDialog": {
+        "user": {
+          "title": "清除你的数据？",
+          "description": "这将永久删除此页面为你保存的记录，不影响其他人的数据。此操作无法撤销。"
+        },
+        "shared": {
+          "title": "清除共享数据？",
+          "description": "这将永久删除此页面为所有使用者保存的共享记录。此操作无法撤销。"
+        }
+      },
+      "toasts": {
+        "exported": "数据已导出。",
+        "exportFailed": "无法导出数据。",
+        "cleared": "{count, plural, =0 {没有可清除的记录。} other {已清除 # 条记录。}}",
+        "clearFailed": "无法清除数据。"
+      }
+    },
     "share": {
       "title": "分享制品",
       "anyoneWithLink": "任何拥有链接的人",
@@ -2311,7 +2409,10 @@
       "publicLinkLabel": "公开链接",
       "hideFromSearch": "对搜索引擎隐藏",
       "hideFromSearchDescription": "公开链接默认会被索引以扩大触达；如果是敏感的一次性内容，请开启此项。",
-      "views": "浏览量"
+      "views": "浏览量",
+      "publicRecords": "公开数据集合",
+      "publicRecordsDescription": "此页面可以向持有链接的任何人只读展示的共享数据。填写集合名称；留空则不展示任何数据。",
+      "publicRecordsPlaceholder": "例如 scores, results"
     },
     "filePreview": {
       "titleFallback": "文件预览",
@@ -2465,15 +2566,15 @@
       "openSourceAria": "打开 {name} 来源",
       "openGithub": "打开 GitHub 仓库",
       "openSource": "打开来源",
-      "credentialsRequired": "需要凭据",
+      "credentialsRequired": "需要连接",
       "toolsSyncedTitle": "已同步 {count} 个工具",
       "tested": "已测试 {time}",
       "notTestedYet": "尚未测试",
       "testAria": "测试 {name}",
       "testConnection": "测试连接",
-      "configureAria": "配置 {name}",
-      "configureRequired": "配置所需凭据",
-      "settings": "设置",
+      "configureAria": "管理 {name} 的连接",
+      "configureRequired": "连接后才能使用此服务器",
+      "settings": "连接",
       "uninstallAria": "卸载 {name}",
       "uninstall": "卸载",
       "enableAria": "启用 {name}",
@@ -2481,7 +2582,11 @@
       "enable": "启用",
       "disable": "停用",
       "install": "安装",
-      "unverifiedWarning": "未验证的 MCP 可以接收本回合的工具参数，并可能执行外部操作。启用前请先查看该服务器。"
+      "unverifiedWarning": "未验证的 MCP 可以接收本回合的工具参数，并可能执行外部操作。启用前请先查看该服务器。",
+      "connectedVia": {
+        "oauth": "已使用 OAuth 连接",
+        "header": "已使用 API 密钥连接"
+      }
     },
     "empty": {
       "none": "此工作区暂无可用的 MCP 服务器。",
@@ -2504,7 +2609,11 @@
       "testFailed": "测试 MCP 失败。",
       "loadMoreFailed": "加载更多 MCP 服务器失败。",
       "connected": "MCP 服务器已连接",
-      "authFailed": "MCP 授权失败。请重试。"
+      "authFailed": "MCP 授权失败。请重试。",
+      "connectUnconfirmed": "无法确认连接。请打开“连接”进行检查。",
+      "authInvalid": "此登录链接已过期或已被使用。请重新连接。",
+      "authDenied": "登录已取消。",
+      "authTimeout": "登录服务未能及时响应。请重试。"
     },
     "risk": {
       "destructive": "破坏性",
@@ -2517,7 +2626,7 @@
       "titleFallback": "MCP 详情",
       "loadingDescription": "正在加载 MCP 详情。",
       "test": "测试",
-      "settings": "设置",
+      "settings": "连接",
       "uninstall": "卸载",
       "install": "安装",
       "loading": "正在加载 MCP…",
@@ -2528,7 +2637,7 @@
       "identifierMissing": "缺少 MCP 标识符。",
       "enabled": "已启用",
       "disabled": "已停用",
-      "configureCredentials": "配置凭据",
+      "configureCredentials": "连接此服务器",
       "toolsSynced": "已同步 {count} 个工具",
       "testedSuffix": " · 已测试 {time}",
       "notTestedSuffix": " · 尚未测试",
@@ -2569,8 +2678,8 @@
       "securityShort": "凭据按工作区加密，且仅在工具调用期间发送给此服务器。"
     },
     "credentials": {
-      "title": "配置 MCP 凭据",
-      "description": "凭据在 SourceWeft 中加密存储，且仅在工具调用期间发送给此 MCP 服务器。",
+      "title": "连接",
+      "description": "你的登录凭证或密钥在 SourceWeft 中加密存储，且仅在工具调用期间发送给此 MCP 服务器。",
       "serverFallback": "MCP 服务器",
       "authType": {
         "bearer": "Bearer 令牌",
@@ -2591,6 +2700,7 @@
       },
       "headersHint": "每行填写一个请求头。保存后将不再显示机密值。",
       "noAuthNote": "此 MCP 服务器无需凭据。",
+      "catalogNotice": "此服务器返回的工具名称、描述和参数结构可能会公开显示在其目录页面上。绝不保留你的凭据或你发送的数据。",
       "oauthNote": "此 MCP 服务器使用 OAuth。请与提供方连接你的账户——你将被重定向以授予访问权限，然后返回此处。你的令牌将加密存储并自动刷新。",
       "optionalKeyNote": "此 MCP 服务器无需凭据即可使用。如有 API 密钥，可在此添加。",
       "method": {
@@ -2615,14 +2725,34 @@
         "apiKeyRequired": "保存前请输入请求头名称和 API 密钥。",
         "headerRequired": "保存前请至少添加一个请求头。",
         "keyRequired": "保存前需输入 API 密钥。",
-        "methodNotAllowed": "此服务器不接受这种连接方式。"
+        "methodNotAllowed": "此服务器不接受这种连接方式。",
+        "authTimeout": "登录服务未能及时响应。请重试。",
+        "redirectBlocked": "登录页面未能打开。请重试，并检查浏览器是否允许重定向。",
+        "notConnected": "此连接已失效。请重新连接。",
+        "discoveryFailed": "无法使用你的连接检查工具。",
+        "discoveryTimeout": "服务器未能及时列出工具。请重试。"
       },
       "toasts": {
         "saved": "MCP 凭据已保存",
         "saveFailed": "保存凭据失败。",
         "alreadyConnected": "MCP 服务器已连接",
         "authStartFailed": "启动授权失败。"
-      }
+      },
+      "states": {
+        "requesting": "正在联系登录服务…",
+        "redirecting": "正在打开 {provider}…",
+        "testing": "正在检查你可以使用的工具…"
+      },
+      "result": {
+        "title": "你可以使用 {count} 个工具",
+        "more": "…另有 {count} 个",
+        "empty": "此服务器没有为你的账户列出任何工具。",
+        "truncated": "仅显示前 {count} 个。",
+        "oversize": "有 {count} 个工具因定义过大而被省略。",
+        "private": "只有你能看到此列表，不会与工作空间共享。"
+      },
+      "useInChat": "在对话中使用",
+      "retry": "重试"
     },
     "submit": {
       "trigger": "提交 MCP",
@@ -2827,6 +2957,7 @@
       "preview": "预览 {title}",
       "completed": "完成于 {date}",
       "public": "公开",
+      "awaitingApproval": "等待审批",
       "couldNotLoad": "无法加载该制品。",
       "loadFailed": "加载制品失败。",
       "loadMoreFailed": "加载更多制品失败。"
@@ -4011,6 +4142,10 @@
         "documentationUrl": "文档 URL",
         "homepageUrl": "主页 URL",
         "repoUrl": "仓库 URL",
+        "license": "许可证",
+        "licenseHint": "SPDX 编号或名称，例如 MIT。托管服务不显示。",
+        "language": "主要语言",
+        "languageHint": "服务使用的编程语言，例如 TypeScript。托管服务不显示。",
         "deprecated": "标记为已弃用",
         "deprecatedHint": "告知访客此服务已不再维护。它仍会保留在列表中。",
         "urlInvalid": "请输入以 https:// 开头的完整网址。",

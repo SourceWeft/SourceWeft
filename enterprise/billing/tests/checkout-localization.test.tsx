@@ -906,3 +906,33 @@ test("enterprise/billing/src/ui/** never constructs Intl.* or calls toLocaleStri
 
   expect(violations).toEqual([]);
 });
+
+test("team checkout dialog shows $9.90 per seat and $19.80 for the two-seat minimum", async () => {
+  const copy = getBillingCopy("zh-CN");
+  const dialog = await renderNode(
+    <BillingUiProvider value={makeHost()}>
+      <TeamCheckoutDialog
+        allowBillingIntervalSwitch
+        billingInterval="monthly"
+        monthlyPerSeatPrice={990}
+        onOpenChange={() => {}}
+        open
+        perSeatPrice={990}
+        source="landing"
+        yearlyPerSeatPrice={9900}
+      />
+    </BillingUiProvider>,
+  );
+  try {
+    expect(dialog.page).toContain(
+      formatCopyLike(copy.checkout.perSeatSummary, {
+        price: "$9.90",
+        count: zhCNFormat.number(2),
+      }),
+    );
+    expect(dialog.page).toContain("$19.80");
+    expect(dialog.page).not.toContain("$10");
+  } finally {
+    await dialog.unmount();
+  }
+});

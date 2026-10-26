@@ -5,6 +5,7 @@ import { Check, Copy, Eye, Globe, Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import {
   Dialog,
@@ -36,6 +37,7 @@ export function ShareArtifactDialog({
   share,
   isShareLoading,
   onShareChange,
+  showPublicRecords = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -45,10 +47,45 @@ export function ShareArtifactDialog({
   share: ShareLink | null;
   isShareLoading: boolean;
   onShareChange: (share: ShareLink | null) => void;
+  /** HTML pages with shared storage can expose chosen collections read-only. */
+  showPublicRecords?: boolean;
 }) {
   const t = useTranslations("dashboardChatFiles");
   const [isBusy, setIsBusy] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
+  const savedCollections = (share?.publicRecordCollections ?? []).join(", ");
+  const [collectionsDraft, setCollectionsDraft] =
+    React.useState(savedCollections);
+  React.useEffect(
+    () => setCollectionsDraft(savedCollections),
+    [savedCollections],
+  );
+
+  async function handlePublicRecords() {
+    if (!share) return;
+    const collections = [
+      ...new Set(
+        collectionsDraft
+          .split(/[\s,]+/u)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (collections.some((name) => !/^[A-Za-z0-9_-]{1,64}$/u.test(name))) {
+      toast.error(t("toasts.publicRecordsInvalid"));
+      return;
+    }
+    try {
+      const result = await contentClient.updateArtifactShare(
+        workspaceId,
+        artifactId,
+        { publicRecordCollections: collections },
+      );
+      onShareChange(result.share);
+    } catch {
+      toast.error(t("toasts.publicRecordsFailed"));
+    }
+  }
 
   async function handleToggle(next: boolean) {
     setIsBusy(true);
@@ -209,6 +246,37 @@ export function ShareArtifactDialog({
                       onCheckedChange={(v) => void handleNoindex(v)}
                     />
                   </label>
+                  {showPublicRecords && (
+                    <div className="space-y-2 p-4">
+                      <label
+                        className="block text-sm font-medium"
+                        htmlFor="share-public-records"
+                      >
+                        {t("share.publicRecords")}
+                      </label>
+                      <span className="block text-xs leading-5 text-muted-foreground">
+                        {t("share.publicRecordsDescription")}
+                      </span>
+                      <div className="flex gap-2">
+                        <Input
+                          id="share-public-records"
+                          value={collectionsDraft}
+                          placeholder={t("share.publicRecordsPlaceholder")}
+                          onChange={(event) =>
+                            setCollectionsDraft(event.target.value)
+                          }
+                        />
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={collectionsDraft === savedCollections}
+                          onClick={() => void handlePublicRecords()}
+                        >
+                          {t("actions.save")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-4 p-4">
                     <div className="flex min-w-0 items-center gap-2">
                       <Eye className="size-3.5 shrink-0 text-muted-foreground" />

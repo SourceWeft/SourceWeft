@@ -94,6 +94,8 @@ export const marketMcpOwnerFieldSchema = z.enum([
   "documentationUrl",
   "homepageUrl",
   "repoUrl",
+  "license",
+  "language",
   "deprecated",
   "tools",
 ]);
@@ -115,6 +117,43 @@ export const marketMcpOwnerLayerSchema = z.object({
 // server's owner with their own credentials and are shown but never trusted
 // for unattended execution (their risk is always `unknown`).
 export const MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED = "owner-submitted";
+// Tools read by SourceWeft itself with a reference account, and tools observed
+// through members' own connections (Issue #367). Both are shown, neither is
+// trusted for unattended execution (risk `unknown`).
+export const MARKET_MCP_TOOL_SOURCE_PLATFORM_INDEXED = "platform-indexed";
+export const MARKET_MCP_TOOL_SOURCE_MEMBER_OBSERVED = "member-observed";
+
+// The approved reference profile a platform snapshot was read with. Describes
+// the kind of account, never which account. Free text written by an admin: it
+// is stored with the snapshot and never part of a public answer.
+export const marketMcpReferenceProfileSchema = z
+  .object({
+    tier: z.string().trim().min(1).max(64),
+    role: z.string().trim().min(1).max(64),
+    scopes: z.array(z.string().trim().min(1).max(128)).max(32),
+    // The day the profile was approved or last reviewed, `YYYY-MM-DD`.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .strict();
+export type MarketMcpReferenceProfile = z.infer<
+  typeof marketMcpReferenceProfileSchema
+>;
+
+// Where the tool list on a page came from when it is not the owner's, and
+// whether it is still about the server at the listing's current address.
+export const marketMcpToolsReferenceSchema = z.object({
+  source: z.enum([
+    MARKET_MCP_TOOL_SOURCE_PLATFORM_INDEXED,
+    MARKET_MCP_TOOL_SOURCE_MEMBER_OBSERVED,
+  ]),
+  // When the list was read (a member observation: the day only).
+  observedAt: z.string(),
+  // The listing's endpoint changed since the list was read.
+  stale: z.boolean(),
+});
+export type MarketMcpToolsReference = z.infer<
+  typeof marketMcpToolsReferenceSchema
+>;
 
 /**
  * Where an MCP server's logo came from, first hit of the chain: the registry's
@@ -196,6 +235,9 @@ export const marketMcpManifestSchema = z.object({
   // Present when a verified owner's corrections were applied over the
   // federated data (Issue #367, W7).
   owner: marketMcpOwnerLayerSchema.optional(),
+  // Present when the tools came from a platform snapshot or members'
+  // observation instead of the registry, a probe or the owner (Issue #367).
+  toolsReference: marketMcpToolsReferenceSchema.optional(),
   // Absent on manifests written before it existed and on servers without a
   // domain publisher.
   publisher: marketMcpPublisherSchema.optional(),
@@ -307,6 +349,14 @@ export const marketMcpToolsValidationSchema = marketMcpValidationSchema.pick({
   at: true,
 });
 
+export const marketMcpLocalizedSummarySchema = z.object({
+  locale: z.enum(["zh-CN", "zh-TW"]),
+  text: z.string(),
+});
+export type MarketMcpLocalizedSummary = z.infer<
+  typeof marketMcpLocalizedSummarySchema
+>;
+
 export const marketItemSummarySchema = z.object({
   id: z.string(),
   identifier: z.string(),
@@ -361,6 +411,15 @@ export const marketItemSummarySchema = z.object({
   deprecated: z.boolean().optional(),
   // The owner's corrections applied over the federated data; null when none.
   owner: marketMcpOwnerLayerSchema.nullable().optional(),
+  // The language the description was written in, by script detection
+  // ("en", "zh", "ja", "ko", "ru", ...); null until the translation pass has
+  // looked at it. Optional for answers from before it existed.
+  descriptionLanguage: z.string().nullable().optional(),
+  // An AI translation of `summary` into the requested Chinese variant, only
+  // for an entry without an AI overview whose summary is not already in that
+  // language. Machine output: the page labels it and shows `summary` as the
+  // original. Optional for answers from before it existed.
+  localizedSummary: marketMcpLocalizedSummarySchema.nullable().optional(),
 });
 
 export const marketItemVersionSchema = z.object({
@@ -471,8 +530,6 @@ export const marketMcpScoreItemKeySchema = z.enum([
   "hasLogo",
   "hasDocs",
   "hasLicense",
-  "officialPublisher",
-  "claimed",
 ]);
 
 // F when a required item is not met, else by the share of the total weight
@@ -482,6 +539,11 @@ export const marketMcpScoreGradeSchema = z.enum(["A", "B", "F"]);
 export const marketMcpScoreItemSchema = z.object({
   key: marketMcpScoreItemKeySchema,
   weight: z.number().int().min(0),
+  // False when the item does not apply to this entry (a hosted-only service
+  // has no license to declare): it is then neither met nor required and its
+  // weight is left out of the percentage. Absent means true, for answers from
+  // before it existed.
+  applicable: z.boolean().default(true),
   // Required for THIS entry: a remote's reachability, say, but not a stdio
   // package's.
   required: z.boolean(),
@@ -490,11 +552,95 @@ export const marketMcpScoreItemSchema = z.object({
 
 export const marketMcpScoreSchema = z.object({
   grade: marketMcpScoreGradeSchema,
-  // Met weight as a share of the total weight, 0–100, whole number.
+  // Met weight as a share of the weight that applies, 0–100, whole number.
   percentage: z.number().int().min(0).max(100),
   // Every item, in the definition's order, whether met or not.
   items: z.array(marketMcpScoreItemSchema),
 });
+
+// ---------------------------------------------------------------------------
+// Tool revisions (Issue #367). A listing's tool list has a history per source:
+// a new revision whenever the canonicalised list differs from that source's
+// previous one. The number is the history of THIS listing, not the server's
+// own version. No member or team identifier is ever part of it.
+// ---------------------------------------------------------------------------
+
+export const marketMcpToolRevisionSourceSchema = z.enum([
+  "owner",
+  "platform-indexed",
+  "member-observed",
+]);
+export type MarketMcpToolRevisionSource = z.infer<
+  typeof marketMcpToolRevisionSourceSchema
+>;
+
+export const MARKET_MCP_TOOL_REVISIONS_MAX_LIMIT = 50;
+export const MARKET_MCP_TOOL_REVISIONS_DEFAULT_LIMIT = 20;
+
+export const marketMcpToolFieldSchema = z.enum([
+  "title",
+  "description",
+  "inputSchema",
+  "outputSchema",
+  "annotations",
+]);
+
+// On the detail answer: the current revision of the source whose tools the
+// page shows. Null when that list has no revision history.
+export const marketMcpToolsRevisionSchema = z.object({
+  source: marketMcpToolRevisionSourceSchema,
+  revision: z.number().int().min(1),
+  observedAt: z.string(),
+  lastConfirmedAt: z.string(),
+});
+
+export const marketMcpToolRevisionSchema = z.object({
+  source: marketMcpToolRevisionSourceSchema,
+  revision: z.number().int().min(1),
+  // The newest revision of its source, and not a withdrawal.
+  current: z.boolean(),
+  // The source took its list back; not the same as a valid empty list.
+  withdrawn: z.boolean(),
+  toolsCount: z.number().int().min(0),
+  // What the server called its own version then. Context only.
+  serverVersion: z.string().nullable(),
+  observedAt: z.string(),
+  lastConfirmedAt: z.string(),
+  added: z.array(z.string()),
+  removed: z.array(z.string()),
+  changed: z.array(
+    z.object({ name: z.string(), fields: z.array(marketMcpToolFieldSchema) }),
+  ),
+});
+export type MarketMcpToolRevision = z.infer<typeof marketMcpToolRevisionSchema>;
+export type MarketMcpToolsRevision = z.infer<typeof marketMcpToolsRevisionSchema>;
+
+// GET /v1/mcp/:identifier/tools/revisions — newest first, for the one source
+// whose tools the page shows (the answer's `source`; there is no way to ask for
+// another). `before` is the revision number to continue after (the previous
+// answer's `nextBefore`).
+export const listMarketMcpToolRevisionsRequestSchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MARKET_MCP_TOOL_REVISIONS_MAX_LIMIT)
+    .default(MARKET_MCP_TOOL_REVISIONS_DEFAULT_LIMIT),
+  // A revision number is a Postgres `integer`.
+  before: z.coerce.number().int().min(1).max(2_147_483_647).optional(),
+});
+export type ListMarketMcpToolRevisionsRequest = z.infer<
+  typeof listMarketMcpToolRevisionsRequestSchema
+>;
+
+export const listMarketMcpToolRevisionsResponseSchema = z.object({
+  source: marketMcpToolRevisionSourceSchema.nullable(),
+  items: z.array(marketMcpToolRevisionSchema),
+  nextBefore: z.number().int().min(1).nullable(),
+});
+export type ListMarketMcpToolRevisionsResponse = z.infer<
+  typeof listMarketMcpToolRevisionsResponseSchema
+>;
 
 export const getMarketMcpResponseSchema = z.object({
   item: marketItemSummarySchema,
@@ -517,6 +663,9 @@ export const getMarketMcpResponseSchema = z.object({
   // when the server has no published version to score. Optional for answers
   // from before it existed.
   score: marketMcpScoreSchema.nullable().optional(),
+  // The current revision of the source whose tool list is shown; null when
+  // that list has no history. Optional for answers from before it existed.
+  toolsRevision: marketMcpToolsRevisionSchema.nullable().optional(),
 });
 
 export const getMarketMcpManifestResponseSchema = z.object({
@@ -900,6 +1049,7 @@ export type MarketMcpGithubRegistryProvenance = z.infer<
 >;
 
 export * from "./sitemaps";
+export * from "./endpoint-pin";
 
 // ---------------------------------------------------------------------------
 // Owner-submitted tool lists (Issue #367, W7). `sourceweft mcp inspect` runs
@@ -923,10 +1073,39 @@ export const MARKET_MCP_INSPECT_LIMITS = Object.freeze({
   serverInfoBytes: 4 * 1024,
 });
 
+/**
+ * How deep a tool's schemas and annotations may nest. Real JSON Schemas stay
+ * far below this; a value that fits the byte limit only as thousands of nested
+ * arrays would overflow the stack of any recursive walk over it.
+ */
+export const MARKET_MCP_TOOL_MAX_NESTING = 64;
+
+/**
+ * Does any value nest deeper than `limit`? Walks with an explicit stack, so
+ * the check cannot overflow on the input it rejects.
+ */
+export function marketMcpNestsDeeperThan(root: unknown, limit: number): boolean {
+  const stack: Array<[unknown, number]> = [[root, 0]];
+  while (stack.length > 0) {
+    const [value, depth] = stack.pop()!;
+    if (!value || typeof value !== "object") continue;
+    if (depth >= limit) return true;
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      stack.push([child, depth + 1]);
+    }
+  }
+  return false;
+}
+
 // UTF-8 size of a value's JSON; this package runs in browsers too, so no
 // Node `Buffer`.
 function jsonBytes(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
+  try {
+    return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
+  } catch {
+    // Nested too deeply to serialise: over any limit, not a server error.
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 export const marketMcpInspectedToolSchema = z
@@ -941,6 +1120,16 @@ export const marketMcpInspectedToolSchema = z
     outputSchema: z.record(z.string(), z.unknown()).optional(),
     annotations: z.record(z.string(), z.unknown()).default({}),
   })
+  .refine(
+    (tool) =>
+      !marketMcpNestsDeeperThan(
+        [tool.inputSchema, tool.outputSchema, tool.annotations],
+        MARKET_MCP_TOOL_MAX_NESTING,
+      ),
+    {
+      message: `A tool's schemas and annotations may nest at most ${MARKET_MCP_TOOL_MAX_NESTING} levels deep`,
+    },
+  )
   .refine(
     (tool) =>
       jsonBytes(tool.inputSchema) +
@@ -996,4 +1185,64 @@ export const submitMarketMcpOwnerToolsRequestSchema = z
   .strict();
 export type SubmitMarketMcpOwnerToolsRequest = z.infer<
   typeof submitMarketMcpOwnerToolsRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Platform reference snapshot (Issue #367). A market admin's private tool reads
+// a server's tools with a reference account on its own machine and submits the
+// list here. The platform records it as source `platform-indexed`, risk
+// `unknown`; an owner's list outranks it.
+// ---------------------------------------------------------------------------
+
+export const MARKET_MCP_SNAPSHOT_LIMITS = Object.freeze({
+  endpointChars: 2_048,
+  // How far ahead of the server clock `observedAt` may be.
+  clockSkewMs: 5 * 60 * 1000,
+});
+
+// POST /v1/market/admin/mcp/platform-snapshots
+export const submitMarketMcpPlatformSnapshotRequestSchema = z
+  .object({
+    identifier: z.string().min(1).max(256),
+    // Both must name the listing's CURRENT `manifest.endpointUrl`: the origin
+    // as `scheme://host[:port]`, the URL in full. Compared after
+    // normalisation (case, trailing dot, default port); userinfo is refused.
+    endpointOrigin: z.string().min(1).max(MARKET_MCP_SNAPSHOT_LIMITS.endpointChars),
+    endpointUrl: z.string().min(1).max(MARKET_MCP_SNAPSHOT_LIMITS.endpointChars),
+    tools: z.array(marketMcpInspectedToolSchema).max(MARKET_MCP_INSPECT_LIMITS.tools),
+    referenceProfile: marketMcpReferenceProfileSchema,
+    // When the list was read, ISO 8601 with offset.
+    observedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+export type SubmitMarketMcpPlatformSnapshotRequest = z.infer<
+  typeof submitMarketMcpPlatformSnapshotRequestSchema
+>;
+
+export const submitMarketMcpPlatformSnapshotResponseSchema = z.object({
+  identifier: z.string(),
+  // `created`: a new revision; `confirmed`: same list as the latest revision,
+  // only confirmed again; `throttled`: the daily revision ceiling was reached
+  // and nothing was recorded.
+  outcome: z.enum(["created", "confirmed", "throttled"]),
+  revision: z.number().int().min(1).nullable(),
+  toolsHash: z.string(),
+  toolsCount: z.number().int().min(0),
+});
+export type SubmitMarketMcpPlatformSnapshotResponse = z.infer<
+  typeof submitMarketMcpPlatformSnapshotResponseSchema
+>;
+
+// POST /v1/market/admin/mcp/tool-sources — take a source's recorded tools
+// down (`takedown`: removes its whole history and keeps the source from being
+// recorded again) or allow it again (`restore`).
+export const marketMcpToolSourceActionRequestSchema = z
+  .object({
+    identifier: z.string().min(1).max(256),
+    source: z.enum(["platform-indexed", "member-observed"]),
+    action: z.enum(["takedown", "restore"]),
+  })
+  .strict();
+export type MarketMcpToolSourceActionRequest = z.infer<
+  typeof marketMcpToolSourceActionRequestSchema
 >;

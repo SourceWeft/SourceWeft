@@ -94,7 +94,9 @@ test("HTML preview exposes all projected formats and retains its pinned iframe",
   );
   assert.equal(
     container.querySelector("iframe")?.getAttribute("src"),
-    "/inline?v=2",
+    // The pinned version is kept; `runtime=1` asks the host for the injected
+    // link and storage runtime.
+    "/inline?v=2&runtime=1",
   );
   assert.equal(
     container

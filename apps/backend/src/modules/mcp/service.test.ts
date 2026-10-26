@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   listMcpToolRuns: vi.fn(),
   listWorkspaceMcpInstalls: vi.fn(),
   logInfo: vi.fn(),
+  recordMemberObservedTools: vi.fn(),
   requireMcpWorkspace: vi.fn(),
   setWorkspaceMcpToolsEnabled: vi.fn(),
   updateMcpActionRun: vi.fn(),
@@ -51,6 +52,10 @@ vi.mock("../../shared/config", () => ({
       clients: {},
     },
   },
+}));
+
+vi.mock("../market/tool-revisions/member-observed", () => ({
+  recordMemberObservedTools: mocks.recordMemberObservedTools,
 }));
 
 vi.mock("./oauth-repository", () => ({
@@ -2012,4 +2017,306 @@ test("listInstalls overlays per-member status and connectedVia in two batched qu
     "e_optional",
     "g_bearer",
   ]);
+});
+
+/** Two members' own accounts on one install: each key sees different tools. */
+function memberAccounts(
+  install: WorkspaceMcpInstallRecord,
+  tools: Record<string, string[] | Error>,
+) {
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockImplementation(
+    async (scope: { userId: string }) => ({
+      authType: "bearer",
+      encryptedSecret: `enc:key-of-${scope.userId}`,
+    }),
+  );
+  mocks.createLangChainMcpClient.mockImplementation(
+    ({ headers }: { headers: { Authorization?: string } }) => {
+      const member = headers.Authorization?.replace("Bearer key-of-", "") ?? "";
+      const close = vi.fn(async () => undefined);
+      clientCloseMocks.push(close);
+      return {
+        close,
+        getTools: vi.fn(async () => {
+          const listed = tools[member];
+          if (listed instanceof Error) throw listed;
+          return (listed ?? []).map((name) =>
+            originalTool({
+              name: `mcp__arcmira__${name}`,
+              metadata: { annotations: { readOnlyHint: name.startsWith("get") } },
+            }),
+          );
+        }),
+      };
+    },
+  );
+}
+
+test("discoverToolsForMember returns each member their own tools and writes nothing shared", async () => {
+  resetAuthMethodMocks();
+  memberAccounts(oauthOrKeyInstall(), {
+    user_a: ["get_a", "put_a"],
+    user_b: ["get_b"],
+  });
+  const service = new McpService();
+  const input = { workspaceId: "workspace_1", installId: "mcp_install_arcmira" };
+
+  const first = await service.discoverToolsForMember({ ...input, userId: "user_a" });
+  const second = await service.discoverToolsForMember({ ...input, userId: "user_b" });
+
+  assert.deepEqual(first.tools.map((tool) => tool.name), ["get_a", "put_a"]);
+  assert.deepEqual(first.tools.map((tool) => tool.readOnly), [true, false]);
+  assert.deepEqual(second.tools.map((tool) => tool.name), ["get_b"]);
+  // The shared tool rows and the install's shared health are untouched.
+  assert.equal(mocks.upsertWorkspaceMcpTools.mock.calls.length, 0);
+  assert.equal(mocks.updateWorkspaceMcpInstall.mock.calls.length, 0);
+  // Every client was closed.
+  assert.ok(clientCloseMocks.length === 2);
+  for (const close of clientCloseMocks) assert.equal(close.mock.calls.length, 1);
+});
+
+test("a member's failing credential fails only their own discovery and never marks the install", async () => {
+  resetAuthMethodMocks();
+  memberAccounts(oauthOrKeyInstall(), {
+    user_a: ["get_a"],
+    user_b: new Error("401 Unauthorized: bad key sk-secretsecretsecret123456"),
+  });
+  const service = new McpService();
+  const input = { workspaceId: "workspace_1", installId: "mcp_install_arcmira" };
+
+  await assert.rejects(
+    () => service.discoverToolsForMember({ ...input, userId: "user_b" }),
+    (error: unknown) =>
+      error instanceof McpError &&
+      error.code === "MCP_MEMBER_DISCOVERY_FAILED" &&
+      !error.message.includes("sk-secretsecretsecret123456"),
+  );
+  const ok = await service.discoverToolsForMember({ ...input, userId: "user_a" });
+  assert.deepEqual(ok.tools.map((tool) => tool.name), ["get_a"]);
+  // testInstall would have set status "error" and a lastError here.
+  assert.equal(mocks.updateWorkspaceMcpInstall.mock.calls.length, 0);
+  assert.equal(mocks.upsertWorkspaceMcpTools.mock.calls.length, 0);
+});
+
+test("a member's discovery is offered to the catalog without anything about them", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: true, outcome: "created" });
+  memberAccounts(oauthOrKeyInstall({ endpointUrl: "https://mcp.arcmira.com/mcp" }), {
+    user_a: ["get_a", "put_a"],
+  });
+  await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_a",
+    installId: "mcp_install_arcmira",
+  });
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+  const offered = mocks.recordMemberObservedTools.mock.calls[0]![0] as Record<string, unknown>;
+  assert.equal(offered.marketIdentifier, "arcmira");
+  assert.equal(offered.endpointUrl, "https://mcp.arcmira.com/mcp");
+  assert.equal(offered.complete, true);
+  assert.deepEqual(
+    (offered.tools as Array<{ name: string }>).map((tool) => tool.name),
+    ["get_a", "put_a"],
+  );
+  // Nothing that says who connected, or where, is passed on.
+  assert.deepEqual(Object.keys(offered).sort(), ["complete", "endpointUrl", "marketIdentifier", "tools"]);
+  assert.ok(!JSON.stringify(offered).match(/user_a|workspace_1|team_1|mcp_install_arcmira/));
+});
+
+test("a key under a header the listing does not declare is never offered to the catalog", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: true, outcome: "created" });
+  const install = oauthOrKeyInstall({ authType: "api_key_header" });
+  install.manifestJson = {
+    auth: {
+      type: "api_key_header",
+      required: true,
+      headerName: "X-Api-Key",
+      methods: [{ type: "header", name: "X-Api-Key" }],
+    },
+  };
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.createLangChainMcpClient.mockImplementation(() => ({
+    close: vi.fn(async () => undefined),
+    getTools: vi.fn(async () => [originalTool({ name: "mcp__arcmira__get_a" })]),
+  }));
+  const discover = () =>
+    new McpService().discoverToolsForMember({
+      workspaceId: "workspace_1",
+      userId: "user_a",
+      installId: "mcp_install_arcmira",
+    });
+
+  // The member narrows the server with a toolset header of their own choosing.
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    headerName: "X-MCP-Toolsets",
+    encryptedSecret: "enc:narrow",
+  });
+  const result = await discover();
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["get_a"]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 0);
+
+  // The same member under the declared header is offered.
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    headerName: "x-api-key",
+    encryptedSecret: "enc:key",
+  });
+  await discover();
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+});
+
+test("a failing observation never fails the member's discovery", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockRejectedValue(new Error("database is down"));
+  memberAccounts(oauthOrKeyInstall(), { user_a: ["get_a"] });
+  const result = await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_a",
+    installId: "mcp_install_arcmira",
+  });
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["get_a"]);
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+});
+
+test("a cut-off discovery is offered as incomplete, a failed one not at all", async () => {
+  resetAuthMethodMocks();
+  mocks.recordMemberObservedTools.mockResolvedValue({ recorded: false, reason: "incomplete" });
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:key",
+  });
+  toolsByInstallId.set(
+    install.id,
+    Array.from({ length: 250 }, (_, index) =>
+      originalTool({ name: `mcp__arcmira__tool_${index}` }),
+    ),
+  );
+  await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+  await vi.waitFor(() => assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 1));
+  assert.equal(
+    (mocks.recordMemberObservedTools.mock.calls[0]![0] as { complete: boolean }).complete,
+    false,
+  );
+
+  resetAuthMethodMocks();
+  memberAccounts(oauthOrKeyInstall(), {
+    user_b: new Error("401 Unauthorized"),
+  });
+  await assert.rejects(() =>
+    new McpService().discoverToolsForMember({
+      workspaceId: "workspace_1",
+      userId: "user_b",
+      installId: "mcp_install_arcmira",
+    }),
+  );
+  assert.equal(mocks.recordMemberObservedTools.mock.calls.length, 0);
+});
+
+test("a member without permission to manage MCP cannot discover, and no client is created", async () => {
+  resetAuthMethodMocks();
+  memberAccounts(oauthOrKeyInstall(), { user_a: ["get_a"] });
+  mocks.requireMcpWorkspace.mockImplementation(
+    async (input: { userId: string; permission: string }) => {
+      if (input.userId === "viewer" || input.permission !== "mcp.manage") {
+        throw new McpError(403, "MCP_FORBIDDEN", "no access");
+      }
+      return {
+        workspace: { id: "workspace_1", organizationId: "team_1" },
+        membership: { role: "workspace_admin" },
+      };
+    },
+  );
+  await assert.rejects(
+    () =>
+      new McpService().discoverToolsForMember({
+        workspaceId: "workspace_1",
+        userId: "viewer",
+        installId: "mcp_install_arcmira",
+      }),
+    (error: unknown) => error instanceof McpError && error.code === "MCP_FORBIDDEN",
+  );
+  assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
+});
+
+test("discoverToolsForMember bounds the count and drops oversize definitions", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:key",
+  });
+  const tools = Array.from({ length: 250 }, (_, index) =>
+    originalTool({ name: `mcp__arcmira__tool_${index}` }),
+  );
+  // One tool whose schema alone is far past the per-tool limit.
+  (tools[3] as unknown as { schema: unknown }).schema = {
+    type: "object",
+    properties: { blob: { type: "string", description: "x".repeat(40_000) } },
+  };
+  toolsByInstallId.set(install.id, tools);
+
+  const result = await new McpService().discoverToolsForMember({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+
+  assert.equal(result.toolCount, 250);
+  assert.equal(result.truncated, true);
+  assert.equal(result.skippedOversize, 1);
+  assert.equal(result.tools.length, 199);
+  assert.ok(!result.tools.some((tool) => tool.name === "tool_3"));
+  assert.equal(mocks.upsertWorkspaceMcpTools.mock.calls.length, 0);
+});
+
+test("discoverToolsForMember on an unconnected OAuth install fails fast without a client", async () => {
+  resetAuthMethodMocks();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(oauthOrKeyInstall());
+  await assert.rejects(
+    () =>
+      new McpService().discoverToolsForMember({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        installId: "mcp_install_arcmira",
+      }),
+    (error: unknown) =>
+      error instanceof McpError && error.code === "MCP_OAUTH_NOT_CONNECTED",
+  );
+  assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
+});
+
+test("discoverToolsForMember on a key-required install without a saved key says so and calls nothing", async () => {
+  resetAuthMethodMocks();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(
+    mcpInstall({
+      id: "mcp_install_key",
+      authType: "bearer",
+      credentialStatus: "required",
+    }),
+  );
+  mocks.findWorkspaceMcpCredential.mockResolvedValue(null);
+  await assert.rejects(
+    () =>
+      new McpService().discoverToolsForMember({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        installId: "mcp_install_key",
+      }),
+    (error: unknown) =>
+      error instanceof McpError &&
+      error.code === "MCP_NOT_CONNECTED" &&
+      error.statusCode === 400,
+  );
+  assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
 });

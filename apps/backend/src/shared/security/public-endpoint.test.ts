@@ -82,8 +82,9 @@ test("classifies expanded IPv6 and the whole link-local range", () => {
   ]) {
     assert.equal(isPublicIpAddress(address), true, address);
   }
-  // These transition prefixes are outside this change's policy scope.
-  for (const address of ["::2", "64:ff9b::808:808", "2002:808:808::1"]) {
+  // The transition ranges are blocked (see the dedicated test below); "::2"
+  // is just an ordinary address.
+  for (const address of ["::2"]) {
     assert.equal(isPublicIpAddress(address), true, address);
   }
   for (const invalid of ["", "127.1", "256.1.1.1", "not-an-ip"]) {
@@ -186,4 +187,21 @@ test("sanitizes custom headers and rejects dangerous names", () => {
     () => sanitizeCustomHeaders({ "x-forwarded-for": "127.0.0.1" }),
     /not allowed/,
   );
+});
+
+test("blocks the IPv6 transition ranges that embed or tunnel an IPv4 address", () => {
+  for (const address of [
+    "64:ff9b::7f00:1", // NAT64 of 127.0.0.1
+    "64:ff9b::a9fe:a9fe", // NAT64 of 169.254.169.254
+    "64:ff9b::808:808", // NAT64 of a public IPv4 is still not checkable
+    "2002:7f00:1::1", // 6to4 of 127.0.0.1
+    "2002:a00:1::1", // 6to4 of 10.0.0.1
+    "2001:0:4136:e378:8000:63bf:3fff:fdd2", // Teredo
+    "100::1", // discard-only
+  ]) {
+    assert.equal(isPublicIpAddress(address), false, address);
+  }
+  // Neighbouring global unicast stays public.
+  assert.equal(isPublicIpAddress("2001:4860:4860::8888"), true);
+  assert.equal(isPublicIpAddress("2003::1"), true);
 });

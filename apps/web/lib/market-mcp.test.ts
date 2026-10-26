@@ -4,6 +4,7 @@ const client = vi.hoisted(() => ({
   getMcp: vi.fn(),
   listMcp: vi.fn(),
   listMcpCategories: vi.fn(),
+  listMcpToolRevisions: vi.fn(),
 }));
 const cacheCalls = vi.hoisted(
   () => [] as { keys: string[]; options: { revalidate?: number } }[],
@@ -37,12 +38,14 @@ vi.mock("@sourceweft/market-sdk", () => {
     getMcp = client.getMcp;
     listMcp = client.listMcp;
     listMcpCategories = client.listMcpCategories;
+    listMcpToolRevisions = client.listMcpToolRevisions;
   }
   return { MarketClient, MarketClientError };
 });
 
 import {
   getPublicMcpDetail,
+  getPublicMcpToolRevisions,
   listPublicMcp,
   listPublicMcpCategories,
   requirePublicMcpCategories,
@@ -69,6 +72,7 @@ const aiOverview = {
 beforeEach(() => {
   client.getMcp.mockReset();
   client.listMcp.mockReset();
+  client.listMcpToolRevisions.mockReset();
 });
 
 describe("getPublicMcpDetail", () => {
@@ -93,10 +97,13 @@ describe("getPublicMcpDetail", () => {
       {
         aiOverview,
         overviewLocales: ["en", "zh-CN"],
+        localizedSummary: null,
+        descriptionLanguage: null,
         readme: { markdown: "# Weather", source, status: "ok" },
         relatedProduct: null,
         score: null,
         searchIndexable: true,
+        toolsRevision: null,
         versions,
       },
     );
@@ -110,10 +117,13 @@ describe("getPublicMcpDetail", () => {
     await expect(getPublicMcpDetail("x", "en")).resolves.toEqual({
       aiOverview: null,
       overviewLocales: [],
+      localizedSummary: null,
+      descriptionLanguage: null,
       readme: null,
       relatedProduct: null,
       score: null,
       searchIndexable: true,
+      toolsRevision: null,
       versions,
     });
   });
@@ -155,16 +165,41 @@ describe("getPublicMcpDetail", () => {
     });
   });
 
+  it("carries the current tools revision when the market has one", async () => {
+    const toolsRevision = {
+      source: "owner",
+      revision: 3,
+      observedAt: "2026-10-24T10:00:00.000Z",
+      lastConfirmedAt: "2026-10-24T10:00:00.000Z",
+    };
+    client.getMcp.mockResolvedValue({ item: {}, versions: [], toolsRevision });
+    await expect(getPublicMcpDetail("x", "en")).resolves.toMatchObject({
+      toolsRevision,
+    });
+  });
+
+  it("reads the change log, and goes without it when it cannot be read", async () => {
+    const history = { source: "owner", items: [], nextBefore: null };
+    client.listMcpToolRevisions.mockResolvedValue(history);
+    await expect(getPublicMcpToolRevisions("io.github.o/r")).resolves.toBe(history);
+    expect(client.listMcpToolRevisions).toHaveBeenCalledWith("io.github.o/r");
+    client.listMcpToolRevisions.mockRejectedValue(new Error("market down"));
+    await expect(getPublicMcpToolRevisions("io.github.o/r")).resolves.toBeNull();
+  });
+
   it("goes without all of them when the detail cannot be read", async () => {
     client.getMcp.mockRejectedValue(new Error("market down"));
     await expect(getPublicMcpDetail("x", "zh-TW")).resolves.toEqual({
       aiOverview: null,
       overviewLocales: [],
+      localizedSummary: null,
+      descriptionLanguage: null,
       readme: null,
       relatedProduct: null,
       score: null,
       // An outage never deindexes a page.
       searchIndexable: true,
+      toolsRevision: null,
       versions: [],
     });
   });

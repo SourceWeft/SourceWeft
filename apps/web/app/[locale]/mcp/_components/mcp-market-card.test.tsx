@@ -24,10 +24,20 @@ vi.mock("next-intl/server", async () => {
       }),
   };
 });
-vi.mock("next-intl", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("next-intl")>()),
-  useLocale: () => "en",
-}));
+vi.mock("next-intl", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next-intl")>();
+  const messages = (await import("../../../../messages/en.json")).default;
+  return {
+    ...actual,
+    useLocale: () => "en",
+    useTranslations: (namespace?: string) =>
+      actual.createTranslator({
+        locale: "en",
+        messages,
+        namespace: namespace as never,
+      }),
+  };
+});
 
 import { McpMarketCard } from "./mcp-display";
 
@@ -107,6 +117,22 @@ describe("public MCP card", () => {
     }
   });
 
+  it("shows a Chinese reader's translation of a long registry summary, marked as AI-translated", async () => {
+    const summary =
+      "Forecasts for any city, with severe-weather alerts and air quality.";
+    const html = await card(
+      item({
+        summary,
+        localizedSummary: { locale: "zh-CN", text: "任意城市的天气预报，含恶劣天气预警和空气质量。" },
+      }),
+    );
+    expect(html).toContain("任意城市的天气预报，含恶劣天气预警和空气质量。");
+    expect(html).not.toContain(summary);
+    expect(html).toContain("data-ai-translated");
+    expect(html).toContain(enMessages.mcp.aiOverview.translatedTag);
+    expect(html).not.toContain("data-ai-summary");
+  });
+
   // Issue #367: the publisher's own server, next to the provider name.
   it("marks a server its publisher runs as from the official publisher", async () => {
     const html = await card(
@@ -173,5 +199,96 @@ describe("public MCP card", () => {
     expect(local).toContain(
       "Filesystem&#x27;s local MCP server; no sign-in required; STDIO.",
     );
+  });
+
+  // #367 A1: an io.github.* listing names a GitHub account the registry
+  // checked, not the product's maker.
+  it("labels a GitHub-namespace server neutrally and never as official", async () => {
+    const html = await card(
+      item({ identifier: "io.github.arcmira/mcp", providerName: "arcmira" }),
+    );
+    expect(html).toContain('data-github-account="arcmira"');
+    expect(html).toContain("Published by GitHub account arcmira");
+    expect(html).not.toContain("data-official-publisher");
+    expect(html).not.toContain(enMessages.mcp.card.officialPublisher);
+    // A verified claim changes nothing about who published it.
+    const claimed = await card(
+      item({
+        claimed: true,
+        identifier: "io.github.arcmira/mcp",
+        providerName: "arcmira",
+      }),
+    );
+    expect(claimed).toContain(enMessages.mcp.badges.claimed);
+    expect(claimed).toContain("Published by GitHub account arcmira");
+    expect(claimed).not.toContain("data-official-publisher");
+  });
+
+  it("keeps the provider name for a server with neither a domain nor a GitHub namespace", async () => {
+    const html = await card(
+      item({ identifier: "acme/weather", providerName: "Acme" }),
+    );
+    expect(html).toContain(">Acme<");
+    expect(html).not.toContain("data-github-account");
+  });
+
+  it("leaves out the verification badge where the list asks", async () => {
+    const value = item({ verified: true });
+    const plain = renderToStaticMarkup(
+      (await resolveServerTree(
+        await McpMarketCard({ item: value }),
+      )) as ReactElement,
+    );
+    expect(plain).toContain(enMessages.mcp.badges.verification.verified);
+    const hidden = renderToStaticMarkup(
+      (await resolveServerTree(
+        await McpMarketCard({ hideVerification: true, item: value }),
+      )) as ReactElement,
+    );
+    expect(hidden).not.toContain(enMessages.mcp.badges.verification.verified);
+    expect(hidden).not.toContain(enMessages.mcp.badges.verification.unverified);
+  });
+
+  it("shows no 'Other' category as if it were one", async () => {
+    expect(await card(item({ categories: ["other"] }))).not.toContain(
+      ">Other<",
+    );
+    expect(await card(item({ categories: ["databases"] }))).toContain(
+      ">Databases<",
+    );
+  });
+
+  // Never "0 tools" for a list that is empty for another reason.
+  it("says why a server lists no tools instead of 0 tools", async () => {
+    const authRequired = await card(
+      item({ requiresAuth: true, transport: "streamable_http" }),
+    );
+    expect(authRequired).toContain("Credential required");
+    expect(authRequired).toContain('data-tools-status="credentialRequired"');
+    expect(authRequired).not.toContain("0 tools");
+    const unindexed = await card(item({ transport: "streamable_http" }));
+    expect(unindexed).toContain("Not indexed yet");
+    // Not a warning: most remote cards have no tool list.
+    expect(
+      /data-tools-status="unindexed"[^>]*>([\s\S]*?)<\/span><\/span>/.exec(
+        unindexed,
+      )?.[1],
+    ).not.toContain("lucide-triangle-alert");
+    expect(unindexed).not.toContain("0 tools");
+    const stdio = await card(item({ transport: "stdio" }));
+    expect(stdio).toContain("Not validated yet");
+    expect(stdio).not.toContain("0 tools");
+    const failed = await card(
+      item({
+        toolsValidation: {
+          at: "2026-10-20T00:00:00.000Z",
+          reason: "start",
+          status: "failed",
+        },
+        transport: "stdio",
+      }),
+    );
+    expect(failed).toContain("Not validated · the server did not start");
+    expect(await card(item({ toolsCount: 3 }))).toContain("3 tools");
   });
 });

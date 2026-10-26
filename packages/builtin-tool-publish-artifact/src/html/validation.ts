@@ -3,6 +3,7 @@ import { parse, type DefaultTreeAdapterTypes } from "parse5";
 import postcss from "postcss";
 import valueParser from "postcss-value-parser";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
+import { parseArtifactExternalUrl } from "@sourceweft/contracts/artifact-records";
 import {
   HTML_ARTIFACT_METADATA_NAME,
   htmlArtifactMetadataSchema,
@@ -75,6 +76,13 @@ function checkCss(css: string) {
       }
     });
   });
+}
+
+function isExternalWebLink(value: string) {
+  const trimmed = value.trim();
+  return (
+    /^https?:\/\//iu.test(trimmed) && parseArtifactExternalUrl(trimmed) !== null
+  );
 }
 
 /** Read URL tokens without splitting the commas inside data URLs. */
@@ -177,9 +185,15 @@ export function validateHtmlBytes(bytes: Uint8Array) {
           checkResource(value.trim(), `${tag}.${name}`);
         }
         if (name === "href" || name === "xlink:href") {
-          if (tag === "a" && !value.startsWith("#"))
-            resourceError("Navigation links must stay within the document");
-          checkResource(value.trim(), `${tag}.${name}`);
+          // A link is navigation, not a resource: in-document anchors stay in
+          // the page and http(s) links open only after the host's
+          // leave-SourceWeft confirmation. Nothing else may be a link target.
+          if (tag === "a") {
+            if (!value.startsWith("#") && !isExternalWebLink(value))
+              resourceError(
+                "Links must point within the document or to an http(s) URL",
+              );
+          } else checkResource(value.trim(), `${tag}.${name}`);
         }
         if (["action", "formaction", "ping", "srcdoc"].includes(name)) {
           resourceError(

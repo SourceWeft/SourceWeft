@@ -10,12 +10,18 @@ import {
   assertRejectsWithBillingCode,
 } from "./test-fixtures";
 
-test("default free quota can be configured by runtime env", async () => {
+test("default free quota comes from the runtime config", async () => {
   const store = new MemoryBillingStore();
   const configuredQuota = {
     ...runtimeConfig,
-    defaultMonthlyPages: 42,
-    defaultMonthlyCredits: 1234,
+    planQuotas: {
+      ...runtimeConfig.planQuotas,
+      individual_free: {
+        active: true,
+        monthlyPagesLimit: 42,
+        monthlyCreditsGrant: 1234,
+      },
+    },
   };
   const accountService = new BillingAccountService(store, configuredQuota);
   const usageService = new BillingUsageService(

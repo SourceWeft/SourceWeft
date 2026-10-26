@@ -5,6 +5,7 @@ import type { BillingClient } from "@sourceweft/sdk";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
+import { formatPrice } from "./format-price";
 import { TeamCheckoutDialog } from "./team-checkout-dialog";
 
 import { planFamilyToPricingPlanId, type PlanConfig } from "../catalog/pricing";
@@ -50,11 +51,6 @@ function isPersonalOrganization(org: PricingOrg) {
   return (
     parseOrganizationMetadata(org.metadata).sourceweft?.kind === "personal"
   );
-}
-
-function formatPrice(cents: number, freeLabel: string): string {
-  if (cents === 0) return freeLabel;
-  return `$${(cents / 100).toFixed(0)}`;
 }
 
 function yearlyDiscount(monthly: number, yearly: number): number {

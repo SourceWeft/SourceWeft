@@ -34,6 +34,27 @@ describe("locales and cards", () => {
     }
   });
 
+  it("shows a Chinese reader the translation of the registry summary, flagged", () => {
+    const localizedSummary = { locale: "zh-CN" as const, text: "注册表的描述。" };
+    expect(
+      mcpCardText({ summary: "Registry text.", aiSummary: null, localizedSummary }),
+    ).toEqual({ text: "注册表的描述。", ai: false, translated: true });
+    // An AI summary still wins, and so does a template standing in for a short summary.
+    expect(
+      mcpCardText({ summary: "Registry text.", aiSummary: "AI.", localizedSummary }),
+    ).toEqual({ text: "AI.", ai: true });
+    expect(
+      mcpCardText(
+        { summary: "Notion", aiSummary: null, localizedSummary },
+        "Notion's hosted MCP server; OAuth sign-in required.",
+      ),
+    ).toEqual({ text: "Notion's hosted MCP server; OAuth sign-in required.", ai: false });
+    // No translation: the original.
+    expect(
+      mcpCardText({ summary: "Registry text.", aiSummary: null, localizedSummary: null }),
+    ).toEqual({ text: "Registry text.", ai: false });
+  });
+
   // #367 W4: a template sentence stands in for a registry summary that is
   // not longer than it; an AI summary still wins.
   it("prefers a given template over a registry summary no longer than it", () => {

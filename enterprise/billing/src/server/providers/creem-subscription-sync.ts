@@ -587,4 +587,9 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
 export { createCreemWebhookHandler } from "./creem-webhook-bypass";
 export { createCreemReversalSync } from "./creem-reversal-sync";
 export { monitorStrandedCreemReceipts } from "./creem-receipt-monitor";
+export {
+  listCatalogCreemProducts,
+  monitorCreemCatalogPrices,
+} from "./creem-catalog-monitor";
+export { createCreemClient } from "./creem-client";
 export type { MonitorStrandedCreemReceiptsDeps } from "./creem-receipt-monitor";

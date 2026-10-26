@@ -449,6 +449,41 @@
       "when": 1792826043797,
       "tag": "0063_market_mcp_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792850292500,
+      "tag": "0064_market_mcp_tool_revisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792901504711,
+      "tag": "0065_market_mcp_icon_dry_run",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1792903417503,
+      "tag": "0066_artifact_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1792910347642,
+      "tag": "0067_mcp_oauth_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1792912247956,
+      "tag": "0068_market_mcp_tool_revision_context",
+      "breakpoints": true
     }
   ]
 }

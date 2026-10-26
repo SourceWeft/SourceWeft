@@ -677,6 +677,12 @@ export async function setMcpOwnerOverrides(
  * tools and the file's non-secret facts are kept; the tools are shown with
  * `risk: "unknown"` and `source: "owner-submitted"` (see ./overrides.ts). The
  * saver becomes the list's author.
+ *
+ * Revision history (../tool-revisions): a list that differs from the previous
+ * owner list becomes the next `owner` revision, the same list again only
+ * confirms the latest. An EMPTY submission clears the owner's list exactly like
+ * `clearMcpOwnerTools` (the owner layer has no "owner says no tools" state
+ * yet), so both record a withdrawal, not an empty revision.
  */
 export async function setMcpOwnerTools(
   input: {
@@ -699,7 +705,15 @@ export async function setMcpOwnerTools(
   const meta: Record<string, unknown> = {};
   if (input.submission.generatedAt) meta.generatedAt = input.submission.generatedAt;
   if (input.submission.serverInfo) meta.serverInfo = input.submission.serverInfo;
-  return writeTools(server, input.userId, tools, meta, deps);
+  const version = input.submission.serverInfo?.version;
+  return writeTools(
+    server,
+    input.userId,
+    tools,
+    meta,
+    deps,
+    typeof version === "string" ? version : null,
+  );
 }
 
 export async function clearMcpOwnerTools(
@@ -716,10 +730,12 @@ async function writeTools(
   tools: unknown[],
   meta: Record<string, unknown>,
   deps: McpClaimDeps,
+  serverVersion: string | null = null,
 ): Promise<McpOwnerOverrides> {
   const { row, verified } = await saveOwnerTools({
     serverId: server.id,
     userId,
+    serverVersion,
     tools: tools.length > 0 ? tools : null,
     meta: tools.length > 0 ? meta : null,
     now: deps.now(),
