@@ -19,6 +19,7 @@ on:
       - "scripts/ci/sandbox-bundle*.mjs"
       - "scripts/ci/desktop-deb*.mjs"
       - "scripts/ci/install-static-ripgrep.sh"
+      - "scripts/ci/install-ripgrep-macos.sh"
       - "scripts/ci/ripgrep-release.json"
       - "scripts/ci/update-verifier/**"
       - ".github/workflows/desktop-release.yml"
@@ -424,6 +425,74 @@ jobs:
           # Packing is deterministic: a second pack of the same bundle is byte-identical.
           node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out-again"
           cmp "$tarball" "$out-again/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz"
+
+  sandbox-bundle-macos:
+    name: Sandbox bundle pack, sign and verify (macOS)
+    # macos-14 (arm64), like the real-sandbox macOS job: the arm64 bundle builds natively and the
+    # x86_64 bundle cross-compiles here exactly as the Tauri installers do on macos-15.
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Same pin as the release build and the real-sandbox jobs.
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - run: pnpm install --frozen-lockfile
+      - name: Build the signature verifier used for release packages
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Archive tooling unit tests (darwin file set, cross-arch target resolution)
+        run: node --test scripts/ci/sandbox-bundle.test.mjs
+      - name: Sidecar manifest unit tests
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar test
+      - name: Signing round trip with a throwaway key
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: node --test scripts/ci/sandbox-bundle-signature.test.mjs
+      - name: Build, ad-hoc sign, pack and verify both macOS targets exactly as the release does
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: |
+          set -euo pipefail
+          # One throwaway updater key for the minisign round trip (no release secret is used).
+          keys=$(mktemp -d)
+          pnpm --filter @sourceweft/desktop exec tauri signer generate --ci -w "$keys/ci-key" -p ci-throwaway-password
+          export TAURI_SIGNING_PRIVATE_KEY="$(cat "$keys/ci-key")"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=ci-throwaway-password
+          export TAURI_UPDATER_PUBLIC_KEY="$(cat "$keys/ci-key.pub")"
+          # The arm64 target builds natively; the x86_64 target cross-compiles on this arm64
+          # runner (bun --target=bun-darwin-x64) and is packed but not executed.
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            echo "::group::$target"
+            rg="$(bash scripts/ci/install-ripgrep-macos.sh "$RUNNER_TEMP/ripgrep-$target" "$target")"
+            pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$target" --rg "$rg"
+            # Ad-hoc sign (hardened runtime + allow-jit entitlement) BEFORE packing, then rebuild
+            # the manifest over the signed binaries so their hashes match what is packed.
+            bash apps/desktop/sandbox-sidecar/scripts/sign-macos.sh apps/desktop/sandbox-sidecar/dist/bundle -
+            codesign --verify --strict --verbose=2 apps/desktop/sandbox-sidecar/dist/bundle/srt-sidecar
+            codesign --verify --strict --verbose=2 apps/desktop/sandbox-sidecar/dist/bundle/rg
+            pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --remanifest
+            out="$RUNNER_TEMP/sandbox-bundle-$target"
+            rm -rf "$out" "$out-again"
+            node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out"
+            tarball="$out/sourceweft-sandbox-$target.tar.gz"
+            node scripts/ci/sandbox-bundle.mjs verify "$tarball"
+            node scripts/ci/sandbox-bundle.mjs sign "$tarball"
+            node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+            tar -tvzf "$tarball"
+            # Packing is deterministic: a second pack of the same signed bundle is byte-identical.
+            node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out-again"
+            cmp "$tarball" "$out-again/sourceweft-sandbox-$target.tar.gz"
+            echo "::endgroup::"
+          done
 
   macos-sandbox:
     name: Real sandbox suite on macOS
