@@ -23,7 +23,7 @@ import { requireRouteParam } from "./helpers";
  * preflight the API answers only for trusted origins. DELETE is never a simple
  * cross-site request, so it needs only the origin check.
  */
-function rejectOpaqueOrigin(c: Context) {
+export function rejectOpaqueOrigin(c: Context) {
   if (c.req.header("origin") === "null")
     throw artifactRecordError(
       "forbidden",

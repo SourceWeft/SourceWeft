@@ -98,6 +98,48 @@ describe("owner layer", () => {
     expect(marketItemSummarySchema.parse(item)).toBeTruthy();
   });
 
+  test("the owner's license and language replace the resolved ones, in item and manifest", () => {
+    const licensed = {
+      overridesJson: { license: " Apache-2.0 ", language: "Rust" },
+      toolsJson: null,
+      toolsSubmittedAt: null,
+      updatedAt: new Date(0),
+    };
+    const base = { ...federatedItem, license: "MIT", language: "Go" };
+    const item = applyOwnerOverridesToItem(base, { row: licensed, claimed: true });
+    expect([item.license, item.language]).toEqual(["Apache-2.0", "Rust"]);
+    expect(item.owner?.fields).toEqual(["license", "language"]);
+    const manifest = applyOwnerOverridesToManifest(federatedManifest, licensed);
+    expect([manifest.license, manifest.language]).toEqual(["Apache-2.0", "Rust"]);
+    // Without them the resolved values stay.
+    const plain = applyOwnerOverridesToItem(base, {
+      row: { ...licensed, overridesJson: {} },
+      claimed: true,
+    });
+    expect([plain.license, plain.language]).toEqual(["MIT", "Go"]);
+  });
+
+  test("an owner's own summary drops the translation made from the registry's", () => {
+    const translated = {
+      ...federatedItem,
+      descriptionLanguage: "en",
+      localizedSummary: { locale: "zh-CN" as const, text: "注册表摘要" },
+    };
+    const owned = (overridesJson: Record<string, unknown>) =>
+      applyOwnerOverridesToItem(translated, {
+        row: { overridesJson, toolsJson: null, toolsSubmittedAt: null, updatedAt: new Date(0) },
+        claimed: true,
+      });
+    expect(owned({ summary: "Owner summary" })).toMatchObject({
+      descriptionLanguage: null,
+      localizedSummary: null,
+    });
+    expect(owned({ homepageUrl: "https://notion.com" }).localizedSummary).toEqual({
+      locale: "zh-CN",
+      text: "注册表摘要",
+    });
+  });
+
   test("a claimed server with no corrections shows the federated data and the mark", () => {
     const item = applyOwnerOverridesToItem(federatedItem, { row: null, claimed: true });
     expect(item).toMatchObject({

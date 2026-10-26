@@ -1,4 +1,7 @@
-export { getPricingConfig } from "../../lib/billing-edition/catalog";
+export {
+  buildPricingPlans,
+  type PlansCopy,
+} from "../../lib/billing-edition/catalog";
 export {
   planFamilyToPricingPlanId,
   type PlanConfig,

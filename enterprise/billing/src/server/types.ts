@@ -20,6 +20,7 @@ import type {
   PaymentReversalInput,
   PaymentReversalNotice,
 } from "./payment-reversal";
+import type { PlanQuota } from "./plans";
 
 export type BillingRuntimeConfig = {
   saasEnabled: boolean;
@@ -33,8 +34,11 @@ export type BillingRuntimeConfig = {
   creditUnitUsd: number;
   defaultMarkupRate: number;
   defaultPlanFamily: PlanFamily;
-  defaultMonthlyPages: number;
-  defaultMonthlyCredits: number;
+  /** Per-member allocation by plan; `team_standard` is one seat's worth. */
+  planQuotas: Record<
+    "individual_free" | "individual_pro" | "team_standard",
+    PlanQuota
+  >;
   reconcileEnabled: boolean;
   creem: {
     apiKey: string;

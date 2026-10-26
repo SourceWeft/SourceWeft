@@ -881,6 +881,7 @@ describe("MCP README storage and fetch state", () => {
     };
     const fetchReadmes = vi.fn(async (targets: GitHubReadmeTarget[]) => ({
       results: targets.map(({ repo }) => results[repo]!),
+      repositories: targets.map(() => null),
       cost: 1,
       remaining: 4000,
       resetAt,
@@ -890,6 +891,7 @@ describe("MCP README storage and fetch state", () => {
       {
         claim: readmes.claimMcpReadmes,
         write: readmes.writeMcpReadmeColumns,
+        writeRepositoryMetadata: readmes.writeMcpRepositoryMetadata,
         defer: readmes.deferMcpReadmes,
         fetchReadmes,
         hasToken: () => true,

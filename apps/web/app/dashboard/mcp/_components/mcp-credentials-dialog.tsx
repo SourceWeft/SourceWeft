@@ -37,6 +37,7 @@ import {
 } from "../../../../lib/mcp-auth-method";
 import { acceptedMcpReturnTo } from "../../../../lib/mcp-return-to";
 import { contentClient } from "../../../../lib/sdk";
+import { catalogNoticeApplies } from "./mcp-catalog-notice";
 
 type ConnectionMethod = "oauth" | "header";
 
@@ -770,6 +771,15 @@ export function CredentialsDialog({
           ) : null}
 
           {!keyMethod && authType === "oauth" ? oauthPanel : null}
+
+          {catalogNoticeApplies(install, {
+            declaredKeyMethod: Boolean(keyMethod),
+            apiKeyHeaderName,
+          }) ? (
+            <p className="text-[11px] text-muted-foreground">
+              {t("credentials.catalogNotice")}
+            </p>
+          ) : null}
 
           {formError ? (
             <p className="text-xs text-destructive" role="alert">

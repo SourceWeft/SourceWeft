@@ -6,43 +6,10 @@ import type {
   BillingScope,
   PlanFamily,
 } from "@sourceweft/credits-core";
+import type { BillingCatalog } from "../catalog/billing-catalog";
+import type { PlanQuota } from "./plans";
 import type { BillingRuntimeConfig } from "./types";
 import { parseBooleanEnv as parseBoolean } from "./env";
-
-function parsePositiveNumber(value: string | undefined, fallback: number) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error("Billing configuration value must be a positive number");
-  }
-
-  return parsed;
-}
-
-function parseNonNegativeNumber(value: string | undefined, fallback: number) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(
-      "Billing configuration value must be a non-negative number",
-    );
-  }
-
-  return parsed;
-}
-
-function parseNonNegativeInteger(value: string | undefined, fallback: number) {
-  const parsed = parseNonNegativeNumber(value, fallback);
-  if (!Number.isInteger(parsed))
-    throw new Error("Billing configuration value must be an integer");
-  return parsed;
-}
 
 const billingModes: ReadonlySet<BillingMode> = new Set([
   "disabled",
@@ -133,9 +100,55 @@ function parseWaffoEnvironment(
   return parseBoolean(env.WAFFO_TEST_MODE, true) ? "test" : "prod";
 }
 
+/**
+ * Variables that used to carry prices, quotas, Creem product IDs and the credit
+ * unit price. The billing catalog file replaces them; they are ignored and the
+ * host reports any that are still set.
+ */
+export const RETIRED_BILLING_ENV_NAMES = [
+  "NEXT_PUBLIC_PRICING_PRO_MONTHLY",
+  "NEXT_PUBLIC_PRICING_PRO_YEARLY",
+  "NEXT_PUBLIC_PRICING_TEAM_MONTHLY",
+  "NEXT_PUBLIC_PRICING_TEAM_YEARLY",
+  "BILLING_PRICE_INDIVIDUAL_PRO_MONTHLY_CENTS",
+  "BILLING_PRICE_INDIVIDUAL_PRO_YEARLY_CENTS",
+  "BILLING_PRICE_TEAM_STANDARD_MONTHLY_CENTS",
+  "BILLING_PRICE_TEAM_STANDARD_YEARLY_CENTS",
+  "BILLING_CREDIT_TOPUP_UNIT_AMOUNT",
+  "BILLING_CREDIT_TOPUP_AMOUNT_CENTS",
+  "BILLING_PAGE_TOPUP_UNIT_AMOUNT",
+  "BILLING_PAGE_TOPUP_AMOUNT_CENTS",
+  "CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID",
+  "CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID",
+  "CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID",
+  "CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID",
+  "CREEM_CREDIT_TOPUP_PRODUCT_ID",
+  "CREEM_PAGE_TOPUP_PRODUCT_ID",
+  "BACKEND_DEFAULT_MONTHLY_CREDITS",
+  "BACKEND_DEFAULT_MONTHLY_PAGES",
+  "BACKEND_CREDIT_UNIT_USD",
+  "BACKEND_CREDIT_MARKUP_RATE",
+] as const;
+
+/** Names from `RETIRED_BILLING_ENV_NAMES` that are set to a non-empty value. */
+export function findIgnoredLegacyBillingEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): string[] {
+  return RETIRED_BILLING_ENV_NAMES.filter((name) => Boolean(env[name]?.trim()));
+}
+
+function planQuota(plan: { credits: number; pages: number }): PlanQuota {
+  return {
+    active: true,
+    monthlyPagesLimit: plan.pages,
+    monthlyCreditsGrant: plan.credits,
+  };
+}
+
 export function readBillingConfig(
   env: Readonly<Record<string, string | undefined>>,
   webBaseUrl: string,
+  catalog: BillingCatalog,
 ): BillingRuntimeConfig {
   const saasEnabled = parseBoolean(env.SOURCEWEFT_SAAS_ENABLED, false);
   const requestedBillingProvider = parseBillingProvider(
@@ -167,23 +180,17 @@ export function readBillingConfig(
     enforceLimits: parseBoolean(env.BACKEND_BILLING_ENFORCE_LIMITS, true),
     teamBillingEnabled:
       saasEnabled && parseBoolean(env.BACKEND_TEAM_BILLING_ENABLED, false),
-    creditUnitUsd: parsePositiveNumber(env.BACKEND_CREDIT_UNIT_USD, 0.00125),
-    defaultMarkupRate: parseNonNegativeNumber(
-      env.BACKEND_CREDIT_MARKUP_RATE,
-      0.25,
-    ),
+    creditUnitUsd: catalog.credits.unitUsd,
+    defaultMarkupRate: catalog.credits.markupRate,
     defaultPlanFamily: parsePlanFamily(
       env.BACKEND_DEFAULT_PLAN_FAMILY,
       "individual_free",
     ),
-    defaultMonthlyPages: parseNonNegativeInteger(
-      env.BACKEND_DEFAULT_MONTHLY_PAGES,
-      300,
-    ),
-    defaultMonthlyCredits: parseNonNegativeInteger(
-      env.BACKEND_DEFAULT_MONTHLY_CREDITS,
-      3000,
-    ),
+    planQuotas: {
+      individual_free: planQuota(catalog.plans.free),
+      individual_pro: planQuota(catalog.plans.pro),
+      team_standard: planQuota(catalog.plans.team),
+    },
     reconcileEnabled: parseBoolean(
       env.BACKEND_BILLING_RECONCILE_ENABLED,
       false,
@@ -194,15 +201,15 @@ export function readBillingConfig(
       webhookSecret: env.CREEM_WEBHOOK_SECRET || "",
       testMode: parseBoolean(env.CREEM_TEST_MODE, true),
       individualProMonthlyProductId:
-        env.CREEM_INDIVIDUAL_PRO_MONTHLY_PRODUCT_ID || "",
+        catalog.plans.pro.creemProductId?.monthly ?? "",
       individualProYearlyProductId:
-        env.CREEM_INDIVIDUAL_PRO_YEARLY_PRODUCT_ID || "",
+        catalog.plans.pro.creemProductId?.yearly ?? "",
       teamStandardMonthlyProductId:
-        env.CREEM_TEAM_STANDARD_MONTHLY_PRODUCT_ID || "",
+        catalog.plans.team.creemProductId?.monthly ?? "",
       teamStandardYearlyProductId:
-        env.CREEM_TEAM_STANDARD_YEARLY_PRODUCT_ID || "",
-      creditTopupProductId: env.CREEM_CREDIT_TOPUP_PRODUCT_ID || "",
-      pageTopupProductId: env.CREEM_PAGE_TOPUP_PRODUCT_ID || "",
+        catalog.plans.team.creemProductId?.yearly ?? "",
+      creditTopupProductId: catalog.topups.credit.creemProductId ?? "",
+      pageTopupProductId: catalog.topups.page.creemProductId ?? "",
     },
     stripe: {
       secretKey: env.STRIPE_SECRET_KEY?.trim() || "",
@@ -215,38 +222,14 @@ export function readBillingConfig(
       environment: parseWaffoEnvironment(env),
     },
     catalog: {
-      individualProMonthlyAmountCents: parsePositiveNumber(
-        env.BILLING_PRICE_INDIVIDUAL_PRO_MONTHLY_CENTS,
-        990,
-      ),
-      individualProYearlyAmountCents: parsePositiveNumber(
-        env.BILLING_PRICE_INDIVIDUAL_PRO_YEARLY_CENTS,
-        9900,
-      ),
-      teamStandardMonthlyAmountCents: parsePositiveNumber(
-        env.BILLING_PRICE_TEAM_STANDARD_MONTHLY_CENTS,
-        990,
-      ),
-      teamStandardYearlyAmountCents: parsePositiveNumber(
-        env.BILLING_PRICE_TEAM_STANDARD_YEARLY_CENTS,
-        9900,
-      ),
-      creditTopupUnitAmount: parsePositiveNumber(
-        env.BILLING_CREDIT_TOPUP_UNIT_AMOUNT,
-        10000,
-      ),
-      creditTopupAmountCents: parsePositiveNumber(
-        env.BILLING_CREDIT_TOPUP_AMOUNT_CENTS,
-        1250,
-      ),
-      pageTopupUnitAmount: parsePositiveNumber(
-        env.BILLING_PAGE_TOPUP_UNIT_AMOUNT,
-        1000,
-      ),
-      pageTopupAmountCents: parsePositiveNumber(
-        env.BILLING_PAGE_TOPUP_AMOUNT_CENTS,
-        500,
-      ),
+      individualProMonthlyAmountCents: catalog.plans.pro.priceCents.monthly,
+      individualProYearlyAmountCents: catalog.plans.pro.priceCents.yearly,
+      teamStandardMonthlyAmountCents: catalog.plans.team.priceCents.monthly,
+      teamStandardYearlyAmountCents: catalog.plans.team.priceCents.yearly,
+      creditTopupUnitAmount: catalog.topups.credit.units,
+      creditTopupAmountCents: catalog.topups.credit.priceCents,
+      pageTopupUnitAmount: catalog.topups.page.units,
+      pageTopupAmountCents: catalog.topups.page.priceCents,
     },
   };
 }

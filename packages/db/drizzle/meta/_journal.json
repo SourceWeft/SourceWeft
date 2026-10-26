@@ -477,6 +477,13 @@
       "when": 1792910347642,
       "tag": "0067_mcp_oauth_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1792912247956,
+      "tag": "0068_market_mcp_tool_revision_context",
+      "breakpoints": true
     }
   ]
 }

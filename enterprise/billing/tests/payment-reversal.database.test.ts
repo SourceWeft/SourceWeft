@@ -683,7 +683,7 @@ test("reversal and usage on the same member serialize", async () => {
     assert.equal(before?.addOnCreditsBalance, 10_000);
     assert.equal(
       before?.monthlyCreditsBalance,
-      runtimeConfig.defaultMonthlyCredits,
+      runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant,
     );
 
     // A partial refund (half of `paidAmount`) reclaims 5,000 of the 10,000
@@ -721,7 +721,7 @@ test("reversal and usage on the same member serialize", async () => {
     assert.equal(after?.addOnCreditsBalance, 5_000);
     assert.equal(
       after?.monthlyCreditsBalance,
-      runtimeConfig.defaultMonthlyCredits - 2000,
+      runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant - 2000,
     );
 
     const row = await pool.query(
@@ -731,7 +731,7 @@ test("reversal and usage on the same member serialize", async () => {
     assert.equal(row.rows[0]?.add_on_credits_balance, 5_000);
     assert.equal(
       row.rows[0]?.monthly_credits_balance,
-      runtimeConfig.defaultMonthlyCredits - 2000,
+      runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant - 2000,
     );
   } finally {
     try {
@@ -775,7 +775,8 @@ test("reclaim stops at zero under real constraints", async () => {
     await billing.meterConsume(
       teamId,
       {
-        credits: runtimeConfig.defaultMonthlyCredits + 9_000,
+        credits:
+          runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant + 9_000,
         feature: "test",
         idempotencyKey: `spend_${id}`,
       },

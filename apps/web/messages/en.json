@@ -433,6 +433,11 @@
         "unsupportedPackage": "the package type cannot run in the sandbox"
       }
     },
+    "toolsReference": {
+      "platformIndexed": "Read by SourceWeft with a standard test account · {date}",
+      "memberObserved": "Observed through connected accounts · {date}. It can differ by account.",
+      "stale": "The server address changed since this was read."
+    },
     "toolChangeLog": {
       "heading": "Change log",
       "intro": "Each entry is a change to this listing's tool list. It is not a version of the server itself.",
@@ -623,6 +628,10 @@
       "otherClients": "Other MCP clients",
       "otherClientsConfig": "Add this to your client's <code>mcpServers</code> config.",
       "oauthNote": " The client completes OAuth sign-in on first connect.",
+      "agentHeading": "Use with an agent",
+      "agentLead": "Paste this prompt into Claude Code, Codex, Cursor or another agent — or into SourceWeft chat. The agent reads this server's install guide, shows you its publisher, endpoint and sign-in, and adds it to your client once you agree. Keys never go into a command.",
+      "agentPrompt": "Read {url} and connect the MCP server it describes to my client. Before changing any config, show me its publisher, endpoint and sign-in method and wait for my OK. Never put an API key in a command or in a file I would commit; ask me where it should come from.",
+      "agentGuideLink": "Read the install guide the agent follows",
       "followRepo": "Follow the launch instructions in the <link>repository</link>.",
       "readmeHeading": "README",
       "toolsHeading": "Tools",
@@ -658,6 +667,11 @@
       "publishedByGithub": "Published by GitHub account {owner}",
       "delivery": "Delivery",
       "hostedService": "Hosted service",
+      "translatedSummary": {
+        "badge": "AI-translated",
+        "note": "Translated by an AI model from the original description below; it can be wrong.",
+        "original": "Original description"
+      },
       "integrationsShowMore": "Show more"
     },
     "readme": {
@@ -679,6 +693,8 @@
       "requirements": "Requirements",
       "englishFallback": "Shown in English: no overview in your language yet.",
       "cardSummaryTitle": "AI-generated summary",
+      "translatedTag": "AI-translated",
+      "translatedCardTitle": "AI-translated from the original description",
       "admin": {
         "title": "AI overview",
         "loading": "Loading overview…",
@@ -2348,6 +2364,42 @@
     "video": {
       "previewTitle": "Video Preview"
     },
+    "pageData": {
+      "title": "Page data",
+      "description": "Records this page keeps between visits. Export a copy or clear them here.",
+      "scopes": {
+        "user": {
+          "label": "Your data",
+          "hint": "Only you can see this."
+        },
+        "shared": {
+          "label": "Shared data",
+          "hint": "Seen by everyone who opens this page. Only the creator or a workspace admin can export or clear it."
+        }
+      },
+      "actions": {
+        "export": "Export data",
+        "clear": "Clear data",
+        "clearing": "Clearing…",
+        "clearConfirm": "Clear data"
+      },
+      "clearDialog": {
+        "user": {
+          "title": "Clear your data?",
+          "description": "This permanently deletes the records this page saved for you. Other people's data is not affected. This action cannot be undone."
+        },
+        "shared": {
+          "title": "Clear shared data?",
+          "description": "This permanently deletes the shared records this page saved for everyone who uses it. This action cannot be undone."
+        }
+      },
+      "toasts": {
+        "exported": "Data exported.",
+        "exportFailed": "Could not export the data.",
+        "cleared": "{count, plural, =0 {No records to clear.} one {Cleared # record.} other {Cleared # records.}}",
+        "clearFailed": "Could not clear the data."
+      }
+    },
     "share": {
       "title": "Share artifact",
       "anyoneWithLink": "Anyone with the link",
@@ -2648,6 +2700,7 @@
       },
       "headersHint": "Use one header per line. Secret values are not shown again after saving.",
       "noAuthNote": "This MCP server does not require credentials.",
+      "catalogNotice": "The names, descriptions and schemas this server returns may be shown publicly on its catalog page. Your credentials and the data you send are never kept.",
       "oauthNote": "This MCP server uses OAuth. Connect your account with the provider — you'll be redirected to grant access, then returned here. Your token is stored encrypted and refreshed automatically.",
       "optionalKeyNote": "This MCP server works without a credential. Add an API key if you have one.",
       "method": {
@@ -2904,6 +2957,7 @@
       "preview": "Preview {title}",
       "completed": "completed {date}",
       "public": "Public",
+      "awaitingApproval": "Waiting for approval",
       "couldNotLoad": "Could not load the artifact.",
       "loadFailed": "Failed to load artifacts.",
       "loadMoreFailed": "Failed to load more artifacts."
@@ -4088,6 +4142,10 @@
         "documentationUrl": "Documentation URL",
         "homepageUrl": "Homepage URL",
         "repoUrl": "Repository URL",
+        "license": "License",
+        "licenseHint": "An SPDX id or a name, such as MIT. Not shown for a hosted service.",
+        "language": "Main language",
+        "languageHint": "The language the server is written in, such as TypeScript. Not shown for a hosted service.",
         "deprecated": "Mark as deprecated",
         "deprecatedHint": "Tells visitors this server is no longer maintained. It stays listed.",
         "urlInvalid": "Enter a full URL starting with https://.",

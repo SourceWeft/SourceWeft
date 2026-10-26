@@ -5,6 +5,7 @@ import type {
   MarketMcpScoreItemKey,
   McpReadmeStatus,
 } from "@sourceweft/market-contracts";
+import { resolveListingMetadata } from "../metadata/listing-metadata";
 
 /**
  * The quality scorecard of a catalog MCP entry (Issue #367, W6): how complete
@@ -213,32 +214,6 @@ function visibleChars(value: string) {
   return value.replace(/\s+/g, " ").trim().length;
 }
 
-/**
- * True when the registry entry lists remotes and nothing to install or read:
- * no package, no repository. Read from what the entry says about how it is
- * delivered; an entry that says nothing (a submission, a row from before
- * `registryServer` was kept) is not hosted-only, so the license applies.
- */
-function isHostedOnly(input: {
-  manifest: Record<string, unknown>;
-  provenance: Record<string, unknown>;
-  registryServer: Record<string, unknown> | null;
-}): boolean {
-  const { manifest, provenance, registryServer } = input;
-  if (!registryServer) return false;
-  const remotes = Array.isArray(registryServer.remotes)
-    ? registryServer.remotes
-    : [];
-  const packages = Array.isArray(registryServer.packages)
-    ? registryServer.packages
-    : [];
-  if (remotes.length === 0 || packages.length > 0) return false;
-  return !(
-    text(record(provenance.repository)?.url) !== null ||
-    isHttpUrl(manifest.repoUrl)
-  );
-}
-
 export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
   const now = source.now ?? new Date();
   const manifest = record(source.manifestJson) ?? {};
@@ -246,10 +221,15 @@ export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
   const auth = record(manifest.auth);
   const authProbe = record(provenance.authProbe);
   const owner = record(manifest.owner);
-  const registryServer = record(provenance.registryServer);
   const authMetadata = record(provenance.authMetadata);
-  const githubRegistry = record(provenance.githubRegistry);
   const tools = Array.isArray(manifest.tools) ? manifest.tools : [];
+  // The license the page shows, from the same sources (the manifest already
+  // carries a verified owner's word); a hosted service has none.
+  const listing = resolveListingMetadata({
+    manifestJson: manifest,
+    provenanceJson: provenance,
+    repoUrl: text(manifest.repoUrl),
+  });
 
   const hasRemoteEndpoint = isHttpUrl(manifest.endpointUrl);
   const probeResult = text(authProbe?.result);
@@ -297,11 +277,8 @@ export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
     readmeFetched: source.readmeStatus === "ok",
     hasResourceDocumentation: isHttpUrl(authMetadata?.resourceDocumentation),
     hasOwnerDocumentation: isHttpUrl(manifest.documentationUrl),
-    licenseKnown:
-      text(manifest.license) !== null || text(githubRegistry?.license) !== null,
-    hostedOnly:
-      hasRemoteEndpoint &&
-      isHostedOnly({ manifest, provenance, registryServer }),
+    licenseKnown: listing.license !== null,
+    hostedOnly: listing.hostedOnly,
   };
 }
 

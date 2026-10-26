@@ -198,13 +198,25 @@ export function ArtifactStorageBar({
         This page saves data under your account.
       </p>
       {shared && sharedState && !sharedState.approval && (
-        <div className="mt-2 space-y-2">
+        <div
+          className="mt-2 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+          role="region"
+          aria-label="Shared data approval"
+          data-testid="artifact-approval-pending"
+        >
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200">
+            <ShieldAlert className="size-4 shrink-0" />
+            {sharedState.canApprove
+              ? "Waiting for your approval"
+              : "Waiting for approval"}
+          </p>
           <p>
             This version asks to read and change <strong>shared data</strong>{" "}
-            that everyone who can open it sees.{" "}
+            that everyone who can open it sees. It cannot use shared data until
+            it is approved.{" "}
             {sharedState.canApprove
-              ? "Review it before approving."
-              : "A workspace editor or admin has to approve this version first."}
+              ? "Review the request before approving."
+              : "Only a workspace editor or admin can approve this version."}
           </p>
           <NavigationAttemptsNote count={sharedState.navigationAttempts} />
           {sharedState.canApprove && !reviewing && (

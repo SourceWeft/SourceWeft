@@ -2,7 +2,14 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { Check, ChevronDown, MailPlus, Plus, Trash2, Users } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  MailPlus,
+  Plus,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -20,7 +27,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../../lib/auth-client";
 import { TeamCheckoutDialog } from "../../../_components/team-checkout-dialog";
-import { getPricingConfig } from "../../../_landing/pricing-config";
+import { useDeploymentCapabilities } from "../../../../lib/billing-edition/capabilities";
 import {
   getPersonalOrganization,
   getVisibleTeamOrganizations,
@@ -137,9 +144,7 @@ export function TeamPanel({
       await refreshTeamData();
       toast.success(t("team.invitationRevoked"));
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("team.revokeFailed"),
-      );
+      toast.error(err instanceof Error ? err.message : t("team.revokeFailed"));
     } finally {
       setRevokingId(null);
     }
@@ -218,9 +223,14 @@ export function TeamPanel({
           !memberEmails.has(inv.email.toLowerCase()),
       ) ?? [])
     : [];
-  const teamPlan = getPricingConfig().find((plan) => plan.id === "team");
-  const monthlyTeamSeatPrice = teamPlan?.monthlyPrice ?? 0;
-  const yearlyTeamSeatPrice = teamPlan?.yearlyPrice ?? 0;
+  const deployment = useDeploymentCapabilities();
+  const teamSeatPrices =
+    deployment.status === "ready" &&
+    deployment.capabilities.edition === "commercial"
+      ? deployment.capabilities.billing.catalog.plans.team.priceCents
+      : null;
+  const monthlyTeamSeatPrice = teamSeatPrices?.monthly ?? 0;
+  const yearlyTeamSeatPrice = teamSeatPrices?.yearly ?? 0;
   const loadingTeamData = orgs === undefined || activeOrg === undefined;
 
   if (loadingTeamData) {

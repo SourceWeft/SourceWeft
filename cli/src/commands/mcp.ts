@@ -232,7 +232,7 @@ export async function mcpInspectCommand(
  * server refuses what is stored, one step further up is tried (refresh, then
  * the browser). The token goes to the endpoint's origin only.
  */
-async function inspectWithOAuth(
+export async function inspectWithOAuth(
   ctx: McpInspectContext,
   url: string,
   client: { name: string; version: string },

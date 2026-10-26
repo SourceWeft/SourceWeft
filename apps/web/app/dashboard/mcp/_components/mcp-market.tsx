@@ -852,9 +852,19 @@ function McpCard({
               "data-ai-summary": "",
               title: tOverview("cardSummaryTitle"),
             }
-          : {})}
+          : cardText.translated
+            ? {
+                "data-ai-translated": "",
+                title: tOverview("translatedCardTitle"),
+              }
+            : {})}
       >
         {cardText.text}
+        {cardText.translated ? (
+          <span className="ml-1 whitespace-nowrap text-[10px] text-muted-foreground/70">
+            {tOverview("translatedTag")}
+          </span>
+        ) : null}
       </button>
 
       <div className="mt-3 flex flex-wrap gap-1.5">

@@ -138,6 +138,8 @@ test("file endpoints and static assets stay outside the proxy", () => {
     "/skills/agent.v2/install.md",
     "/en/skills/agent.v2/install.md",
     "/zh-CN/skills/agent.v2/install.md",
+    "/mcp/com.acme%2Fsearch/install.md",
+    "/zh-CN/mcp/io.github.a%2Fb.test/install.md",
     "/favicon.ico",
     "/icons/mcp.svg",
     "/_next/static/chunk.js",

@@ -32,8 +32,23 @@ export const runtimeConfig: BillingRuntimeConfig = {
   creditUnitUsd: 0.00125,
   defaultMarkupRate: 0.25,
   defaultPlanFamily: "individual_free",
-  defaultMonthlyPages: 300,
-  defaultMonthlyCredits: 3000,
+  planQuotas: {
+    individual_free: {
+      active: true,
+      monthlyPagesLimit: 300,
+      monthlyCreditsGrant: 3000,
+    },
+    individual_pro: {
+      active: true,
+      monthlyPagesLimit: 6000,
+      monthlyCreditsGrant: 8000,
+    },
+    team_standard: {
+      active: true,
+      monthlyPagesLimit: 6000,
+      monthlyCreditsGrant: 8000,
+    },
+  },
   reconcileEnabled: false,
   creem: {
     apiKey: "",

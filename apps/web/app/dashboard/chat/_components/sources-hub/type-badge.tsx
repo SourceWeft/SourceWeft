@@ -3,6 +3,9 @@ const TONE_CLASSES = {
   // Matches the emerald "public" accent used in the share dialog.
   public:
     "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  // Needs someone's attention, e.g. a version waiting for shared-data approval.
+  attention:
+    "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
 } as const;
 
 export function TypeBadge({

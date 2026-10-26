@@ -4,7 +4,11 @@ import { createRoot } from "react-dom/client";
 import { expect, test, vi } from "vitest";
 import { PricingToggle } from "../src/ui/pricing-toggle";
 import { BillingUiProvider, type BillingUiHost } from "../src/ui/context";
-import { getPricingConfig } from "../src/catalog/pricing";
+import {
+  defaultBillingCatalog,
+  toDisplayCatalog,
+} from "../src/catalog/billing-catalog";
+import { buildPricingPlans } from "../src/catalog/pricing";
 import { getBillingMessages } from "../src/messages";
 vi.mock("../src/ui/team-checkout-dialog", () => ({
   TeamCheckoutDialog: () => null,
@@ -14,10 +18,10 @@ test.each(["en", "zh-CN", "zh-TW", "unknown"])(
   "pricing controls and CTAs use %s with English default",
   async (locale) => {
     const copy = getBillingMessages(locale);
-    const plans = getPricingConfig({}).map((plan) => ({
-      ...plan,
-      ...copy.plans[plan.id],
-    }));
+    const plans = buildPricingPlans(
+      toDisplayCatalog(defaultBillingCatalog),
+      copy.plans,
+    );
     const host = document.createElement("div");
     const root = createRoot(host);
     const billingHost = {
@@ -53,10 +57,10 @@ test.each(["en", "zh-CN", "zh-TW", "unknown"])(
 
 test("pro and team show $9.90 monthly and $99 yearly without rounding", async () => {
   const copy = getBillingMessages("en");
-  const plans = getPricingConfig({}).map((plan) => ({
-    ...plan,
-    ...copy.plans[plan.id],
-  }));
+  const plans = buildPricingPlans(
+    toDisplayCatalog(defaultBillingCatalog),
+    copy.plans,
+  );
   const host = document.createElement("div");
   const root = createRoot(host);
   const billingHost = {

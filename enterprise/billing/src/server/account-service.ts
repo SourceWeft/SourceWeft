@@ -30,27 +30,6 @@ import {
 
 const ACTIVE_PROVIDER_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
 
-/**
- * The quota a single member receives. Grants are per-member now (one
- * `billing_accounts` row per user), so this is one seat's worth regardless of
- * how many seats the team has. `getPlanQuota` (seat-scaled team total) is only for pricing/catalog.
- */
-function resolvePerSeatQuota(
-  runtimeConfig: BillingRuntimeConfig,
-  planFamily: BillingAccountState["planFamily"],
-): PlanQuota {
-  const quota = getPerSeatQuota(planFamily);
-  if (planFamily !== "individual_free") {
-    return quota;
-  }
-
-  return {
-    ...quota,
-    monthlyPagesLimit: runtimeConfig.defaultMonthlyPages,
-    monthlyCreditsGrant: runtimeConfig.defaultMonthlyCredits,
-  };
-}
-
 function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -298,7 +277,7 @@ export class BillingAccountService {
     const previousPlanFamily = account.planFamily;
     const previousMonthlyGrant = account.monthlyCreditsGrant;
     const previousMonthlyPagesGrant = account.monthlyPagesGrant;
-    const nextQuota = resolvePerSeatQuota(this.runtimeConfig, nextPlanFamily);
+    const nextQuota = getPerSeatQuota(this.runtimeConfig, nextPlanFamily);
 
     account.planFamily = nextPlanFamily;
     account.monthlyCreditsGrant = nextQuota.monthlyCreditsGrant;
@@ -418,10 +397,7 @@ export class BillingAccountService {
               Date.now(),
             )
           : createOperationId("quota-adjustment", account.teamId, Date.now());
-    const nextQuota = resolvePerSeatQuota(
-      this.runtimeConfig,
-      account.planFamily,
-    );
+    const nextQuota = getPerSeatQuota(this.runtimeConfig, account.planFamily);
 
     if (isSeatChange) {
       await appendBillingLedger({
@@ -546,7 +522,7 @@ export class BillingAccountService {
       input.cycleSource,
       input.cycleStartAt,
     );
-    const quota = resolvePerSeatQuota(this.runtimeConfig, account.planFamily);
+    const quota = getPerSeatQuota(this.runtimeConfig, account.planFamily);
 
     if (input.expireCurrentMonthly) {
       if (this.runtimeConfig.creditsEnabled && previousMonthlyBalance > 0) {
@@ -709,7 +685,7 @@ export class BillingAccountService {
     client: PoolClient,
   ) {
     const context = await this.resolveMemberAccountContext(teamId, client);
-    const quota = resolvePerSeatQuota(this.runtimeConfig, context.planFamily);
+    const quota = getPerSeatQuota(this.runtimeConfig, context.planFamily);
     const nowIso = new Date().toISOString();
     const currentSubscription = await this.store.getSubscriptionByTeam(
       teamId,
@@ -893,7 +869,7 @@ export class BillingAccountService {
       return account;
     }
 
-    const quota = resolvePerSeatQuota(this.runtimeConfig, account.planFamily);
+    const quota = getPerSeatQuota(this.runtimeConfig, account.planFamily);
     const isProviderMonthlyCycle =
       account.cycleSource === "provider_subscription" &&
       subscription?.billingInterval === "monthly";

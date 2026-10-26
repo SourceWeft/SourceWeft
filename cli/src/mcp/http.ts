@@ -1,4 +1,5 @@
 import { McpInspectError, McpUnauthorizedError } from "../errors";
+import { printable } from "./oauth/redact";
 import {
   isRecord,
   isResponseTo,
@@ -180,7 +181,7 @@ export function createHttpTransport(
     if (!response.ok) {
       throw new McpInspectError(
         `The server answered ${method} with HTTP ${response.status}${
-          body ? `: ${body.slice(0, 300)}` : ""
+          body ? `: ${printable(body, 300)}` : ""
         }`,
       );
     }

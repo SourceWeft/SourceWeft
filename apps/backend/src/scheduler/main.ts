@@ -17,6 +17,7 @@ import {
 } from "./schedules/github-registry";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import { scheduleMcpOverviews } from "./schedules/mcp-overview";
+import { scheduleMcpSummaryTranslations } from "./schedules/mcp-summary-translation";
 import {
   MCP_README_SCHEDULE_INTERVAL_MS,
   scheduleMcpReadmeFetches,
@@ -160,6 +161,14 @@ async function mcpOverviewTick() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error("Failed to queue MCP overviews", { message });
+  }
+  // Entries without an overview get a Chinese summary instead, on the same
+  // pace.
+  try {
+    await scheduleMcpSummaryTranslations();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to queue MCP summary translation", { message });
   }
 }
 

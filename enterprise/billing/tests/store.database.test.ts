@@ -56,11 +56,11 @@ test("Postgres billing preserves concurrent idempotency, member isolation and le
     );
     assert.equal(
       (await store.getAccount(teamId, actor))?.monthlyCreditsBalance,
-      runtimeConfig.defaultMonthlyCredits - 10,
+      runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant - 10,
     );
     assert.equal(
       (await store.getAccount(teamId, peer))?.monthlyCreditsBalance,
-      runtimeConfig.defaultMonthlyCredits,
+      runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant,
     );
     const charges = await pool.query(
       "select count(*)::int as count from usage_ledgers where team_id=$1 and event_type='consume'",
@@ -93,7 +93,7 @@ test("Postgres billing preserves concurrent idempotency, member isolation and le
     );
     assert.equal(
       (await store.getAccount(teamId, actor))?.monthlyCreditsBalance,
-      runtimeConfig.defaultMonthlyCredits - 10,
+      runtimeConfig.planQuotas.individual_free.monthlyCreditsGrant - 10,
     );
     const afterFailure = await pool.query(
       "select count(*)::int as count from usage_ledgers where team_id=$1 and event_type='consume'",

@@ -69,7 +69,12 @@ export const OWNER_URL_FIELDS = [
   "homepageUrl",
   "repoUrl",
 ] as const;
-export const OWNER_TEXT_FIELDS = ["summary", "description"] as const;
+export const OWNER_TEXT_FIELDS = [
+  "summary",
+  "description",
+  "license",
+  "language",
+] as const;
 export type OwnerTextField =
   | (typeof OWNER_URL_FIELDS)[number]
   | (typeof OWNER_TEXT_FIELDS)[number];
@@ -80,6 +85,8 @@ export const OWNER_TEXT_LIMITS: Record<
 > = {
   summary: 300,
   description: 5_000,
+  license: 120,
+  language: 64,
 };
 
 export type OwnerOverridesForm = Record<OwnerTextField, string> & {
@@ -94,6 +101,8 @@ export function ownerOverridesForm(
     iconUrl: values?.iconUrl ?? "",
     summary: values?.summary ?? "",
     description: values?.description ?? "",
+    license: values?.license ?? "",
+    language: values?.language ?? "",
     documentationUrl: values?.documentationUrl ?? "",
     homepageUrl: values?.homepageUrl ?? "",
     repoUrl: values?.repoUrl ?? "",
@@ -116,6 +125,8 @@ export function ownerOverridesPayload(
     iconUrl: text(form.iconUrl),
     summary: text(form.summary),
     description: text(form.description),
+    license: text(form.license),
+    language: text(form.language),
     documentationUrl: text(form.documentationUrl),
     homepageUrl: text(form.homepageUrl),
     repoUrl: text(form.repoUrl),
