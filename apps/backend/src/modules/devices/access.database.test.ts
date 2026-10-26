@@ -542,12 +542,10 @@ test("the bound device's reported environment is read through the thread binding
     title: "Environment",
     executionTargetJson: { kind: "local", deviceId: h.id },
   });
-  assert.equal(await provider.boundDeviceEnvironment(threadId), null);
-  await schema.db.insert(schema.localThreadBindings).values({
-    threadId,
-    deviceId: h.id,
-    userId: h.userId,
-  });
+  // A thread with no binding has no device environment.
+  assert.equal(await provider.boundDeviceEnvironment(randomUUID()), null);
+  // Inserting a local thread creates its binding (database trigger); the device has not
+  // reported yet, so every field is null.
   assert.deepEqual(await provider.boundDeviceEnvironment(threadId), {
     platform: null,
     arch: null,
