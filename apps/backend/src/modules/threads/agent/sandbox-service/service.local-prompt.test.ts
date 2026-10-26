@@ -35,6 +35,9 @@ const BASE_TEXT =
 const NETWORK_BLOCK =
   "<local_network_access>\nOutbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.\n</local_network_access>";
 
+const SECRETS_BLOCK =
+  "<local_secrets>\nSome environment variables in commands on this PC may hold placeholder values that start with fake_value_. They are not the real secret: the real value is substituted only on requests to the hosts the user bound to that secret, so use the variable exactly as you would the real credential (for example in an Authorization header). Never print, store or send the variable's content anywhere else, and never put it in a request body unless you were asked to; a request whose body contains it always needs the user's approval. Requests to those hosts that change data (anything but GET, HEAD or OPTIONS) also ask the user first.\n</local_secrets>";
+
 const request = {
   filesystem: {},
   executionTarget: { kind: "local" },
@@ -60,14 +63,14 @@ describe("local execution prompt", () => {
       sandboxState: null,
     };
     expect(await prompt()).toBe(
-      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
+      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${NETWORK_BLOCK}\n${SECRETS_BLOCK}`,
     );
     expect(state.loadedFor).toEqual(["thread-1"]);
   });
 
   test("a missing device row also leaves the text unchanged", async () => {
     expect(await prompt()).toBe(
-      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
+      `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${NETWORK_BLOCK}\n${SECRETS_BLOCK}`,
     );
   });
 
@@ -87,7 +90,7 @@ describe("local execution prompt", () => {
     expect(text).toContain("Shell: bash (commands run under this shell)");
     expect(
       text.endsWith(
-        `\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
+        `\n</local_execution_presentation>\n${NETWORK_BLOCK}\n${SECRETS_BLOCK}`,
       ),
     ).toBe(true);
   });
