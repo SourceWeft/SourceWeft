@@ -567,12 +567,17 @@ fn host_only_listener() -> (u16, String) {
 }
 
 /// `CONNECT <host>:<port>` to the sandbox's HTTP proxy, authenticated with the credentials srt
-/// put in the sandboxed command's own `HTTPS_PROXY`, then whatever the tunnel returns.
-const CONNECT_PROBE: &str = r#"p="$HTTPS_PROXY"; rest="${p#http://}"; cred="${rest%@*}"; hp="${rest##*@}"
+/// put in the sandboxed command's own `HTTPS_PROXY`, then whatever the tunnel returns. The status
+/// line is read before anything else is written, and SIGPIPE is ignored: a refused CONNECT is
+/// answered with a 403 and the connection is closed straight away, so a later write must not kill
+/// the probe (exit 141) and lose the 403 that was already sent.
+const CONNECT_PROBE: &str = r#"trap '' PIPE
+p="$HTTPS_PROXY"; rest="${p#http://}"; cred="${rest%@*}"; hp="${rest##*@}"
 auth=$(printf %s "$cred" | base64 -w0)
 exec 3<>"/dev/tcp/${hp%:*}/${hp##*:}"
 printf 'CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\n\r\n' '@TARGET@' '@TARGET@' "$auth" >&3
-sleep 0.5
+IFS= read -r -t 5 status <&3
+printf '%s\n' "$status" | tr -d '\r'
 printf 'GET / HTTP/1.0\r\n\r\n' >&3 2>/dev/null
 timeout 5 cat <&3 | tr -d '\r'
 true"#;
@@ -580,7 +585,8 @@ true"#;
 /// A SOCKS5 CONNECT with a DOMAINNAME (address type 3) destination to the sandbox's SOCKS
 /// proxy (`FTP_PROXY` names it), using the username/password from that URL. Prints each reply
 /// as hex (`greeting=0502`, `auth=0100`, `reply=05..`), then whatever the tunnel returns.
-const SOCKS_PROBE: &str = r#"p="$FTP_PROXY"; rest="${p#socks5h://}"; cred="${rest%@*}"; hp="${rest##*@}"
+const SOCKS_PROBE: &str = r#"trap '' PIPE
+p="$FTP_PROXY"; rest="${p#socks5h://}"; cred="${rest%@*}"; hp="${rest##*@}"
 user="${cred%%:*}"; pass="${cred#*:}"; host='@HOST@'; port=@PORT@
 hex() { od -An -tx1 | tr -d ' \n'; }
 byte() { printf "\\$(printf %03o "$1")"; }
