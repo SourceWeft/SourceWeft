@@ -173,8 +173,12 @@ jobs:
           # it, never touching cargo's own (now-poisoned) network access.
           export http_proxy=http://127.0.0.1:9
           export https_proxy=http://127.0.0.1:9
+          # One test at a time: every test starts its own sidecar against the runner's real
+          # `~/.cargo` and `~`, and each srt instance creates and removes the placeholder files
+          # behind the literal denyRead entries (e.g. `~/.cargo/credentials.toml`), so parallel
+          # instances delete each other's placeholders. Production has a single sidecar.
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
-            --test linux_sandbox -- --include-ignored
+            --test linux_sandbox -- --include-ignored --test-threads=1
       - name: Real keyring round trip (fails if it falls back to the no-keyring skip)
         working-directory: apps/desktop/src-tauri
         run: |
