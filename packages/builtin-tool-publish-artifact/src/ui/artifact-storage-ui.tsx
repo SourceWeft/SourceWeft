@@ -9,6 +9,11 @@ import {
   type ArtifactRecordsStatus,
   type ArtifactRecordsTransport,
 } from "@sourceweft/contracts/artifact-records";
+import {
+  DEFAULT_ARTIFACT_STORAGE_TEXT,
+  formatArtifactText,
+  type ArtifactStorageText,
+} from "@sourceweft/contracts/artifact-storage-text";
 
 /** Long query strings and fragments are how a page would smuggle data out. */
 const DATA_CARRYING_LINK_CHARS = 120;
@@ -22,10 +27,12 @@ export function ExternalLinkPrompt({
   url,
   onCancel,
   onContinue,
+  text = DEFAULT_ARTIFACT_STORAGE_TEXT,
 }: {
   url: URL;
   onCancel: () => void;
   onContinue: () => void;
+  text?: ArtifactStorageText;
 }) {
   const cancel = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -52,12 +59,9 @@ export function ExternalLinkPrompt({
           className="flex items-center gap-2 text-base font-semibold"
         >
           <ExternalLink className="size-4" />
-          Leaving SourceWeft
+          {text.linkTitle}
         </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This page wants to open a website outside SourceWeft. Only continue if
-          you trust it.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{text.linkIntro}</p>
         <p
           className="mt-4 break-all text-lg font-semibold"
           data-testid="artifact-link-host"
@@ -66,8 +70,7 @@ export function ExternalLinkPrompt({
         </p>
         {host.isInternationalized && (
           <p className="text-xs text-muted-foreground">
-            Shown in the browser as{" "}
-            <span className="font-mono">{host.ascii}</span>
+            {text.linkShownAs} <span className="font-mono">{host.ascii}</span>
           </p>
         )}
         <p className="mt-3 break-all rounded bg-muted/40 p-2 font-mono text-xs">
@@ -78,7 +81,7 @@ export function ExternalLinkPrompt({
               className="ml-1 underline"
               onClick={() => setExpanded(true)}
             >
-              Show all
+              {text.linkShowAll}
             </button>
           )}
         </p>
@@ -88,16 +91,15 @@ export function ExternalLinkPrompt({
             className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400"
           >
             <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
-            This link is long and may carry information from the page to that
-            website.
+            {text.linkLongWarning}
           </p>
         )}
         <div className="mt-5 flex justify-end gap-2">
           <Button ref={cancel} variant="secondary" size="sm" onClick={onCancel}>
-            Cancel
+            {text.cancel}
           </Button>
           <Button size="sm" onClick={onContinue}>
-            Continue
+            {text.continue}
           </Button>
         </div>
       </div>
@@ -105,39 +107,62 @@ export function ExternalLinkPrompt({
   );
 }
 
-export function NavigatedAwayNotice({ onReload }: { onReload: () => void }) {
+export function NavigatedAwayNotice({
+  onReload,
+  text = DEFAULT_ARTIFACT_STORAGE_TEXT,
+}: {
+  onReload: () => void;
+  text?: ArtifactStorageText;
+}) {
   return (
     <div
       role="alert"
       className="grid h-full min-h-80 place-items-center p-6 text-center"
     >
       <div className="max-w-sm space-y-3">
-        <p className="text-sm font-medium">
-          This page tried to go to another address, so it was stopped and its
-          storage was disconnected.
-        </p>
+        <p className="text-sm font-medium">{text.navigatedAway}</p>
         <Button size="sm" variant="secondary" onClick={onReload}>
           <RotateCcw className="size-3.5" />
-          Reload page
+          {text.reloadPage}
         </Button>
       </div>
     </div>
   );
 }
 
-/** A calm heads-up, not a warning: reports are advisory and nothing changes. */
-export function NavigationAttemptsNote({ count }: { count: number }) {
-  if (!count || count < 1) return null;
+/** Renders a sentence whose `<strong>…</strong>` span is emphasised. */
+function Emphasised({ template }: { template: string }) {
   return (
-    <p className="text-muted-foreground" data-testid="artifact-navigation-note">
-      This version has tried to leave its page {count}{" "}
-      {count === 1 ? "time" : "times"} recently.
-    </p>
+    <>
+      {template.split(/(<strong>.*?<\/strong>)/su).map((part, index) => {
+        const inner = /^<strong>(.*)<\/strong>$/su.exec(part)?.[1];
+        return inner === undefined ? (
+          part
+        ) : (
+          <strong key={index}>{inner}</strong>
+        );
+      })}
+    </>
   );
 }
 
-function personName(person: ArtifactRecordPerson | null) {
-  return person?.name || "a workspace member";
+/** A calm heads-up, not a warning: reports are advisory and nothing changes. */
+export function NavigationAttemptsNote({
+  count,
+  text = DEFAULT_ARTIFACT_STORAGE_TEXT,
+}: {
+  count: number;
+  text?: ArtifactStorageText;
+}) {
+  if (!count || count < 1) return null;
+  return (
+    <p className="text-muted-foreground" data-testid="artifact-navigation-note">
+      {formatArtifactText(
+        count === 1 ? text.navigationAttemptsOne : text.navigationAttemptsOther,
+        { count },
+      )}
+    </p>
+  );
 }
 
 /**
@@ -149,10 +174,14 @@ function personName(person: ArtifactRecordPerson | null) {
 export function ArtifactStorageBar({
   transport,
   shared,
+  text = DEFAULT_ARTIFACT_STORAGE_TEXT,
 }: {
   transport: ArtifactRecordsTransport;
   shared: boolean;
+  text?: ArtifactStorageText;
 }) {
+  const personName = (person: ArtifactRecordPerson | null) =>
+    person?.name || text.memberFallback;
   const [status, setStatus] = useState<ArtifactRecordsStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,9 +193,9 @@ export function ArtifactStorageBar({
       setStatus(await transport.status());
       setError(null);
     } catch {
-      setError("Could not check this page's storage access.");
+      setError(text.statusError);
     }
-  }, [transport]);
+  }, [transport, text.statusError]);
 
   useEffect(() => {
     void refresh();
@@ -180,7 +209,7 @@ export function ArtifactStorageBar({
       setReviewing(false);
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "That did not work.");
+      setError(cause instanceof Error ? cause.message : text.actionError);
     } finally {
       setBusy(false);
     }
@@ -195,46 +224,44 @@ export function ArtifactStorageBar({
     >
       <p className="flex items-center gap-1.5 text-muted-foreground">
         <Database className="size-3.5" />
-        This page saves data under your account.
+        {text.ownData}
       </p>
       {shared && sharedState && !sharedState.approval && (
         <div
           className="mt-2 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
           role="region"
-          aria-label="Shared data approval"
+          aria-label={text.approvalRegionLabel}
           data-testid="artifact-approval-pending"
         >
           <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200">
             <ShieldAlert className="size-4 shrink-0" />
             {sharedState.canApprove
-              ? "Waiting for your approval"
-              : "Waiting for approval"}
+              ? text.waitingForYourApproval
+              : text.waitingForApproval}
           </p>
           <p>
-            This version asks to read and change <strong>shared data</strong>{" "}
-            that everyone who can open it sees. It cannot use shared data until
-            it is approved.{" "}
-            {sharedState.canApprove
-              ? "Review the request before approving."
-              : "Only a workspace editor or admin can approve this version."}
+            <Emphasised template={text.approvalAsk} />{" "}
+            {sharedState.canApprove ? text.approverHint : text.nonApproverHint}
           </p>
-          <NavigationAttemptsNote count={sharedState.navigationAttempts} />
+          <NavigationAttemptsNote
+            count={sharedState.navigationAttempts}
+            text={text}
+          />
           {sharedState.canApprove && !reviewing && (
             <Button
               size="sm"
               variant="secondary"
               onClick={() => setReviewing(true)}
             >
-              Review request
+              {text.reviewRequest}
             </Button>
           )}
           {reviewing && (
             <div className="space-y-2 rounded border bg-background p-3">
               <p>
-                Approving lets this exact version, written by{" "}
-                {personName(sharedState.author)}, read and change shared data,
-                including what other members enter. A page can send what it
-                reads outside SourceWeft. New versions need a new approval.
+                {formatArtifactText(text.reviewBody, {
+                  author: personName(sharedState.author),
+                })}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -242,14 +269,14 @@ export function ArtifactStorageBar({
                   variant="secondary"
                   onClick={() => setReviewing(false)}
                 >
-                  Cancel
+                  {text.cancel}
                 </Button>
                 <Button
                   size="sm"
                   disabled={busy}
                   onClick={() => void act(transport.approveShared)}
                 >
-                  Approve this version
+                  {text.approveVersion}
                 </Button>
               </div>
             </div>
@@ -260,31 +287,33 @@ export function ArtifactStorageBar({
         <div
           className="mt-2 space-y-2"
           role="region"
-          aria-label="Shared data consent"
+          aria-label={text.consentRegionLabel}
         >
-          <p>
-            This page can read and change shared data, including what other
-            members entered, and could send it outside SourceWeft. Don&apos;t
-            store anything sensitive here.
-          </p>
+          <p>{text.consentBody}</p>
           <p className="text-muted-foreground">
-            Version by {personName(sharedState.author)}, approved by{" "}
-            {personName(sharedState.approval.approvedBy)}.
+            {formatArtifactText(text.consentMeta, {
+              author: personName(sharedState.author),
+              approver: personName(sharedState.approval.approvedBy),
+            })}
           </p>
-          <NavigationAttemptsNote count={sharedState.navigationAttempts} />
+          <NavigationAttemptsNote
+            count={sharedState.navigationAttempts}
+            text={text}
+          />
           <Button
             size="sm"
             disabled={busy}
             onClick={() => void act(transport.grantSharedConsent)}
           >
-            Allow shared data
+            {text.allowSharedData}
           </Button>
         </div>
       )}
       {shared && sharedState?.approval && sharedState.consented && (
         <p className="mt-1 text-muted-foreground">
-          Shared data is on for this version (approved by{" "}
-          {personName(sharedState.approval.approvedBy)}).
+          {formatArtifactText(text.sharedDataOn, {
+            approver: personName(sharedState.approval.approvedBy),
+          })}
           {sharedState.canApprove && transport.revokeShared && (
             <button
               type="button"
@@ -292,7 +321,7 @@ export function ArtifactStorageBar({
               disabled={busy}
               onClick={() => void act(transport.revokeShared)}
             >
-              Revoke approval
+              {text.revokeApproval}
             </button>
           )}
         </p>

@@ -71,6 +71,7 @@ export const CLIENT_NAMESPACES = {
   ],
   /** `app/dashboard`: the signed-in workspace and chat. */
   dashboard: [
+    "artifactShare.storage",
     "authPages.desktopLogin",
     "catalogBadge",
     "chatRecovery",
@@ -107,6 +108,7 @@ export const CLIENT_NAMESPACES = {
   /** `app/artifact-preview`: renders the chat canvas around a shared artifact. */
   artifactPreview: [
     "artifactShare.preview",
+    "artifactShare.storage",
     "catalogBadge",
     "chatRecovery",
     "dashboardChat",

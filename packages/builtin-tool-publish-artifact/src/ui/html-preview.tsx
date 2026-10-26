@@ -26,6 +26,7 @@ import {
 } from "./artifact-file-downloads";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
 import type { ArtifactRecordsTransport } from "@sourceweft/contracts/artifact-records";
+import type { ArtifactStorageText } from "@sourceweft/contracts/artifact-storage-text";
 import { ArtifactBridgeHost, artifactRuntimeUrl } from "./artifact-bridge";
 import {
   ArtifactStorageBar,
@@ -51,6 +52,7 @@ export function HtmlPreview({
   files = [],
   storage,
   records = null,
+  text,
 }: {
   fileUrl: string;
   downloadUrl: string | null;
@@ -61,6 +63,8 @@ export function HtmlPreview({
   storage?: { storage: boolean; shared: boolean };
   /** Bound to this version by the host; null where storage cannot work. */
   records?: ArtifactRecordsTransport | null;
+  /** The storage prompts in the viewer's language; English when omitted. */
+  text?: ArtifactStorageText;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [frameGeneration, setFrameGeneration] = useState(0);
@@ -386,7 +390,11 @@ export function HtmlPreview({
       </div>
       <ArtifactFileDownloads files={files} />
       {storage?.storage && records && (
-        <ArtifactStorageBar transport={records} shared={storage.shared} />
+        <ArtifactStorageBar
+          transport={records}
+          shared={storage.shared}
+          text={text}
+        />
       )}
       {error && (
         <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">
@@ -403,7 +411,7 @@ export function HtmlPreview({
       )}
       <div className="relative min-h-0 flex-1">
         {navigatedAway && mode === "preview" ? (
-          <NavigatedAwayNotice onReload={reloadFrame} />
+          <NavigatedAwayNotice onReload={reloadFrame} text={text} />
         ) : (
           <iframe
             key={`${fileUrl}#${frameGeneration}`}
@@ -422,6 +430,7 @@ export function HtmlPreview({
             url={pendingLink}
             onCancel={() => setPendingLink(null)}
             onContinue={() => openLink(pendingLink)}
+            text={text}
           />
         )}
         {mode === "source" && (

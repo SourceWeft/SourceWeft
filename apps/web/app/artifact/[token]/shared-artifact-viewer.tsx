@@ -18,6 +18,7 @@ import {
 import { Preview } from "@sourceweft/preview/react";
 import { createPublicArtifactRecordsTransport } from "../../../lib/artifact-records-transport";
 import { contentClient } from "../../../lib/sdk";
+import { useArtifactStorageText } from "../../../lib/use-artifact-storage-text";
 
 type SharedArtifact = PublicSharedArtifactResponse["artifact"];
 
@@ -43,6 +44,7 @@ export function SharedArtifactViewer({
   artifact: SharedArtifact;
 }) {
   const t = useTranslations("artifactShare");
+  const storageText = useArtifactStorageText();
   const stageRef = useRef<HTMLDivElement>(null);
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [overlayFullscreen, setOverlayFullscreen] = useState(false);
@@ -84,13 +86,14 @@ export function SharedArtifactViewer({
         contentClient,
         artifact.token,
       ),
+      storageText,
     };
     try {
       return resolveArtifactPreview(context) ?? null;
     } catch {
       return null;
     }
-  }, [artifact, title]);
+  }, [artifact, title, storageText]);
   const capabilityContent = capability?.content ?? null;
   // A capability that renders its own download (e.g. the video presentation's
   // client-render overlay) suppresses the header's generic file download, so a

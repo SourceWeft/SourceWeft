@@ -14,6 +14,7 @@
  */
 import type { ComponentType, ReactNode } from "react";
 import type { ArtifactRecordsTransport } from "./artifact-records";
+import type { ArtifactStorageText } from "./artifact-storage-text";
 
 // ---------------------------------------------------------------------------
 // Shared read-only views
@@ -163,6 +164,12 @@ export type ArtifactPreviewContext = {
    * previews leave it unset and get theirs from the render host.
    */
   readonly records?: ArtifactRecordsTransport | null;
+  /**
+   * The storage prompts in the viewer's language, when the host supplies them
+   * directly (the public share page, which installs no render host). In-app
+   * previews leave it unset and get theirs from the render host.
+   */
+  readonly storageText?: ArtifactStorageText;
 };
 
 export type ArtifactPreviewResult = {
@@ -268,6 +275,12 @@ export type ArtifactRenderHost = {
     artifactId: string;
     artifactVersionId: string;
   }) => ArtifactRecordsTransport;
+  /**
+   * The storage prompts in the viewer's language. A React hook — only legal
+   * from a component's render. Optional: without it the English defaults in
+   * `artifact-storage-text` apply.
+   */
+  readonly useArtifactStorageText?: () => ArtifactStorageText;
 };
 
 let currentHost: ArtifactRenderHost | null = null;
