@@ -491,6 +491,13 @@
       "when": 1793019096894,
       "tag": "0069_local_network_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1793019395061,
+      "tag": "0070_local_network_request_kind",
+      "breakpoints": true
     }
   ]
 }

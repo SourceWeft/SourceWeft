@@ -1,0 +1,6 @@
+ALTER TABLE "local_network_requests" ADD COLUMN "kind" text DEFAULT 'host' NOT NULL;--> statement-breakpoint
+ALTER TABLE "local_network_requests" ADD COLUMN "method" text;--> statement-breakpoint
+ALTER TABLE "local_network_requests" ADD COLUMN "path" text;--> statement-breakpoint
+ALTER TABLE "local_network_requests" ADD COLUMN "secret_in_body" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "local_network_requests" ADD CONSTRAINT "local_network_requests_kind_check" CHECK ("local_network_requests"."kind" in ('host', 'request'));--> statement-breakpoint
+ALTER TABLE "local_network_requests" ADD CONSTRAINT "local_network_requests_request_shape_check" CHECK (("local_network_requests"."kind" = 'host' and "local_network_requests"."method" is null and "local_network_requests"."path" is null and not "local_network_requests"."secret_in_body") or ("local_network_requests"."kind" = 'request' and "local_network_requests"."method" is not null and char_length("local_network_requests"."method") <= 16 and ("local_network_requests"."path" is null or char_length("local_network_requests"."path") <= 200)));

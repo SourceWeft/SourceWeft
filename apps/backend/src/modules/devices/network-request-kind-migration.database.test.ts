@@ -16,8 +16,8 @@ const BASE = `
 // throwaway schema so the stub tables above are the ones referenced.
 async function migrate(client: Client, schema: string) {
   for (const file of [
-    "0064_local_network_approvals.sql",
-    "0065_local_network_request_kind.sql",
+    "0069_local_network_approvals.sql",
+    "0070_local_network_request_kind.sql",
   ]) {
     const sql = await readFile(
       new URL(`../../../../../packages/db/drizzle/${file}`, import.meta.url),
@@ -51,7 +51,7 @@ const insert = (
   ];
 };
 
-describe("0065_local_network_request_kind", () => {
+describe("0070_local_network_request_kind", () => {
   test("existing rows become host asks; request rows must carry a method", async () => {
     await withIsolatedSchema(
       { prefix: "net_kind", setupSql: BASE },
@@ -61,7 +61,7 @@ describe("0065_local_network_request_kind", () => {
           (
             await readFile(
               new URL(
-                "../../../../../packages/db/drizzle/0064_local_network_approvals.sql",
+                "../../../../../packages/db/drizzle/0069_local_network_approvals.sql",
                 import.meta.url,
               ),
               "utf8",
@@ -73,7 +73,7 @@ describe("0065_local_network_request_kind", () => {
           (
             await readFile(
               new URL(
-                "../../../../../packages/db/drizzle/0065_local_network_request_kind.sql",
+                "../../../../../packages/db/drizzle/0070_local_network_request_kind.sql",
                 import.meta.url,
               ),
               "utf8",
