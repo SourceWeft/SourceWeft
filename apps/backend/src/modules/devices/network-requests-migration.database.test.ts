@@ -8,7 +8,7 @@ import { withIsolatedSchema } from "../../test/isolated-schema";
 async function migrate(client: Client, schema: string) {
   const sql = await readFile(
     new URL(
-      "../../../../../packages/db/drizzle/0064_local_network_approvals.sql",
+      "../../../../../packages/db/drizzle/0069_local_network_approvals.sql",
       import.meta.url,
     ),
     "utf8",
@@ -52,7 +52,7 @@ const insert = (
   ];
 };
 
-describe("0064_local_network_approvals", () => {
+describe("0069_local_network_approvals", () => {
   test("devices default to ask and only accept the three modes", async () => {
     await withIsolatedSchema(
       {
