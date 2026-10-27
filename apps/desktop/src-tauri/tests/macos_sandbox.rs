@@ -1011,3 +1011,30 @@ fn unanswered_ask_in_a_short_command_is_denied_at_once() {
 fn unanswered_ask_in_a_longer_command_times_out_before_the_kill() {
     unanswered_ask_ends_before_the_command_timeout(18_000, "ask-medium");
 }
+
+/// Diagnostic for an intermittent CI-only failure: a sandboxed command's first connection to the
+/// sidecar's proxy is refused ("Failed to connect to localhost port N after 0 ms") although the
+/// sidecar is alive and listening. Starts many fresh sidecars, each running one command that must
+/// be answered by the proxy (a strict-mode 403, no outside network needed), and reports every
+/// refusal with the in-sandbox follow-up from `diagnose_proxy_refusal`.
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn proxy_is_reachable_from_every_fresh_sandbox() {
+    let mut refused = Vec::new();
+    for round in 0..60 {
+        let (_app, host) = host_with_bundle();
+        let workspace = host.ensure_workspace("owner", "thread").unwrap();
+        let result = execute_net(
+            &host,
+            &format!("reach-{round}"),
+            &workspace,
+            "curl -sS -m 5 -o /dev/null -w %{http_code} http://example.com/; true",
+            Some(net_policy("strict", &[])),
+        );
+        let text = output(&result).to_string();
+        if !text.starts_with("403") {
+            refused.push(format!("round {round}: {text}"));
+        }
+    }
+    assert!(refused.is_empty(), "{} of 60 fresh sandboxes could not use the proxy:\n{}", refused.len(), refused.join("\n"));
+}

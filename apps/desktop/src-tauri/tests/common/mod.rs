@@ -102,7 +102,7 @@ pub fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &st
         json!({"workspaceId": workspace.id, "command": command, "timeoutMs": 60000, "maxOutputChars": 20000}),
     )
     .map(|result| {
-        diagnose_proxy_refusal(&result);
+        diagnose_proxy_refusal(host, workspace, &result);
         result
     })
     .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
@@ -116,7 +116,7 @@ pub fn output(result: &Value) -> &str {
 /// proxy at all. Right then, while the sidecar is still alive, ask the host what it can see —
 /// otherwise the failure is indistinguishable from a dead or not-yet-listening sidecar. Prints to
 /// stderr (shown for a failing test); never fails a test by itself.
-pub fn diagnose_proxy_refusal(result: &Value) {
+pub fn diagnose_proxy_refusal(host: &LocalHost, workspace: &Workspace, result: &Value) {
     let Some(text) = result["output"].as_str() else { return };
     let Some(rest) = text.split("Failed to connect to localhost port ").nth(1) else { return };
     let port: String = rest.chars().take_while(char::is_ascii_digit).collect();
@@ -144,6 +144,26 @@ pub fn diagnose_proxy_refusal(result: &Value) {
         run(format!("nc -z -w1 ::1 {port} && echo open || echo refused")),
         run(format!("netstat -an 2>/dev/null | grep '\\.{port} ' | head -5")),
     );
+    // The same question from inside a fresh sandbox of the same host: is the refusal per command
+    // (a new profile can connect) or lasting (this sidecar's proxy is unreachable from sandboxes)?
+    let probe = format!(
+        "env | grep -i '_proxy=' ; \
+         for target in http://127.0.0.1:{port}/ 'http://[::1]:{port}/' http://localhost:{port}/; do \
+           echo \"== $target\"; curl -sS --noproxy '*' -m 3 -o /dev/null -w '%{{http_code}}' \"$target\" 2>&1 | tail -2; echo; \
+         done"
+    );
+    let follow_up = host.dispatch(
+        &Executions::default(),
+        &format!("proxy-diag-{port}"),
+        "owner",
+        &workspace.thread_id,
+        "command.execute",
+        json!({"workspaceId": workspace.id, "command": probe, "timeoutMs": 30000, "maxOutputChars": 4000, "network": {"mode": "open", "allow": [], "suggested": {}}}),
+    );
+    match follow_up {
+        Ok(value) => eprintln!("in-sandbox follow-up:\n{}", value["output"].as_str().unwrap_or("<no output>")),
+        Err(error) => eprintln!("in-sandbox follow-up failed: {error}"),
+    }
 }
 
 /// Runs `command` after a positive control that must succeed inside the sandbox, and asserts the
@@ -270,7 +290,7 @@ pub fn execute_net_timeout(
         payload,
     )
     .map(|result| {
-        diagnose_proxy_refusal(&result);
+        diagnose_proxy_refusal(host, workspace, &result);
         result
     })
     .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
