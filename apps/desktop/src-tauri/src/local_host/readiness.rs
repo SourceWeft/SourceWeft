@@ -25,8 +25,8 @@ use std::{
 /// integration test in `tests/linux_sandbox.rs` can build one directly, to probe a bundle
 /// against an explicit `bwrap` path rather than the production one. Production code never
 /// needs this path; it always goes through `LocalHost::sandbox_readiness` below.
-#[cfg(unix)]
-pub use super::sidecar::{Helpers, InitConfig, Platform};
+#[cfg(any(unix, windows))]
+pub use super::sidecar::{Helpers, InitConfig, Platform, WindowsInit};
 
 /// Readiness of local sandboxed execution on this platform, reported to the Web UI via
 /// `local_bridge::local_host_status` (`state` is the serde tag).
@@ -407,7 +407,7 @@ pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
 /// init names one) a missing or non-executable bubblewrap. Only then is the sidecar started.
 #[cfg(unix)]
 fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> SandboxReadiness {
-    if !bundle.join("srt-sidecar").is_file() {
+    if !bundle.join(super::sidecar::sidecar_file_name()).is_file() {
         return SandboxReadiness::bundle_missing();
     }
     if let Some(bwrap) = init.bwrap_path.as_deref() {
@@ -668,6 +668,7 @@ mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            windows: None,
         }
     }
 

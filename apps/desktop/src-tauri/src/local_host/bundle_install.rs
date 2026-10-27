@@ -20,7 +20,7 @@
 //!    back if anything goes wrong), then delete the old one.
 use super::{
     readiness::{settled_readiness, ReadinessCache, SandboxReadiness},
-    sidecar::SANDBOX_PROTOCOL_VERSION,
+    sidecar::{sidecar_file_name, SANDBOX_PROTOCOL_VERSION},
     HostError, LocalHost, Result,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -28,11 +28,12 @@ use flate2::read::GzDecoder;
 use minisign_verify::{PublicKey, Signature};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{self, BufReader, Read, Write},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -40,7 +41,7 @@ use std::{
 /// Where the signed release assets live; the app version selects the tag.
 const RELEASE_BASE: &str = "https://github.com/SourceWeft/SourceWeft/releases/download";
 /// The platforms a runtime is published for (`desktop-release.yml`): Linux x86_64 and both macOS
-/// architectures. Windows has none. The sidecar is compiled for the build host, so each target
+/// architectures. Windows has none yet (Task 7 enables the Windows triples). The sidecar is compiled for the build host, so each target
 /// triple matches a release leg exactly.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const RELEASE_TARGET: Option<&str> = Some("x86_64-unknown-linux-gnu");
@@ -259,10 +260,7 @@ impl Fetch for HttpsFetch {
             {
                 return Err(download_failed("The download is larger than allowed."));
             }
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
+            let mut file = new_private_file()
                 .open(dest)
                 .map_err(|error| install_failed("Could not create the download file", error))?;
             let mut total = 0u64;
@@ -472,8 +470,11 @@ struct Scratch {
 impl Scratch {
     fn create(parent: &Path, prefix: &str) -> Result<Self> {
         let path = parent.join(format!("{prefix}{}", uuid::Uuid::new_v4().simple()));
-        fs::DirBuilder::new()
-            .mode(0o700)
+        #[cfg_attr(windows, allow(unused_mut))]
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder
             .create(&path)
             .map_err(|error| install_failed("Could not create a working directory", error))?;
         Ok(Self { path, armed: true })
@@ -511,7 +512,7 @@ fn swap_lock() -> std::sync::MutexGuard<'static, ()> {
 fn looks_like_runtime(dir: &Path) -> bool {
     let is_dir = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_dir());
     let is_file = |p: &Path| p.symlink_metadata().is_ok_and(|m| m.is_file());
-    is_dir(dir) && is_file(&dir.join("srt-sidecar")) && is_file(&dir.join(MANIFEST_FILENAME))
+    is_dir(dir) && is_file(&dir.join(sidecar_file_name())) && is_file(&dir.join(MANIFEST_FILENAME))
 }
 
 fn current_is_absent(sandbox_dir: &Path) -> bool {
@@ -780,17 +781,14 @@ fn extract_bundle(tarball: &Path, staging: &Path, spec: &InstallSpec) -> Result<
             return Err(bundle_invalid(format!("Size mismatch: {shown}")));
         }
         let path = staging.join(&shown);
-        let mut out = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
+        let mut out = new_private_file()
             .open(&path)
             .map_err(|error| install_failed("Could not write the runtime", error))?;
         let digest = read_payload(&mut archive, size, Some(&mut out), &shown)?;
         if lower_hex(&digest) != expected.sha256 {
             return Err(bundle_invalid(format!("sha256 mismatch: {shown}")));
         }
-        out.set_permissions(fs::Permissions::from_mode(mode as u32))
+        set_final_mode(&out, mode as u32)
             .and_then(|()| out.sync_all())
             .map_err(|error| install_failed("Could not write the runtime", error))?;
     }
@@ -804,15 +802,35 @@ fn extract_bundle(tarball: &Path, staging: &Path, spec: &InstallSpec) -> Result<
     Ok(manifest)
 }
 
+/// Options for creating a new file that only the current user can read or write: mode 0600 on
+/// unix; on Windows the file inherits the owner-only ACL of the app-data directory.
+fn new_private_file() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options
+}
+
+/// Applies the archive's final mode (0755 or 0644) to a fully written file. Windows has no
+/// execute bit: whether a file runs is decided by its `.exe` extension, which the archive's
+/// names (checked against the manifest) already carry.
+fn set_final_mode(file: &File, mode: u32) -> io::Result<()> {
+    #[cfg(unix)]
+    return file.set_permissions(fs::Permissions::from_mode(mode));
+    #[cfg(windows)]
+    {
+        let _ = (file, mode);
+        Ok(())
+    }
+}
+
 fn write_file(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut file = new_private_file()
         .open(path)
         .map_err(|error| install_failed("Could not write the runtime", error))?;
     file.write_all(bytes)
-        .and_then(|()| file.set_permissions(fs::Permissions::from_mode(mode)))
+        .and_then(|()| set_final_mode(&file, mode))
         .and_then(|()| file.sync_all())
         .map_err(|error| install_failed("Could not write the runtime", error))
 }
@@ -984,12 +1002,16 @@ impl LocalHost {
         super::srt_exec::stop_sidecar(&self.sandbox);
     }
 
-    /// Only macOS and Linux keep a sidecar.
+    /// Windows keeps no sidecar yet. Task 6: every per-workspace instance must be stopped
+    /// BEFORE the swap there (a running `srt-sidecar.exe` blocks the rename of `current`), not
+    /// after it as on unix.
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn stop_sandbox_sidecar(&self) {}
 }
 
-#[cfg(test)]
+// The extraction tests drive unix file modes and a unix stub sidecar; Windows-only checks live in
+// `windows_tests` below.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use flate2::{write::GzEncoder, Compression};
@@ -2376,5 +2398,42 @@ mod tests {
         assert!(!dest("c").exists(), "nothing is created for a refused URL");
         finish(stop, handle);
         finish(stop_r, handle_r);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn a_runtime_is_recognised_by_its_exe_sidecar_and_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!looks_like_runtime(dir.path()));
+        fs::write(dir.path().join(MANIFEST_FILENAME), "{}").unwrap();
+        // The unix name is not the Windows sidecar.
+        fs::write(dir.path().join("srt-sidecar"), "x").unwrap();
+        assert!(!looks_like_runtime(dir.path()));
+        fs::write(dir.path().join("srt-sidecar.exe"), "x").unwrap();
+        assert!(looks_like_runtime(dir.path()));
+    }
+
+    #[test]
+    fn new_private_files_refuse_to_overwrite_and_take_the_final_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.exe");
+        write_file(&path, b"bytes", 0o755).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"bytes");
+        assert_eq!(write_file(&path, b"other", 0o755).unwrap_err().code, SANDBOX_INSTALL_FAILED);
+        assert_eq!(fs::read(&path).unwrap(), b"bytes");
+    }
+
+    #[test]
+    fn scratch_directories_are_created_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let scratch = Scratch::create(dir.path(), ".staging-").unwrap();
+        let path = scratch.path().to_path_buf();
+        assert!(path.is_dir());
+        drop(scratch);
+        assert!(!path.exists());
     }
 }

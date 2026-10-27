@@ -1,4 +1,7 @@
-#![cfg(windows)]
+//! `LocalHost::open` refuses a platform the sandbox does not support, without creating state.
+//! Windows on x86-64 and arm64 is supported (Plan 6), so this only applies to a Windows target
+//! on any other architecture.
+#![cfg(all(windows, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 
 use sourceweft_desktop::local_host::LocalHost;
 

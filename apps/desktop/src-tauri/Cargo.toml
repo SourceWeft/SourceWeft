@@ -50,6 +50,21 @@ security-framework = "3"
 # avoids an extra native build dependency on the Linux desktop image.
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
+[target.'cfg(windows)'.dependencies]
+# Process creation flags for the sidecar and the wrapped command (local_host/{sidecar,process}.rs)
+# and, in later tasks, Job Objects, ACL and Credential Manager calls. Same 0.61 line the tree
+# already resolves through tauri, so no second copy is built.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_Security",
+    "Win32_System_IO",
+    "Win32_System_Console",
+    "Win32_System_SystemInformation",
+] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"

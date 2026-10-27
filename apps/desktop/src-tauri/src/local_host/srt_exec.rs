@@ -2,6 +2,10 @@
 //! wraps each command with sandbox-runtime: bubblewrap on Linux, Seatbelt on macOS). Produces
 //! the result shape `{"output","exitCode","truncated","cancelled"}`.
 //!
+//! The module also compiles on Windows, where only the platform-neutral parts exist so far
+//! (the slot, the restart policy, `init_config`); the POSIX toolchain/read-root/shell pieces are
+//! unix-only and `execute_command` fails closed until per-workspace instances land (Task 6).
+//!
 //! One sidecar is kept per `LocalHost`, started lazily from `readiness::bundle_dir`. Its `init`
 //! lists `<base>/task-workspaces` plus every currently granted directory as the workspace roots
 //! a wrap may name; each `wrap` grants read and write access to exactly that command's workspace
@@ -11,9 +15,13 @@
 //! `LINUX_SYSTEM_READ_ROOTS` / `DARWIN_SYSTEM_READ_ROOTS`). Nothing here ever runs
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
+// Windows has no caller yet for most of this module (Task 6 wires the Windows instances).
+#![cfg_attr(windows, allow(dead_code, unused_imports))]
+#[cfg(unix)]
+use super::readiness::user_path;
 use super::{
-    readiness::{bundle_dir, user_path, Helpers, InitConfig, Platform},
-    sidecar::{Sidecar, WrappedCommand},
+    readiness::{bundle_dir, Helpers, InitConfig, Platform},
+    sidecar::{ripgrep_file_name, sidecar_file_name, Sidecar, WrappedCommand},
     HostError, LocalHost, Result,
 };
 use serde_json::{json, Value};
@@ -66,12 +74,14 @@ impl SandboxInstance {
     }
 }
 
-/// The platform this build runs the sidecar for.
-pub(crate) const HOST_PLATFORM: Platform = if cfg!(target_os = "macos") {
-    Platform::Darwin
-} else {
-    Platform::Linux
-};
+/// The platform this build runs the sidecar for. One explicit definition per supported target:
+/// no target silently maps to another platform's policy.
+#[cfg(target_os = "macos")]
+pub(crate) const HOST_PLATFORM: Platform = Platform::Darwin;
+#[cfg(target_os = "linux")]
+pub(crate) const HOST_PLATFORM: Platform = Platform::Linux;
+#[cfg(windows)]
+pub(crate) const HOST_PLATFORM: Platform = Platform::Windows;
 
 /// The `InitConfig` for a sidecar of `platform` whose helpers live in `bundle`, for a host whose
 /// app data is `base`. `<base>/local-host` (the host database) and `<base>/sandbox` (the
@@ -85,14 +95,9 @@ pub(crate) fn init_config(
     base: &Path,
     workspace_roots: Vec<String>,
 ) -> InitConfig {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir();
     let linux = platform == Platform::Linux;
-    let read_roots = match platform {
-        Platform::Darwin => {
-            darwin_read_roots(Path::new(&home), base, &user_path().0, XCODE_SELECT)
-        }
-        Platform::Linux => read_roots(Path::new(&home), base, &user_path().0),
-    };
+    let read_roots = platform_read_roots(platform, &home, base);
     InitConfig {
         platform,
         read_roots,
@@ -103,7 +108,10 @@ pub(crate) fn init_config(
         home,
         workspace_roots,
         helpers: Helpers {
-            ripgrep: bundle.join("rg").to_string_lossy().into_owned(),
+            ripgrep: bundle
+                .join(ripgrep_file_name())
+                .to_string_lossy()
+                .into_owned(),
             apply_seccomp: linux
                 .then(|| bundle.join("apply-seccomp").to_string_lossy().into_owned()),
             java_agent_jar: Some(
@@ -114,7 +122,45 @@ pub(crate) fn init_config(
             ),
         },
         bwrap_path: linux.then(|| BWRAP_PATH.to_string()),
+        // Task 6: the Windows host supplies `windows: Some(WindowsInit { srt_win, shell })` once
+        // the staged `srt-win.exe` and the shell are detected. Until then a Windows `init` goes
+        // out without it and the sidecar refuses it (`POLICY_INVALID`): nothing runs.
+        windows: None,
     }
+}
+
+/// The user's home directory as the sidecar's `home` (the base of its credential-path denies).
+/// Empty when the platform's variable is unset, as before.
+#[cfg(unix)]
+fn home_dir() -> String {
+    std::env::var("HOME").unwrap_or_default()
+}
+
+/// Windows has no `HOME`; the profile directory is `USERPROFILE`.
+// Task 4: the Windows wire path form (forward-slash drive paths) is applied here.
+#[cfg(windows)]
+fn home_dir() -> String {
+    std::env::var("USERPROFILE").unwrap_or_default()
+}
+
+/// The toolchain directories the sandbox must be able to read, per platform (see `read_roots` and
+/// `darwin_read_roots`).
+#[cfg(unix)]
+fn platform_read_roots(platform: Platform, home: &str, base: &Path) -> Vec<String> {
+    match platform {
+        Platform::Darwin => darwin_read_roots(Path::new(home), base, &user_path().0, XCODE_SELECT),
+        Platform::Linux => read_roots(Path::new(home), base, &user_path().0),
+        // A Windows `InitConfig` is never built on a unix host; its read roots are decided where
+        // the Windows host runs (Task 6).
+        Platform::Windows => Vec::new(),
+    }
+}
+
+/// Task 6: Windows read roots are exactly the `PATH` directories inside the profile (plus the
+/// shell's install root), computed there. Empty until then.
+#[cfg(windows)]
+fn platform_read_roots(_platform: Platform, _home: &str, _base: &Path) -> Vec<String> {
+    Vec::new()
 }
 
 /// Toolchain directories under `$HOME` that the sandbox must still be able to read, although
@@ -129,6 +175,7 @@ pub(crate) fn init_config(
 ///
 /// A read root can contain credential files (`~/.cargo/credentials.toml` under `~/.cargo`); the
 /// sidecar's policy keeps the known ones literally read-denied inside it (Ruling R25).
+#[cfg(unix)]
 pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String> {
     if !home.is_absolute() {
         return Vec::new();
@@ -180,6 +227,7 @@ pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String
 /// (and must not) reject "inside home" here — that is the toolchain it is re-allowing.
 /// `darwin_read_roots_with` adds that one further check for its discovered extras, which can point
 /// anywhere (e.g. a `DEVELOPER_DIR=$HOME` that makes `xcode-select -p` echo the home directory).
+#[cfg(unix)]
 fn is_protected_read_root(
     canonical: &Path,
     canonical_home: &Path,
@@ -193,6 +241,7 @@ fn is_protected_read_root(
 }
 
 /// The system `xcode-select` the production discovery runs; a test passes a stub path instead.
+#[cfg(unix)]
 const XCODE_SELECT: &str = "/usr/bin/xcode-select";
 
 /// Fixed Homebrew prefixes macOS toolchains install under, outside `$HOME`. Added to the read
@@ -201,6 +250,7 @@ const XCODE_SELECT: &str = "/usr/bin/xcode-select";
 /// own `DARWIN_SYSTEM_READ_ROOTS` covers the OS toolchain in `/bin` and `/usr/bin`; these cover
 /// user-installed tools such as `bash`, `python3`, `node` and `git` reached through the login
 /// `PATH`. `$HOME`-relative toolchains (nvm, pyenv, rustup) come from `read_roots` via `PATH`.
+#[cfg(unix)]
 const DARWIN_HOMEBREW_PREFIXES: [&str; 2] = ["/opt/homebrew", "/usr/local"];
 
 /// The macOS Command Line Tools developer directory (the fixed OS install path). Read root and
@@ -209,6 +259,7 @@ const DARWIN_HOMEBREW_PREFIXES: [&str; 2] = ["/opt/homebrew", "/usr/local"];
 /// in the sandbox and the shims are pointed here instead. Added to the read roots when it exists
 /// (`darwin_read_roots`), so the sandboxed shim can read the real tools it resolves under it; a
 /// narrow toolchain subpath of `/Library`, never a wholesale `/Library` grant.
+#[cfg(unix)]
 const DARWIN_COMMAND_LINE_TOOLS: &str = "/Library/Developer/CommandLineTools";
 
 /// macOS read roots: the PATH-derived toolchain roots under `$HOME` (`read_roots`), plus the
@@ -219,6 +270,7 @@ const DARWIN_COMMAND_LINE_TOOLS: &str = "/Library/Developer/CommandLineTools";
 /// The OS read set (`/bin`, `/usr/bin`, `/etc`, `/var`, `/dev`, …) is the sidecar's own
 /// `DARWIN_SYSTEM_READ_ROOTS`, not here. Each discovered path is canonicalised and kept only when
 /// it is a directory; the result is de-duplicated with the PATH roots first.
+#[cfg(unix)]
 pub(crate) fn darwin_read_roots(
     home: &Path,
     base: &Path,
@@ -257,6 +309,7 @@ pub(crate) fn darwin_read_roots(
 ///     the same command-line `clang`/`git`/`make` for this purpose;
 ///   * when CLT is absent, `None` leaves the active developer dir in force (an Xcode-only machine's
 ///     shims stay unsupported — no safe mechanism can run a full Xcode in the sandbox).
+#[cfg(unix)]
 fn darwin_developer_dir(command_line_tools: &str) -> Option<String> {
     let canonical = Path::new(command_line_tools).canonicalize().ok()?;
     let usable = ["usr/bin/git", "usr/bin/clang"]
@@ -275,6 +328,7 @@ fn darwin_developer_dir(command_line_tools: &str) -> Option<String> {
 /// extra can point anywhere, so a `DEVELOPER_DIR` that makes `xcode-select -p` echo `$HOME`, a home
 /// subdirectory, or the app-data base must never silently re-open it for every wrapped command. The
 /// PATH-derived roots come first and duplicates are dropped.
+#[cfg(unix)]
 fn darwin_read_roots_with(
     home: &Path,
     base: &Path,
@@ -313,6 +367,7 @@ fn darwin_read_roots_with(
 /// toolchain, an empty or whitespace result, or a path that no longer exists yields `None`, so a
 /// broken `xcode-select` never adds a read root. The canonical form is what is compared and handed
 /// to srt (srt matches literal paths without resolving them against a cwd).
+#[cfg(unix)]
 fn developer_dir(xcode_select: &str) -> Option<PathBuf> {
     // Clear the environment first: `xcode-select -p` echoes `$DEVELOPER_DIR` verbatim when it is
     // set (e.g. `DEVELOPER_DIR=$HOME xcode-select -p` prints the home directory), so an inherited
@@ -443,26 +498,37 @@ fn wrap_in_sandbox(
 /// automatic workspace base plus every currently granted directory.
 fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
     let bundle = bundle_dir(&host.base);
-    if !bundle.join("srt-sidecar").is_file() {
+    if !bundle.join(sidecar_file_name()).is_file() {
         return Err(HostError::new(
             "SANDBOX_UNAVAILABLE",
             "Sandbox runtime is not installed",
         ));
     }
-    let roots = host.sandbox_workspace_roots()?;
-    let names = roots
-        .iter()
-        .map(|root| {
-            root.to_str().map(str::to_string).ok_or_else(|| {
-                HostError::new("INVALID_PATH", format!("path is not valid UTF-8: {root:?}"))
+    // Task 6: a Windows host starts one instance per workspace root (`init` with exactly one
+    // workspace root, the staged `srt-win.exe` and the detected shell). Until then no Windows
+    // sidecar is started for commands.
+    #[cfg(windows)]
+    return Err(HostError::new(
+        "UNSUPPORTED_PLATFORM",
+        "Local command execution is not available on Windows yet.",
+    ));
+    #[cfg(unix)]
+    {
+        let roots = host.sandbox_workspace_roots()?;
+        let names = roots
+            .iter()
+            .map(|root| {
+                root.to_str().map(str::to_string).ok_or_else(|| {
+                    HostError::new("INVALID_PATH", format!("path is not valid UTF-8: {root:?}"))
+                })
             })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let sidecar = Sidecar::start(
-        &bundle,
-        &init_config(HOST_PLATFORM, &bundle, &host.base, names),
-    )?;
-    Ok(SandboxInstance::new(sidecar, roots))
+            .collect::<Result<Vec<_>>>()?;
+        let sidecar = Sidecar::start(
+            &bundle,
+            &init_config(HOST_PLATFORM, &bundle, &host.base, names),
+        )?;
+        Ok(SandboxInstance::new(sidecar, roots))
+    }
 }
 
 /// The wrapped command's environment with the pinned toolchain, home, temp and cache locations
@@ -475,6 +541,7 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
 /// dir untouched. When `Some`, the pin overrides a `DEVELOPER_DIR` the user's own environment
 /// carries (the `wrapped` value is replaced): a full Xcode selected that way cannot run its shims
 /// in the sandbox anyway (see `darwin_developer_dir`).
+#[cfg(unix)]
 fn child_env(
     root: &Path,
     wrapped: Vec<(String, String)>,
@@ -499,6 +566,7 @@ fn child_env(
 }
 
 /// Single-quotes `value` for a POSIX shell.
+#[cfg(unix)]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -507,6 +575,7 @@ fn shell_quote(value: &str) -> String {
 /// `--setenv TMPDIR /tmp/claude` for every command, which overrides the value inherited from
 /// `child_env`, so the workspace `TMPDIR` is re-exported as the first line the sandboxed shell
 /// runs. A newline-separated prefix leaves any valid script unchanged.
+#[cfg(unix)]
 fn pinned_script(root: &Path, script: &str) -> String {
     let tmpdir = format!("{}/.tmp", root.to_string_lossy());
     format!("export TMPDIR={}\n{script}", shell_quote(&tmpdir))
@@ -514,6 +583,7 @@ fn pinned_script(root: &Path, script: &str) -> String {
 
 /// Creates `<root>/.tmp` (one level, never following a symlink at that name) so `TMPDIR`
 /// exists before the command runs.
+#[cfg(unix)]
 fn prepare_tmpdir(root: &Path) -> Result<()> {
     match std::fs::create_dir(root.join(".tmp")) {
         Ok(()) => Ok(()),
@@ -522,6 +592,7 @@ fn prepare_tmpdir(root: &Path) -> Result<()> {
     }
 }
 
+#[cfg(unix)]
 /// Runs `script` under `/bin/sh`-compatible wrapping in `cwd` (inside `root`), with write access
 /// to `root` only, and returns the JSON shape the backend expects
 /// (`{"output","exitCode","truncated","cancelled"}`).
@@ -582,7 +653,25 @@ pub(crate) fn execute_command(
     result
 }
 
-#[cfg(test)]
+/// Task 6: Windows command execution (per-workspace instances, shell prelude, Windows child
+/// environment) replaces this. Until then it fails closed: nothing runs, and the caller sees why.
+#[cfg(windows)]
+pub(crate) fn execute_command(
+    _host: &LocalHost,
+    _root: &Path,
+    _cwd: &Path,
+    _script: &str,
+    _timeout_ms: u64,
+    _max_chars: usize,
+    _cancel: Arc<AtomicBool>,
+) -> Result<Value> {
+    Err(HostError::new(
+        "UNSUPPORTED_PLATFORM",
+        "Local command execution is not available on Windows yet.",
+    ))
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
@@ -623,6 +712,7 @@ mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            windows: None,
         };
         let sidecar = Sidecar::start_with_timeout(bundle, &init, Duration::from_secs(5))?;
         Ok(SandboxInstance::new(
