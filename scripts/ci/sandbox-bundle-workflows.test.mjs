@@ -709,3 +709,61 @@ test("no backslash reaches pnpm: the ripgrep path is handed off with forward sla
   ).run;
   assert.match(pack, /cygpath -m "\$RUNNER_TEMP"/);
 });
+
+test("the Windows real-sandbox job installs upstream first, drives the real launcher, runs both shells and guards the runs", async () => {
+  const wf = await workflow("desktop-build");
+  const job = wf.jobs["windows-sandbox"];
+  assert(job, "windows-sandbox job must exist");
+  assert.equal(job["timeout-minutes"], 60);
+  assert.deepEqual(
+    job.strategy.matrix.include.map((leg) => [leg.os, leg.target]),
+    [
+      ["windows-2025", "x86_64-pc-windows-msvc"],
+      ["windows-11-arm", "aarch64-pc-windows-msvc"],
+    ],
+  );
+  assert.equal(job.strategy["fail-fast"], false);
+  const named = (prefix) => job.steps.findIndex((step) => step.name?.startsWith(prefix));
+  const upstream = named("Install the UPSTREAM default sandbox-runtime first");
+  const hosts = named("Add the hosts-file entries");
+  const prebuild = named("Pre-build the real-sandbox test binary");
+  const suite = named("Real-sandbox suite (");
+  const guard = named("Guard - every test ran");
+  const hide = named("Hide Git Bash");
+  const second = named("Shell-matrix tests again under Windows PowerShell");
+  const restore = named("Restore Git Bash");
+  const coexist = named("Both installs are still present");
+  const secrets = named("Real Credential Manager round trip");
+  const final = named("Uninstall ours, check the upstream install is untouched");
+  const cleanup = named("Cleanup (");
+  for (const index of [upstream, hosts, prebuild, suite, guard, hide, second, restore, coexist, secrets, final, cleanup])
+    assert.notEqual(index, -1);
+  assert(upstream < suite && hosts < suite && prebuild < suite);
+  assert(suite < guard && guard < hide && hide < second && second < restore && restore < coexist);
+  assert(coexist < final);
+  // The suite runs one test at a time, includes the ignored tests, and poisons the proxy
+  // variables only after the binary has been compiled.
+  assert.match(job.steps[prebuild].run, /--test windows_sandbox --no-run/);
+  assert.match(job.steps[suite].run, /--test windows_sandbox -- --include-ignored --test-threads=1/);
+  assert.equal(job.steps[suite].env.HTTP_PROXY, "http://127.0.0.1:9");
+  assert.equal(job.steps[suite].env.HTTPS_PROXY, "http://127.0.0.1:9");
+  assert.match(job.steps[second].run, /shells_/);
+  // The upstream install is the plain default one: its executable's own `install`, no names.
+  const script = await readFile(new URL("./windows-sandbox-coexist.ps1", import.meta.url), "utf8");
+  const code = script
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .join("\n");
+  assert.match(code, /sandbox-runtime@\$Version/);
+  assert.match(code, /Run-Checked \$exe @\('install'\)/);
+  assert.doesNotMatch(code, /--sandbox-user|--sublayer-guid|--proxy-port-range|--force/);
+  assert.match(job.steps[upstream].run, /install-upstream .* -Version 0\.0\.81/);
+  // Cleanup always runs; Git Bash is restored even when the second pass fails.
+  assert.match(job.steps[cleanup].if, /always\(\)/);
+  assert.match(job.steps[restore].if, /always\(\)/);
+  // The Credential Manager guard fails on the no-store skip phrase, like the Linux job's.
+  assert.match(job.steps[secrets].run, /has no usable Credential Manager/);
+  // Both new files are PR triggers (the test file is covered by apps/desktop/**).
+  assert(wf.on.pull_request.paths.includes("scripts/ci/windows-sandbox*.ps1"));
+  assert(wf.on.pull_request.paths.includes("apps/desktop/**"));
+});
