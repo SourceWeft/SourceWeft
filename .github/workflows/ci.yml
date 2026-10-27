@@ -279,7 +279,8 @@ jobs:
     # image publication. PRs use the faster lint, type, and test jobs.
     if: github.event_name != 'pull_request'
     needs: [revision, test]
-    runs-on: ubuntu-latest
+    # Playwright does not support the Ubuntu 26.04 that ubuntu-latest now resolves to.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
       postgres:
@@ -359,7 +360,8 @@ jobs:
   html-artifacts:
     needs: revision
     name: HTML runtime and complete library
-    runs-on: ubuntu-latest
+    # Playwright does not support the Ubuntu 26.04 that ubuntu-latest now resolves to.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
