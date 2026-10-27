@@ -4,6 +4,11 @@
 //! `cargo test --test linux_sandbox -- --include-ignored` on a Linux host (see the Docker recipe
 //! in `.superpowers/sdd/2026-10-24-local-sandbox-cross-platform/task-6-report.md`).
 //!
+//! Run with `--test-threads=1` (the CI job does): `cannot_read_cargo_credentials_under_a_toolchain_read_root`
+//! plants and removes a real `~/.cargo/credentials.toml`, and srt stats that file while building
+//! the bwrap argv of any concurrent test's command; if it vanishes before bwrap starts, bwrap
+//! aborts with "Can't create file at ... credentials.toml: Read-only file system".
+//!
 //! The readiness tests drive `readiness::probe_bundle` directly with an explicit `bwrap` path.
 //! The execution tests go through the production `LocalHost::open` + `dispatch` path, which
 //! starts the sidecar from `<app data>/sandbox/current` and uses the production bwrap at

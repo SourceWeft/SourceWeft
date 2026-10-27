@@ -18,6 +18,7 @@ import {
   buildConfig,
   perCommandConfig,
   perWrapReadRoots,
+  perWrapWriteDenies,
 } from "./policy.js";
 import { SANDBOX_PROTOCOL_VERSION } from "./protocol.js";
 import type { InitConfig, Request, Response, SidecarErrorCode, WrapResult } from "./protocol.js";
@@ -156,8 +157,9 @@ function checkHelpersExist(config: InitConfig): void {
  * Merges `perCommandConfig(workspaceRoot, readRoots)` onto `base`: `filesystem.allowWrite` is
  * concatenated (the one field a per-command overlay is allowed to widen), `filesystem.allowRead`
  * is *replaced* by the overlay's (this command's own workspace root plus `perWrapReadRoots`,
- * Ruling R14 — never the other init workspace roots), and every other field (network, denyRead,
- * denyWrite, ripgrep, bwrapPath, seccomp, the java agent jar) passes straight through from
+ * Ruling R14 — never the other init workspace roots), `filesystem.denyWrite` is `base`'s plus
+ * `writeDenies` (never replaced by the overlay's empty one), and every other field (network,
+ * denyRead, ripgrep, bwrapPath, seccomp, the java agent jar) passes straight through from
  * `base` unchanged. The result is a *complete* `SandboxRuntimeConfig`, suitable as
  * `wrapWithSandboxArgv`'s `customConfig`: srt reads each `customConfig` field in preference to
  * the one `initialize` was given only when the former is defined, so handing it a complete
@@ -167,12 +169,19 @@ function mergedConfigFor(
   base: SandboxRuntimeConfig,
   readRoots: readonly string[],
   workspaceRoot: string,
+  writeDenies: readonly string[],
 ): SandboxRuntimeConfig {
   const overlay = perCommandConfig(workspaceRoot, readRoots);
   return {
     ...base,
     filesystem: {
       ...base.filesystem,
+      // `base.denyWrite` is kept (the overlay's is empty and must never replace it); the
+      // credential paths that exist now (linux, see `perWrapWriteDenies`) are added.
+      denyWrite: [
+        ...(base.filesystem.denyWrite ?? []),
+        ...writeDenies.map((path) => ({ path, literal: true as const })),
+      ],
       allowRead: overlay.filesystem?.allowRead ?? [],
       allowWrite: [...base.filesystem.allowWrite, ...(overlay.filesystem?.allowWrite ?? [])],
     },
@@ -268,6 +277,11 @@ export async function startServer(
     return { protocolVersion: SANDBOX_PROTOCOL_VERSION };
   }
 
+  /** macOS shell for srt's `[binShell, "-c", ...]` argv; Linux keeps srt's own default. */
+  function binShellFor(config: InitConfig): string | undefined {
+    return config.platform === "darwin" ? "/bin/bash" : undefined;
+  }
+
   async function handleWrap(request: {
     commandId: string;
     command: string;
@@ -288,11 +302,12 @@ export async function startServer(
       state.runtimeConfig,
       state.wrapReadRoots,
       workspaceRoot,
+      perWrapWriteDenies(state.config, workspaceRoot),
     );
     try {
       const { argv, env } = await deps.srt.wrapWithSandboxArgv(
         request.command,
-        undefined,
+        binShellFor(state.config),
         customConfig,
         undefined,
         cwd,
@@ -328,13 +343,14 @@ export async function startServer(
       state.runtimeConfig,
       state.wrapReadRoots,
       workspaceRoot,
+      perWrapWriteDenies(state.config, workspaceRoot),
     );
     let argv: string[];
     let env: Record<string, string>;
     try {
       const wrapped = await deps.srt.wrapWithSandboxArgv(
         "true",
-        undefined,
+        binShellFor(state.config),
         customConfig,
         undefined,
         workspaceRoot,

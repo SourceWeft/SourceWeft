@@ -4,11 +4,31 @@ import {
   buildConfig,
   perCommandConfig,
   perWrapReadRoots,
+  perWrapWriteDenies,
   PolicyInvalidError,
 } from "../src/policy.js";
 
 const SYSTEM = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt"];
-const CREDENTIALS = [
+// The darwin system read set re-allowed on top of the "/" deny (DARWIN_SYSTEM_READ_ROOTS).
+const DARWIN_SYSTEM = [
+  "/bin",
+  "/usr/bin",
+  "/etc",
+  "/private/etc",
+  "/var",
+  "/private/var/select",
+  "/dev",
+  "/System/Library/OpenSSL",
+  // perl/shasum interpreter + XS modules; /sbin (md5); /usr/share (terminfo, file magic, iconv,
+  // zoneinfo symlink); the narrow zoneinfo data under the otherwise-denied /private/var/db; and
+  // sw_vers's version plist as a single literal file.
+  "/System/Library/Perl",
+  "/sbin",
+  "/usr/share",
+  "/private/var/db/timezone",
+  "/System/Library/CoreServices/SystemVersion.plist",
+];
+const CREDENTIAL_FILES = [
   ".cargo/credentials",
   ".cargo/credentials.toml",
   ".docker/config.json",
@@ -17,7 +37,19 @@ const CREDENTIALS = [
   ".netrc",
   ".git-credentials",
   ".config/gh/hosts.yml",
-].map((relative) => ({ path: `/home/u/${relative}`, literal: true }));
+  ".ssh",
+  ".aws",
+  ".gnupg",
+];
+const CREDENTIALS = CREDENTIAL_FILES.map((relative) => ({
+  path: `/home/u/${relative}`,
+  literal: true,
+}));
+// On darwin the credential set also carries ~/Library/Keychains (upstream srt #755).
+const DARWIN_CREDENTIALS = [...CREDENTIAL_FILES, "Library/Keychains"].map((relative) => ({
+  path: `/home/u/${relative}`,
+  literal: true,
+}));
 const literals = (paths: readonly string[]) => paths.map((path) => ({ path, literal: true }));
 /** The paths of a filesystem entry list (srt also accepts bare strings there). */
 const pathsOf = (entries: ReadonlyArray<string | { path: string }> | undefined): string[] =>
@@ -66,6 +98,21 @@ test("linux denies / and home, re-allows the system set, workspace and read root
     "192.168.0.0/16",
     "100.64.0.0/10",
     "fc00::/7",
+    // Documentation / reserved / non-global-unicast (see address-guard.ts UNROUTABLE_*). Not
+    // 198.18.0.0/15: Clash/TUN fake-IP DNS answers public names from it.
+    "192.0.2.0/24",
+    "198.51.100.0/24",
+    "203.0.113.0/24",
+    "240.0.0.0/4",
+    "2001:db8::/32",
+    "64:ff9b:1::/48",
+    "100::/8",
+    "200::/7",
+    "400::/6",
+    "800::/5",
+    "1000::/4",
+    "4000::/2",
+    "8000::/1",
   ]);
   assert.equal(c.bwrapPath, "/opt/sourceweft/libexec/bwrap");
   assert.equal(c.seccomp?.applyPath, "/opt/sw/apply-seccomp");
@@ -78,17 +125,46 @@ test("linux denies / and home, re-allows the system set, workspace and read root
   ])
     assert.ok(!(k in c) && !(k in c.network), `${k} must not be set`);
 });
-test("darwin keeps the home deny only, and both spellings of /tmp/claude", () => {
+test("darwin denies / and home (incl. ~/Library/Keychains), re-allows the darwin system set", () => {
   const c = buildConfig(validInit({ platform: "darwin", home: "/home/u" }));
-  assert.deepEqual(c.filesystem.denyRead, [{ path: "/home/u", literal: true }, ...CREDENTIALS]);
+  // "/" and home denied, then the credential files, then ~/Library/Keychains (srt #755).
+  assert.deepEqual(c.filesystem.denyRead, [
+    { path: "/", literal: true },
+    { path: "/home/u", literal: true },
+    ...DARWIN_CREDENTIALS,
+  ]);
+  // Workspace, the darwin system read set, then the init read roots. No /Users, /Library,
+  // /private/var/db, /private/var/folders, /Volumes.
   assert.deepEqual(c.filesystem.allowRead, [
     { path: "/home/u/ws", literal: true },
+    ...literals(DARWIN_SYSTEM),
     { path: "/home/u/.nvm/versions/node/v22.1.0", literal: true },
   ]);
+  const allowed = pathsOf(c.filesystem.allowRead);
+  for (const forbidden of [
+    "/Users",
+    "/Library",
+    "/private/var/db",
+    "/private/var/folders",
+    "/Volumes",
+  ])
+    assert.ok(!allowed.includes(forbidden), `${forbidden} must not be re-allowed`);
+  // The credential paths are unwritable too (a granted $HOME must not let a command overwrite a
+  // key or plant authorized_keys); they follow the srt temp dir entries.
   assert.deepEqual(c.filesystem.denyWrite, [
     { path: "/tmp/claude", literal: true },
     { path: "/private/tmp/claude", literal: true },
+    ...DARWIN_CREDENTIALS,
   ]);
+  // The darwin policy must not loosen any of the forbidden srt knobs either.
+  for (const k of [
+    "allowLocalBinding",
+    "allowUnixSockets",
+    "allowAllUnixSockets",
+    "enableWeakerNestedSandbox",
+    "allowAppleEvents",
+  ])
+    assert.ok(!(k in c) && !(k in c.network), `${k} must not be set`);
 });
 
 // Ruling R25: the credential files stay denied however home is spelled.
@@ -96,7 +172,40 @@ test("credential denies are absolute paths under home", () => {
   const c = buildConfig(validInit({ home: "/home/u/" }));
   const denied = pathsOf(c.filesystem.denyRead);
   assert.ok(denied.includes("/home/u/.cargo/credentials.toml"));
+  for (const dir of [".ssh", ".aws", ".gnupg"]) assert.ok(denied.includes(`/home/u/${dir}`));
   assert.ok(denied.every((path) => !path.includes("//")));
+});
+
+// Linux: bubblewrap makes an empty placeholder on the host for every ABSENT denyWrite path under
+// a writable root (a granted $HOME), so buildConfig adds none and perWrapWriteDenies adds only the
+// credential paths that exist (checked per command), keeping the real home free of placeholders.
+test("linux denyWrite: no credential paths statically, only existing ones inside the workspace per wrap", () => {
+  const init = validInit({ home: "/home/u" });
+  assert.deepEqual(buildConfig(init).filesystem.denyWrite, [{ path: "/tmp/claude", literal: true }]);
+  const present = new Set(["/home/u/.ssh", "/home/u/.npmrc", "/home/u/.cargo/credentials.toml"]);
+  const exists = (path: string) => present.has(path);
+  // A granted $HOME workspace: the existing credential paths inside it are denied.
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u", exists), [
+    "/home/u/.cargo/credentials.toml",
+    "/home/u/.npmrc",
+    "/home/u/.ssh",
+  ]);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u", () => false), []);
+  // A workspace elsewhere (the cargo read root is not writable): bwrap would fail to bind a mount
+  // point inside a read-only root, and a deny where nothing is writable protects nothing.
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u/project", exists), []);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u/.cargo", exists), ["/home/u/.cargo/credentials.toml"]);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/u/.cargo/bin", exists), []);
+  assert.deepEqual(perWrapWriteDenies(init, "/home/uu", exists), []);
+  // Trailing-slash homes are spelled the same as in the read denies.
+  assert.deepEqual(
+    perWrapWriteDenies(validInit({ home: "/home/u/" }), "/home/u", (path) => path === "/home/u/.aws"),
+    ["/home/u/.aws"],
+  );
+});
+
+test("darwin has no per-wrap write denies: they are all static and unconditional", () => {
+  assert.deepEqual(perWrapWriteDenies(validInit({ platform: "darwin", home: "/home/u" }), "/home/u", () => true), []);
 });
 
 // srt binds its bridge sockets from the sidecar's runtime directory before its filesystem
@@ -149,6 +258,7 @@ test("per-wrap read roots carve out exactly the in-sandbox helper files", () => 
     "/home/u/.nvm/versions/node/v22.1.0",
   ]);
   assert.deepEqual(perWrapReadRoots(validInit({ platform: "darwin" })), [
+    ...DARWIN_SYSTEM,
     "/home/u/.nvm/versions/node/v22.1.0",
   ]);
 });

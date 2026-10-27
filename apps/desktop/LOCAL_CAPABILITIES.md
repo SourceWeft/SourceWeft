@@ -25,9 +25,10 @@ Windows implementation is deferred.
   special files, and oversized input. File writes/backups are not implemented yet.
 - A narrow `local_host_status` command consumed through the existing Web
   `desktopBridge`, with window/origin checks and Tauri command permissions.
-- A P0 Seatbelt probe and real macOS tests of filesystem, subprocess, symlink,
-  and network isolation. Its **explicit block-all network profile is a test
-  fixture**, not the eventual WorkBuddy-style controlled-network default.
+- Sandboxed command execution on macOS and Linux through the `sandbox-sidecar`
+  bundle (`srt-sidecar`, built on sandbox-runtime: Seatbelt on macOS, bubblewrap on
+  Linux). Readiness is the bundle's `init` + `probe` round trip. Real-host suites
+  cover filesystem, subprocess, symlink, and network isolation.
 
 ## Not available to users yet
 
@@ -50,15 +51,30 @@ cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 pnpm --filter web check-types
 ```
 
-The physical Seatbelt test is opt-in because an outer sandbox may prohibit
-`sandbox_apply`. Run it on a real macOS host; do not silently replace it with an
-unconfined execution test:
+The real macOS sandbox suite is opt-in (every test is `#[ignore]`) because an outer
+sandbox may prohibit `sandbox_apply`, and it needs the built sidecar bundle. Run it
+on a real, unrestricted macOS host; do not silently replace it with an unconfined
+execution test. Build the bundle first (Bun 1.4.2), then run the suite:
 
 ```sh
-cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test macos_sandbox -- --include-ignored
+(cd apps/desktop/sandbox-sidecar && bun run build --rg "$(command -v rg)")
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test macos_sandbox -- --include-ignored --test-threads=1
 ```
 
-The foundation currently has ten ordinary tests; the separate real Seatbelt run
-adds the physical isolation test. Passing this probe is not completion of P0:
-runtime toolchain coverage, cancellation, proxy policy, identity and durable Agent
-resume still require validation before enabling local Agent execution.
+The same bundle also backs the other opt-in real tests (`--test macos_signing`,
+`--test local_execution`, `--test local_workspaces`, `--test local_binary_reads`), run with the same
+`-- --include-ignored --test-threads=1` flags.
+
+`hostname_to_loopback_blocked` also needs these `/etc/hosts` entries and fails with
+that instruction when they are missing:
+
+```
+127.0.0.1 sw-loop.test
+10.0.0.1 sw-private.test
+```
+
+`public_https_allowed` makes a real request to the public npm registry, so the host
+needs working public internet. The ordinary `cargo test --lib` run covers the Rust
+units without the bundle. Passing the suite is not completion of P0: cancellation,
+identity and durable Agent resume still require validation before enabling local
+Agent execution.

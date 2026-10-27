@@ -3,8 +3,10 @@
  * private/internal network, independent of whatever srt's own network config denies. This
  * is the full policy from the design's Global Constraints: localhost names, loopback,
  * RFC1918, CGNAT, link-local, multicast, well-known cloud metadata addresses, the IPv6
- * unique-local range, the unspecified address, and — via `own` — every address bound to the
- * sandbox host's own network interfaces.
+ * unique-local range, the unspecified address, the documentation, reserved and
+ * non-global-unicast ranges (`UNROUTABLE_V4`/`UNROUTABLE_V6`, including the local-use NAT64
+ * prefix), the IPv4-embedding IPv6 forms of all of the above, and — via `own` — every address
+ * bound to the sandbox host's own network interfaces.
  *
  * `host` may be a bare hostname, a bare IPv4/IPv6 literal in any spelling srt's proxy accepts
  * (dotted quad, inet_aton shorthand, integer, hex or octal), a bracketed IPv6 literal
@@ -107,6 +109,62 @@ addV4WithEmbedded(CLOUD_METADATA, "168.63.129.16", 32); // Azure host endpoint
 addV4WithEmbedded(CLOUD_METADATA, "192.0.0.192", 32); // Oracle Cloud
 addV6(CLOUD_METADATA, "fd00:ec2::", 32); // AWS IPv6 metadata
 
+/**
+ * Documentation, reserved and non-global-unicast ranges, shared by both address layers: this
+ * module judges IP *literals* with it, and `policy.ts` passes the same list to srt as
+ * `deniedResolvedAddresses`, so a hostname that resolves into one is refused too. (srt's own
+ * resolved-address check never re-judges an IP literal, so each layer needs the full list.)
+ * It carries over the parts of the retired macOS proxy's `public_address` that srt's built-in
+ * set does not cover; `tests/address-guard-parity.test.ts` checks the two against each other.
+ *
+ * - `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`: documentation
+ *   (RFC 5737 / RFC 3849).
+ * - `240.0.0.0/4`: reserved for future use (includes the broadcast address).
+ * - IPv6 outside `2000::/3` (global unicast): the six blocks `100::/8` … `8000::/1`. The list
+ *   deliberately starts at `100::/8`, not `::/3`: `::/8` holds the IPv4-embedding forms
+ *   (IPv4-mapped `::ffff:0:0/96`, IPv4-compatible, IPv4-translated, NAT64 `64:ff9b::/96`) that
+ *   srt, and this module's `DENIED_RANGES`, judge by the IPv4 address they carry — on an
+ *   IPv6-only/NAT64 network a public name resolves into `64:ff9b::/96`, so denying `::/8`
+ *   wholesale would cut off real public hosts. None of those blocks is currently allocated as
+ *   public global unicast, so a public host does not answer from them today.
+ * - `64:ff9b:1::/48`: the local-use NAT64 prefix (RFC 8215). Unlike the well-known `64:ff9b::/96`
+ *   it is not a public translation: its embedded IPv4 address is operator-defined and may be a
+ *   private one, which this module cannot decode, so the whole prefix is refused.
+ *
+ * Deliberately NOT listed: `198.18.0.0/15` (RFC 2544 benchmarking). The retired proxy denied it,
+ * but it is no private network, and Clash/TUN-style "fake-IP" DNS answers public names with
+ * 198.18.x.x addresses; denying it would break all egress for those users (ruling of the macOS
+ * migration plan). Also not listed: `192.0.0.0/24` (IETF protocol assignments; the retired
+ * proxy allowed it, and Oracle's metadata address inside it is listed individually).
+ */
+export const UNROUTABLE_V4: readonly string[] = [
+  "192.0.2.0/24",
+  "198.51.100.0/24",
+  "203.0.113.0/24",
+  "240.0.0.0/4",
+];
+export const UNROUTABLE_V6: readonly string[] = [
+  "2001:db8::/32",
+  "64:ff9b:1::/48",
+  "100::/8",
+  "200::/7",
+  "400::/6",
+  "800::/5",
+  "1000::/4",
+  "4000::/2",
+  "8000::/1",
+];
+
+const UNROUTABLE = new BlockList();
+for (const cidr of UNROUTABLE_V4) {
+  const [address = "", prefix = ""] = cidr.split("/");
+  addV4WithEmbedded(UNROUTABLE, address, Number(prefix));
+}
+for (const cidr of UNROUTABLE_V6) {
+  const [address = "", prefix = ""] = cidr.split("/");
+  addV6(UNROUTABLE, address, Number(prefix));
+}
+
 // fc00::/7 (unique local) has no IPv4-mapped/compatible form of its own — it is already an
 // IPv6-only range, so it covers fd00:ec2::/32 above only incidentally (both are checked).
 const UNIQUE_LOCAL = new BlockList();
@@ -122,6 +180,7 @@ const DENIED_RANGES: ReadonlyArray<readonly [BlockList, string]> = [
   [MULTICAST, "is a multicast address"],
   [CLOUD_METADATA, "is a well-known cloud metadata address"],
   [UNIQUE_LOCAL, "is a unique-local (fc00::/7) address"],
+  [UNROUTABLE, "is a documentation, reserved or non-global-unicast address"],
 ];
 
 /** Strips one pair of enclosing `[...]` brackets, if present. */

@@ -1,7 +1,6 @@
 //! Shared spawn/timeout/cancel/group-kill/bounded-output loop for running a command behind a
-//! sandbox wrapper. macOS builds a `sandbox-exec` argv around this; a future Linux sidecar
-//! runner reuses it unchanged, so this module must compile on every unix target even though
-//! it currently has only one caller.
+//! sandbox wrapper. `srt_exec.rs` runs the argv the sandbox sidecar returns through this loop on
+//! macOS and Linux, and the module compiles on every unix target.
 use super::{HostError, Result};
 use std::{
     io::Read,

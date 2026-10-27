@@ -284,10 +284,6 @@ impl LocalHost {
                 .lock()
                 .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?
                 .insert(id.into(), cancel.clone());
-            #[cfg(target_os = "macos")]
-            let result =
-                execute_command(&workspace.path, &cwd, command, timeout, max_output, cancel);
-            #[cfg(target_os = "linux")]
             let result = super::srt_exec::execute_command(
                 self,
                 &workspace.path,
@@ -520,50 +516,4 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
         return Err(HostError::new("PATH_MISSING", "Path does not exist"));
     }
     Ok(result)
-}
-
-#[cfg(target_os = "macos")]
-fn execute_command(
-    root: &Path,
-    cwd: &Path,
-    script: &str,
-    timeout: u64,
-    max: usize,
-    cancel: Arc<AtomicBool>,
-) -> Result<Value> {
-    let proxy = super::proxy::PublicProxy::start()?;
-    let policy = super::sandbox::command_profile(root, proxy.port)?;
-    let proxy_url = format!("http://127.0.0.1:{}", proxy.port);
-    let argv = vec![
-        "/usr/bin/sandbox-exec".to_string(),
-        "-p".to_string(),
-        policy,
-        "/bin/sh".to_string(),
-        "-c".to_string(),
-        script.to_string(),
-    ];
-    let env = vec![
-        (
-            "PATH".to_string(),
-            "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-        ),
-        ("HOME".to_string(), root.to_string_lossy().into_owned()),
-        ("TMPDIR".to_string(), root.to_string_lossy().into_owned()),
-        ("HTTP_PROXY".to_string(), proxy_url.clone()),
-        ("HTTPS_PROXY".to_string(), proxy_url.clone()),
-        ("http_proxy".to_string(), proxy_url.clone()),
-        ("https_proxy".to_string(), proxy_url),
-    ];
-    let run = super::process::run_wrapped(&argv, &env, cwd, timeout, max, cancel)?;
-    let output = format!(
-        "{}{}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
-    );
-    Ok(json!({
-        "output": output.chars().take(max).collect::<String>(),
-        "exitCode": run.exit_code,
-        "truncated": run.truncated || output.chars().count() > max,
-        "cancelled": run.cancelled,
-    }))
 }

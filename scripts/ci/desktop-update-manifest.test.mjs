@@ -64,9 +64,14 @@ test("complete explicitly targeted release generates immutable signed-package re
 test("sandbox bundle assets beside the update packages are not update packages", async (t) => {
   const dir = await fixture(t);
   const without = await prepare(dir);
-  const bundle = "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz";
-  await writeFile(join(dir, bundle), "bundle bytes");
-  await writeFile(join(dir, `${bundle}.sig`), "c2ln");
+  for (const bundle of [
+    "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz",
+    "sourceweft-sandbox-aarch64-apple-darwin.tar.gz",
+    "sourceweft-sandbox-x86_64-apple-darwin.tar.gz",
+  ]) {
+    await writeFile(join(dir, bundle), "bundle bytes");
+    await writeFile(join(dir, `${bundle}.sig`), "c2ln");
+  }
   const withBundle = await prepare(dir);
   assert.deepEqual(withBundle.manifest, without.manifest);
   assert.deepEqual(

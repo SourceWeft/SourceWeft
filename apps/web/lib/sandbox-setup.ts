@@ -29,7 +29,8 @@ const ACTION_BY_REMEDY: Record<SandboxRemedy, SandboxSetupAction> = {
 
 /**
  * Maps the host's readiness onto the setup card. Returns null unless setup is needed, so
- * `ready`, `unsupported` and the absent readiness (macOS, older builds) show no card.
+ * `ready`, `unsupported` and the absent readiness (older builds with no managed LocalHost) show
+ * no card.
  * An unknown remedy from a newer host degrades to reason-only rather than guessing an action.
  */
 export function sandboxSetupCard(
