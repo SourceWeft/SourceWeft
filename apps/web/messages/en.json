@@ -1352,6 +1352,9 @@
         "copied": "Copied",
         "runSetup": "Run setup",
         "runningSetup": "Running setup…",
+        "elevatedSetupDescription": "A one-time administrator step is needed. It installs the SourceWeft sandbox helper under Program Files and creates a restricted sandbox account and network rules for it on this PC. Windows will ask for your approval; SourceWeft never sees your password.",
+        "elevatedSetup": "Set up (needs administrator approval)",
+        "elevatedSetupRunning": "Setting up…",
         "checkAgain": "Check again"
       },
       "remoteAccessTitle": "Allow access from other devices",

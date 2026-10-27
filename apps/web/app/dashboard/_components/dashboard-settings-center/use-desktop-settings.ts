@@ -3,8 +3,12 @@
 import { useEffect, useState } from "react";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
 
-/** Desktop platforms that can host local execution (macOS Seatbelt, Linux bubblewrap). */
-const LOCAL_EXECUTION_PLATFORMS: readonly string[] = ["macos", "linux"];
+/** Desktop platforms that can host local execution (macOS Seatbelt, Linux bubblewrap, Windows sandbox account). */
+const LOCAL_EXECUTION_PLATFORMS: readonly string[] = [
+  "macos",
+  "linux",
+  "windows",
+];
 
 /** Keep desktop-only settings out of ordinary browser sessions. */
 export function useDesktopSettings() {
@@ -24,6 +28,7 @@ export function useDesktopSettings() {
   }, []);
   return {
     isDesktop: platform !== null,
-    isLocalPc: platform !== null && LOCAL_EXECUTION_PLATFORMS.includes(platform),
+    isLocalPc:
+      platform !== null && LOCAL_EXECUTION_PLATFORMS.includes(platform),
   };
 }

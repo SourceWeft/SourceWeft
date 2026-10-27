@@ -1352,6 +1352,9 @@
         "copied": "已複製",
         "runSetup": "執行設定",
         "runningSetup": "正在執行設定…",
+        "elevatedSetupDescription": "需要執行一次管理員操作。它會把 SourceWeft 沙箱輔助程式安裝到 Program Files 下，並在這臺電腦上為它建立受限的沙箱帳戶和網路規則。Windows 會請求你的核准；SourceWeft 不會取得你的密碼。",
+        "elevatedSetup": "設定（需要管理員核准）",
+        "elevatedSetupRunning": "正在設定…",
         "checkAgain": "重新檢查"
       },
       "remoteAccessTitle": "允許其他裝置存取",
