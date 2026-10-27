@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import { McpClaimFlow } from "./mcp-claim-flow";
 
 const IDENTIFIER = "com.example/server";
+// Relative to now, so the fixture claims never expire out from under the tests.
+const IN_A_WEEK = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
 function claim(patch: Partial<McpClaim> = {}): McpClaim {
   return {
@@ -37,7 +39,7 @@ function claim(patch: Partial<McpClaim> = {}): McpClaim {
     status: "pending",
     target: "example.com",
     createdAt: "2026-10-20T00:00:00.000Z",
-    expiresAt: "2026-10-27T00:00:00.000Z",
+    expiresAt: IN_A_WEEK,
     verifiedAt: null,
     revokedAt: null,
     lastError: null,
@@ -69,7 +71,7 @@ const instructions = {
   dnsRecordValue: "sourceweft-claim=swc_abc",
   wellKnownUrl: "https://example.com/.well-known/sourceweft-claim",
   wellKnownBody: "swc_abc",
-  expiresAt: "2026-10-27T00:00:00.000Z",
+  expiresAt: IN_A_WEEK,
 };
 
 let container: HTMLDivElement;
