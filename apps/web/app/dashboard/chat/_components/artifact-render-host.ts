@@ -10,6 +10,7 @@
 import { configureArtifactRenderHost } from "@sourceweft/agent-tool-registry/ui";
 import { createAppArtifactRecordsTransport } from "../../../../lib/artifact-records-transport";
 import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
+import { useArtifactStorageText } from "../../../../lib/use-artifact-storage-text";
 import {
   resolveArtifactPageUrlFromArtifact,
   resolveArtifactPreviewImageUrlFromArtifact,
@@ -49,6 +50,7 @@ configureArtifactRenderHost({
   resolveArtifactFileUrl: resolveArtifactProxyFileUrlFromArtifact,
   resolveArtifactPreviewImageUrl: resolveArtifactPreviewImageUrlFromArtifact,
   useArtifactSnapshot,
+  useArtifactStorageText,
   createArtifactRecordsTransport: (input) =>
     announcingApprovalChanges(
       createAppArtifactRecordsTransport(contentClient, input),

@@ -44,6 +44,7 @@
     "./artifact-execution": "./src/artifact-execution.ts",
     "./html-artifact": "./src/html-artifact.ts",
     "./artifact-records": "./src/artifact-records.ts",
+    "./artifact-storage-text": "./src/artifact-storage-text.ts",
     "./artifact-runtime": "./src/artifact-runtime.ts",
     "./billing-runtime": "./src/billing-runtime.ts",
     "./billing-catalog": "./src/billing-catalog.ts",
