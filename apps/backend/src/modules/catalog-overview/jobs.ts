@@ -1,5 +1,9 @@
 import type { Job } from "bullmq";
 import { logger } from "../../shared/logger";
+import {
+  MarketAiDeferredError,
+  nextMarketAiWindow,
+} from "../../shared/market-ai-schedule";
 import type { SystemModelReadiness } from "../../shared/model-gateway/system-client";
 import { enqueueWithAudit, jobsQueue } from "../../shared/queue";
 import type {
@@ -211,6 +215,15 @@ export function createOverviewJobs<
       }
       return result;
     } catch (error) {
+      if (error instanceof MarketAiDeferredError) {
+        await store.fail(
+          versionId,
+          requestId,
+          "Waiting for off-peak window",
+          true,
+        );
+        throw error;
+      }
       const isLastAttempt = attempt >= (job.opts.attempts ?? 1);
       await store.fail(
         versionId,
@@ -269,6 +282,7 @@ export async function enqueueOverviewBatch<TPayload>(
     label: string;
   },
 ): Promise<{ queued: number; skipped: number }> {
+  if (nextMarketAiWindow()) return { queued: 0, skipped: 0 };
   const readiness = await deps.readModelReadiness();
   if (!readiness.ready) {
     logger.debug(

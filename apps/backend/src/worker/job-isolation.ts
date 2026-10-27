@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Job } from "bullmq";
+import { DelayedError, type Job } from "bullmq";
 import { isConnectorError } from "../modules/connectors/errors";
 import { isContentError } from "../modules/content/errors";
 import type { ThreadChatRunJobPayload } from "../modules/content/queue";
@@ -91,6 +91,7 @@ export async function runWorkerJobWithIsolation(
   try {
     return await workerJobStorage.run(context, () => processor(job));
   } catch (error) {
+    if (error instanceof DelayedError) throw error;
     const normalized = normalizeWorkerRuntimeError(error);
     logger.error("Job processor failed", {
       ...buildWorkerJobFailureLog(job, normalized),
@@ -102,7 +103,9 @@ export async function runWorkerJobWithIsolation(
   }
 }
 
-function threadChatRunPayload(data: JobPayload): ThreadChatRunJobPayload | null {
+function threadChatRunPayload(
+  data: JobPayload,
+): ThreadChatRunJobPayload | null {
   return typeof data.runId === "string" &&
     typeof data.teamId === "string" &&
     typeof data.workspaceId === "string"
@@ -137,14 +140,17 @@ export async function handleUnhandledWorkerRuntimeError(input: {
       try {
         await input.persistThreadRunFailure({ payload, error });
       } catch (persistError) {
-        logger.error("Failed to persist thread run after unhandled worker error", {
-          jobId: context.jobId,
-          type: context.jobName,
-          error:
-            persistError instanceof Error
-              ? persistError.message
-              : String(persistError),
-        });
+        logger.error(
+          "Failed to persist thread run after unhandled worker error",
+          {
+            jobId: context.jobId,
+            type: context.jobName,
+            error:
+              persistError instanceof Error
+                ? persistError.message
+                : String(persistError),
+          },
+        );
       }
     }
   }

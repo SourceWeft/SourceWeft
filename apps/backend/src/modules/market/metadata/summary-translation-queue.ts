@@ -1,5 +1,6 @@
 import { enqueueWithAudit, jobsQueue } from "../../../shared/queue";
 import { getSystemModelReadiness } from "../../../shared/model-gateway/system-client";
+import { nextMarketAiWindow } from "../../../shared/market-ai-schedule";
 
 /**
  * The summary translation job (`mcp-summary-translation`) on the primary
@@ -45,6 +46,7 @@ const defaultDeps: EnqueueMcpSummaryTranslationDeps = {
 export async function enqueueMcpSummaryTranslation(
   deps: EnqueueMcpSummaryTranslationDeps = defaultDeps,
 ): Promise<boolean> {
+  if (nextMarketAiWindow()) return false;
   if (!(await deps.modelReady())) return false;
   if (await deps.jobExists(MCP_SUMMARY_TRANSLATION_SCHEDULED_JOB_ID)) {
     return false;

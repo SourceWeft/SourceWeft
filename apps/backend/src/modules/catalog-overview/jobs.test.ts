@@ -8,6 +8,8 @@ vi.mock("../../shared/queue", () => ({
 }));
 
 import { createOverviewJobs, enqueueOverviewBatch } from "./jobs";
+import { config } from "../../shared/config";
+import { MarketAiDeferredError } from "../../shared/market-ai-schedule";
 
 /** The durable job side of the engine, for a fake kind. */
 
@@ -48,6 +50,53 @@ beforeEach(() => {
   queue.enqueue.mockResolvedValue({ id: "queued" });
   queue.getJob.mockResolvedValue(null);
   store.findInterrupted.mockResolvedValue([]);
+});
+
+test("cross-boundary deferral leaves the durable request pending even on its last retry", async () => {
+  const deferred = new MarketAiDeferredError(new Date("2026-10-28T04:00Z"));
+  const active = job(
+    { thingVersionId: "v", thingId: "t", requestId: "one" },
+    2,
+  );
+  await expect(
+    jobs.process(active, async () => {
+      throw deferred;
+    }),
+  ).rejects.toBe(deferred);
+  expect(store.fail).toHaveBeenCalledWith(
+    "v",
+    "one",
+    "Waiting for off-peak window",
+    true,
+  );
+});
+
+test("peak hours skip candidate scans, crash recovery and enqueue", async () => {
+  const original = config.market.aiOffPeakOnly;
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-28T01:00Z"));
+  config.market.aiOffPeakOnly = true;
+  try {
+    const deps = {
+      readModelReadiness: vi.fn(),
+      findCandidates: vi.fn(),
+      recover: vi.fn(),
+      enqueue: vi.fn(),
+      jobExists: vi.fn(),
+    };
+    expect(
+      await enqueueOverviewBatch(deps, {
+        jobId: String,
+        batchSize: 20,
+        scanLimit: 100,
+        label: "MCP",
+      }),
+    ).toEqual({ queued: 0, skipped: 0 });
+    for (const fn of Object.values(deps)) expect(fn).not.toHaveBeenCalled();
+  } finally {
+    config.market.aiOffPeakOnly = original;
+    vi.useRealTimers();
+  }
 });
 
 test("each request gets its own deduplicating job id with bounded retries", async () => {

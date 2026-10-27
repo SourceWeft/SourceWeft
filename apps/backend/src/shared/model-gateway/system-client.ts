@@ -9,6 +9,7 @@ import {
   type ThinkingConfig,
 } from "@sourceweft/model-gateway";
 import { config } from "../config";
+import { assertMarketAiWindow, marketAiDeferral } from "../market-ai-schedule";
 import { logger } from "../logger";
 import {
   buildRoutedModelGatewayConfig,
@@ -320,9 +321,23 @@ function systemModelClient(
   const client = createModelGateway({
     ...buildRoutedModelGatewayConfig(
       buildSystemModelRoutedConfig(routed, settings, readiness),
-      // Platform calls are not tenant generations: nothing is persisted, and
-      // the one log line below is their record.
-      { observeSink: null, byok: false },
+      {
+        observeSink: null,
+        byok: false,
+        // Guard SDK retries and schema negotiation through the shared builder.
+        beforeFetch: () => {
+          try {
+            assertMarketAiWindow();
+          } catch (error) {
+            throw new ModelGatewayError({
+              code: "POLICY",
+              message: error instanceof Error ? error.message : String(error),
+              retryable: false,
+              cause: error,
+            });
+          }
+        },
+      },
     ),
     targetHealth: systemTargetHealth,
   });
@@ -477,6 +492,7 @@ export async function withSystemModel<T>(
 
   const chat: SystemModelChat = {
     complete: async (input, options) => {
+      assertMarketAiWindow();
       const startedAt = Date.now();
       let result: ChatCompleteResult;
       try {
@@ -496,6 +512,8 @@ export async function withSystemModel<T>(
           },
         );
       } catch (error) {
+        const deferred = marketAiDeferral(error);
+        if (deferred) throw deferred;
         logCall({ context, settings, startedAt, error });
         throw error;
       }
