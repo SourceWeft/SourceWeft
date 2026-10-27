@@ -305,12 +305,15 @@ mod tests {
             (SetupCode::UserNamespaceRestricted, "userNamespaceRestricted"),
             (SetupCode::SandboxFailed, "sandboxFailed"),
             (SetupCode::Installing, "installing"),
+            (SetupCode::WindowsNotInstalled, "windowsNotInstalled"),
+            (SetupCode::WindowsSetupOutdated, "windowsSetupOutdated"),
         ];
         let remedies = [
             (Remedy::DownloadRuntime, "downloadRuntime"),
             (Remedy::UpdateApp, "updateApp"),
             (Remedy::ReinstallPackage, "reinstallPackage"),
             (Remedy::PrivilegedSetup, "privilegedSetup"),
+            (Remedy::ElevatedSetup, "elevatedSetup"),
             (Remedy::None, "none"),
         ];
         for (code, wire_code) in codes {
@@ -325,6 +328,58 @@ mod tests {
                 assert_eq!(message["sandbox"]["remedy"], wire_remedy);
             }
         }
+    }
+
+    /// The wire names the backend accepts (`invocation-reply.ts`), read from its source so the two
+    /// lists cannot drift: every Rust variant must be one of them and every one of theirs must be
+    /// a Rust variant.
+    #[test]
+    fn the_codes_and_remedies_are_exactly_the_backends() {
+        let source = include_str!("../../../../backend/src/modules/devices/invocation-reply.ts")
+            .replace("\r\n", "\n");
+        let list = |name: &str| -> Vec<String> {
+            let start = source.find(&format!("export const {name} = [")).unwrap();
+            let body = &source[start..];
+            let body = &body[body.find('[').unwrap() + 1..body.find("] as const").unwrap()];
+            body.split(',')
+                .map(|item| item.trim().trim_matches('"').to_string())
+                .filter(|item| !item.is_empty())
+                .collect()
+        };
+        let wire = |value: serde_json::Value| value.as_str().unwrap().to_string();
+        let mut codes: Vec<String> = [
+            SetupCode::BundleMissing,
+            SetupCode::BundleStale,
+            SetupCode::BundleNewer,
+            SetupCode::BundleInvalid,
+            SetupCode::BwrapMissing,
+            SetupCode::UserNamespaceRestricted,
+            SetupCode::SandboxFailed,
+            SetupCode::Installing,
+            SetupCode::WindowsNotInstalled,
+            SetupCode::WindowsSetupOutdated,
+        ]
+        .into_iter()
+        .map(|code| wire(json!(code)))
+        .collect();
+        let mut remedies: Vec<String> = [
+            Remedy::DownloadRuntime,
+            Remedy::UpdateApp,
+            Remedy::ReinstallPackage,
+            Remedy::PrivilegedSetup,
+            Remedy::ElevatedSetup,
+            Remedy::None,
+        ]
+        .into_iter()
+        .map(|remedy| wire(json!(remedy)))
+        .collect();
+        let (mut theirs_codes, mut theirs_remedies) =
+            (list("SANDBOX_SETUP_CODES"), list("SANDBOX_REMEDIES"));
+        for list in [&mut codes, &mut remedies, &mut theirs_codes, &mut theirs_remedies] {
+            list.sort();
+        }
+        assert_eq!(codes, theirs_codes);
+        assert_eq!(remedies, theirs_remedies);
     }
 
     #[test]

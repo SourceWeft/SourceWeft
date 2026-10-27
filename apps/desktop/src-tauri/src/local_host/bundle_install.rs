@@ -40,19 +40,26 @@ use std::{
 
 /// Where the signed release assets live; the app version selects the tag.
 const RELEASE_BASE: &str = "https://github.com/SourceWeft/SourceWeft/releases/download";
-/// The platforms a runtime is published for (`desktop-release.yml`): Linux x86_64 and both macOS
-/// architectures. Windows has none yet (Task 7 enables the Windows triples). The sidecar is compiled for the build host, so each target
-/// triple matches a release leg exactly.
+/// The platforms a runtime is published for (`desktop-release.yml`): Linux x86_64, both macOS
+/// architectures and both Windows ones (the desktop installer is x64-only, whose app also runs
+/// under emulation on Windows 11 ARM; the arm64 bundle is published for native ARM builds). The
+/// sidecar is compiled for the build host, so each target triple matches a release leg exactly.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const RELEASE_TARGET: Option<&str> = Some("x86_64-unknown-linux-gnu");
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const RELEASE_TARGET: Option<&str> = Some("aarch64-apple-darwin");
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const RELEASE_TARGET: Option<&str> = Some("x86_64-apple-darwin");
+#[cfg(all(windows, target_arch = "x86_64"))]
+const RELEASE_TARGET: Option<&str> = Some("x86_64-pc-windows-msvc");
+#[cfg(all(windows, target_arch = "aarch64"))]
+const RELEASE_TARGET: Option<&str> = Some("aarch64-pc-windows-msvc");
 #[cfg(not(any(
     all(target_os = "linux", target_arch = "x86_64"),
     all(target_os = "macos", target_arch = "aarch64"),
     all(target_os = "macos", target_arch = "x86_64"),
+    all(windows, target_arch = "x86_64"),
+    all(windows, target_arch = "aarch64"),
 )))]
 const RELEASE_TARGET: Option<&str> = None;
 
@@ -397,6 +404,42 @@ fn parse_manifest(bytes: &[u8], spec: &InstallSpec) -> Result<RawManifest> {
     Ok(manifest)
 }
 
+/// The SHA-256 the installed bundle's `manifest.json` lists for `name`. The manifest was checked
+/// against the signed archive when the bundle was installed and every file against it; this reads
+/// it back (size-capped, strictly parsed) so Windows setup and readiness can compare the staged
+/// helper with the bundle's. The directory is user-writable, so this is a comparison value, not a
+/// trust anchor: whatever runs elevated is the *copy*, hashed inside the admin-only directory.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn bundle_file_sha256(bundle: &Path, name: &str) -> Result<String> {
+    let manifest = bundle.join(MANIFEST_FILENAME);
+    let file = File::open(&manifest)
+        .map_err(|error| bundle_invalid(format!("The runtime manifest cannot be read: {error}")))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_MANIFEST_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| bundle_invalid(format!("The runtime manifest cannot be read: {error}")))?;
+    if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(bundle_invalid("The runtime manifest is too large."));
+    }
+    let manifest: RawManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| bundle_invalid(format!("The runtime manifest is not valid: {error}")))?;
+    let entry = manifest
+        .files
+        .get(name)
+        .ok_or_else(|| bundle_invalid(format!("The runtime does not contain {name}.")))?;
+    let hex = entry.sha256.len() == 64
+        && entry
+            .sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if !hex {
+        return Err(bundle_invalid(format!(
+            "The runtime manifest's checksum for {name} is not valid."
+        )));
+    }
+    Ok(entry.sha256.clone())
+}
+
 // ------------------------------------------------------------------- signature
 
 fn decode_public_key(pubkey_b64: &str) -> Result<PublicKey> {
@@ -493,7 +536,7 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         if self.armed {
-            let _ = fs::remove_dir_all(&self.path);
+            remove_path(&self.path);
         }
     }
 }
@@ -573,16 +616,64 @@ fn sweep_stale(sandbox_dir: &Path) {
     }
 }
 
-/// Removes a file, symlink (not followed) or directory tree, ignoring failure.
-fn remove_path(path: &Path) {
+/// How many times a file operation that can fail transiently is tried. Windows holds a file open
+/// for a moment after a process that used it exits (and a virus scanner opens fresh files), which
+/// makes a delete or rename fail with a sharing violation that goes away on its own; macOS and
+/// Linux have no such state and keep one attempt.
+#[cfg(windows)]
+const FILE_OPERATION_ATTEMPTS: u32 = 3;
+#[cfg(not(windows))]
+const FILE_OPERATION_ATTEMPTS: u32 = 1;
+const FILE_OPERATION_PAUSE: Duration = Duration::from_millis(150);
+
+/// Runs `attempt` up to `attempts` times, pausing between failures. A target that is already gone
+/// counts as done. Returns the last error when every attempt failed.
+fn retry_file_operation(
+    attempts: u32,
+    pause: Duration,
+    mut attempt: impl FnMut() -> io::Result<()>,
+) -> io::Result<()> {
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        match attempt() {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if tries >= attempts => return Err(error),
+            Err(_) => std::thread::sleep(pause),
+        }
+    }
+}
+
+/// `remove_path`'s removal with an explicit number of attempts and pause.
+fn remove_path_with(path: &Path, attempts: u32, pause: Duration) -> io::Result<()> {
     match path.symlink_metadata() {
         Ok(meta) if meta.is_dir() => {
-            let _ = fs::remove_dir_all(path);
+            retry_file_operation(attempts, pause, || fs::remove_dir_all(path))
         }
-        Ok(_) => {
-            let _ = fs::remove_file(path);
+        Ok(_) => retry_file_operation(attempts, pause, || fs::remove_file(path)),
+        Err(_) => Ok(()),
+    }
+}
+
+/// Removes a file, symlink (not followed) or directory tree, retrying a transient failure on
+/// Windows and then ignoring it: what stays behind is a `.old-*`/`.staging-*` directory that the
+/// next install sweeps (`sweep_stale`).
+fn remove_path(path: &Path) {
+    let _ = remove_path_with(path, FILE_OPERATION_ATTEMPTS, FILE_OPERATION_PAUSE);
+}
+
+/// `fs::rename`, retried on Windows (see [`FILE_OPERATION_ATTEMPTS`]). A rename whose source is
+/// gone is *not* success here, unlike a removal.
+fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error) if tries >= FILE_OPERATION_ATTEMPTS => return Err(error),
+            Err(_) => std::thread::sleep(FILE_OPERATION_PAUSE),
         }
-        Err(_) => {}
     }
 }
 
@@ -933,12 +1024,27 @@ pub fn install(app_data: &Path, spec: &InstallSpec, fetch: &dyn Fetch) -> Result
     fetch.get_to_file(&spec.archive_url(), &tarball, MAX_DOWNLOAD_BYTES)?;
     verify_signature(&key, &tarball, &signature)?;
 
-    install_verified_tarball(&sandbox_dir, &tarball, spec, &|from, to| {
-        fs::rename(from, to)
-    })
+    install_verified_tarball(&sandbox_dir, &tarball, spec, &rename_with_retry)
 }
 
 // ------------------------------------------------------------------ host side
+
+/// Windows cannot rename `current` while a sidecar runs `srt-sidecar.exe` from it, so every
+/// per-workspace instance goes first (unix replaces the files under a running sidecar and stops it
+/// afterwards).
+const STOP_BEFORE_SWAP: bool = cfg!(windows);
+
+/// Runs `install`, stopping the sandbox sidecars before it when `stop_first` and, whatever the
+/// outcome, after it: no sidecar started from the previous files may keep serving commands; the
+/// next command starts one from whatever `current` is now.
+fn install_around_stop<T>(stop_first: bool, stop: &dyn Fn(), install: impl FnOnce() -> T) -> T {
+    if stop_first {
+        stop();
+    }
+    let result = install();
+    stop();
+    result
+}
 
 impl LocalHost {
     /// Downloads and installs the sandbox runtime for this build. While it runs,
@@ -989,27 +1095,21 @@ impl LocalHost {
                     "The sandbox runtime is already being installed.",
                 )
             })?;
-        // Windows cannot rename `current` while a sidecar runs `srt-sidecar.exe` from it, so
-        // every per-workspace instance goes first (unix replaces the files under a running
-        // sidecar and stops it afterwards).
-        #[cfg(windows)]
-        self.stop_sandbox_sidecar();
-        let result = install(&self.base, spec, fetch);
-        // Whatever happened, no sidecar started from the previous files may keep serving
-        // commands; the next command starts one from whatever `current` is now.
-        self.stop_sandbox_sidecar();
+        let result = install_around_stop(STOP_BEFORE_SWAP, &|| self.stop_sandbox_sidecar(), || {
+            install(&self.base, spec, fetch)
+        });
         drop(guard);
         result
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    fn stop_sandbox_sidecar(&self) {
+    pub(super) fn stop_sandbox_sidecar(&self) {
         super::srt_exec::stop_sidecar(&self.sandbox);
     }
 
     /// No other platform runs a sidecar.
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    fn stop_sandbox_sidecar(&self) {}
+    pub(super) fn stop_sandbox_sidecar(&self) {}
 }
 
 // The extraction tests drive unix file modes and a unix stub sidecar; Windows-only checks live in
@@ -1641,6 +1741,160 @@ mod tests {
         assert_eq!(mode(&current.join("srt-sidecar")), 0o755);
         assert_eq!(mode(&current.join("rg")), 0o755);
         assert_eq!(mode(&current.join("srt-proxy-agent.jar")), 0o644);
+    }
+
+    #[test]
+    fn a_windows_file_set_installs_through_the_same_path() {
+        // The Windows bundle ships `{srt-sidecar.exe, rg.exe, srt-win.exe, srt-proxy-agent.jar}`
+        // and no `apply-seccomp`. The packer gives `*.exe` mode 0755 by extension (the files carry
+        // no execute bit when built on Windows); the installer accepts exactly the manifest's
+        // names and modes, and the staged helper is found by its manifest entry afterwards.
+        for target in ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"] {
+            let app_data = tempfile::tempdir().unwrap();
+            let sandbox = app_data.path().join("sandbox");
+            fs::create_dir_all(&sandbox).unwrap();
+            let mut spec = spec();
+            spec.target = target.into();
+            let sidecar = b"MZ fake sidecar\n".as_slice();
+            let rg = b"MZ fake rg\n".as_slice();
+            let srt_win = b"MZ fake srt-win\n".as_slice();
+            let jar = b"fake jar\n".as_slice();
+            let manifest = manifest_with(
+                &[("srt-sidecar.exe", sidecar), ("rg.exe", rg), ("srt-win.exe", srt_win), ("srt-proxy-agent.jar", jar)],
+                |m| m["target"] = serde_json::json!(target),
+            );
+            let archive_entries = vec![
+                Entry::file(MANIFEST_FILENAME, &manifest, 0o644),
+                Entry::file("rg.exe", rg, 0o755),
+                Entry::file("srt-proxy-agent.jar", jar, 0o644),
+                Entry::file("srt-sidecar.exe", sidecar, 0o755),
+                Entry::file("srt-win.exe", srt_win, 0o755),
+            ];
+            let tarball = app_data.path().join("runtime.tar.gz");
+            fs::write(&tarball, gz(&tar(&archive_entries, true))).unwrap();
+
+            let installed =
+                install_verified_tarball(&sandbox, &tarball, &spec, &|a, b| fs::rename(a, b)).unwrap();
+            assert_eq!(installed.target, target);
+            assert_eq!(installed.files, ["rg.exe", "srt-proxy-agent.jar", "srt-sidecar.exe", "srt-win.exe"]);
+            let current = sandbox.join("current");
+            assert_eq!(
+                entries(&current),
+                ["manifest.json", "rg.exe", "srt-proxy-agent.jar", "srt-sidecar.exe", "srt-win.exe"]
+            );
+            assert_eq!(mode(&current.join("srt-win.exe")), 0o755);
+            assert_eq!(mode(&current.join("srt-proxy-agent.jar")), 0o644);
+            assert_eq!(bundle_file_sha256(&current, "srt-win.exe").unwrap(), sha(srt_win));
+        }
+    }
+
+    #[test]
+    fn the_bundles_listed_hash_is_read_back_strictly() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |manifest: &[u8]| fs::write(dir.path().join(MANIFEST_FILENAME), manifest).unwrap();
+        let good = manifest_with(&[("srt-win.exe", b"helper"), ("rg.exe", b"rg")], |_| {});
+        write(&good);
+        assert_eq!(bundle_file_sha256(dir.path(), "srt-win.exe").unwrap(), sha(b"helper"));
+        assert_eq!(bundle_file_sha256(dir.path(), "rg.exe").unwrap(), sha(b"rg"));
+        // A file the manifest does not list.
+        let error = bundle_file_sha256(dir.path(), "apply-seccomp").unwrap_err();
+        assert_eq!(error.code, SANDBOX_BUNDLE_INVALID);
+        assert!(error.message.contains("does not contain apply-seccomp"), "{}", error.message);
+        // A checksum that is not lowercase hex, an unknown field, junk, nothing, too much.
+        let upper = manifest_with(&[("srt-win.exe", b"helper")], |m| {
+            m["files"]["srt-win.exe"]["sha256"] = serde_json::json!(sha(b"helper").to_uppercase())
+        });
+        let extra = manifest_with(&[("srt-win.exe", b"helper")], |m| m["surprise"] = serde_json::json!(1));
+        for bad in [upper.as_slice(), extra.as_slice(), b"not json".as_slice(), b"".as_slice(), vec![b' '; 70_000].as_slice()] {
+            write(bad);
+            assert_eq!(bundle_file_sha256(dir.path(), "srt-win.exe").unwrap_err().code, SANDBOX_BUNDLE_INVALID);
+        }
+        fs::remove_file(dir.path().join(MANIFEST_FILENAME)).unwrap();
+        assert_eq!(bundle_file_sha256(dir.path(), "srt-win.exe").unwrap_err().code, SANDBOX_BUNDLE_INVALID);
+    }
+
+    #[test]
+    fn sidecars_are_stopped_before_the_swap_where_files_in_use_cannot_be_replaced() {
+        use std::cell::RefCell;
+        let log = RefCell::new(Vec::new());
+        let stop = || log.borrow_mut().push("stop");
+        let result = install_around_stop(true, &stop, || {
+            log.borrow_mut().push("install");
+            7
+        });
+        assert_eq!((result, log.borrow().clone()), (7, vec!["stop", "install", "stop"]));
+        log.borrow_mut().clear();
+        install_around_stop(false, &stop, || log.borrow_mut().push("install"));
+        assert_eq!(*log.borrow(), ["install", "stop"]);
+        // A failed install stops them afterwards all the same.
+        log.borrow_mut().clear();
+        let failed: std::result::Result<(), &str> = install_around_stop(true, &stop, || Err("no"));
+        assert!(failed.is_err());
+        assert_eq!(*log.borrow(), ["stop", "stop"]);
+        // Windows is the platform that stops first.
+        assert_eq!(STOP_BEFORE_SWAP, cfg!(windows));
+    }
+
+    #[test]
+    fn a_transient_file_failure_is_retried_then_given_up_on() {
+        use std::cell::Cell;
+        let sharing_violation = || io::Error::new(io::ErrorKind::PermissionDenied, "in use");
+        // Succeeds on the third attempt.
+        let calls = Cell::new(0);
+        retry_file_operation(3, Duration::ZERO, || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 { Err(sharing_violation()) } else { Ok(()) }
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 3);
+        // Gives up after the last attempt with that attempt's error.
+        let calls = Cell::new(0);
+        let error = retry_file_operation(3, Duration::ZERO, || {
+            calls.set(calls.get() + 1);
+            Err(sharing_violation())
+        })
+        .unwrap_err();
+        assert_eq!((calls.get(), error.kind()), (3, io::ErrorKind::PermissionDenied));
+        // Already gone is done, immediately.
+        let calls = Cell::new(0);
+        retry_file_operation(3, Duration::ZERO, || {
+            calls.set(calls.get() + 1);
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        // One attempt means one.
+        let calls = Cell::new(0);
+        assert!(retry_file_operation(1, Duration::ZERO, || {
+            calls.set(calls.get() + 1);
+            Err(sharing_violation())
+        })
+        .is_err());
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn removal_handles_files_directories_and_what_is_already_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = dir.path().join(".old-x");
+        fs::create_dir_all(tree.join("nested")).unwrap();
+        fs::write(tree.join("nested").join("f"), "x").unwrap();
+        remove_path_with(&tree, 3, Duration::ZERO).unwrap();
+        assert!(!tree.exists());
+        let file = dir.path().join("f");
+        fs::write(&file, "x").unwrap();
+        remove_path_with(&file, 3, Duration::ZERO).unwrap();
+        assert!(!file.exists());
+        remove_path_with(&dir.path().join("missing"), 3, Duration::ZERO).unwrap();
+        // A symlink is removed, never followed.
+        let target = dir.path().join("keep");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("f"), "x").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        remove_path(&link);
+        assert!(link.symlink_metadata().is_err());
+        assert!(target.join("f").exists());
     }
 
     #[test]
@@ -2428,6 +2682,46 @@ mod windows_tests {
         assert_eq!(fs::read(&path).unwrap(), b"bytes");
         assert_eq!(write_file(&path, b"other", 0o755).unwrap_err().code, SANDBOX_INSTALL_FAILED);
         assert_eq!(fs::read(&path).unwrap(), b"bytes");
+    }
+
+    #[test]
+    fn the_release_spec_names_this_windows_architecture() {
+        let spec = InstallSpec::release().unwrap();
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(spec.target, "x86_64-pc-windows-msvc");
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(spec.target, "aarch64-pc-windows-msvc");
+        assert_eq!(spec.app_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(spec.protocol_version, SANDBOX_PROTOCOL_VERSION);
+        assert_eq!(
+            spec.archive_url(),
+            format!(
+                "https://github.com/SourceWeft/SourceWeft/releases/download/v{}/sourceweft-sandbox-{}.tar.gz",
+                env!("CARGO_PKG_VERSION"),
+                spec.target
+            )
+        );
+        assert!(InstallSpec::runtime_published());
+    }
+
+    #[test]
+    fn a_locked_directory_is_retried_and_then_left_for_the_next_sweep() {
+        // A file held open without FILE_SHARE_DELETE cannot be deleted on Windows: the removal
+        // retries, gives up without panicking, and the directory is still there for `sweep_stale`.
+        let dir = tempfile::tempdir().unwrap();
+        let tree = dir.path().join(".old-locked");
+        fs::create_dir(&tree).unwrap();
+        let locked = tree.join("srt-sidecar.exe");
+        fs::write(&locked, "x").unwrap();
+        // Rust opens with FILE_SHARE_DELETE by default; share only reads (FILE_SHARE_READ = 1).
+        use std::os::windows::fs::OpenOptionsExt;
+        let held = OpenOptions::new().read(true).share_mode(1).open(&locked).unwrap();
+        assert!(remove_path_with(&tree, 3, Duration::from_millis(10)).is_err());
+        remove_path(&tree);
+        assert!(tree.exists());
+        drop(held);
+        remove_path(&tree);
+        assert!(!tree.exists(), "removed once nothing holds it");
     }
 
     #[test]
