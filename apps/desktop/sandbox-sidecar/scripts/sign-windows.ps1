@@ -79,5 +79,5 @@ foreach ($name in 'srt-sidecar.exe', 'srt-win.exe', 'rg.exe') {
     }
     if ($null -eq $signature.TimeStamperCertificate) { throw "$name signature carries no timestamp" }
   }
-  Write-Host "$name: signed by $($signature.SignerCertificate.Subject), status $($signature.Status)"
+  Write-Host "${name}: signed by $($signature.SignerCertificate.Subject), status $($signature.Status)"
 }
