@@ -1,6 +1,6 @@
 use super::{HostError, LocalHost, Result};
 use rusqlite::{params, OptionalExtension};
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use serde_json::json;
 use serde_json::Value;
 use std::{
@@ -11,8 +11,10 @@ use std::{
     },
 };
 
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+use std::path::Path;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-use std::{io::Read, path::Path};
+use std::io::Read;
 
 #[derive(Default)]
 pub struct Executions {
@@ -134,7 +136,7 @@ impl LocalHost {
         outcome
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     fn perform(
         &self,
         _calls: &Executions,
@@ -146,11 +148,11 @@ impl LocalHost {
     ) -> Result<Value> {
         Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
-            "Local execution currently requires macOS or Linux.",
+            "Local execution currently requires macOS, Linux or Windows.",
         ))
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     fn perform(
         &self,
         calls: &Executions,
@@ -170,50 +172,70 @@ impl LocalHost {
             let grant = text(payload, "folderId")?;
             let root = self.granted_directory(owner, grant)?;
             let requested = text(payload, "path")?;
-            let relative = if requested.starts_with('/') {
-                Path::new(requested)
-                    .strip_prefix(&root)
-                    .map_err(|_| HostError::new("PATH_DENIED", "Outside the selected folder"))?
-                    .to_str()
-                    .ok_or_else(|| HostError::new("INVALID_PATH", "Invalid path"))?
-            } else {
-                requested
-            };
+            let relative = folder_relative(&root, requested)?;
+            let relative = relative.as_str();
             let path = checked_path(&root, relative, true)?;
-            use std::os::unix::fs::MetadataExt;
             if action == "folder.read" {
-                use base64::Engine;
-                let parts = Path::new(relative)
-                    .components()
-                    .filter_map(|p| match p {
-                        std::path::Component::Normal(v) => Some(v),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                let mut file = super::files::open_file_beneath(&root, &parts, libc::O_RDONLY)?;
-                let meta = file.metadata()?;
-                if !meta.is_file() || meta.nlink() != 1 {
-                    return Err(HostError::new(
-                        "FILE_ACCESS_DENIED",
-                        "Only regular, non-hardlinked files can be previewed.",
-                    ));
+                // Windows: Task 5 replaces this with the descriptor-relative read (it needs the
+                // new open-flag type, so the primitive is not reachable from here yet).
+                #[cfg(windows)]
+                return Err(HostError::new(
+                    "UNSUPPORTED_PLATFORM",
+                    "Draft folder reads are not available on Windows yet.",
+                ));
+                #[cfg(unix)]
+                {
+                    use base64::Engine;
+                    use std::os::unix::fs::MetadataExt;
+                    let parts = Path::new(relative)
+                        .components()
+                        .filter_map(|p| match p {
+                            std::path::Component::Normal(v) => Some(v),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    let mut file = super::files::open_file_beneath(&root, &parts, libc::O_RDONLY)?;
+                    let meta = file.metadata()?;
+                    if !meta.is_file() || meta.nlink() != 1 {
+                        return Err(HostError::new(
+                            "FILE_ACCESS_DENIED",
+                            "Only regular, non-hardlinked files can be previewed.",
+                        ));
+                    }
+                    let mut bytes = Vec::new();
+                    (&mut file).take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                    if bytes.len() > 1024 * 1024 {
+                        return Err(HostError::new(
+                            "FILE_TOO_LARGE",
+                            "Draft previews are limited to 1 MiB.",
+                        ));
+                    }
+                    self.granted_directory(owner, grant)?;
+                    return Ok(
+                        json!({"content":base64::engine::general_purpose::STANDARD.encode(bytes)}),
+                    );
                 }
-                let mut bytes = Vec::new();
-                (&mut file).take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                if bytes.len() > 1024 * 1024 {
-                    return Err(HostError::new(
-                        "FILE_TOO_LARGE",
-                        "Draft previews are limited to 1 MiB.",
-                    ));
-                }
-                self.granted_directory(owner, grant)?;
-                return Ok(
-                    json!({"content":base64::engine::general_purpose::STANDARD.encode(bytes)}),
-                );
             }
-            let files = super::files::list_granted_directory(&root, Path::new(relative))?;
-            self.granted_directory(owner, grant)?;
-            return Ok(json!({"root":root,"path":path,"files":files}));
+            // Windows: Task 5 adds the descriptor-relative listing (and its wire-form entry
+            // paths); `root` and `path` below already leave the host in wire form.
+            #[cfg(windows)]
+            {
+                let _ = &path;
+                return Err(HostError::new(
+                    "UNSUPPORTED_PLATFORM",
+                    "Draft folder listings are not available on Windows yet.",
+                ));
+            }
+            #[cfg(unix)]
+            {
+                let files = super::files::list_granted_directory(&root, Path::new(relative))?;
+                self.granted_directory(owner, grant)?;
+                return Ok(json!({
+                    "root": super::winpath::host_to_wire(&root)?,
+                    "path": super::winpath::host_to_wire(&path)?,
+                    "files": files
+                }));
+            }
         }
         if action == "workspace.check" {
             self.check_workspace(
@@ -420,8 +442,7 @@ impl LocalHost {
                 let mut files = Vec::new();
                 let meta = path.symlink_metadata()?;
                 if meta.is_file() {
-                    use std::os::unix::fs::MetadataExt;
-                    if meta.nlink() > 1 {
+                    if has_other_links(&path, &meta)? {
                         return Err(HostError::new(
                             "HARDLINK_NOT_ALLOWED",
                             "Hard-linked files cannot be searched.",
@@ -443,16 +464,25 @@ impl LocalHost {
                         .map_err(|_| HostError::new("PATH_DENIED", "Outside directory"))?;
                     let directory = checked_path(
                         &workspace.path,
-                        rel.to_str()
-                            .ok_or_else(|| HostError::new("INVALID_PATH", "Non-UTF8 path"))?,
+                        &relative_for_check(rel)?,
                         true,
                     )?;
                     for entry in std::fs::read_dir(directory)? {
                         let entry = entry?;
                         let meta = entry.path().symlink_metadata()?;
-                        use std::os::unix::fs::MetadataExt;
-                        if meta.file_type().is_symlink()
-                            || (!meta.is_dir() && (!meta.is_file() || meta.nlink() > 1))
+                        if is_link(&meta)
+                            || (!meta.is_dir()
+                                && (!meta.is_file() || has_other_links(&entry.path(), &meta)?))
+                        {
+                            continue;
+                        }
+                        // Names the host cannot address again (Windows: not UTF-8, or a name Win32
+                        // would resolve to something else) are not listed.
+                        #[cfg(windows)]
+                        if entry
+                            .file_name()
+                            .to_str()
+                            .is_none_or(|name| super::winpath::validate_component(name).is_err())
                         {
                             continue;
                         }
@@ -465,7 +495,7 @@ impl LocalHost {
                         if recursive && meta.is_dir() {
                             pending.push(entry.path());
                         }
-                        files.push(json!({"path":entry.path().strip_prefix(&workspace.path).map_err(|_|HostError::new("PATH_DENIED","Outside workspace"))?.to_string_lossy(),"is_dir":meta.is_dir(),"size":meta.len()}));
+                        files.push(json!({"path":relative_wire(entry.path().strip_prefix(&workspace.path).map_err(|_|HostError::new("PATH_DENIED","Outside workspace"))?),"is_dir":meta.is_dir(),"size":meta.len()}));
                     }
                 }
                 Ok(json!({"files":files}))
@@ -478,7 +508,7 @@ impl LocalHost {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
     payload
         .get(key)
@@ -486,17 +516,117 @@ fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| HostError::new("INVALID_CALL", format!("Missing {key}")))
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+/// A draft-folder request path (`folder.list` / `folder.read`) reduced to a path relative to the
+/// granted `root`. The backend may send the absolute path the host reported, which must lie inside
+/// `root`; on Windows that is the wire form (`C:/proj/a.txt`, see `winpath`).
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+fn folder_relative(root: &Path, requested: &str) -> Result<String> {
+    #[cfg(unix)]
+    {
+        if requested.starts_with('/') {
+            Ok(Path::new(requested)
+                .strip_prefix(root)
+                .map_err(|_| HostError::new("PATH_DENIED", "Outside the selected folder"))?
+                .to_str()
+                .ok_or_else(|| HostError::new("INVALID_PATH", "Invalid path"))?
+                .to_owned())
+        } else {
+            Ok(requested.to_owned())
+        }
+    }
+    #[cfg(windows)]
+    {
+        super::winpath::folder_request_relative(root, requested)
+    }
+}
+
+/// Whether a directory entry is a link the listing must skip: a symbolic link on unix, any reparse
+/// point (symlink, junction, mount point, cloud placeholder) on Windows.
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+fn is_link(meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        meta.file_type().is_symlink()
+    }
+    #[cfg(windows)]
+    {
+        super::winpath::is_reparse_point(meta)
+    }
+}
+
+/// Whether a regular file has more than one hard link.
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+fn has_other_links(path: &Path, meta: &std::fs::Metadata) -> Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let _ = path;
+        Ok(meta.nlink() > 1)
+    }
+    #[cfg(windows)]
+    {
+        let _ = meta;
+        Ok(super::winpath::link_count(path)? > 1)
+    }
+}
+
+/// A workspace-relative path as reported to the backend: `/`-separated on every platform.
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+fn relative_wire(relative: &Path) -> String {
+    #[cfg(unix)]
+    {
+        relative.to_string_lossy().into_owned()
+    }
+    #[cfg(windows)]
+    {
+        relative.to_string_lossy().replace('\\', "/")
+    }
+}
+
+/// The relative path of a visited directory in the form `checked_path` takes (`/`-separated).
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+fn relative_for_check(relative: &Path) -> Result<String> {
+    let text = relative
+        .to_str()
+        .ok_or_else(|| HostError::new("INVALID_PATH", "Non-UTF8 path"))?;
+    #[cfg(windows)]
+    {
+        Ok(text.replace('\\', "/"))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(text.to_owned())
+    }
+}
+
+/// Resolves `relative` below `root`, refusing anything that is not a plain path inside it.
+/// Unix: no symbolic link on the way. Windows: no reparse point on the way (symlink, junction,
+/// mount point, cloud placeholder), no component Win32 would resolve to something other than the
+/// spelled name (device names, alternate data streams, trailing dots/spaces, `\`), and no 8.3
+/// short-name alias (the spelled path must be the on-disk path, up to case).
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::path::PathBuf> {
     use std::path::Component;
+    #[cfg(windows)]
+    if relative.contains('\\') {
+        return Err(HostError::new(
+            "PATH_DENIED",
+            "Expected a workspace-relative path with / separators",
+        ));
+    }
     let mut result = root.to_owned();
     for component in Path::new(relative).components() {
         match component {
             Component::CurDir => {}
             Component::Normal(part) => {
+                #[cfg(windows)]
+                part.to_str()
+                    .ok_or_else(|| HostError::new("PATH_DENIED", "Path is not valid UTF-8"))
+                    .and_then(super::winpath::validate_component)
+                    .map_err(|error| HostError::new("PATH_DENIED", error.message))?;
                 result.push(part);
                 if let Ok(meta) = result.symlink_metadata() {
-                    if meta.file_type().is_symlink() {
+                    if is_link(&meta) {
                         return Err(HostError::new(
                             "PATH_DENIED",
                             "Symbolic links are not allowed",
@@ -515,5 +645,29 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
     if must_exist && !result.exists() {
         return Err(HostError::new("PATH_MISSING", "Path does not exist"));
     }
+    #[cfg(windows)]
+    reject_short_name_alias(&result)?;
     Ok(result)
+}
+
+/// Windows resolves `PROGRA~1` to `Program Files`; the host would then act on a different name
+/// than the one it validated. The deepest existing prefix of `path` must canonicalise to itself.
+#[cfg(windows)]
+fn reject_short_name_alias(path: &Path) -> Result<()> {
+    let mut existing = path;
+    while !existing.exists() {
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => return Ok(()),
+        }
+    }
+    let canonical = super::winpath::to_native(&existing.canonicalize()?)?;
+    if super::winpath::same_path(&canonical, existing) {
+        Ok(())
+    } else {
+        Err(HostError::new(
+            "PATH_DENIED",
+            "Short (8.3) name aliases and redirected paths are not allowed",
+        ))
+    }
 }

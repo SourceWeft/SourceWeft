@@ -58,7 +58,7 @@ impl SandboxInstance {
     fn covers(&self, root: &Path) -> bool {
         self.workspace_roots
             .iter()
-            .any(|allowed| root.starts_with(allowed))
+            .any(|allowed| root_within(root, allowed))
     }
 
     /// Exactly once per successful `wrap` on this instance, after its command exited (or
@@ -71,6 +71,19 @@ impl SandboxInstance {
             // removes its placeholders on reset and on exit.
             eprintln!("sourceweft-desktop: sandbox cleanup failed: {error}");
         }
+    }
+}
+
+/// Whether `root` is `allowed` or lies below it. Windows compares case-insensitively and ignores
+/// the `\\?\` prefix (`winpath::is_inside`); elsewhere it is the plain component prefix test.
+fn root_within(root: &Path, allowed: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        super::winpath::is_inside(root, allowed)
+    }
+    #[cfg(not(windows))]
+    {
+        root.starts_with(allowed)
     }
 }
 
@@ -136,8 +149,9 @@ fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_default()
 }
 
-/// Windows has no `HOME`; the profile directory is `USERPROFILE`.
-// Task 4: the Windows wire path form (forward-slash drive paths) is applied here.
+/// Windows has no `HOME`; the profile directory is `USERPROFILE`. Paths handed to the sidecar are
+/// native non-verbatim Windows paths (`C:\Users\me`, the form `winpath::to_native` produces), not
+/// the forward-slash wire form the backend sees (`winpath` module doc).
 #[cfg(windows)]
 fn home_dir() -> String {
     std::env::var("USERPROFILE").unwrap_or_default()
@@ -1284,5 +1298,22 @@ mod tests {
         assert_eq!(wire["platform"], "darwin");
         assert!(wire.get("bwrapPath").is_none());
         assert!(wire["helpers"].get("applySeccomp").is_none());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::root_within;
+    use std::path::Path;
+
+    #[test]
+    fn a_workspace_root_is_covered_case_insensitively_and_across_path_spellings() {
+        let allowed = Path::new(r"C:\Users\Me\Work");
+        assert!(root_within(Path::new(r"C:\Users\Me\Work"), allowed));
+        assert!(root_within(Path::new(r"c:\users\me\WORK\sub"), allowed));
+        assert!(root_within(Path::new(r"\\?\C:\Users\Me\Work\sub"), allowed));
+        assert!(!root_within(Path::new(r"C:\Users\Me\Work2"), allowed));
+        assert!(!root_within(Path::new(r"C:\Users\Me"), allowed));
+        assert!(!root_within(Path::new(r"D:\Users\Me\Work"), allowed));
     }
 }

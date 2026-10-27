@@ -14,6 +14,7 @@ mod sidecar;
 mod srt_exec;
 pub mod privileged_setup;
 pub mod readiness;
+pub mod winpath;
 mod workspace;
 
 pub use workspace::{LocalHost, Workspace};

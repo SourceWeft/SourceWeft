@@ -316,7 +316,7 @@ impl RemoteHost {
                 credentials.api_base.trim_end_matches('/')
             ))
             .bearer_auth(&credentials.token)
-            .json(&json!({"ticket":ticket,"workspaceBase":self.host.workspace_base(),"name":computer_name()?}))
+            .json(&json!({"ticket":ticket,"workspaceBase":self.host.workspace_base_wire().map_err(|e| e.to_string())?,"name":computer_name()?}))
             .send()
             .await
             .map_err(|e| e.to_string())?;
