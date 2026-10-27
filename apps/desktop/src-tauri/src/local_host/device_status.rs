@@ -48,6 +48,14 @@ const MACOS_COMMAND_SHELL: &str = "bash";
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const LINUX_COMMAND_SHELL: &str = "bash";
 
+/// The shell sandboxed commands run under on Windows: the one `win_shell::detect` finds (Git Bash
+/// when installed, else Windows PowerShell 5.1), passed to srt as `windows.shell`. `None` when the
+/// machine has neither, in which case no status is reported (and no command runs).
+#[cfg(windows)]
+fn windows_command_shell() -> Option<&'static str> {
+    super::win_shell::detect().map(|shell| shell.kind.name())
+}
+
 /// Basename of the shell that sandboxed commands run under on this platform; `None` where this
 /// host has no sandboxed command execution at all (then no status is reported).
 pub fn command_shell() -> Option<&'static str> {
@@ -56,6 +64,9 @@ pub fn command_shell() -> Option<&'static str> {
     } else if cfg!(target_os = "linux") {
         Some(LINUX_COMMAND_SHELL)
     } else {
+        #[cfg(windows)]
+        return windows_command_shell();
+        #[cfg(not(windows))]
         None
     }
 }
@@ -445,12 +456,54 @@ mod tests {
     }
 
     #[test]
+    fn windows_shell_is_the_one_the_host_names_in_the_sidecar_init() {
+        // On win32 the sidecar passes `windows.shell` (an absolute `bash.exe` or
+        // `powershell.exe` the host chose, `win_shell`) to srt as `binShell`, and srt picks the
+        // `-c` / `-NoProfile -Command` flags from that file name. The name reported to the
+        // backend is the kind of that very shell.
+        use crate::local_host::win_shell::{detect_with, ShellKind, ShellRoots};
+        let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
+        let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            squashed.contains(
+                "if (config.platform === \"win32\") return config.windows?.shell; return undefined;"
+            ),
+            "binShellFor no longer hands the host's win32 shell to srt: update the Windows shell names"
+        );
+        let roots = ShellRoots {
+            program_files: Some(r"C:\Program Files".into()),
+            system_root: Some(r"C:\Windows".into()),
+            ..ShellRoots::default()
+        };
+        let basename = |kind, present: &'static str| {
+            let shell = detect_with(&roots, |path| path.to_str() == Some(present)).unwrap();
+            assert_eq!(shell.kind, kind);
+            shell.exe.to_str().unwrap().rsplit('\\').next().unwrap().to_string()
+        };
+        assert_eq!(basename(ShellKind::GitBash, r"C:\Program Files\Git\bin\bash.exe"), "bash.exe");
+        assert_eq!(
+            basename(
+                ShellKind::PowerShell,
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+            ),
+            "powershell.exe"
+        );
+        assert_eq!(ShellKind::GitBash.name(), "bash");
+        assert_eq!(ShellKind::PowerShell.name(), "powershell");
+        // Both reported names satisfy the backend's pattern.
+        assert!(is_valid_shell(ShellKind::GitBash.name()) && is_valid_shell(ShellKind::PowerShell.name()));
+    }
+
+    #[test]
     fn this_platform_has_a_shell_the_backend_accepts() {
         if let Some(shell) = command_shell() {
             assert!(is_valid_shell(shell));
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         assert!(command_shell().is_some());
+        // Windows PowerShell 5.1 ships with every supported Windows, so there is always a shell.
+        #[cfg(windows)]
+        assert!(matches!(command_shell(), Some("bash" | "powershell")));
     }
 
     #[test]
@@ -499,7 +552,7 @@ mod tests {
         assert!(reporter.begin_probe());
         assert!(!reporter.begin_probe());
         let first = reporter.on_readiness(Some(ready()));
-        if cfg!(any(target_os = "macos", target_os = "linux")) {
+        if command_shell().is_some() {
             assert_eq!(first.unwrap()["sandbox"], json!({"state": "ready"}));
             // unchanged: nothing, however often it is asked
             for _ in 0..3 {
@@ -523,7 +576,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     #[test]
     fn reporter_skips_the_transient_checking_placeholder_and_failed_probes() {
         let mut reporter = StatusReporter::default();
@@ -537,7 +590,7 @@ mod tests {
         assert!(reporter.on_readiness(Some(ready())).is_some());
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     #[test]
     fn a_new_connection_reports_again() {
         let connected = json!({"features": ["status"]});

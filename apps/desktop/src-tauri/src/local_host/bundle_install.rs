@@ -989,6 +989,11 @@ impl LocalHost {
                     "The sandbox runtime is already being installed.",
                 )
             })?;
+        // Windows cannot rename `current` while a sidecar runs `srt-sidecar.exe` from it, so
+        // every per-workspace instance goes first (unix replaces the files under a running
+        // sidecar and stops it afterwards).
+        #[cfg(windows)]
+        self.stop_sandbox_sidecar();
         let result = install(&self.base, spec, fetch);
         // Whatever happened, no sidecar started from the previous files may keep serving
         // commands; the next command starts one from whatever `current` is now.
@@ -997,15 +1002,13 @@ impl LocalHost {
         result
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     fn stop_sandbox_sidecar(&self) {
         super::srt_exec::stop_sidecar(&self.sandbox);
     }
 
-    /// Windows keeps no sidecar yet. Task 6: every per-workspace instance must be stopped
-    /// BEFORE the swap there (a running `srt-sidecar.exe` blocks the rename of `current`), not
-    /// after it as on unix.
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    /// No other platform runs a sidecar.
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     fn stop_sandbox_sidecar(&self) {}
 }
 

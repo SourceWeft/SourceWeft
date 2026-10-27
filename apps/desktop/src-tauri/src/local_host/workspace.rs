@@ -43,8 +43,9 @@ pub struct LocalHost {
     // readiness.rs for the policy. Present on every platform (only macOS and Linux read it) so
     // the struct's shape does not depend on target OS.
     pub(super) sandbox_readiness_cache: Mutex<ReadinessCache>,
-    // The sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    // The sandbox sidecar (macOS, Linux) or the per-workspace sidecars (Windows), started lazily
+    // on the first command; see `srt_exec.rs`.
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     pub(super) sandbox: super::srt_exec::SandboxSlot,
 }
 
@@ -155,7 +156,7 @@ impl LocalHost {
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
                 sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
-                #[cfg(any(target_os = "macos", target_os = "linux"))]
+                #[cfg(any(target_os = "macos", target_os = "linux", windows))]
                 sandbox: Default::default(),
             })
         }

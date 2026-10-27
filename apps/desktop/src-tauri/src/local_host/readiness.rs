@@ -385,6 +385,26 @@ fn extract_path(output: &str) -> Option<&str> {
     Some(&output[begin..end])
 }
 
+/// The `PATH` of the host process on Windows, as the sandboxed command will resolve tools through
+/// it. The sandbox sidecar is started with this very `PATH` and srt hands it to the broker, whose
+/// `PATH` is the one overlay the sandboxed child inherits (Plan 6, fact 6): there is no login shell
+/// to ask, and `System` is what is reported. A `PATH` that is not valid Unicode is converted
+/// lossily; an unset one is empty.
+#[cfg(any(windows, test))]
+pub(crate) fn windows_path_value(raw: Option<std::ffi::OsString>) -> String {
+    raw.map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Cached for the lifetime of the process, like the unix login-shell lookup: `PATH` is not
+/// expected to change while the app runs, and the sidecar captured it at start anyway.
+#[cfg(windows)]
+pub(crate) fn user_path() -> (String, ToolchainPath) {
+    static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let path = CACHE.get_or_init(|| windows_path_value(std::env::var_os("PATH")));
+    (path.clone(), ToolchainPath::System)
+}
+
 /// Probes an already-unpacked sandbox bundle: starts the sidecar with `init`, sends a `probe`
 /// request, and reports exactly why execution is unavailable when either step fails, using the
 /// sidecar's own error message verbatim. Never returns `Ready` unless both the start/`init`
@@ -626,6 +646,16 @@ impl LocalHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_path_is_the_process_path_verbatim_or_empty() {
+        use std::ffi::OsString;
+        assert_eq!(
+            windows_path_value(Some(OsString::from(r"C:\Windows\System32;C:\Users\me\.cargo\bin"))),
+            r"C:\Windows\System32;C:\Users\me\.cargo\bin"
+        );
+        assert_eq!(windows_path_value(None), "");
+    }
 
     fn needs_setup_for_test(reason: &str) -> SandboxReadiness {
         SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
