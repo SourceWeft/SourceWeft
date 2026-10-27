@@ -14,4 +14,4 @@
 
 PC 工作目录、文件面板、目录选择和升级说明见 [LOCAL_FILES.md](LOCAL_FILES.md)（英文）。
 
-Linux 本地执行（`.deb` 与 AppImage 的安装设置、沙箱运行时下载、故障排查，以及沙箱可读取的工具链）见 [LINUX_SANDBOX.md](LINUX_SANDBOX.md)（英文）。
+Linux 本地执行（`.deb` 与 AppImage 的安装设置、沙箱运行时下载、故障排查，以及沙箱可读取的工具链）见 [LINUX_SANDBOX.md](LINUX_SANDBOX.md)（英文）。Windows 本地执行（一次性的管理员设置及移除方法、所用 shell、命令可读取和访问的范围、Schannel 限制、故障排查）见 [WINDOWS_SANDBOX.md](WINDOWS_SANDBOX.md)（英文）。
