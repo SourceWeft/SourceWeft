@@ -9,6 +9,8 @@ const bridge = vi.hoisted(() => ({
   localHostStatus: vi.fn(),
   installSandboxRuntime: vi.fn(),
   runSandboxPrivilegedSetup: vi.fn(),
+  // These tests are not about the vault; its section hides itself.
+  vaultList: () => Promise.reject(new Error("Command vault_list not found")),
 }));
 const localRequest = vi.hoisted(() => vi.fn());
 const ensureSession = vi.hoisted(() => vi.fn());

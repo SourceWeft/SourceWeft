@@ -1,10 +1,31 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { db, localDevices, localToolInvocations } from "@sourceweft/db";
+import {
+  db,
+  localDevices,
+  localNetworkRequests,
+  localToolInvocations,
+} from "@sourceweft/db";
 
 async function settleLostCalls(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   deviceId: string,
 ) {
+  // Nothing can answer these any more: the command that asked is gone with the
+  // connection. Marked delivered too, so a later connection is not sent them.
+  await tx
+    .update(localNetworkRequests)
+    .set({
+      status: "expired",
+      reason: "device disconnected",
+      resolvedAt: new Date(),
+      deliveredAt: new Date(),
+    })
+    .where(
+      and(
+        eq(localNetworkRequests.deviceId, deviceId),
+        eq(localNetworkRequests.status, "pending"),
+      ),
+    );
   await tx
     .update(localToolInvocations)
     .set({

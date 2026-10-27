@@ -609,6 +609,8 @@ impl LocalHost {
                     &bundle,
                     &self.base,
                     vec![self.workspace_base().to_string_lossy().into_owned()],
+                    // Readiness never needs TLS termination: the probe runs without secrets.
+                    false,
                 );
                 // A crash in the middle of a runtime swap leaves the previous runtime aside.
                 super::bundle_install::recover_previous_runtime(&self.base.join("sandbox"));
@@ -678,6 +680,7 @@ mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            tls: None,
         }
     }
 
@@ -758,19 +761,31 @@ mod tests {
                 "protocol-null",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol none, this app needs 1). Install the update.",
+                "The sandbox runtime is out of date (protocol none, this app needs 3). Install the update.",
             ),
             (
                 "protocol-0",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol 0, this app needs 1). Install the update.",
+                "The sandbox runtime is out of date (protocol 0, this app needs 3). Install the update.",
+            ),
+            (
+                "protocol-1",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
+                "The sandbox runtime is out of date (protocol 1, this app needs 3). Install the update.",
             ),
             (
                 "protocol-2",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
+                "The sandbox runtime is out of date (protocol 2, this app needs 3). Install the update.",
+            ),
+            (
+                "protocol-4",
                 SetupCode::BundleNewer,
                 Remedy::UpdateApp,
-                "The sandbox runtime (protocol 2) is newer than this app supports (1). Update SourceWeft.",
+                "The sandbox runtime (protocol 4) is newer than this app supports (3). Update SourceWeft.",
             ),
         ] {
             let mut init = test_init();

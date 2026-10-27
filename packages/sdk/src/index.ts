@@ -6,9 +6,19 @@ export * from "./dashboard-client";
 export * from "./http-client";
 export * from "./jobs-client";
 export * from "./llm-observability-client";
+export * from "./local-devices-client";
 export * from "./user-settings-client";
 export * from "./workspace-client";
 export type {
+  ListLocalNetworkRequestsResponse,
+  LocalNetworkDecision,
+  LocalNetworkMode,
+  LocalNetworkRequestKind,
+  LocalNetworkRequest,
+  RespondLocalNetworkRequest,
+  RespondLocalNetworkRequestResponse,
+  UpdateLocalDeviceNetworkMode,
+  UpdateLocalDeviceNetworkModeResponse,
   AgentToolTrustRule,
   ListAgentToolTrustRulesResponse,
   RespondAgentConfirmationRequest,

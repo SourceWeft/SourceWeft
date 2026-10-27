@@ -5,6 +5,8 @@ pub mod bundle_install;
 pub mod device_status;
 pub mod execution;
 pub mod maintenance;
+pub mod network;
+pub mod vault;
 mod files;
 #[cfg(unix)]
 pub(crate) mod process;

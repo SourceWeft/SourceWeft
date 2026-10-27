@@ -161,10 +161,21 @@ export function perWrapReadRoots(init: InitConfig, runtimeDir?: string): string[
  * them again; re-allowing exactly this directory keeps them reachable without re-allowing `/tmp`.
  * It holds only srt's sockets and empty mount-source directories for this one sidecar.
  *
- * @throws {PolicyInvalidError} if `init.home`, `runtimeDir`, or any entry of
- * `init.workspaceRoots` or `init.readRoots`, is not an absolute path.
+ * `ca` (present only when the sidecar was started with `init.tls`) turns on TLS termination with
+ * that persistent CA, plus the empty `credentials` block that wires srt's placeholder substitution
+ * into the proxy. Secrets are never part of this config: they are registered per command (see
+ * `secrets.ts`). The CA key path is also read-denied here, on top of the host's sandbox data
+ * directory being denied, so the key stays unreadable to a command even if that directory is
+ * ever moved or re-allowed.
+ *
+ * @throws {PolicyInvalidError} if `init.home`, `runtimeDir`, any entry of
+ * `init.workspaceRoots` or `init.readRoots`, or a `ca` path, is not an absolute path.
  */
-export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRuntimeConfig {
+export function buildConfig(
+  init: InitConfig,
+  runtimeDir?: string,
+  ca?: { certPath: string; keyPath: string },
+): SandboxRuntimeConfig {
   assertAbsolute("home", init.home);
   if (runtimeDir !== undefined) assertAbsolute("runtimeDir", runtimeDir);
   init.workspaceRoots.forEach((path, i) =>
@@ -176,6 +187,10 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
   }
   if (init.helpers.javaAgentJar !== undefined) {
     assertAbsolute("helpers.javaAgentJar", init.helpers.javaAgentJar);
+  }
+  if (ca !== undefined) {
+    assertAbsolute("tls ca certificate", ca.certPath);
+    assertAbsolute("tls ca key", ca.keyPath);
   }
   const denyRoots = init.denyRoots ?? [];
   denyRoots.forEach((path, i) => assertAbsolute(`denyRoots[${i}]`, path));
@@ -192,6 +207,7 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
         init.home,
         ...denyRoots,
         ...credentialDenies(init.home),
+        ...(ca === undefined ? [] : [ca.keyPath]),
       ].map((path) => ({ path, literal: true as const })),
       allowRead: [...init.workspaceRoots, ...perWrapReadRoots(init, runtimeDir)].map((path) => ({
         path,
@@ -207,6 +223,10 @@ export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRunti
     ripgrep: { command: init.helpers.ripgrep },
   };
 
+  if (ca !== undefined) {
+    config.network.tlsTerminate = { caCertPath: ca.certPath, caKeyPath: ca.keyPath };
+    config.credentials = {};
+  }
   if (init.bwrapPath !== undefined) config.bwrapPath = init.bwrapPath;
   if (init.helpers.applySeccomp !== undefined) {
     config.seccomp = { applyPath: init.helpers.applySeccomp };

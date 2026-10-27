@@ -32,6 +32,9 @@ pub fn web_capability(base: &Url) -> CapabilityBuilder {
         .permission("allow-disconnect-local-host")
         .permission("allow-choose-working-directory")
         .permission("allow-enable-local-host")
+        .permission("allow-vault-list")
+        .permission("allow-vault-set")
+        .permission("allow-vault-remove")
         .permission("allow-hub-window-action")
         .permission("allow-hub-window-send")
 }
@@ -109,6 +112,14 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|permission| permission == "allow-desktop-titlebar-action"));
+            // The production web origin is remote: only this capability reaches it, so the
+            // vault commands must be here (capabilities/main.json has no `remote` key).
+            for vault in ["allow-vault-list", "allow-vault-set", "allow-vault-remove"] {
+                assert!(
+                    permissions.as_array().unwrap().iter().any(|p| p == vault),
+                    "{origin} must be able to call {vault}"
+                );
+            }
             let patterns: Vec<RemoteUrlPattern> = capability
                 .remote
                 .unwrap()
@@ -154,6 +165,9 @@ mod tests {
             "allow-choose-local-folder",
             "allow-enable-local-host",
             "allow-set-autostart",
+            "allow-vault-list",
+            "allow-vault-set",
+            "allow-vault-remove",
         ] {
             assert!(!permissions.iter().any(|p| p == denied));
         }

@@ -2,6 +2,7 @@
 import { authClient } from "../../../../lib/auth-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import type { LocalNetworkMode } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopBridge,
@@ -12,6 +13,7 @@ import {
   type LocalDevice,
 } from "../../../../lib/local-execution";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
+import { LocalVaultSection } from "./local-vault-section";
 import { deviceSystemLabel } from "../../../../lib/sandbox-setup";
 import { LocalSandboxSetupCard } from "./local-sandbox-setup-card";
 export function LocalHostPanel() {
@@ -85,6 +87,10 @@ export function LocalHostPanel() {
       clearInterval(timer);
     };
   }, [userId]);
+  // The network policy is enforced only by a sandbox that is ready. macOS reports no
+  // readiness (Seatbelt ignores the policy) and a Linux computer that still needs setup, or is
+  // unsupported, runs nothing, so no mode is offered as if it applied.
+  const enforced = status?.readiness?.state === "ready";
   if (!desktopBridge.isAvailable()) return null;
   if (dataOwner && dataOwner !== userId)
     return (
@@ -161,6 +167,51 @@ export function LocalHostPanel() {
         </Button>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
+        <h3 className="font-medium">{t("localHost.networkTitle")}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t("localHost.networkDescription")}
+        </p>
+        <select
+          aria-label={t("localHost.networkSelectAria")}
+          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+          // Without sandbox readiness (macOS, older builds) the policy is not
+          // enforced, so no mode may be offered as if it were.
+          disabled={busy || !device || !enforced}
+          onChange={async (event) => {
+            if (!device || !enforced) return;
+            const networkMode = event.target.value as LocalNetworkMode;
+            setBusy(true);
+            setError(null);
+            try {
+              // Like the remote-access switch, only this computer may change
+              // its own policy: the request carries the native proof.
+              const value = await localRequest<{
+                networkMode: LocalNetworkMode;
+              }>(
+                `/v1/local-devices/${device.id}`,
+                { networkMode },
+                { localProof: true, method: "PATCH" },
+              );
+              setDevice({ ...device, networkMode: value.networkMode });
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          value={device?.networkMode ?? "ask"}
+        >
+          <option value="ask">{t("localHost.networkAsk")}</option>
+          <option value="open">{t("localHost.networkOpen")}</option>
+          <option value="strict">{t("localHost.networkStrict")}</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {enforced
+            ? t("localHost.networkHelperEnforced")
+            : t("localHost.networkHelperUnenforced")}
+        </p>
+      </div>
+      <div className="space-y-3 rounded-lg border p-4">
         <h3 className="font-medium">{t("localHost.workingDirectoriesTitle")}</h3>
         <p className="text-sm text-muted-foreground">
           {t("localHost.workingDirectoriesDescription")}
@@ -224,6 +275,7 @@ export function LocalHostPanel() {
           {t("localHost.addFolder")}
         </Button>
       </div>
+      <LocalVaultSection />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

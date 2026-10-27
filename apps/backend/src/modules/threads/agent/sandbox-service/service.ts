@@ -26,6 +26,7 @@ import {
   localProviderForTurn,
 } from "../../../devices/provider";
 import { localExecutionEnvironmentPrompt } from "../../../devices/local-execution-prompt";
+import type { NetworkSkillInput } from "../../../devices/network-skill-domains";
 import { ContentError } from "../../../content/errors";
 
 const CLEANUP_LIMIT = 25;
@@ -70,10 +71,15 @@ const sandboxService = new AgentSandboxService({
  */
 export const agentSandboxService = {
   async createRuntimeForTurn(
-    input: SandboxRuntimeRequest,
+    input: SandboxRuntimeRequest & {
+      /** Local conversations only: the turn's skills, for declared domains. */
+      localNetworkSkills?: readonly NetworkSkillInput[];
+    },
   ): Promise<AgentSandboxRuntimeForTurn | null> {
     if (input.executionTarget?.kind === "local") {
-      const localFactory = await localProviderForTurn(input.context);
+      const localFactory = await localProviderForTurn(input.context, {
+        networkSkills: input.localNetworkSkills ?? [],
+      });
       if (!localFactory)
         throw new ContentError(
           409,
@@ -103,7 +109,13 @@ export const agentSandboxService = {
         runtime.buildRuntimePrompt = () => `${buildRuntimePrompt()}
 <local_execution_presentation>
 Commands execute on the user's bound PC inside its authorized working folder. In user-facing updates and answers, describe this as running a command on the computer or in the working folder. Do not call it a cloud sandbox. Mention implementation terms such as sandbox/provider only if the user asks about implementation. Internal tool names do not change this execution location. Do not assume cloud-image packages are installed on this PC.${environment ? `\n${environment}` : ""}
-</local_execution_presentation>`;
+</local_execution_presentation>
+<local_network_access>
+Outbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.
+</local_network_access>
+<local_secrets>
+Some environment variables in commands on this PC may hold placeholder values that start with fake_value_. They are not the real secret: the real value is substituted only on requests to the hosts the user bound to that secret, so use the variable exactly as you would the real credential (for example in an Authorization header). Never print, store or send the variable's content anywhere else, and never put it in a request body unless you were asked to; a request whose body contains it always needs the user's approval. Requests to those hosts that change data (anything but GET, HEAD or OPTIONS) also ask the user first.
+</local_secrets>`;
       }
       return runtime;
     }

@@ -36,3 +36,33 @@ test("passes through native Error instances", async () => {
     (actual) => actual === error,
   );
 });
+
+test("vault wrappers invoke the native commands with the expected argument shapes", async () => {
+  const invoke = vi.fn().mockResolvedValue(undefined);
+  window.__SOURCEWEFT_DESKTOP__ = { isDesktop: true, invoke, listen: vi.fn() };
+  await desktopBridge.vaultList();
+  await desktopBridge.vaultSet({
+    label: "L",
+    envVar: "E_VAR",
+    value: "v",
+    hosts: ["a.example.com"],
+    acknowledgedInterception: true,
+  });
+  await desktopBridge.vaultRemove("id-1");
+  assert.deepEqual(invoke.mock.calls, [
+    ["vault_list", undefined],
+    [
+      "vault_set",
+      {
+        input: {
+          label: "L",
+          envVar: "E_VAR",
+          value: "v",
+          hosts: ["a.example.com"],
+          acknowledgedInterception: true,
+        },
+      },
+    ],
+    ["vault_remove", { id: "id-1" }],
+  ]);
+});

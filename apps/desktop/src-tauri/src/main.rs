@@ -115,6 +115,7 @@ fn open_linux_local_host(
         sourceweft_desktop::local_host::LocalHost::open(&base)
             .map_err(|error| format!("local host storage at {base:?}: {error}"))?,
     );
+    host.set_secret_store(std::sync::Arc::new(local_bridge::KeychainStore::default()));
     let remote = remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())?;
     Ok((host, remote))
 }
@@ -157,6 +158,9 @@ fn main() {
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
             local_bridge::choose_working_directory,
+            local_bridge::vault_list,
+            local_bridge::vault_set,
+            local_bridge::vault_remove,
             local_bridge::run_sandbox_privileged_setup,
             local_bridge::install_sandbox_runtime,
             tray_locale::sync_tray_locale,
@@ -173,6 +177,7 @@ fn main() {
                 let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
                     &app.path().app_data_dir()?,
                 )?);
+                host.set_secret_store(std::sync::Arc::new(local_bridge::KeychainStore::default()));
                 app.manage(
                     remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
                         .map_err(std::io::Error::other)?,

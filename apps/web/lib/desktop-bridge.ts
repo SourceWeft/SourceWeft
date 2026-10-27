@@ -92,6 +92,34 @@ export type LocalHostStatus = {
   readiness?: SandboxReadiness;
 };
 
+/** A stored secret as the UI may know it. The value never comes back. */
+export type VaultSecretMeta = {
+  id: string;
+  label: string;
+  envVar: string;
+  hosts: string[];
+  /** Write requests to the bound hosts need the user's approval. */
+  readOnly: boolean;
+  /** Unix seconds. */
+  createdAt: number;
+};
+
+export type VaultListing = {
+  secrets: VaultSecretMeta[];
+  /** False where this computer stores secrets but does not inject them yet. */
+  enforced: boolean;
+};
+
+export type NewVaultSecret = {
+  label: string;
+  envVar: string;
+  value: string;
+  hosts: string[];
+  readOnly?: boolean;
+  /** True only after the user ticked the consent for HTTPS interception. */
+  acknowledgedInterception: boolean;
+};
+
 type DesktopListener<TPayload> = (payload: TPayload) => void;
 
 function getBridge() {
@@ -167,6 +195,16 @@ export const desktopBridge = {
   },
   localHostStatus() {
     return invokeDesktop<LocalHostStatus>("local_host_status");
+  },
+  vaultList() {
+    return invokeDesktop<VaultListing>("vault_list");
+  },
+  /** The value goes straight to the OS keychain; the answer is metadata only. */
+  vaultSet(input: NewVaultSecret) {
+    return invokeDesktop<VaultSecretMeta>("vault_set", { input });
+  },
+  vaultRemove(id: string) {
+    return invokeDesktop<void>("vault_remove", { id });
   },
   /**
    * Downloads, verifies and installs the sandbox runtime (explicit user consent: only ever

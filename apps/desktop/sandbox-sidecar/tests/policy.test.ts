@@ -215,3 +215,48 @@ test("rejects a relative readRoots entry", () => {
     },
   );
 });
+
+test("buildConfig sets no request filter itself (the server attaches the audit one)", () => {
+  assert.equal(buildConfig(validInit()).network.filterRequest, undefined);
+});
+
+test("buildConfig without a CA stays exactly as before: no TLS termination, no credentials block", () => {
+  const config = buildConfig(validInit());
+  assert.equal(config.network.tlsTerminate, undefined);
+  assert.equal(config.credentials, undefined);
+  assert.deepEqual(config.network.allowedDomains, []);
+});
+
+test("buildConfig with a CA turns on TLS termination and the (empty) credentials block", () => {
+  const ca = { certPath: "/app/sandbox/ca/ca.crt", keyPath: "/app/sandbox/ca/ca.key" };
+  const config = buildConfig(validInit(), undefined, ca);
+  assert.deepEqual(config.network.tlsTerminate, {
+    caCertPath: ca.certPath,
+    caKeyPath: ca.keyPath,
+  });
+  // An empty block is what wires srt's header and body substitution; the secrets themselves are
+  // registered per command and are never in this config.
+  assert.deepEqual(config.credentials, {});
+  assert.deepEqual(config.network.allowedDomains, []);
+});
+
+test("buildConfig denies the sandbox the CA key by itself, in addition to the denied app data", () => {
+  const ca = { certPath: "/app/sandbox/ca/ca.crt", keyPath: "/app/sandbox/ca/ca.key" };
+  const denied = pathsOf(buildConfig(validInit(), undefined, ca).filesystem.denyRead);
+  assert.ok(denied.includes(ca.keyPath));
+  assert.ok(!pathsOf(buildConfig(validInit()).filesystem.denyRead).includes(ca.keyPath));
+  // The public certificate is not secret and is not denied.
+  assert.ok(!denied.includes(ca.certPath));
+});
+
+test("buildConfig rejects relative CA paths", () => {
+  for (const ca of [
+    { certPath: "ca.crt", keyPath: "/abs/ca.key" },
+    { certPath: "/abs/ca.crt", keyPath: "ca.key" },
+  ]) {
+    assert.throws(
+      () => buildConfig(validInit(), undefined, ca),
+      (error) => error instanceof PolicyInvalidError && error.code === "POLICY_INVALID",
+    );
+  }
+});

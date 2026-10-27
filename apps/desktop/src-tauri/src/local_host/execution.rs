@@ -79,7 +79,10 @@ impl LocalHost {
                 "Invocation was cancelled before execution",
             ));
         }
-        let fingerprint = serde_json::to_string(&(owner, thread, action, &payload))
+        // The network policy is the backend's per-call decision input, not part of what the
+        // call *is*: a redelivery after a rule change must still match its journal entry.
+        let fingerprint_payload = fingerprint_payload(action, &payload);
+        let fingerprint = serde_json::to_string(&(owner, thread, action, &fingerprint_payload))
             .map_err(|e| HostError::new("INVALID_CALL", e.to_string()))?;
         {
             let db = self
@@ -278,15 +281,23 @@ impl LocalHost {
                 .and_then(Value::as_u64)
                 .unwrap_or(20000)
                 .clamp(1, 100000) as usize;
+            let network = super::network::NetworkPolicy::from_payload(payload)?;
             let cancel = Arc::new(AtomicBool::new(false));
             calls
                 .active
                 .lock()
                 .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?
                 .insert(id.into(), cancel.clone());
+            // Network asks raised while this command runs are attributed to this invocation
+            // (and denied if it is cancelled or ends).
+            let _running = self.network.begin(id, cancel.clone());
+            // Decision N7: the macOS Seatbelt path keeps its public-only proxy and ignores the
+            // policy (its result also has no `networkAudit`); only Linux enforces it.
             #[cfg(target_os = "macos")]
-            let result =
-                execute_command(&workspace.path, &cwd, command, timeout, max_output, cancel);
+            let result = {
+                let _ignored = &network;
+                execute_command(&workspace.path, &cwd, command, timeout, max_output, cancel)
+            };
             #[cfg(target_os = "linux")]
             let result = super::srt_exec::execute_command(
                 self,
@@ -296,6 +307,8 @@ impl LocalHost {
                 timeout,
                 max_output,
                 cancel,
+                network.as_ref(),
+                &_running,
             );
             if let Ok(mut active) = calls.active.lock() {
                 active.remove(id);
@@ -482,6 +495,19 @@ impl LocalHost {
     }
 }
 
+/// `payload` as it is journaled for duplicate detection: a `command.execute` payload without its
+/// `network` policy.
+fn fingerprint_payload<'a>(action: &str, payload: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if action == "command.execute" && payload.get("network").is_some() {
+        let mut stripped = payload.clone();
+        if let Some(object) = stripped.as_object_mut() {
+            object.remove("network");
+        }
+        return std::borrow::Cow::Owned(stripped);
+    }
+    std::borrow::Cow::Borrowed(payload)
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
     payload
@@ -555,15 +581,93 @@ fn execute_command(
         ("https_proxy".to_string(), proxy_url),
     ];
     let run = super::process::run_wrapped(&argv, &env, cwd, timeout, max, cancel)?;
+    Ok(macos_result(&run, max))
+}
+
+/// The macOS result: exactly `output`, `exitCode`, `truncated`, `cancelled` (no `networkAudit`;
+/// see decision N7).
+#[cfg(target_os = "macos")]
+fn macos_result(run: &super::process::RunOutput, max: usize) -> Value {
     let output = format!(
         "{}{}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
     );
-    Ok(json!({
+    json!({
         "output": output.chars().take(max).collect::<String>(),
         "exitCode": run.exit_code,
         "truncated": run.truncated || output.chars().count() > max,
         "cancelled": run.cancelled,
-    }))
+    })
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    // Not imported at file level on every platform (it is cfg-gated there).
+    use serde_json::json;
+
+    #[test]
+    fn the_network_policy_is_not_part_of_the_journal_fingerprint() {
+        let with = json!({"workspaceId":"w","command":"ls","network":{"mode":"ask","allow":["a.com"],"suggested":{}}});
+        let other = json!({"workspaceId":"w","command":"ls","network":{"mode":"strict","allow":[],"suggested":{}}});
+        let without = json!({"workspaceId":"w","command":"ls"});
+        let print = |payload: &Value| {
+            serde_json::to_string(&("o", "t", "command.execute", &*fingerprint_payload("command.execute", payload))).unwrap()
+        };
+        assert_eq!(print(&with), print(&without));
+        assert_eq!(print(&with), print(&other));
+        // Other fields still distinguish calls, and other actions keep their payload as is.
+        let changed = json!({"workspaceId":"w","command":"pwd","network":{"mode":"ask"}});
+        assert_ne!(print(&with), print(&changed));
+        let read = json!({"path":"a","network":{"mode":"ask"}});
+        assert_eq!(*fingerprint_payload("file.read", &read), read);
+    }
+
+    /// Redelivering a call with a different `network` policy is the same call: the journal must
+    /// answer it (here `OUTCOME_UNKNOWN`, since the first attempt never completed) instead of
+    /// re-executing or rejecting it as a changed call. Calls that differ in anything else still
+    /// conflict. The payload has no `workspaceId`, so nothing ever runs.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_redelivery_with_a_different_network_policy_is_not_executed_again() {
+        let app = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        host.initialize_invocation_journal().unwrap();
+        let calls = Executions::default();
+        let dispatch = |payload: Value| {
+            host.dispatch(&calls, "call-1", "owner", "thread", "command.execute", payload)
+        };
+        let first = dispatch(json!({"command":"echo hi","network":{"mode":"ask","allow":[],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(first.code, "INVALID_CALL", "{first}");
+        let second = dispatch(json!({"command":"echo hi","network":{"mode":"strict","allow":["a.com"],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(second.code, "OUTCOME_UNKNOWN", "{second}");
+        let third = dispatch(json!({"command":"echo hi"})).unwrap_err();
+        assert_eq!(third.code, "OUTCOME_UNKNOWN", "{third}");
+        let changed = dispatch(json!({"command":"echo bye","network":{"mode":"ask","allow":[],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(changed.code, "INVOCATION_CONFLICT", "{changed}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_result_shape_is_unchanged_and_has_no_audit() {
+        let run = super::super::process::RunOutput {
+            stdout: b"out".to_vec(),
+            stderr: b"err".to_vec(),
+            exit_code: 3,
+            truncated: false,
+            cancelled: false,
+        };
+        let value = macos_result(&run, 100);
+        assert_eq!(
+            value,
+            json!({"output":"outerr","exitCode":3,"truncated":false,"cancelled":false})
+        );
+        let truncated = macos_result(&run, 4);
+        assert_eq!(truncated["output"], "oute");
+        assert_eq!(truncated["truncated"], true);
+    }
 }

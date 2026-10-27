@@ -19,6 +19,9 @@
     "allow-open-external-url",
     "allow-authenticate-local-host",
     "allow-choose-local-folder",
+    "allow-vault-list",
+    "allow-vault-set",
+    "allow-vault-remove",
     "allow-run-sandbox-privileged-setup",
     "allow-install-sandbox-runtime"
   ]
