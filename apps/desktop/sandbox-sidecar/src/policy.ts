@@ -94,8 +94,10 @@ const LINUX_SYSTEM_READ_ROOTS: readonly string[] = [
  * empirically by driving real commands through the sandbox on this macOS (26.x, APFS with the
  * `/etc`→`private/etc` and `/var`→`private/var` symlinks). Each entry names the real command that
  * failed without it. Narrow literal files and subpaths are preferred over broad directories;
- * `/Users`, `/Library` (as a whole), `/private/var/db`, `/private/var/folders` and `/Volumes`
- * stay denied. The developer directory (`xcode-select -p`), `/opt/homebrew`, `/usr/local` and the
+ * `/Users`, `/Library` (as a whole), `/private/var/folders` and `/Volumes` stay denied, and so does
+ * `/private/var/db` save for the single world-readable `timezone` subpath `date` needs (the
+ * password-hash store `/private/var/db/dslocal` and everything else under it stay denied — verified).
+ * The developer directory (`xcode-select -p`), `/opt/homebrew`, `/usr/local` and the
  * PATH-derived toolchain roots are discovered host-side in `srt_exec.rs` and arrive as
  * `init.readRoots`, not here.
  *
@@ -141,6 +143,36 @@ const DARWIN_SYSTEM_READ_ROOTS: readonly string[] = [
   // Operation not permitted)`. The rest of `/System` stays denied — frameworks load from the dyld
   // shared cache, which srt's base profile already allows.
   "/System/Library/OpenSSL",
+  // `echo hi | shasum -a 256` (and `shasum -a 512`, any `perl -e …`): `shasum` is a Perl script and
+  // `/usr/bin/perl` loads its interpreter dylib and XS modules from here — without it the process
+  // aborts with `dyld: Library not loaded: /System/Library/Perl/5.34/…/CORE/libperl.dylib (blocked
+  // by sandbox)` (SIGABRT), and skill-staging `shasum -a 256 -c` verification fails. Perl's core
+  // modules (`Digest::SHA` for `shasum`) live under the same tree. The read is scoped to this
+  // subpath only: a sibling such as `/System/Library/Keychains` stays denied (verified).
+  "/System/Library/Perl",
+  // `md5 file` / `md5 -q`: BSD `md5`, `md5sum`, and the rest of the single-binary system tools live
+  // in `/sbin` (`/sbin/md5`), which is on the login PATH but was otherwise unreadable, so a bare
+  // `md5` was `command not found`. `/sbin` holds only system executables (no secrets).
+  "/sbin",
+  // `tput colors` (terminfo under `/usr/share/terminfo`), `file magic.bin` (magic database under
+  // `/usr/share/file`), `iconv` (charset data), the `/usr/share/zoneinfo` symlink, man pages and
+  // git templates: all read world-readable OS data shipped under `/usr/share`. Without it `tput` is
+  // `unknown terminal`, `file` reports `could not find any valid magic files`, and `iconv_open`
+  // fails with `Invalid argument`. `/usr/share` carries only system data — user secrets live under
+  // `$HOME`, `/Library` and `/Users`, all still denied.
+  "/usr/share",
+  // The zoneinfo database `date` reads for a non-UTC `TZ` (`TZ=America/New_York date +%Z` → `EDT`):
+  // `/usr/share/zoneinfo` (covered by `/usr/share`) is a symlink into `/var/db/timezone/…`, so the
+  // actual data needs this one narrow subpath of the otherwise-denied `/private/var/db`. It holds
+  // only world-readable timezone tables; the rest of `/private/var/db` — notably the `dslocal`
+  // password-hash store — stays denied (verified: `ls /private/var/db/dslocal` → Operation not
+  // permitted with this entry present).
+  "/private/var/db/timezone",
+  // `sw_vers`: reads the OS version from this one file and fails with `Unknown error loading system
+  // version plist` without it. Allowed as a single literal file (not the directory), so siblings
+  // under `/System/Library/CoreServices` stay denied (verified: `ls …/Finder.app` → Operation not
+  // permitted). `date` needs no entry of its own beyond the zoneinfo paths above.
+  "/System/Library/CoreServices/SystemVersion.plist",
 ];
 
 /**

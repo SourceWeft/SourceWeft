@@ -19,6 +19,14 @@ const DARWIN_SYSTEM = [
   "/private/var/select",
   "/dev",
   "/System/Library/OpenSSL",
+  // perl/shasum interpreter + XS modules; /sbin (md5); /usr/share (terminfo, file magic, iconv,
+  // zoneinfo symlink); the narrow zoneinfo data under the otherwise-denied /private/var/db; and
+  // sw_vers's version plist as a single literal file.
+  "/System/Library/Perl",
+  "/sbin",
+  "/usr/share",
+  "/private/var/db/timezone",
+  "/System/Library/CoreServices/SystemVersion.plist",
 ];
 const CREDENTIAL_FILES = [
   ".cargo/credentials",

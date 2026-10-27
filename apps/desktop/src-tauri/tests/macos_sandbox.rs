@@ -507,6 +507,148 @@ fn toolchain_commands() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Common-tool read roots (E2E finding): the per-entry `DARWIN_SYSTEM_READ_ROOTS` additions, each
+// proved by the real command that failed without it, plus the negative that the narrow entry did
+// not re-open the denied directory around it.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn perl_backed_tools_run() {
+    // `shasum` is a Perl script; `/usr/bin/perl` loads libperl.dylib and its XS modules (Digest::SHA)
+    // from `/System/Library/Perl`. Without that read root it aborts with `dyld: Library not loaded:
+    // …/libperl.dylib (blocked by sandbox)`, which silently broke skill-staging `shasum -a 256 -c`.
+    // The negative control proves the entry is scoped: a sibling `/System/Library/Keychains`
+    // (world-readable on the host) stays denied, so `/System/Library` was not blanket-re-allowed.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    assert!(
+        fs::File::open("/System/Library/Keychains").is_ok(),
+        "precondition: /System/Library/Keychains must be readable on the host"
+    );
+    let result = execute(
+        &host,
+        "perl",
+        &workspace,
+        "printf 'hi\\n' | shasum -a 256 && printf 'hi\\n' | shasum -a 512 | cut -c1-16 && \
+         perl -e 'print \"perl-ran\\n\"' && \
+         if ls /System/Library/Keychains >/dev/null 2>&1; then echo SYSLIB-READ; else echo SYSLIB-DENIED; fi",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let text = output(&result);
+    assert!(
+        text.contains("98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"),
+        "shasum -a 256 of \"hi\\n\" must print its known digest: {result}"
+    );
+    assert!(text.contains("d78abb0542736865"), "shasum -a 512 prefix: {result}");
+    assert!(text.contains("perl-ran"), "perl -e must run: {result}");
+    assert!(
+        text.contains("SYSLIB-DENIED") && !text.contains("SYSLIB-READ"),
+        "/System/Library/Perl must not re-open sibling /System/Library/Keychains: {result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn sbin_tools_run() {
+    // BSD `md5` lives in `/sbin` (on the login PATH but formerly unreadable, so a bare `md5` was
+    // `command not found`). The known MD5 of "hi\n" is asserted so the tool really ran.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute(&host, "sbin", &workspace, "printf 'hi\\n' | md5");
+    assert_eq!(result["exitCode"], 0, "{result}");
+    assert!(
+        output(&result).contains("764efa883dda1e11db47671c4a3bbd9e"),
+        "md5 of \"hi\\n\" must print its known digest: {result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn usr_share_data_tools_run() {
+    // `/usr/share` carries the OS data these tools read: terminfo (`tput`), the file magic database
+    // (`file`), and iconv's charset tables. Without it `tput` is `unknown terminal`, `file` reports
+    // `could not find any valid magic files`, and `iconv_open` fails with `Invalid argument`.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute(
+        &host,
+        "usr-share",
+        &workspace,
+        "printf '\\x89PNG\\r\\n' > magic.bin && \
+         printf 'colors=%s\\n' \"$(TERM=xterm-256color tput colors)\" && \
+         file magic.bin && \
+         printf 'iconv=%s\\n' \"$(printf 'hi' | iconv -f utf-8 -t utf-8)\"",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let text = output(&result);
+    assert!(text.contains("colors=256"), "tput terminfo lookup: {result}");
+    assert!(text.contains("magic.bin:"), "file read its magic database: {result}");
+    assert!(text.contains("iconv=hi"), "iconv charset tables: {result}");
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn sw_vers_reads_only_its_version_plist() {
+    // `sw_vers` reads `/System/Library/CoreServices/SystemVersion.plist`, re-allowed as a single
+    // literal file. The negative control proves the literal did not open the directory: a sibling
+    // `Finder.app` (readable on the host) stays denied.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    assert!(
+        fs::File::open("/System/Library/CoreServices/Finder.app").is_ok(),
+        "precondition: /System/Library/CoreServices/Finder.app must be readable on the host"
+    );
+    let result = execute(
+        &host,
+        "sw-vers",
+        &workspace,
+        "printf 'version=%s\\n' \"$(sw_vers -productName)\" && \
+         if ls /System/Library/CoreServices/Finder.app >/dev/null 2>&1; then echo CS-READ; else echo CS-DENIED; fi",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let text = output(&result);
+    assert!(text.contains("version=macOS"), "sw_vers must read the version plist: {result}");
+    assert!(
+        text.contains("CS-DENIED") && !text.contains("CS-READ"),
+        "the SystemVersion.plist literal must not re-open its directory: {result}"
+    );
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn tz_aware_date_reads_only_timezone_data() {
+    // A non-UTC `TZ` makes `date` read the zoneinfo database, which `/usr/share/zoneinfo` symlinks
+    // into `/var/db/timezone/…`; the one narrow `/private/var/db/timezone` subpath re-allows it.
+    // The negative control proves the rest of the otherwise-denied `/private/var/db` (mode 0755 on
+    // the host, so the denial is non-vacuous) — the `dslocal` password-hash store included — stays
+    // closed.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    assert!(
+        fs::read_dir("/private/var/db").is_ok(),
+        "precondition: /private/var/db must be listable on the host"
+    );
+    let result = execute(
+        &host,
+        "tz-date",
+        &workspace,
+        "printf 'zone=%s\\n' \"$(TZ=America/New_York date +%Z)\" && \
+         if ls /private/var/db >/dev/null 2>&1; then echo VARDB-READ; else echo VARDB-DENIED; fi",
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let text = output(&result);
+    assert!(
+        text.contains("zone=EST") || text.contains("zone=EDT"),
+        "TZ-aware date must resolve the zoneinfo database: {result}"
+    );
+    assert!(
+        text.contains("VARDB-DENIED") && !text.contains("VARDB-READ"),
+        "the timezone subpath must not re-open the rest of /private/var/db: {result}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
 // Network: the sandbox proxy's address guard (parity with the retired Rust proxy).
 // ---------------------------------------------------------------------------------------------
 
