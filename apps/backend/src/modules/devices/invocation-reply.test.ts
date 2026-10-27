@@ -106,12 +106,15 @@ describe("device status message", () => {
       "userNamespaceRestricted",
       "sandboxFailed",
       "installing",
+      "windowsNotInstalled",
+      "windowsSetupOutdated",
     ]);
     expect([...SANDBOX_REMEDIES]).toEqual([
       "downloadRuntime",
       "updateApp",
       "reinstallPackage",
       "privilegedSetup",
+      "elevatedSetup",
       "none",
     ]);
     for (const code of SANDBOX_SETUP_CODES)
@@ -122,6 +125,29 @@ describe("device status message", () => {
             sandbox: { state: "needsSetup", code, remedy, reason: "why" },
           }).success,
         ).toBe(true);
+  });
+
+  test("accepts a Windows host that needs its elevated setup", () => {
+    const windows = {
+      type: "status",
+      platform: "windows",
+      arch: "x64",
+      shell: "bash",
+      sandbox: {
+        state: "needsSetup",
+        code: "windowsNotInstalled",
+        reason: "The Windows sandbox is not installed.",
+        remedy: "elevatedSetup",
+      },
+      capabilities: ["sandbox"],
+    };
+    expect(localDeviceReplySchema.parse(windows)).toEqual(windows);
+    expect(
+      localDeviceReplySchema.parse({
+        ...windows,
+        sandbox: { ...windows.sandbox, code: "windowsSetupOutdated" },
+      }),
+    ).toMatchObject({ sandbox: { code: "windowsSetupOutdated" } });
   });
 
   test.each([

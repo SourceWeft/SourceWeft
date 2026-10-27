@@ -136,3 +136,64 @@ test("PC download maps only structured FILE_NOT_FOUND into provider missing", as
     expect(failure).not.toBeInstanceOf(SandboxProviderError);
   }
 });
+
+test("Windows forward-slash drive paths are bound, mapped and fenced like POSIX ones", async () => {
+  const root = "C:/Users/Test/AppData/Roaming/app/task-workspaces/id/files";
+  state.call.mockImplementation(async (input) => {
+    if (input.action === "workspace.ensure")
+      return { id: "native", path: root };
+    if (input.action === "file.list")
+      return { files: [{ path: "src/a.ts", is_dir: false, size: 3 }] };
+    return {};
+  });
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  expect(provider.pathPolicy.defaultCwd).toBe(root);
+  expect(provider.pathPolicy.skillsRoot).toBe(`${root}/.sourceweft-skills`);
+  await provider.ensureDirectory!({
+    providerSandboxId: "native",
+    directory: `${root}/src`,
+  });
+  expect(state.call.mock.calls.at(-1)![0]).toMatchObject({
+    action: "file.mkdir",
+    payload: { workspaceId: "native", path: "src" },
+  });
+  // NTFS is case-insensitive: the drive letter and directories may differ in case.
+  await provider.ensureDirectory!({
+    providerSandboxId: "native",
+    directory: `${root.toLowerCase()}/Src`,
+  });
+  expect(state.call.mock.calls.at(-1)![0]).toMatchObject({
+    payload: { path: "Src" },
+  });
+  await expect(
+    provider.listFiles!({ providerSandboxId: "native", sandboxPath: root }),
+  ).resolves.toEqual([{ path: `${root}/src/a.ts`, is_dir: false, size: 3 }]);
+  for (const path of [
+    "C:/Users/Test/other/a.txt",
+    "D:/Users/Test/AppData/Roaming/app/task-workspaces/id/files/a",
+    `${root}x/a`,
+    `${root}/../a`,
+  ]) {
+    await expect(
+      provider.downloadFile({ providerSandboxId: "native", sandboxPath: path }),
+    ).rejects.toThrow("LOCAL_PATH_DENIED");
+  }
+});
+
+test.each([
+  "relative/path",
+  "C:\\Users\\Test\\files",
+  "\\\\server\\share\\files",
+  "//server/share/files",
+  "C:/Users/Test/../Other",
+])(
+  "an invalid working directory from the host is refused: %s",
+  async (path) => {
+    state.call.mockImplementation(async (input) =>
+      input.action === "workspace.ensure" ? { id: "native", path } : {},
+    );
+    await expect(localProviderForTurn(context)).rejects.toMatchObject({
+      code: "LOCAL_WORKSPACE_MISMATCH",
+    });
+  },
+);

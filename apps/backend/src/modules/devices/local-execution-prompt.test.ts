@@ -63,10 +63,95 @@ describe("localExecutionEnvironmentPrompt", () => {
     expect(text).not.toContain("mips");
   });
 
-  test("does not describe Windows, which has no local execution yet", () => {
+  test("describes a Windows computer under Git Bash with the Windows sandbox rules", () => {
+    const text = localExecutionEnvironmentPrompt(
+      device({ platform: "windows", arch: "x64", shell: "bash" }),
+    );
+    expect(text).toContain("Operating system: Windows (x64)");
+    expect(text).toContain("Shell: bash (commands run under this shell)");
+    expect(text).toContain("forward-slash drive paths");
+    expect(text).toContain("C:/Users/");
+    expect(text).toContain("separate sandbox account");
+    expect(text).toContain("only inside the working folder");
+    expect(text).toContain("Schannel");
+    expect(text).toContain("curl.exe");
+    expect(text).toContain("Invoke-WebRequest");
+    expect(text).toContain("HttpClient");
+    expect(text).toContain("winget");
+    expect(text).toContain("Node, Python or git");
+    expect(text).toContain("Git Bash shell: plain `curl` works");
+    expect(text).toContain("POSIX-style quoting");
+    expect(text).toContain("NODE_USE_ENV_PROXY=1");
+    expect(text).toContain("private, loopback and metadata addresses");
+    expect(text).toContain("<sandbox_violations>");
+    expect(text).not.toContain("Paths are POSIX-style");
+    expect(text).not.toContain("git init --template=");
+  });
+
+  test("describes Windows PowerShell quoting and withholds the Git Bash curl advice", () => {
+    const text = localExecutionEnvironmentPrompt(
+      device({ platform: "windows", arch: "arm64", shell: "powershell" }),
+    );
+    expect(text).toContain("Operating system: Windows (arm64)");
+    expect(text).toContain("Windows PowerShell 5.1");
+    expect(text).toContain("single quotes");
+    expect(text).toContain("Invoke-WebRequest");
+    expect(text).not.toContain("Git Bash shell: plain `curl` works");
+  });
+
+  test("accepts exe-suffixed Windows shell names", () => {
     expect(
-      localExecutionEnvironmentPrompt(device({ platform: "windows" })),
-    ).toBe("");
+      localExecutionEnvironmentPrompt(
+        device({ platform: "windows", shell: "bash.exe" }),
+      ),
+    ).toContain("Git Bash shell: plain `curl` works");
+    expect(
+      localExecutionEnvironmentPrompt(
+        device({ platform: "windows", shell: "PowerShell.exe" }),
+      ),
+    ).toContain("Windows PowerShell 5.1");
+  });
+
+  test("tells the agent Windows execution is unavailable when setup is needed", () => {
+    const text = localExecutionEnvironmentPrompt(
+      device({ platform: "windows", sandboxState: "needsSetup" }),
+    );
+    expect(text).toContain("Operating system: Windows (x64)");
+    expect(text).toContain("until its owner finishes setup");
+    expect(text).not.toContain("Schannel");
+  });
+
+  test("does not claim Windows sandbox rules when the host reports the sandbox unsupported", () => {
+    const text = localExecutionEnvironmentPrompt(
+      device({ platform: "windows", sandboxState: "unsupported" }),
+    );
+    expect(text).toContain("Operating system: Windows (x64)");
+    expect(text).not.toContain("Schannel");
+  });
+
+  test("keeps the Linux and macOS text byte-identical", () => {
+    expect(localExecutionEnvironmentPrompt(device())).toMatchInlineSnapshot(`
+      "Operating system: Linux (x64)
+      Shell: bash (commands run under this shell)
+      Paths are POSIX-style: forward slashes, and absolute paths start with /.
+      Commands run with these restrictions on this computer:
+      - Writes are possible only inside the working folder.
+      - The home directory and most of the filesystem cannot be read, except the working folder, system directories and the user's toolchains; directories that are denied may look empty.
+      - Network access allows the public internet only; private, loopback and metadata addresses are refused.
+      - Blocked actions are reported in a <sandbox_violations> block in the tool result. Read it and change your approach instead of retrying the same action.
+      - Protected files cannot be written: .git/hooks, shell rc files, .vscode, .idea and .mcp.json.
+      - When initialising a repository use an empty template: git init --template=
+      - Node's built-in fetch needs NODE_USE_ENV_PROXY=1, which is already set."
+    `);
+    expect(
+      localExecutionEnvironmentPrompt(
+        device({ platform: "macos", arch: "arm64", shell: "zsh" }),
+      ),
+    ).toMatchInlineSnapshot(`
+      "Operating system: macOS (arm64)
+      Shell: zsh (commands run under this shell)
+      Paths are POSIX-style: forward slashes, and absolute paths start with /."
+    `);
   });
 
   test.each([

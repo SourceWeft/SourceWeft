@@ -24,6 +24,7 @@ import {
 } from "../../modules/threads/agent/sandbox-service/provider-registry";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
+import { joinDevicePath } from "../../modules/devices/device-path";
 
 /**
  * One stdio validation in one sandbox (Issue #367, W1b). The market module
@@ -110,7 +111,10 @@ export async function runMcpStdioValidationInSandbox(
     },
   });
   const createdMs = Date.now() - startedAt;
-  const directory = `${provider.pathPolicy.workspaceRoot}/${WORK_DIRECTORY}`;
+  const directory = joinDevicePath(
+    provider.pathPolicy.workspaceRoot,
+    WORK_DIRECTORY,
+  );
   const log = {
     identifier: context.identifier,
     version: context.version,
@@ -130,7 +134,7 @@ export async function runMcpStdioValidationInSandbox(
     const encoder = new TextEncoder();
     await provider.uploadFile({
       providerSandboxId,
-      sandboxPath: `${directory}/${MCP_STDIO_DRIVER_FILE}`,
+      sandboxPath: joinDevicePath(directory, MCP_STDIO_DRIVER_FILE),
       content: encoder.encode(stdioDriverSource()),
     });
     await provider.uploadFile({
