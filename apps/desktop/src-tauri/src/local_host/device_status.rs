@@ -36,10 +36,11 @@ pub const CAPABILITIES: &[&str] = &[
     "folder.read",
 ];
 
-/// The shell sandboxed commands run under on macOS: `execution.rs` execs
-/// `sandbox-exec ... /bin/sh -c <script>`. A test pins this to that source.
+/// The shell sandboxed commands run under on macOS: the sidecar passes srt's `binShell`
+/// `/bin/bash` for darwin (`sandbox-sidecar/src/server.ts` `binShellFor`), so srt runs
+/// `[/bin/bash, "-c", <script>]`. A test pins this to that source.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-const MACOS_COMMAND_SHELL: &str = "sh";
+const MACOS_COMMAND_SHELL: &str = "bash";
 
 /// The shell sandboxed commands run under on Linux: the sidecar calls srt's
 /// `wrapWithSandboxArgv` without a `binShell`, and srt then defaults to `bash`. A test pins the
@@ -409,24 +410,34 @@ mod tests {
     }
 
     #[test]
-    fn macos_shell_is_the_one_execution_rs_execs() {
-        // `execute_command` for macOS: `sandbox-exec -p <policy> /bin/sh -c <script>`.
+    fn macos_shell_is_the_bin_shell_the_sidecar_passes_for_darwin() {
+        // macOS now runs commands through the same sidecar as Linux: srt wraps them as
+        // `[binShell, "-c", ...]`, and the sidecar passes `/bin/bash` as `binShell` for darwin
+        // (`server.ts` `binShellFor`). `MACOS_COMMAND_SHELL` is that shell's basename.
         // Normalise line endings: a Windows checkout may convert the source to CRLF.
-        let source = include_str!("execution.rs").replace("\r\n", "\n");
-        assert!(source.contains("\"/usr/bin/sandbox-exec\".to_string(),"));
-        assert!(source.contains("\"/bin/sh\".to_string(),\n        \"-c\".to_string(),"));
-        assert_eq!(MACOS_COMMAND_SHELL, "sh");
+        let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
+        let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            squashed.contains("config.platform === \"darwin\" ? \"/bin/bash\" : undefined"),
+            "the sidecar's binShellFor no longer returns /bin/bash for darwin: update MACOS_COMMAND_SHELL"
+        );
+        assert_eq!(MACOS_COMMAND_SHELL, "bash");
     }
 
     #[test]
     fn linux_shell_is_srts_default_because_the_sidecar_passes_no_bin_shell() {
-        // `wrapWithSandboxArgv(request.command, undefined /* binShell */, customConfig, ...)`;
-        // srt then runs `bash` (`const shellPath = shell || 'bash'`).
-        let source = include_str!("../../../sandbox-sidecar/src/server.ts");
+        // The sidecar passes `binShellFor(state.config)` as srt's `binShell`, and `binShellFor`
+        // returns `undefined` for every non-darwin platform, so on Linux srt falls back to its own
+        // default (`const shellPath = shell || 'bash'`).
+        let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
         let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            squashed.contains("wrapWithSandboxArgv( request.command, undefined, customConfig,"),
-            "the sidecar passes a binShell now: update LINUX_COMMAND_SHELL"
+            squashed.contains("wrapWithSandboxArgv( request.command, binShellFor(state.config),"),
+            "the sidecar no longer routes binShell through binShellFor: update LINUX_COMMAND_SHELL"
+        );
+        assert!(
+            squashed.contains("config.platform === \"darwin\" ? \"/bin/bash\" : undefined"),
+            "binShellFor no longer returns undefined for non-darwin: update LINUX_COMMAND_SHELL"
         );
         assert_eq!(LINUX_COMMAND_SHELL, "bash");
     }

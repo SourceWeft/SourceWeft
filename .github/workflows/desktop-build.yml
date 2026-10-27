@@ -19,6 +19,7 @@ on:
       - "scripts/ci/sandbox-bundle*.mjs"
       - "scripts/ci/desktop-deb*.mjs"
       - "scripts/ci/install-static-ripgrep.sh"
+      - "scripts/ci/install-ripgrep-macos.sh"
       - "scripts/ci/ripgrep-release.json"
       - "scripts/ci/update-verifier/**"
       - ".github/workflows/desktop-release.yml"
@@ -424,3 +425,174 @@ jobs:
           # Packing is deterministic: a second pack of the same bundle is byte-identical.
           node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out-again"
           cmp "$tarball" "$out-again/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz"
+
+  sandbox-bundle-macos:
+    name: Sandbox bundle pack, sign and verify (macOS)
+    # macos-14 (arm64), like the real-sandbox macOS job: the arm64 bundle builds natively and the
+    # x86_64 bundle cross-compiles here exactly as the Tauri installers do on macos-15.
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Same pin as the release build and the real-sandbox jobs.
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - run: pnpm install --frozen-lockfile
+      - name: Build the signature verifier used for release packages
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Archive tooling unit tests (darwin file set, cross-arch target resolution)
+        run: node --test scripts/ci/sandbox-bundle.test.mjs
+      - name: Sidecar manifest unit tests
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar test
+      - name: Signing round trip with a throwaway key
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: node --test scripts/ci/sandbox-bundle-signature.test.mjs
+      - name: Build, ad-hoc sign, pack and verify both macOS targets exactly as the release does
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: |
+          set -euo pipefail
+          # One throwaway updater key for the minisign round trip (no release secret is used).
+          keys=$(mktemp -d)
+          pnpm --filter @sourceweft/desktop exec tauri signer generate --ci -w "$keys/ci-key" -p ci-throwaway-password
+          export TAURI_SIGNING_PRIVATE_KEY="$(cat "$keys/ci-key")"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=ci-throwaway-password
+          export TAURI_UPDATER_PUBLIC_KEY="$(cat "$keys/ci-key.pub")"
+          # The arm64 target builds natively; the x86_64 target cross-compiles on this arm64
+          # runner (bun --target=bun-darwin-x64) and is packed but not executed.
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            echo "::group::$target"
+            rg="$(bash scripts/ci/install-ripgrep-macos.sh "$RUNNER_TEMP/ripgrep-$target" "$target")"
+            pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$target" --rg "$rg"
+            # Ad-hoc sign (hardened runtime + allow-jit entitlement) BEFORE packing, then rebuild
+            # the manifest over the signed binaries so their hashes match what is packed.
+            bash apps/desktop/sandbox-sidecar/scripts/sign-macos.sh apps/desktop/sandbox-sidecar/dist/bundle -
+            codesign --verify --strict --verbose=2 apps/desktop/sandbox-sidecar/dist/bundle/srt-sidecar
+            codesign --verify --strict --verbose=2 apps/desktop/sandbox-sidecar/dist/bundle/rg
+            pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --remanifest
+            out="$RUNNER_TEMP/sandbox-bundle-$target"
+            rm -rf "$out" "$out-again"
+            node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out"
+            tarball="$out/sourceweft-sandbox-$target.tar.gz"
+            node scripts/ci/sandbox-bundle.mjs verify "$tarball"
+            node scripts/ci/sandbox-bundle.mjs sign "$tarball"
+            node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+            tar -tvzf "$tarball"
+            # Packing is deterministic: a second pack of the same signed bundle is byte-identical.
+            node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$out-again"
+            cmp "$tarball" "$out-again/sourceweft-sandbox-$target.tar.gz"
+            echo "::endgroup::"
+          done
+
+  macos-sandbox:
+    name: Real sandbox suite on macOS
+    # Pinned to macos-14 (arm64) instead of macos-latest: the real suite depends on the
+    # runner's Seatbelt behaviour and Xcode/CLT layout, which can change when -latest moves.
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Describe the runner (diagnostics for sandbox_apply behaviour)
+        run: |
+          sw_vers
+          uname -m
+          xcode-select -p
+          if [ -d /Library/Developer/CommandLineTools ]; then
+            echo "/Library/Developer/CommandLineTools: present"
+          else
+            echo "/Library/Developer/CommandLineTools: absent"
+          fi
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Matches the version the bundle is built with locally (srt requires >= 1.4).
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          # Distinct from the `package` and `linux-sandbox` keys so the jobs never race to
+          # save the same cache entry.
+          key: desktop-macos-sandbox-${{ runner.arch }}-1.94.1-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+      - name: Install ripgrep (the bundle ships a real rg binary)
+        run: |
+          set -eu
+          brew install ripgrep
+          rg_path=$(command -v rg)
+          echo "rg: ${rg_path}"
+          # The bundle copies this file, so it must be a real arm64 Mach-O executable, not a
+          # shell function or a wrapper script.
+          file -L "${rg_path}"
+          file -L "${rg_path}" | grep -q "Mach-O 64-bit executable arm64"
+          "${rg_path}" --version
+      - run: pnpm install --frozen-lockfile
+      - name: Sandbox sidecar unit tests
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar test
+      - name: Build sandbox sidecar bundle
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target aarch64-apple-darwin --rg "$(command -v rg)"
+      - name: Add the /etc/hosts entries the proxy hostname tests require
+        # hostname_to_loopback_blocked asserts these exist: names that resolve to host loopback
+        # and to a private address, without depending on live DNS.
+        run: |
+          set -eu
+          for entry in '127.0.0.1 sw-loop.test' '10.0.0.1 sw-private.test'; do
+            if ! grep -qxF "${entry}" /etc/hosts; then
+              echo "${entry}" | sudo tee -a /etc/hosts > /dev/null
+            fi
+            grep -qxF "${entry}" /etc/hosts
+          done
+          grep -E 'sw-(loop|private)\.test' /etc/hosts
+      - name: Pre-build the real-sandbox test binaries
+        # Compiles (but does not run) before the next step sets a poisoned proxy: cargo
+        # itself honours HTTP_PROXY/HTTPS_PROXY for its own registry access, and a cold cache
+        # would otherwise make that step fail to even compile, not just prove the sidecar
+        # strips the variables.
+        run: >-
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          --test macos_sandbox --test macos_signing --test local_execution
+          --test local_workspaces --test local_binary_reads --no-run
+      - name: Real-sandbox suite (readiness, Seatbelt execution, allow-jit signing)
+        env:
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+        run: |
+          # Both cases (lowercase set here rather than in `env:`, since GitHub Actions treats
+          # env keys as case-insensitive and would reject HTTP_PROXY/http_proxy as
+          # duplicates there); this proves neither ever reaches the sandboxed child. The
+          # binaries were already compiled by the previous step, so this invocation only runs
+          # them. No skip or continue-on-error: a runner that refuses sandbox_apply fails here.
+          export http_proxy=http://127.0.0.1:9
+          export https_proxy=http://127.0.0.1:9
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
+            --test macos_sandbox --test local_execution \
+            --test local_workspaces --test local_binary_reads \
+            -- --include-ignored --test-threads=1
+          # Signing: only the positive test runs on the hosted VM. The negative test
+          # (`bundle_signed_without_allow_jit_loses_jit`) needs a host that enforces the
+          # hardened-runtime JIT entitlement; the hosted macos-14 VM does not (run 40186818886:
+          # the copy signed without allow-jit still mapped "JS JIT generated code"), so there it
+          # would fail for a reason that says nothing about our bundle. It is run locally on
+          # real hardware instead (see the macos_signing.rs module doc).
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
+            --test macos_signing \
+            -- --include-ignored --test-threads=1 --exact \
+            bundle_signed_with_allow_jit_runs_with_jit

@@ -503,6 +503,104 @@ test("CLI: pack then verify; usage errors exit non-zero", async (t) => {
   );
 });
 
+// ---- macOS bundles: same determinism and strictness, a different file set (no apply-seccomp)
+const DARWIN_FILES = {
+  "srt-sidecar": { body: "#!sidecar\n" + "x".repeat(1500), exec: true },
+  rg: { body: "mach-o rg", exec: true },
+  "srt-proxy-agent.jar": { body: "PK\u0003\u0004jar", exec: false },
+};
+
+function darwinManifest(target, files = DARWIN_FILES, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    protocolVersion: 1,
+    appVersion: "0.3.0-rc.9",
+    target,
+    srtVersion: "0.0.81",
+    files: Object.fromEntries(
+      Object.entries(files)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, { body }]) => [
+          name,
+          { sha256: sha(body), size: Buffer.byteLength(body) },
+        ]),
+    ),
+    ...overrides,
+  };
+}
+
+async function makeDarwinBundle(t, target, files = DARWIN_FILES) {
+  const dir = join(await temp(t), "bundle");
+  await mkdir(dir);
+  for (const [name, { body, exec }] of Object.entries(files)) {
+    await writeFile(join(dir, name), body);
+    await chmod(join(dir, name), exec ? 0o755 : 0o644);
+  }
+  await writeFile(
+    join(dir, "manifest.json"),
+    JSON.stringify(darwinManifest(target, files), null, 2) + "\n",
+  );
+  return dir;
+}
+
+for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+  test(`macOS bundle (${target}) packs and verifies with the darwin file set and no apply-seccomp`, async (t) => {
+    const name = `sourceweft-sandbox-${target}.tar.gz`;
+    const path = await packBundle(
+      await makeDarwinBundle(t, target),
+      join(await temp(t), "out"),
+    );
+    assert.equal(path.endsWith(name), true);
+    const manifest = await verifyTarball(path);
+    assert.equal(manifest.target, target);
+    assert.deepEqual(Object.keys(manifest.files), [
+      "rg",
+      "srt-proxy-agent.jar",
+      "srt-sidecar",
+    ]);
+    // Deterministic: a second pack of the same bundle is byte-identical.
+    const again = await packBundle(
+      await makeDarwinBundle(t, target),
+      join(await temp(t), "out2"),
+    );
+    assert.deepEqual(await readFile(again), await readFile(path));
+  });
+
+  test(`macOS bundle (${target}) must not ship apply-seccomp`, async (t) => {
+    const withSeccomp = {
+      ...DARWIN_FILES,
+      "apply-seccomp": { body: "seccomp", exec: true },
+    };
+    const bundle = await makeDarwinBundle(t, target, withSeccomp);
+    await assert.rejects(
+      packBundle(bundle, join(await temp(t), "o")),
+      /bundle file set is not the darwin set/,
+    );
+  });
+}
+
+test("Linux bundle missing apply-seccomp is rejected on pack and on verify", async (t) => {
+  const noSeccomp = {
+    "srt-sidecar": FILES["srt-sidecar"],
+    rg: FILES.rg,
+    "srt-proxy-agent.jar": FILES["srt-proxy-agent.jar"],
+  };
+  // pack refuses it
+  const bundle = await makeBundle(t, {
+    files: noSeccomp,
+    manifest: manifestFor(noSeccomp),
+  });
+  await assert.rejects(
+    packBundle(bundle, join(await temp(t), "o")),
+    /bundle file set is not the linux set/,
+  );
+  // and a hand-built archive missing apply-seccomp fails verify for the same reason
+  await assert.rejects(
+    verifyTarball(await writeArchive(t, goodEntries(noSeccomp))),
+    /bundle file set is not the linux set/,
+  );
+});
+
 test("the tar writer rejects names over the 100-byte ustar limit instead of corrupting the header", () => {
   const entry = (name) => [{ name, bytes: Buffer.from("x"), mode: 0o644 }];
   assert.doesNotThrow(() => writeTar(entry("a".repeat(100))));

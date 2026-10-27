@@ -9,14 +9,12 @@ pub mod network;
 mod files;
 #[cfg(unix)]
 pub(crate) mod process;
-mod proxy;
 #[cfg(unix)]
 mod sidecar;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod srt_exec;
 pub mod privileged_setup;
 pub mod readiness;
-pub mod sandbox;
 mod workspace;
 
 pub use workspace::{LocalHost, Workspace};

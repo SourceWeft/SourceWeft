@@ -39,10 +39,20 @@ use std::{
 
 /// Where the signed release assets live; the app version selects the tag.
 const RELEASE_BASE: &str = "https://github.com/SourceWeft/SourceWeft/releases/download";
-/// The only platform a runtime is published for (`desktop-release.yml`, Linux leg).
+/// The platforms a runtime is published for (`desktop-release.yml`): Linux x86_64 and both macOS
+/// architectures. Windows has none. The sidecar is compiled for the build host, so each target
+/// triple matches a release leg exactly.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const RELEASE_TARGET: Option<&str> = Some("x86_64-unknown-linux-gnu");
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const RELEASE_TARGET: Option<&str> = Some("aarch64-apple-darwin");
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const RELEASE_TARGET: Option<&str> = Some("x86_64-apple-darwin");
+#[cfg(not(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "macos", target_arch = "x86_64"),
+)))]
 const RELEASE_TARGET: Option<&str> = None;
 
 /// Largest archive or signature download accepted (the same cap `sandbox-bundle.mjs` packs to).
@@ -121,7 +131,7 @@ impl InstallSpec {
 
     /// Whether a runtime is published for this platform at all (readiness uses this to avoid
     /// offering a download that can only fail).
-    #[allow(dead_code)] // only the Linux readiness probe asks
+    #[allow(dead_code)] // only the macOS/Linux readiness probe asks
     pub(crate) fn runtime_published() -> bool {
         RELEASE_TARGET.is_some()
     }
@@ -969,13 +979,13 @@ impl LocalHost {
         result
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn stop_sandbox_sidecar(&self) {
         super::srt_exec::stop_sidecar(&self.sandbox);
     }
 
-    /// Only Linux keeps a sidecar.
-    #[cfg(not(target_os = "linux"))]
+    /// Only macOS and Linux keep a sidecar.
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn stop_sandbox_sidecar(&self) {}
 }
 
@@ -1374,9 +1384,44 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    /// The release triple for the two macOS legs; the sidecar is compiled for the build host, so
+    /// the triple follows this binary's own architecture.
+    #[cfg(target_os = "macos")]
+    const MACOS_RELEASE_TARGET: &str = if cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin"
+    } else {
+        "x86_64-apple-darwin"
+    };
+
+    #[cfg(target_os = "macos")]
     #[test]
-    fn only_linux_x86_64_has_a_published_runtime() {
+    fn the_release_spec_uses_the_build_constants_on_macos() {
+        let spec = InstallSpec::release().unwrap();
+        assert_eq!(spec.target, MACOS_RELEASE_TARGET);
+        assert_eq!(spec.app_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(spec.protocol_version, SANDBOX_PROTOCOL_VERSION);
+        assert_eq!(
+            spec.url_base,
+            "https://github.com/SourceWeft/SourceWeft/releases/download"
+        );
+        assert_eq!(
+            spec.archive_url(),
+            format!(
+                "https://github.com/SourceWeft/SourceWeft/releases/download/v{}/sourceweft-sandbox-{MACOS_RELEASE_TARGET}.tar.gz",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        assert_eq!(spec.signature_url(), format!("{}.sig", spec.archive_url()));
+    }
+
+    /// The platforms with no published runtime (Windows): `release()` is the only honest answer.
+    #[cfg(not(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+    )))]
+    #[test]
+    fn platforms_without_a_published_runtime_report_unsupported() {
         assert_eq!(
             InstallSpec::release().unwrap_err().code,
             SANDBOX_PLATFORM_UNSUPPORTED
@@ -1529,6 +1574,48 @@ mod tests {
     #[test]
     fn the_test_archive_builder_produces_an_installable_archive() {
         assert_eq!(run_archive(gz(&tar(&good_entries(), true))), None);
+    }
+
+    #[test]
+    fn a_macos_file_set_installs_through_the_same_path() {
+        // The macOS bundle ships `{srt-sidecar, rg, srt-proxy-agent.jar}` and NO `apply-seccomp`
+        // (Seatbelt needs no helper): the installer is file-set agnostic — it installs exactly the
+        // files the manifest names — so the same extract/verify/swap path accepts it, with the
+        // macOS target triple, preserving the executable bit on the two binaries.
+        let app_data = tempfile::tempdir().unwrap();
+        let sandbox = app_data.path().join("sandbox");
+        fs::create_dir_all(&sandbox).unwrap();
+        let mut spec = spec();
+        spec.target = "aarch64-apple-darwin".into();
+        let rg = b"fake rg binary\n".as_slice();
+        let jar = b"fake jar\n".as_slice();
+        let sidecar = b"fake sidecar binary\n".as_slice();
+        let manifest = manifest_with(
+            &[("rg", rg), ("srt-proxy-agent.jar", jar), ("srt-sidecar", sidecar)],
+            |m| m["target"] = serde_json::json!("aarch64-apple-darwin"),
+        );
+        let archive_entries = vec![
+            Entry::file(MANIFEST_FILENAME, &manifest, 0o644),
+            Entry::file("rg", rg, 0o755),
+            Entry::file("srt-proxy-agent.jar", jar, 0o644),
+            Entry::file("srt-sidecar", sidecar, 0o755),
+        ];
+        let tarball = app_data.path().join("runtime.tar.gz");
+        fs::write(&tarball, gz(&tar(&archive_entries, true))).unwrap();
+
+        let installed =
+            install_verified_tarball(&sandbox, &tarball, &spec, &|a, b| fs::rename(a, b)).unwrap();
+        assert_eq!(installed.target, "aarch64-apple-darwin");
+        assert_eq!(installed.files, ["rg", "srt-proxy-agent.jar", "srt-sidecar"]);
+        let current = sandbox.join("current");
+        assert_eq!(
+            entries(&current),
+            ["manifest.json", "rg", "srt-proxy-agent.jar", "srt-sidecar"],
+            "no apply-seccomp on macOS"
+        );
+        assert_eq!(mode(&current.join("srt-sidecar")), 0o755);
+        assert_eq!(mode(&current.join("rg")), 0o755);
+        assert_eq!(mode(&current.join("srt-proxy-agent.jar")), 0o644);
     }
 
     #[test]
@@ -1938,7 +2025,11 @@ mod tests {
         );
     }
 
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    #[cfg(not(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+    )))]
     #[test]
     fn the_production_install_reports_an_unsupported_platform_without_touching_anything() {
         let app_data = tempfile::tempdir().unwrap();

@@ -7,7 +7,7 @@ import { createNetworkPolicy, USER_DENIAL_REASONS } from "../src/network-policy.
 import type { AskHostRequest, AskHostAnswer } from "../src/network-policy.js";
 import type { NetworkMode, WrapNetwork } from "../src/protocol.js";
 
-const OWN = "203.0.113.7";
+const OWN = "93.184.216.7";
 
 type Harness = {
   policy: ReturnType<typeof createNetworkPolicy>;

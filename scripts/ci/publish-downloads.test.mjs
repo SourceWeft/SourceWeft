@@ -128,11 +128,16 @@ test("signed publication includes Linux AppImage and both Mac architectures", as
 
 test("sandbox bundle assets beside the installers are not installers", async (t) => {
   const { root, prepared } = await fixture(t);
-  const dir = join(root, "linux-bundle");
+  const dir = join(root, "sandbox-bundles");
   await mkdir(dir);
-  const bundle = "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz";
-  await writeFile(join(dir, bundle), "bundle bytes");
-  await writeFile(join(dir, `${bundle}.sig`), "c2ln");
+  for (const bundle of [
+    "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz",
+    "sourceweft-sandbox-aarch64-apple-darwin.tar.gz",
+    "sourceweft-sandbox-x86_64-apple-darwin.tar.gz",
+  ]) {
+    await writeFile(join(dir, bundle), "bundle bytes");
+    await writeFile(join(dir, `${bundle}.sig`), "c2ln");
+  }
   const again = await prepareManifest(
     config,
     root,

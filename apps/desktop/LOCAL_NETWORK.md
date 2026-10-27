@@ -48,7 +48,7 @@ The audit is stored with the invocation result; it is not exposed in the UI yet.
 
 ## Known limits
 
-- macOS keeps its Seatbelt proxy until the sidecar switch and ignores the policy.
+- The policy is enforced identically on macOS and Linux (both run commands through the sandbox sidecar); Windows does not run local commands yet.
 - Attribution assumes one command at a time per device (srt's ask callback carries no
   command id); zero or several concurrently active commands deny everything.
 - Setting a request filter makes srt refuse plain-HTTP request targets with dot segments

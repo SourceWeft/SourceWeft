@@ -26,7 +26,7 @@ vi.mock("../../../../lib/local-host-session", () => ({
 import { LocalHostPanel } from "./local-host-panel";
 import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
-function device(networkMode?: string) {
+function device(networkMode?: string, platform?: string) {
   return {
     id: "device-1",
     name: "Mac",
@@ -34,12 +34,13 @@ function device(networkMode?: string) {
     remoteEnabled: false,
     connected: true,
     ...(networkMode ? { networkMode } : {}),
+    ...(platform ? { platform } : {}),
   };
 }
 
-function route(networkMode?: string) {
+function route(networkMode?: string, platform?: string) {
   localRequest.mockImplementation(async (path: string, body?: unknown) => {
-    if (path === "/v1/local-devices") return { devices: [device(networkMode)] };
+    if (path === "/v1/local-devices") return { devices: [device(networkMode, platform)] };
     if (path.endsWith("/folders")) return { folders: [] };
     if (path === "/v1/local-devices/device-1" && body)
       return { id: "device-1", networkMode: (body as { networkMode: string }).networkMode };
@@ -133,7 +134,7 @@ test("a failed change keeps the old mode and shows the error", async () => {
   assert.equal(modeSelect(container).value, "ask");
 });
 
-test("without sandbox readiness the select stays visible but disabled, with the stored mode", async () => {
+test("a host that reports no readiness keeps the select visible but disabled, with the stored mode", async () => {
   localHostStatus.mockResolvedValue({ connected: true, deviceId: "device-1" });
   route("strict");
   const container = await render();
@@ -193,4 +194,49 @@ test("a computer whose sandbox needs setup or is unsupported offers no network m
     assert.match(container.textContent ?? "", /not enforced on this computer yet/);
     await unmountAll();
   }
+});
+
+test("a macOS computer whose sandbox is ready enforces the policy: enabled, no 'not enforced' text, and it PATCHes", async () => {
+  localHostStatus.mockResolvedValue({
+    connected: true,
+    deviceId: "device-1",
+    readiness: { state: "ready" },
+  });
+  route("ask", "macos");
+  const container = await render();
+  const select = modeSelect(container);
+  assert.equal(select.disabled, false);
+  assert.match(container.textContent ?? "", /Enforced by the sandbox on this computer/);
+  assert.doesNotMatch(container.textContent ?? "", /not enforced|macOS support arrives/);
+  await act(async () => {
+    select.value = "strict";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await flush(4);
+  assert.deepEqual(
+    localRequest.mock.calls.find(([, body]) => Boolean(body)),
+    [
+      "/v1/local-devices/device-1",
+      { networkMode: "strict" },
+      { localProof: true, method: "PATCH" },
+    ],
+  );
+  assert.equal(modeSelect(container).value, "strict");
+});
+
+test("a macOS computer that needs setup does not enforce the policy", async () => {
+  localHostStatus.mockResolvedValue({
+    connected: false,
+    deviceId: "device-1",
+    readiness: {
+      state: "needsSetup",
+      code: "bundleMissing",
+      reason: "The sandbox runtime is not installed.",
+      remedy: "downloadRuntime",
+    },
+  });
+  route("ask", "macos");
+  const container = await render();
+  assert.equal(modeSelect(container).disabled, true);
+  assert.match(container.textContent ?? "", /not enforced on this computer yet/);
 });

@@ -1,12 +1,10 @@
 //! Readiness of local sandboxed execution, and toolchain `PATH` discovery for the commands run
 //! inside it.
 //!
-//! macOS keeps its existing Seatbelt execution path (migrated by a later plan) and is always
-//! `Ready` without ever touching a sandbox bundle. This module's bundle-probing half exists for
-//! the Linux bwrap-based sandbox bundle that a later task wires into execution. Nothing here
-//! ever reports `Ready` on a missing helper, a failed `init`/`probe` round trip, or a dead
-//! sidecar: those are reported as `NeedsSetup` with a reason, so local execution fails loudly
-//! instead of silently running unsandboxed.
+//! On macOS and Linux readiness is the sandbox bundle's probe (the sidecar's `init` + `probe`
+//! round trip). Nothing here ever reports `Ready` on a missing helper, a failed `init`/`probe`
+//! round trip, or a dead sidecar: those are reported as `NeedsSetup` with a reason, so local
+//! execution fails loudly instead of silently running unsandboxed.
 use super::LocalHost;
 #[cfg(unix)]
 use super::sidecar::Sidecar;
@@ -39,9 +37,8 @@ pub enum SandboxReadiness {
     // fields of a struct variant, so `toolchain_path` needs its own `rename_all` to come out
     // as `toolchainPath` on the wire.
     //
-    // `toolchain_path` is `None` on macOS, whose Seatbelt execution never uses the login-shell
-    // `PATH`, so reporting readiness there never spawns a login shell (and the field is
-    // omitted on the wire).
+    // `toolchain_path` is `None` only for a value built without a login-shell lookup (the
+    // field is then omitted on the wire).
     #[serde(rename_all = "camelCase")]
     Ready {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -434,8 +431,8 @@ fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> Sandbo
     }
 }
 
-/// `LocalHost::sandbox_readiness`'s cache: probing is expensive (spawning a login shell; on
-/// Linux, starting a whole sidecar process and round-tripping `init` + `probe`), and
+/// `LocalHost::sandbox_readiness`'s cache: probing is expensive (spawning a login shell, then
+/// starting a whole sidecar process and round-tripping `init` + `probe`), and
 /// `local_host_status` is polled by the Web UI every few seconds, so a fresh probe runs only
 /// when the cached value could plausibly be stale.
 ///
@@ -446,11 +443,10 @@ fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> Sandbo
 /// concurrent call never blocks on it: it returns the last known value, or a transient
 /// `SandboxReadiness::checking()` (`NeedsSetup`, reason "Checking the sandbox runtime", no
 /// remedy) if there isn't one yet.
-// `get_or_probe`/`invalidate` are only reached from `sandbox_readiness`'s Linux branch in a
-// production (non-test) build, so a plain `cargo build` on macOS/Windows sees no caller and
-// would otherwise warn this whole type as dead code; the unit tests below exercise the cache
-// policy directly (platform-independently) precisely so it does not need a real Linux target
-// to verify, which is also why it is not itself `#[cfg(target_os = "linux")]`-gated.
+// `get_or_probe`/`invalidate` are only reached from `sandbox_readiness` on macOS and Linux, so a
+// build for any other target sees no caller and would otherwise warn this whole type as dead
+// code; the unit tests below exercise the cache policy directly (platform-independently),
+// which is also why the type is not itself `cfg`-gated to those targets.
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub(crate) struct ReadinessCache {
@@ -575,16 +571,14 @@ impl Drop for InstallGuard<'_> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const SANDBOX_READINESS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 impl LocalHost {
-    /// Whether local sandboxed execution can run right now, and why not if it cannot. macOS
-    /// keeps its Seatbelt path (migrated by a later plan) and is always `Ready`, without ever
-    /// touching a sandbox bundle or spawning a login shell (`toolchain_path` is `None`: Seatbelt
-    /// execution does not use the login-shell `PATH`). Linux probes the bundle under this host's own
-    /// app-data directory, through `ReadinessCache` so repeated polling doesn't repeatedly
-    /// spawn a sidecar. Every other platform is `Unsupported`.
+    /// Whether local sandboxed execution can run right now, and why not if it cannot. macOS and
+    /// Linux probe the bundle under this host's own app-data directory, through
+    /// `ReadinessCache` so repeated polling doesn't repeatedly spawn a sidecar. Every other
+    /// platform is `Unsupported`.
     pub fn sandbox_readiness(&self) -> SandboxReadiness {
         // While the runtime is being replaced there is nothing meaningful to probe, and the
         // bundle directory may be mid-swap.
@@ -592,12 +586,7 @@ impl LocalHost {
             return SandboxReadiness::installing();
         }
 
-        #[cfg(target_os = "macos")]
-        return SandboxReadiness::Ready {
-            toolchain_path: None,
-        };
-
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         return ReadinessCache::get_or_probe(
             &self.sandbox_readiness_cache,
             SANDBOX_READINESS_RECHECK_INTERVAL,
@@ -606,6 +595,7 @@ impl LocalHost {
                 // `srt_exec::init_config`), probed against the automatic workspace base.
                 let bundle = bundle_dir(&self.base);
                 let init = super::srt_exec::init_config(
+                    super::srt_exec::HOST_PLATFORM,
                     &bundle,
                     &self.base,
                     vec![self.workspace_base().to_string_lossy().into_owned()],
@@ -956,18 +946,22 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_is_ready_without_bundle() {
+    fn macos_missing_bundle_is_needs_setup() {
         let app_data = tempfile::tempdir().unwrap();
         let host = LocalHost::open(app_data.path()).unwrap();
-        // No bundle was ever placed under `app_data`; macOS must still report Ready.
+        // No bundle was ever placed under `app_data`: macOS must not report Ready. A runtime IS
+        // published for macOS now, so the remedy is `downloadRuntime` (same as Linux), not the
+        // downgraded no-download failure.
         assert!(!bundle_dir(app_data.path()).exists());
-        // Ruling R26: no login shell on macOS, so no toolchain path either.
+        assert_eq!(host.sandbox_readiness(), SandboxReadiness::bundle_missing());
         assert_eq!(
-            host.sandbox_readiness(),
-            SandboxReadiness::Ready {
-                toolchain_path: None
-            },
-            "expected Ready without a bundle on macOS"
+            serde_json::to_value(host.sandbox_readiness()).unwrap(),
+            serde_json::json!({
+                "state": "needsSetup",
+                "code": "bundleMissing",
+                "reason": "Sandbox runtime is not installed",
+                "remedy": "downloadRuntime",
+            })
         );
     }
 

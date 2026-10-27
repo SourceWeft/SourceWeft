@@ -86,9 +86,9 @@ export function LocalHostPanel() {
       clearInterval(timer);
     };
   }, [userId]);
-  // The network policy is enforced only by a sandbox that is ready. macOS reports no
-  // readiness (Seatbelt ignores the policy) and a Linux computer that still needs setup, or is
-  // unsupported, runs nothing, so no mode is offered as if it applied.
+  // The network policy is enforced by the sandbox, on every platform, once the host reports it
+  // ready. A computer that still needs setup, is unsupported, or reports no readiness (a build
+  // without a managed host) is not enforcing it, so no mode is offered as if it applied.
   const enforced = status?.readiness?.state === "ready";
   if (!desktopBridge.isAvailable()) return null;
   if (dataOwner && dataOwner !== userId)
@@ -173,8 +173,8 @@ export function LocalHostPanel() {
         <select
           aria-label={t("localHost.networkSelectAria")}
           className="h-9 rounded-md border border-border bg-background px-2 text-sm"
-          // Without sandbox readiness (macOS, older builds) the policy is not
-          // enforced, so no mode may be offered as if it were.
+          // Until the host reports the sandbox ready the policy is not enforced, so no
+          // mode may be offered as if it were.
           disabled={busy || !device || !enforced}
           onChange={async (event) => {
             if (!device || !enforced) return;

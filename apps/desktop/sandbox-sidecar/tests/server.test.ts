@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
-import { buildConfig, perWrapReadRoots } from "../src/policy.js";
+import { buildConfig, perWrapReadRoots, perWrapWriteDenies } from "../src/policy.js";
 import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
 import type {
   AuditEntry,
@@ -41,6 +41,12 @@ function linuxInit(overrides: Partial<InitConfig> = {}): InitConfig {
   };
 }
 
+/** The darwin shape of `InitConfig`: ripgrep is the only helper (macOS has no bubblewrap and no
+ * seccomp helper), exactly what the Rust host sends on macOS. */
+function darwinInit(overrides: Partial<InitConfig> = {}): InitConfig {
+  return linuxInit({ platform: "darwin", helpers: { ripgrep: rgPath }, ...overrides });
+}
+
 /** A fake `SrtLike`, driving the server's error mapping and merged-config logic without any
  * real sandboxing. `wrapWithSandboxArgv("true", ...)` — what `probe` always wraps — returns an
  * argv that, when actually spawned by `probe`'s `runProbe`, exits with `probeExit.code` after
@@ -51,6 +57,7 @@ function makeFakeSrt(): SrtLike & {
     params: { host: string; port: number | undefined },
   ) => Promise<boolean | { allow: false; reason: string }>;
   lastCustomConfig?: unknown;
+  binShells: Array<string | undefined>;
   probeExit: { code: number; stderr: string };
   initError?: Error;
   wrapError?: Error;
@@ -62,6 +69,7 @@ function makeFakeSrt(): SrtLike & {
     probeExit: { code: 0, stderr: "" },
     cleanupCalls: 0,
     resetCalls: 0,
+    binShells: [] as Array<string | undefined>,
     ask: undefined as
       | ((
           params: { host: string; port: number | undefined },
@@ -81,13 +89,14 @@ function makeFakeSrt(): SrtLike & {
     },
     async wrapWithSandboxArgv(
       command: string,
-      _binShell?: string,
+      binShell?: string,
       customConfig?: unknown,
       _abortSignal?: AbortSignal,
       _cwd?: string,
       _options?: { commandId?: string },
     ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
       fake.lastCustomConfig = customConfig;
+      fake.binShells.push(binShell);
       if (fake.wrapError) throw fake.wrapError;
       if (command === "true") {
         const script = `process.stderr.write(${JSON.stringify(fake.probeExit.stderr)});process.exit(${fake.probeExit.code})`;
@@ -525,10 +534,10 @@ test("ask callback denies private literals with a reason, and allows public ones
 
 test("ask callback denies the sidecar host's own addresses", async () => {
   const srt = makeFakeSrt();
-  const harness = await initHarness(srt, () => new Set(["203.0.113.7"]));
+  const harness = await initHarness(srt, () => new Set(["93.184.216.7"]));
   assert.ok(srt.ask);
   await wrapCommand(harness);
-  const result = await srt.ask({ host: "203.0.113.7", port: 443 });
+  const result = await srt.ask({ host: "93.184.216.7", port: 443 });
   assert.equal(typeof result, "object");
   if (typeof result === "object") {
     assert.equal(result.allow, false);
@@ -1090,7 +1099,7 @@ test("main strips proxy variables", () => {
 // actually happen; a `PassThrough`-driven `startServer` test, unlike this one, can't exercise
 // it. `SandboxManager` always sandboxes for the actual host OS, not `InitConfig.platform`, so
 // this only exercises a real sandbox session where that host OS has one srt supports — on
-// this Mac, that's `sandbox-exec` on darwin; skipped elsewhere rather than failing on an
+// this Mac, that's Seatbelt on darwin; skipped elsewhere rather than failing on an
 // environment this test was never meant to assert anything about.
 test(
   "main flushes the shutdown ack to stdout before exiting (real srt)",
@@ -1152,3 +1161,115 @@ test(
     assert.equal(lines[1]?.ok, true, `shutdown failed: ${JSON.stringify(lines[1])}`);
   },
 );
+
+test("darwin wrap and probe pass /bin/bash as srt's binShell; linux leaves srt's default", async () => {
+  const darwin = makeFakeSrt();
+  const darwinHarness = await initHarness(darwin, undefined, darwinInit());
+  assert.equal(
+    (await darwinHarness.send({ op: "probe" })).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await darwinHarness.send({
+        op: "wrap",
+        commandId: "c".repeat(22),
+        command: "echo hi",
+        cwd: workspaceRoot,
+        workspaceRoot,
+      })
+    ).ok,
+    true,
+  );
+  assert.deepEqual(darwin.binShells, ["/bin/bash", "/bin/bash"]);
+  await darwinHarness.stop();
+
+  const linux = makeFakeSrt();
+  const linuxHarness = await initHarness(linux);
+  await linuxHarness.send({ op: "probe" });
+  await linuxHarness.send({
+    op: "wrap",
+    commandId: "d".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+  });
+  assert.deepEqual(linux.binShells, [undefined, undefined]);
+  await linuxHarness.stop();
+});
+
+// A granted $HOME is writable, so the credential paths must reach srt as `denyWrite` for every
+// wrap — the overlay's empty `denyWrite` must not replace them.
+test("darwin wrap keeps the credential denyWrite entries from buildConfig", async () => {
+  const srt = makeFakeSrt();
+  const init = darwinInit();
+  const harness = await initHarness(srt, undefined, init);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: workspaceRoot,
+    workspaceRoot,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  const denied = (srt.lastCustomConfig as { filesystem: { denyWrite: Array<{ path: string }> } })
+    .filesystem.denyWrite.map((entry) => entry.path);
+  for (const relative of [".ssh", ".aws", ".gnupg", "Library/Keychains"])
+    assert.ok(denied.includes(`${init.home}/${relative}`), `${relative} must be write-denied`);
+  assertMergeInvariant(srt.lastCustomConfig, workspaceRoot, init);
+  await harness.stop();
+});
+
+test("linux wrap and probe add write denies only for existing credential paths inside the wrap's workspace", async () => {
+  const home = mkdtempSync(join(tmpRoot, "linux-home-"));
+  mkdirSync(join(home, ".ssh"));
+  // The user granted $HOME itself (a second root is a normal workspace; ~/.cargo style read
+  // roots are not writable and must never get a write deny, or bwrap cannot bind them).
+  mkdirSync(join(home, ".cargo"));
+  writeFileSync(join(home, ".cargo", "credentials.toml"), "x");
+  const init = linuxInit({ home, workspaceRoots: [home, workspaceRoot], readRoots: [join(home, ".cargo")] });
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, init);
+  const denyWrite = () =>
+    (srt.lastCustomConfig as { filesystem: { denyWrite: Array<{ path: string }> } }).filesystem.denyWrite.map(
+      (entry) => entry.path,
+    );
+  const wrap = async (root: string) => {
+    const response = await harness.send({
+      op: "wrap",
+      commandId: "c".repeat(22),
+      command: "echo hi",
+      cwd: root,
+      workspaceRoot: root,
+    });
+    assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+    // The host cleans up after every command; a command id cannot be wrapped twice before that.
+    await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  };
+  await wrap(home);
+  // The static entry survives; existing credential paths inside the writable home are added;
+  // absent paths (which srt would otherwise create as placeholders in the real home) are not.
+  assert.deepEqual(denyWrite(), ["/tmp/claude", join(home, ".cargo/credentials.toml"), join(home, ".ssh")]);
+  // Checked per command: a path that appears later is covered by the next wrap.
+  mkdirSync(join(home, ".aws"));
+  await wrap(home);
+  assert.deepEqual(denyWrite(), [
+    "/tmp/claude",
+    join(home, ".cargo/credentials.toml"),
+    join(home, ".ssh"),
+    join(home, ".aws"),
+  ]);
+  // A wrap in another workspace root: nothing writable contains the credential paths.
+  await wrap(workspaceRoot);
+  assert.deepEqual(denyWrite(), ["/tmp/claude"]);
+  const probe = await harness.send({ op: "probe" });
+  assert.equal(probe.ok, true, `probe failed: ${JSON.stringify(probe)}`);
+  // probe wraps init's first workspace root (here the granted home).
+  assert.deepEqual(denyWrite(), [
+    "/tmp/claude",
+    join(home, ".cargo/credentials.toml"),
+    join(home, ".ssh"),
+    join(home, ".aws"),
+  ]);
+  await harness.stop();
+});

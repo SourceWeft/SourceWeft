@@ -8,7 +8,7 @@
 //! timeout all deny.
 //!
 //! The bridge is platform independent (it only knows closures and JSON); `srt_exec.rs` wires
-//! it to the sidecar's event handler. The macOS Seatbelt path never asks (decision N7).
+//! it to the sidecar's event handler. macOS runs through the same sidecar flow, so it asks too.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{

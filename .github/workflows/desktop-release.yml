@@ -127,14 +127,19 @@ jobs:
         env:
           DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
         run: node scripts/ci/prepare-desktop-release.mjs
-      # Local-execution sandbox runtime (Linux x86_64 only). The desktop app downloads it on
-      # demand from this release, so it is signed with the same updater key and verified here
-      # with the same minisign-verify tool before it is uploaded.
+      # Local-execution sandbox runtime. The desktop app downloads it on demand from this release
+      # and verifies it (minisign over the whole file with the same updater key, then the
+      # manifest + per-file SHA-256), so each leg here builds the runtime for its own target,
+      # code-signs it, and minisign-signs the packed tarball with the same key and verifier the
+      # installers use. Linux x86_64 ships a static ripgrep and srt's apply-seccomp helper; macOS
+      # (both architectures) ships a Mach-O ripgrep and no apply-seccomp, and additionally
+      # code-signs the binaries (Developer ID + hardened runtime + entitlements in `signed`,
+      # ad-hoc in `updater-signed`) BEFORE the tarball is hashed and minisigned.
       - uses: oven-sh/setup-bun@v2
-        if: runner.os == 'Linux' && steps.existing.outputs.exists != 'true'
+        if: (runner.os == 'Linux' || runner.os == 'macOS') && steps.existing.outputs.exists != 'true'
         with:
           bun-version: 1.4.2
-      - name: Build, sign and verify the sandbox runtime bundle
+      - name: Build, sign and verify the sandbox runtime bundle (Linux)
         if: runner.os == 'Linux' && steps.existing.outputs.exists != 'true'
         shell: bash
         env:
@@ -151,6 +156,76 @@ jobs:
           node scripts/ci/sandbox-bundle.mjs verify "$tarball"
           node scripts/ci/sandbox-bundle.mjs sign "$tarball"
           node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+          cp "$tarball" "$tarball.sig" desktop-release/
+      # macOS only: import the Developer ID Application certificate so codesign can find
+      # APPLE_SIGNING_IDENTITY when it signs the bare sandbox binaries. The installer's own signing
+      # is done inside `tauri build`, which imports this same certificate into its own temporary
+      # keychain and does not leave it behind for a later codesign call, so the bundle job needs
+      # its own import. Same secrets as the installers; no new secret. Runs only for the `signed`
+      # policy (the `updater-signed` path signs ad-hoc and needs no certificate). UNVERIFIED in
+      # this repository: no Apple Developer ID certificate is available to the authors, so the
+      # Developer ID branch has only ever been exercised against a fake codesign.
+      - name: Import the Developer ID certificate for sandbox-bundle signing
+        if: runner.os == 'macOS' && inputs.publication_policy == 'signed' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE:-}" ] || [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ] || [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "::error::APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD and APPLE_SIGNING_IDENTITY are required for the signed policy"
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/sandbox-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          cert="$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert"
+          security import "$cert" -P "$APPLE_CERTIFICATE_PASSWORD" -k "$keychain" -T /usr/bin/codesign
+          rm -f "$cert"
+          # Allow codesign to use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          # Prepend our keychain to the user search list so codesign resolves the identity.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | sed 's/"//g')
+      - name: Build, sign and verify the sandbox runtime bundle (macOS)
+        if: runner.os == 'macOS' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: |
+          set -euo pipefail
+          # Pinned official Mach-O ripgrep for this arch (scripts/ci/ripgrep-release.json),
+          # checksum-verified. x86_64-apple-darwin cross-compiles on the arm64 runner as the
+          # Tauri installers do.
+          rg="$(bash scripts/ci/install-ripgrep-macos.sh "$RUNNER_TEMP/ripgrep" "$DESKTOP_RELEASE_TARGET")"
+          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$DESKTOP_RELEASE_TARGET" --rg "$rg"
+          # Code-sign the binaries BEFORE packing. signed => Developer ID Application identity
+          # (hardened runtime + entitlements + secure timestamp); updater-signed => ad-hoc (`-`),
+          # exactly like the installers. sign-macos.sh exits non-zero on any failure (the bundle
+          # must then be discarded, which `set -e` does by failing the job).
+          if [ "$DESKTOP_PUBLICATION_POLICY" = "signed" ]; then
+            identity="$APPLE_SIGNING_IDENTITY"
+          else
+            identity="-"
+          fi
+          bash apps/desktop/sandbox-sidecar/scripts/sign-macos.sh apps/desktop/sandbox-sidecar/dist/bundle "$identity"
+          # Code-signing rewrote the binaries, so the build-time manifest no longer matches them;
+          # rebuild it over the signed files before the tarball is hashed and minisigned.
+          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --remanifest
+          bundle=sandbox-bundle
+          rm -rf "$bundle"
+          node scripts/ci/sandbox-bundle.mjs pack apps/desktop/sandbox-sidecar/dist/bundle "$bundle"
+          tarball="$bundle/sourceweft-sandbox-$DESKTOP_RELEASE_TARGET.tar.gz"
+          node scripts/ci/sandbox-bundle.mjs verify "$tarball"
+          node scripts/ci/sandbox-bundle.mjs sign "$tarball"
+          node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+          # Signature checks on the signed binaries. --verify --strict is meaningful for both
+          # ad-hoc and Developer ID; the Developer ID assertions (codesign authority + a notarized
+          # spctl assessment) are UNVERIFIED here (no Apple credentials) and documented as such.
+          for file in srt-sidecar rg; do
+            codesign --verify --strict --verbose=2 "apps/desktop/sandbox-sidecar/dist/bundle/$file"
+            codesign -dvv "apps/desktop/sandbox-sidecar/dist/bundle/$file" 2>&1 | grep -E 'Signature=|Authority=|flags=' || true
+          done
           cp "$tarball" "$tarball.sig" desktop-release/
       - uses: actions/upload-artifact@v4
         if: steps.existing.outputs.exists != 'true'

@@ -1,6 +1,175 @@
-//! Helpers shared by the integration tests.
+//! Shared helpers for the macOS real-sandbox integration tests: `macos_sandbox.rs` and the
+//! `#[ignore]`d real tests in `local_execution.rs`, both `#![cfg(target_os = "macos")]`. Each
+//! pulls this in with `mod common;`, so it is only ever compiled into those macOS-gated test
+//! binaries.
+//!
+//! The Linux suite keeps its own copy of the equivalent helpers inside `linux_sandbox.rs` by
+//! design — that file is deliberately left untouched — so there is no cross-platform sharing
+//! here; this module is macOS-only and mirrors the Linux helper style.
+//!
+//! The bundle is located relative to `CARGO_MANIFEST_DIR`, at
+//! `apps/desktop/sandbox-sidecar/dist/bundle` (git-ignored), built by that package's
+//! `bun run build --rg "$(command -v rg)"`; no new environment variable locates it.
 #![allow(dead_code)]
-use serde_json::Value;
+use serde_json::{json, Value};
+use sourceweft_desktop::local_host::{
+    execution::Executions, readiness::bundle_dir, LocalHost, Workspace,
+};
+use sourceweft_desktop::local_host::network::{NetworkBridge, OutboundLease};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
+
+/// `apps/desktop/sandbox-sidecar/dist/bundle`.
+pub fn built_bundle_source() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../sandbox-sidecar/dist/bundle")
+}
+
+/// Copies the already-built bundle into `dest` (a `<app data>/sandbox/current` directory),
+/// matching the layout `readiness::bundle_dir` expects under a real app-data directory.
+pub fn copy_bundle_into(dest: &Path) {
+    let source = built_bundle_source();
+    assert!(
+        source.join("srt-sidecar").is_file(),
+        "expected a built sidecar bundle at {source:?}; run `bun run build --rg \
+         \"$(command -v rg)\"` in apps/desktop/sandbox-sidecar first (see the plan's \
+         verification recipe)"
+    );
+    fs::create_dir_all(dest).unwrap();
+    for entry in fs::read_dir(&source).unwrap() {
+        let entry = entry.unwrap();
+        let target = dest.join(entry.file_name());
+        fs::copy(entry.path(), &target).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&target, permissions).unwrap();
+    }
+}
+
+/// srt treats an existing `/tmp/claude` as its own writable TMPDIR (the state on any machine that
+/// also runs Claude Code), so creating it once makes every test run in that configuration;
+/// `cannot_write_srt_tmp_claude`-style checks then prove the sidecar's write deny covers it.
+/// Creating or removing it mid-command would race srt's bind, so it is created once and never
+/// removed.
+pub fn ensure_tmp_claude() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        fs::create_dir_all("/tmp/claude").expect("create /tmp/claude");
+    });
+    assert!(
+        Path::new("/tmp/claude").is_dir(),
+        "/tmp/claude must be a directory"
+    );
+}
+
+/// A `LocalHost` over a fresh temporary app-data directory (under `$TMPDIR`, i.e.
+/// `/private/var/folders/...`) with the built bundle installed at `<app data>/sandbox/current`,
+/// exactly where production looks for it.
+pub fn host_with_bundle() -> (tempfile::TempDir, LocalHost) {
+    ensure_tmp_claude();
+    let app = tempfile::tempdir().unwrap();
+    copy_bundle_into(&bundle_dir(app.path()));
+    let host = LocalHost::open(app.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    (app, host)
+}
+
+/// A `LocalHost` over a caller-chosen app-data directory (e.g. one under `/tmp`, to exercise the
+/// `/tmp`→`/private/tmp` symlink), with the bundle installed. The caller owns `app_path` and its
+/// cleanup.
+pub fn host_with_bundle_at(app_path: &Path) -> LocalHost {
+    ensure_tmp_claude();
+    copy_bundle_into(&bundle_dir(app_path));
+    let host = LocalHost::open(app_path).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    host
+}
+
+pub fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -> Value {
+    host.dispatch(
+        &Executions::default(),
+        call,
+        "owner",
+        &workspace.thread_id,
+        "command.execute",
+        json!({"workspaceId": workspace.id, "command": command, "timeoutMs": 60000, "maxOutputChars": 20000}),
+    )
+    .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
+}
+
+pub fn output(result: &Value) -> &str {
+    result["output"].as_str().unwrap()
+}
+
+/// Runs `command` after a positive control that must succeed inside the sandbox, and asserts the
+/// control ran, so a denial test cannot pass merely because the sandbox failed to start the
+/// command at all (e.g. exit 127 from a missing helper).
+pub fn execute_denied(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -> Value {
+    let control = workspace.path.join(".sw-control");
+    let _ = fs::remove_file(&control);
+    let result = execute(
+        host,
+        call,
+        workspace,
+        &format!("printf ran > .sw-control && {command}"),
+    );
+    assert_eq!(
+        fs::read_to_string(&control).ok().as_deref(),
+        Some("ran"),
+        "the sandboxed command never ran: {result}"
+    );
+    result
+}
+
+/// Single-quotes `path` for `/bin/sh`.
+pub fn quoted(path: &Path) -> String {
+    format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"))
+}
+
+pub fn home_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").expect("HOME must be set for this test"))
+}
+
+/// Removes a planted file even when an assertion fails.
+pub struct RemoveOnDrop(pub PathBuf);
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Sets an environment variable for the lifetime of the guard and restores its previous value (or
+/// removes it) on drop. The real-sandbox tests run with `--test-threads=1`, so a transient
+/// process-wide variable set here never races a sibling test.
+pub struct EnvVarGuard {
+    key: String,
+    previous: Option<String>,
+}
+impl EnvVarGuard {
+    pub fn set(key: &str, value: &str) -> Self {
+        let previous = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        Self {
+            key: key.to_string(),
+            previous,
+        }
+    }
+}
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var(&self.key, value),
+            None => std::env::remove_var(&self.key),
+        }
+    }
+}
 
 /// The shape every `command.execute` result has, on every platform: the four original fields
 /// with the right types, and nothing else except the optional extras a sandboxed run adds
@@ -29,3 +198,151 @@ pub fn assert_result_shape(result: &Value) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Network approvals. The backend half is replaced by `ApprovalBridge`: it installs an outbound
+// channel on `host.network`, records every `network.ask` frame, and answers through
+// `host.network.resolve`, exactly as `remote_host.rs` does for a `network.decision`.
+// ---------------------------------------------------------------------------------------------
+
+/// A `network` payload for `command.execute`.
+pub fn net_policy(mode: &str, allow: &[&str]) -> Value {
+    json!({"mode": mode, "allow": allow, "suggested": {}})
+}
+
+/// `command.execute` with an explicit network policy and command timeout.
+pub fn execute_net_timeout(
+    host: &LocalHost,
+    call: &str,
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+    timeout_ms: u64,
+) -> Value {
+    let mut payload = json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": 20000});
+    if let Some(network) = network {
+        payload["network"] = network;
+    }
+    host.dispatch(
+        &Executions::default(),
+        call,
+        "owner",
+        &workspace.thread_id,
+        "command.execute",
+        payload,
+    )
+    .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
+}
+
+pub fn execute_net(
+    host: &LocalHost,
+    call: &str,
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+) -> Value {
+    execute_net_timeout(host, call, workspace, command, network, 60000)
+}
+
+/// What the stand-in backend does with each `network.ask`: wait `delay`, then answer.
+#[derive(Clone)]
+pub struct Answer {
+    pub delay: Duration,
+    pub allow: bool,
+    pub reason: Option<&'static str>,
+}
+
+/// Installs an outbound channel on `host.network` for its lifetime. With `answer` it resolves
+/// every ask after the delay; without, it only records them (the ask stays pending).
+pub struct ApprovalBridge {
+    lease: Option<OutboundLease>,
+    asks: Arc<Mutex<Vec<Value>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ApprovalBridge {
+    pub fn start(host: &LocalHost, answer: Option<Answer>) -> Self {
+        let bridge: NetworkBridge = host.network.clone();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let lease = bridge.attach(sender);
+        let asks = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let (asks, stop) = (asks.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match frames.try_recv() {
+                        Ok(frame) => {
+                            asks.lock().unwrap().push(frame.clone());
+                            if let Some(answer) = &answer {
+                                std::thread::sleep(answer.delay);
+                                let ask_id = frame["askId"].as_str().unwrap();
+                                bridge.resolve(ask_id, answer.allow, answer.reason.map(str::to_string));
+                            }
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+            })
+        };
+        Self {
+            lease: Some(lease),
+            asks,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    pub fn allowing(host: &LocalHost, delay_ms: u64) -> Self {
+        Self::start(
+            host,
+            Some(Answer {
+                delay: Duration::from_millis(delay_ms),
+                allow: true,
+                reason: None,
+            }),
+        )
+    }
+
+    pub fn asks(&self) -> Vec<Value> {
+        self.asks.lock().unwrap().clone()
+    }
+}
+
+impl Drop for ApprovalBridge {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        drop(self.lease.take());
+    }
+}
+
+pub fn audit_of(result: &Value) -> &Vec<Value> {
+    result["networkAudit"]
+        .as_array()
+        .unwrap_or_else(|| panic!("result has no networkAudit: {result}"))
+}
+
+/// The first audit entry for which `matches` holds.
+pub fn audit_entry<'a>(result: &'a Value, matches: impl Fn(&Value) -> bool) -> &'a Value {
+    audit_of(result)
+        .iter()
+        .find(|entry| matches(entry))
+        .unwrap_or_else(|| panic!("no matching audit entry in: {result}"))
+}
+
+/// A `connection` audit entry for the npm registry over HTTPS.
+pub fn npm_connection(entry: &Value, decision: &str, source: &str) -> bool {
+    entry["kind"] == "connection"
+        && entry["host"] == "registry.npmjs.org"
+        && entry["port"] == 443
+        && entry["decision"] == decision
+        && entry["source"] == source
+}
+
+pub const FETCH_NPM: &str =
+    "curl -sS -o /dev/null -w %{http_code} https://registry.npmjs.org/left-pad";
+

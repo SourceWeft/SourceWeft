@@ -289,18 +289,10 @@ impl LocalHost {
                 .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?
                 .insert(id.into(), cancel.clone());
             // Network asks raised while this command runs are attributed to this invocation
-            // (and denied if it is cancelled or ends).
-            // The command is killed `timeout` ms after it starts; asks must settle before that.
+            // (and denied if it is cancelled or ends). The command is killed `timeout` ms after
+            // it starts; asks must settle before that.
             let kill_deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
-            let _running = self.network.begin(id, cancel.clone(), kill_deadline);
-            // Decision N7: the macOS Seatbelt path keeps its public-only proxy and ignores the
-            // policy (its result also has no `networkAudit`); only Linux enforces it.
-            #[cfg(target_os = "macos")]
-            let result = {
-                let _ignored = &network;
-                execute_command(&workspace.path, &cwd, command, timeout, max_output, cancel)
-            };
-            #[cfg(target_os = "linux")]
+            let running = self.network.begin(id, cancel.clone(), kill_deadline);
             let result = super::srt_exec::execute_command(
                 self,
                 &workspace.path,
@@ -310,7 +302,7 @@ impl LocalHost {
                 max_output,
                 cancel,
                 network.as_ref(),
-                &_running,
+                &running,
             );
             if let Ok(mut active) = calls.active.lock() {
                 active.remove(id);
@@ -550,59 +542,6 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
     Ok(result)
 }
 
-#[cfg(target_os = "macos")]
-fn execute_command(
-    root: &Path,
-    cwd: &Path,
-    script: &str,
-    timeout: u64,
-    max: usize,
-    cancel: Arc<AtomicBool>,
-) -> Result<Value> {
-    let proxy = super::proxy::PublicProxy::start()?;
-    let policy = super::sandbox::command_profile(root, proxy.port)?;
-    let proxy_url = format!("http://127.0.0.1:{}", proxy.port);
-    let argv = vec![
-        "/usr/bin/sandbox-exec".to_string(),
-        "-p".to_string(),
-        policy,
-        "/bin/sh".to_string(),
-        "-c".to_string(),
-        script.to_string(),
-    ];
-    let env = vec![
-        (
-            "PATH".to_string(),
-            "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-        ),
-        ("HOME".to_string(), root.to_string_lossy().into_owned()),
-        ("TMPDIR".to_string(), root.to_string_lossy().into_owned()),
-        ("HTTP_PROXY".to_string(), proxy_url.clone()),
-        ("HTTPS_PROXY".to_string(), proxy_url.clone()),
-        ("http_proxy".to_string(), proxy_url.clone()),
-        ("https_proxy".to_string(), proxy_url),
-    ];
-    let run = super::process::run_wrapped(&argv, &env, cwd, timeout, max, cancel)?;
-    Ok(macos_result(&run, max))
-}
-
-/// The macOS result: exactly `output`, `exitCode`, `truncated`, `cancelled` (no `networkAudit`;
-/// see decision N7).
-#[cfg(target_os = "macos")]
-fn macos_result(run: &super::process::RunOutput, max: usize) -> Value {
-    let output = format!(
-        "{}{}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
-    );
-    json!({
-        "output": output.chars().take(max).collect::<String>(),
-        "exitCode": run.exit_code,
-        "truncated": run.truncated || output.chars().count() > max,
-        "cancelled": run.cancelled,
-    })
-}
-
 #[cfg(test)]
 pub(crate) mod network_tests {
     use super::*;
@@ -670,26 +609,5 @@ pub(crate) mod network_tests {
         let changed = dispatch(json!({"command":"echo bye","network":{"mode":"ask","allow":[],"suggested":{}}}))
             .unwrap_err();
         assert_eq!(changed.code, "INVOCATION_CONFLICT", "{changed}");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_result_has_the_four_original_fields() {
-        let run = super::super::process::RunOutput {
-            stdout: b"out".to_vec(),
-            stderr: b"err".to_vec(),
-            exit_code: 3,
-            truncated: false,
-            cancelled: false,
-        };
-        let value = macos_result(&run, 100);
-        assert_result_shape(&value);
-        assert_eq!(value["output"], "outerr");
-        assert_eq!(value["exitCode"], 3);
-        assert_eq!(value["truncated"], false);
-        assert_eq!(value["cancelled"], false);
-        let truncated = macos_result(&run, 4);
-        assert_eq!(truncated["output"], "oute");
-        assert_eq!(truncated["truncated"], true);
     }
 }

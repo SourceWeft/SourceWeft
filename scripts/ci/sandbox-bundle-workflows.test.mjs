@@ -15,6 +15,10 @@ const workflow = async (name) =>
     ),
   );
 const BUNDLE = "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz";
+const DARWIN_BUNDLES = [
+  "sourceweft-sandbox-aarch64-apple-darwin.tar.gz",
+  "sourceweft-sandbox-x86_64-apple-darwin.tar.gz",
+];
 const globToRegExp = (glob) =>
   new RegExp(
     `^${glob
@@ -35,20 +39,26 @@ test("release publishes the signed bundle and its signature for signed policies 
   const candidate = release.steps.find(
     (step) => step.id === "github_release_candidate",
   );
-  for (const file of [BUNDLE, `${BUNDLE}.sig`])
-    assert(
-      covers(signed.with.files, `release-installers/${file}`),
-      `signed release must upload ${file}`,
-    );
-  for (const file of [BUNDLE, `${BUNDLE}.sig`])
-    assert(
-      !covers(candidate.with.files, `release-installers/${file}`),
-      `candidate release must not upload ${file}`,
-    );
-  // Both release bodies must stop claiming local execution is macOS-only.
+  // The Linux bundle and every macOS bundle (both architectures) plus their .sig files.
+  for (const bundle of [BUNDLE, ...DARWIN_BUNDLES])
+    for (const file of [bundle, `${bundle}.sig`]) {
+      assert(
+        covers(signed.with.files, `release-installers/${file}`),
+        `signed release must upload ${file}`,
+      );
+      assert(
+        !covers(candidate.with.files, `release-installers/${file}`),
+        `candidate release must not upload ${file}`,
+      );
+    }
+  // The signed body now says local execution runs on both macOS and Linux x86_64 via the
+  // downloaded signed runtime; neither body may claim it is macOS-only.
   assert.doesNotMatch(signed.with.body, /currently requires macOS/);
+  assert.doesNotMatch(signed.with.body, /requires macOS/);
   assert.match(signed.with.body, /Linux x86_64/);
+  assert.match(signed.with.body, /macOS/);
   assert.doesNotMatch(candidate.with.body, /currently requires macOS/);
+  assert.doesNotMatch(candidate.with.body, /requires macOS in this release/);
 });
 
 test("recovery attaches the bundle only when the original artifacts have one", async () => {
@@ -163,7 +173,8 @@ test("both bundle builds use the one pinned static ripgrep and never apt", async
   );
   assert.match(script, /static-pie linked/);
   const release = (await workflow("desktop-release")).jobs.build.steps.find(
-    (step) => step.name === "Build, sign and verify the sandbox runtime bundle",
+    (step) =>
+      step.name === "Build, sign and verify the sandbox runtime bundle (Linux)",
   );
   const pr = (await workflow("desktop-build")).jobs["sandbox-bundle"].steps;
   const install = pr.find((step) => step.id === "ripgrep");
@@ -186,43 +197,123 @@ test("both bundle builds use the one pinned static ripgrep and never apt", async
     );
 });
 
-test("the signed desktop build produces the bundle in the Linux leg only, before the artifact upload", async () => {
+test("the signed desktop build produces the Linux and both macOS bundles, each signed before packing, before the artifact upload", async () => {
   const { jobs } = await workflow("desktop-release");
   const steps = jobs.build.steps;
-  const build = steps.findIndex(
-    (step) => step.name === "Build, sign and verify the sandbox runtime bundle",
+  const linux = steps.findIndex(
+    (step) =>
+      step.name === "Build, sign and verify the sandbox runtime bundle (Linux)",
+  );
+  const mac = steps.findIndex(
+    (step) =>
+      step.name === "Build, sign and verify the sandbox runtime bundle (macOS)",
   );
   const upload = steps.findIndex((step) =>
     step.uses?.startsWith("actions/upload-artifact"),
   );
-  const installer = steps.findIndex(
-    (step) => step.name === "Verify and describe Linux artifacts",
+  assert(linux !== -1 && mac !== -1);
+  assert(linux < upload && mac < upload);
+
+  // One setup-bun before the bundle steps, gated on Linux OR macOS.
+  const setup = steps.find(
+    (step) =>
+      step.uses?.startsWith("oven-sh/setup-bun") &&
+      /runner\.os == 'macOS'/.test(step.if ?? ""),
   );
-  assert(installer < build && build < upload);
-  const setup = steps[build - 1];
-  assert.match(setup.uses, /^oven-sh\/setup-bun@/);
+  assert(setup, "a setup-bun step must run on macOS");
   assert.equal(setup.with["bun-version"], "1.4.2");
-  for (const step of [setup, steps[build]]) {
-    assert.match(step.if, /runner\.os == 'Linux'/);
-    assert.match(step.if, /exists != 'true'/);
-  }
-  const script = steps[build].run;
+  assert.match(setup.if, /runner\.os == 'Linux' \|\| runner\.os == 'macOS'/);
+  assert.match(setup.if, /exists != 'true'/);
+
+  // The Linux leg: static ripgrep, pack/sign/verify, no codesign.
+  const linuxStep = steps[linux];
+  assert.match(linuxStep.if, /runner\.os == 'Linux'/);
+  assert.match(linuxStep.if, /exists != 'true'/);
   for (const part of [
+    "install-static-ripgrep.sh",
     '--target "$DESKTOP_RELEASE_TARGET"',
-    '--rg "$rg"',
     "sandbox-bundle.mjs pack",
     "sandbox-bundle.mjs verify ",
     "sandbox-bundle.mjs sign",
     "sandbox-bundle.mjs verify-signature",
     "desktop-release/",
   ])
-    assert(script.includes(part), `missing: ${part}`);
-  assert(script.indexOf(" sign ") < script.indexOf("verify-signature"));
+    assert(linuxStep.run.includes(part), `linux leg missing: ${part}`);
+
+  // The macOS leg: mac ripgrep, codesign BEFORE packing, remanifest, pack/sign/verify.
+  const macStep = steps[mac];
+  assert.match(macStep.if, /runner\.os == 'macOS'/);
+  assert.match(macStep.if, /exists != 'true'/);
+  for (const part of [
+    "install-ripgrep-macos.sh",
+    '--target "$DESKTOP_RELEASE_TARGET"',
+    "scripts/sign-macos.sh",
+    "--remanifest",
+    "sandbox-bundle.mjs pack",
+    "sandbox-bundle.mjs verify ",
+    "sandbox-bundle.mjs sign",
+    "sandbox-bundle.mjs verify-signature",
+    "desktop-release/",
+  ])
+    assert(macStep.run.includes(part), `macOS leg missing: ${part}`);
+  // Code-signing and the re-manifest happen before the tarball is packed/hashed/minisigned.
+  assert(macStep.run.indexOf("sign-macos.sh") < macStep.run.indexOf("mjs pack"));
+  assert(macStep.run.indexOf("--remanifest") < macStep.run.indexOf("mjs pack"));
   assert(
-    jobs.build.strategy.matrix.include.some(
-      (leg) => leg.target === "x86_64-unknown-linux-gnu",
-    ),
+    macStep.run.indexOf(" sign ") < macStep.run.indexOf("verify-signature"),
   );
+  // Developer ID in `signed`, ad-hoc in `updater-signed`, same secrets as the installers.
+  assert.match(macStep.run, /DESKTOP_PUBLICATION_POLICY" = "signed"/);
+  assert.match(macStep.run, /identity="\$APPLE_SIGNING_IDENTITY"/);
+  assert.match(macStep.run, /identity="-"/);
+
+  // The Developer ID certificate import reuses the installer's Apple secrets and runs only for
+  // the signed policy, before the macOS bundle step.
+  const importStep = steps.find((step) =>
+    step.name?.startsWith("Import the Developer ID certificate"),
+  );
+  assert(importStep);
+  assert.match(importStep.if, /runner\.os == 'macOS'/);
+  assert.match(importStep.if, /publication_policy == 'signed'/);
+  assert(steps.indexOf(importStep) < mac);
+  assert.doesNotMatch(JSON.stringify(macStep), /secrets\./);
+
+  // Both macOS targets are built by the matrix (as the installers are).
+  for (const target of [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+  ])
+    assert(
+      jobs.build.strategy.matrix.include.some((leg) => leg.target === target),
+      `matrix missing ${target}`,
+    );
+});
+
+test("the macOS release leg uses the pinned macOS ripgrep, not brew", async () => {
+  const pin = JSON.parse(
+    await readFile(new URL("./ripgrep-release.json", import.meta.url), "utf8"),
+  );
+  for (const triple of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+    const entry = pin.darwin[triple];
+    assert.match(entry.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(entry.asset, `ripgrep-${pin.version}-${triple}.tar.gz`);
+    assert.equal(
+      entry.url,
+      `https://github.com/BurntSushi/ripgrep/releases/download/${pin.version}/${entry.asset}`,
+    );
+  }
+  const script = await readFile(
+    new URL("./install-ripgrep-macos.sh", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /shasum -a 256 -c/);
+  assert(
+    script.indexOf("shasum -a 256 -c") < script.indexOf("tar -xzf"),
+    "verify before extracting",
+  );
+  assert.match(script, /Mach-O 64-bit executable/);
+  assert.doesNotMatch(script, /brew install/);
 });
 
 test("pull-request CI packs, signs and verifies the bundle with a throwaway key only", async () => {
@@ -242,4 +333,43 @@ test("pull-request CI packs, signs and verifies the bundle with a throwaway key 
   );
   assert(JSON.stringify(job).includes("tauri signer generate"));
   assert(JSON.stringify(job).includes("sandbox-bundle.mjs verify-signature"));
+});
+
+test("pull-request CI also packs, ad-hoc signs and verifies both macOS bundles with a throwaway key only", async () => {
+  const { jobs } = parse(
+    await readFile(
+      new URL("../../.github/workflows/desktop-build.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+  const job = jobs["sandbox-bundle-macos"];
+  assert(job, "sandbox-bundle-macos job must exist");
+  assert.equal(job["runs-on"], "macos-14");
+  const text = JSON.stringify(job);
+  assert.doesNotMatch(
+    text,
+    /secrets\.|upload-artifact|environment|APPLE_/,
+    "no production secrets, Apple credentials, environment or artifact upload",
+  );
+  assert(text.includes("tauri signer generate"), "throwaway key only");
+  const run = job.steps.find((step) =>
+    step.name?.startsWith("Build, ad-hoc sign, pack and verify both macOS"),
+  ).run;
+  // Both architectures are built, the arm64 natively and the x86_64 cross-compiled here.
+  assert.match(run, /aarch64-apple-darwin x86_64-apple-darwin/);
+  // Ad-hoc code-sign (identity `-`) before packing, then re-manifest over the signed files.
+  assert(run.indexOf("sign-macos.sh") < run.indexOf("mjs pack"));
+  assert(run.indexOf("--remanifest") < run.indexOf("mjs pack"));
+  for (const part of [
+    "install-ripgrep-macos.sh",
+    "sign-macos.sh apps/desktop/sandbox-sidecar/dist/bundle -",
+    "sandbox-bundle.mjs verify ",
+    "sandbox-bundle.mjs verify-signature",
+    "cmp ",
+  ])
+    assert(run.includes(part), `macOS PR job missing: ${part}`);
+  // The darwin unit tests (file set + cross-arch target) run here too.
+  assert(
+    job.steps.some((step) => (step.run ?? "").includes("sandbox-bundle.test.mjs")),
+  );
 });

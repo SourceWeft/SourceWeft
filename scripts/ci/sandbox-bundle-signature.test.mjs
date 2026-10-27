@@ -49,7 +49,13 @@ async function throwawayKey(dir, password) {
 async function packedBundle(dir) {
   const bundle = join(dir, "bundle");
   await mkdir(bundle);
-  const files = { rg: "ripgrep", "srt-sidecar": "sidecar" };
+  // A complete Linux file set (sandbox-bundle validates the set per target on pack/verify).
+  const files = {
+    rg: "ripgrep",
+    "srt-sidecar": "sidecar",
+    "apply-seccomp": "seccomp",
+    "srt-proxy-agent.jar": "PK\u0003\u0004jar",
+  };
   for (const [name, body] of Object.entries(files))
     await writeFile(join(bundle, name), body);
   await writeFile(

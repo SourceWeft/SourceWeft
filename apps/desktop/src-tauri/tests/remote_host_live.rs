@@ -1,13 +1,20 @@
 #![cfg(target_os = "macos")]
 //! Opt-in execution E2E host. This runs the production RemoteHost, Keychain,
-//! WebSocket, SQLite and Seatbelt code. Only the UI enrollment interaction is
-//! supplied by the isolated E2E fixture. It is not a simulated device.
+//! WebSocket, SQLite and sandbox-sidecar (`srt_exec`) command-execution code —
+//! the same srt sidecar path Linux uses, not the retired hand-written Seatbelt
+//! profile. Only the UI enrollment interaction is supplied by the isolated E2E
+//! fixture. It is not a simulated device.
+//!
+//! Like the other real-sandbox tests, each host installs the built
+//! `sandbox-sidecar` bundle into its own `<native-data>/sandbox/current` before
+//! serving, so sandboxed command execution works; build the bundle first.
 #[path = "../src/secret_store.rs"]
 mod secret_store;
 #[path = "../src/remote_host.rs"]
 mod remote_host;
+mod common;
 
-use sourceweft_desktop::local_host::LocalHost;
+use sourceweft_desktop::local_host::{readiness::bundle_dir, LocalHost};
 use std::{
     fs,
     path::PathBuf,
@@ -16,7 +23,7 @@ use std::{
 };
 
 #[test]
-#[ignore = "requires isolated live backend and real macOS Keychain/Seatbelt"]
+#[ignore = "requires isolated live backend, real macOS Keychain and the sandbox bundle"]
 fn serve_real_local_host_for_browser_execution_e2e() {
     assert_eq!(
         std::env::var("SOURCEWEFT_API_BASE_URL").unwrap(),
@@ -32,6 +39,7 @@ fn serve_real_local_host_for_browser_execution_e2e() {
     let run_id = enrollment["runId"].as_str().unwrap();
     assert!(uuid::Uuid::parse_str(run_id).is_ok());
     let data = root.join("native-data");
+    common::copy_bundle_into(&bundle_dir(&data));
     let host = Arc::new(LocalHost::open(&data).unwrap());
     let service = format!("nicelab.sourceweft.execution-e2e.{run_id}");
     let remote = remote_host::RemoteHost::new(host, service).unwrap();
@@ -96,6 +104,7 @@ fn serve_context_host_with_real_authentication() {
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     assert!(uuid::Uuid::parse_str(&run).is_ok());
     let data = root.join(format!("host-{run}"));
+    common::copy_bundle_into(&bundle_dir(&data));
     let host = Arc::new(LocalHost::open(&data).unwrap());
     let remote =
         remote_host::RemoteHost::new(host, format!("nicelab.sourceweft.context-e2e.{run}"))
