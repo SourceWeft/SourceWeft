@@ -25,7 +25,7 @@ use std::{
 /// the init, policy or wrap semantics change (for example a new `InitConfig` policy field).
 /// `Sidecar::start` requires the bundle's `init` reply to report exactly this version, so a
 /// bundle that predates a policy field can never run commands while ignoring that field.
-pub(crate) const SANDBOX_PROTOCOL_VERSION: u32 = 1;
+pub(crate) const SANDBOX_PROTOCOL_VERSION: u32 = 2;
 
 /// `InitConfig` as sent on `init`, mirroring the TypeScript type (camelCase on the wire).
 ///
@@ -705,7 +705,7 @@ mod tests {
     fn matching_protocol_version_starts() {
         let bundle = bundle_with_stub();
         Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(5))
-            .expect("protocolVersion 1 is accepted");
+            .expect("protocolVersion 2 is accepted");
     }
 
     #[test]
@@ -716,6 +716,8 @@ mod tests {
             ("protocol-string", "none"),
             ("protocol-float", "none"),
             ("protocol-0", "0"),
+            // A bundle from before the Windows platform (protocol 1) must be replaced.
+            ("protocol-1", "1"),
         ] {
             let error = start_expecting_error(&init_with_stub_mode(mode));
             assert_eq!(error.code, "BUNDLE_STALE", "{mode}");
@@ -731,12 +733,12 @@ mod tests {
 
     #[test]
     fn newer_protocol_version_is_bundle_newer() {
-        let error = start_expecting_error(&init_with_stub_mode("protocol-2"));
+        let error = start_expecting_error(&init_with_stub_mode("protocol-3"));
         assert_eq!(error.code, "BUNDLE_NEWER");
         assert_eq!(
             error.message,
             format!(
-                "The sandbox runtime (protocol 2) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
+                "The sandbox runtime (protocol 3) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
             )
         );
     }

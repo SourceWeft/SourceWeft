@@ -17,6 +17,7 @@ import {
   assertWorkspaceRootAllowed,
   buildConfig,
   perCommandConfig,
+  perWrapDenies,
   perWrapReadRoots,
   perWrapWriteDenies,
 } from "./policy.js";
@@ -65,6 +66,12 @@ export type ServerDeps = {
    * re-allows for reading so srt's bridge sockets stay reachable; see `buildConfig`.
    */
   runtimeDir?: string;
+  /**
+   * Whether a path exists, for the helper-file checks at `init` and the win32 per-command
+   * credential denies. Defaults to the real filesystem (`existsSync` for helpers, `lstat`
+   * for the denies); tests inject one so Windows-shaped paths can be exercised off Windows.
+   */
+  pathExists?: (path: string) => boolean;
 };
 
 const KNOWN_ERROR_CODES: readonly SidecarErrorCode[] = [
@@ -95,6 +102,33 @@ class SidecarError extends Error {
 
 function notInitialized(): SidecarError {
   return new SidecarError("NOT_INITIALIZED", "sidecar has not received init yet");
+}
+
+/**
+ * The probe's command on win32: `exit 0` is a no-op in both shells the host may choose (`true`
+ * is not a PowerShell command). Linux and macOS keep `true`.
+ */
+const WIN32_PROBE_COMMAND = "exit 0";
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * srt throws `WindowsSandboxError` (a stable string `code` such as `not_provisioned` or
+ * `reinstall_required`) for the failures the host must tell apart; the code is carried as a
+ * `[code] ` prefix on the message so the host can classify without parsing prose. Matched by
+ * name rather than `instanceof` so this file never imports srt (`main.ts` loads it lazily).
+ */
+function windowsErrorMessage(error: unknown): string {
+  if (
+    error instanceof Error &&
+    error.name === "WindowsSandboxError" &&
+    typeof (error as unknown as { code?: unknown }).code === "string"
+  ) {
+    return `[${(error as unknown as { code: string }).code}] ${error.message}`;
+  }
+  return errorMessage(error);
 }
 
 /** How long a cached `ownAddresses()` snapshot is reused for the ask callback. */
@@ -137,17 +171,19 @@ type InitializedState = {
 
 /**
  * Checks every helper path named in `config` — `helpers.ripgrep` always, `helpers.applySeccomp`
- * and `helpers.javaAgentJar` when given, and `bwrapPath` when given — against the filesystem,
- * and throws `HELPER_MISSING` naming the first one that does not exist.
+ * and `helpers.javaAgentJar` when given, `bwrapPath` when given, and on win32 the staged
+ * `windows.srtWin` and the `windows.shell` — against the filesystem, and throws
+ * `HELPER_MISSING` naming the first one that does not exist.
  */
-function checkHelpersExist(config: InitConfig): void {
+function checkHelpersExist(config: InitConfig, pathExists: (path: string) => boolean): void {
   const candidates: string[] = [config.helpers.ripgrep];
   if (config.helpers.applySeccomp !== undefined) candidates.push(config.helpers.applySeccomp);
   if (config.helpers.javaAgentJar !== undefined) candidates.push(config.helpers.javaAgentJar);
   if (config.bwrapPath !== undefined) candidates.push(config.bwrapPath);
+  if (config.windows !== undefined) candidates.push(config.windows.srtWin, config.windows.shell);
 
   for (const path of candidates) {
-    if (!existsSync(path)) {
+    if (!pathExists(path)) {
       throw new SidecarError("HELPER_MISSING", `sandbox helper not found at ${path}`);
     }
   }
@@ -184,6 +220,25 @@ function mergedConfigFor(
       ],
       allowRead: overlay.filesystem?.allowRead ?? [],
       allowWrite: [...base.filesystem.allowWrite, ...(overlay.filesystem?.allowWrite ?? [])],
+    },
+  };
+}
+
+/**
+ * The per-command `customConfig` on win32: only `filesystem`, and only the per-command denies.
+ * srt's Windows wrap throws on a non-empty `allowRead`/`allowWrite` (`srt-win exec` has only
+ * `--deny-*`), so those are empty; everything else (network, ripgrep, the `windows` block)
+ * falls back to what `initialize` was given. `denies` go in both lists: a read deny alone
+ * would leave a credential file overwritable inside the writable workspace.
+ */
+function win32CustomConfig(denies: readonly string[]): Partial<SandboxRuntimeConfig> {
+  const entries = denies.map((path) => ({ path, literal: true as const }));
+  return {
+    filesystem: {
+      allowRead: [],
+      allowWrite: [],
+      denyRead: entries,
+      denyWrite: entries.map((entry) => ({ ...entry })),
     },
   };
 }
@@ -234,6 +289,7 @@ export async function startServer(
   output: Writable,
   deps: ServerDeps,
 ): Promise<void> {
+  const pathExists = deps.pathExists ?? existsSync;
   let state: InitializedState | null = null;
   let ownAddressesCache: Set<string> | null = null;
   let ownAddressesCachedAt = 0;
@@ -261,8 +317,10 @@ export async function startServer(
   }
 
   async function handleInit(config: InitConfig): Promise<{ protocolVersion: number }> {
-    checkHelpersExist(config);
+    // The policy is validated first: a malformed `windows` block or path is POLICY_INVALID even
+    // when a helper is also missing, and `checkHelpersExist` only ever sees validated paths.
     const runtimeConfig = buildConfig(config, deps.runtimeDir);
+    checkHelpersExist(config, pathExists);
     ownAddressesCache = deps.ownAddresses();
     ownAddressesCachedAt = Date.now();
     try {
@@ -270,16 +328,42 @@ export async function startServer(
     } catch (error) {
       throw new SidecarError(
         "SANDBOX_UNAVAILABLE",
-        error instanceof Error ? error.message : String(error),
+        config.platform === "win32" ? windowsErrorMessage(error) : errorMessage(error),
       );
     }
     state = { config, runtimeConfig, wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir) };
     return { protocolVersion: SANDBOX_PROTOCOL_VERSION };
   }
 
-  /** macOS shell for srt's `[binShell, "-c", ...]` argv; Linux keeps srt's own default. */
+  /**
+   * The shell for srt's argv: macOS `/bin/bash`, the host-chosen `bash.exe`/`powershell.exe` on
+   * win32 (srt picks the matching `-c` / `-NoProfile -Command` flags from its name), and srt's
+   * own default on Linux.
+   */
   function binShellFor(config: InitConfig): string | undefined {
-    return config.platform === "darwin" ? "/bin/bash" : undefined;
+    if (config.platform === "darwin") return "/bin/bash";
+    if (config.platform === "win32") return config.windows?.shell;
+    return undefined;
+  }
+
+  /**
+   * The `customConfig` srt receives for a command in `workspaceRoot`: the POSIX platforms get a
+   * complete merged config (see `mergedConfigFor`); win32 gets only the per-command denies,
+   * because its srt refuses a per-command grant.
+   */
+  function customConfigFor(
+    current: InitializedState,
+    workspaceRoot: string,
+  ): Partial<SandboxRuntimeConfig> {
+    if (current.config.platform === "win32") {
+      return win32CustomConfig(perWrapDenies(current.config, workspaceRoot, deps.pathExists));
+    }
+    return mergedConfigFor(
+      current.runtimeConfig,
+      current.wrapReadRoots,
+      workspaceRoot,
+      perWrapWriteDenies(current.config, workspaceRoot, deps.pathExists),
+    );
   }
 
   async function handleWrap(request: {
@@ -293,17 +377,14 @@ export async function startServer(
     // `cwd` is what srt resolves a relative literal path against — neither is otherwise
     // constrained, so a bad value here (relative, outside every init workspace root, or
     // escaping one via `..`) must never reach srt's filesystem policy unchecked.
+    const { platform } = state.config;
     const workspaceRoot = assertWorkspaceRootAllowed(
       request.workspaceRoot,
       state.config.workspaceRoots,
+      platform,
     );
-    const cwd = assertCwdWithinWorkspace(request.cwd, workspaceRoot);
-    const customConfig = mergedConfigFor(
-      state.runtimeConfig,
-      state.wrapReadRoots,
-      workspaceRoot,
-      perWrapWriteDenies(state.config, workspaceRoot),
-    );
+    const cwd = assertCwdWithinWorkspace(request.cwd, workspaceRoot, platform);
+    const customConfig = customConfigFor(state, workspaceRoot);
     try {
       const { argv, env } = await deps.srt.wrapWithSandboxArgv(
         request.command,
@@ -339,17 +420,12 @@ export async function startServer(
     if (workspaceRoot === undefined) {
       throw new SidecarError("SANDBOX_UNAVAILABLE", "init had no workspaceRoots to probe with");
     }
-    const customConfig = mergedConfigFor(
-      state.runtimeConfig,
-      state.wrapReadRoots,
-      workspaceRoot,
-      perWrapWriteDenies(state.config, workspaceRoot),
-    );
+    const customConfig = customConfigFor(state, workspaceRoot);
     let argv: string[];
     let env: Record<string, string>;
     try {
       const wrapped = await deps.srt.wrapWithSandboxArgv(
-        "true",
+        state.config.platform === "win32" ? WIN32_PROBE_COMMAND : "true",
         binShellFor(state.config),
         customConfig,
         undefined,

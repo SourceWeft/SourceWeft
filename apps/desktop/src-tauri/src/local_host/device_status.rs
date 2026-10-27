@@ -418,7 +418,7 @@ mod tests {
         let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
         let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            squashed.contains("config.platform === \"darwin\" ? \"/bin/bash\" : undefined"),
+            squashed.contains("if (config.platform === \"darwin\") return \"/bin/bash\";"),
             "the sidecar's binShellFor no longer returns /bin/bash for darwin: update MACOS_COMMAND_SHELL"
         );
         assert_eq!(MACOS_COMMAND_SHELL, "bash");
@@ -427,8 +427,8 @@ mod tests {
     #[test]
     fn linux_shell_is_srts_default_because_the_sidecar_passes_no_bin_shell() {
         // The sidecar passes `binShellFor(state.config)` as srt's `binShell`, and `binShellFor`
-        // returns `undefined` for every non-darwin platform, so on Linux srt falls back to its own
-        // default (`const shellPath = shell || 'bash'`).
+        // returns `undefined` for linux (darwin has `/bin/bash`, win32 the host-chosen shell), so on
+        // Linux srt falls back to its own default (`const shellPath = shell || 'bash'`).
         let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
         let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
@@ -436,8 +436,10 @@ mod tests {
             "the sidecar no longer routes binShell through binShellFor: update LINUX_COMMAND_SHELL"
         );
         assert!(
-            squashed.contains("config.platform === \"darwin\" ? \"/bin/bash\" : undefined"),
-            "binShellFor no longer returns undefined for non-darwin: update LINUX_COMMAND_SHELL"
+            squashed.contains(
+                "if (config.platform === \"win32\") return config.windows?.shell; return undefined;"
+            ),
+            "binShellFor no longer returns undefined for linux: update LINUX_COMMAND_SHELL"
         );
         assert_eq!(LINUX_COMMAND_SHELL, "bash");
     }

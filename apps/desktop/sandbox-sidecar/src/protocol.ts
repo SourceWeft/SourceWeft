@@ -12,12 +12,14 @@
  * bundle that reports anything else, so a stale sidecar can never silently ignore policy it
  * does not understand. Bump this whenever the init, policy or wrap semantics change (for
  * example a new `InitConfig` policy field), in the same change that updates the Rust constant.
+ *
+ * Version 2 adds the `win32` platform and its `windows` block.
  */
-export const SANDBOX_PROTOCOL_VERSION = 1;
+export const SANDBOX_PROTOCOL_VERSION = 2;
 
 /** Sent once, before any other request, to hand the sidecar its policy inputs. */
 export type InitConfig = {
-  platform: "linux" | "darwin";
+  platform: "linux" | "darwin" | "win32";
   home: string;
   workspaceRoots: string[];
   readRoots: string[];
@@ -29,6 +31,14 @@ export type InitConfig = {
     javaAgentJar?: string;
   };
   bwrapPath?: string;
+  /**
+   * Required on `win32` and rejected elsewhere. Both are absolute drive paths chosen by the
+   * host: `srtWin` is the `srt-win.exe` the sandbox account runs (so it must live where
+   * `Users` can read and execute it, not in the per-user bundle) and `shell` is the
+   * `bash.exe`/`powershell.exe` srt launches commands with. The namespace (sandbox account,
+   * proxy port range) is fixed in the sidecar and never sent by the host.
+   */
+  windows?: { srtWin: string; shell: string };
 };
 
 /** One inbound request line, always carrying its own `id` for correlation with the reply. */
