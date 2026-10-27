@@ -905,7 +905,12 @@ pub(crate) fn list_granted_directory(
             }
         }
     }
-    let directory = open_file_beneath(root, &parts, OpenKind::Dir)?;
+    // No parts lists the root itself, as on unix (where the empty walk opens ".").
+    let directory = if parts.is_empty() {
+        nt::open_beneath(root, &parts, nt::Role::Dir)?
+    } else {
+        open_file_beneath(root, &parts, OpenKind::Dir)?
+    };
     let mut base = root.to_owned();
     for part in &parts {
         base.push(part);
