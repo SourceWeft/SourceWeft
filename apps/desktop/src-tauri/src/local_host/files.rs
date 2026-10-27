@@ -1481,13 +1481,18 @@ mod tests {
         std::os::unix::fs::symlink(target, link).unwrap();
         #[cfg(windows)]
         {
-            let output = std::process::Command::new("cmd")
-                .args(["/D", "/C", "mklink", "/J"])
-                .arg(link)
-                .arg(target)
+            let output = std::process::Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "New-Item -ItemType Junction -Path $env:SW_LINK -Target $env:SW_TARGET -ErrorAction Stop | Out-Null",
+                ])
+                .env("SW_LINK", link)
+                .env("SW_TARGET", target)
                 .output()
                 .unwrap();
-            assert!(output.status.success(), "mklink /J failed: {output:?}");
+            assert!(output.status.success(), "junction creation failed: {output:?}");
         }
     }
 
@@ -1847,13 +1852,18 @@ mod windows_tests {
         std::fs::write(outside.path().join("data.txt"), "outside").unwrap();
         let held = nt::open_beneath(root.path(), &parts(&["dir"]), nt::Role::Dir).unwrap();
         std::fs::rename(root.path().join("dir"), root.path().join("moved")).unwrap();
-        let output = std::process::Command::new("cmd")
-            .args(["/D", "/C", "mklink", "/J"])
-            .arg(root.path().join("dir"))
-            .arg(outside.path())
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path $env:SW_LINK -Target $env:SW_TARGET -ErrorAction Stop | Out-Null",
+            ])
+            .env("SW_LINK", root.path().join("dir"))
+            .env("SW_TARGET", outside.path())
             .output()
             .unwrap();
-        assert!(output.status.success(), "mklink /J failed: {output:?}");
+        assert!(output.status.success(), "junction creation failed: {output:?}");
         // The path now leads outside; the held handle still leads to the original directory.
         assert!(open_file_beneath(root.path(), &parts(&["dir", "data.txt"]), OpenKind::Read).is_err());
         let (mut file, _) = nt::open_entry(&held, "data.txt", nt::Role::Read).unwrap();

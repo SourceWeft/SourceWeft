@@ -164,22 +164,18 @@ test("desktop gear and account menu reuse a single settings dialog", async () =>
 });
 
 test.each(["macos", "windows", "linux"])(
-  "%s groups desktop settings with platform-specific local access",
+  "%s groups desktop settings with local access",
   async (platform) => {
     host.available = true;
     host.platform = platform;
     const dialog = await settings();
     expect(dialog.textContent).toContain("Account & workspace");
     expect(dialog.textContent).toContain("Desktop app");
-    expect(Boolean(button("This computer", dialog))).toBe(
-      platform === "macos" || platform === "linux",
-    );
+    expect(Boolean(button("This computer", dialog))).toBe(true);
     await click(button("About", dialog));
     expect(dialog.textContent).toContain("About content");
-    if (platform === "macos" || platform === "linux") {
-      await click(button("This computer", dialog));
-      expect(dialog.textContent).toContain("Local computer content");
-    }
+    await click(button("This computer", dialog));
+    expect(dialog.textContent).toContain("Local computer content");
   },
 );
 

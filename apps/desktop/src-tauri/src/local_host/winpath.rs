@@ -841,13 +841,18 @@ mod windows_tests {
     use std::process::Command;
 
     fn junction(link: &Path, target: &Path) {
-        let status = Command::new("cmd")
-            .args(["/D", "/C", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
+        let status = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path $env:SW_LINK -Target $env:SW_TARGET -ErrorAction Stop | Out-Null",
+            ])
+            .env("SW_LINK", link)
+            .env("SW_TARGET", target)
             .output()
             .unwrap();
-        assert!(status.status.success(), "mklink /J failed: {status:?}");
+        assert!(status.status.success(), "junction creation failed: {status:?}");
     }
 
     #[test]
