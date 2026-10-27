@@ -152,7 +152,7 @@ switch ($Action) {
     $bash = Bash-Exe
     if (-not (Test-Path -LiteralPath $bash)) { Fail "no Git Bash at $bash to hide" }
     Rename-Item -LiteralPath $bash -NewName 'bash.exe.sw-hidden'
-    Note "hid $bash: the host will choose Windows PowerShell."
+    Note "hid ${bash}: the host will choose Windows PowerShell."
   }
 
   'restore-bash' {
