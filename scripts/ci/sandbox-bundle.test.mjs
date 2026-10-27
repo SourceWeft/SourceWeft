@@ -601,6 +601,157 @@ test("Linux bundle missing apply-seccomp is rejected on pack and on verify", asy
   );
 });
 
+// ---- Windows bundles: .exe names, srt-win.exe, no apply-seccomp, modes by extension
+const WINDOWS_FILES = {
+  "srt-sidecar.exe": { body: "MZ-sidecar" + "x".repeat(1500), exec: false },
+  "rg.exe": { body: "MZ-rg", exec: false },
+  "srt-win.exe": { body: "MZ-srt-win", exec: false },
+  "srt-proxy-agent.jar": { body: "PK\u0003\u0004jar", exec: false },
+};
+
+async function makeWindowsBundle(t, target, files = WINDOWS_FILES) {
+  const dir = join(await temp(t), "bundle");
+  await mkdir(dir);
+  for (const [name, { body, exec }] of Object.entries(files)) {
+    await writeFile(join(dir, name), body);
+    await chmod(join(dir, name), exec ? 0o755 : 0o644);
+  }
+  await writeFile(
+    join(dir, "manifest.json"),
+    JSON.stringify(darwinManifest(target, files), null, 2) + "\n",
+  );
+  return dir;
+}
+
+function tarModes(tar) {
+  const modes = {};
+  for (let offset = 0; tar[offset] !== 0; ) {
+    const header = tar.subarray(offset, offset + 512);
+    const name = header.toString("latin1", 0, header.indexOf(0));
+    const octal = (from, len) =>
+      Number.parseInt(
+        header.toString("latin1", from, from + len).replace(/\0.*/, ""),
+        8,
+      );
+    modes[name] = octal(100, 8);
+    offset += 512 + Math.ceil(octal(124, 12) / 512) * 512;
+  }
+  return modes;
+}
+
+for (const target of ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]) {
+  test(`Windows bundle (${target}) packs and verifies with the windows file set`, async (t) => {
+    const path = await packBundle(
+      await makeWindowsBundle(t, target),
+      join(await temp(t), "out"),
+    );
+    assert.equal(path.endsWith(`sourceweft-sandbox-${target}.tar.gz`), true);
+    const manifest = await verifyTarball(path);
+    assert.equal(manifest.target, target);
+    assert.deepEqual(Object.keys(manifest.files), [
+      "rg.exe",
+      "srt-proxy-agent.jar",
+      "srt-sidecar.exe",
+      "srt-win.exe",
+    ]);
+    const again = await packBundle(
+      await makeWindowsBundle(t, target),
+      join(await temp(t), "out2"),
+    );
+    assert.deepEqual(await readFile(again), await readFile(path));
+  });
+
+  test(`Windows bundle (${target}) gets tar modes from the extension, not from the file system`, async (t) => {
+    // Files built on Windows carry no exec bit; one that did (a bundle assembled elsewhere) must
+    // not leak it onto the jar. .exe -> 0755, everything else 0644.
+    const files = {
+      ...WINDOWS_FILES,
+      "srt-proxy-agent.jar": { body: "PK\u0003\u0004jar", exec: true },
+      "rg.exe": { body: "MZ-rg", exec: false },
+    };
+    const path = await packBundle(
+      await makeWindowsBundle(t, target, files),
+      join(await temp(t), "out"),
+    );
+    const { gunzipSync } = await import("node:zlib");
+    assert.deepEqual(tarModes(gunzipSync(await readFile(path))), {
+      "manifest.json": 0o644,
+      "rg.exe": 0o755,
+      "srt-proxy-agent.jar": 0o644,
+      "srt-sidecar.exe": 0o755,
+      "srt-win.exe": 0o755,
+    });
+  });
+
+  test(`Windows bundle (${target}) rejects apply-seccomp, extension-less names and a missing srt-win.exe`, async (t) => {
+    const reject = async (files, pattern) =>
+      assert.rejects(
+        packBundle(
+          await makeWindowsBundle(t, target, files),
+          join(await temp(t), "o"),
+        ),
+        pattern,
+      );
+    await reject(
+      { ...WINDOWS_FILES, "apply-seccomp": { body: "seccomp", exec: true } },
+      /bundle file set is not the windows set/,
+    );
+    const { "srt-win.exe": _runner, ...noRunner } = WINDOWS_FILES;
+    await reject(noRunner, /bundle file set is not the windows set/);
+    const { "rg.exe": _rg, ...noRg } = WINDOWS_FILES;
+    await reject(
+      { ...noRg, rg: { body: "MZ-rg", exec: true } },
+      /bundle file set is not the windows set/,
+    );
+    // A Linux-shaped file set under a Windows target is the same mistake.
+    await reject(FILES, /bundle file set is not the windows set/);
+  });
+}
+
+test("a Windows file set under a Linux or macOS target is rejected too", async (t) => {
+  for (const target of [TARGET, "aarch64-apple-darwin"]) {
+    const dir = await makeWindowsBundle(t, target);
+    await assert.rejects(
+      packBundle(dir, join(await temp(t), "o")),
+      /bundle file set is not the (linux|darwin) set/,
+    );
+  }
+});
+
+test("verify rejects a Windows .exe that is not 0755 and a non-.exe that is", async (t) => {
+  const target = "x86_64-pc-windows-msvc";
+  const name = `sourceweft-sandbox-${target}.tar.gz`;
+  const entries = (modes) => {
+    const manifest = darwinManifest(target, WINDOWS_FILES);
+    return [
+      {
+        name: "manifest.json",
+        body: JSON.stringify(manifest, null, 2) + "\n",
+      },
+      ...Object.entries(WINDOWS_FILES)
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([file, { body }]) => ({
+          name: file,
+          body,
+          mode: modes[file] ?? (file.endsWith(".exe") ? 0o755 : 0o644),
+        })),
+    ];
+  };
+  await verifyTarball(await writeArchive(t, entries({}), name));
+  await assert.rejects(
+    verifyTarball(
+      await writeArchive(t, entries({ "rg.exe": 0o644 }), name),
+    ),
+    /must be 755: rg\.exe/,
+  );
+  await assert.rejects(
+    verifyTarball(
+      await writeArchive(t, entries({ "srt-proxy-agent.jar": 0o755 }), name),
+    ),
+    /must be 644: srt-proxy-agent\.jar/,
+  );
+});
+
 test("the tar writer rejects names over the 100-byte ustar limit instead of corrupting the header", () => {
   const entry = (name) => [{ name, bytes: Buffer.from("x"), mode: 0o644 }];
   assert.doesNotThrow(() => writeTar(entry("a".repeat(100))));

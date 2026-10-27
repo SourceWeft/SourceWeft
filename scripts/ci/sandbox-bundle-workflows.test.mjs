@@ -316,6 +316,52 @@ test("the macOS release leg uses the pinned macOS ripgrep, not brew", async () =
   assert.doesNotMatch(script, /brew install/);
 });
 
+test("the Windows ripgrep pins are release-shaped and installed through a verify-before-extract script", async () => {
+  const pin = JSON.parse(
+    await readFile(new URL("./ripgrep-release.json", import.meta.url), "utf8"),
+  );
+  // The pre-existing keys (Linux top level, darwin block) are consumed by the shell installers
+  // and stay as they were; Windows is an additive per-triple block.
+  assert.deepEqual(Object.keys(pin), [
+    "version",
+    "asset",
+    "sha256",
+    "url",
+    "darwin",
+    "windows",
+  ]);
+  assert.deepEqual(Object.keys(pin.windows).sort(), [
+    "aarch64-pc-windows-msvc",
+    "x86_64-pc-windows-msvc",
+  ]);
+  const expected = {
+    "x86_64-pc-windows-msvc":
+      "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+    "aarch64-pc-windows-msvc":
+      "e4abca10c3a64ebea742667dd7009449d49403db5460dd6873e389fa2945360f",
+  };
+  for (const [triple, entry] of Object.entries(pin.windows)) {
+    assert.equal(entry.sha256, expected[triple]);
+    assert.equal(entry.asset, `ripgrep-${pin.version}-${triple}.zip`);
+    assert.equal(
+      entry.url,
+      `https://github.com/BurntSushi/ripgrep/releases/download/${pin.version}/${entry.asset}`,
+    );
+  }
+  const script = await readFile(
+    new URL("./install-ripgrep-windows.ps1", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /Get-FileHash/);
+  assert(
+    script.indexOf("Get-FileHash") < script.indexOf("ZipFile"),
+    "verify before extracting",
+  );
+  assert.match(script, /0x8664/);
+  assert.match(script, /0xAA64/i);
+  assert.doesNotMatch(script, /choco|winget|scoop|Invoke-Expression|\biex\b/);
+});
+
 test("pull-request CI packs, signs and verifies the bundle with a throwaway key only", async () => {
   const text = await readFile(
     new URL("../../.github/workflows/desktop-build.yml", import.meta.url),

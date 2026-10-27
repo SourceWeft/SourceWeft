@@ -41,34 +41,49 @@ export function tarballName(target) {
   return `sourceweft-sandbox-${target}.tar.gz`;
 }
 
-// The files `build.ts` lays down, by platform. Both platforms carry the compiled sidecar, the
-// ripgrep binary srt runs and the Java proxy agent; Linux additionally carries srt's
-// `apply-seccomp` helper, which has no macOS build and which the macOS daemon never needs
-// (Seatbelt, not seccomp). The set is validated against the manifest target on pack and verify
-// so a Linux bundle can never ship without apply-seccomp and a macOS bundle can never ship one.
-const COMMON_FILES = ["rg", "srt-proxy-agent.jar", "srt-sidecar"];
-const LINUX_ONLY_FILES = ["apply-seccomp"];
+// The files `build.ts` lays down, by platform (build.ts's `bundlePlan` is the producer of these
+// names). Every platform carries the compiled sidecar, the ripgrep binary srt runs and the Java
+// proxy agent. Linux additionally carries srt's `apply-seccomp` helper, which has no macOS or
+// Windows build and which neither needs (Seatbelt; the Windows sandbox account). Windows
+// additionally carries `srt-win.exe` (the broker and the sandbox-account runner) and names its
+// executables `*.exe`. The set is validated against the manifest target on pack and verify so a
+// Linux bundle can never ship without apply-seccomp, a macOS or Windows bundle can never ship
+// one, and a Windows bundle can never ship without srt-win.exe.
+const FILE_SETS = {
+  linux: ["apply-seccomp", "rg", "srt-proxy-agent.jar", "srt-sidecar"],
+  darwin: ["rg", "srt-proxy-agent.jar", "srt-sidecar"],
+  windows: ["rg.exe", "srt-proxy-agent.jar", "srt-sidecar.exe", "srt-win.exe"],
+};
 
 /** Maps a Rust target triple to the sandbox platform, or throws for an unsupported one. */
 export function platformOfTarget(target) {
   if (target.endsWith("-apple-darwin")) return "darwin";
   if (target.includes("-linux-")) return "linux";
+  if (target.endsWith("-pc-windows-msvc")) return "windows";
   assert.fail(`unsupported bundle target platform: ${target}`);
 }
 
 /** The bundle's file names (manifest.json excluded) must be exactly the set for its platform. */
 export function validateFileSet(target, names) {
   const platform = platformOfTarget(target);
-  const expected = [
-    ...COMMON_FILES,
-    ...(platform === "linux" ? LINUX_ONLY_FILES : []),
-  ].sort();
+  const expected = [...FILE_SETS[platform]].sort();
   const actual = [...names].sort();
   assert.deepEqual(
     actual,
     expected,
     `bundle file set is not the ${platform} set for ${target} (expected: ${expected.join(", ")}; actual: ${actual.join(", ")})`,
   );
+}
+
+/**
+ * The tar mode of a bundle file. Linux and macOS read it off the exec bit the build left on the
+ * file. Windows has no exec bit (a bundle built there reports none), so the mode comes from the
+ * name alone: `*.exe` is 0755, anything else 0644. The installer's extraction accepts exactly
+ * these two modes.
+ */
+function modeFor(platform, name, fileMode) {
+  if (platform === "windows") return name.endsWith(".exe") ? 0o755 : 0o644;
+  return fileMode & 0o111 ? 0o755 : 0o644;
 }
 
 // ---------------------------------------------------------------- manifest
@@ -302,6 +317,7 @@ function gunzip(bytes) {
 export async function packBundle(bundleDir, outDir) {
   const manifestBytes = await readFile(join(bundleDir, MANIFEST_FILENAME));
   const manifest = parseManifest(manifestBytes);
+  const platform = platformOfTarget(manifest.target);
   const files = new Map();
   const modes = new Map();
   for (const entry of await readdir(bundleDir, { withFileTypes: true })) {
@@ -310,7 +326,7 @@ export async function packBundle(bundleDir, outDir) {
     const path = join(bundleDir, entry.name);
     const { mode } = await lstat(path);
     files.set(entry.name, await readFile(path));
-    modes.set(entry.name, mode & 0o111 ? 0o755 : 0o644);
+    modes.set(entry.name, modeFor(platform, entry.name, mode));
   }
   checkAgainstManifest(manifest, files);
   validateFileSet(manifest.target, files.keys());
@@ -350,6 +366,16 @@ export async function verifyTarball(path) {
     manifest.target,
     entries.slice(1).map(({ name }) => name),
   );
+  if (platformOfTarget(manifest.target) === "windows") {
+    for (const { name, mode } of entries.slice(1)) {
+      const expected = modeFor("windows", name, 0);
+      assert.equal(
+        mode,
+        expected,
+        `windows bundle mode must be ${expected.toString(8)}: ${name}`,
+      );
+    }
+  }
   return manifest;
 }
 

@@ -75,6 +75,8 @@ const HOST_TARGETS: Record<string, string> = {
   "linux/arm64": "aarch64-unknown-linux-gnu",
   "darwin/x64": "x86_64-apple-darwin",
   "darwin/arm64": "aarch64-apple-darwin",
+  "win32/x64": "x86_64-pc-windows-msvc",
+  "win32/arm64": "aarch64-pc-windows-msvc",
 };
 
 /** Rust triple -> the `bun build --compile --target` value that produces it. */
@@ -83,13 +85,90 @@ export const BUN_COMPILE_TARGETS: Record<string, string> = {
   "aarch64-unknown-linux-gnu": "bun-linux-arm64",
   "x86_64-apple-darwin": "bun-darwin-x64",
   "aarch64-apple-darwin": "bun-darwin-arm64",
+  "x86_64-pc-windows-msvc": "bun-windows-x64",
+  "aarch64-pc-windows-msvc": "bun-windows-arm64",
 };
 
 const osOf = (triple: string): string => {
   if (triple.endsWith("-apple-darwin")) return "darwin";
   if (triple.includes("-linux-")) return "linux";
+  if (triple.endsWith("-pc-windows-msvc")) return "windows";
   throw new Error(`cannot determine OS of target ${triple}`);
 };
+
+/** Rust triple -> the architecture directory name srt's `vendor/` uses (`x64` or `arm64`). */
+function vendorArchOf(triple: string): "x64" | "arm64" {
+  if (triple.startsWith("x86_64-")) return "x64";
+  if (triple.startsWith("aarch64-")) return "arm64";
+  throw new Error(`cannot determine the architecture of target ${triple}`);
+}
+
+export type BundlePlan = {
+  /** The compiled sidecar's file name in the bundle (`.exe` on Windows). */
+  sidecarName: string;
+  /** The ripgrep file name in the bundle (the binary itself comes from `--rg`). */
+  rgName: string;
+  /**
+   * Files copied verbatim out of the installed srt package, as `from` (relative to the sidecar
+   * package root, POSIX separators) -> `to` (file name in the bundle).
+   */
+  vendorCopies: { from: string; to: string; executable: boolean }[];
+  /** Whether `rg` gets mode 0755 (false on Windows, which has no exec bit). */
+  setExecBit: boolean;
+};
+
+const VENDOR = "node_modules/@anthropic-ai/sandbox-runtime/vendor";
+
+/**
+ * Everything that differs between the three bundle flavours, decided from the Rust target alone
+ * (never from the host), as pure data so it is testable without a Windows machine. Linux adds
+ * srt's `apply-seccomp`; macOS has no extra helper (Seatbelt); Windows adds srt's `srt-win.exe`
+ * (the broker and the sandbox-account runner), takes `.exe` names and has no seccomp. The helper
+ * is taken from the target architecture's vendor directory: it must match the bundle.
+ */
+export function bundlePlan(target: string): BundlePlan {
+  if (!Object.values(HOST_TARGETS).includes(target)) {
+    throw new Error(`${target} is not a supported bundle target`);
+  }
+  const os = osOf(target);
+  const arch = vendorArchOf(target);
+  const jar = {
+    from: `${VENDOR}/java-proxy-agent/srt-proxy-agent.jar`,
+    to: "srt-proxy-agent.jar",
+    executable: false,
+  };
+  if (os === "windows") {
+    return {
+      sidecarName: "srt-sidecar.exe",
+      rgName: "rg.exe",
+      vendorCopies: [
+        {
+          from: `${VENDOR}/srt-win/${arch}/srt-win.exe`,
+          to: "srt-win.exe",
+          executable: false,
+        },
+        jar,
+      ],
+      setExecBit: false,
+    };
+  }
+  return {
+    sidecarName: "srt-sidecar",
+    rgName: "rg",
+    vendorCopies:
+      os === "linux"
+        ? [
+            {
+              from: `${VENDOR}/seccomp/${arch}/apply-seccomp`,
+              to: "apply-seccomp",
+              executable: true,
+            },
+            jar,
+          ]
+        : [jar],
+    setExecBit: true,
+  };
+}
 
 /**
  * The bundle is compiled by Bun. The OS must be the build host's OS: Bun can cross-compile
