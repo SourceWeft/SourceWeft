@@ -946,6 +946,24 @@ fn guard_beats_rule_and_approval() {
     });
 }
 
+/// What the host can see about the sidecar and its proxy listeners, for a failure message: a
+/// command that "could not connect to the proxy" is otherwise indistinguishable from a dead or
+/// not-yet-listening sidecar.
+fn host_diagnostics() -> String {
+    let run = |program: &str, args: &[&str]| {
+        std::process::Command::new(program)
+            .args(args)
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_else(|error| format!("{program}: {error}"))
+    };
+    format!(
+        "sidecar processes:\n{}\nlisteners:\n{}",
+        run("/bin/sh", &["-c", "ps -axo pid,etime,stat,command | grep '[s]rt-sidecar'"]),
+        run("/bin/sh", &["-c", "lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -i 'srt-sid'"]),
+    )
+}
+
 /// An ask nobody answers, in a command with its own (short) timeout: the bridge denies it before
 /// the command is killed, so the command finishes by itself (not exit 124) and its output
 /// carries the `<sandbox_violations>` text with the reason.
@@ -966,7 +984,11 @@ fn unanswered_ask_ends_before_the_command_timeout(timeout_ms: u64, call: &str) {
     assert_ne!(result["exitCode"], 124, "killed by its own timeout: {result}");
     assert_eq!(result["cancelled"], false, "{result}");
     let text = output(&result);
-    assert!(text.contains("<sandbox_violations>"), "{result}");
+    assert!(
+        text.contains("<sandbox_violations>"),
+        "{result}\n--- host diagnostics ---\n{}",
+        host_diagnostics()
+    );
     assert!(text.contains("approval timed out"), "{result}");
     assert!(text.contains("CURL_EXIT="), "the command must have finished by itself: {result}");
     assert!(elapsed < Duration::from_millis(timeout_ms), "{elapsed:?}: {result}");
