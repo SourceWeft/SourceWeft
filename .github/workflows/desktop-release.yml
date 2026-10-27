@@ -237,7 +237,10 @@ jobs:
         shell: pwsh
         run: |
           $rg = @(& ./scripts/ci/install-ripgrep-windows.ps1 "$env:RUNNER_TEMP\ripgrep" $env:DESKTOP_RELEASE_TARGET)[-1]
-          "path=$rg" >> $env:GITHUB_OUTPUT
+          # Forward slashes: `pnpm run` re-escapes every backslash in the arguments it appends to
+          # the script on Windows (D:\a\_temp became D:\\a\\_temp for bun), so the path handed to
+          # `build -- --rg` must not contain any. Windows accepts this form everywhere.
+          "path=$($rg.Replace('\', '/'))" >> $env:GITHUB_OUTPUT
       - name: Build, sign and verify the sandbox runtime bundle (Windows)
         if: runner.os == 'Windows' && steps.existing.outputs.exists != 'true'
         shell: bash
@@ -322,7 +325,10 @@ jobs:
         shell: pwsh
         run: |
           $rg = @(& ./scripts/ci/install-ripgrep-windows.ps1 "$env:RUNNER_TEMP\ripgrep" $env:DESKTOP_RELEASE_TARGET)[-1]
-          "path=$rg" >> $env:GITHUB_OUTPUT
+          # Forward slashes: `pnpm run` re-escapes every backslash in the arguments it appends to
+          # the script on Windows (D:\a\_temp became D:\\a\\_temp for bun), so the path handed to
+          # `build -- --rg` must not contain any. Windows accepts this form everywhere.
+          "path=$($rg.Replace('\', '/'))" >> $env:GITHUB_OUTPUT
       - name: Build, sign and verify the sandbox runtime bundle (Windows)
         if: steps.existing.outputs.exists != 'true'
         shell: bash

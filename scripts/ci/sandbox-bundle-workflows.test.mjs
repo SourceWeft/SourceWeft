@@ -487,10 +487,17 @@ test("pull-request CI builds, runs, throwaway-signs and verifies both Windows bu
   assert.match(sign, /-Throwaway/);
   assert(sign.includes(verify), "signed executables are run again");
   assert(
-    sign.indexOf("sign-windows.ps1") < sign.indexOf("verify-windows-bundle.ps1") &&
-      sign.indexOf("verify-windows-bundle.ps1") < sign.indexOf("--remanifest"),
-    "sign, re-run, then rebuild the manifest over the signed files",
+    sign.indexOf("sign-windows.ps1") < sign.indexOf("verify-windows-bundle.ps1"),
+    "sign, then run the signed executables",
   );
+  // The manifest is rebuilt over the signed files in bash: in PowerShell `pnpm` can be pnpm.ps1,
+  // which swallows the `--` before --remanifest.
+  assert.doesNotMatch(sign, /pnpm|--remanifest/);
+  const remanifest = named("Re-manifest over the signed executables");
+  assert(remanifest > named("Authenticode-sign with a throwaway certificate"));
+  assert(remanifest < named("Pack, sign (throwaway key) and verify"));
+  assert.equal(job.steps[remanifest].shell, "bash");
+  assert.match(job.steps[remanifest].run, /build -- --remanifest/);
   assert.match(sign, /Remove-Item[^\n]*Cert:/, "the throwaway certificate is removed again");
   // Pack/sign/verify exactly as the release does, with a deterministic second pack.
   const pack = run("Pack, sign (throwaway key) and verify");
@@ -559,7 +566,7 @@ test("the signing script accepts only the expected certificate and a real timest
   // self-signed run may report an untrusted chain.
   assert.match(script, /\$signature\.Status -ne 'Valid'/);
   assert.match(script, /TimeStamperCertificate/);
-  assert.match(script, /-notin @\('Valid', 'UnknownError'\)/);
+  assert.match(script, /-notin @\('Valid', 'UnknownError', 'NotTrusted'\)/);
   assert.match(script, /a release signature needs -TimestampUrl/);
 });
 
@@ -679,4 +686,26 @@ test("the Windows arm64 bundle has its own release job: native runner, no instal
       await readFile(new URL("./ripgrep-release.json", import.meta.url), "utf8"),
       new RegExp(target),
     );
+});
+
+test("no backslash reaches pnpm: the ripgrep path is handed off with forward slashes", async () => {
+  // `pnpm run` re-escapes backslashes in forwarded arguments on Windows (CI run for PR #423:
+  // D:\\a\\_temp\\ripgrep\\rg.exe reached bun doubled and copyfile failed with ENOENT).
+  const steps = [
+    ...(await workflow("desktop-build")).jobs["sandbox-bundle-windows"].steps,
+    ...Object.values((await workflow("desktop-release")).jobs).flatMap((job) => job.steps),
+  ].filter((step) => /install-ripgrep-windows\.ps1/.test(step.run ?? ""));
+  assert.equal(steps.length, 3, "PR job, release x64 leg, release arm64 job");
+  for (const step of steps)
+    assert.match(step.run, /"path=\$\(\$rg\.Replace\('\\', '\/'\)\)" >> \$env:GITHUB_OUTPUT/);
+  const script = await readFile(
+    new URL("./build-sandbox-bundle-windows.sh", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /RG_PATH must use forward slashes/);
+  // The PR job's updater key directory is a D:/... path as well.
+  const pack = (await workflow("desktop-build")).jobs["sandbox-bundle-windows"].steps.find((step) =>
+    step.name?.startsWith("Pack, sign (throwaway key)"),
+  ).run;
+  assert.match(pack, /cygpath -m "\$RUNNER_TEMP"/);
 });

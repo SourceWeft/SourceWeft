@@ -546,7 +546,10 @@ jobs:
         shell: pwsh
         run: |
           $rg = @(& ./scripts/ci/install-ripgrep-windows.ps1 "$env:RUNNER_TEMP\ripgrep" $env:TARGET)[-1]
-          "path=$rg" >> $env:GITHUB_OUTPUT
+          # Forward slashes: `pnpm run` re-escapes every backslash in the arguments it appends to
+          # the script on Windows (D:\a\_temp became D:\\a\\_temp for bun), so the path handed to
+          # `build -- --rg` must not contain any. Windows accepts this form everywhere.
+          "path=$($rg.Replace('\', '/'))" >> $env:GITHUB_OUTPUT
       - name: Build the sandbox bundle for the target
         shell: bash
         env:
@@ -572,13 +575,16 @@ jobs:
           finally {
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
           }
-          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --remanifest
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Re-manifest over the signed executables
+        # bash, not pwsh: in PowerShell `pnpm` can resolve to pnpm.ps1, which swallows the `--`.
+        shell: bash
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --remanifest
       - name: Pack, sign (throwaway key) and verify exactly as the release does
         shell: bash
         run: |
           set -euo pipefail
-          keys="$RUNNER_TEMP/sandbox-bundle-keys"
+          # cygpath -m: a D:/... path, no backslashes for pnpm to re-escape.
+          keys="$(cygpath -m "$RUNNER_TEMP")/sandbox-bundle-keys"
           mkdir -p "$keys"
           pnpm --filter @sourceweft/desktop exec tauri signer generate --ci -w "$keys/ci-key" -p ci-throwaway-password
           export TAURI_SIGNING_PRIVATE_KEY="$(cat "$keys/ci-key")"

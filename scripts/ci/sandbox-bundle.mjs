@@ -427,7 +427,9 @@ export function signTarball(path) {
     "signer",
     "sign",
     // pnpm runs the CLI from apps/desktop, so a relative path would point at the wrong file.
-    absolute,
+    // Forward slashes: on Windows pnpm re-escapes backslashes in forwarded arguments, which
+    // would turn D:\a\x into D:\\a\\x; Windows accepts D:/a/x everywhere.
+    absolute.replaceAll("\\", "/"),
   ]);
   return `${absolute}.sig`;
 }

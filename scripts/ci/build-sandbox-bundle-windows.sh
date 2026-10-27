@@ -19,6 +19,13 @@ set -euo pipefail
 : "${RG_PATH:?RG_PATH (the pinned ripgrep) is required}"
 : "${DESKTOP_UPDATE_VERIFIER:?DESKTOP_UPDATE_VERIFIER is required}"
 
+# `pnpm run` doubles every backslash in the arguments it forwards on Windows, so the ripgrep path
+# must arrive with forward slashes (install-ripgrep-windows.ps1's caller converts it). Refuse
+# anything else instead of rewriting it here: a path that is wrong should fail loudly.
+case "$RG_PATH" in
+  *\\*) echo "::error::RG_PATH must use forward slashes: $RG_PATH"; exit 1 ;;
+esac
+
 bundle_dir=apps/desktop/sandbox-sidecar/dist/bundle
 scripts=apps/desktop/sandbox-sidecar/scripts
 

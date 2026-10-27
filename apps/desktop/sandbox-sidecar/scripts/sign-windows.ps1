@@ -9,7 +9,7 @@
 #       chain), exactly like the installer.
 #   pwsh sign-windows.ps1 -BundleDir <dir> -Thumbprint <sha1> -Throwaway
 #       Pull-request CI with a self-signed certificate made for the run: no timestamp, and the
-#       status may only be UnknownError (signed, chain not trusted). It still proves that signing
+#       status may only be UnknownError or NotTrusted (signed, chain not trusted). It still proves that signing
 #       leaves the executables intact (a corrupted or hash-mismatched image is rejected) and that
 #       the bundle can be re-manifested, packed and verified over signed files.
 param(
@@ -67,9 +67,9 @@ foreach ($name in 'srt-sidecar.exe', 'srt-win.exe', 'rg.exe') {
     throw "$name is not signed by the expected certificate (status $($signature.Status))"
   }
   if ($Throwaway) {
-    # A self-signed root is not trusted, which Windows reports as UnknownError; anything that
+    # A self-signed root is not trusted, which Windows reports as UnknownError or NotTrusted; anything that
     # says the image or its signature is damaged (HashMismatch, NotSigned, ...) is a failure.
-    if ($signature.Status -notin @('Valid', 'UnknownError')) {
+    if ($signature.Status -notin @('Valid', 'UnknownError', 'NotTrusted')) {
       throw "$name signature status is $($signature.Status): $($signature.StatusMessage)"
     }
   }
