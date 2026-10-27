@@ -101,11 +101,49 @@ pub fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &st
         "command.execute",
         json!({"workspaceId": workspace.id, "command": command, "timeoutMs": 60000, "maxOutputChars": 20000}),
     )
+    .map(|result| {
+        diagnose_proxy_refusal(&result);
+        result
+    })
     .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
 }
 
 pub fn output(result: &Value) -> &str {
     result["output"].as_str().unwrap()
+}
+
+/// A sandboxed command that "could not connect to localhost port N" never reached the sidecar's
+/// proxy at all. Right then, while the sidecar is still alive, ask the host what it can see —
+/// otherwise the failure is indistinguishable from a dead or not-yet-listening sidecar. Prints to
+/// stderr (shown for a failing test); never fails a test by itself.
+pub fn diagnose_proxy_refusal(result: &Value) {
+    let Some(text) = result["output"].as_str() else { return };
+    let Some(rest) = text.split("Failed to connect to localhost port ").nth(1) else { return };
+    let port: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if port.is_empty() {
+        return;
+    }
+    let run = |script: String| {
+        std::process::Command::new("/bin/sh")
+            .args(["-c", &script])
+            .output()
+            .map(|out| {
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                )
+            })
+            .unwrap_or_else(|error| error.to_string())
+    };
+    eprintln!(
+        "--- proxy refusal diagnostics (port {port}) ---\nsidecars:\n{}\nlisteners on {port}:\n{}\nconnect 127.0.0.1: {}\nconnect ::1: {}\nsockets:\n{}",
+        run("ps -axo pid,ppid,etime,stat,command | grep '[s]rt-sidecar'".into()),
+        run(format!("lsof -nP -iTCP:{port} 2>&1 | head -5")),
+        run(format!("nc -z -w1 127.0.0.1 {port} && echo open || echo refused")),
+        run(format!("nc -z -w1 ::1 {port} && echo open || echo refused")),
+        run(format!("netstat -an 2>/dev/null | grep '\\.{port} ' | head -5")),
+    );
 }
 
 /// Runs `command` after a positive control that must succeed inside the sandbox, and asserts the
@@ -231,6 +269,10 @@ pub fn execute_net_timeout(
         "command.execute",
         payload,
     )
+    .map(|result| {
+        diagnose_proxy_refusal(&result);
+        result
+    })
     .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
 }
 
