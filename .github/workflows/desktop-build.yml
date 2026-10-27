@@ -20,6 +20,8 @@ on:
       - "scripts/ci/desktop-deb*.mjs"
       - "scripts/ci/install-static-ripgrep.sh"
       - "scripts/ci/install-ripgrep-macos.sh"
+      - "scripts/ci/install-ripgrep-windows.ps1"
+      - "scripts/ci/build-sandbox-bundle-windows.sh"
       - "scripts/ci/ripgrep-release.json"
       - "scripts/ci/update-verifier/**"
       - ".github/workflows/desktop-release.yml"
@@ -493,6 +495,107 @@ jobs:
             cmp "$tarball" "$out-again/sourceweft-sandbox-$target.tar.gz"
             echo "::endgroup::"
           done
+
+  sandbox-bundle-windows:
+    name: Sandbox bundle pack, sign and verify (Windows ${{ matrix.arch }})
+    # Each architecture builds natively on its own runner (so the compiled executables are also
+    # run, not just packed): windows-2025 for x86_64 and windows-11-arm for aarch64.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            arch: x64
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      TARGET: ${{ matrix.target }}
+      BUNDLE_DIR: apps/desktop/sandbox-sidecar/dist/bundle
+      DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Same pin as the release build and the real-sandbox jobs. Bun ships a native
+          # windows-aarch64 build from 1.3.10 on (bun-v1.4.2 has bun-windows-aarch64.zip), which
+          # setup-bun v2 selects on the arm64 runner.
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - run: pnpm install --frozen-lockfile
+      - name: Build the signature verifier used for release packages
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Archive tooling unit tests (the Windows file set and Windows host handling)
+        # Only the Windows-specific cases: the Linux and macOS file sets rely on file-system exec
+        # bits a Windows file system does not have, and their jobs run the whole file.
+        run: node --test --test-name-pattern="[Ww]indows" scripts/ci/sandbox-bundle.test.mjs
+      - name: Sidecar build helper and manifest unit tests
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar exec tsx --test tests/build-helpers.test.ts tests/bundle-manifest.test.ts
+      - name: Install the pinned ripgrep (checksum and architecture verified)
+        id: ripgrep
+        shell: pwsh
+        run: |
+          $rg = @(& ./scripts/ci/install-ripgrep-windows.ps1 "$env:RUNNER_TEMP\ripgrep" $env:TARGET)[-1]
+          "path=$rg" >> $env:GITHUB_OUTPUT
+      - name: Build the sandbox bundle for the target
+        shell: bash
+        env:
+          RG_PATH: ${{ steps.ripgrep.outputs.path }}
+        run: pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$TARGET" --rg "$RG_PATH"
+      - name: Verify the built executables (architecture, namespaced srt-win, sidecar namespace)
+        # Runs the compiled srt-sidecar.exe with --print-namespace: the --define that build.ts
+        # passes through the Windows command line must really have reached the executable.
+        shell: pwsh
+        run: ./apps/desktop/sandbox-sidecar/scripts/verify-windows-bundle.ps1 $env:BUNDLE_DIR $env:TARGET
+      - name: Authenticode-sign with a throwaway certificate, re-verify and re-manifest
+        # The release signs the three executables before packing; this proves signing leaves them
+        # runnable (a Bun-compiled executable must still print its namespace) and that the bundle
+        # can be re-manifested over the signed bytes. The certificate is self-signed and created
+        # for this run, so no production certificate or secret is involved.
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=SourceWeft CI throwaway' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(1)
+          try {
+            ./apps/desktop/sandbox-sidecar/scripts/sign-windows.ps1 -BundleDir $env:BUNDLE_DIR -Thumbprint $cert.Thumbprint -Throwaway
+            ./apps/desktop/sandbox-sidecar/scripts/verify-windows-bundle.ps1 $env:BUNDLE_DIR $env:TARGET
+          }
+          finally {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+          }
+          pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --remanifest
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Pack, sign (throwaway key) and verify exactly as the release does
+        shell: bash
+        run: |
+          set -euo pipefail
+          keys="$RUNNER_TEMP/sandbox-bundle-keys"
+          mkdir -p "$keys"
+          pnpm --filter @sourceweft/desktop exec tauri signer generate --ci -w "$keys/ci-key" -p ci-throwaway-password
+          export TAURI_SIGNING_PRIVATE_KEY="$(cat "$keys/ci-key")"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=ci-throwaway-password
+          export TAURI_UPDATER_PUBLIC_KEY="$(cat "$keys/ci-key.pub")"
+          # Relative output paths: GNU tar reads `D:\...` as a remote host:file.
+          out=sandbox-bundle-ci
+          rm -rf "$out" "$out-again"
+          node scripts/ci/sandbox-bundle.mjs pack "$BUNDLE_DIR" "$out"
+          tarball="$out/sourceweft-sandbox-$TARGET.tar.gz"
+          node scripts/ci/sandbox-bundle.mjs verify "$tarball"
+          node scripts/ci/sandbox-bundle.mjs sign "$tarball"
+          node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
+          tar -tvzf "$tarball"
+          # Packing is deterministic: a second pack of the same signed bundle is byte-identical.
+          node scripts/ci/sandbox-bundle.mjs pack "$BUNDLE_DIR" "$out-again"
+          cmp "$tarball" "$out-again/sourceweft-sandbox-$TARGET.tar.gz"
 
   macos-sandbox:
     name: Real sandbox suite on macOS

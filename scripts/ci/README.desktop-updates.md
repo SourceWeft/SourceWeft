@@ -282,7 +282,7 @@ directory records update status, versions, channel and safe error codes; it is
 truncated once it exceeds 256 KiB. UI errors and CI receipts provide additional
 diagnostics. Credentials, workfiles and chat content are never included.
 
-## Sandbox runtime bundle (macOS and Linux)
+## Sandbox runtime bundle (macOS, Linux and Windows)
 
 Local device execution needs the sandbox runtime. It is not part of the installer: the app
 downloads it only after the user clicks Install in the app. The file set is per platform:
@@ -292,6 +292,10 @@ downloads it only after the user clicks Install in the app. The file set is per 
   `srt-proxy-agent.jar` — **no** `apply-seccomp` (Seatbelt, not seccomp). `pack`/`verify`
   in `sandbox-bundle.mjs` validate the file set against the manifest target, so a Linux
   bundle can never ship without `apply-seccomp` and a macOS bundle can never ship one.
+- Windows (`x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`): `srt-sidecar.exe`, `rg.exe`,
+  `srt-win.exe` (srt's namespaced broker and sandbox-account runner, taken from the target
+  architecture's vendor directory), `srt-proxy-agent.jar` — no `apply-seccomp`. Windows has no
+  exec bit, so the packer gives `*.exe` mode 0755 by extension.
 
 What is published, per `signed` or `updater-signed` release, as GitHub Release assets
 next to the installers (one pair per target):
@@ -299,6 +303,8 @@ next to the installers (one pair per target):
 - `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz` (+ `.sig`)
 - `sourceweft-sandbox-aarch64-apple-darwin.tar.gz` (+ `.sig`)
 - `sourceweft-sandbox-x86_64-apple-darwin.tar.gz` (+ `.sig`)
+- `sourceweft-sandbox-x86_64-pc-windows-msvc.tar.gz` (+ `.sig`)
+- `sourceweft-sandbox-aarch64-pc-windows-msvc.tar.gz` (+ `.sig`)
 
 `candidate` releases publish none of them (they have no updater key, so the app could not
 verify a download anyway). The bundles are **not** mirrored to `download.sourceweft.com`
@@ -313,7 +319,9 @@ before the artifact upload):
    verified before extraction. Linux uses `install-static-ripgrep.sh` (static musl, rejects
    a dynamically linked binary); macOS uses `install-ripgrep-macos.sh <dir> <triple>` (the
    `darwin` block of the same JSON; a Mach-O binary of the requested architecture). The
-   runner's package-manager ripgrep is never bundled. To bump ripgrep, change that one file
+   Windows uses `install-ripgrep-windows.ps1 <dir> <triple>` (the `windows` block: a zip,
+   checked before extraction, whose `rg.exe` must be a PE binary of the requested
+   architecture). The runner's package-manager ripgrep is never bundled. To bump ripgrep, change that one file
    with the checksums from the official release.
 1. `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target <triple> --rg <rg>`
    (Bun 1.4.2) writes `dist/bundle/` including `manifest.json`: `schemaVersion` 1,
@@ -329,6 +337,21 @@ before the artifact upload):
    `updater-signed`, exactly like the installers. Code-signing rewrites the binaries, so
    `build.ts --remanifest` then rebuilds `manifest.json` over the signed files so their hashes
    match what is packed. Linux never code-signs and never runs these steps.
+   **Windows** (`scripts/ci/build-sandbox-bundle-windows.sh`): after the build,
+   `verify-windows-bundle.ps1` checks the PE machine types, that `srt-win.exe` is the
+   namespaced build and — by running the compiled `srt-sidecar.exe --print-namespace` — that the
+   `--define __SRT_WIN_NAMESPACE__="sourceweft"` really reached the executable (a define that
+   lost its quotes on the Windows command line still builds, silently with upstream names).
+   Only in the `signed` policy, `sign-windows.ps1` then Authenticode-signs `srt-sidecar.exe`,
+   `srt-win.exe` and `rg.exe` with signtool, using the installer's certificate
+   (`WINDOWS_CERTIFICATE_THUMBPRINT`, imported by the workflow) and `WINDOWS_TIMESTAMP_URL`
+   (every signature must verify as `Valid` and carry a timestamp), the executables are run
+   again, and `build.ts --remanifest` rebuilds the manifest over the signed bytes. The
+   `updater-signed` policy has no certificate and leaves them unsigned. The x64 bundle is built
+   by the Windows x64 `build` leg beside the installer; the aarch64 bundle has no installer and
+   is built on a native `windows-11-arm` runner by the `sandbox-bundle-windows-arm64` job. Its
+   artifact is `desktop-release-aarch64-pc-windows-msvc-<sha>`, which the recovery workflow
+   treats as optional (releases built before it have none).
 3. `node scripts/ci/sandbox-bundle.mjs pack` writes a deterministic archive (ustar in
    gzip; sorted entries, zero mtime/uid/gid, modes 0755/0644, `manifest.json` first,
    plain files at the archive root only). `verify` re-reads it and rejects absolute, `..`,
@@ -349,9 +372,11 @@ The app derives the download location from its own version
 plus `.sig`), verifies the signature with the public key embedded in the build, and only
 then extracts and checks the manifest. Builds without an embedded key cannot install it.
 Pull requests that touch the desktop app, the sidecar or these scripts run the
-`sandbox-bundle` job (Linux) and `sandbox-bundle-macos` job (both macOS targets) in
+`sandbox-bundle` job (Linux), `sandbox-bundle-macos` job (both macOS targets) and
+`sandbox-bundle-windows` job (`windows-2025` x64 and `windows-11-arm` arm64, each natively) in
 `desktop-build.yml`, which build the bundle and run the same pack, sign and verify steps with
-a throwaway key (ad-hoc code-signing on macOS); nothing is uploaded.
+a throwaway key (ad-hoc code-signing on macOS; a throwaway self-signed Authenticode
+certificate on Windows); nothing is uploaded.
 
 ## Linux packaging
 

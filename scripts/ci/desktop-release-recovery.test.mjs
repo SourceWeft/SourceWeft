@@ -172,6 +172,39 @@ test("missing, duplicate, expired and wrong-commit artifacts are rejected", () =
     assert.throws(() => validateRecoverySource(input));
   }
 });
+test("the bundle-only Windows arm64 artifact is optional but, once present, held to the same rules", () => {
+  const withBundle = () => {
+    const input = fixture();
+    input.artifacts.push({
+      name: `desktop-release-aarch64-pc-windows-msvc-${input.sha}`,
+      expired: false,
+      size_in_bytes: 100,
+    });
+    return input;
+  };
+  // Releases built before the bundle existed have four artifacts; newer ones have five.
+  assert.equal(validateRecoverySource(fixture()).length, 4);
+  const names = validateRecoverySource(withBundle());
+  assert.equal(names.length, 5);
+  assert(names.includes(`desktop-release-aarch64-pc-windows-msvc-${"a".repeat(40)}`));
+  for (const kind of ["duplicate", "expired", "wrong-commit", "empty"]) {
+    const input = withBundle();
+    const extra = input.artifacts.at(-1);
+    if (kind === "duplicate") input.artifacts.push({ ...extra });
+    if (kind === "expired") extra.expired = true;
+    if (kind === "wrong-commit") extra.name = extra.name.replace(input.sha, "b".repeat(40));
+    if (kind === "empty") extra.size_in_bytes = 0;
+    assert.throws(() => validateRecoverySource(input), kind);
+  }
+  // Any other extra artifact is still refused.
+  const unknown = fixture();
+  unknown.artifacts.push({
+    name: `desktop-release-unknown-${unknown.sha}`,
+    expired: false,
+    size_in_bytes: 100,
+  });
+  assert.throws(() => validateRecoverySource(unknown), /Exact original desktop artifacts/);
+});
 test("published image must identify the exact release source, architecture and version", () => {
   const config = {
     architecture: "amd64",

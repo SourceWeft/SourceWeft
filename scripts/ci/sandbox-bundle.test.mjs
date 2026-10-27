@@ -16,7 +16,12 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { packBundle, verifyTarball, writeTar } from "./sandbox-bundle.mjs";
+import {
+  packBundle,
+  spawnInvocation,
+  verifyTarball,
+  writeTar,
+} from "./sandbox-bundle.mjs";
 
 const script = fileURLToPath(new URL("./sandbox-bundle.mjs", import.meta.url));
 const TARGET = "x86_64-unknown-linux-gnu";
@@ -756,4 +761,36 @@ test("the tar writer rejects names over the 100-byte ustar limit instead of corr
   const entry = (name) => [{ name, bytes: Buffer.from("x"), mode: 0o644 }];
   assert.doesNotThrow(() => writeTar(entry("a".repeat(100))));
   assert.throws(() => writeTar(entry("a".repeat(101))), /100-byte ustar limit/);
+});
+
+test("spawnInvocation runs pnpm through the shell on Windows only, quoting what needs it", () => {
+  const args = ["--filter", "@sourceweft/desktop", "exec", "tauri", "signer", "sign"];
+  // POSIX hosts spawn pnpm directly, byte-identical to before.
+  assert.deepEqual(spawnInvocation("pnpm", [...args, "/tmp/a b/x.tar.gz"], "linux"), {
+    command: "pnpm",
+    args: [...args, "/tmp/a b/x.tar.gz"],
+    shell: false,
+  });
+  assert.deepEqual(spawnInvocation("pnpm", args, "darwin").shell, false);
+  // On Windows pnpm is a .cmd shim that spawnSync cannot start without a shell; the whole command
+  // line is one string (no args array with shell: true) and a path with a space is quoted.
+  assert.deepEqual(
+    spawnInvocation("pnpm", [...args, "C:\\Users\\a b\\x.tar.gz"], "win32"),
+    {
+      command:
+        'pnpm --filter @sourceweft/desktop exec tauri signer sign "C:\\Users\\a b\\x.tar.gz"',
+      args: [],
+      shell: true,
+    },
+  );
+  assert.equal(
+    spawnInvocation("pnpm", ['say "hi"'], "win32").command,
+    'pnpm "say ""hi"""',
+  );
+  // Anything else (the verifier executable) is never routed through a shell.
+  assert.deepEqual(spawnInvocation("C:\\v\\verifier.exe", ["a", "b"], "win32"), {
+    command: "C:\\v\\verifier.exe",
+    args: ["a", "b"],
+    shell: false,
+  });
 });

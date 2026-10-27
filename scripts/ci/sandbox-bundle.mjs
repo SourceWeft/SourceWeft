@@ -381,9 +381,26 @@ export async function verifyTarball(path) {
 
 // ------------------------------------------------------------------ signing
 
+/**
+ * How to spawn `command`. On Windows `pnpm` is a `.cmd` shim, which `spawnSync` cannot start
+ * without a shell (and Node refuses to run a `.cmd` directly), so it goes through the shell as
+ * ONE command-line string with any argument that needs it quoted. Everything else, and every
+ * POSIX host, spawns the executable directly with an argument vector, as before.
+ */
+export function spawnInvocation(command, args, platform = process.platform) {
+  if (platform !== "win32" || command !== "pnpm") {
+    return { command, args, shell: false };
+  }
+  const quote = (arg) =>
+    /^[\w@+=:,./\\-]+$/.test(arg) ? arg : `"${arg.replaceAll('"', '""')}"`;
+  return { command: [command, ...args.map(quote)].join(" "), args: [], shell: true };
+}
+
 function run(command, args, env) {
-  const result = spawnSync(command, args, {
+  const invocation = spawnInvocation(command, args);
+  const result = spawnSync(invocation.command, invocation.args, {
     stdio: "inherit",
+    shell: invocation.shell,
     env: { ...process.env, ...env },
   });
   if (result.error) throw result.error;

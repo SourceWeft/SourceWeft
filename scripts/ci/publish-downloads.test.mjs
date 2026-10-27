@@ -134,6 +134,8 @@ test("sandbox bundle assets beside the installers are not installers", async (t)
     "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz",
     "sourceweft-sandbox-aarch64-apple-darwin.tar.gz",
     "sourceweft-sandbox-x86_64-apple-darwin.tar.gz",
+    "sourceweft-sandbox-x86_64-pc-windows-msvc.tar.gz",
+    "sourceweft-sandbox-aarch64-pc-windows-msvc.tar.gz",
   ]) {
     await writeFile(join(dir, bundle), "bundle bytes");
     await writeFile(join(dir, `${bundle}.sig`), "c2ln");
@@ -162,7 +164,9 @@ test("manifest preserves actual architectures and separates preview/stable", asy
       ["windows", "x64"],
     ],
   );
-  assert.equal(prepared.manifest.artifacts[1].localExecutionSupported, false);
+  // macOS and Windows run local execution; Linux AppImage does not (see the Linux assertion above).
+  assert.equal(prepared.manifest.artifacts[0].localExecutionSupported, true);
+  assert.equal(prepared.manifest.artifacts[1].localExecutionSupported, true);
   assert(!JSON.stringify(prepared.manifest).includes("test-secret"));
   const prefixed = await prepareManifest(
     { ...config, prefix: "apps/desktop" },

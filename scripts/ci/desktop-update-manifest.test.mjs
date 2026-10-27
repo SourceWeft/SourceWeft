@@ -68,6 +68,8 @@ test("sandbox bundle assets beside the update packages are not update packages",
     "sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz",
     "sourceweft-sandbox-aarch64-apple-darwin.tar.gz",
     "sourceweft-sandbox-x86_64-apple-darwin.tar.gz",
+    "sourceweft-sandbox-x86_64-pc-windows-msvc.tar.gz",
+    "sourceweft-sandbox-aarch64-pc-windows-msvc.tar.gz",
   ]) {
     await writeFile(join(dir, bundle), "bundle bytes");
     await writeFile(join(dir, `${bundle}.sig`), "c2ln");

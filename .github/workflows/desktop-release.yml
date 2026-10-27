@@ -134,9 +134,13 @@ jobs:
       # installers use. Linux x86_64 ships a static ripgrep and srt's apply-seccomp helper; macOS
       # (both architectures) ships a Mach-O ripgrep and no apply-seccomp, and additionally
       # code-signs the binaries (Developer ID + hardened runtime + entitlements in `signed`,
-      # ad-hoc in `updater-signed`) BEFORE the tarball is hashed and minisigned.
+      # ad-hoc in `updater-signed`) BEFORE the tarball is hashed and minisigned. Windows x86_64 ships a
+# PE ripgrep, srt-win.exe and the sidecar as .exe files, and under `signed` Authenticode-signs
+# them with the installer's certificate before the tarball is hashed and minisigned; the
+# aarch64 Windows bundle has no installer and is built by the `sandbox-bundle-windows-arm64` job
+# below on a native arm64 runner.
       - uses: oven-sh/setup-bun@v2
-        if: (runner.os == 'Linux' || runner.os == 'macOS') && steps.existing.outputs.exists != 'true'
+        if: (runner.os == 'Linux' || runner.os == 'macOS' || runner.os == 'Windows') && steps.existing.outputs.exists != 'true'
         with:
           bun-version: 1.4.2
       - name: Build, sign and verify the sandbox runtime bundle (Linux)
@@ -227,10 +231,108 @@ jobs:
             codesign -dvv "apps/desktop/sandbox-sidecar/dist/bundle/$file" 2>&1 | grep -E 'Signature=|Authority=|flags=' || true
           done
           cp "$tarball" "$tarball.sig" desktop-release/
+      - name: Install the pinned Windows ripgrep for the sandbox runtime bundle
+        id: ripgrep_windows
+        if: runner.os == 'Windows' && steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $rg = @(& ./scripts/ci/install-ripgrep-windows.ps1 "$env:RUNNER_TEMP\ripgrep" $env:DESKTOP_RELEASE_TARGET)[-1]
+          "path=$rg" >> $env:GITHUB_OUTPUT
+      - name: Build, sign and verify the sandbox runtime bundle (Windows)
+        if: runner.os == 'Windows' && steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier.exe
+          RG_PATH: ${{ steps.ripgrep_windows.outputs.path }}
+        run: bash scripts/ci/build-sandbox-bundle-windows.sh
       - uses: actions/upload-artifact@v4
         if: steps.existing.outputs.exists != 'true'
         with:
           name: desktop-release-${{ matrix.target }}-${{ github.sha }}
+          path: desktop-release/*
+          if-no-files-found: error
+          retention-days: 30
+  # The aarch64 Windows sandbox runtime bundle. The desktop installer is x64-only, so there is no
+  # installer, updater package or manifest for this target: the job only builds, signs, packs and
+  # uploads sourceweft-sandbox-aarch64-pc-windows-msvc.tar.gz(.sig) beside the other bundles. It
+  # builds on a native arm64 runner so the executables it ships are the ones it ran. Its artifact
+  # is named like the others (`desktop-release-<target>-<sha>`) so the release workflow's single
+  # download pattern picks it up, and so a rerun reuses it the same way.
+  sandbox-bundle-windows-arm64:
+    name: Sandbox runtime bundle (Windows arm64)
+    environment: desktop-release
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    env:
+      DESKTOP_RELEASE_TARGET: aarch64-pc-windows-msvc
+      SOURCEWEFT_SIGNED_RELEASE: "true"
+      DESKTOP_PUBLICATION_POLICY: ${{ inputs.publication_policy }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      WINDOWS_TIMESTAMP_URL: ${{ inputs.publication_policy == 'signed' && vars.WINDOWS_TIMESTAMP_URL || '' }}
+      DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Reuse completed signed artifacts on reruns
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/reuse-desktop-release.mjs
+      - uses: dtolnay/rust-toolchain@1.94.1
+        if: steps.existing.outputs.exists != 'true'
+      - uses: oven-sh/setup-bun@v2
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          # bun-v1.4.2 ships bun-windows-aarch64.zip; setup-bun v2 selects it on this runner.
+          bun-version: 1.4.2
+      - run: pnpm install --frozen-lockfile
+        if: steps.existing.outputs.exists != 'true'
+      - run: node scripts/ci/verify-desktop-tag.mjs
+        if: github.ref_type == 'tag'
+      - name: Import Windows signing certificate
+        if: inputs.publication_policy == 'signed' && steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD) { throw "Windows signing credentials are required" }
+          $path = Join-Path $env:RUNNER_TEMP 'desktop-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
+            $signer = @($cert | Where-Object HasPrivateKey)
+            if ($signer.Count -ne 1) { throw "Expected one signing certificate" }
+            "WINDOWS_CERTIFICATE_THUMBPRINT=$($signer[0].Thumbprint)" >> $env:GITHUB_ENV
+          } finally { Remove-Item $path -ErrorAction SilentlyContinue }
+      - name: Build signature verifier
+        if: steps.existing.outputs.exists != 'true'
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Install the pinned Windows ripgrep for the sandbox runtime bundle
+        id: ripgrep_windows
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $rg = @(& ./scripts/ci/install-ripgrep-windows.ps1 "$env:RUNNER_TEMP\ripgrep" $env:DESKTOP_RELEASE_TARGET)[-1]
+          "path=$rg" >> $env:GITHUB_OUTPUT
+      - name: Build, sign and verify the sandbox runtime bundle (Windows)
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        env:
+          RG_PATH: ${{ steps.ripgrep_windows.outputs.path }}
+        run: bash scripts/ci/build-sandbox-bundle-windows.sh
+      - uses: actions/upload-artifact@v4
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          name: desktop-release-${{ env.DESKTOP_RELEASE_TARGET }}-${{ github.sha }}
           path: desktop-release/*
           if-no-files-found: error
           retention-days: 30

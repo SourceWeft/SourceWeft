@@ -72,7 +72,7 @@ export async function describeInstaller(directory, platform, arch, version) {
     ...(await digest(createReadStream(path))),
     distributionSigned: false,
     notarized: false,
-    localExecutionSupported: platform === "darwin",
+    localExecutionSupported: platform === "darwin" || platform === "win32",
   };
 }
 
