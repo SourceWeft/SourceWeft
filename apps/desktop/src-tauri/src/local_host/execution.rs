@@ -290,7 +290,9 @@ impl LocalHost {
                 .insert(id.into(), cancel.clone());
             // Network asks raised while this command runs are attributed to this invocation
             // (and denied if it is cancelled or ends).
-            let _running = self.network.begin(id, cancel.clone());
+            // The command is killed `timeout` ms after it starts; asks must settle before that.
+            let kill_deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
+            let _running = self.network.begin(id, cancel.clone(), kill_deadline);
             // Decision N7: the macOS Seatbelt path keeps its public-only proxy and ignores the
             // policy (its result also has no `networkAudit`); only Linux enforces it.
             #[cfg(target_os = "macos")]
@@ -602,8 +604,27 @@ fn macos_result(run: &super::process::RunOutput, max: usize) -> Value {
 }
 
 #[cfg(test)]
-mod network_tests {
+pub(crate) mod network_tests {
     use super::*;
+
+    /// The shape every result has: the four original fields with the right types, and nothing
+    /// but the optional extras a sandboxed run adds (`networkAudit`, `networkAuditError`,
+    /// `vaultWarning`). The integration tests have the same check in `tests/common/mod.rs`.
+    #[allow(dead_code)]
+    pub(crate) fn assert_result_shape(result: &Value) {
+        let object = result.as_object().expect("a result object");
+        assert!(object.get("output").is_some_and(Value::is_string), "{result}");
+        assert!(object.get("exitCode").is_some_and(Value::is_i64), "{result}");
+        assert!(object.get("truncated").is_some_and(Value::is_boolean), "{result}");
+        assert!(object.get("cancelled").is_some_and(Value::is_boolean), "{result}");
+        for key in object.keys() {
+            assert!(
+                ["output", "exitCode", "truncated", "cancelled", "networkAudit", "networkAuditError", "vaultWarning"]
+                    .contains(&key.as_str()),
+                "unexpected result key {key:?}: {result}"
+            );
+        }
+    }
     // Not imported at file level on every platform (it is cfg-gated there).
     use serde_json::json;
 
@@ -653,7 +674,7 @@ mod network_tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_result_shape_is_unchanged_and_has_no_audit() {
+    fn macos_result_has_the_four_original_fields() {
         let run = super::super::process::RunOutput {
             stdout: b"out".to_vec(),
             stderr: b"err".to_vec(),
@@ -662,10 +683,11 @@ mod network_tests {
             cancelled: false,
         };
         let value = macos_result(&run, 100);
-        assert_eq!(
-            value,
-            json!({"output":"outerr","exitCode":3,"truncated":false,"cancelled":false})
-        );
+        assert_result_shape(&value);
+        assert_eq!(value["output"], "outerr");
+        assert_eq!(value["exitCode"], 3);
+        assert_eq!(value["truncated"], false);
+        assert_eq!(value["cancelled"], false);
         let truncated = macos_result(&run, 4);
         assert_eq!(truncated["output"], "oute");
         assert_eq!(truncated["truncated"], true);

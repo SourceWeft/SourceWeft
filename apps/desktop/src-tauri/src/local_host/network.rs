@@ -22,8 +22,15 @@ use std::{
 };
 
 /// How long the host waits for the backend before denying (decision N8: the backend's own
-/// window is 120 s; this is the backstop).
-pub const ASK_TIMEOUT: Duration = Duration::from_secs(150);
+/// window is 120 s; this is the backstop). Deliberately a few seconds below the sidecar's own
+/// 150 s ask timeout (`ASK_TIMEOUT_MS` in `network-policy.ts`), which is only a backstop for a
+/// host that never answers: the bridge must be the first to deny, so the denial carries the
+/// bridge's reason.
+pub const ASK_TIMEOUT: Duration = Duration::from_secs(145);
+/// An ask is never held until the command's own kill deadline: the denial must reach the
+/// sidecar early enough for the command to notice it and finish by itself (so its output
+/// carries the `<sandbox_violations>` text) instead of being killed with exit 124.
+pub const DEADLINE_MARGIN: Duration = Duration::from_secs(10);
 /// How often a waiting ask re-checks whether its command was cancelled.
 const CANCEL_POLL: Duration = Duration::from_millis(100);
 
@@ -118,6 +125,8 @@ struct Pending {
 
 struct Active {
     invocation: String,
+    /// When the command is killed for running too long (start + its `timeoutMs`).
+    kill_deadline: Instant,
     /// The sidecar's id for the command this invocation is running, registered before the
     /// command is wrapped. An ask naming any other command is not this invocation's.
     command_id: Option<String>,
@@ -142,6 +151,7 @@ struct State {
 struct Inner {
     state: Mutex<State>,
     timeout: Duration,
+    margin: Duration,
 }
 
 /// Cheap to clone; every clone shares one state.
@@ -212,10 +222,17 @@ impl Drop for OutboundLease {
 
 impl NetworkBridge {
     pub fn with_timeout(timeout: Duration) -> Self {
+        Self::with_limits(timeout, DEADLINE_MARGIN)
+    }
+
+    /// `timeout`: the longest an ask waits. `margin`: how long before the command's kill
+    /// deadline an ask must be settled (tests shrink both).
+    pub fn with_limits(timeout: Duration, margin: Duration) -> Self {
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(State::default()),
                 timeout,
+                margin,
             }),
         }
     }
@@ -265,9 +282,19 @@ impl NetworkBridge {
 
     /// Records `invocation` as running a command. Commands run serially per device; if more
     /// than one is somehow active, asks are treated as having no active command.
-    pub fn begin(&self, invocation: &str, cancel: Arc<AtomicBool>) -> ActiveCommand {
+    ///
+    /// `kill_deadline` is when the command will be killed for running too long. Asks wait at
+    /// most until `margin` before it, and an ask that arrives later than that is denied at once
+    /// (`approval timed out`), so a denial always reaches the command while it can still react.
+    pub fn begin(
+        &self,
+        invocation: &str,
+        cancel: Arc<AtomicBool>,
+        kill_deadline: Instant,
+    ) -> ActiveCommand {
         self.state().active.push(Active {
             invocation: invocation.to_string(),
+            kill_deadline,
             command_id: None,
             cancel,
         });
@@ -348,6 +375,7 @@ impl NetworkBridge {
         }
         let (answer, receiver) = mpsc::channel();
         let ask_id = uuid::Uuid::new_v4().to_string();
+        let wait_budget;
         let cancel = {
             let mut state = self.state();
             let Some((connection, outbound)) = state
@@ -367,6 +395,17 @@ impl NetworkBridge {
                 return Decision::deny("ask for a different command");
             }
             let cancel = state.active[0].cancel.clone();
+            // Settle the ask before the command's own kill deadline (see `DEADLINE_MARGIN`).
+            let remaining = state.active[0]
+                .kill_deadline
+                .saturating_duration_since(Instant::now());
+            let Some(budget) = remaining.checked_sub(self.inner.margin) else {
+                return Decision::deny("approval timed out");
+            };
+            if budget.is_zero() {
+                return Decision::deny("approval timed out");
+            }
+            wait_budget = budget.min(self.inner.timeout);
             state.pending.insert(
                 ask_id.clone(),
                 Pending {
@@ -388,7 +427,7 @@ impl NetworkBridge {
             }
             cancel
         };
-        let deadline = Instant::now() + self.inner.timeout;
+        let deadline = Instant::now() + wait_budget;
         loop {
             let now = Instant::now();
             let wait = deadline.saturating_duration_since(now).min(CANCEL_POLL);
@@ -433,9 +472,14 @@ mod tests {
         (bridge.attach(sender), receiver)
     }
 
+    /// A kill deadline that never matters in a test.
+    fn far() -> Instant {
+        Instant::now() + Duration::from_secs(3600)
+    }
+
     /// `begin` plus the command-id registration `srt_exec` does before wrapping.
     fn begin_cmd(bridge: &NetworkBridge, invocation: &str, cancel: Arc<AtomicBool>) -> ActiveCommand {
-        let active = bridge.begin(invocation, cancel);
+        let active = bridge.begin(invocation, cancel, far());
         active.set_command_id("cmd");
         active
     }
@@ -658,7 +702,7 @@ mod tests {
     fn an_ask_for_another_command_or_an_unregistered_one_is_denied() {
         let bridge = NetworkBridge::default();
         let (_lease, mut frames) = connected(&bridge);
-        let active = bridge.begin("inv", Arc::default());
+        let active = bridge.begin("inv", Arc::default(), far());
         // No sidecar command id registered yet: fail closed.
         assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("ask for a different command"));
         active.set_command_id("cmd-mine");
@@ -775,6 +819,128 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(10));
             }
             assert!(waiting.join().unwrap().allow);
+        }
+    }
+
+    // ---- ask waits follow the command's own kill deadline ----
+
+    /// A bridge whose ask timeout is `timeout` and whose margin is `margin`, with one command
+    /// that will be killed `kill_in` from now.
+    fn bridge_killed_in(
+        timeout: Duration,
+        margin: Duration,
+        kill_in: Duration,
+        cancel: Arc<AtomicBool>,
+    ) -> (
+        NetworkBridge,
+        OutboundLease,
+        tokio::sync::mpsc::UnboundedReceiver<Value>,
+        ActiveCommand,
+    ) {
+        let bridge = NetworkBridge::with_limits(timeout, margin);
+        let (lease, frames) = connected(&bridge);
+        let active = bridge.begin("inv", cancel, Instant::now() + kill_in);
+        active.set_command_id("cmd");
+        (bridge, lease, frames, active)
+    }
+
+    #[test]
+    fn an_ask_waits_only_until_the_margin_before_the_kill_deadline() {
+        // 30 s-style case, scaled: killed in 1.2 s, margin 0.4 s => waits ~0.8 s, then denies.
+        let (bridge, _lease, mut frames, _active) = bridge_killed_in(
+            Duration::from_secs(60),
+            Duration::from_millis(400),
+            Duration::from_millis(1200),
+            Arc::default(),
+        );
+        let started = Instant::now();
+        let waiting = spawn_decide(&bridge, ask("a.com"));
+        let id = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
+        let decision = waiting.join().unwrap();
+        let waited = started.elapsed();
+        assert_eq!(decision, Decision::deny("approval timed out"));
+        assert!(waited >= Duration::from_millis(600), "{waited:?}");
+        assert!(waited <= Duration::from_millis(1100), "must answer before the kill: {waited:?}");
+        // The ask is settled: a late decision finds nothing.
+        assert!(!bridge.resolve(&id, true, None));
+    }
+
+    #[test]
+    fn an_ask_arriving_inside_the_margin_is_denied_immediately_and_not_relayed() {
+        let (bridge, _lease, mut frames, _active) = bridge_killed_in(
+            Duration::from_secs(60),
+            Duration::from_millis(400),
+            Duration::from_millis(250),
+            Arc::default(),
+        );
+        let started = Instant::now();
+        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("approval timed out"));
+        assert!(started.elapsed() < Duration::from_millis(100), "{:?}", started.elapsed());
+        assert!(frames.try_recv().is_err(), "nothing may reach the backend");
+        // Already past the deadline: same.
+        let (bridge, _lease, _frames, _active) = bridge_killed_in(
+            Duration::from_secs(60),
+            Duration::from_millis(400),
+            Duration::ZERO,
+            Arc::default(),
+        );
+        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("approval timed out"));
+    }
+
+    #[test]
+    fn a_long_command_still_waits_for_the_full_ask_timeout() {
+        let (bridge, _lease, mut frames, _active) = bridge_killed_in(
+            Duration::from_millis(700),
+            Duration::from_millis(100),
+            Duration::from_secs(3600),
+            Arc::default(),
+        );
+        let started = Instant::now();
+        let waiting = spawn_decide(&bridge, ask("a.com"));
+        next_frame(&mut frames);
+        assert_eq!(waiting.join().unwrap(), Decision::deny("approval timed out"));
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(650) && waited < Duration::from_secs(3), "{waited:?}");
+        // The production defaults: 145 s ask cap, 10 s margin, below the sidecar's 150 s.
+        assert!(ASK_TIMEOUT < Duration::from_secs(150));
+        assert_eq!(DEADLINE_MARGIN, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn cancel_still_wins_over_the_deadline_wait() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (bridge, _lease, mut frames, _active) = bridge_killed_in(
+            Duration::from_secs(60),
+            Duration::from_millis(100),
+            Duration::from_secs(30),
+            cancel.clone(),
+        );
+        let waiting = spawn_decide(&bridge, ask("a.com"));
+        next_frame(&mut frames);
+        cancel.store(true, Ordering::SeqCst);
+        assert_eq!(waiting.join().unwrap(), Decision::deny("command cancelled"));
+    }
+
+    #[test]
+    fn a_decision_just_before_the_effective_deadline_is_honoured_and_just_after_is_not() {
+        // Effective wait = killed in 1.0 s - margin 0.4 s = 0.6 s.
+        for (answer_after, expect_allow) in [(Duration::from_millis(350), true), (Duration::from_millis(1000), false)] {
+            let (bridge, _lease, mut frames, _active) = bridge_killed_in(
+                Duration::from_secs(60),
+                Duration::from_millis(400),
+                Duration::from_millis(1000),
+                Arc::default(),
+            );
+            let waiting = spawn_decide(&bridge, ask("a.com"));
+            let id = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
+            std::thread::sleep(answer_after);
+            let delivered = bridge.resolve(&id, true, None);
+            let decision = waiting.join().unwrap();
+            assert_eq!(decision.allow, expect_allow, "{answer_after:?}: {decision:?}");
+            assert_eq!(delivered, expect_allow, "{answer_after:?}");
+            if !expect_allow {
+                assert_eq!(decision, Decision::deny("approval timed out"));
+            }
         }
     }
 }

@@ -812,6 +812,11 @@ mod tests {
         }
     }
 
+    /// A kill deadline that never matters in a test.
+    fn far() -> std::time::Instant {
+        std::time::Instant::now() + Duration::from_secs(3600)
+    }
+
     fn ask_policy() -> NetworkPolicy {
         NetworkPolicy {
             mode: super::super::network::NetworkMode::Ask,
@@ -825,7 +830,7 @@ mod tests {
         let (_app, host, root) = host_with_stub_bundle();
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
         let _lease = host.network.attach(sender);
-        let active = host.network.begin("inv-1", Arc::default());
+        let active = host.network.begin("inv-1", Arc::default(), far());
         let bridge = host.network.clone();
         let answerer = std::thread::spawn(move || {
             let frame = next_ask(&mut frames);
@@ -860,7 +865,7 @@ mod tests {
         let (_app, host, root) = host_with_stub_bundle();
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
         let _lease = host.network.attach(sender);
-        let active = host.network.begin("inv-1", Arc::default());
+        let active = host.network.begin("inv-1", Arc::default(), far());
         let bridge = host.network.clone();
         let answerer = std::thread::spawn(move || {
             let frame = next_ask(&mut frames);
@@ -880,7 +885,7 @@ mod tests {
         let (_app, host, root) = host_with_stub_bundle();
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
         let _lease = host.network.attach(sender);
-        let active = host.network.begin("inv-1", Arc::default());
+        let active = host.network.begin("inv-1", Arc::default(), far());
         let result = execute_command(
             &host, &root, &root, "SLEEP_ASK_OTHER:example.com:443", 20_000, 1000, Arc::default(),
             Some(&ask_policy()), &active,
@@ -893,7 +898,7 @@ mod tests {
     #[test]
     fn asks_without_a_connection_are_denied_and_the_command_still_finishes() {
         let (_app, host, root) = host_with_stub_bundle();
-        let active = host.network.begin("inv-1", Arc::default());
+        let active = host.network.begin("inv-1", Arc::default(), far());
         let result = execute_command(
             &host, &root, &root, "SLEEP_ASK:example.com:443", 20_000, 1000, Arc::default(), None, &active,
         )
@@ -905,7 +910,7 @@ mod tests {
     #[test]
     fn a_failing_audit_never_fails_the_command() {
         let (_app, host, root) = host_with_stub_bundle();
-        let active = host.network.begin("inv", Arc::default());
+        let active = host.network.begin("inv", Arc::default(), far());
         let result = execute_command(
             &host, &root, &root, "AUDIT_FAIL", 20_000, 1000, Arc::default(), None, &active,
         )
@@ -916,19 +921,15 @@ mod tests {
     }
 
     #[test]
-    fn result_keys_are_the_macos_ones_plus_the_audit() {
+    fn the_result_is_the_macos_shape_plus_the_audit() {
         let (_app, host, root) = host_with_stub_bundle();
-        let active = host.network.begin("inv", Arc::default());
+        let active = host.network.begin("inv", Arc::default(), far());
         let result = execute_command(
             &host, &root, &root, "echo hi", 20_000, 1000, Arc::default(), None, &active,
         )
         .unwrap();
-        let mut keys: Vec<&str> = result.as_object().unwrap().keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            ["cancelled", "exitCode", "networkAudit", "output", "truncated"]
-        );
+        super::super::execution::network_tests::assert_result_shape(&result);
+        assert!(result["networkAudit"].is_array(), "{result}");
     }
 
     #[test]
@@ -950,7 +951,7 @@ mod tests {
 
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
         let _lease = host.network.attach(sender);
-        let active = host.network.begin("inv-1", Arc::default());
+        let active = host.network.begin("inv-1", Arc::default(), far());
         active.set_command_id("cmd");
         let (instance, _) = wrap_in_sandbox(
             &host.sandbox, &root, &root, "SLEEP_ASK:example.com:443", "cmd", None,

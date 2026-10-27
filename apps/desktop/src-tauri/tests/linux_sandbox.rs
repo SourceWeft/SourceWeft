@@ -18,6 +18,8 @@
 //! how this test locates its fixtures: the bundle is located relative to
 //! `CARGO_MANIFEST_DIR`, at `apps/desktop/sandbox-sidecar/dist/bundle` (git-ignored). The
 //! verification recipe copies a container-built bundle there before running `cargo test`.
+mod common;
+
 use serde_json::{json, Value};
 use sourceweft_desktop::local_host::{
     execution::Executions,
@@ -240,19 +242,8 @@ fn writes_inside_workspace() {
         &workspace,
         "printf hello > out.txt && /bin/pwd && printf '%s\\n' \"$HOME\" \"$TMPDIR\" \"$npm_config_cache\" \"$PIP_CACHE_DIR\" \"$NODE_USE_ENV_PROXY\" && mktemp",
     );
-    // Exactly the macOS result shape.
-    let mut keys: Vec<&str> = result
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    keys.sort_unstable();
-    assert_eq!(
-        keys,
-        ["cancelled", "exitCode", "networkAudit", "output", "truncated"],
-        "{result}"
-    );
+    // The macOS result shape: the four original fields, plus at most the sandbox extras.
+    common::assert_result_shape(&result);
     assert_eq!(result["exitCode"], 0, "{result}");
     assert_eq!(result["cancelled"], false, "{result}");
     assert_eq!(result["truncated"], false, "{result}");
@@ -912,7 +903,16 @@ fn execute_net(
 }
 
 fn net_payload(workspace: &Workspace, command: &str, network: Option<Value>) -> Value {
-    let mut payload = json!({"workspaceId": workspace.id, "command": command, "timeoutMs": 60000, "maxOutputChars": 20000});
+    net_payload_timeout(workspace, command, network, 60000)
+}
+
+fn net_payload_timeout(
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+    timeout_ms: u64,
+) -> Value {
+    let mut payload = json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": 20000});
     if let Some(network) = network {
         payload["network"] = network;
     }
@@ -1348,4 +1348,60 @@ fn plain_http_audit_has_method_and_path() {
     assert_eq!(entry["decision"], "allow", "{result}");
     assert_eq!(entry["source"], "rule", "{result}");
     assert!(entry["status"].is_u64(), "status must be numeric: {result}");
+}
+
+/// An ask nobody answers, in a command with its own (short) timeout: the bridge must deny it
+/// before the command is killed, so the command finishes by itself (not exit 124) and its output
+/// carries the `<sandbox_violations>` text with the reason.
+fn unanswered_ask_ends_before_the_command_timeout(timeout_ms: u64, call: &str) {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // Records the ask, never answers it.
+    let approvals = ApprovalBridge::start(&host, None);
+    let started = Instant::now();
+    let result = host
+        .dispatch(
+            &Executions::default(),
+            call,
+            "owner",
+            &workspace.thread_id,
+            "command.execute",
+            net_payload_timeout(
+                &workspace,
+                &format!("{FETCH_NPM}; echo; echo CURL_EXIT=$?"),
+                Some(policy("ask", &[])),
+                timeout_ms,
+            ),
+        )
+        .unwrap_or_else(|error| panic!("command.execute failed: {error}"));
+    let elapsed = started.elapsed();
+    assert_ne!(result["exitCode"], 124, "the command was killed by its timeout: {result}");
+    assert_eq!(result["cancelled"], false, "{result}");
+    let text = output(&result);
+    assert!(text.contains("<sandbox_violations>"), "{result}");
+    assert!(text.contains("approval timed out"), "{result}");
+    assert!(text.contains("CURL_EXIT="), "the command must have finished by itself: {result}");
+    assert!(
+        elapsed < Duration::from_millis(timeout_ms),
+        "finished in {elapsed:?}, after its {timeout_ms} ms timeout: {result}"
+    );
+    // A short command's ask is denied at once (inside the margin) and never reaches the
+    // backend; a longer one is relayed and then times out before the kill.
+    if timeout_ms <= 10_000 {
+        assert!(approvals.asks().is_empty(), "{:?}", approvals.asks());
+    } else {
+        assert_eq!(approvals.asks().len(), 1);
+    }
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn unanswered_ask_in_a_short_command_is_denied_at_once() {
+    unanswered_ask_ends_before_the_command_timeout(6_000, "ask-short");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn unanswered_ask_in_a_longer_command_times_out_before_the_kill() {
+    unanswered_ask_ends_before_the_command_timeout(18_000, "ask-medium");
 }

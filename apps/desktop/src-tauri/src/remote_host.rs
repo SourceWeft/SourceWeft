@@ -700,7 +700,7 @@ mod network_decision_tests {
     fn pending_ask(bridge: &NetworkBridge) -> (OutboundLease, String, std::thread::JoinHandle<Decision>) {
         let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
         let lease = bridge.attach(sender);
-        let active = bridge.begin("inv", Arc::default());
+        let active = bridge.begin("inv", Arc::default(), std::time::Instant::now() + Duration::from_secs(3600));
         active.set_command_id("c");
         let waiting = {
             let bridge = bridge.clone();
