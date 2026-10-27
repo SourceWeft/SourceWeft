@@ -27,6 +27,8 @@ import type { AgentToolTrustRuleRecord } from "../connectors/types";
 import {
   allowPatternsFromRules,
   approvalExpiry,
+  APPROVAL_END_MARGIN_MS,
+  MIN_APPROVAL_WINDOW_MS,
   buildCommandNetworkPolicy,
   decisionFrameForRow,
   matchingNetworkRule,
@@ -272,23 +274,82 @@ describe("allow list sent to the device", () => {
 
 describe("approvalExpiry", () => {
   const T = new Date("2026-10-25T12:00:00Z");
-  test("is the approval window unless the command ends sooner", () => {
+  const at = (ms: number) => new Date(T.getTime() + ms);
+  const iso = (d: Date) => d.toISOString();
+
+  test("a long command keeps the full approval window", () => {
     expect(
-      approvalExpiry(T, new Date(T.getTime() + 600_000)).toISOString(),
+      iso(
+        approvalExpiry(T, {
+          createdAt: T,
+          deadline: at(600_000),
+          payload: { timeoutMs: 590_000 },
+        }),
+      ),
     ).toBe("2026-10-25T12:02:00.000Z");
-    expect(
-      approvalExpiry(T, new Date(T.getTime() + 30_000)).toISOString(),
-    ).toBe("2026-10-25T12:00:30.000Z");
   });
-  test("a missing or unusable deadline falls back to the window", () => {
-    for (const deadline of [null, undefined, new Date("garbage")])
-      expect(approvalExpiry(T, deadline).toISOString()).toBe(
-        "2026-10-25T12:02:00.000Z",
-      );
-  });
-  test("an already-passed deadline is not in the future", () => {
+
+  test("the card lapses a margin before the command's own kill time", () => {
+    // Created 90 s ago with a 120 s timeout: killed in 30 s, card ends in 15 s.
     expect(
-      approvalExpiry(T, new Date(T.getTime() - 1)).getTime() <= T.getTime(),
-    ).toBe(true);
+      iso(
+        approvalExpiry(T, {
+          createdAt: at(-90_000),
+          deadline: at(-90_000 + 130_000),
+          payload: { timeoutMs: 120_000 },
+        }),
+      ),
+    ).toBe(iso(at(15_000)));
+    expect(APPROVAL_END_MARGIN_MS).toBe(15_000);
+  });
+
+  test("the invocation deadline bounds it too, with the same margin", () => {
+    expect(iso(approvalExpiry(T, { createdAt: T, deadline: at(40_000) }))).toBe(
+      iso(at(25_000)),
+    );
+    // Whichever limit is earlier wins.
+    expect(
+      iso(
+        approvalExpiry(T, {
+          createdAt: at(-100_000),
+          deadline: at(60_000),
+          payload: { timeoutMs: 120_000 },
+        }),
+      ),
+    ).toBe(iso(at(5_000)));
+  });
+
+  test("missing or unusable limits are ignored and fall back to the window", () => {
+    const window = "2026-10-25T12:02:00.000Z";
+    for (const invocation of [
+      {},
+      { deadline: null, createdAt: null, payload: null },
+      { deadline: new Date("garbage") },
+      { createdAt: T, payload: {} },
+      { createdAt: T, payload: { timeoutMs: "120000" } },
+      { createdAt: T, payload: { timeoutMs: 0 } },
+      { createdAt: T, payload: { timeoutMs: -5 } },
+      { createdAt: T, payload: { timeoutMs: Number.NaN } },
+      { createdAt: new Date("garbage"), payload: { timeoutMs: 1000 } },
+      // A timeout without a creation time cannot be anchored.
+      { payload: { timeoutMs: 1000 } },
+    ])
+      expect(
+        iso(approvalExpiry(T, invocation)),
+        JSON.stringify(invocation),
+      ).toBe(window);
+  });
+
+  test("a command about to end leaves less than the minimum usable time", () => {
+    const left = (ms: number) =>
+      approvalExpiry(T, {
+        createdAt: at(-120_000 + ms),
+        payload: { timeoutMs: 120_000 },
+      }).getTime() - T.getTime();
+    expect(MIN_APPROVAL_WINDOW_MS).toBe(10_000);
+    expect(left(5_000)).toBeLessThan(MIN_APPROVAL_WINDOW_MS);
+    expect(left(24_999)).toBeLessThan(MIN_APPROVAL_WINDOW_MS);
+    expect(left(25_000)).toBeGreaterThanOrEqual(MIN_APPROVAL_WINDOW_MS);
+    expect(left(-1_000)).toBeLessThan(0);
   });
 });

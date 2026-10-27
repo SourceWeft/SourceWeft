@@ -1380,60 +1380,145 @@ test("the allow list in the next command's policy keeps only runtime-valid entri
   ]);
 });
 
-test("a pending request lapses with its command: min(window, the command's own deadline)", async () => {
+test("a pending card lapses before the command's own kill time, and a command about to end is denied at once", async () => {
   const w = await world();
   const device = await connectDevice(w.h.token);
+  const listed = async () =>
+    (
+      await approvals.listPendingNetworkRequests({
+        userId: w.h.userId,
+        workspaceId: w.workspaceId,
+        threadId: w.threadId,
+      })
+    ).requests;
+  const shape = async (
+    id: string,
+    changes: {
+      createdAgoMs?: number;
+      timeoutMs?: unknown;
+      deadlineInMs?: number;
+    },
+  ) => {
+    const created = new Date(Date.now() - (changes.createdAgoMs ?? 0));
+    await schema.db
+      .update(schema.localToolInvocations)
+      .set({
+        createdAt: created,
+        payload: {
+          command: "curl https://example.com/data",
+          ...(changes.timeoutMs !== undefined
+            ? { timeoutMs: changes.timeoutMs }
+            : {}),
+        },
+        ...(changes.deadlineInMs !== undefined
+          ? { deadline: new Date(Date.now() + changes.deadlineInMs) }
+          : {}),
+      })
+      .where(eq(schema.localToolInvocations.id, id));
+    return created;
+  };
+
+  // (a) 28 s left before the kill: the card ends 15 s before it, and the sweep
+  // denies it with the normal reason while the command is still alive.
   const soon = await w.invoke();
-  const deadline = new Date(Date.now() + 30_000);
-  await schema.db
-    .update(schema.localToolInvocations)
-    .set({ deadline })
-    .where(eq(schema.localToolInvocations.id, soon));
+  const created = await shape(soon, {
+    createdAgoMs: 92_000,
+    timeoutMs: 120_000,
+    deadlineInMs: 38_000,
+  });
+  const killAt = created.getTime() + 120_000;
   device.ask(soon, "short", "short.example", 443);
   const [short] = await until(
     () => requests(w.h.id),
     (rows) => rows.length === 1,
   );
-  assert.equal(short!.expiresAt.getTime(), deadline.getTime());
-  const [card] = (
-    await approvals.listPendingNetworkRequests({
-      userId: w.h.userId,
-      workspaceId: w.workspaceId,
-      threadId: w.threadId,
-    })
-  ).requests;
-  assert.equal(new Date(card!.expiresAt).getTime(), deadline.getTime());
-
-  // A long-running command keeps the full window.
-  const long = await w.invoke();
-  device.ask(long, "long", "long.example", 443);
-  const rows = await until(
-    () => requests(w.h.id),
-    (list) => list.length === 2,
+  assert.equal(short!.expiresAt.getTime(), killAt - 15_000);
+  const [card] = await listed();
+  assert.equal(new Date(card!.expiresAt).getTime(), killAt - 15_000);
+  const denial = await device.waitFor(
+    (f) => f.type === "network.decision" && f.askId === "short",
+    20_000,
   );
-  const longRow = rows.find((r) => r.askId === "long")!;
-  assert.equal(
-    longRow.expiresAt.getTime() - longRow.createdAt.getTime(),
-    120_000,
-  );
+  assert.deepEqual(denial, {
+    type: "network.decision",
+    askId: "short",
+    allow: false,
+    reason: "approval timed out",
+  });
+  assert.ok(Date.now() < killAt, "the denial arrives before the kill");
 
-  // A command already past its deadline gets a deny, not a card.
-  const late = await w.invoke();
-  await schema.db
-    .update(schema.localToolInvocations)
-    .set({ deadline: new Date(Date.now() - 1000) })
-    .where(eq(schema.localToolInvocations.id, late));
-  device.ask(late, "late", "late.example", 443);
+  // (b) 5 s left: no card, an immediate denial with the same reason.
+  const ending = await w.invoke();
+  await shape(ending, {
+    createdAgoMs: 115_000,
+    timeoutMs: 120_000,
+    deadlineInMs: 15_000,
+  });
+  device.ask(ending, "ending", "ending.example", 443);
   assert.deepEqual(
     await device.waitFor(
-      (f) => f.type === "network.decision" && f.askId === "late",
+      (f) => f.type === "network.decision" && f.askId === "ending",
     ),
     {
       type: "network.decision",
-      askId: "late",
+      askId: "ending",
       allow: false,
       reason: "approval timed out",
     },
   );
-  assert.equal((await requests(w.h.id)).length, 2);
+  assert.equal((await requests(w.h.id)).length, 1);
+
+  // (c) a long command keeps the full 120 s window.
+  const long = await w.invoke();
+  await shape(long, { timeoutMs: 590_000 });
+  device.ask(long, "long", "long.example", 443);
+  // (d) a payload without a usable timeoutMs falls back to the window alone.
+  const bare = await w.invoke();
+  await shape(bare, {});
+  device.ask(bare, "bare", "bare.example", 443);
+  const junk = await w.invoke();
+  await shape(junk, { timeoutMs: "soon" });
+  device.ask(junk, "junk", "junk.example", 443);
+  const rows = await until(
+    () => requests(w.h.id),
+    (list) => list.length === 4,
+  );
+  for (const askId of ["long", "bare", "junk"]) {
+    const row = rows.find((r) => r.askId === askId)!;
+    assert.equal(
+      row.expiresAt.getTime() - row.createdAt.getTime(),
+      120_000,
+      askId,
+    );
+  }
+
+  // The invocation deadline bounds it as well, and a passed one denies at once.
+  const bounded = await w.invoke();
+  await shape(bounded, { deadlineInMs: 40_000 });
+  device.ask(bounded, "bounded", "bounded.example", 443);
+  const late = await w.invoke();
+  await shape(late, { deadlineInMs: -1_000 });
+  device.ask(late, "late", "late.example", 443);
+  assert.equal(
+    (
+      await device.waitFor(
+        (f) => f.type === "network.decision" && f.askId === "late",
+      )
+    ).reason,
+    "approval timed out",
+  );
+  const boundedRow = (
+    await until(
+      () => requests(w.h.id),
+      (list) => list.some((r) => r.askId === "bounded"),
+    )
+  ).find((r) => r.askId === "bounded")!;
+  const inv = await schema.db.query.localToolInvocations.findFirst({
+    where: eq(schema.localToolInvocations.id, bounded),
+  });
+  assert.equal(
+    boundedRow.expiresAt.getTime(),
+    inv!.deadline.getTime() - 15_000,
+  );
+  assert.equal((await requests(w.h.id)).length, 5);
 });

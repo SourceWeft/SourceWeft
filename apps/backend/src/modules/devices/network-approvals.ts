@@ -87,18 +87,43 @@ export const NETWORK_REQUEST_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const NETWORK_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 let lastPrunedAt = 0;
 
+/** A card must lapse this long before the command ends, so the denial still reaches the model. */
+export const APPROVAL_END_MARGIN_MS = 15_000;
+/** Below this much usable time no card is parked: the ask is denied at once. */
+export const MIN_APPROVAL_WINDOW_MS = 10_000;
+
 /**
- * When a pending request lapses: the approval window, or the command's own
- * deadline if that comes first. A missing or unparseable deadline falls back to
- * the window alone.
+ * When a pending request lapses: the approval window, or shortly before the
+ * command ends, whichever comes first. A command ends at its own timeout
+ * (the desktop kills it `payload.timeoutMs` after it starts) or, at the latest,
+ * at the invocation deadline; the row only records when the call was created,
+ * which is never later than the start, so `createdAt + timeoutMs` is a safe
+ * lower bound on the kill time. Margins keep the denial ahead of the kill, so
+ * the command finishes with a normal denial instead of a bare timeout. A
+ * missing or unusable limit is ignored.
  */
 export function approvalExpiry(
   now: Date,
-  deadline: Date | null | undefined,
+  invocation: {
+    deadline?: Date | null | undefined;
+    createdAt?: Date | null | undefined;
+    payload?: Record<string, unknown> | null | undefined;
+  },
 ): Date {
-  const window = now.getTime() + LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS * 1000;
-  const limit = deadline ? deadline.getTime() : Number.NaN;
-  return new Date(Number.isFinite(limit) ? Math.min(window, limit) : window);
+  let expires = now.getTime() + LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS * 1000;
+  const deadline = invocation.deadline?.getTime() ?? Number.NaN;
+  if (Number.isFinite(deadline))
+    expires = Math.min(expires, deadline - APPROVAL_END_MARGIN_MS);
+  const timeoutMs = invocation.payload?.timeoutMs;
+  const created = invocation.createdAt?.getTime() ?? Number.NaN;
+  if (
+    typeof timeoutMs === "number" &&
+    Number.isFinite(timeoutMs) &&
+    timeoutMs > 0 &&
+    Number.isFinite(created)
+  )
+    expires = Math.min(expires, created + timeoutMs - APPROVAL_END_MARGIN_MS);
+  return new Date(expires);
 }
 
 export function networkTrustScope(host: string): AgentToolTrustScope {
@@ -357,9 +382,11 @@ export async function handleNetworkAsk(
   )
     return denyFrame(ask.askId, NETWORK_REASONS.tooMany);
 
-  // The card's countdown never outlives the command it belongs to.
-  const expiresAt = approvalExpiry(now, invocation.deadline);
-  if (expiresAt.getTime() <= now.getTime())
+  // The card's countdown ends before the command does. With almost no time
+  // left there is nothing to wait for: deny now, with the same reason the
+  // sweep would give, so the command ends with a denial and not a timeout.
+  const expiresAt = approvalExpiry(now, invocation);
+  if (expiresAt.getTime() - now.getTime() < MIN_APPROVAL_WINDOW_MS)
     return denyFrame(ask.askId, NETWORK_REASONS.timedOut);
 
   const suggestedBy = suggestedSkillFor(invocation.payload, host, ask.port);
