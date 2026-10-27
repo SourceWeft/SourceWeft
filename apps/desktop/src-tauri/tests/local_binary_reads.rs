@@ -1,13 +1,10 @@
-//! Binary-transfer and search sessions over workspace files. On Windows these run once the
-//! descriptor-relative file primitives exist (Task 5); until then they are compiled and listed as
-//! ignored rather than skipped silently.
+//! Binary-transfer and search sessions over workspace files, on every supported OS.
 #![cfg(any(unix, windows))]
 mod support;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use sourceweft_desktop::local_host::LocalHost;
 use std::fs;
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn chunks_are_an_immutable_scoped_snapshot_and_close_releases_them() {
     let temp = tempfile::tempdir().unwrap();
@@ -53,7 +50,6 @@ fn chunks_are_an_immutable_scoped_snapshot_and_close_releases_them() {
     );
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn transfer_capacity_is_bounded_and_paths_cannot_escape() {
     let temp = tempfile::tempdir().unwrap();
@@ -85,7 +81,6 @@ fn transfer_capacity_is_bounded_and_paths_cannot_escape() {
         .unwrap();
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn native_search_keeps_literal_matching_and_file_scope_on_the_host() {
     let temp = tempfile::tempdir().unwrap();
@@ -149,7 +144,6 @@ fn native_search_keeps_literal_matching_and_file_scope_on_the_host() {
     );
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn missing_binary_file_has_structured_code_without_weakening_path_denials() {
     let temp = tempfile::tempdir().unwrap();
@@ -205,7 +199,6 @@ fn io_error_classification_only_marks_not_found_as_missing() {
 }
 
 #[test]
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 fn links_and_windows_special_names_are_not_readable() {
     let temp = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

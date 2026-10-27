@@ -13,7 +13,7 @@ use std::{
 
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use std::path::Path;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use std::io::Read;
 
 #[derive(Default)]
@@ -176,66 +176,43 @@ impl LocalHost {
             let relative = relative.as_str();
             let path = checked_path(&root, relative, true)?;
             if action == "folder.read" {
-                // Windows: Task 5 replaces this with the descriptor-relative read (it needs the
-                // new open-flag type, so the primitive is not reachable from here yet).
-                #[cfg(windows)]
-                return Err(HostError::new(
-                    "UNSUPPORTED_PLATFORM",
-                    "Draft folder reads are not available on Windows yet.",
-                ));
-                #[cfg(unix)]
-                {
-                    use base64::Engine;
-                    use std::os::unix::fs::MetadataExt;
-                    let parts = Path::new(relative)
-                        .components()
-                        .filter_map(|p| match p {
-                            std::path::Component::Normal(v) => Some(v),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>();
-                    let mut file = super::files::open_file_beneath(&root, &parts, libc::O_RDONLY)?;
-                    let meta = file.metadata()?;
-                    if !meta.is_file() || meta.nlink() != 1 {
-                        return Err(HostError::new(
-                            "FILE_ACCESS_DENIED",
-                            "Only regular, non-hardlinked files can be previewed.",
-                        ));
-                    }
-                    let mut bytes = Vec::new();
-                    (&mut file).take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                    if bytes.len() > 1024 * 1024 {
-                        return Err(HostError::new(
-                            "FILE_TOO_LARGE",
-                            "Draft previews are limited to 1 MiB.",
-                        ));
-                    }
-                    self.granted_directory(owner, grant)?;
-                    return Ok(
-                        json!({"content":base64::engine::general_purpose::STANDARD.encode(bytes)}),
-                    );
+                use base64::Engine;
+                let parts = Path::new(relative)
+                    .components()
+                    .filter_map(|p| match p {
+                        std::path::Component::Normal(v) => Some(v),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let mut file =
+                    super::files::open_file_beneath(&root, &parts, super::files::OpenKind::Read)?;
+                let meta = file.metadata()?;
+                if !meta.is_file() || super::files::link_count(&file, &meta)? != 1 {
+                    return Err(HostError::new(
+                        "FILE_ACCESS_DENIED",
+                        "Only regular, non-hardlinked files can be previewed.",
+                    ));
                 }
-            }
-            // Windows: Task 5 adds the descriptor-relative listing (and its wire-form entry
-            // paths); `root` and `path` below already leave the host in wire form.
-            #[cfg(windows)]
-            {
-                let _ = &path;
-                return Err(HostError::new(
-                    "UNSUPPORTED_PLATFORM",
-                    "Draft folder listings are not available on Windows yet.",
-                ));
-            }
-            #[cfg(unix)]
-            {
-                let files = super::files::list_granted_directory(&root, Path::new(relative))?;
+                let mut bytes = Vec::new();
+                (&mut file).take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                if bytes.len() > 1024 * 1024 {
+                    return Err(HostError::new(
+                        "FILE_TOO_LARGE",
+                        "Draft previews are limited to 1 MiB.",
+                    ));
+                }
                 self.granted_directory(owner, grant)?;
-                return Ok(json!({
-                    "root": super::winpath::host_to_wire(&root)?,
-                    "path": super::winpath::host_to_wire(&path)?,
-                    "files": files
-                }));
+                return Ok(
+                    json!({"content":base64::engine::general_purpose::STANDARD.encode(bytes)}),
+                );
             }
+            let files = super::files::list_granted_directory(&root, Path::new(relative))?;
+            self.granted_directory(owner, grant)?;
+            return Ok(json!({
+                "root": super::winpath::host_to_wire(&root)?,
+                "path": super::winpath::host_to_wire(&path)?,
+                "files": files
+            }));
         }
         if action == "workspace.check" {
             self.check_workspace(

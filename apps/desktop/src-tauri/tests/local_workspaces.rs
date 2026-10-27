@@ -15,17 +15,10 @@ fn allocation_is_lazy_persistent_and_idempotent() {
     let reopened = LocalHost::open(temp.path()).unwrap();
     let second = reopened.ensure_workspace("account-a", "thread-1").unwrap();
     assert_eq!(first.id, second.id);
-    #[cfg(unix)]
     assert_eq!(
         reopened
             .read_text("account-a", "thread-1", &second.id, "report.txt")
             .unwrap(),
-        "preserved"
-    );
-    // Windows reads go through the descriptor-relative primitive with Task 5.
-    #[cfg(windows)]
-    assert_eq!(
-        fs::read_to_string(second.path.join("report.txt")).unwrap(),
         "preserved"
     );
     assert_eq!(fs::read_dir(reopened.workspace_base()).unwrap().count(), 1);
@@ -110,7 +103,6 @@ fn deleted_or_replaced_ready_workspace_is_not_recreated() {
     assert!(host.ensure_workspace("a", "thread").is_err());
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn reads_reject_traversal_symlinks_hardlinks_and_special_files() {
     let temp = tempfile::tempdir().unwrap();
@@ -170,7 +162,6 @@ fn concurrent_allocations_use_one_root() {
     assert!(ids.iter().all(|id| id == &ids[0]));
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn bounded_text_reads_reject_binary_and_large_files() {
     let temp = tempfile::tempdir().unwrap();
@@ -273,14 +264,8 @@ fn attached_folder_preserves_identity_and_owner_across_restart() {
         .is_err());
     drop(host);
     let host = LocalHost::open(temp.path()).unwrap();
-    #[cfg(unix)]
     assert_eq!(
         host.read_text("owner", "thread", &id, "hello.txt").unwrap(),
-        "original"
-    );
-    #[cfg(windows)]
-    assert_eq!(
-        fs::read_to_string(workspace.path.join("hello.txt")).unwrap(),
         "original"
     );
     let moved = folder.path().with_extension("moved");
@@ -290,7 +275,6 @@ fn attached_folder_preserves_identity_and_owner_across_restart() {
     std::fs::remove_dir_all(moved).unwrap();
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn file_updates_require_read_version_and_backup_original_bytes() {
     let temp = tempfile::tempdir().unwrap();
@@ -378,15 +362,9 @@ fn selected_directory_is_owned_immutable_shared_and_persistent() {
         .ensure_workspace_with_grant("owner", "t", Some(&grant))
         .unwrap();
     assert_eq!(first.path, root);
-    #[cfg(unix)]
     assert_eq!(
         host.read_text("owner", "t", &first.id, "existing.txt")
             .unwrap(),
-        "user content"
-    );
-    #[cfg(windows)]
-    assert_eq!(
-        fs::read_to_string(first.path.join("existing.txt")).unwrap(),
         "user content"
     );
     assert!(host.ensure_workspace("owner", "t").is_err());
@@ -438,7 +416,6 @@ fn selected_directory_is_owned_immutable_shared_and_persistent() {
     }
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn local_edits_detect_external_changes_and_reject_links() {
     let app = tempfile::tempdir().unwrap();
@@ -564,15 +541,9 @@ fn both_v3_directory_schemas_upgrade_without_adopting_new_roots() {
                 .path,
             path
         );
-        #[cfg(unix)]
         assert_eq!(
             host.read_text("owner", "thread", &id, "existing.txt")
                 .unwrap(),
-            "preserved"
-        );
-        #[cfg(windows)]
-        assert_eq!(
-            fs::read_to_string(path.join("existing.txt")).unwrap(),
             "preserved"
         );
         assert!(host
@@ -595,7 +566,6 @@ fn both_v3_directory_schemas_upgrade_without_adopting_new_roots() {
     }
 }
 
-#[cfg_attr(windows, ignore = "needs the Windows file primitives (Task 5)")]
 #[test]
 fn draft_folder_reads_are_authorized_bounded_and_do_not_allocate_a_workspace() {
     use serde_json::json;
@@ -654,9 +624,10 @@ fn draft_folder_reads_are_authorized_bounded_and_do_not_allocate_a_workspace() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Windows: the path layer, the workspace store and the gates of `dispatch`. These cover what is
-// implemented without the descriptor-relative file primitives (Task 5): store creation, identity,
-// wire paths, grant limits and `checked_path` (through `file.mkdir` / `file.list`).
+// Windows: the path layer, the workspace store, the gates of `dispatch` and the handle-relative
+// file operations: store creation, identity, wire paths, grant limits, `checked_path` (through
+// `file.mkdir` / `file.list`), and writes, reads and draft-folder access that must refuse every
+// kind of reparse point, alternate data stream and reserved name.
 // ---------------------------------------------------------------------------------------------
 
 #[cfg(windows)]
@@ -1000,13 +971,249 @@ mod windows {
         );
         // Another account cannot use the grant.
         assert!(read("other", "folder.list", "").is_err());
-        // Inside the folder the request reaches the file primitive, which Task 5 provides.
+        // Inside the folder the request reaches the handle-relative open: any spelling of the
+        // granted root (the host compares case-insensitively) reads the file.
         for path in [format!("{}/hello.txt", root_wire.to_uppercase()), "hello.txt".to_owned()] {
             assert_eq!(
-                read("owner", "folder.read", &path).unwrap_err().code,
-                "UNSUPPORTED_PLATFORM",
+                read("owner", "folder.read", &path).unwrap()["content"],
+                "aGVsbG8=",
                 "{path}"
             );
         }
+    }
+
+    #[test]
+    fn draft_folder_listings_are_wire_form_and_skip_links() {
+        let data = tempfile::tempdir().unwrap();
+        let selected = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(data.path()).unwrap();
+        host.initialize_invocation_journal().unwrap();
+        fs::create_dir(selected.path().join("sub")).unwrap();
+        fs::write(selected.path().join("sub/文件 [1].txt"), "x").unwrap();
+        fs::write(selected.path().join("plain.txt"), "p").unwrap();
+        fs::write(selected.path().join("shared.txt"), "s").unwrap();
+        fs::hard_link(selected.path().join("shared.txt"), selected.path().join("twin.txt")).unwrap();
+        link_dir(outside.path(), &selected.path().join("escape"));
+        let (grant, granted) = host.grant_directory("owner", selected.path()).unwrap();
+        let list = |path: &str| {
+            call(&host, "owner", "", "folder.list", json!({"folderId": grant, "path": path}))
+        };
+        let root = list("").unwrap();
+        assert_wire(&root["root"]);
+        assert_eq!(root["root"], wire(&granted));
+        let mut names: Vec<String> = root["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| {
+                assert_wire(&entry["path"]);
+                let path = entry["path"].as_str().unwrap();
+                assert!(path.starts_with(&format!("{}/", wire(&granted))), "{path}");
+                path.rsplit('/').next().unwrap().to_owned()
+            })
+            .collect();
+        names.sort();
+        assert_eq!(names, ["plain.txt", "sub"]);
+        let sub = list("sub").unwrap();
+        assert_eq!(sub["files"][0]["path"], format!("{}/sub/文件 [1].txt", wire(&granted)));
+        assert_eq!(sub["files"][0]["is_dir"], false);
+        // Reading the entry path the listing reported works, case-insensitively.
+        let reported = sub["files"][0]["path"].as_str().unwrap().to_owned();
+        assert_eq!(
+            call(&host, "owner", "", "folder.read", json!({"folderId": grant, "path": reported}))
+                .unwrap()["content"],
+            "eA=="
+        );
+        // Hard links and reparse points are refused when named directly.
+        for path in ["twin.txt", "shared.txt", "escape", "escape/anything"] {
+            assert!(
+                call(&host, "owner", "", "folder.read", json!({"folderId": grant, "path": path})).is_err(),
+                "{path}"
+            );
+        }
+    }
+
+    fn new_workspace(app: &std::path::Path) -> (LocalHost, sourceweft_desktop::local_host::Workspace) {
+        let host = LocalHost::open(app).unwrap();
+        host.initialize_invocation_journal().unwrap();
+        let workspace = host.ensure_workspace("owner", "t").unwrap();
+        (host, workspace)
+    }
+
+    fn staging_leftovers(dir: &std::path::Path) -> Vec<String> {
+        let mut found = Vec::new();
+        for entry in walk(dir) {
+            if entry.file_name().unwrap().to_str().unwrap().starts_with(".sourceweft-") {
+                found.push(entry.display().to_string());
+            }
+        }
+        found
+    }
+
+    fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut all = Vec::new();
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if fs::symlink_metadata(&path).unwrap().is_dir() {
+                all.extend(walk(&path));
+            }
+            all.push(path);
+        }
+        all
+    }
+
+    #[test]
+    fn files_are_created_replaced_and_backed_up_through_handles_with_awkward_names() {
+        let app = tempfile::tempdir().unwrap();
+        let (host, w) = new_workspace(app.path());
+        fs::create_dir_all(w.path.join("目录/[x] (1)")).unwrap();
+        let path = "目录/[x] (1)/文件 [2].txt";
+        let created = host.write_bytes("owner", "t", &w.id, path, "你好".as_bytes(), None).unwrap();
+        assert_eq!(created["bytes"], 6);
+        assert!(created["backupId"].is_null());
+        assert_eq!(host.read_text("owner", "t", &w.id, path).unwrap(), "你好");
+        // Another spelling of the same name (case-insensitive file system semantics).
+        assert_eq!(
+            host.read_text("owner", "t", &w.id, "目录/[X] (1)/文件 [2].TXT").unwrap(),
+            "你好"
+        );
+        let replaced = host
+            .write_bytes("owner", "t", &w.id, path, b"second", Some("你好".as_bytes()))
+            .unwrap();
+        let backup = app
+            .path()
+            .join("local-host/backups")
+            .join(replaced["backupId"].as_str().unwrap());
+        assert_eq!(fs::read(backup).unwrap(), "你好".as_bytes());
+        assert_eq!(fs::read(w.path.join(path)).unwrap(), b"second");
+        // A missing parent is an error, not a created directory, and leaves nothing behind.
+        assert!(host.write_bytes("owner", "t", &w.id, "nope/x.txt", b"x", None).is_err());
+        assert!(!w.path.join("nope").exists());
+        assert_eq!(staging_leftovers(&w.path), Vec::<String>::new());
+        // Stale or missing expectations never replace anything.
+        assert_eq!(
+            host.write_bytes("owner", "t", &w.id, path, b"x", Some(b"stale")).unwrap_err().code,
+            "FILE_VERSION_CONFLICT"
+        );
+        assert_eq!(
+            host.write_bytes("owner", "t", &w.id, "absent.txt", b"x", Some(b"was here")).unwrap_err().code,
+            "FILE_VERSION_CONFLICT"
+        );
+        assert_eq!(fs::read(w.path.join(path)).unwrap(), b"second");
+        assert_eq!(staging_leftovers(&w.path), Vec::<String>::new());
+    }
+
+    #[test]
+    fn writes_refuse_streams_reserved_names_and_every_kind_of_reparse_point() {
+        let app = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let (host, w) = new_workspace(app.path());
+        fs::write(outside.path().join("secret"), "unchanged").unwrap();
+        link_dir(outside.path(), &w.path.join("escape"));
+        fs::write(w.path.join("real.txt"), "real").unwrap();
+        for path in [
+            "real.txt:hidden",
+            "new.txt:hidden",
+            "CON",
+            "sub/nul.txt",
+            "dots.",
+            "space ",
+            "star*.txt",
+            "..\\x",
+            "C:/Windows/x.txt",
+            "../outside.txt",
+            "escape/new.txt",
+            "escape/secret",
+        ] {
+            assert!(
+                host.write_bytes("owner", "t", &w.id, path, b"bad", None).is_err(),
+                "accepted {path:?}"
+            );
+        }
+        // The junction itself cannot be replaced or written through.
+        assert!(host
+            .write_bytes("owner", "t", &w.id, "escape", b"bad", Some(b"unchanged"))
+            .is_err());
+        assert_eq!(fs::read(outside.path().join("secret")).unwrap(), b"unchanged");
+        assert!(!outside.path().join("new.txt").exists());
+        assert_eq!(fs::read(w.path.join("real.txt")).unwrap(), b"real");
+        assert!(!w.path.join("new.txt").exists());
+        // No alternate data stream appeared on the real file.
+        assert!(fs::read(w.path.join("real.txt:hidden")).is_err());
+        // A file symlink is refused as a destination and as a source.
+        if link_file(&outside.path().join("secret"), &w.path.join("flink")) {
+            assert!(host.write_bytes("owner", "t", &w.id, "flink", b"bad", Some(b"unchanged")).is_err());
+            assert!(host.write_bytes("owner", "t", &w.id, "flink", b"bad", None).is_err());
+            assert_eq!(
+                host.read_text("owner", "t", &w.id, "flink").unwrap_err().code,
+                "FILE_ACCESS_DENIED"
+            );
+            assert_eq!(fs::read(outside.path().join("secret")).unwrap(), b"unchanged");
+        } else {
+            eprintln!("skipped the file symlink cases: SeCreateSymbolicLinkPrivilege is not held");
+        }
+        assert_eq!(staging_leftovers(&w.path), Vec::<String>::new());
+    }
+
+    #[test]
+    fn hard_linked_files_are_neither_read_nor_replaced() {
+        let app = tempfile::tempdir().unwrap();
+        let (host, w) = new_workspace(app.path());
+        fs::write(w.path.join("one.txt"), "shared").unwrap();
+        fs::hard_link(w.path.join("one.txt"), w.path.join("two.txt")).unwrap();
+        assert_eq!(
+            host.read_text("owner", "t", &w.id, "one.txt").unwrap_err().code,
+            "HARDLINK_NOT_ALLOWED"
+        );
+        assert_eq!(
+            host.write_bytes("owner", "t", &w.id, "two.txt", b"x", Some(b"shared")).unwrap_err().code,
+            "FILE_ACCESS_DENIED"
+        );
+        assert_eq!(fs::read(w.path.join("one.txt")).unwrap(), b"shared");
+        assert_eq!(staging_leftovers(&w.path), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_read_only_file_is_replaced_and_stays_read_only() {
+        let app = tempfile::tempdir().unwrap();
+        let (host, w) = new_workspace(app.path());
+        let path = w.path.join("locked.txt");
+        fs::write(&path, "old").unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&path, permissions).unwrap();
+        host.write_bytes("owner", "t", &w.id, "locked.txt", b"new", Some(b"old")).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert!(fs::metadata(&path).unwrap().permissions().readonly());
+        // Clear the attribute so the temporary directory can be removed.
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&path, permissions).unwrap();
+        assert_eq!(staging_leftovers(&w.path), Vec::<String>::new());
+    }
+
+    #[test]
+    fn reads_see_files_other_programs_hold_open_and_directories_are_not_files() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let app = tempfile::tempdir().unwrap();
+        let (host, w) = new_workspace(app.path());
+        fs::write(w.path.join("open.txt"), "visible").unwrap();
+        fs::create_dir(w.path.join("dir")).unwrap();
+        // Another program holds the file for writing, sharing reads and deletes like editors do.
+        let _held = fs::OpenOptions::new()
+            .write(true)
+            .share_mode(7)
+            .open(w.path.join("open.txt"))
+            .unwrap();
+        assert_eq!(host.read_text("owner", "t", &w.id, "open.txt").unwrap(), "visible");
+        assert_eq!(
+            host.read_text("owner", "t", &w.id, "dir").unwrap_err().code,
+            "NOT_A_FILE"
+        );
+        assert_eq!(
+            host.read_text("owner", "t", &w.id, "missing.txt").unwrap_err().code,
+            "FILE_NOT_FOUND"
+        );
     }
 }
