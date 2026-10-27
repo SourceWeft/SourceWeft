@@ -13,7 +13,7 @@ use std::{
 };
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use crate::secret_store;
 
 #[cfg(target_os = "macos")]
@@ -30,6 +30,56 @@ fn computer_name() -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("macOS computer name is empty".into());
+    }
+    Ok(name.to_owned())
+}
+
+/// The Windows computer name from `GetComputerNameExW(ComputerNamePhysicalDnsHostname)`. A failing
+/// API is an error: there is deliberately no fallback to `%COMPUTERNAME%` or any other source, so
+/// the device is never enrolled under a name this call did not report.
+#[cfg(windows)]
+fn computer_name() -> Result<String, String> {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_MORE_DATA};
+    use windows_sys::Win32::System::SystemInformation::{
+        ComputerNamePhysicalDnsHostname, GetComputerNameExW,
+    };
+    let mut length: u32 = 0;
+    // SAFETY: a null buffer with `length == 0` is the documented size query; nothing is written.
+    let queried = unsafe {
+        GetComputerNameExW(ComputerNamePhysicalDnsHostname, std::ptr::null_mut(), &mut length)
+    };
+    // SAFETY: reads the calling thread's last error, straight after the call that set it.
+    let code = unsafe { GetLastError() };
+    if queried != 0 || code != ERROR_MORE_DATA || length == 0 {
+        return Err(format!(
+            "Could not read the Windows computer name (GetComputerNameExW size query failed, error {code})"
+        ));
+    }
+    let mut buffer = vec![0u16; length as usize];
+    let mut size = length;
+    // SAFETY: `buffer` holds `size` UTF-16 units, which is what the call is told it may write.
+    let read = unsafe {
+        GetComputerNameExW(ComputerNamePhysicalDnsHostname, buffer.as_mut_ptr(), &mut size)
+    };
+    if read == 0 {
+        // SAFETY: as above.
+        let code = unsafe { GetLastError() };
+        return Err(format!(
+            "Could not read the Windows computer name (GetComputerNameExW failed, error {code})"
+        ));
+    }
+    let size = (size as usize).min(buffer.len());
+    computer_name_from_utf16(&buffer[..size])
+}
+
+/// The computer name from the UTF-16 units `GetComputerNameExW` returned (without the terminator):
+/// valid UTF-16, not empty after trimming.
+#[cfg(any(windows, test))]
+fn computer_name_from_utf16(units: &[u16]) -> Result<String, String> {
+    let name = String::from_utf16(units).map_err(|_| "Computer name is not valid UTF-16")?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Windows computer name is empty".into());
     }
     Ok(name.to_owned())
 }
@@ -137,7 +187,7 @@ async fn pick_folder(_app: &tauri::AppHandle) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| "Invalid folder path".into())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_dialog::{DialogExt, FilePath};
     let app = app.clone();
@@ -147,10 +197,11 @@ async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
                 .into_os_string()
                 .into_string()
                 .map_err(|_| "Invalid folder path".to_string()),
-            // `blocking_pick_folder` runs on Linux's own GTK/XDG-portal event
-            // loop, not ours, so it can only yield `None` (dialog dismissed)
-            // or a `FilePath::Url` (never produced for a folder picker); both
-            // are treated the same way the macOS cancel path is.
+            // `blocking_pick_folder` runs on the platform's own dialog event loop
+            // (GTK/XDG portal on Linux, the Win32 folder dialog on Windows), not
+            // ours, so it can only yield `None` (dialog dismissed) or a
+            // `FilePath::Url` (never produced for a folder picker); both are
+            // treated the same way the macOS cancel path is.
             Some(FilePath::Url(_)) | None => {
                 Err("Folder selection cancelled or unavailable".to_string())
             }
@@ -164,13 +215,13 @@ async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
 /// credential is missing. On macOS this must byte-match what the raw
 /// Keychain lookup used to return before `secret_store` existed (see
 /// `secret_store::not_found_message`); `choose_folder` never existed on
-/// Linux before this port, so it gets a plain, friendlier message instead.
+/// Linux or Windows before their ports, so they get a plain, friendlier message instead.
 #[cfg(target_os = "macos")]
 fn missing_device_credential_error() -> String {
     secret_store::not_found_message()
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn missing_device_credential_error() -> String {
     "Authenticate this computer before choosing a folder".to_string()
 }
@@ -184,27 +235,62 @@ fn enrollment_store_error(error: String) -> String {
     format!("Keychain enrollment failed: {error}")
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn enrollment_store_error(error: String) -> String {
     error
 }
 
 /// `authenticate`'s direct/legacy credential lookup used to wrap a real
-/// (non-not-found) error in this prefix only on macOS. On Linux, the error
-/// coming out of `secret_store::get` may already be the exact required
+/// (non-not-found) error in this prefix only on macOS. On Linux and Windows,
+/// the error coming out of `secret_store::get` may already be the exact required
 /// no-keyring message, so it must not be re-wrapped.
 #[cfg(target_os = "macos")]
 fn keychain_lookup_error(error: String) -> String {
     format!("Keychain access failed: {error}")
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 fn keychain_lookup_error(error: String) -> String {
     error
 }
 
+/// The folder the dialog returned, as the path that gets registered. On Windows the dialog's
+/// native text (`C:\Users\me\proj`, possibly `\\?\`-prefixed or with a trailing separator) goes
+/// through `winpath` (`to_wire_str` then `from_wire`, so only a path the backend could read back
+/// is accepted) and then `refuse_broad_grant` against the real profile and `AppData` locations:
+/// a drive root or anything containing the profile is refused before a grant exists. The
+/// registration canonicalises and checks again, so a symlinked or 8.3 spelling of those is
+/// refused too.
+fn picked_folder(raw: &str) -> Result<std::path::PathBuf, String> {
+    #[cfg(windows)]
+    {
+        let (profile, roots) =
+            sourceweft_desktop::local_host::winpath::user_locations().map_err(|e| e.to_string())?;
+        checked_windows_folder(raw, &profile, &roots)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(std::path::PathBuf::from(raw.trim()))
+    }
+}
+
+/// The portable part of [`picked_folder`] on Windows: normalise through `winpath`, then refuse a
+/// folder that is too broad for a persistent write grant (W11).
+#[cfg(any(windows, test))]
+fn checked_windows_folder(
+    raw: &str,
+    profile: &std::path::Path,
+    app_data_roots: &[std::path::PathBuf],
+) -> Result<std::path::PathBuf, String> {
+    use sourceweft_desktop::local_host::winpath;
+    let wire = winpath::to_wire_str(raw.trim()).map_err(|e| e.to_string())?;
+    let folder = winpath::from_wire(&wire).map_err(|e| e.to_string())?;
+    winpath::refuse_broad_grant(&folder, profile, app_data_roots).map_err(|e| e.to_string())?;
+    Ok(folder)
+}
+
 impl RemoteHost {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     pub async fn choose_folder(
         &self,
         app: &tauri::AppHandle,
@@ -232,7 +318,8 @@ impl RemoteHost {
         if self.status().device_id.as_deref() != Some(&credential.id) {
             return Err("Authenticate this computer before choosing a folder".into());
         }
-        let path = pick_folder(app).await?;
+        let picked = pick_folder(app).await?;
+        let folder = picked_folder(&picked)?;
         if self.generation.load(Ordering::SeqCst) != folder_generation
             || self.status().user_id.as_deref() != Some(&owner)
         {
@@ -240,7 +327,7 @@ impl RemoteHost {
         }
         let grant = self
             .host
-            .register_folder(&credential.user_id, std::path::Path::new(path.trim()))
+            .register_folder(&credential.user_id, &folder)
             .map_err(|e| e.to_string())?;
         let response = reqwest::Client::new()
             .post(format!(
@@ -257,7 +344,7 @@ impl RemoteHost {
         }
         response.json().await.map_err(|e| e.to_string())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     pub async fn choose_folder(
         &self,
         _app: &tauri::AppHandle,
@@ -267,7 +354,7 @@ impl RemoteHost {
         Err("UNSUPPORTED_PLATFORM".into())
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     pub async fn authenticate(&self, ticket: String, user_id: String) -> Result<Value, String> {
         if self.status().device_id.is_some() && self.status().user_id.as_deref() != Some(&user_id) {
             self.disconnect();
@@ -339,9 +426,9 @@ impl RemoteHost {
         Ok(proof)
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     pub async fn authenticate(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
-        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.".into())
+        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS, Linux or Windows.".into())
     }
     pub fn new(host: Arc<LocalHost>, service: String) -> Result<Self, String> {
         host.initialize_invocation_journal()
@@ -367,12 +454,12 @@ impl RemoteHost {
             status.device_id = None;
         }
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     pub async fn enroll(&self, _ticket: String) -> Result<RemoteStatus, String> {
-        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.".into())
+        Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS, Linux or Windows.".into())
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     pub async fn enroll(&self, ticket: String) -> Result<RemoteStatus, String> {
         if self.status().device_id.is_some() {
             return Err("A local host is already enrolled in this application session.".into());
@@ -606,6 +693,146 @@ async fn run_connection(
     }
 }
 
+#[cfg(test)]
+mod credential_and_folder_tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    /// Credential Manager stores at most 2560 bytes per credential (see `secret_store`).
+    const CREDENTIAL_BLOB_LIMIT: usize = 2560;
+
+    fn serialized(credentials: &Credentials) -> usize {
+        serde_json::to_vec(credentials).unwrap().len()
+    }
+
+    #[test]
+    fn a_realistic_credential_json_fits_the_credential_manager_blob_limit() {
+        // A UUID device id, a 43-character base64url token (32 random bytes), a user id and the
+        // production API base: what `enroll` really stores.
+        let credentials = Credentials {
+            id: "6f1c1d4e-5a52-4b57-9a0e-0d3c8f6f2b11".into(),
+            user_id: "uJ3kT9vQ2mXr8LpA5nZb7cYd1eWfG4hS".into(),
+            token: "k3V9xQ1mZp7LrT2nBc8YdW5eHf0JgA4uSi6OaNqRbMw".into(),
+            api_base: "https://api.sourceweft.com".into(),
+        };
+        let size = serialized(&credentials);
+        assert!(size < CREDENTIAL_BLOB_LIMIT, "realistic credentials are {size} bytes");
+        // Far below it, not just under it.
+        assert!(size < CREDENTIAL_BLOB_LIMIT / 4, "realistic credentials are {size} bytes");
+    }
+
+    #[test]
+    fn even_oversized_fields_stay_within_the_credential_manager_blob_limit() {
+        // Generous upper bounds for every field: a 512-character API base URL (a self-hosted
+        // deployment behind a long path), 128-character ids, a 256-character token.
+        let credentials = Credentials {
+            id: "d".repeat(128),
+            user_id: "u".repeat(128),
+            token: "t".repeat(256),
+            api_base: format!("https://{}", "a".repeat(504)),
+        };
+        let size = serialized(&credentials);
+        assert!(
+            size < CREDENTIAL_BLOB_LIMIT,
+            "worst-case credentials are {size} bytes, over the {CREDENTIAL_BLOB_LIMIT}-byte Credential Manager limit"
+        );
+    }
+
+    #[test]
+    fn computer_name_from_utf16_trims_and_rejects_empty_or_invalid() {
+        let units = |text: &str| text.encode_utf16().collect::<Vec<u16>>();
+        assert_eq!(computer_name_from_utf16(&units("DESKTOP-1A2B3C")), Ok("DESKTOP-1A2B3C".into()));
+        assert_eq!(computer_name_from_utf16(&units("  Büro-PC \n")), Ok("Büro-PC".into()));
+        assert!(computer_name_from_utf16(&[]).is_err());
+        assert!(computer_name_from_utf16(&units("   ")).is_err());
+        // A lone surrogate is not UTF-16 text.
+        assert!(computer_name_from_utf16(&[0xD800]).is_err());
+    }
+
+    fn profile() -> PathBuf {
+        PathBuf::from("C:\\Users\\me")
+    }
+
+    fn app_data() -> Vec<PathBuf> {
+        vec![
+            PathBuf::from("C:\\Users\\me\\AppData\\Roaming"),
+            PathBuf::from("C:\\Users\\me\\AppData\\Local"),
+        ]
+    }
+
+    #[test]
+    fn the_picked_folder_is_normalised_through_winpath() {
+        for (raw, expected) in [
+            ("C:\\Users\\me\\proj", "C:\\Users\\me\\proj"),
+            ("  C:\\Users\\me\\proj\\\n", "C:\\Users\\me\\proj"),
+            ("c:\\Users\\me\\Documents\\proj", "C:\\Users\\me\\Documents\\proj"),
+            ("\\\\?\\D:\\work\\repo", "D:\\work\\repo"),
+            ("D:/work/repo", "D:\\work\\repo"),
+            ("C:\\Users\\me\\AppData\\Local\\Temp\\x", "C:\\Users\\me\\AppData\\Local\\Temp\\x"),
+        ] {
+            assert_eq!(
+                checked_windows_folder(raw, &profile(), &app_data()).as_deref(),
+                Ok(Path::new(expected)),
+                "{raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_picked_folder_that_is_too_broad_or_not_local_is_refused_before_registration() {
+        for raw in [
+            "C:\\",
+            "D:\\",
+            "C:\\Users",
+            "C:\\Users\\me",
+            "C:\\Users\\me\\",
+            "C:\\Users\\me\\AppData",
+            "C:\\Users\\me\\AppData\\Roaming",
+        ] {
+            let error = checked_windows_folder(raw, &profile(), &app_data()).unwrap_err();
+            assert!(error.contains("FOLDER_TOO_BROAD"), "{raw:?}: {error}");
+        }
+        for raw in [
+            "",
+            "proj",
+            "C:proj",
+            "\\\\server\\share\\proj",
+            "\\\\?\\UNC\\server\\share\\proj",
+            "C:\\work\\..\\x",
+            "C:\\work\\NUL",
+            "C:\\work\\a:b",
+        ] {
+            assert!(checked_windows_folder(raw, &profile(), &app_data()).is_err(), "{raw:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn computer_name_is_the_physical_dns_hostname() {
+        let name = computer_name().expect("GetComputerNameExW must work on a Windows host");
+        assert!(!name.is_empty());
+        assert_eq!(name, name.trim());
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn linux_and_windows_pass_credential_store_errors_through_unprefixed() {
+        assert_eq!(keychain_lookup_error("store says no".into()), "store says no");
+        assert_eq!(enrollment_store_error("store says no".into()), "store says no");
+        assert_eq!(
+            missing_device_credential_error(),
+            "Authenticate this computer before choosing a folder"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_keeps_its_keychain_prefixes() {
+        assert_eq!(keychain_lookup_error("x".into()), "Keychain access failed: x");
+        assert_eq!(enrollment_store_error("x".into()), "Keychain enrollment failed: x");
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod linux_computer_name_tests {
     use super::parse_pretty_hostname;
@@ -670,7 +897,7 @@ mod linux_computer_name_tests {
 /// The `status` report on a real WebSocket against a fake backend (a loopback `ws://` server that
 /// speaks the gateway's side), driving the production `run_connection` with a short heartbeat and
 /// a scripted readiness.
-#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux", windows)))]
 mod status_report_tests {
     use super::*;
     use sourceweft_desktop::local_host::readiness::{Remedy, SetupCode};

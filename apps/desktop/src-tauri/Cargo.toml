@@ -51,6 +51,10 @@ security-framework = "3"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(windows)'.dependencies]
+# Windows Credential Manager (Generic credentials, per-user, DPAPI-protected) for the local-device
+# credentials (secret_store.rs). windows-native is the direct CredRead/CredWrite backend; there is
+# no file fallback.
+keyring = { version = "3", features = ["windows-native"] }
 # Process creation flags for the sidecar and the wrapped command (local_host/{sidecar,process}.rs)
 # and, in later tasks, Job Objects, ACL and Credential Manager calls. Same 0.61 line the tree
 # already resolves through tauri, so no second copy is built.
@@ -63,6 +67,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_System_Console",
     "Win32_System_SystemInformation",
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
 ] }
 
 [dev-dependencies]

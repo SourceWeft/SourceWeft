@@ -4,7 +4,7 @@ mod preview_window;
 mod local_bridge;
 mod native_access;
 mod remote_host;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 mod secret_store;
 mod tray_locale;
 mod window_chrome;
@@ -96,9 +96,10 @@ struct SetAutostartInput {
     enabled: bool,
 }
 
-/// Opens the Linux local host and its remote-dispatch wrapper, or says why it could not.
-#[cfg(target_os = "linux")]
-fn open_linux_local_host(
+/// Opens the local host and its remote-dispatch wrapper, or says why it could not (Linux and
+/// Windows, where local execution is optional and must not stop the app from starting).
+#[cfg(any(target_os = "linux", windows))]
+fn open_optional_local_host(
     app: &tauri::App,
 ) -> Result<
     (
@@ -179,13 +180,13 @@ fn main() {
                 );
                 app.manage(host);
             }
-            // Linux local execution is new and optional: a storage failure (SQLite, permissions,
-            // a read-only home) must not stop the rest of the desktop app from starting. The
-            // error is logged and the local host left unmanaged, which `local_host_status`
-            // reports as `storageInitialized: false` and every local command reports as
-            // UNSUPPORTED_PLATFORM; nothing falls back to running commands another way.
-            #[cfg(target_os = "linux")]
-            match open_linux_local_host(app) {
+            // Linux and Windows local execution is new and optional: a storage failure (SQLite,
+            // permissions, a read-only home) must not stop the rest of the desktop app from
+            // starting. The error is logged and the local host left unmanaged, which
+            // `local_host_status` reports as `storageInitialized: false` and every local command
+            // reports as UNSUPPORTED_PLATFORM; nothing falls back to running commands another way.
+            #[cfg(any(target_os = "linux", windows))]
+            match open_optional_local_host(app) {
                 Ok((host, remote)) => {
                     app.manage(remote);
                     app.manage(host);
