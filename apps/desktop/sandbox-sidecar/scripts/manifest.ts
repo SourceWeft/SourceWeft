@@ -1,6 +1,8 @@
 /**
- * Pure helpers for `build.ts`: the bundle `manifest.json` and the Rust target triple it names.
- * Kept free of Bun APIs so `tests/bundle-manifest.test.ts` can run them under tsx.
+ * Pure helpers for `build.ts`: the bundle `manifest.json`, the Rust target triple it names, the
+ * required-Bun-version guard and the `bun build --compile` argument vector. Kept free of Bun APIs
+ * and of any build side effect so the sidecar tests can import and run them under tsx without
+ * compiling a bundle.
  *
  * The manifest wire shape is fixed by Plan 2 ("Wire contracts"): the Rust installer
  * (`bundle_install.rs`) and `scripts/ci/sandbox-bundle.mjs` read exactly this.
@@ -10,6 +12,53 @@ import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const MANIFEST_FILENAME = "manifest.json";
+
+/**
+ * The exact Bun release the bundle is built and tested with (CI pins the same one). Older Bun
+ * releases break srt's proxy (the design's Global Constraints), and — the trap this guard exists
+ * to stop (E2E finding) — a Bun older than 1.4 silently compiles a sidecar whose `init` never
+ * replies. `build.ts` compiles with `process.execPath` (the very Bun that runs the script), so
+ * pinning the running Bun's version here pins the compiler too.
+ */
+export const REQUIRED_BUN_VERSION = "1.4.2";
+
+/**
+ * Throws unless `version` (passed `process.versions.bun`) is exactly `REQUIRED_BUN_VERSION`. The
+ * message names both the found version and the requirement so a wrong Bun fails loudly instead of
+ * producing a bundle nobody tested; `undefined` (the script was run with node, not Bun, so there is
+ * no `process.versions.bun`) is reported as `no Bun`.
+ */
+export function assertBunVersion(version: string | undefined): void {
+  if (version !== REQUIRED_BUN_VERSION) {
+    throw new Error(
+      `the sidecar bundle must be built with Bun ${REQUIRED_BUN_VERSION}, got ${version ?? "no Bun (run with bun)"}`,
+    );
+  }
+}
+
+/**
+ * The argument vector `build.ts` passes to the Bun it is running under (`process.execPath`) to
+ * compile the sidecar — everything after argv[0]. `crossTarget` is the `bun build --target` value
+ * for a same-OS cross-architecture build (from `bunCompileTarget`), or `undefined` for a native
+ * build, which omits `--target` and so stays byte-identical to the historical Linux compile.
+ * Pure string construction, with no Bun API or filesystem touch, so a test pins the exact command.
+ */
+export function bunCompileArgs(input: {
+  entry: string;
+  outFile: string;
+  crossTarget: string | undefined;
+}): string[] {
+  return [
+    "build",
+    "--compile",
+    ...(input.crossTarget ? [`--target=${input.crossTarget}`] : []),
+    "--define",
+    '__SRT_WIN_NAMESPACE__="sourceweft"',
+    input.entry,
+    "--outfile",
+    input.outFile,
+  ];
+}
 
 export type Manifest = {
   schemaVersion: 1;

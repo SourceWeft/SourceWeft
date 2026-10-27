@@ -44,7 +44,9 @@ import { fileURLToPath } from "node:url";
 import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
 import {
   MANIFEST_FILENAME,
+  assertBunVersion,
   buildManifest,
+  bunCompileArgs,
   bunCompileTarget,
   resolveTarget,
 } from "./manifest.js";
@@ -80,22 +82,6 @@ function readVersion(packageJsonPath: string, what: string): string {
     throw new Error(`${what} has no version in ${packageJsonPath}`);
   }
   return version;
-}
-
-/**
- * The Bun release the bundle is built and tested with (CI pins the same one). Older Bun
- * releases break srt's proxy (the design's Global Constraints), so any other version is refused
- * rather than producing a bundle nobody tested (final review M4).
- */
-const REQUIRED_BUN_VERSION = "1.4.2";
-
-function requireBunVersion(): void {
-  const version = process.versions.bun;
-  if (version !== REQUIRED_BUN_VERSION) {
-    throw new Error(
-      `the sidecar bundle must be built with Bun ${REQUIRED_BUN_VERSION}, got ${version ?? "no Bun (run with bun)"}`,
-    );
-  }
 }
 
 /** srt's vendored `apply-seccomp` directory for this machine's architecture; no guessing. */
@@ -152,7 +138,7 @@ function remanifest(): void {
 }
 
 function main(): void {
-  requireBunVersion();
+  assertBunVersion(process.versions.bun);
   if (process.argv.slice(2).includes("--remanifest")) {
     remanifest();
     return;
@@ -196,19 +182,19 @@ function main(): void {
   // A native build compiles with no `--target` (byte-identical to the historical Linux build);
   // a same-OS cross build (macOS x86_64 on the arm64 runner) passes the explicit Bun target so
   // Bun fetches and uses that runtime instead of the host's.
+  //
+  // Compile with `process.execPath` — the very Bun that runs this script (its version already
+  // pinned by `assertBunVersion`) — not a bare `"bun"` from PATH. Resolving `bun` through PATH
+  // could pick a different, untested Bun (e.g. an older one earlier on PATH) and silently emit a
+  // bundle whose sidecar never replies to `init` (the E2E trap).
   const crossTarget = bunCompileTarget(target, process.platform, process.arch);
   const compile = spawnSync(
-    "bun",
-    [
-      "build",
-      "--compile",
-      ...(crossTarget ? [`--target=${crossTarget}`] : []),
-      "--define",
-      '__SRT_WIN_NAMESPACE__="sourceweft"',
-      join(packageRoot, "src/main.ts"),
-      "--outfile",
-      join(outDir, "srt-sidecar"),
-    ],
+    process.execPath,
+    bunCompileArgs({
+      entry: join(packageRoot, "src/main.ts"),
+      outFile: join(outDir, "srt-sidecar"),
+      crossTarget,
+    }),
     { stdio: "inherit", cwd: packageRoot },
   );
   if (compile.status !== 0) {
