@@ -4,7 +4,6 @@ import { auth } from "../modules/auth";
 import { onboardingService } from "../modules/onboarding/service";
 import { db, workspaces, closeDatabase } from "@sourceweft/db";
 import { eq } from "drizzle-orm";
-import { createLocalAccountIssuer } from "@better-auth/core/db";
 
 if (
   !new URL(process.env.DATABASE_URL!).pathname.startsWith(
@@ -38,7 +37,6 @@ await context.internalAdapter.createAccount({
   userId: user.id,
   accountId: user.id,
   providerId: "credential",
-  issuer: createLocalAccountIssuer("credential"),
   password: await context.password.hash(password),
 });
 await onboardingService.ensurePersonalTeamForUser({ userId: user.id });

@@ -230,7 +230,7 @@ for (const [version, expand] of braceExpansionLines) {
 patchedDependency(backend, "undici", "6.29.1");
 patchedDependency(dotenvx, "undici", "7.30.1");
 
-const qs = patchedDependency(express, "qs", "6.16.0");
+const qs = patchedDependency(express, "qs", "6.16.1");
 assert.throws(
   () =>
     qs.parse("a[]=1,2,3,4", {
@@ -240,6 +240,15 @@ assert.throws(
     }),
   /Array limit exceeded/,
 );
+// GHSA-6pq8-jhm2-2vcw: comma serialization must not crash on attacker-owned
+// non-callable toString properties, with either encoder path.
+for (const encodeValuesOnly of [false, true]) {
+  assert.doesNotThrow(() =>
+    qs.stringify({ a: [{ toString: "not-a-function" }] }, {
+      arrayFormat: "comma", encodeValuesOnly,
+    }),
+  );
+}
 const hostileObject = qs.parse("a[constructor][isBuffer]=not-a-function", {
   plainObjects: true,
 });
