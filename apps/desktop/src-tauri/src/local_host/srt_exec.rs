@@ -1247,7 +1247,7 @@ pub(crate) fn execute_command(
         let kind = instance.shell.ok_or_else(|| {
             HostError::new("SANDBOX_UNAVAILABLE", "The sandbox instance has no shell.")
         })?;
-        super::win_shell::pinned_script(kind, root, script)
+        super::win_shell::pinned_script(kind, root, cwd, script)
     };
     let (instance, wrapped) = match wrap_in_instances(
         &host.sandbox,

@@ -260,12 +260,44 @@ pub fn prelude(kind: ShellKind, root: &str) -> Result<String> {
     Ok(text)
 }
 
+/// The statement that makes the command start in `cwd` (wire form), or nothing for bash.
+///
+/// Windows PowerShell initialises its location from the process's current directory through the
+/// FileSystem provider, which treats `[` and `]` as wildcard characters: for a workspace such as
+/// `C:\Users\me\[work]` it fails to resolve the path and silently falls back to its own
+/// directory (`C:\Windows\System32\WindowsPowerShell\v1.0`), so the command would run in the wrong
+/// place. `Set-Location -LiteralPath` takes the path verbatim. A failure must stop the command
+/// instead of running it elsewhere: `-ErrorAction Stop` ends the script with a non-zero exit code
+/// and the `$?` check covers any non-terminating path. Git Bash keeps the directory it was started
+/// in, so it gets no statement.
+fn cwd_statement(kind: ShellKind, cwd: &str) -> Result<String> {
+    match kind {
+        ShellKind::GitBash => Ok(String::new()),
+        ShellKind::PowerShell => Ok(format!(
+            "Set-Location -LiteralPath {} -ErrorAction Stop; if (-not $?) {{ exit 1 }}\n",
+            quote_powershell(cwd)?
+        )),
+    }
+}
+
+/// [`prelude`] preceded, for PowerShell, by the statement that enters `cwd` (wire form; see
+/// `cwd_statement`). The directory change is the FIRST statement, so nothing else runs, and no
+/// variable is pinned, in the wrong directory.
+pub fn prelude_in(kind: ShellKind, root: &str, cwd: &str) -> Result<String> {
+    Ok(format!(
+        "{}{}",
+        cwd_statement(kind, cwd)?,
+        prelude(kind, root)?
+    ))
+}
+
 /// `script` with the prelude in front. A newline-separated prefix leaves any valid script
-/// unchanged. `root` is the native workspace root; the prelude carries its wire form (`C:/...`),
-/// which both shells accept.
-pub fn pinned_script(kind: ShellKind, root: &Path, script: &str) -> Result<String> {
-    let wire = super::winpath::to_wire(root)?;
-    Ok(format!("{}{script}", prelude(kind, &wire)?))
+/// unchanged. `root` is the native workspace root and `cwd` the native directory inside it the
+/// command starts in; the prelude carries their wire forms (`C:/...`), which both shells accept.
+pub fn pinned_script(kind: ShellKind, root: &Path, cwd: &Path, script: &str) -> Result<String> {
+    let root = super::winpath::to_wire(root)?;
+    let cwd = super::winpath::to_wire(cwd)?;
+    Ok(format!("{}{script}", prelude_in(kind, &root, &cwd)?))
 }
 
 /// Creates `<root>/.tmp` (one level) so `TEMP` exists before the command runs, and refuses a
@@ -666,11 +698,9 @@ mod tests {
     #[test]
     fn pinned_script_keeps_the_user_script_byte_for_byte_after_the_prelude() {
         let script = "echo 'hi'\r\nls | wc -l\n";
-        for (kind, root) in [
-            (ShellKind::GitBash, Path::new(r"C:\Users\me\My Work")),
-            (ShellKind::PowerShell, Path::new(r"C:\Users\me\My Work")),
-        ] {
-            let pinned = pinned_script(kind, root, script).unwrap();
+        let root = Path::new(r"C:\Users\me\My Work");
+        for kind in [ShellKind::GitBash, ShellKind::PowerShell] {
+            let pinned = pinned_script(kind, root, root, script).unwrap();
             assert!(pinned.ends_with(&format!("\n{script}")), "{pinned}");
             assert!(pinned.contains("C:/Users/me/My Work"), "{pinned}");
             assert!(
@@ -678,8 +708,79 @@ mod tests {
                 "wire form only: {pinned}"
             );
         }
-        // A root that cannot be spelled on the wire is an error, not a guess.
-        assert!(pinned_script(ShellKind::GitBash, Path::new("relative"), "x").is_err());
+        // A root or cwd that cannot be spelled on the wire is an error, not a guess.
+        let ok = Path::new(r"C:\ws");
+        assert!(pinned_script(ShellKind::GitBash, Path::new("relative"), ok, "x").is_err());
+        assert!(pinned_script(ShellKind::PowerShell, ok, Path::new("relative"), "x").is_err());
+    }
+
+    #[test]
+    fn powershell_enters_the_cwd_literally_as_its_first_statement_and_bash_is_unchanged() {
+        let root = Path::new(r"C:\Users\me\[work] it's");
+        let cwd = Path::new(r"C:\Users\me\[work] it's\src\[a]");
+        let powershell = pinned_script(ShellKind::PowerShell, root, cwd, "node x.js").unwrap();
+        assert_eq!(
+            powershell.lines().next().unwrap(),
+            "Set-Location -LiteralPath 'C:/Users/me/[work] it''s/src/[a]' -ErrorAction Stop; \
+             if (-not $?) { exit 1 }"
+        );
+        // The pinned variables still follow, and the script is last.
+        assert!(powershell.contains("$env:HOME = 'C:/Users/me/[work] it''s'\n"));
+        assert!(powershell.ends_with("node x.js"));
+        // Bash keeps the directory it was started in: the text is exactly the env prelude.
+        let bash = pinned_script(ShellKind::GitBash, root, cwd, "node x.js").unwrap();
+        assert_eq!(
+            bash,
+            format!(
+                "{}node x.js",
+                prelude(ShellKind::GitBash, "C:/Users/me/[work] it's").unwrap()
+            )
+        );
+        assert!(!bash.contains("Set-Location") && !bash.contains("cd "));
+    }
+
+    #[test]
+    fn the_cwd_statement_is_one_literal_for_every_nasty_cwd() {
+        for value in nasty_values()
+            .into_iter()
+            .filter(|v| !v.chars().any(char::is_control))
+        {
+            let statement = cwd_statement(ShellKind::PowerShell, &value).unwrap();
+            let literal = statement
+                .strip_prefix("Set-Location -LiteralPath ")
+                .unwrap();
+            let (read, rest) = read_powershell_literal(literal).unwrap();
+            assert_eq!(read, value);
+            assert_eq!(
+                rest, " -ErrorAction Stop; if (-not $?) { exit 1 }\n",
+                "{value:?} leaked into the statement"
+            );
+            assert_eq!(statement.matches('\n').count(), 1);
+            assert_eq!(cwd_statement(ShellKind::GitBash, &value).unwrap(), "");
+        }
+        for bad in ["", "a\nb", "a\u{0}b", "a\rb"] {
+            assert!(
+                cwd_statement(ShellKind::PowerShell, bad).is_err(),
+                "{bad:?}"
+            );
+        }
+        // The hostile shapes the coordinator named, spelled out.
+        for cwd in [
+            "C:/ws/[a]/b[1]",
+            "C:/ws/it's",
+            "C:/ws/\u{2019}x\u{2019}",
+            "C:/项目/测试",
+            "C:/ws/`n`$x",
+            "C:/ws/$(calc)/$env:X",
+            "C:/ws/100%/%PATH%",
+            "C:/ws/a&b;c|d",
+        ] {
+            let statement = cwd_statement(ShellKind::PowerShell, cwd).unwrap();
+            let literal = statement
+                .strip_prefix("Set-Location -LiteralPath ")
+                .unwrap();
+            assert_eq!(read_powershell_literal(literal).unwrap().0, cwd);
+        }
     }
 
     #[cfg(unix)]
@@ -803,6 +904,67 @@ mod windows_tests {
                 "{root:?}"
             );
         }
+    }
+
+    /// The regression behind `cwd_statement`: a start directory with `[ ]`, an apostrophe, a
+    /// space and CJK must be the command's directory, not PowerShell's own.
+    #[test]
+    fn the_powershell_prelude_enters_a_bracketed_apostrophe_directory() {
+        let tree = tempfile::tempdir().unwrap();
+        let base = tree.path().canonicalize().unwrap();
+        let dir = base.join("[a] it's 测试 b").join("sub[1]");
+        std::fs::create_dir_all(&dir).unwrap();
+        let native = crate::local_host::winpath::to_native(&dir).unwrap();
+        let wire = crate::local_host::winpath::to_wire(&dir).unwrap();
+        let root = crate::local_host::winpath::to_wire(dir.parent().unwrap()).unwrap();
+        let script = format!(
+            "{}$here = (Get-Location).ProviderPath; \
+             [Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($here)))",
+            prelude_in(ShellKind::PowerShell, &root, &wire).unwrap()
+        );
+        let out =
+            String::from_utf8(STANDARD.decode(run_powershell(&script).trim()).unwrap()).unwrap();
+        assert_eq!(out, native.to_str().unwrap());
+    }
+
+    /// A start directory that cannot be entered stops the command before anything else runs.
+    #[test]
+    fn a_missing_cwd_stops_the_powershell_command() {
+        let tree = tempfile::tempdir().unwrap();
+        let gone = crate::local_host::winpath::to_wire(
+            &tree.path().canonicalize().unwrap().join("[gone]"),
+        )
+        .unwrap();
+        let marker = tree.path().join("ran.txt");
+        let script = format!(
+            "{}New-Item -ItemType File -Path '{}' | Out-Null",
+            prelude_in(ShellKind::PowerShell, "C:/ws", &gone).unwrap(),
+            marker.display()
+        );
+        let shell = detect_with(&ShellRoots::from_env(), |p| p.is_file()).unwrap();
+        let exe = if shell.kind == ShellKind::PowerShell {
+            shell.exe
+        } else {
+            let root = std::env::var("SystemRoot").unwrap();
+            PathBuf::from(format!(
+                r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
+            ))
+        };
+        let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let output = std::process::Command::new(exe)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &STANDARD.encode(utf16),
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        assert!(
+            !marker.exists(),
+            "the command must not run in the wrong directory"
+        );
     }
 
     #[test]
