@@ -451,9 +451,25 @@ pub(crate) fn classify_windows_probe_failure(code: &str, message: &str) -> Sandb
         }
         _ => {}
     }
+    if code == "SANDBOX_INIT_TIMEOUT" {
+        return sandbox_preparing();
+    }
     super::readiness::classify_bundle_failure(code, message).unwrap_or_else(|| {
         SandboxReadiness::needs_setup(SetupCode::SandboxFailed, message, Remedy::None)
     })
+}
+
+/// The sandbox's first start did not finish within the (long) `init` timeout. This is the
+/// transient state of a fresh setup (the sandbox account's profile is created at its first
+/// logon, and slow machines take minutes), not a failure with nothing to do: it is reported as
+/// `installing` (no remedy, the app keeps checking) with a reason that says what is happening.
+pub(crate) fn sandbox_preparing() -> SandboxReadiness {
+    SandboxReadiness::needs_setup(
+        SetupCode::Installing,
+        "The sandbox is still getting ready for its first start after setup, which takes a while. \
+         It is checked again automatically.",
+        Remedy::None,
+    )
 }
 
 // ------------------------------------------------------------------------ processes
@@ -828,6 +844,23 @@ mod tests {
                 assert!(reason.starts_with(message), "srt's text is kept: {reason}");
             }
         }
+    }
+
+    #[test]
+    fn a_first_start_that_outlasts_the_init_timeout_is_a_transient_preparing_state() {
+        let readiness = classify_windows_probe_failure(
+            "SANDBOX_INIT_TIMEOUT",
+            "Preparing this folder for the sandbox did not finish within 10 minutes (...).",
+        );
+        let (code, remedy, reason) = parts(&readiness);
+        assert_eq!((code, remedy), (SetupCode::Installing, Remedy::None));
+        assert!(reason.contains("first start after setup"), "{reason}");
+        // Not the placeholder another thread's probe answers with, and not a permanent failure.
+        assert!(!readiness.is_checking());
+        assert_ne!(code, SetupCode::SandboxFailed);
+        // Other codes are unaffected.
+        let (code, _, _) = parts(&classify_windows_probe_failure("SANDBOX_UNAVAILABLE", "boom"));
+        assert_eq!(code, SetupCode::SandboxFailed);
     }
 
     #[test]

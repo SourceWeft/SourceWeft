@@ -771,7 +771,9 @@ impl LocalHost {
                 std::fs::create_dir_all(&probe_root)?;
                 let (init, _) =
                     super::srt_exec::windows_init_config_for(&bundle, &self.base, &probe_root)?;
-                Sidecar::start(&bundle, &init)?.probe()
+                // The first start after a fresh setup is slow (the sandbox account's profile is
+                // created at its first logon): the same long `init` timeout as a workspace.
+                Sidecar::start_for_workspace(&bundle, &init)?.probe()
             },
         })
     }
