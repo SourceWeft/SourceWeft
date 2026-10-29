@@ -445,6 +445,15 @@ pub(crate) fn open_file_beneath(
     Err(HostError::new("INVALID_PATH", "A file path is required."))
 }
 
+/// Whether two spellings of a Windows file name are the same name: equal up to case, which is
+/// how NTFS compares them. Anything else (an 8.3 alias, say) is a different spelling.
+#[cfg(any(windows, test))]
+fn names_match(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(char::to_uppercase)
+        .eq(b.chars().flat_map(char::to_uppercase))
+}
+
 #[cfg(windows)]
 pub(crate) use nt::open_file_beneath;
 
@@ -949,6 +958,86 @@ pub(crate) fn list_granted_directory(
     Ok(files)
 }
 
+/// `file.list` on Windows: the entries of `parts` below the open workspace root `root` (a single
+/// file, or a directory, optionally with everything below it), as `{path, is_dir, size}` with
+/// `path` relative to the workspace root and `/`-separated; `relative` is the spelling the request
+/// used (the path reported for a single file, and the prefix of what is found below a directory).
+///
+/// Everything is read through handles: the target is opened by walking the workspace root's
+/// handle, every subdirectory is opened through its parent's handle, and entries are enumerated
+/// from the handle in hand, so a directory swapped for a junction (or renamed away) while the
+/// listing runs cannot redirect it outside the workspace. Reparse points, hard-linked files and
+/// names the host could not address again are skipped, as on unix.
+#[cfg(windows)]
+pub(crate) fn list_workspace_in(
+    root: &File,
+    parts: &[&std::ffi::OsStr],
+    relative: &str,
+    recursive: bool,
+) -> Result<serde_json::Value> {
+    let (target, info) = nt::open_listing_target(root, parts)?;
+    if !info.directory {
+        if info.links > 1 {
+            return Err(HostError::new(
+                "HARDLINK_NOT_ALLOWED",
+                "Hard-linked files cannot be searched.",
+            ));
+        }
+        return Ok(serde_json::json!({
+            "files": [{"path": relative, "is_dir": false, "size": info.end_of_file}]
+        }));
+    }
+    let mut prefix = String::new();
+    for part in parts {
+        prefix.push_str(&part.to_string_lossy());
+        prefix.push('/');
+    }
+    let mut files: Vec<serde_json::Value> = Vec::new();
+    let mut pending = vec![(target, prefix)];
+    while let Some((directory, prefix)) = pending.pop() {
+        let mut found = Vec::new();
+        nt::enumerate(&directory, |entry| {
+            if entry.is_reparse_point()
+                || super::winpath::validate_component(&entry.name).is_err()
+            {
+                return Ok(());
+            }
+            let is_dir = entry.is_directory();
+            if !is_dir {
+                // The directory listing carries no link count: ask the entry itself, through the
+                // held directory, so a name swapped for a link meanwhile is skipped too.
+                match nt::open_entry(&directory, &entry.name, nt::Role::Stat) {
+                    Ok((_, info)) if info.links > 1 => return Ok(()),
+                    Ok(_) => (),
+                    Err(error) if nt::is_vanished_or_link(&error) => return Ok(()),
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            found.push((entry.name, is_dir, entry.size));
+            Ok(())
+        })?;
+        for (name, is_dir, size) in found {
+            if files.len() >= 500 {
+                return Err(HostError::new(
+                    "DIRECTORY_TOO_LARGE",
+                    "More than 500 entries. Choose a narrower directory.",
+                ));
+            }
+            let path = format!("{prefix}{name}");
+            if recursive && is_dir {
+                match nt::open_entry(&directory, &name, nt::Role::Dir) {
+                    Ok((child, _)) => pending.push((child, format!("{path}/"))),
+                    // Vanished or turned into a link since it was enumerated: not listed below.
+                    Err(error) if nt::is_vanished_or_link(&error) => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            files.push(serde_json::json!({"path": path, "is_dir": is_dir, "size": size}));
+        }
+    }
+    Ok(serde_json::json!({"files": files}))
+}
+
 /// The Windows primitives under the file operations. Everything is relative to a directory
 /// handle that this module opened and checked itself; no path is ever re-resolved.
 ///
@@ -987,13 +1076,15 @@ pub(crate) mod nt {
         Win32::{
             Foundation::{
                 RtlNtStatusToDosError, ERROR_CANT_ACCESS_FILE, ERROR_DIRECTORY,
-                ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+                ERROR_INVALID_NAME, ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE,
+                UNICODE_STRING,
             },
             Storage::FileSystem::{
                 FileAttributeTagInfo, FileBasicInfo, FileDispositionInfoEx,
                 FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileStandardInfo,
-                GetFileInformationByHandleEx, SetFileInformationByHandle, DELETE,
-                FILE_ADD_FILE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
+                GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+                SetFileInformationByHandle, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY,
+                FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
                 FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT,
                 FILE_ATTRIBUTE_SYSTEM, FILE_ATTRIBUTE_TAG_INFO, FILE_BASIC_INFO,
                 FILE_DISPOSITION_FLAG_DELETE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
@@ -1002,6 +1093,7 @@ pub(crate) mod nt {
                 FILE_ID_BOTH_DIR_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_LIST_DIRECTORY,
                 FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
                 FILE_SHARE_WRITE, FILE_STANDARD_INFO, FILE_TRAVERSE, SYNCHRONIZE,
+                FILE_NAME_NORMALIZED, VOLUME_NAME_DOS,
             },
             System::IO::IO_STATUS_BLOCK,
         },
@@ -1026,7 +1118,8 @@ pub(crate) mod nt {
     pub(crate) enum Role {
         /// A directory to traverse or list.
         Dir,
-        /// A directory that receives a new entry (it additionally needs `FILE_ADD_FILE`).
+        /// A directory that receives a new entry (it additionally needs `FILE_ADD_FILE` and
+        /// `FILE_ADD_SUBDIRECTORY`).
         Parent,
         /// Anything readable: a file to read, or (rejected by the caller) a directory.
         Read,
@@ -1038,7 +1131,7 @@ pub(crate) mod nt {
         fn access(self) -> u32 {
             match self {
                 Role::Dir => DIRECTORY_ACCESS,
-                Role::Parent => DIRECTORY_ACCESS | FILE_ADD_FILE,
+                Role::Parent => DIRECTORY_ACCESS | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY,
                 Role::Read => FILE_GENERIC_READ,
                 Role::Stat => FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             }
@@ -1255,6 +1348,166 @@ pub(crate) mod nt {
     pub(crate) fn is_vanished_or_link(error: &io::Error) -> bool {
         error.kind() == io::ErrorKind::NotFound
             || error.raw_os_error() == Some(ERROR_CANT_ACCESS_FILE as i32)
+    }
+
+    /// The name `file` has on disk (the last component of its final path), as the file system
+    /// spells it: the long name for an 8.3 alias, the stored case for any case.
+    fn on_disk_name(file: &File) -> io::Result<String> {
+        let mut buffer = vec![0u16; 512];
+        loop {
+            // SAFETY: `file` owns a valid handle; the buffer is `buffer.len()` writable units.
+            let written = unsafe {
+                GetFinalPathNameByHandleW(
+                    file.as_raw_handle(),
+                    buffer.as_mut_ptr(),
+                    buffer.len() as u32,
+                    FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+                )
+            } as usize;
+            if written == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if written < buffer.len() {
+                buffer.truncate(written);
+                break;
+            }
+            // Too small: `written` is the size needed, including the terminator.
+            buffer = vec![0u16; written + 1];
+        }
+        let path = String::from_utf16(&buffer)
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
+        path.rsplit('\\')
+            .next()
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))
+    }
+
+    /// Fails with `ERROR_INVALID_NAME` when the entry `file` was opened as `spelled` is on disk
+    /// under another name (not just another case): an 8.3 short-name alias such as `PROGRA~1`.
+    /// The host would be acting on a different name than the one it validated.
+    fn verify_name(file: &File, spelled: &str) -> io::Result<()> {
+        if super::names_match(&on_disk_name(file)?, spelled) {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(ERROR_INVALID_NAME as i32))
+        }
+    }
+
+    fn denied(message: &str) -> HostError {
+        HostError::new("PATH_DENIED", message)
+    }
+
+    /// Opens the existing entry `name` of `dir` for a walk of the workspace: a reparse point of
+    /// any kind, and an 8.3 alias of the real name, are `PATH_DENIED`; `None` when it does not
+    /// exist; an entry that is a file where a directory is needed is `NOT_A_DIRECTORY`.
+    fn step(dir: &File, name: &str, role: Role) -> Result<Option<(File, Info)>> {
+        match open_entry(dir, name, role) {
+            Ok((file, info)) => match verify_name(&file, name) {
+                Ok(()) => Ok(Some((file, info))),
+                Err(error) if error.raw_os_error() == Some(ERROR_INVALID_NAME as i32) => Err(denied(
+                    "Short (8.3) name aliases and redirected paths are not allowed",
+                )),
+                Err(error) => Err(classify(error)),
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) if error.raw_os_error() == Some(ERROR_CANT_ACCESS_FILE as i32) => {
+                Err(denied("Symbolic links are not allowed"))
+            }
+            Err(error) if error.raw_os_error() == Some(ERROR_DIRECTORY as i32) => {
+                Err(HostError::new("NOT_A_DIRECTORY", "Path is not a directory"))
+            }
+            Err(error) => Err(classify(error)),
+        }
+    }
+
+    /// Checks `parts` below the open directory `root` one handle at a time, as `checked_path`
+    /// promises: no reparse point on the way, no 8.3 alias, and (with `must_exist`) the path
+    /// exists, `PATH_MISSING` otherwise. A part that does not exist ends the check: nothing
+    /// below it exists either.
+    pub(crate) fn check_in(root: &File, parts: &[&OsStr], must_exist: bool) -> Result<()> {
+        let mut directory = root.try_clone()?;
+        for (index, part) in parts.iter().enumerate() {
+            let name = component(part)?;
+            let role = if index == parts.len() - 1 { Role::Stat } else { Role::Dir };
+            match step(&directory, name, role)? {
+                Some((next, _)) => directory = next,
+                None if must_exist => {
+                    return Err(HostError::new("PATH_MISSING", "Path does not exist"))
+                }
+                None => return Ok(()),
+            }
+        }
+        Ok(())
+    }
+
+    /// [`check_in`] for the workspace `root` named by a path (opened without following a
+    /// reparse point in its final component).
+    pub(crate) fn check_beneath(root: &Path, parts: &[&OsStr], must_exist: bool) -> Result<()> {
+        check_in(&open_root(root, Role::Dir).map_err(classify)?, parts, must_exist)
+    }
+
+    /// Creates the directories `parts` below the open directory `root` (those that exist are
+    /// reused), every one created and entered through its parent's handle. Fails like
+    /// [`check_in`] on a link or an alias, with `NOT_A_DIRECTORY` for a file in the way.
+    pub(crate) fn create_dir_all_in(root: &File, parts: &[&OsStr]) -> Result<()> {
+        let mut directory = root.try_clone()?;
+        for part in parts {
+            let name = component(part)?;
+            let mut attempts = 0;
+            directory = loop {
+                if let Some((next, _)) = step(&directory, name, Role::Parent)? {
+                    break next;
+                }
+                attempts += 1;
+                match create(
+                    &directory,
+                    name,
+                    Role::Parent.access(),
+                    FILE_CREATE,
+                    Role::Parent.options(),
+                    FILE_ATTRIBUTE_NORMAL,
+                ) {
+                    Ok(created) => break created,
+                    // Created by someone else meanwhile: open what is there (and check it).
+                    Err(error)
+                        if error.kind() == io::ErrorKind::AlreadyExists && attempts < 3 => {}
+                    Err(error) => return Err(classify(error)),
+                }
+            };
+        }
+        Ok(())
+    }
+
+    /// [`create_dir_all_in`] for the workspace `root` named by a path.
+    pub(crate) fn create_dir_all_beneath(root: &Path, parts: &[&OsStr]) -> Result<()> {
+        create_dir_all_in(&open_root(root, Role::Parent).map_err(classify)?, parts)
+    }
+
+    /// Opens the entry a listing starts from: `parts` below the open directory `root`, with its
+    /// attributes. A directory is returned open for listing; a file, for its attributes only. No
+    /// parts is the root itself (which the caller opened for listing).
+    pub(crate) fn open_listing_target(root: &File, parts: &[&OsStr]) -> Result<(File, Info)> {
+        let missing = || HostError::new("PATH_MISSING", "Path does not exist");
+        let Some((last, parents)) = parts.split_last() else {
+            return Ok((root.try_clone()?, query(root)?));
+        };
+        let mut parent = root.try_clone()?;
+        for part in parents {
+            parent = step(&parent, component(part)?, Role::Dir)?.ok_or_else(missing)?.0;
+        }
+        let name = component(last)?;
+        let (entry, info) = step(&parent, name, Role::Stat)?.ok_or_else(missing)?;
+        if !info.directory {
+            return Ok((entry, info));
+        }
+        // A directory: open it again for listing, through the same parent (and check it again).
+        step(&parent, name, Role::Dir)?.ok_or_else(missing)
+    }
+
+    /// Opens the root of a workspace walk by path (see `open_root`).
+    pub(crate) fn open_walk_root(root: &Path, role: Role) -> Result<File> {
+        open_root(root, role).map_err(classify)
     }
 
     /// Creates the staging file `name` in `dir` (fails if the name exists, like `O_EXCL`).
@@ -1525,6 +1778,17 @@ mod tests {
             Ok(_) => panic!("expected an error"),
             Err(error) => error.code,
         }
+    }
+
+    #[test]
+    fn file_names_match_up_to_case_only() {
+        assert!(names_match("Docs", "dOCS"));
+        assert!(names_match("读我.TXT", "读我.txt"));
+        assert!(names_match("a long directory name", "A LONG DIRECTORY NAME"));
+        // An 8.3 alias is another spelling, not another case.
+        assert!(!names_match("a long directory name", "ALONGD~1"));
+        assert!(!names_match("Program Files", "PROGRA~1"));
+        assert!(!names_match("abc", "abcd"));
     }
 
     #[cfg(unix)]
@@ -1875,6 +2139,202 @@ mod windows_tests {
         let mut text = String::new();
         file.read_to_string(&mut text).unwrap();
         assert_eq!(text, "inside");
+    }
+
+    fn junction(link: &std::path::Path, target: &std::path::Path) {
+        let output = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path $env:SW_LINK -Target $env:SW_TARGET -ErrorAction Stop | Out-Null",
+            ])
+            .env("SW_LINK", link)
+            .env("SW_TARGET", target)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "junction creation failed: {output:?}");
+    }
+
+    /// Opens `<root>\work` and then swaps it: the directory is renamed away and a junction to
+    /// `outside` takes its name. Returns the handle to the original directory and its new name.
+    fn held_then_swapped(
+        root: &std::path::Path,
+        outside: &std::path::Path,
+    ) -> (File, std::path::PathBuf) {
+        let held = nt::open_beneath(root, &parts(&["work"]), nt::Role::Parent).unwrap();
+        std::fs::rename(root.join("work"), root.join("moved")).unwrap();
+        junction(&root.join("work"), outside);
+        (held, root.join("moved"))
+    }
+
+    #[test]
+    fn directories_are_created_through_the_held_directory_not_the_path() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("work")).unwrap();
+        let (held, moved) = held_then_swapped(root.path(), outside.path());
+        // The path now leads outside; creating through the path is refused as a link ...
+        assert_eq!(
+            code(nt::create_dir_all_beneath(root.path(), &parts(&["work", "a", "b"]))),
+            "PATH_DENIED"
+        );
+        // ... and creating below the handle lands in the original directory, never outside.
+        nt::create_dir_all_in(&held, &parts(&["a", "b"])).unwrap();
+        assert!(moved.join("a").join("b").is_dir());
+        assert!(!outside.path().join("a").exists());
+    }
+
+    #[test]
+    fn a_listing_follows_the_directory_it_opened_not_the_path() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("work")).unwrap();
+        std::fs::write(root.path().join("work/inside.txt"), "i").unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "s").unwrap();
+        let held = nt::open_beneath(root.path(), &[], nt::Role::Dir).unwrap();
+        // The listing target is opened (through the held root) before the swap ...
+        let (target, info) = nt::open_listing_target(&held, &parts(&["work"])).unwrap();
+        assert!(info.directory);
+        std::fs::rename(root.path().join("work"), root.path().join("moved")).unwrap();
+        junction(&root.path().join("work"), outside.path());
+        // ... so what it enumerates is the original content, and a fresh walk is refused.
+        let mut names = Vec::new();
+        nt::enumerate(&target, |entry| {
+            names.push(entry.name);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(names, ["inside.txt"]);
+        assert_eq!(
+            code(list_workspace_in(&held, &parts(&["work"]), "work", true)),
+            "PATH_DENIED"
+        );
+        let listing = list_workspace_in(&held, &parts(&["moved"]), "moved", true).unwrap();
+        assert_eq!(listing["files"][0]["path"], "moved/inside.txt");
+    }
+
+    #[test]
+    fn a_recursive_listing_does_not_descend_into_a_directory_swapped_after_it_was_listed() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("a/sub")).unwrap();
+        std::fs::write(root.path().join("a/sub/in.txt"), "i").unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "s").unwrap();
+        let held = nt::open_beneath(root.path(), &[], nt::Role::Dir).unwrap();
+        let listing = list_workspace_in(&held, &[], "", true).unwrap();
+        let mut paths: Vec<String> = listing["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap().to_owned())
+            .collect();
+        paths.sort();
+        assert_eq!(paths, ["a", "a/sub", "a/sub/in.txt"]);
+        // A listing that meets the junction skips it: a reparse point is never listed or entered.
+        std::fs::rename(root.path().join("a"), root.path().join("a-moved")).unwrap();
+        junction(&root.path().join("a"), outside.path());
+        let listing = list_workspace_in(&held, &[], "", true).unwrap();
+        let paths: Vec<&str> = listing["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert!(!paths.iter().any(|p| p.contains("secret")), "{paths:?}");
+        assert!(!paths.contains(&"a"), "the junction is not listed: {paths:?}");
+        assert!(paths.contains(&"a-moved/sub/in.txt"), "{paths:?}");
+    }
+
+    #[test]
+    fn the_walk_check_refuses_links_and_reports_missing_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("real/inner")).unwrap();
+        std::fs::write(root.path().join("real/file.txt"), "x").unwrap();
+        junction(&root.path().join("link"), outside.path());
+        let check = |names: &[&str], must_exist| {
+            nt::check_beneath(root.path(), &parts(names), must_exist)
+        };
+        check(&["real", "inner"], true).unwrap();
+        check(&["REAL", "Inner"], true).unwrap();
+        check(&[], true).unwrap();
+        check(&["real", "new", "deeper"], false).unwrap();
+        assert_eq!(code(check(&["real", "new"], true)), "PATH_MISSING");
+        assert_eq!(code(check(&["link"], false)), "PATH_DENIED");
+        assert_eq!(code(check(&["link", "x"], false)), "PATH_DENIED");
+        assert_eq!(code(check(&["real", "file.txt", "x"], false)), "NOT_A_DIRECTORY");
+    }
+
+    #[test]
+    fn short_name_aliases_are_refused_by_the_walk() {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+        let root = tempfile::tempdir().unwrap();
+        let long = root.path().join("a long directory name");
+        std::fs::create_dir(&long).unwrap();
+        let wide: Vec<u16> = long.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut buffer = vec![0u16; 1024];
+        let written = unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), 1024) } as usize;
+        assert!(written > 0, "GetShortPathNameW failed");
+        let short = std::path::PathBuf::from(std::ffi::OsString::from_wide(&buffer[..written]));
+        let alias = short.file_name().unwrap().to_str().unwrap().to_owned();
+        if alias.eq_ignore_ascii_case("a long directory name") {
+            eprintln!("8.3 names are disabled on this volume; the alias case cannot be exercised");
+            return;
+        }
+        assert_eq!(
+            code(nt::check_beneath(root.path(), &parts(&[alias.as_str(), "x"]), false)),
+            "PATH_DENIED"
+        );
+        assert_eq!(
+            code(nt::create_dir_all_beneath(root.path(), &parts(&[alias.as_str(), "x"]))),
+            "PATH_DENIED"
+        );
+        assert!(!long.join("x").exists());
+        // The real name in another case is the same name.
+        nt::create_dir_all_beneath(root.path(), &parts(&["A LONG DIRECTORY NAME", "x"])).unwrap();
+        assert!(long.join("x").is_dir());
+    }
+
+    #[test]
+    fn existing_directories_are_reused_and_a_file_in_the_way_is_not_a_directory() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("a/b")).unwrap();
+        std::fs::write(root.path().join("a/file.txt"), "x").unwrap();
+        nt::create_dir_all_beneath(root.path(), &parts(&["a", "b"])).unwrap();
+        nt::create_dir_all_beneath(root.path(), &parts(&["CJK目录", "[x] (1)", "with space"])).unwrap();
+        assert!(root.path().join("CJK目录/[x] (1)/with space").is_dir());
+        assert_eq!(
+            code(nt::create_dir_all_beneath(root.path(), &parts(&["a", "file.txt"]))),
+            "NOT_A_DIRECTORY"
+        );
+        assert_eq!(
+            code(nt::create_dir_all_beneath(root.path(), &parts(&["a", "file.txt", "x"]))),
+            "NOT_A_DIRECTORY"
+        );
+    }
+
+    #[test]
+    fn a_single_file_listing_reports_its_size_and_refuses_a_hard_link() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("one.txt"), "12345").unwrap();
+        std::fs::write(root.path().join("two.txt"), "x").unwrap();
+        std::fs::hard_link(root.path().join("two.txt"), root.path().join("three.txt")).unwrap();
+        let held = nt::open_beneath(root.path(), &[], nt::Role::Dir).unwrap();
+        let listing = list_workspace_in(&held, &parts(&["one.txt"]), "one.txt", false).unwrap();
+        assert_eq!(
+            listing,
+            serde_json::json!({"files":[{"path":"one.txt","is_dir":false,"size":5}]})
+        );
+        assert_eq!(
+            code(list_workspace_in(&held, &parts(&["two.txt"]), "two.txt", false)),
+            "HARDLINK_NOT_ALLOWED"
+        );
+        assert_eq!(
+            code(list_workspace_in(&held, &parts(&["absent.txt"]), "absent.txt", false)),
+            "PATH_MISSING"
+        );
     }
 
     #[test]

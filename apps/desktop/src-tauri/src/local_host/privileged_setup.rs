@@ -535,7 +535,11 @@ impl super::LocalHost {
         let _running = SetupRunning::begin()?;
         let _guard = self.begin_setup_guard()?;
         let fallback = self.pinned_helper().ok();
-        self.run_setup_action(&SetupAction::Uninstall(fallback))
+        self.run_setup_action(&SetupAction::Uninstall(fallback))?;
+        // The sandbox is gone; take back the access to the folders above workspaces that it was
+        // given (`win_acl`). Only after a successful removal: a cancelled prompt leaves the
+        // sandbox installed and working.
+        self.revoke_ancestor_grants()
     }
 
     /// The runtime's `srt-win.exe` as the elevated script may stage it: it must be the file this

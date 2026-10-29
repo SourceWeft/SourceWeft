@@ -1034,6 +1034,62 @@ mod windows {
         }
     }
 
+    #[test]
+    fn mkdir_and_list_report_missing_paths_and_files_in_the_way() {
+        let app = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        host.initialize_invocation_journal().unwrap();
+        let w = host.ensure_workspace("owner", "t").unwrap();
+        fs::create_dir_all(w.path.join("CJK目录/[b] (2)")).unwrap();
+        fs::write(w.path.join("CJK目录/[b] (2)/数据 1.txt"), "12345").unwrap();
+        fs::write(w.path.join("file.txt"), "x").unwrap();
+        let act = |action: &str, path: &str, recursive: bool| {
+            call(
+                &host,
+                "owner",
+                "t",
+                action,
+                json!({"workspaceId": w.id, "path": path, "recursive": recursive}),
+            )
+        };
+        // A file where a directory is wanted, whether it is the target or an ancestor.
+        assert_eq!(act("file.mkdir", "file.txt", false).unwrap_err().code, "NOT_A_DIRECTORY");
+        assert_eq!(act("file.mkdir", "file.txt/x", false).unwrap_err().code, "NOT_A_DIRECTORY");
+        // An existing directory is fine (and reported as created, as on unix).
+        assert_eq!(act("file.mkdir", "cjk目录/[B] (2)", false).unwrap(), json!({"created": true}));
+        assert!(!w.path.join("cjk目录/[B] (2)/x").exists());
+        // Listing: a missing path, a single file, a nested directory with awkward names.
+        assert_eq!(act("file.list", "absent", false).unwrap_err().code, "PATH_MISSING");
+        assert_eq!(
+            act("file.list", "file.txt", false).unwrap(),
+            json!({"files": [{"path": "file.txt", "is_dir": false, "size": 1}]})
+        );
+        let nested = act("file.list", "CJK目录", true).unwrap();
+        let mut found: Vec<(String, bool, u64)> = nested["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                (
+                    f["path"].as_str().unwrap().to_owned(),
+                    f["is_dir"].as_bool().unwrap(),
+                    f["size"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                ("CJK目录/[b] (2)".to_owned(), true, 0),
+                ("CJK目录/[b] (2)/数据 1.txt".to_owned(), false, 5),
+            ]
+        );
+        // Not recursive: one level.
+        let shallow = act("file.list", "CJK目录", false).unwrap();
+        assert_eq!(shallow["files"].as_array().unwrap().len(), 1);
+    }
+
     fn new_workspace(app: &std::path::Path) -> (LocalHost, sourceweft_desktop::local_host::Workspace) {
         let host = LocalHost::open(app).unwrap();
         host.initialize_invocation_journal().unwrap();

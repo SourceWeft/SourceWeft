@@ -15,6 +15,7 @@ mod srt_exec;
 pub mod privileged_setup;
 pub mod readiness;
 pub mod winpath;
+mod win_acl;
 mod win_shell;
 mod windows;
 mod workspace;

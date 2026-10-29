@@ -27,6 +27,13 @@ use std::{
 /// bundle that predates a policy field can never run commands while ignoring that field.
 pub(crate) const SANDBOX_PROTOCOL_VERSION: u32 = 2;
 
+/// How long a Windows `init` may take: the first `init` of a workspace walks its whole tree to
+/// grant the sandbox account write access, which takes minutes on a large folder (the ordinary
+/// 30 s reply timeout killed that walk and the retry restarted it). See
+/// `Sidecar::start_for_workspace`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const WINDOWS_INIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
 /// `InitConfig` as sent on `init`, mirroring the TypeScript type (camelCase on the wire).
 ///
 /// `pub`, not `pub(crate)`: this module is private, but `readiness.rs` re-exports this type
@@ -243,13 +250,6 @@ const WINDOWS_SIDECAR_ENV_ALLOW: [&str; 25] = [
     "ProgramFiles",
     "ProgramFiles(x86)",
     "ProgramW6432",
-    "COMSPEC",
-    "PATHEXT",
-    "OS",
-    "PROCESSOR_ARCHITECTURE",
-    "COMPUTERNAME",
-    "USERNAME",
-];
     "CommonProgramFiles",
     "CommonProgramFiles(x86)",
     "CommonProgramW6432",
@@ -258,6 +258,13 @@ const WINDOWS_SIDECAR_ENV_ALLOW: [&str; 25] = [
     "HOMEDRIVE",
     "HOMEPATH",
     "USERDOMAIN",
+    "COMSPEC",
+    "PATHEXT",
+    "OS",
+    "PROCESSOR_ARCHITECTURE",
+    "COMPUTERNAME",
+    "USERNAME",
+];
 
 /// The environment the Windows sidecar is started with, built from the host's own environment:
 /// only `PATH` and the names in `WINDOWS_SIDECAR_ENV_ALLOW` (matched case-insensitively, the
@@ -334,6 +341,20 @@ impl Sidecar {
         Self::start_with_timeout(bundle, init, Duration::from_secs(30))
     }
 
+    /// `start` for a sidecar that serves a real workspace. On Windows the first `init` of a
+    /// workspace walks the whole tree to grant the sandbox account its write access (minutes on a
+    /// large folder), so `init` gets [`WINDOWS_INIT_TIMEOUT`] there; every later call keeps the
+    /// 30 s reply timeout. An `init` that is still running when that expires fails with
+    /// `SANDBOX_INIT_TIMEOUT`, not `SANDBOX_UNAVAILABLE`: the sandbox is not broken, the folder
+    /// was too large to prepare in time, and nothing may restart and retry the same walk behind
+    /// the caller's back. macOS and Linux have no such walk and keep the 30 s for `init`.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn start_for_workspace(bundle: &Path, init: &InitConfig) -> Result<Sidecar> {
+        let reply = Duration::from_secs(30);
+        let init_timeout = if cfg!(windows) { WINDOWS_INIT_TIMEOUT } else { reply };
+        Self::start_with_timeouts(bundle, init, reply, init_timeout)
+    }
+
     /// Same as `start`, but with an explicit reply timeout, applied to `init` and to every
     /// later call on the returned `Sidecar`. Production code always goes through `start`;
     /// tests use this directly with a short timeout so a stuck or dead stub fails fast.
@@ -341,6 +362,16 @@ impl Sidecar {
         bundle: &Path,
         init: &InitConfig,
         timeout: Duration,
+    ) -> Result<Sidecar> {
+        Self::start_with_timeouts(bundle, init, timeout, timeout)
+    }
+
+    /// `start_with_timeout` with a separate (usually longer) timeout for the `init` reply.
+    pub(crate) fn start_with_timeouts(
+        bundle: &Path,
+        init: &InitConfig,
+        timeout: Duration,
+        init_timeout: Duration,
     ) -> Result<Sidecar> {
         let mut command = Command::new(bundle.join(sidecar_file_name()));
         command
@@ -412,8 +443,25 @@ impl Sidecar {
             poisoned: AtomicBool::new(false),
         };
         let id = sidecar.allocate_id();
-        let init_result =
-            sidecar.call(&id, &Request::Init { id: id.clone(), config: init })?;
+        let init_result = sidecar.call_within(
+            &id,
+            &Request::Init { id: id.clone(), config: init },
+            init_timeout,
+            &|| {
+                // Not a desynchronised connection to report as a dead sidecar: the workspace
+                // preparation is simply still running. The sidecar is discarded either way.
+                sidecar.kill_now();
+                HostError::new(
+                    "SANDBOX_INIT_TIMEOUT",
+                    format!(
+                        "Preparing this folder for the sandbox did not finish within {} \
+                         (the first use of a folder grants access to everything in it). Use a \
+                         smaller folder, or try again.",
+                        describe_wait(init_timeout)
+                    ),
+                )
+            },
+        )?;
         if let Err(rejection) = check_protocol_version(&init_result) {
             // A bundle that fails the handshake must never be used, and must not linger either:
             // kill it now rather than relying on `Drop`'s polite shutdown-then-wait.
@@ -516,6 +564,20 @@ impl Sidecar {
     /// type-level doc comment) before returning; a call made after that returns immediately,
     /// without touching stdin/stdout.
     fn call(&self, id: &str, request: &Request) -> Result<serde_json::Value> {
+        self.call_within(id, request, self.timeout, &|| {
+            self.poison("sidecar did not reply in time")
+        })
+    }
+
+    /// `call` with an explicit reply timeout and the error to report when it expires (which must
+    /// also leave the instance unusable: the reply may still arrive later).
+    fn call_within(
+        &self,
+        id: &str,
+        request: &Request,
+        timeout: Duration,
+        on_timeout: &dyn Fn() -> HostError,
+    ) -> Result<serde_json::Value> {
         if self.poisoned.load(Ordering::SeqCst) {
             return Err(HostError::new(
                 "SANDBOX_UNAVAILABLE",
@@ -536,12 +598,9 @@ impl Sidecar {
             .and_then(|()| conn.stdin.flush())
             .map_err(|error| self.poison(format!("failed to write to sidecar: {error}")))?;
 
-        let raw = conn.replies.recv_timeout(self.timeout).map_err(|error| {
-            let reason = match error {
-                RecvTimeoutError::Timeout => "sidecar did not reply in time",
-                RecvTimeoutError::Disconnected => "sidecar exited without replying",
-            };
-            self.poison(reason)
+        let raw = conn.replies.recv_timeout(timeout).map_err(|error| match error {
+            RecvTimeoutError::Timeout => on_timeout(),
+            RecvTimeoutError::Disconnected => self.poison("sidecar exited without replying"),
         })?;
         drop(conn);
 
@@ -563,6 +622,16 @@ impl Sidecar {
             }
             None => Err(self.poison("sidecar reported failure without an error body")),
         }
+    }
+}
+
+/// A wait as the user reads it: whole minutes from one minute up, seconds below.
+fn describe_wait(wait: Duration) -> String {
+    let seconds = wait.as_secs();
+    match seconds {
+        60 => "1 minute".to_string(),
+        120.. if seconds.is_multiple_of(60) => format!("{} minutes", seconds / 60),
+        _ => format!("{seconds} seconds"),
     }
 }
 
@@ -776,6 +845,26 @@ mod tests {
     }
 
     #[test]
+    fn sidecar_environment_keeps_the_drive_and_profile_locations_tools_expect() {
+        // Without these a sandboxed Git, Python or Java misplaces its profile and system paths.
+        let wanted = [
+            "SystemDrive",
+            "ALLUSERSPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "USERDOMAIN",
+            "CommonProgramFiles",
+            "CommonProgramFiles(x86)",
+            "CommonProgramW6432",
+        ];
+        let pairs: Vec<(&str, &str)> = wanted.iter().map(|name| (*name, "x")).collect();
+        let kept = env_of(&pairs);
+        let names: Vec<&str> = kept.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, wanted);
+        assert_eq!(WINDOWS_SIDECAR_ENV_ALLOW.len(), 25);
+    }
+
+    #[test]
     fn sidecar_environment_keeps_the_first_of_two_spellings() {
         let kept = env_of(&[("Path", "first"), ("PATH", "second")]);
         assert_eq!(kept, vec![("Path".to_string(), "first".to_string())]);
@@ -844,26 +933,6 @@ mod tests {
 
         #[test]
         fn sidecar_error_code_is_preserved() {
-    #[test]
-    fn sidecar_environment_keeps_the_drive_and_profile_locations_tools_expect() {
-        // Without these a sandboxed Git, Python or Java misplaces its profile and system paths.
-        let wanted = [
-            "SystemDrive",
-            "ALLUSERSPROFILE",
-            "HOMEDRIVE",
-            "HOMEPATH",
-            "USERDOMAIN",
-            "CommonProgramFiles",
-            "CommonProgramFiles(x86)",
-            "CommonProgramW6432",
-        ];
-        let pairs: Vec<(&str, &str)> = wanted.iter().map(|name| (*name, "x")).collect();
-        let kept = env_of(&pairs);
-        let names: Vec<&str> = kept.iter().map(|(name, _)| name.as_str()).collect();
-        assert_eq!(names, wanted);
-        assert_eq!(WINDOWS_SIDECAR_ENV_ALLOW.len(), 25);
-    }
-
             let bundle = bundle_with_stub();
             let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
             let error = sidecar
@@ -908,6 +977,61 @@ mod tests {
                 started.elapsed() < Duration::from_secs(10),
                 "expected the 3s sidecar timeout to fire well before the stub's 10s sleep ends"
             );
+        }
+
+        #[test]
+        fn an_init_that_outlasts_its_own_timeout_is_an_init_timeout_not_a_dead_sidecar() {
+            let bundle = bundle_with_stub();
+            let mut init = test_init();
+            init.home = "/tmp/sourceweft-sidecar-test-home/hang-init".to_string();
+            let started = Instant::now();
+            let error = match Sidecar::start_with_timeouts(
+                bundle.path(),
+                &init,
+                Duration::from_secs(30),
+                Duration::from_secs(2),
+            ) {
+                Ok(_) => panic!("an init that never replies must fail"),
+                Err(error) => error,
+            };
+            assert_eq!(error.code, "SANDBOX_INIT_TIMEOUT");
+            assert!(error.message.contains("2 seconds"), "{}", error.message);
+            assert!(
+                started.elapsed() < Duration::from_secs(8),
+                "the init timeout, not the stub's 10 s sleep or the 30 s reply timeout, ended it: {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn the_long_init_timeout_does_not_lengthen_the_other_calls() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start_with_timeouts(
+                bundle.path(),
+                &test_init(),
+                Duration::from_secs(2),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+            let started = Instant::now();
+            let error = sidecar
+                .wrap(
+                    "cmd-6",
+                    "HANG",
+                    Path::new("/tmp"),
+                    Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                )
+                .unwrap_err();
+            assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
+            assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
+        }
+
+        #[test]
+        fn waits_are_described_in_minutes_or_seconds() {
+            assert_eq!(describe_wait(WINDOWS_INIT_TIMEOUT), "10 minutes");
+            assert_eq!(describe_wait(Duration::from_secs(60)), "1 minute");
+            assert_eq!(describe_wait(Duration::from_secs(90)), "90 seconds");
+            assert_eq!(describe_wait(Duration::from_secs(2)), "2 seconds");
         }
 
         #[test]

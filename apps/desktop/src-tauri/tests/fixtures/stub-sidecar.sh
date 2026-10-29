@@ -19,6 +19,8 @@
 #     "protocol-string" -> "2" (a string), "protocol-float" -> 1.5, "protocol-missing" -> {} (no
 #     field), "protocol-null" -> null (the pre-handshake reply). Anything else replies 2, which is
 #     SANDBOX_PROTOCOL_VERSION in sandbox-sidecar/src/protocol.ts.
+#   - init.config.home ending in "/hang-init" -> never reply to init (sleeps 10 s, then exits):
+#     a preparation that outlasts the caller's init timeout
 #   - init.config.home ending in "/record-ops" -> append "<op> <commandId>"
 #     for every later request to "<home>.log" (srt_exec.rs cleanup tests)
 # Anything else gets a generic canned success reply.
@@ -39,6 +41,9 @@ while IFS= read -r line; do
     case "$op" in
         init)
             home=$(extract home "$line")
+            case "$home" in
+                */hang-init) sleep 10; exit 0 ;;
+            esac
             case "$home" in
                 */protocol-0) result='{"protocolVersion":0}' ;;
                 */protocol-1) result='{"protocolVersion":1}' ;;

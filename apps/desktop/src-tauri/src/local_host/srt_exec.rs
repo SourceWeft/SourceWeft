@@ -999,6 +999,11 @@ pub(crate) struct ReadRootInputs<'a> {
     pub path_var: &'a str,
     /// The chosen shell's install root, when it has one (Git for Windows).
     pub shell_root: Option<&'a Path>,
+    /// The credential locations (`winpath::protected_locations`): a read root that equals or lies
+    /// inside one is dropped, because the sidecar refuses such a read root outright
+    /// (`POLICY_INVALID`) and that would fail the whole `init` (a Microsoft Store Python `Scripts`
+    /// directory under `AppData\Local\Packages` is the usual case).
+    pub protected: &'a [PathBuf],
 }
 
 /// The Windows `readRoots` (Plan 6, W3): exactly the `PATH` directories (and the shell's install
@@ -1011,7 +1016,8 @@ pub(crate) struct ReadRootInputs<'a> {
 ///   cache and `credentials.toml`). There is no bin-to-parent rule here.
 /// - Never granted: the profile itself, `AppData` and its `Local`/`Roaming`/`LocalLow` children
 ///   (anything that equals or contains one of `app_data_roots`), and `base` in either direction
-///   (equal, inside, or containing it) — the host database and bundles are not tool directories.
+///   (equal, inside, or containing it) — the host database and bundles are not tool directories —
+///   and anything equal to or inside a credential location (`ReadRootInputs::protected`).
 ///   Directories *inside* `AppData\Local` and `\Roaming` are fine.
 /// - Only absolute local drive paths that `canonical` resolves to existing directories count:
 ///   relative entries are skipped before `canonical` is asked, so the process's current directory
@@ -1046,7 +1052,8 @@ pub(crate) fn read_roots_windows(
             || !is_inside(&native, inputs.profile)
             || inputs.app_data_roots.iter().any(|root| is_inside(root, &native))
             || is_inside(&native, inputs.base)
-            || is_inside(inputs.base, &native);
+            || is_inside(inputs.base, &native)
+            || inputs.protected.iter().any(|location| is_inside(&native, location));
         if protected || roots.iter().any(|seen| same_path(seen, &native)) {
             continue;
         }
@@ -1086,6 +1093,7 @@ pub(crate) fn windows_init_config(
 ) -> InitConfig {
     let text = |path: &Path| path.to_string_lossy().into_owned();
     let shell_root = host.shell.install_root();
+    let protected = super::winpath::protected_locations(&host.profile);
     let read_roots = read_roots_windows(
         &ReadRootInputs {
             profile: &host.profile,
@@ -1093,6 +1101,7 @@ pub(crate) fn windows_init_config(
             base,
             path_var: &host.path_var,
             shell_root: shell_root.as_deref(),
+            protected: &protected,
         },
         canonical,
     );
@@ -1145,6 +1154,12 @@ fn windows_host() -> Result<WindowsHost> {
 
 /// The `InitConfig` of a Windows sidecar for `root`, from this machine. Used by command execution
 /// and, with a scratch workspace root, by the readiness probe.
+///
+/// Before returning it, the sandbox account is given traversal of every profile directory above
+/// `root` and above each read root (`win_acl`): programs resolve the path they run in, and the
+/// account cannot `stat` those directories otherwise (`EPERM ... lstat '...\AppData'`). That
+/// grant is part of building the config so that every sidecar start, the readiness probe
+/// included, has it. A machine without the sandbox account fails closed here.
 #[cfg(windows)]
 pub(crate) fn windows_init_config_for(
     bundle: &Path,
@@ -1152,17 +1167,37 @@ pub(crate) fn windows_init_config_for(
     root: &Path,
 ) -> Result<(InitConfig, ShellKind)> {
     let host = windows_host()?;
+    // The sidecar compares paths as spelled, so the workspace root it is given must be the
+    // canonical long-name form (a base under an 8.3-spelled profile would otherwise differ from
+    // the read roots and the grants below).
     let root = super::winpath::to_native(root)?;
+    let root = windows_canonical_dir(&root).unwrap_or(root);
     let kind = host.shell.kind;
-    Ok((
-        windows_init_config(bundle, base, &root, &host, windows_canonical_dir),
-        kind,
-    ))
+    let init = windows_init_config(bundle, base, &root, &host, windows_canonical_dir);
+    let mut targets = vec![root.clone()];
+    targets.extend(init.read_roots.iter().map(PathBuf::from));
+    super::win_acl::ensure_ancestor_traversal(base, &host.profile, &targets)?;
+    Ok((init, kind))
+}
+
+/// Refused while the runtime is being installed or the elevated setup is running: both replace
+/// the files a sidecar runs from (and the staged helper it launches), so nothing may start, or
+/// keep serving a new command, meanwhile.
+#[cfg(windows)]
+fn refuse_while_installing(host: &LocalHost) -> Result<()> {
+    if super::readiness::ReadinessCache::is_installing(&host.sandbox_readiness_cache) {
+        return Err(HostError::new(
+            "SANDBOX_UNAVAILABLE",
+            "The sandbox is installing; try again when it has finished.",
+        ));
+    }
+    Ok(())
 }
 
 /// Starts the sidecar for `root` from this host's installed bundle.
 #[cfg(windows)]
 fn start_windows_instance(host: &LocalHost, root: &Path) -> Result<SandboxInstance> {
+    refuse_while_installing(host)?;
     let bundle = bundle_dir(&host.base);
     if !bundle.join(sidecar_file_name()).is_file() {
         return Err(HostError::new(
@@ -1172,7 +1207,11 @@ fn start_windows_instance(host: &LocalHost, root: &Path) -> Result<SandboxInstan
     }
     let root = super::winpath::to_native(root)?;
     let (init, shell) = windows_init_config_for(&bundle, &host.base, &root)?;
-    let sidecar = Sidecar::start(&bundle, &init)?;
+    // The first `init` of a workspace walks its tree and can take minutes.
+    let sidecar = Sidecar::start_for_workspace(&bundle, &init)?;
+    // An install that began while this one was starting must not find a sidecar running from the
+    // files it is about to swap: drop it (it shuts down) rather than hand it out.
+    refuse_while_installing(host)?;
     Ok(SandboxInstance::new(sidecar, vec![root]).with_shell(shell))
 }
 
@@ -1192,6 +1231,16 @@ pub(crate) fn execute_command(
     max_chars: usize,
     cancel: Arc<AtomicBool>,
 ) -> Result<Value> {
+    refuse_while_installing(host)?;
+    // Instances are keyed by, and the sidecar is told, the canonical spelling of the root (see
+    // `windows_init_config_for`); the working directory is rebased onto it.
+    let canonical_root = windows_canonical_dir(root).unwrap_or_else(|| root.to_path_buf());
+    let rebased_cwd = match super::winpath::relative_below(root, cwd) {
+        Some(relative) if relative.is_empty() => canonical_root.clone(),
+        Some(relative) => canonical_root.join(relative.replace('/', "\\")),
+        None => cwd.to_path_buf(),
+    };
+    let (root, cwd) = (canonical_root.as_path(), rebased_cwd.as_path());
     super::win_shell::prepare_tmpdir(root)?;
     let command_id = new_command_id();
     let script_for = |instance: &SandboxInstance| -> Result<String> {
@@ -1870,6 +1919,36 @@ mod windows_tests {
         assert!(!same_root(Path::new(r"C:\Users\Me\Work"), Path::new(r"C:\Users\Me\Work\sub")));
     }
 
+    #[test]
+    fn nothing_starts_or_runs_while_an_install_is_in_progress() {
+        use super::{execute_command, start_windows_instance};
+        use crate::local_host::{readiness::ReadinessCache, LocalHost};
+        use std::sync::{atomic::AtomicBool, Arc};
+        let app = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        let root = app.path().to_path_buf();
+        let run = |host: &LocalHost| {
+            execute_command(host, &root, &root, "echo hi", 1000, 100, Arc::new(AtomicBool::new(false)))
+                .unwrap_err()
+        };
+        let guard = ReadinessCache::begin_install(&host.sandbox_readiness_cache)
+            .expect("no install is running yet");
+        let refused = run(&host);
+        assert_eq!(refused.code, "SANDBOX_UNAVAILABLE");
+        assert!(refused.message.contains("installing"), "{}", refused.message);
+        let refused = match start_windows_instance(&host, &root) {
+            Err(error) => error,
+            Ok(_) => panic!("a sidecar must not start while an install runs"),
+        };
+        assert_eq!(refused.code, "SANDBOX_UNAVAILABLE");
+        assert!(refused.message.contains("installing"), "{}", refused.message);
+        // Once the install is over the refusal is gone (this machine has no runtime, which is a
+        // different, honest error).
+        drop(guard);
+        let error = run(&host);
+        assert!(!error.message.contains("installing"), "{}", error.message);
+    }
+
     /// The production `canonical` against a real directory tree: only existing directories under
     /// the profile, in native form, with no widening of `bin`.
     #[test]
@@ -1905,6 +1984,7 @@ mod windows_tests {
                 base: &base,
                 path_var: &path_var,
                 shell_root: None,
+                protected: &[],
             },
             windows_canonical_dir,
         );
@@ -1966,6 +2046,7 @@ mod windows_policy_tests {
 
     fn roots(path_var: &str, shell_root: Option<&str>, fs: impl Fn(&Path) -> Option<PathBuf>) -> Vec<String> {
         let app_data = app_data();
+        let protected = crate::local_host::winpath::protected_locations(Path::new(PROFILE));
         read_roots_windows(
             &ReadRootInputs {
                 profile: Path::new(PROFILE),
@@ -1973,6 +2054,7 @@ mod windows_policy_tests {
                 base: Path::new(BASE),
                 path_var,
                 shell_root: shell_root.map(Path::new),
+                protected: &protected,
             },
             fs,
         )
@@ -2057,6 +2139,36 @@ mod windows_policy_tests {
     }
 
     #[test]
+    fn path_entries_inside_credential_locations_are_not_read_roots() {
+        // The sidecar refuses a read root in a protected location with POLICY_INVALID, which would
+        // fail the whole init: such PATH entries (a Store Python's Scripts directory, a tool
+        // installed under `.ssh`) must be dropped before the config is built.
+        static DIRS: &[&str] = &[
+            r"C:\Users\Me\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_abc\LocalCache\local-packages\Scripts",
+            r"C:\Users\Me\AppData\Local\Packages",
+            r"C:\Users\Me\.ssh",
+            r"C:\Users\Me\.ssh\bin",
+            r"C:\Users\Me\.sshfoo",
+            r"C:\Users\Me\.cargo\bin",
+            r"C:\Users\Me\AppData\Local\Programs\Python\Python312\Scripts",
+        ];
+        let path_var = DIRS.join(";");
+        assert_eq!(
+            roots(&path_var, None, fake_fs(DIRS)),
+            [
+                r"C:\Users\Me\.sshfoo",
+                r"C:\Users\Me\.cargo\bin",
+                r"C:\Users\Me\AppData\Local\Programs\Python\Python312\Scripts",
+            ]
+        );
+        // The shell's install root is held to the same rule.
+        assert_eq!(
+            roots("", Some(r"C:\Users\Me\.ssh\bin"), fake_fs(DIRS)),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
     fn a_base_outside_appdata_is_protected_in_both_directions() {
         let app_data = app_data();
         let found = read_roots_windows(
@@ -2069,6 +2181,7 @@ mod windows_policy_tests {
                     r"C:\Users\Me\tools\apple;C:\Users\Me\other"
                 ),
                 shell_root: None,
+                protected: &[],
             },
             |path: &Path| Some(path.to_path_buf()),
         );

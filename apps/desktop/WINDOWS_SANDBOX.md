@@ -184,7 +184,29 @@ command may be re-allowed only its own folder). At most **4** run at once; a fif
 evicts the longest-idle one, and if all four are running commands the new command is refused
 with `SANDBOX_BUSY` ("Too many workspaces are running commands at once; wait for one to
 finish."). The first command in a folder pays for stamping the permission on it (proportional to
-the size of the tree).
+the size of the tree); that first start may take up to 10 minutes before it is reported as
+`SANDBOX_INIT_TIMEOUT` ("Preparing this folder for the sandbox did not finish ... Use a smaller
+folder, or try again"). It is not treated as a broken sandbox and is not retried automatically.
+
+### The folders above a working folder
+
+Programs resolve the path they run in: Node's `realpathSync` and Git `stat` **every parent** of
+the working folder. Your profile is closed to the sandbox account, so before a sandbox starts for
+a folder the app gives the account one *"this folder only"* permission on each directory above the
+working folder (and above each toolchain folder) that lies **inside your profile**, the profile
+folder included. The permission is `FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL |
+SYNCHRONIZE`: not inherited by anything below it, no listing, no file reads. The drive root,
+`C:\Users` and anything outside your profile are readable by default and are not touched.
+
+**What this exposes:** to the sandbox account, that each of those directories exists, its
+attributes (dates, flags) and its permission list. **Not exposed:** the names of other entries
+(the account cannot list the directory) or any contents. Existing permissions are kept as they
+are and the protection flags are never changed; a directory that already admits the account is
+left alone, so a second start changes nothing. The entries the app added are recorded in
+`%APPDATA%\nicelab.sourceweft\sandbox\ancestor-grants.json` and the app's removal path takes
+exactly those back (by the recorded SID, so it works after the account is gone). Without the
+account (sandbox not set up) nothing is granted and nothing runs. If a permission list cannot be
+written (for example a protected folder), the command is refused naming that folder.
 
 ## What a command can reach on the network
 

@@ -239,7 +239,19 @@ sock.on('data', d => {
 });
 "##;
 
-const SCRIPTS: [(&str, &str); 10] = [
+/// `node sw-list.cjs <dir>...`: for each directory, whether `lstat` works and whether the
+/// directory can be listed. Prints one `LIST {json}` line per directory.
+const LIST_SCRIPT: &str = r##"const fs = require('fs');
+try { fs.writeFileSync('.sw-control', 'ran'); } catch (e) { console.log('CONTROL-ERR:' + e.code); }
+for (const dir of process.argv.slice(2)) {
+  const r = { dir };
+  try { r.lstat = fs.lstatSync(dir).isDirectory() ? 'dir' : 'other'; } catch (e) { r.lstat = 'ERR:' + e.code; }
+  try { r.readdir = 'LISTED:' + fs.readdirSync(dir).length; } catch (e) { r.readdir = 'ERR:' + e.code; }
+  console.log('LIST ' + JSON.stringify(r));
+}
+"##;
+
+const SCRIPTS: [(&str, &str); 11] = [
     ("sw-env.cjs", ENV_SCRIPT),
     ("sw-read.cjs", READ_SCRIPT),
     ("sw-write.cjs", WRITE_SCRIPT),
@@ -250,6 +262,7 @@ const SCRIPTS: [(&str, &str); 10] = [
     ("sw-net.cjs", NET_SCRIPT),
     ("sw-connect.cjs", CONNECT_SCRIPT),
     ("sw-socks.cjs", SOCKS_SCRIPT),
+    ("sw-list.cjs", LIST_SCRIPT),
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -966,6 +979,55 @@ fn setup_uninstall_returns_to_not_installed_and_leaves_the_upstream_install_alon
 
 #[test]
 #[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn setup_uninstall_works_without_the_staged_helper_and_revokes_the_ancestor_grants() {
+    // The staged helper is gone (deleted, or never fully staged) but the account and the network
+    // rules exist: the uninstall must still remove them, through the pinned, hash-verified helper
+    // of the installed runtime, and must not report success for a sandbox it left behind.
+    let (app, host) = host_with_bundle();
+    let mut guard = Reinstall { host: &host, armed: true };
+    // A workspace under the profile makes the host grant ancestor traversal (and record it).
+    let (_scratch, scratch) = profile_scratch("sw-anc-unin-");
+    let nested = scratch.join("w");
+    fs::create_dir_all(&nested).unwrap();
+    let (workspace, _) = granted_workspace(&host, "unin", &nested);
+    let (result, _) = env_probe(&host, "unin", &workspace, active_shell());
+    assert_eq!(result["exitCode"], 0, "{result}");
+    assert!(
+        ancestor_record(app.path()).is_some(),
+        "precondition: the host recorded the ancestor grants it added"
+    );
+    let with_grant = acl_report(&scratch);
+    assert_eq!(with_grant.sandbox_entries().len(), 1, "{:?}", with_grant.aces);
+
+    fs::remove_file(staged_srt_win()).expect("delete the staged helper");
+    host.run_elevated_uninstall()
+        .unwrap_or_else(|error| panic!("the uninstall without the staged helper failed: {error}"));
+    let (ok, text) = host_powershell(
+        "if (Get-LocalUser -Name 'sourceweft-sandbox' -ErrorAction SilentlyContinue) { 'ACCOUNT-PRESENT' } else { 'ACCOUNT-GONE' }",
+    );
+    assert!(
+        ok && text.contains("ACCOUNT-GONE"),
+        "the uninstall must remove the account even without the staged helper: {text}"
+    );
+    let staged_dir = staged_srt_win().parent().unwrap().to_path_buf();
+    assert!(!staged_dir.exists(), "the uninstall must remove {staged_dir:?}");
+    // Revoked by the uninstall: the entry is gone although its account no longer resolves.
+    assert!(
+        acl_report(&scratch).sandbox_entries().is_empty()
+            && !acl_report(&scratch).aces.iter().any(|line| line.contains("S-1-5-21")
+                && line.contains("|Allow|1179808|")),
+        "the uninstall must take back the ancestor grants: {:?}",
+        acl_report(&scratch).aces
+    );
+    assert!(ancestor_record(app.path()).is_none(), "the record is removed with the grants");
+
+    host.run_elevated_setup()
+        .unwrap_or_else(|error| panic!("the reinstall after the uninstall failed: {error}"));
+    guard.armed = false;
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
 fn upstream_default_install_coexists_with_ours() {
     let upstream = upstream_srt_win();
     let (_app, host) = host_with_bundle();
@@ -1257,6 +1319,249 @@ fn shells_workspace_with_spaces_brackets_cjk_and_apostrophes() {
         "ok",
         "a file with spaces, brackets, CJK and an apostrophe must be created in the folder ({shell:?}): {result}"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ancestor traversal: the sandbox account can resolve the path it runs in (and nothing more).
+// ---------------------------------------------------------------------------------------------
+
+/// A fresh directory directly under the user's profile, removed with the guard. Workspaces under
+/// it are in the profile like production's `%APPDATA%\<app>\task-workspaces\<id>`.
+fn profile_scratch(prefix: &str) -> (tempfile::TempDir, PathBuf) {
+    let profile = profile_dir();
+    let dir = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(&profile)
+        .unwrap_or_else(|error| panic!("cannot create a scratch directory under {profile:?}: {error}"));
+    let root = canonical(dir.path());
+    (dir, root)
+}
+
+/// What the DACL of a directory looks like, from Windows PowerShell: the SDDL of the access list
+/// (`D:` flags first: `P` protected, `AI` auto-inherited) and one line per entry.
+struct AclReport {
+    sddl: String,
+    aces: Vec<String>,
+}
+
+impl AclReport {
+    /// The flags before the first entry, e.g. `D:PAI`.
+    fn flags(&self) -> &str {
+        self.sddl.split('(').next().unwrap_or("")
+    }
+
+    fn sandbox_entries(&self) -> Vec<&String> {
+        self.aces.iter().filter(|line| line.contains("sourceweft-sandbox")).collect()
+    }
+
+    fn others(&self) -> Vec<&String> {
+        self.aces.iter().filter(|line| !line.contains("sourceweft-sandbox")).collect()
+    }
+}
+
+fn acl_report(dir: &Path) -> AclReport {
+    let literal = dir.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         $a = Get-Acl -LiteralPath '{literal}'\n\
+         'SDDL ' + $a.GetSecurityDescriptorSddlForm('Access')\n\
+         foreach ($r in $a.Access) {{ 'ACE ' + $r.IdentityReference + '|' + $r.AccessControlType + '|' + [int]$r.FileSystemRights + '|' + $r.InheritanceFlags + '|' + $r.PropagationFlags + '|' + $r.IsInherited + '|' + $r.FileSystemRights }}\n"
+    );
+    let (ok, text) = host_powershell(&script);
+    assert!(ok, "Get-Acl failed for {dir:?}: {text}");
+    let sddl = text
+        .lines()
+        .find_map(|line| line.trim_end().strip_prefix("SDDL "))
+        .unwrap_or_else(|| panic!("no SDDL line for {dir:?}: {text}"))
+        .to_string();
+    let aces = text
+        .lines()
+        .filter_map(|line| line.trim_end().strip_prefix("ACE "))
+        .map(str::to_string)
+        .collect();
+    AclReport { sddl, aces }
+}
+
+/// The access mask the grant is specified to carry: FILE_TRAVERSE | FILE_READ_ATTRIBUTES |
+/// READ_CONTROL | SYNCHRONIZE.
+const TRAVERSE_MASK: &str = "1179808";
+
+fn ancestor_record(app: &Path) -> Option<Value> {
+    let text = fs::read_to_string(app.join("sandbox").join("ancestor-grants.json")).ok()?;
+    Some(serde_json::from_str(&text).expect("ancestor-grants.json is JSON"))
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn a_node_script_in_a_workspace_under_the_profile_runs() {
+    // The regression for the ancestor bug (17 failures in the first CI run): Node's realpathSync
+    // lstat's every ancestor of the script, and the sandbox account could not stat `...\AppData`.
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let (_scratch, scratch) = profile_scratch("sw-anc-run-");
+    let nested = scratch.join("one").join("two");
+    fs::create_dir_all(&nested).unwrap();
+    let (workspace, root) = granted_workspace(&host, "deep-thread", &nested);
+    assert!(root.starts_with(profile_dir()), "precondition: {root:?} must be inside the profile");
+    let (result, env) = env_probe(&host, "deep", &workspace, shell);
+    assert_eq!(result["exitCode"], 0, "a Node script in a profile workspace must run ({shell:?}): {result}");
+    assert_eq!(norm(env["cwd"].as_str().unwrap_or_default()), norm(&wire(&root)), "{env}");
+    assert_eq!(fs::read_to_string(root.join("out.txt")).unwrap_or_default(), "hello", "{result}");
+
+    // The automatic workspace (`<app data>/task-workspaces/<id>/files`, here under %TEMP%) is the
+    // production layout; it must run a script too.
+    let automatic = new_workspace(&host, "auto-thread");
+    let (result, _) = env_probe(&host, "auto", &automatic, shell);
+    assert_eq!(result["exitCode"], 0, "a Node script in an automatic workspace must run ({shell:?}): {result}");
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn the_ancestor_grant_allows_lstat_but_no_directory_listing() {
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let base = std::env::temp_dir();
+    let parent = if canonical(&base).starts_with(profile_dir()) { base } else { profile_dir() };
+    let dir = tempfile::Builder::new()
+        .prefix("sw-list-")
+        .tempdir_in(&parent)
+        .unwrap();
+    let nested = canonical(dir.path()).join("ws");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(canonical(dir.path()).join("sibling.txt"), "x").unwrap();
+    let (workspace, root) = granted_workspace(&host, "list-thread", &nested);
+
+    // Every strict ancestor inside the profile, profile first.
+    let profile = profile_dir();
+    let mut ancestors: Vec<PathBuf> = root
+        .ancestors()
+        .skip(1)
+        .take_while(|path| path.starts_with(&profile))
+        .map(Path::to_path_buf)
+        .collect();
+    ancestors.reverse();
+    assert!(
+        ancestors.len() >= 2 && ancestors[0] == profile,
+        "precondition: expected the profile and at least one directory below it, got {ancestors:?}"
+    );
+    let names: Vec<String> = ancestors.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let control = workspace.path.join(".sw-control");
+    let _ = fs::remove_file(&control);
+    let result = execute(&host, "list", &workspace, &node(shell, "sw-list.cjs", &refs));
+    assert_eq!(
+        fs::read_to_string(&control).ok().as_deref(),
+        Some("ran"),
+        "the sandboxed Node never ran in the workspace, so the results below would prove nothing: {result}"
+    );
+    let lines: Vec<Value> = output(&result)
+        .lines()
+        .filter_map(|line| line.strip_prefix("LIST "))
+        .map(|line| serde_json::from_str(line).expect("LIST line is JSON"))
+        .collect();
+    assert_eq!(lines.len(), ancestors.len(), "one LIST line per directory: {result}");
+    // The directories whose lists no one but the user can read on any Windows install: the
+    // profile, its AppData, and the scratch directory this test created. (Other ancestors, such as
+    // %TEMP%, are listed in the log but not asserted: a machine's own ACLs may admit more there.)
+    let must_refuse = [
+        profile.clone(),
+        profile.join("AppData"),
+        canonical(dir.path()),
+    ];
+    for line in &lines {
+        eprintln!("ancestor as the sandbox sees it: {line}");
+        assert_eq!(line["lstat"], "dir", "lstat of an ancestor must work (the grant): {line}");
+        let listed = PathBuf::from(line["dir"].as_str().unwrap_or_default());
+        if must_refuse.iter().any(|path| norm(&path.to_string_lossy()) == norm(&listed.to_string_lossy())) {
+            let listing = line["readdir"].as_str().unwrap_or_default();
+            assert!(
+                listing == "ERR:EACCES" || listing == "ERR:EPERM",
+                "listing {listed:?} must be refused (the grant has no FILE_LIST_DIRECTORY), got {listing:?}: {line}"
+            );
+        }
+    }
+    assert!(
+        lines.iter().any(|line| line["dir"].as_str().is_some_and(|d| norm(d) == norm(&profile.to_string_lossy()))),
+        "the profile directory itself must have been probed: {lines:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn ancestor_grants_are_exact_idempotent_and_revocable() {
+    let shell = active_shell();
+    let (app, host) = host_with_bundle();
+    let (_scratch, scratch) = profile_scratch("sw-anc-acl-");
+    let first = scratch.join("a").join("b");
+    fs::create_dir_all(&first).unwrap();
+    // Two directories only this test has ever touched: the scratch directory and its child `a`.
+    let touched = [scratch.clone(), scratch.join("a")];
+    let before: Vec<AclReport> = touched.iter().map(|dir| acl_report(dir)).collect();
+    for (dir, report) in touched.iter().zip(&before) {
+        assert!(report.sandbox_entries().is_empty(), "precondition: {dir:?} has no sandbox entry yet: {:?}", report.aces);
+    }
+
+    // Starting a sandbox for the workspace grants traversal on the directories above it.
+    let (workspace, _) = granted_workspace(&host, "acl-1", &first);
+    let (result, _) = env_probe(&host, "acl-1", &workspace, shell);
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let after: Vec<AclReport> = touched.iter().map(|dir| acl_report(dir)).collect();
+    for ((dir, was), now) in touched.iter().zip(&before).zip(&after) {
+        let ours = now.sandbox_entries();
+        assert_eq!(ours.len(), 1, "exactly one sandbox entry on {dir:?}: {:?}", now.aces);
+        // IdentityReference|Allow|mask|InheritanceFlags|PropagationFlags|IsInherited|rights
+        let fields: Vec<&str> = ours[0].split('|').collect();
+        assert_eq!(fields[1], "Allow", "{dir:?}: {}", ours[0]);
+        assert_eq!(fields[2], TRAVERSE_MASK, "mask of {dir:?} (traverse + read attributes + read control + synchronize): {}", ours[0]);
+        assert_eq!(fields[3], "None", "children must not inherit it ({dir:?}): {}", ours[0]);
+        assert_eq!(fields[5], "False", "an explicit entry ({dir:?}): {}", ours[0]);
+        assert_eq!(now.others(), was.others(), "every other entry of {dir:?} is unchanged");
+        assert_eq!(now.flags(), was.flags(), "the protection flags of {dir:?} are unchanged");
+    }
+
+    // It is recorded, so it can be taken back exactly.
+    let record = ancestor_record(app.path()).expect("the grants are recorded in <app data>/sandbox/ancestor-grants.json");
+    let recorded = |dir: &Path| {
+        record["grants"].as_array().unwrap().iter().any(|grant| {
+            grant["path"].as_str().is_some_and(|path| norm(path) == norm(&dir.to_string_lossy()))
+        })
+    };
+    for dir in &touched {
+        assert!(recorded(dir), "{dir:?} must be in the record: {record}");
+    }
+
+    // A second workspace under the same parents changes nothing on them.
+    let second = scratch.join("a").join("c");
+    fs::create_dir_all(&second).unwrap();
+    let (workspace2, _) = granted_workspace(&host, "acl-2", &second);
+    let (result, _) = env_probe(&host, "acl-2", &workspace2, shell);
+    assert_eq!(result["exitCode"], 0, "{result}");
+    for (dir, was) in touched.iter().zip(&after) {
+        assert_eq!(acl_report(dir).sddl, was.sddl, "a second start must be a no-op on {dir:?}");
+    }
+    assert_eq!(ancestor_record(app.path()), Some(record), "the record is unchanged by a no-op");
+
+    // Revocation removes exactly what was added.
+    host.revoke_ancestor_grants()
+        .unwrap_or_else(|error| panic!("revoking the ancestor grants failed: {error}"));
+    for (dir, was) in touched.iter().zip(&before) {
+        let now = acl_report(dir);
+        assert!(now.sandbox_entries().is_empty(), "{dir:?} still has a sandbox entry: {:?}", now.aces);
+        assert_eq!(now.sddl, was.sddl, "revocation must restore the original access list of {dir:?} exactly");
+    }
+    assert!(
+        ancestor_record(app.path()).is_none(),
+        "the record is removed once everything in it was revoked"
+    );
+
+    // And the sandbox grants again when the next workspace starts.
+    let third = scratch.join("a").join("d");
+    fs::create_dir_all(&third).unwrap();
+    let (workspace3, _) = granted_workspace(&host, "acl-3", &third);
+    let (result, _) = env_probe(&host, "acl-3", &workspace3, shell);
+    assert_eq!(result["exitCode"], 0, "after a revocation the next start grants again: {result}");
+    assert_eq!(acl_report(&scratch).sandbox_entries().len(), 1);
+    host.revoke_ancestor_grants().unwrap();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1593,14 +1898,15 @@ fn git_bash_install_root() -> Option<PathBuf> {
 #[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
 fn git_for_windows_https_works() {
     let shell = active_shell();
-    let Some(git_root) = git_bash_install_root() else {
+    if git_bash_install_root().is_none() {
         eprintln!("SKIPPED: Git for Windows is not installed in a fixed location on this machine");
         return;
-    };
+    }
     let (_app, host) = host_with_bundle();
     let workspace = new_workspace(&host, "thread");
     // git itself (OpenSSL backend, injected by srt: Schannel cannot get credentials under the
-    // write-restricted token).
+    // write-restricted token). Git's own curl.exe is a different matter: see
+    // `git_bash_curl_is_a_schannel_client_known_limit`.
     let result = execute(
         &host,
         "git",
@@ -1609,40 +1915,97 @@ fn git_for_windows_https_works() {
     );
     assert_eq!(result["exitCode"], 0, "git over HTTPS must work under the sandbox ({shell:?}): {result}");
     assert!(output(&result).contains("\tHEAD"), "git ls-remote printed no HEAD: {result}");
-    // Git for Windows' own OpenSSL curl, by absolute path.
-    let curl = git_root.join(r"mingw64\bin\curl.exe");
-    let command = call(
-        shell,
-        &curl,
-        "-sS -m 30 -o NUL -w '%{http_code}' https://registry.npmjs.org/left-pad",
-    );
-    let result = execute(&host, "git-curl", &workspace, &command);
-    assert_eq!(result["exitCode"], 0, "Git for Windows' curl.exe must work under the sandbox ({shell:?}): {result}");
-    assert_eq!(output(&result).trim(), "200", "{result}");
+}
+
+/// The `curl --version` lines that say how it was built, for the log (and for failure messages).
+fn curl_build(text: &str) -> String {
+    text.lines()
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            lower.starts_with("curl ") || lower.starts_with("features:") || lower.starts_with("protocols:")
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 #[test]
 #[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
-fn git_bash_plain_curl_reaches_https() {
-    // The runtime prompt tells the model that, in Git Bash, plain `curl` works for HTTPS because it
-    // is Git's OpenSSL build and not the System32 Schannel one. This is that claim.
+fn git_bash_curl_is_a_schannel_client_known_limit() {
+    // KNOWN LIMIT (real CI evidence, windows-2025): plain `curl` in Git Bash fails HTTPS under the
+    // sandbox with `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`. Git for
+    // Windows' curl is built against Schannel, like System32's. So the runtime prompt must NOT
+    // promise that `curl` works in Git Bash; Node, Python, `git` (srt injects OpenSSL for it) and
+    // Java/Go are the HTTPS clients that work. This test asserts the failure (so a future srt fix
+    // is noticed, not hidden), asserts that Git's `curl.exe` called by absolute path behaves the
+    // same as plain `curl` (they should be one binary), and prints how they are built.
     if active_shell() != Shell::GitBash {
         eprintln!("SKIPPED: the host is not using Git Bash on this machine (no Git\\bin\\bash.exe)");
         return;
     }
+    let Some(git_root) = git_bash_install_root() else {
+        eprintln!("SKIPPED: Git for Windows is not installed in a fixed location on this machine");
+        return;
+    };
     let (_app, host) = host_with_bundle();
     let workspace = new_workspace(&host, "thread");
-    let result = execute(
+    let absolute = git_root.join(r"mingw64\bin\curl.exe");
+
+    // Which binary plain `curl` is, and how both are built (printed so a CI log answers "which
+    // TLS backend?" without another run).
+    let which = execute(&host, "curl-which", &workspace, "command -v curl");
+    eprintln!("plain curl resolves to: {}", output(&which).trim());
+    let plain_version = execute(&host, "curl-version", &workspace, "curl --version");
+    eprintln!("plain `curl --version`:\n{}", output(&plain_version));
+    let abs_version = execute(
+        &host,
+        "curl-abs-version",
+        &workspace,
+        &call(Shell::GitBash, &absolute, "--version"),
+    );
+    eprintln!("{absolute:?} --version:\n{}", output(&abs_version));
+    eprintln!(
+        "curl build (plain): {} / (absolute): {}",
+        curl_build(output(&plain_version)),
+        curl_build(output(&abs_version))
+    );
+    assert_eq!(plain_version["exitCode"], 0, "`curl --version` must run in Git Bash: {plain_version}");
+    assert!(
+        output(&plain_version).to_lowercase().contains("curl "),
+        "`curl --version` printed no version: {plain_version}"
+    );
+
+    let url = "https://registry.npmjs.org/left-pad";
+    let plain = execute(
         &host,
         "plain-curl",
         &workspace,
-        "curl -sS -m 30 -o /dev/null -w '%{http_code}' https://registry.npmjs.org/left-pad",
+        &format!("curl -sS -m 30 -o /dev/null -w '%{{http_code}}' {url}"),
     );
-    assert_eq!(
-        result["exitCode"], 0,
-        "plain `curl` in Git Bash must reach HTTPS under the sandbox (the runtime prompt promises it): {result}"
+    let by_path = execute(
+        &host,
+        "abs-curl",
+        &workspace,
+        &call(Shell::GitBash, &absolute, &format!("-sS -m 30 -o NUL -w '%{{http_code}}' {url}")),
     );
-    assert_eq!(output(&result).trim(), "200", "{result}");
+    eprintln!("plain curl: {plain}\nabsolute-path curl: {by_path}");
+    let fails_like_schannel = |result: &Value| {
+        let text = output(result);
+        result["exitCode"] != 0
+            && !text.contains("200")
+            && (result["exitCode"] == 35 || text.to_lowercase().contains("schannel"))
+    };
+    assert!(
+        fails_like_schannel(&plain),
+        "KNOWN LIMIT CHANGED or something else broke: plain `curl` in Git Bash was expected to fail \
+         HTTPS the way Schannel clients do (exit 35 / schannel message). If it now works, the \
+         limitation may be fixed: update WINDOWS_SANDBOX.md and the runtime prompt, then replace this \
+         test. Result: {plain}"
+    );
+    assert!(
+        fails_like_schannel(&by_path),
+        "Git's curl.exe by absolute path was expected to behave exactly like plain `curl` (the same \
+         binary); it did not. Plain: {plain}\nAbsolute: {by_path}"
+    );
 }
 
 /// Proxy variables a host-side child must not inherit (this process's are poisoned by the job).
