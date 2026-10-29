@@ -283,6 +283,15 @@ because a Schannel client works, update this section and the prompt.
   folder stamps a permission on its whole tree. It stays after the command ends, after you
   remove the folder from the app and after you uninstall the app; only the sandbox removal
   ([Remove](#remove)) takes it back.
+- **Working folders are not isolated from each other for reads.** Writes are: a command can write
+  only in its own working folder. But a kept write permission also gives the sandbox group read
+  access (`srt-win` design: "any sandboxed session can read a kept root"), so a command in one
+  working folder can **read** the files of another working folder that was ever used, on this
+  computer. There is no per-workspace read separation on Windows, and the app cannot add one (a
+  per-command read deny is stamped on the shared sandbox account and would also block a command
+  running in the other folder). Your profile, credential directories and the app's own data stay
+  protected as described above. The CI suite asserts this limit (reads succeed, writes are
+  refused), so an `srt` change is noticed.
 - **The staged helper is machine-wide.** `srt-win.exe` lives in `%ProgramFiles%\SourceWeft\sandbox`
   and the sandbox account, its group and the network rules belong to the computer, not to one
   Windows user. On a **shared computer** every Windows user who runs SourceWeft uses the same

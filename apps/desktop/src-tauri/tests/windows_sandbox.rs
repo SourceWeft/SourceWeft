@@ -1202,7 +1202,14 @@ fn shells_cannot_write_outside_the_workspace() {
 
 #[test]
 #[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
-fn shells_cannot_read_or_write_another_granted_workspace() {
+fn shells_cannot_write_another_granted_workspace_but_can_read_it_known_limit() {
+    // Writes are isolated per workspace (each session's token carries one capability SID per
+    // root). READS ARE NOT: srt-win's design (its README: "Reads are not separated this way: any
+    // sandboxed session can read a kept root") gives the sandbox group read access to every kept
+    // write grant. A per-command read deny of the other roots is not viable (it would be stamped
+    // on the shared account and block the other workspace's concurrent commands, at O(tree) cost).
+    // So: writes must stay denied, and the read is asserted as a KNOWN LIMIT so that an srt change
+    // is noticed rather than hidden.
     let shell = active_shell();
     let (_app, host) = host_with_bundle();
     let first = tempfile::tempdir().unwrap();
@@ -1223,13 +1230,32 @@ fn shells_cannot_read_or_write_another_granted_workspace() {
             "a workspace must read its own files ({shell:?}): {own}"
         );
     }
+    let changed = |what: &str, result: &Value| {
+        format!(
+            "srt changed: cross-workspace reads are now isolated ({what}) - update WINDOWS_SANDBOX.md \
+             (Limits) and the runtime prompt, then turn this into an isolation test. Result: {result}"
+        )
+    };
     let cross = read_probe(&host, "cross-read", &first_ws, shell, &second_root.join("secret.txt"));
-    assert_read_denied(&cross, &second_secret, "another granted workspace");
+    eprintln!("cross-workspace read (known limit): {cross}");
+    assert!(
+        output(&cross).contains(&format!("READ-OK:{second_secret}")),
+        "{}",
+        changed("first -> second", &cross)
+    );
     let cross = read_probe(&host, "cross-read-back", &second_ws, shell, &first_root.join("secret.txt"));
-    assert_read_denied(&cross, &first_secret, "another granted workspace (the other direction)");
+    assert!(
+        output(&cross).contains(&format!("READ-OK:{first_secret}")),
+        "{}",
+        changed("second -> first", &cross)
+    );
+    // Writes stay isolated, in both directions.
     let escape = second_root.join("escape.txt");
     let result = write_probe(&host, "cross-write", &first_ws, shell, &escape);
     assert_write_denied(&result, &escape, "another granted workspace");
+    let escape = first_root.join("escape.txt");
+    let result = write_probe(&host, "cross-write-back", &second_ws, shell, &escape);
+    assert_write_denied(&result, &escape, "another granted workspace (the other direction)");
 }
 
 #[test]
@@ -1936,38 +1962,23 @@ fn git_bash_curl_is_a_schannel_client_known_limit() {
     // Windows' curl is built against Schannel, like System32's. So the runtime prompt must NOT
     // promise that `curl` works in Git Bash; Node, Python, `git` (srt injects OpenSSL for it) and
     // Java/Go are the HTTPS clients that work. This test asserts the failure (so a future srt fix
-    // is noticed, not hidden), asserts that Git's `curl.exe` called by absolute path behaves the
-    // same as plain `curl` (they should be one binary), and prints how they are built.
+    // is noticed, not hidden), prints where plain `curl` resolves to and how it is built.
+    // (An earlier version also called `<Git>\mingw64\bin\curl.exe`: that path does not exist on the
+    // runner's Git layout, so the binary is taken from `command -v curl` instead.)
     if active_shell() != Shell::GitBash {
         eprintln!("SKIPPED: the host is not using Git Bash on this machine (no Git\\bin\\bash.exe)");
         return;
     }
-    let Some(git_root) = git_bash_install_root() else {
-        eprintln!("SKIPPED: Git for Windows is not installed in a fixed location on this machine");
-        return;
-    };
     let (_app, host) = host_with_bundle();
     let workspace = new_workspace(&host, "thread");
-    let absolute = git_root.join(r"mingw64\bin\curl.exe");
 
-    // Which binary plain `curl` is, and how both are built (printed so a CI log answers "which
-    // TLS backend?" without another run).
+    // Which binary plain `curl` is, and how it is built (printed so a CI log answers "which TLS
+    // backend?" without another run).
     let which = execute(&host, "curl-which", &workspace, "command -v curl");
     eprintln!("plain curl resolves to: {}", output(&which).trim());
     let plain_version = execute(&host, "curl-version", &workspace, "curl --version");
     eprintln!("plain `curl --version`:\n{}", output(&plain_version));
-    let abs_version = execute(
-        &host,
-        "curl-abs-version",
-        &workspace,
-        &call(Shell::GitBash, &absolute, "--version"),
-    );
-    eprintln!("{absolute:?} --version:\n{}", output(&abs_version));
-    eprintln!(
-        "curl build (plain): {} / (absolute): {}",
-        curl_build(output(&plain_version)),
-        curl_build(output(&abs_version))
-    );
+    eprintln!("curl build: {}", curl_build(output(&plain_version)));
     assert_eq!(plain_version["exitCode"], 0, "`curl --version` must run in Git Bash: {plain_version}");
     assert!(
         output(&plain_version).to_lowercase().contains("curl "),
@@ -1981,13 +1992,7 @@ fn git_bash_curl_is_a_schannel_client_known_limit() {
         &workspace,
         &format!("curl -sS -m 30 -o /dev/null -w '%{{http_code}}' {url}"),
     );
-    let by_path = execute(
-        &host,
-        "abs-curl",
-        &workspace,
-        &call(Shell::GitBash, &absolute, &format!("-sS -m 30 -o NUL -w '%{{http_code}}' {url}")),
-    );
-    eprintln!("plain curl: {plain}\nabsolute-path curl: {by_path}");
+    eprintln!("plain curl: {plain}");
     let fails_like_schannel = |result: &Value| {
         let text = output(result);
         result["exitCode"] != 0
@@ -2000,11 +2005,6 @@ fn git_bash_curl_is_a_schannel_client_known_limit() {
          HTTPS the way Schannel clients do (exit 35 / schannel message). If it now works, the \
          limitation may be fixed: update WINDOWS_SANDBOX.md and the runtime prompt, then replace this \
          test. Result: {plain}"
-    );
-    assert!(
-        fails_like_schannel(&by_path),
-        "Git's curl.exe by absolute path was expected to behave exactly like plain `curl` (the same \
-         binary); it did not. Plain: {plain}\nAbsolute: {by_path}"
     );
 }
 
