@@ -25,7 +25,10 @@ import {
   boundDeviceEnvironment,
   localProviderForTurn,
 } from "../../../devices/provider";
-import { localExecutionEnvironmentPrompt } from "../../../devices/local-execution-prompt";
+import {
+  localExecutionEnvironmentPrompt,
+  localNetworkAccessPrompt,
+} from "../../../devices/local-execution-prompt";
 import type { NetworkSkillInput } from "../../../devices/network-skill-domains";
 import { ContentError } from "../../../content/errors";
 
@@ -102,16 +105,16 @@ export const agentSandboxService = {
         new DrizzleSandboxOperationStore(),
       );
       if (runtime) {
-        const environment = localExecutionEnvironmentPrompt(
-          await boundDeviceEnvironment(input.context.threadId),
-        );
+        const device = await boundDeviceEnvironment(input.context.threadId);
+        const environment = localExecutionEnvironmentPrompt(device);
+        const networkAccess = localNetworkAccessPrompt(device?.networkMode);
         const buildRuntimePrompt = runtime.buildRuntimePrompt.bind(runtime);
         runtime.buildRuntimePrompt = () => `${buildRuntimePrompt()}
 <local_execution_presentation>
 Commands execute on the user's bound PC inside its authorized working folder. In user-facing updates and answers, describe this as running a command on the computer or in the working folder. Do not call it a cloud sandbox. Mention implementation terms such as sandbox/provider only if the user asks about implementation. Internal tool names do not change this execution location. Do not assume cloud-image packages are installed on this PC.${environment ? `\n${environment}` : ""}
 </local_execution_presentation>
 <local_network_access>
-Outbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.
+${networkAccess}
 </local_network_access>`;
       }
       return runtime;

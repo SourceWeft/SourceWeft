@@ -39,10 +39,10 @@ export const localDevices = pgTable(
     }),
     /**
      * Outbound-network policy for commands run on this computer: `open` keeps
-     * every public host reachable, `ask` raises an approval for an unknown
-     * host while the command keeps running, `strict` never asks.
+     * every public host reachable (the default), `ask` raises an approval for
+     * an unknown host while the command keeps running, `strict` never asks.
      */
-    networkMode: text("network_mode").notNull().default("ask"),
+    networkMode: text("network_mode").notNull().default("open"),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
     // Last `status` report from the host. All null for hosts that never send one.
     platform: text("platform"),

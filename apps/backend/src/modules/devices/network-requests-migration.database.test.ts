@@ -53,7 +53,7 @@ const insert = (
 };
 
 describe("0070_local_network_approvals", () => {
-  test("devices default to ask and only accept the three modes", async () => {
+  test("devices (new and existing) default to open and only accept the three modes", async () => {
     await withIsolatedSchema(
       {
         prefix: "net_mode",
@@ -63,7 +63,18 @@ describe("0070_local_network_approvals", () => {
         await migrate(client, schema);
         expect(
           (await client.query("SELECT network_mode FROM local_devices")).rows,
-        ).toEqual([{ network_mode: "ask" }, { network_mode: "ask" }]);
+        ).toEqual([{ network_mode: "open" }, { network_mode: "open" }]);
+        // A computer enrolled after the migration is open as well.
+        await client.query(
+          "INSERT INTO local_devices(id, user_id) VALUES ('new', 'owner')",
+        );
+        expect(
+          (
+            await client.query(
+              "SELECT network_mode FROM local_devices WHERE id='new'",
+            )
+          ).rows,
+        ).toEqual([{ network_mode: "open" }]);
         for (const mode of ["open", "ask", "strict"])
           await client.query("UPDATE local_devices SET network_mode=$1", [
             mode,

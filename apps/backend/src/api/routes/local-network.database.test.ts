@@ -88,18 +88,18 @@ test("the network mode changes only with the computer's own proof, for its own o
   session.current = { userId: owner.userId, sessionId: owner.sessionId };
 
   // A browser session without the proof is not "that computer".
-  assert.equal((await patch(id, { networkMode: "open" })).status, 403);
+  assert.equal((await patch(id, { networkMode: "ask" })).status, 403);
   // A proof that does not belong to this session or account is refused.
   assert.equal(
-    (await patch(id, { networkMode: "open" }, stranger.proof)).status,
+    (await patch(id, { networkMode: "ask" }, stranger.proof)).status,
     403,
   );
   session.current = { userId: owner.userId, sessionId: randomUUID() };
   assert.equal(
-    (await patch(id, { networkMode: "open" }, owner.proof)).status,
+    (await patch(id, { networkMode: "ask" }, owner.proof)).status,
     403,
   );
-  assert.equal(await modeOf(id), "ask");
+  assert.equal(await modeOf(id), "open");
 
   session.current = { userId: owner.userId, sessionId: owner.sessionId };
   const ok = await patch(id, { networkMode: "strict" }, owner.proof);
@@ -114,7 +114,7 @@ test("the network mode changes only with the computer's own proof, for its own o
     sessionId: stranger.sessionId,
   };
   assert.equal(
-    (await patch(id, { networkMode: "open" }, stranger.proof)).status,
+    (await patch(id, { networkMode: "ask" }, stranger.proof)).status,
     404,
   );
   // Malformed bodies never reach the service.
@@ -126,7 +126,7 @@ test("the network mode changes only with the computer's own proof, for its own o
   assert.equal(await modeOf(id), "strict");
   session.current = null;
   assert.equal(
-    (await patch(id, { networkMode: "open" }, owner.proof)).status,
+    (await patch(id, { networkMode: "ask" }, owner.proof)).status,
     401,
   );
 });

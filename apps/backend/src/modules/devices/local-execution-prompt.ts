@@ -72,3 +72,21 @@ export function localExecutionEnvironmentPrompt(
   }
   return lines.join("\n");
 }
+
+const NETWORK_ACCESS_PROMPT = {
+  open: "Outbound network access to public hosts is allowed. Connections to local, private and cloud-metadata addresses are always blocked.",
+  ask: "Outbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.",
+  strict:
+    "Only hosts the user has allowed can be reached; a request to any other host is denied without asking. Tell the user which host you need and why.",
+} as const;
+
+/**
+ * The `<local_network_access>` text for the computer's network mode. A missing
+ * device or a value this build does not know is treated as `open`, the
+ * default: it never promises an approval flow the device might not have.
+ */
+export function localNetworkAccessPrompt(mode: string | null | undefined) {
+  return mode === "ask" || mode === "strict"
+    ? NETWORK_ACCESS_PROMPT[mode]
+    : NETWORK_ACCESS_PROMPT.open;
+}

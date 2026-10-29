@@ -27,13 +27,14 @@ import type { NetworkSkillInput } from "./network-skill-domains";
  */
 export async function boundDeviceEnvironment(
   threadId: string,
-): Promise<LocalExecutionDevice | null> {
+): Promise<(LocalExecutionDevice & { networkMode: string | null }) | null> {
   const [row] = await db
     .select({
       platform: localDevices.platform,
       arch: localDevices.arch,
       shell: localDevices.shell,
       sandboxState: localDevices.sandboxState,
+      networkMode: localDevices.networkMode,
     })
     .from(localThreadBindings)
     .innerJoin(localDevices, eq(localDevices.id, localThreadBindings.deviceId))

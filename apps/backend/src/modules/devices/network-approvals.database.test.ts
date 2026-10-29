@@ -151,9 +151,20 @@ async function world(
     role?: "workspace_admin" | "editor" | "viewer";
     payload?: Record<string, unknown>;
     status?: string;
+    /**
+     * The computer's network mode. Approvals only exist in `ask`, so that is
+     * what a test gets unless it says otherwise; "unset" leaves the column at
+     * its default.
+     */
+    mode?: "open" | "ask" | "strict" | "unset";
   } = {},
 ) {
   const h = await enrol();
+  if (options.mode !== "unset")
+    await schema.db
+      .update(schema.localDevices)
+      .set({ networkMode: options.mode ?? "ask" })
+      .where(eq(schema.localDevices.id, h.id));
   const workspaceId = randomUUID(),
     teamId = randomUUID(),
     threadId = randomUUID();
@@ -835,14 +846,14 @@ test("the mode on the computer decides at ask time, and skills only ever suggest
 });
 
 test("a computer's mode is changed only from that computer", async () => {
-  const w = await world();
+  const w = await world({ mode: "unset" });
   assert.equal(
     (
       await schema.db.query.localDevices.findFirst({
         where: eq(schema.localDevices.id, w.h.id),
       })
     )?.networkMode,
-    "ask",
+    "open",
   );
   assert.deepEqual(
     await approvals.setDeviceNetworkMode({
@@ -1521,4 +1532,133 @@ test("a pending card lapses before the command's own kill time, and a command ab
     inv!.deadline.getTime() - 15_000,
   );
   assert.equal((await requests(w.h.id)).length, 5);
+});
+
+test("a computer with no explicit mode is open: policy, asks and the stored default", async () => {
+  const w = await world({ mode: "unset" });
+  const device = await connectDevice(w.h.token);
+  const invocationId = await w.invoke();
+  assert.equal(
+    (await schema.db.query.localDevices.findFirst({
+      where: eq(schema.localDevices.id, w.h.id),
+    }))!.networkMode,
+    "open",
+  );
+  const tenant = {
+    teamId: w.teamId,
+    workspaceId: w.workspaceId,
+    userId: w.h.userId,
+  };
+  // Even a stored rule adds nothing in open mode: there is no list to keep.
+  await schema.db.insert(schema.agentToolTrustRules).values({
+    id: randomUUID(),
+    ...tenant,
+    domain: "network",
+    toolName: "network_access",
+    targetType: "host",
+    targetId: "api.example.com",
+    allowedRiskLevels: ["medium"],
+    status: "active",
+    expiresAt: new Date(Date.now() + 3600_000),
+  });
+  assert.deepEqual(
+    await approvals.resolveCommandNetworkPolicy({
+      deviceId: w.h.id,
+      tenant,
+      skills: [],
+    }),
+    { mode: "open", allow: [], suggested: {} },
+  );
+  // A question that reaches the backend is answered per open semantics.
+  device.ask(invocationId, "open-1", "anything.example", 443);
+  assert.deepEqual(await device.waitFor((f) => f.type === "network.decision"), {
+    type: "network.decision",
+    askId: "open-1",
+    allow: true,
+  });
+  assert.deepEqual(await requests(w.h.id), []);
+});
+
+test("each mode answers a public host its own way", async () => {
+  for (const [mode, expected] of [
+    ["open", { allow: true }],
+    [
+      "strict",
+      {
+        allow: false,
+        reason: "host is not on the allow list (strict network mode)",
+      },
+    ],
+    ["ask", null],
+  ] as const) {
+    const w = await world({ mode });
+    const device = await connectDevice(w.h.token);
+    const invocationId = await w.invoke();
+    device.ask(invocationId, `m-${mode}`, "public.example.com", 443);
+    if (expected) {
+      assert.deepEqual(
+        await device.waitFor((f) => f.type === "network.decision"),
+        { type: "network.decision", askId: `m-${mode}`, ...expected },
+        mode,
+      );
+      assert.equal((await requests(w.h.id)).length, 0, mode);
+    } else {
+      const rows = await until(
+        () => requests(w.h.id),
+        (list) => list.length === 1,
+      );
+      assert.equal(rows[0]!.status, "pending", mode);
+      assert.equal(
+        device.inbox.some((f) => f.type === "network.decision"),
+        false,
+      );
+    }
+  }
+});
+
+test("local, private and metadata addresses are refused in every mode and never stored", async () => {
+  const hosts = [
+    "127.0.0.1",
+    "10.1.2.3",
+    "172.16.0.9",
+    "192.168.1.20",
+    "169.254.169.254",
+    "100.64.0.1",
+    "0.0.0.0",
+    "::1",
+    "fe80::1",
+    "fd00::5",
+    "::ffff:10.0.0.1",
+    "localhost",
+    "db.localhost",
+  ];
+  for (const mode of ["open", "ask", "strict"] as const) {
+    const w = await world({ mode });
+    const device = await connectDevice(w.h.token);
+    const invocationId = await w.invoke();
+    for (const [i, host] of hosts.entries()) {
+      device.ask(invocationId, `p-${mode}-${i}`, host, 80);
+      assert.deepEqual(
+        await device.waitFor(
+          (f) => f.type === "network.decision" && f.askId === `p-${mode}-${i}`,
+        ),
+        {
+          type: "network.decision",
+          askId: `p-${mode}-${i}`,
+          allow: false,
+          reason: "public internet only",
+        },
+        `${mode} ${host}`,
+      );
+    }
+    assert.equal((await requests(w.h.id)).length, 0, mode);
+    // A public neighbour of those ranges is not caught by accident.
+    device.ask(invocationId, `ok-${mode}`, "1.1.1.1", 443);
+    const frame = await Promise.race([
+      device.waitFor((f) => f.askId === `ok-${mode}`, 800).catch(() => null),
+    ]);
+    if (mode === "open") assert.equal(frame?.allow, true);
+    if (mode === "strict") assert.equal(frame?.allow, false);
+    assert.notEqual(frame?.reason, "public internet only");
+  }
 });

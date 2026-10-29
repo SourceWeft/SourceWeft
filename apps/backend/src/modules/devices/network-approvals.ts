@@ -9,7 +9,9 @@ import {
   threads,
 } from "@sourceweft/db";
 import {
+  DEFAULT_LOCAL_NETWORK_MODE,
   LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS,
+  localNetworkModeSchema,
   LOCAL_NETWORK_HOST_NOT_ALLOWABLE_CODE,
   LOCAL_NETWORK_TRUST_DOMAIN,
   LOCAL_NETWORK_TRUST_TARGET_TYPE,
@@ -36,6 +38,7 @@ import { requireDeviceAccess, type LocalExecutionCaller } from "./access";
 import {
   canonicalNetworkHost,
   isAllowableRuleHost,
+  isNonPublicNetworkHost,
   matchesAnyNetworkPattern,
   sidecarAllowEntry,
 } from "./network-policy";
@@ -76,6 +79,7 @@ export const NETWORK_REASONS = {
   unavailable: "network approval is unavailable",
   invalidHost: "invalid host",
   invalidAsk: "invalid network request",
+  nonPublic: "public internet only",
   tooMany: "too many network requests",
 } as const;
 
@@ -124,6 +128,15 @@ export function approvalExpiry(
   )
     expires = Math.min(expires, created + timeoutMs - APPROVAL_END_MARGIN_MS);
   return new Date(expires);
+}
+
+/**
+ * A computer's stored mode, or the default (`open`) for anything this build
+ * does not recognise. Unknown never means "ask" or "strict": those are opt-ins.
+ */
+export function networkModeOrDefault(value: string | null | undefined) {
+  const parsed = localNetworkModeSchema.safeParse(value);
+  return parsed.success ? parsed.data : DEFAULT_LOCAL_NETWORK_MODE;
 }
 
 export function networkTrustScope(host: string): AgentToolTrustScope {
@@ -245,7 +258,7 @@ export async function resolveCommandNetworkPolicy(input: {
       "LOCAL_DEVICE_NOT_FOUND",
       "No computer was found for this account.",
     );
-  const mode = device.networkMode as LocalNetworkMode;
+  const mode = networkModeOrDefault(device.networkMode);
   const rules =
     mode === "open"
       ? []
@@ -285,6 +298,10 @@ export async function handleNetworkAsk(
   if (!host) return denyFrame(ask.askId, NETWORK_REASONS.invalidHost);
   if (!Number.isInteger(ask.port) || ask.port < 1 || ask.port > 65535)
     return denyFrame(ask.askId, NETWORK_REASONS.invalidAsk);
+  // Local, private and metadata addresses are refused in every mode; the
+  // device never asks about them, so this only backs its guard up.
+  if (isNonPublicNetworkHost(host))
+    return denyFrame(ask.askId, NETWORK_REASONS.nonPublic);
 
   const [invocation] = await db
     .select()
@@ -311,9 +328,10 @@ export async function handleNetworkAsk(
     .from(localDevices)
     .where(and(eq(localDevices.id, device.id), isNull(localDevices.revokedAt)));
   if (!live) return denyFrame(ask.askId, NETWORK_REASONS.noCommand);
-  if (live.networkMode === "open")
+  const liveMode = networkModeOrDefault(live.networkMode);
+  if (liveMode === "open")
     return { type: "network.decision", askId: ask.askId, allow: true };
-  if (live.networkMode === "strict")
+  if (liveMode === "strict")
     return denyFrame(ask.askId, NETWORK_REASONS.strict);
 
   const [existing] = await db

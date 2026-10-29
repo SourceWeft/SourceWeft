@@ -23,7 +23,7 @@ CREATE TABLE "local_network_requests" (
 	CONSTRAINT "local_network_requests_resolved_check" CHECK (("local_network_requests"."status" = 'pending') = ("local_network_requests"."resolved_at" is null))
 );
 --> statement-breakpoint
-ALTER TABLE "local_devices" ADD COLUMN "network_mode" text DEFAULT 'ask' NOT NULL;--> statement-breakpoint
+ALTER TABLE "local_devices" ADD COLUMN "network_mode" text DEFAULT 'open' NOT NULL;--> statement-breakpoint
 ALTER TABLE "local_network_requests" ADD CONSTRAINT "local_network_requests_invocation_id_local_tool_invocations_id_fk" FOREIGN KEY ("invocation_id") REFERENCES "public"."local_tool_invocations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "local_network_requests" ADD CONSTRAINT "local_network_requests_device_id_local_devices_id_fk" FOREIGN KEY ("device_id") REFERENCES "public"."local_devices"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "local_network_requests" ADD CONSTRAINT "local_network_requests_thread_id_threads_id_fk" FOREIGN KEY ("thread_id") REFERENCES "public"."threads"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

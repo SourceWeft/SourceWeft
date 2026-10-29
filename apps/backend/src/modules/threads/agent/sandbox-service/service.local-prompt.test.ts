@@ -32,8 +32,15 @@ import { agentSandboxService } from "./service";
 const BASE_TEXT =
   "Commands execute on the user's bound PC inside its authorized working folder. In user-facing updates and answers, describe this as running a command on the computer or in the working folder. Do not call it a cloud sandbox. Mention implementation terms such as sandbox/provider only if the user asks about implementation. Internal tool names do not change this execution location. Do not assume cloud-image packages are installed on this PC.";
 
-const NETWORK_BLOCK =
-  "<local_network_access>\nOutbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.\n</local_network_access>";
+const block = (text: string) =>
+  `<local_network_access>\n${text}\n</local_network_access>`;
+const OPEN_TEXT =
+  "Outbound network access to public hosts is allowed. Connections to local, private and cloud-metadata addresses are always blocked.";
+const ASK_TEXT =
+  "Outbound network access from commands on this PC may need the user's approval. A command that reaches a new host can pause until the user answers in the conversation. If a request is denied, the tool output explains why: do not retry the same host, and tell the user which host you needed and why. Connections to local, private and cloud-metadata addresses are always blocked.";
+const STRICT_TEXT =
+  "Only hosts the user has allowed can be reached; a request to any other host is denied without asking. Tell the user which host you need and why.";
+const NETWORK_BLOCK = block(OPEN_TEXT);
 
 const request = {
   filesystem: {},
@@ -86,9 +93,45 @@ describe("local execution prompt", () => {
     ).toBe(true);
     expect(text).toContain("Shell: bash (commands run under this shell)");
     expect(
-      text.endsWith(
-        `\n</local_execution_presentation>\n${NETWORK_BLOCK}`,
-      ),
+      text.endsWith(`\n</local_execution_presentation>\n${NETWORK_BLOCK}`),
     ).toBe(true);
+  });
+
+  test("the network text follows the bound computer's mode", async () => {
+    for (const [networkMode, text] of [
+      ["open", OPEN_TEXT],
+      ["ask", ASK_TEXT],
+      ["strict", STRICT_TEXT],
+      // Anything this build does not know is the default, never an approval promise.
+      ["something-new", OPEN_TEXT],
+      [null, OPEN_TEXT],
+    ] as const) {
+      state.device = {
+        platform: null,
+        arch: null,
+        shell: null,
+        sandboxState: null,
+        networkMode,
+      };
+      expect(await prompt(), String(networkMode)).toBe(
+        `BASE\n<local_execution_presentation>\n${BASE_TEXT}\n</local_execution_presentation>\n${block(text)}`,
+      );
+    }
+  });
+
+  test("a mode that is not open never leaks the other modes' wording", async () => {
+    state.device = {
+      platform: "linux",
+      arch: "x64",
+      shell: "bash",
+      sandboxState: "ready",
+      networkMode: "strict",
+    };
+    const text = await prompt();
+    expect(text).toContain(STRICT_TEXT);
+    expect(text).not.toContain("may need the user's approval");
+    expect(text).not.toContain(
+      "Outbound network access to public hosts is allowed",
+    );
   });
 });

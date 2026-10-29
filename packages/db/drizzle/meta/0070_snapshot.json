@@ -1,5 +1,5 @@
 {
-  "id": "4b3cb787-336b-457d-ac9f-63b687a654bb",
+  "id": "51a2b8ea-a411-4ec3-a725-1e4c0968c2fa",
   "prevId": "c09cbecf-3fd4-4033-9a6b-af1e35f26951",
   "version": "7",
   "dialect": "postgresql",
@@ -20794,7 +20794,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'ask'"
+          "default": "'open'"
         },
         "revoked_at": {
           "name": "revoked_at",

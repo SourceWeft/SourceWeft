@@ -6,14 +6,16 @@ import {
 
 /**
  * Outbound-network policy of one local computer, applied to the commands the
- * agent runs there:
- * - `open`   any public host (the private/loopback/metadata guard still holds);
+ * agent runs there. `open` is the default and today's behaviour; `ask` and
+ * `strict` are per-computer opt-ins. In every mode the private, loopback,
+ * cloud-metadata and own-address guard stays authoritative.
+ * - `open`   any public host;
  * - `ask`    an unknown host raises an approval while the command keeps running;
  * - `strict` only hosts on the allow list; nothing is ever asked.
  */
 export const localNetworkModeSchema = z.enum(["open", "ask", "strict"]);
 export type LocalNetworkMode = z.infer<typeof localNetworkModeSchema>;
-export const DEFAULT_LOCAL_NETWORK_MODE: LocalNetworkMode = "ask";
+export const DEFAULT_LOCAL_NETWORK_MODE: LocalNetworkMode = "open";
 
 /** How long a user has to answer a network approval before it is denied. */
 export const LOCAL_NETWORK_APPROVAL_WINDOW_SECONDS = 120;

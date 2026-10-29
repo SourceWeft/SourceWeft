@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 
 /**
  * Host matching for the network allow list, written to agree with the
@@ -121,4 +121,47 @@ export function isAllowableRuleHost(host: string): boolean {
   const canonical = canonicalNetworkHost(host);
   if (!canonical || isIP(canonical) !== 0) return false;
   return sidecarAllowEntry(canonical) === canonical;
+}
+
+const NON_PUBLIC = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+] as const)
+  NON_PUBLIC.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of [
+  ["::", 128],
+  ["::1", 128],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["ff00::", 8],
+] as const)
+  NON_PUBLIC.addSubnet(network, prefix, "ipv6");
+
+/**
+ * Whether a canonical host is a local, private, link-local, cloud-metadata or
+ * otherwise non-public address (or `localhost`). The device refuses these in
+ * every mode before it ever asks; this is the backend's own check on the same
+ * rule, so no answer from here can ever allow one.
+ */
+export function isNonPublicNetworkHost(host: string): boolean {
+  const canonical = canonicalNetworkHost(host);
+  if (!canonical) return false;
+  if (canonical === "localhost" || canonical.endsWith(".localhost"))
+    return true;
+  const family = isIP(canonical);
+  if (family === 0) return false;
+  // An IPv4-mapped IPv6 address is judged as the IPv4 address it carries.
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(canonical);
+  if (mapped) return NON_PUBLIC.check(mapped[1]!, "ipv4");
+  return NON_PUBLIC.check(canonical, family === 4 ? "ipv4" : "ipv6");
 }

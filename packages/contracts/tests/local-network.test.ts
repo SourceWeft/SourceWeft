@@ -8,9 +8,9 @@ import {
 } from "../src/local-network";
 import { toolConfirmationDomainSchema } from "../src/agent-confirmations";
 
-test("modes are the three device policies and ask is the default", () => {
+test("modes are the three device policies and open is the default", () => {
   assert.deepEqual(localNetworkModeSchema.options, ["open", "ask", "strict"]);
-  assert.equal(DEFAULT_LOCAL_NETWORK_MODE, "ask");
+  assert.equal(DEFAULT_LOCAL_NETWORK_MODE, "open");
   assert.equal(
     updateLocalDeviceNetworkModeSchema.safeParse({ networkMode: "any" })
       .success,
