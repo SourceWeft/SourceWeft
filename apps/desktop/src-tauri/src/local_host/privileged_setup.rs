@@ -387,6 +387,9 @@ pub(crate) const ELEVATION_COOLDOWN: std::time::Duration = std::time::Duration::
 #[derive(Debug, Default)]
 pub(crate) struct Cooldown {
     last_attempt: Option<std::time::Instant>,
+    /// Why that attempt did not succeed, so a refusal inside the window still names the cause
+    /// instead of hiding it behind "wait".
+    last_failure: Option<String>,
 }
 
 #[cfg(any(windows, test))]
@@ -397,22 +400,35 @@ impl Cooldown {
             let elapsed = now.saturating_duration_since(last);
             if elapsed < ELEVATION_COOLDOWN {
                 let wait = (ELEVATION_COOLDOWN - elapsed).as_secs() + 1;
+                let previous = self
+                    .last_failure
+                    .as_deref()
+                    .map(|failure| format!(" The previous attempt failed: {failure}"))
+                    .unwrap_or_default();
                 return Err(format!(
-                    "The sandbox setup was just attempted. Wait {wait} seconds before trying again."
+                    "The sandbox setup was just attempted. Wait {wait} seconds before trying again.{previous}"
                 ));
             }
         }
         Ok(())
     }
 
-    /// Records that an attempt is being started.
+    /// Records that an attempt is being started (an elevated launch is about to be made; a
+    /// request refused before that, for any reason, never gets here).
     pub(crate) fn started(&mut self, now: std::time::Instant) {
         self.last_attempt = Some(now);
+        self.last_failure = None;
+    }
+
+    /// The attempt that was started did not succeed.
+    pub(crate) fn failed(&mut self, reason: &str) {
+        self.last_failure = Some(reason.chars().take(300).collect());
     }
 
     /// A successful setup or removal clears the wait.
     pub(crate) fn succeeded(&mut self) {
         self.last_attempt = None;
+        self.last_failure = None;
     }
 }
 
@@ -447,12 +463,16 @@ pub(crate) fn run_elevated_with(
         cooldown.check(now)?;
         cooldown.started(now);
     }
-    let output = launch(powershell, &args)
-        .map_err(|error| format!("Windows PowerShell could not be started: {error}"))?;
-    let result = read_result().and_then(|text| parse_setup_result(&text, run_id));
-    let outcome = interpret_outcome(&output, result.as_ref());
-    if outcome.is_ok() {
-        cooldown.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).succeeded();
+    let outcome = launch(powershell, &args)
+        .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
+        .and_then(|output| {
+            let result = read_result().and_then(|text| parse_setup_result(&text, run_id));
+            interpret_outcome(&output, result.as_ref())
+        });
+    let mut cooldown = cooldown.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match &outcome {
+        Ok(()) => cooldown.succeeded(),
+        Err(reason) => cooldown.failed(reason),
     }
     outcome
 }
@@ -510,7 +530,8 @@ impl Drop for SetupRunning {
 
 /// Process-wide: the web page and the settings UI share one elevation budget.
 #[cfg(windows)]
-static COOLDOWN: std::sync::Mutex<Cooldown> = std::sync::Mutex::new(Cooldown { last_attempt: None });
+static COOLDOWN: std::sync::Mutex<Cooldown> =
+    std::sync::Mutex::new(Cooldown { last_attempt: None, last_failure: None });
 
 #[cfg(windows)]
 impl super::LocalHost {
@@ -831,17 +852,55 @@ mod windows_tests {
         assert!(script.contains("-ne $Expected) { Finish 44"), "{script}");
         assert!(script.contains("-not [Environment]::Is64BitProcess"));
         // The directories are verified before anything is placed in them.
-        let base_check = script.find("AssertProtected $Base").expect("the base directory is checked");
+        let base_check = script.find("Ensure $Base").expect("the base directory is ensured and checked");
         let dispatch = script.find("if ($Action -eq \"install\")").expect("the dispatch");
         assert!(base_check < dispatch);
         let stage = script.find("function Stage").unwrap();
-        let stage_check = script[stage..].find("AssertProtected $Dir").expect("the staging directory is checked");
+        let stage_check = script[stage..].find("Ensure $Dir").expect("the staging directory is ensured and checked");
         let copy = script[stage..].find("Copy-Item").unwrap();
         assert!(stage_check < copy, "the staging directory is checked before the copy");
         // Reparse points, the owner and the write-granting entries are what AssertProtected looks at.
         for part in ["-band 1024", "GetOwner([Security.Principal.SecurityIdentifier])", "GetAccessRules($true, $true", "-band 0x500D0156", "Finish 45"] {
             assert!(script.contains(part), "{part}");
         }
+    }
+
+    /// A directory that exists must be checked as it is (one owned by an ordinary account is
+    /// refused); only a directory this run creates is claimed first. Real CI evidence: on a runner
+    /// whose administrator account has no split token the elevated process creates folders owned
+    /// by that user, not by the Administrators group.
+    #[test]
+    fn only_a_directory_the_script_created_is_claimed_before_it_is_checked() {
+        let script = compact_script(WINDOWS_SETUP_SCRIPT);
+        let ensure = &script[script.find("function Ensure").unwrap()..script.find("function Stage").unwrap()];
+        // Created only when absent, never with -Force, claimed, then checked; an existing one is only checked.
+        let absent = ensure.find("if (-not (Test-Path -LiteralPath $Path))").expect("claims only when absent");
+        let create = ensure.find("New-Item -ItemType Directory -Path $Path").unwrap();
+        let claim = ensure.find("Claim $Path").unwrap();
+        let check = ensure.find("AssertProtected $Path").unwrap();
+        assert!(absent < create && create < claim && claim < check);
+        assert!(!ensure.contains("-Force"), "an existing folder must not pass as ours");
+        // Claim: owner Administrators, explicit permissions, no write-like entry for others.
+        let claim_fn = &script[script.find("function Claim").unwrap()..script.find("function Ensure").unwrap()];
+        for part in [
+            "SetOwner((New-Object Security.Principal.SecurityIdentifier \"S-1-5-32-544\"))",
+            "SetAccessRuleProtection($true, $true)",
+            "RemoveAccessRuleSpecific($Rule)",
+            "-band 0x500D0156",
+            "Set-Acl -LiteralPath $Path -AclObject $Acl",
+        ] {
+            assert!(claim_fn.contains(part), "{part}");
+        }
+        // The strict check itself still refuses an owner that is not SYSTEM, an administrator
+        // account or TrustedInstaller, and the uninstall of an existing folder still only checks.
+        let assert_fn = &script[script.find("function AssertProtected").unwrap()..script.find("function Claim").unwrap()];
+        assert!(assert_fn.contains("$Trusted -notcontains $Owner"));
+        assert!(assert_fn.contains("Finish 45 \"owner of $Path is $Owner\""));
+        let uninstall = &script[script.find("function Uninstall").unwrap()..script.rfind("try {").unwrap()];
+        assert!(uninstall.contains("if (Test-Path -LiteralPath $Dir) { AssertProtected $Dir }"));
+        assert!(!uninstall.contains("Claim"));
+        // Nothing but AssertProtected, Claim and Ensure may call Claim.
+        assert_eq!(script.matches("Claim $").count(), 1);
     }
 
     #[test]
@@ -1193,6 +1252,39 @@ mod windows_tests {
         // The refused attempt did not extend the wait.
         assert!(attempt(start + ELEVATION_COOLDOWN).is_err());
         assert_eq!(*launches.borrow(), 2);
+    }
+
+    #[test]
+    fn a_refusal_inside_the_window_names_why_the_previous_attempt_failed() {
+        let cooldown = Mutex::new(Cooldown::default());
+        let start = Instant::now();
+        let failing = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> { Ok(output(Some(45), "")) };
+        let result45 = || Some(format!("{{\"runId\":\"{RUN_ID}\",\"exit\":45,\"message\":\"owner of C:\\\\x is S-1-5-21-1-2-3-500\"}}"));
+        let first = run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &failing, &result45, &cooldown, start).unwrap_err();
+        assert!(first.contains("not protected"), "{first}");
+        let second = run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &failing, &result45, &cooldown, start + Duration::from_secs(2)).unwrap_err();
+        assert!(second.starts_with("The sandbox setup was just attempted. Wait 19 seconds"), "{second}");
+        assert!(second.contains("The previous attempt failed: The folder the sandbox helper is installed in is not protected"), "{second}");
+        // After the window the next attempt is a fresh one.
+        assert!(run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &ok_launch, &ok_result, &cooldown, start + ELEVATION_COOLDOWN).is_ok());
+    }
+
+    /// Only a launch that was made starts the wait: a request refused before it (bad input, a
+    /// helper that does not match, the cooldown itself) must not hold up the next, valid one.
+    #[test]
+    fn a_request_refused_before_any_launch_does_not_start_the_cooldown() {
+        let cooldown = Mutex::new(Cooldown::default());
+        let start = Instant::now();
+        let launch = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> { panic!("must not launch") };
+        assert!(run_elevated_with(&install(r"relative"), RUN_ID, PF, POWERSHELL, &launch, &|| None, &cooldown, start).is_err());
+        assert!(run_elevated_with(&uninstall(), RUN_ID, "relative", POWERSHELL, &launch, &|| None, &cooldown, start).is_err());
+        assert!(cooldown.lock().unwrap().check(start).is_ok());
+        // The refusal for being inside the window does not extend the window either.
+        cooldown.lock().unwrap().started(start);
+        for step in [1, 5, 10, 19] {
+            assert!(run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &launch, &|| None, &cooldown, start + Duration::from_secs(step)).is_err());
+        }
+        assert!(run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &ok_launch, &ok_result, &cooldown, start + ELEVATION_COOLDOWN).is_ok());
     }
 
     #[test]

@@ -20,7 +20,13 @@
 # them for the app): Program Files comes from the .NET known-folder call, and the directories
 # the script creates and uses are checked before anything is put in them (exit 45): not a
 # reparse point, owned by an administrator account, and not writable through any entry that
-# grants write access to anyone else.
+# grants write access to anyone else. A directory that already exists is checked as it is: one
+# owned by an ordinary account is refused. A directory this run creates is first claimed: its
+# owner is set to BUILTIN\Administrators and its permissions are made explicit without any entry
+# for another account that could write. (An elevated token whose default owner is the user, such
+# as the built-in administrator account without a split token, would otherwise leave the new
+# folder owned by that user, with the creator-owner entry turned into a full-control entry for
+# that user.) The check then runs on the result.
 #
 # install:
 #   1. Copies srt-win.exe from the runtime into Program Files\SourceWeft\sandbox (administrators
@@ -103,10 +109,37 @@ function BundleSource {
     return $null
 }
 
+# Claims a directory this run has just created: owner BUILTIN\Administrators (the elevated token may
+# assign it), inheritance cut with the inherited entries kept as explicit ones, and every allow
+# entry for an account that is not SYSTEM, an administrator or TrustedInstaller and grants a
+# write-like right removed (the creator-owner entry becomes one for the creating user when that
+# user, not the Administrators group, is the token default owner).
+function Claim([string]$Path) {
+    $Acl = Get-Acl -LiteralPath $Path
+    $Acl.SetOwner((New-Object Security.Principal.SecurityIdentifier "S-1-5-32-544"))
+    $Acl.SetAccessRuleProtection($true, $true)
+    foreach ($Rule in @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
+        if ($Rule.AccessControlType -eq "Allow" -and ($Trusted -notcontains $Rule.IdentityReference.Value) -and (([int]$Rule.FileSystemRights) -band 0x500D0156) -ne 0) {
+            [void]$Acl.RemoveAccessRuleSpecific($Rule)
+        }
+    }
+    Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+# Makes sure $Path is a protected directory: one that exists is checked as it is, one that does not
+# is created (never with -Force, so an existing one cannot be mistaken for ours), claimed and
+# then checked.
+function Ensure([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path | Out-Null
+        Claim $Path
+    }
+    AssertProtected $Path
+}
+
 # Puts $Source into the staging directory as srt-win.exe, once its copy there has the pinned hash.
 function Stage([string]$Source) {
-    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
-    AssertProtected $Dir
+    Ensure $Dir
     $Temp = Join-Path $Dir ("srt-win-" + $RunId + ".tmp")
     Copy-Item -LiteralPath $Source -Destination $Temp -Force
     # The check that matters: the copy, now out of reach of non-administrators, is what was
@@ -147,8 +180,7 @@ try {
     if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole($Admin)) { Finish 40 "" }
     $Expected = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ProgramFilesB64))
     if (-not [Environment]::Is64BitProcess -or $Root.TrimEnd("\") -ne $Expected) { Finish 44 "Windows reports $Root, the app expected $Expected" }
-    New-Item -ItemType Directory -Force -Path $Base | Out-Null
-    AssertProtected $Base
+    Ensure $Base
     if ($Action -eq "install") { Install } elseif ($Action -eq "uninstall") { Uninstall } else { Finish 43 "" }
 } catch {
     Finish 42 $_.Exception.Message
