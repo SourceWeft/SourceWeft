@@ -1,8 +1,8 @@
 {
   "name": "@sourceweft/cli",
   "license": "Apache-2.0",
-  "version": "0.2.1",
-  "description": "Install skills from the SourceWeft marketplace onto a local coding agent.",
+  "version": "0.3.0",
+  "description": "Install skills and connect MCP servers from the SourceWeft marketplace on a local machine.",
   "keywords": [
     "skills",
     "agent-skills",
