@@ -41,7 +41,8 @@ function bundleWithDefine(dir: string, mangle: (arg: string) => string): string 
 test("--print-namespace prints srt's Windows namespace without starting the server", () => {
   // Run from source with no build-time define: srt falls back to upstream's namespace, so the
   // flag reports the effective value rather than a constant of its own.
-  const namespace = printedNamespace(join(packageRoot, "node_modules/.bin/tsx"), [
+  const namespace = printedNamespace(process.execPath, [
+    join(packageRoot, "node_modules/tsx/dist/cli.mjs"),
     "src/main.ts",
     "--print-namespace",
   ]);
