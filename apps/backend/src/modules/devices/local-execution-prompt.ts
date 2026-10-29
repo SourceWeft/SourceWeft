@@ -44,17 +44,17 @@ const WINDOWS_SANDBOX_RULES = [
   "- Writes are possible only inside the working folder.",
   "- The user's profile and most of the filesystem cannot be read, except the working folder, system directories and the user's toolchains.",
   "- Network access allows the public internet only; private, loopback and metadata addresses are refused.",
-  "- Programs built on the Windows Schannel TLS stack cannot reach the network under the sandbox: System32 curl.exe, PowerShell Invoke-WebRequest and Invoke-RestMethod, .NET HttpClient, winget and cargo's HTTPS downloads fail. Use Node, Python or git for network access.",
+  "- Programs built on the Windows Schannel TLS stack cannot do HTTPS under the sandbox: curl and curl.exe (including the curl that ships with Git Bash), PowerShell Invoke-WebRequest and Invoke-RestMethod, .NET HttpClient, winget and cargo's HTTPS downloads all fail. For network access use Node's built-in fetch, Python, git, or Java and Go programs.",
   "- Blocked actions are reported in a <sandbox_violations> block in the tool result. Read it and change your approach instead of retrying the same action.",
   "- Node's built-in fetch needs NODE_USE_ENV_PROXY=1, which is already set.",
 ];
 
 const WINDOWS_GIT_BASH_RULES = [
-  "- Git Bash shell: plain `curl` works for HTTPS (it is Git's OpenSSL build, not the System32 one). Use POSIX-style quoting and POSIX commands; paths such as C:/Users/name/project work as they are.",
+  "- Git Bash shell: use POSIX-style quoting and POSIX commands; paths such as C:/Users/name/project work as they are. Plain `curl` fails here too, because Git for Windows builds it on Schannel; use Node, Python or git instead.",
 ];
 
 const WINDOWS_POWERSHELL_RULES = [
-  "- Windows PowerShell 5.1 shell: use single quotes for literal strings, `;` instead of `&&` to chain commands, and the PowerShell cmdlets rather than POSIX tools. Do not use curl or wget, which are Invoke-WebRequest aliases that cannot reach the network here.",
+  "- Windows PowerShell 5.1 shell: use single quotes for literal strings, `;` instead of `&&` to chain commands, and the PowerShell cmdlets rather than POSIX tools. Do not use curl or wget, which are Invoke-WebRequest aliases that cannot reach the network here, and curl.exe fails as well.",
 ];
 
 function windowsShellKind(shell: string | null): "bash" | "powershell" | null {

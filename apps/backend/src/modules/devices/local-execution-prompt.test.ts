@@ -78,8 +78,14 @@ describe("localExecutionEnvironmentPrompt", () => {
     expect(text).toContain("Invoke-WebRequest");
     expect(text).toContain("HttpClient");
     expect(text).toContain("winget");
-    expect(text).toContain("Node, Python or git");
-    expect(text).toContain("Git Bash shell: plain `curl` works");
+    expect(text).toContain("Node's built-in fetch, Python, git");
+    expect(text).toContain("Java and Go");
+    expect(text).toContain(
+      "curl and curl.exe (including the curl that ships with Git Bash)",
+    );
+    expect(text).toContain("Git Bash shell:");
+    expect(text).toContain("Plain `curl` fails here too");
+    expect(text).not.toContain("curl` works");
     expect(text).toContain("POSIX-style quoting");
     expect(text).toContain("NODE_USE_ENV_PROXY=1");
     expect(text).toContain("private, loopback and metadata addresses");
@@ -88,7 +94,7 @@ describe("localExecutionEnvironmentPrompt", () => {
     expect(text).not.toContain("git init --template=");
   });
 
-  test("describes Windows PowerShell quoting and withholds the Git Bash curl advice", () => {
+  test("describes Windows PowerShell quoting and withholds the Git Bash advice", () => {
     const text = localExecutionEnvironmentPrompt(
       device({ platform: "windows", arch: "arm64", shell: "powershell" }),
     );
@@ -96,15 +102,28 @@ describe("localExecutionEnvironmentPrompt", () => {
     expect(text).toContain("Windows PowerShell 5.1");
     expect(text).toContain("single quotes");
     expect(text).toContain("Invoke-WebRequest");
-    expect(text).not.toContain("Git Bash shell: plain `curl` works");
+    expect(text).not.toContain("Git Bash shell:");
+    expect(text).toContain("curl.exe fails as well");
   });
+
+  test.each(["bash", "sh", "bash.exe", "powershell", "PowerShell.exe", null])(
+    "never tells the agent that curl works on Windows (shell %s)",
+    (shell) => {
+      const text = localExecutionEnvironmentPrompt(
+        device({ platform: "windows", shell }),
+      );
+      expect(text).not.toMatch(/curl[^.\n]*\b(works|is fine|is available)\b/iu);
+      expect(text).toContain("cannot do HTTPS under the sandbox");
+      expect(text).toContain("Schannel");
+    },
+  );
 
   test("accepts exe-suffixed Windows shell names", () => {
     expect(
       localExecutionEnvironmentPrompt(
         device({ platform: "windows", shell: "bash.exe" }),
       ),
-    ).toContain("Git Bash shell: plain `curl` works");
+    ).toContain("Git Bash shell:");
     expect(
       localExecutionEnvironmentPrompt(
         device({ platform: "windows", shell: "PowerShell.exe" }),
