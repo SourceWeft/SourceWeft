@@ -68,11 +68,18 @@ two steps, in this order:
 2. **Set up (needs administrator approval)** — one Windows UAC prompt. It runs a PowerShell
    script that is embedded in the app (`sourceweft-sandbox-setup.ps1`, passed to
    `powershell.exe -EncodedCommand`; nothing is read from a file you could change). The script:
-   1. creates `%ProgramFiles%\SourceWeft\sandbox` (administrators write; everyone reads and
-      executes) and copies the runtime's `srt-win.exe` into it under a temporary name;
-   2. computes the SHA-256 of the **copy** and compares it with the value in the signed
-      runtime's manifest. A different file is deleted and the setup stops (exit code 41).
-      Nothing has executed it yet;
+   1. asks Windows (not an environment variable) for `Program Files`, stops if that differs from
+      what the app expected (exit code 44), checks that `Program Files\SourceWeft` and its
+      `sandbox` folder are real folders owned by an administrator account that nobody else can
+      write to (exit code 45), creates the `sandbox` folder (administrators write; everyone
+      reads and executes) and copies the runtime's `srt-win.exe` into it under a temporary name;
+   2. computes the SHA-256 of the **copy** and compares it with the SHA-256 that is **pinned
+      inside the app** (`sandbox-sidecar/srt-win-pin.json`, the exact file of the pinned
+      `sandbox-runtime` fork release). The runtime's own manifest is not what authorises the
+      file: it sits in your writable app data. A different file is deleted and the setup stops
+      (exit code 41). Nothing has executed it yet. For the same reason `srt-win.exe` is the one
+      executable of the runtime that is **not** Authenticode-signed: signing would change the
+      bytes the pin names;
    3. renames the copy into place and runs `srt-win.exe install --proxy-port-range 60180-60189`,
       which creates the `sourceweft-sandbox` account and group and installs the network rules;
    4. writes `%ProgramFiles%\SourceWeft\sandbox-setup-result.json`.
@@ -93,7 +100,8 @@ inside the sandbox and Windows has confirmed the network rules block a direct co
 
 ### Update
 
-The staged helper must be the same file as the runtime's. After an app or runtime update that
+The staged helper must be the file pinned in the app (and the runtime's `srt-win.exe` must be
+that same file). After an app or runtime update that
 changes `srt-win.exe`, the status becomes **windowsSetupOutdated** and the same button runs the
 setup again, which replaces the staged copy. If this computer was set up by a *newer* SourceWeft
 than the app, the app asks you to update itself; the setup never goes backwards.
@@ -101,7 +109,12 @@ than the app, the app asks you to update itself; the setup never goes backwards.
 ### Remove
 
 There is no button for this yet. To remove everything the setup created, run in an
-**administrator** PowerShell, as the same Windows user that uses the app:
+**administrator** PowerShell, as the same Windows user that uses the app. (The app's own removal
+path, used by the CI suite, also works when the staged `srt-win.exe` has been deleted: it stages
+the pinned, hash-checked helper from the installed runtime first. If the sandbox account exists
+and neither helper is available it stops with exit code 46 instead of reporting success. Setup
+attempts are rate-limited: a second attempt within 20 seconds of one that did not succeed is
+refused without showing a prompt.)
 
 ```powershell
 & "$env:ProgramFiles\SourceWeft\sandbox\srt-win.exe" uninstall
@@ -162,15 +175,22 @@ by the permissions the sandbox account already has:
 
 Inside the working folder or a read root, these are denied for **both reading and writing**
 when they exist: `.ssh`, `.aws`, `.azure`, `.kube`, `.gnupg`, `.docker\config.json`, `.npmrc`,
-`.pypirc`, `.netrc`, `_netrc`, `.git-credentials`, `.cargo\credentials(.toml)`, `.config\gh`,
-`.config\gcloud`, `.config\git\credentials`, and under `AppData`: `Roaming\{gcloud, GitHub CLI,
+`.pypirc`, `.netrc`, `_netrc`, `.pgpass`, `.git-credentials`, `.cargo\credentials(.toml)`,
+`.m2\settings.xml`, `.gradle\gradle.properties`, `.nuget\NuGet.Config`, `.oci`, `.terraform.d`,
+`.claude`, `.codex`, `.config\gh`, `.config\gcloud`, `.config\git\credentials`,
+`.config\rclone`, `.config\op`, and under `AppData`: `Roaming\{gcloud, GitHub CLI,
 gnupg, Microsoft\Credentials, Microsoft\Protect, Microsoft\Vault, Microsoft\Crypto,
-Microsoft\SystemCertificates, Mozilla, 1Password, Bitwarden, KeePass}` and `Local\{Microsoft\Credentials,
+Microsoft\SystemCertificates, Mozilla, 1Password, Bitwarden, KeePass, Code\User\globalStorage,
+npm\etc\npmrc}` and `Local\{Microsoft\Credentials,
 Microsoft\Vault, Microsoft\IdentityCache, Microsoft\TokenBroker, Google\Chrome\User Data,
 Microsoft\Edge\User Data, BraveSoftware\Brave-Browser\User Data, Packages}` (Windows Credential
 Manager stores, DPAPI master keys, browser profiles). Only paths that exist are denied: denying
 an absent path would make `srt-win` create a placeholder. A path that appears later is covered by
-the next command. The app's own tokens live in the Windows Credential Manager of *your* account
+the next command. The list is one file shared by the app and the sandbox process
+(`sandbox-sidecar/src/windows-protected-paths.json`). A working folder or read root that **is or
+lies inside** one of these (for example `%USERPROFILE%\.ssh\project`) is refused: the denies
+only cover what lies *inside* a granted folder, so a folder placed inside a credential store
+would be granted with no deny at all. The app's own tokens live in the Windows Credential Manager of *your* account
 (size-limited to 2560 bytes per entry), which the sandbox account cannot see.
 
 ### Working folders
@@ -220,28 +240,34 @@ connect to a server on `localhost` (loopback is open only for the proxy ports; t
 ## The Schannel limitation
 
 Programs built on the Windows **Schannel** TLS stack cannot do HTTPS under the sandbox: Schannel
-cannot acquire credentials under the write-restricted token. These fail:
+cannot acquire credentials under the write-restricted token. This includes **every `curl`**,
+because both the System32 `curl.exe` and the `curl` that ships with Git for Windows (the one
+plain `curl` runs in Git Bash) are Schannel builds. These fail, in either shell:
 
 | Fails | Typical symptom |
 | --- | --- |
-| `C:\Windows\System32\curl.exe` | `curl: (35) schannel: AcquireCredentialsHandle failed` |
+| `curl` and `curl.exe`: `C:\Windows\System32\curl.exe` and Git for Windows' `curl` (so plain `curl` in Git Bash too) | `curl: (35) schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS` |
 | PowerShell `Invoke-WebRequest`, `Invoke-RestMethod` | an exception from the request |
 | .NET `HttpClient` / `WebClient` | the same |
 | `winget`, `cargo`'s HTTPS downloads | a connection or TLS error |
 
 These work: **Node** (including `fetch`, because `NODE_USE_ENV_PROXY=1` is set), **Python**,
-**Java**, **Go**, **git** (Git for Windows' OpenSSL backend, which the sandbox selects for it), and,
-in Git Bash, plain **`curl`** (Git's own OpenSSL build, not the System32 one). The runtime prompt
-tells the model all of this. The CI suite asserts the failures as a *known limit*
-(`schannel_clients_cannot_do_https_under_the_sandbox_known_limit`), with controls proving the same
-requests succeed outside the sandbox, so a future `srt` fix is noticed instead of hidden: when
-that test starts failing because the clients work, update this section and the prompt.
+**Java** and **Go** programs, and **git** (Git for Windows' OpenSSL backend, which the sandbox
+selects for it, so `git clone`/`fetch` over HTTPS work). For a plain download use
+`node -e "fetch(url).then(...)"` or Python's `urllib`, not `curl`. The runtime prompt tells the
+model all of this; on a Windows computer it never tells it that `curl` works. The symptom shown
+for plain `curl` in Git Bash was observed on the `windows-2025` CI runner. The CI suite asserts
+the Schannel failures as a *known limit*, with controls proving the same requests succeed outside
+the sandbox, so a future `srt` fix is noticed instead of hidden: when a test starts failing
+because a Schannel client works, update this section and the prompt.
 
 ## Limits
 
-- Reads are ACL-bounded, not deny-by-default: the sandbox account reads what `Users` reads,
-  including volumes whose permissions admit `Users`. Nothing in your profile is readable except
-  read roots and the working folder.
+- **Reads are bounded by permissions, not by a deny list.** The sandbox account reads whatever
+  `Users` can read, on every volume: a second drive or a data partition whose permissions admit
+  `Users` is readable from a command, and the app cannot narrow that without rewriting
+  permissions across the volume. Nothing in your profile is readable except read roots, the
+  working folder and what its ancestors expose (below).
 - Tools installed under `Program Files` or other `Users`-readable places work without any setup.
   A tool whose directory is outside the profile and not readable by `Users` does not work.
 - `rustup` keeps toolchains in `~\.rustup`, which is not on `PATH` and is never granted, so
@@ -253,10 +279,31 @@ that test starts failing because the clients work, update this section and the p
   token blocks.
 - At most 4 working folders at a time (above). The setup supports 5 sandbox processes in total
   (ten ports, two each): four folders and the readiness probe.
-- Working-folder permissions are **kept** after a command ends and removed only by uninstall.
-  They name a machine-wide group, so on a **shared computer** another Windows user who runs
-  `srt-win exec` by hand without the write-restricted token could write into your working folders.
-  Do not use this on a computer that other people have accounts on and who you do not trust.
+- **Working-folder permissions are kept until uninstall.** Granting write access to a working
+  folder stamps a permission on its whole tree. It stays after the command ends, after you
+  remove the folder from the app and after you uninstall the app; only the sandbox removal
+  ([Remove](#remove)) takes it back.
+- **The staged helper is machine-wide.** `srt-win.exe` lives in `%ProgramFiles%\SourceWeft\sandbox`
+  and the sandbox account, its group and the network rules belong to the computer, not to one
+  Windows user. On a **shared computer** every Windows user who runs SourceWeft uses the same
+  helper, and a user whose app carries a different helper replaces it for all of them (the next
+  setup, which needs an administrator, does that). The kept permissions above name the machine-wide
+  group, so another Windows user who runs `srt-win exec` by hand, without the write-restricted
+  token, could write into your working folders. Do not use this on a computer that other people
+  have accounts on and who you do not trust.
+- **Ancestors of a working folder are partly exposed.** Programs resolve the path they start in
+  (Node's `realpathSync` looks at every parent folder, Git does the same), and the sandbox account
+  cannot look at folders inside your profile. So, before the first command in a working folder, the
+  app adds for each folder above it (and above each read root) inside your profile, the profile
+  folder and `AppData` included, one permission for the sandbox account that applies to that folder
+  only: traverse, read attributes and read permissions. It does not allow listing the folder,
+  reading any file, or anything inherited by the folders below, and the drive root, `C:\Users`
+  and anything outside your profile are not touched. Consequence: a command can see that those
+  folders exist and read their attributes and permissions, and can open a path whose name it
+  already knows, but cannot list them or learn the names beside them. The app records what it added
+  in `<app data>\sandbox\ancestor-grants.json` and takes back exactly those entries when it
+  removes the sandbox (its own removal path; the manual commands under [Remove](#remove) do not,
+  and uninstalling the app does not either, so until then they stay, naming the sandbox account).
 - A process in the sandbox can derive a differently-restricted copy of its own token that the
   network rule does not match (`deny-only-user-sid` residual documented by upstream). The sandbox
   checks for it at start and reports it in its log; it does not fail the session.
@@ -290,7 +337,10 @@ app ignores a result that does not carry its own run id. `message` is `srt-win`'
 | The sandbox could not protect the system folders. | 17 | `srt-win` could not place the write-deny entries it keeps on system folders; see `message`. |
 | A sandboxed command is still running. Stop it and try again. | 22 | A sandbox session is alive. End the running command (or close the workspace) and retry. |
 | The setup did not get administrator rights. | 40 | The script ran without elevation. Approve the UAC prompt. |
-| The sandbox helper in the downloaded runtime does not match its signed manifest. | 41 | The runtime on disk was altered or half-replaced. Install the runtime again. |
+| The sandbox helper in the downloaded runtime is not the one this version of SourceWeft expects. | 41 | The runtime on disk was altered, half-replaced or belongs to another release. Install the runtime again. |
+| Windows reports a different Program Files location than SourceWeft expected, so the setup was stopped. | 44 | The app and the elevated script disagree about where `Program Files` is. Nothing was changed. |
+| The folder the sandbox helper is installed in is not protected against changes by ordinary users, so the setup was stopped. | 45 | `Program Files\SourceWeft` (or its `sandbox` folder) is a link, is owned by an ordinary account, or grants write access to someone who is not an administrator. Fix its permissions; `message` names the entry. |
+| The sandbox is set up on this computer but its helper is missing, and the runtime to repair it from is not available. | 46 | A removal found the sandbox account but no `srt-win.exe` to remove it with. Install the runtime again, then remove. |
 | The setup could not finish. / could not find the sandbox runtime. | 42 / 43 | Read `message`. For 43 install the runtime first. |
 | Windows could not start the setup. | 121 | `powershell.exe` could not start the elevated process (policy, or an automation session without a desktop). Run the app in your normal desktop session. |
 
@@ -333,6 +383,7 @@ Not covered by CI, and checked by hand or not at all:
 - Windows 10, and the x64 app on Windows 11 ARM.
 - Git Bash and PowerShell in a real interactive desktop session, with real antivirus and
   SmartScreen.
-- Authenticode signing of the runtime's executables (needs the release certificate); CI signs
+- Authenticode signing of the runtime's `srt-sidecar.exe` and `rg.exe` (needs the release
+  certificate; `srt-win.exe` is pinned by hash instead and never signed); CI signs
   with a throwaway certificate and checks that signing leaves them runnable.
 - The Credential Manager in a real logon session (CI runs it in a service-like session).
