@@ -775,7 +775,7 @@ test("the Windows real-sandbox job installs upstream first, drives the real laun
   for (const index of [hide, restore, cleanup]) assert.equal(job.steps[index].shell, "pwsh");
   assert.match(job.steps[second].run, /Select-String/);
   // A hung suite step is bounded so the always-run steps and the log upload still happen.
-  assert.equal(job.steps[suite]["timeout-minutes"], 25);
+  assert.equal(job.steps[suite]["timeout-minutes"], 30);
   assert.equal(job.steps[second]["timeout-minutes"], 25);
   // The upstream install is the plain default one: its executable's own `install`, no names.
   const script = await readFile(new URL("./windows-sandbox-coexist.ps1", import.meta.url), "utf8");

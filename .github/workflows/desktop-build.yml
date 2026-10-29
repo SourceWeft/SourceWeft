@@ -704,8 +704,9 @@ jobs:
       - name: Real-sandbox suite (setup through the real launcher, execution, fences, kill, coexistence)
         # A hung step must not eat the whole job: the test binary stops itself with a "HUNG:" report
         # (tests/windows_sandbox.rs), and this is the backstop that still leaves time for the
-        # always-run steps (cleanup, log upload).
-        timeout-minutes: 25
+        # always-run steps (cleanup, log upload). The suite took 3.5 minutes on windows-2025 and 20
+        # on windows-11-arm (about half a minute per test, see the TIMING lines in its log).
+        timeout-minutes: 30
         env:
           # Windows environment variable names are case-insensitive, so these are also the lowercase
           # variables; the suite fails when they are missing and proves the sidecar strips them.

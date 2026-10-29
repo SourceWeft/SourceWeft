@@ -75,7 +75,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Mutex, Once,
+        mpsc, Arc, Mutex, Once, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -324,19 +324,67 @@ fn upstream_srt_win() -> PathBuf {
     path
 }
 
-/// Copies the built bundle into `dest` (`<app data>/sandbox/current`).
+/// The built bundle, copied once per test process into a private folder, with its sidecar run
+/// once. Every test then gets its own `<app data>/sandbox/current` from it ([`copy_bundle_into`]).
+///
+/// Why not copy the built bundle for every test: the executables are big, and on a Windows ARM
+/// runner copying and first-running a fresh copy of each one cost about half a minute per test
+/// (the whole suite took twenty minutes against three and a half on x64, and the first two tests
+/// ran into the host's 30 second limit on preparing a folder). The timing lines (`TIMING:`) in the
+/// log show where the time goes.
+fn cached_bundle() -> &'static Path {
+    static CACHE: OnceLock<PathBuf> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let _w = watch("preparing the bundle copy", Duration::from_secs(600));
+        let source = built_bundle_source();
+        assert!(
+            source.join("srt-sidecar.exe").is_file() && source.join("srt-win.exe").is_file(),
+            "expected a built Windows sandbox bundle (srt-sidecar.exe, srt-win.exe, manifest.json) at \
+             {source:?}; run `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target \
+             <triple> --rg <path to rg.exe>` first"
+        );
+        let dir = std::env::temp_dir().join(format!("sw-sandbox-bundle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let started = Instant::now();
+        for entry in fs::read_dir(&source).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(entry.path(), dir.join(entry.file_name())).unwrap();
+        }
+        eprintln!("TIMING: copied the bundle once in {:?}", started.elapsed());
+        // The first run of a new executable can be slow (virus scanning); take it here, once and
+        // visibly, instead of inside the first test's 30 second limit on starting a sandbox.
+        let started = Instant::now();
+        let mut sidecar = Command::new(dir.join("srt-sidecar.exe"));
+        sidecar.arg("--print-namespace");
+        match run_bounded_result(sidecar, Duration::from_secs(300)) {
+            Ok(output) => eprintln!(
+                "TIMING: first run of srt-sidecar.exe took {:?} (exit {}, printed {:?})",
+                started.elapsed(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout).trim()
+            ),
+            Err(error) => panic!("the sidecar of the built bundle cannot run: {error}"),
+        }
+        dir
+    })
+}
+
+/// Gives `dest` (`<app data>/sandbox/current`) the built bundle: the two big executables as hard
+/// links to the process-wide copy (same volume permitting; a copy otherwise), everything else as
+/// real copies, so a test that edits `manifest.json` or `srt-win.exe` edits its own file.
 fn copy_bundle_into(dest: &Path) {
-    let source = built_bundle_source();
-    assert!(
-        source.join("srt-sidecar.exe").is_file() && source.join("srt-win.exe").is_file(),
-        "expected a built Windows sandbox bundle (srt-sidecar.exe, srt-win.exe, manifest.json) at \
-         {source:?}; run `pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target \
-         <triple> --rg <path to rg.exe>` first"
-    );
+    let cache = cached_bundle();
     fs::create_dir_all(dest).unwrap();
-    for entry in fs::read_dir(&source).unwrap() {
+    for entry in fs::read_dir(cache).unwrap() {
         let entry = entry.unwrap();
-        fs::copy(entry.path(), dest.join(entry.file_name())).unwrap();
+        let name = entry.file_name();
+        let target = dest.join(&name);
+        let shared = name == "srt-sidecar.exe" || name == "rg.exe";
+        if shared && fs::hard_link(entry.path(), &target).is_ok() {
+            continue;
+        }
+        fs::copy(entry.path(), &target).unwrap();
     }
 }
 
@@ -422,6 +470,14 @@ fn watch(what: impl Into<String>, limit: Duration) -> Watch {
 fn arm_test() {
     start_watchdog();
     let name = std::thread::current().name().unwrap_or("a test").to_string();
+    {
+        static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(previous) = *last {
+            eprintln!("TIMING: the previous test took {:?} from opening its host to the next one", previous.elapsed());
+        }
+        *last = Some(Instant::now());
+    }
     let mut slots = DEADLINES.lock().unwrap_or_else(|e| e.into_inner());
     slots.retain(|(id, _, _)| *id != 0);
     slots.push((
@@ -557,6 +613,29 @@ fn describe_node() -> String {
     }
 }
 
+/// `sandbox_readiness()` once the setup has just run: the first start of the sandbox after a fresh
+/// install is slow (the sandbox account's profile is created at its first logon; arm64 runners
+/// are slower still), and the host reports that as the transient `installing` ("still getting
+/// ready") answer. Polls while the answer is transient, up to `limit`, and returns the settled
+/// one (or the last transient one when the time is up, which the caller's assertion then shows).
+fn settled_readiness(host: &LocalHost, limit: Duration) -> SandboxReadiness {
+    let deadline = Instant::now() + limit;
+    loop {
+        let readiness = host.sandbox_readiness();
+        let transient = readiness.is_checking()
+            || matches!(&readiness, SandboxReadiness::NeedsSetup { code: SetupCode::Installing, .. });
+        if !transient || Instant::now() >= deadline {
+            return readiness;
+        }
+        eprintln!("readiness is still transient, checking again in 5 s: {readiness:?}");
+        std::thread::sleep(Duration::from_secs(5));
+        host.invalidate_sandbox_readiness();
+    }
+}
+
+/// How long a test waits for the sandbox to become ready after the setup.
+const READY_AFTER_SETUP: Duration = Duration::from_secs(300);
+
 /// Process-wide record that the sandbox is installed, so only the first test pays for the setup.
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 
@@ -581,8 +660,8 @@ fn ensure_installed(host: &LocalHost) {
         });
     }
     let readiness = {
-        let _w = watch("the readiness check after the setup", Duration::from_secs(300));
-        host.sandbox_readiness()
+        let _w = watch("the readiness check after the setup", Duration::from_secs(660));
+        settled_readiness(host, READY_AFTER_SETUP)
     };
     assert!(
         matches!(readiness, SandboxReadiness::Ready { .. }),
@@ -603,9 +682,12 @@ fn host_with_bundle() -> (tempfile::TempDir, LocalHost) {
 fn host_without_setup() -> (tempfile::TempDir, LocalHost) {
     arm_test();
     let app = tempfile::tempdir().unwrap();
+    let started = Instant::now();
     copy_bundle_into(&bundle_dir(app.path()));
+    let copied = started.elapsed();
     let host = LocalHost::open(app.path()).unwrap();
     host.initialize_invocation_journal().unwrap();
+    eprintln!("TIMING: test bundle {copied:?}, host open {:?}", started.elapsed() - copied);
     (app, host)
 }
 
@@ -654,14 +736,19 @@ fn try_execute(
         format!("command.execute `{label}` ({command})"),
         Duration::from_millis(timeout_ms) + Duration::from_secs(150),
     );
-    host.dispatch(
+    let started = Instant::now();
+    let result = host.dispatch(
         executions,
         &call_id(label),
         "owner",
         &workspace.thread_id,
         "command.execute",
         json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": max_chars}),
-    )
+    );
+    if started.elapsed() > Duration::from_secs(5) {
+        eprintln!("TIMING: command.execute `{label}` took {:?}", started.elapsed());
+    }
+    result
 }
 
 fn execute(host: &LocalHost, label: &str, workspace: &Workspace, command: &str) -> Value {
@@ -971,7 +1058,7 @@ fn setup_through_the_real_launcher_makes_readiness_ready() {
              the script's message and exit code (12 network rules, 13 conflicting install, 14 account, 21/41 hash, 40 not elevated)"
         )
     });
-    let readiness = host.sandbox_readiness();
+    let readiness = settled_readiness(&host, READY_AFTER_SETUP);
     assert!(
         matches!(readiness, SandboxReadiness::Ready { .. }),
         "readiness must be Ready once the setup has run, got {readiness:?}"
@@ -1069,7 +1156,7 @@ fn setup_a_tampered_staged_helper_is_outdated_and_the_setup_repairs_it() {
     host.run_elevated_setup()
         .unwrap_or_else(|error| panic!("the setup must replace a tampered staged helper: {error}"));
     guard.armed = false;
-    let readiness = host.sandbox_readiness();
+    let readiness = settled_readiness(&host, READY_AFTER_SETUP);
     assert!(
         matches!(readiness, SandboxReadiness::Ready { .. }),
         "after the setup replaced the tampered helper readiness must be Ready, got {readiness:?}"
@@ -1126,7 +1213,7 @@ fn setup_uninstall_returns_to_not_installed_and_leaves_the_upstream_install_alon
     host.run_elevated_setup()
         .unwrap_or_else(|error| panic!("the reinstall after the uninstall failed: {error}"));
     guard.armed = false;
-    let readiness = host.sandbox_readiness();
+    let readiness = settled_readiness(&host, READY_AFTER_SETUP);
     assert!(
         matches!(readiness, SandboxReadiness::Ready { .. }),
         "after the reinstall readiness must be Ready, got {readiness:?}"
