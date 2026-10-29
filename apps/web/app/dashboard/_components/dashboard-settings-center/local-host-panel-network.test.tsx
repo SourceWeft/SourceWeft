@@ -80,16 +80,66 @@ test("shows the device's mode and the three options", async () => {
   assert.deepEqual(
     [...select.options].map((o) => [o.value, o.textContent]),
     [
-      ["ask", "Ask each time"],
-      ["open", "Allow all public hosts"],
-      ["strict", "Only allowed hosts"],
+      ["open", "Allow public sites (default)"],
+      ["ask", "Ask me about new sites"],
+      ["strict", "Only sites I allow"],
     ],
   );
 });
 
-test("defaults to Ask each time when the device reports no mode", async () => {
+test("a device without a stored mode, or with an unknown one, is shown as open", async () => {
   route();
-  assert.equal(modeSelect(await render()).value, "ask");
+  assert.equal(modeSelect(await render()).value, "open");
+  await unmountAll();
+  route("paranoid");
+  assert.equal(modeSelect(await render()).value, "open");
+});
+
+function description(container: HTMLElement) {
+  return container.querySelector("#network-mode-description")?.textContent ?? "";
+}
+
+test("a short description under the select follows the mode", async () => {
+  route();
+  const container = await render();
+  assert.match(description(container), /any public site/);
+  assert.match(description(container), /Private, local and cloud-metadata addresses are always blocked/);
+  const select = modeSelect(container);
+  for (const [mode, pattern] of [
+    ["ask", /pauses until you approve it in the conversation/],
+    ["strict", /only the sites you have allowed\. Nothing is asked/],
+    ["open", /any public site/],
+  ] as const) {
+    await act(async () => {
+      select.value = mode;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush(4);
+    assert.match(description(container), pattern, mode);
+  }
+});
+
+test("each option PATCHes its own value", async () => {
+  route("open");
+  const container = await render();
+  const select = modeSelect(container);
+  for (const mode of ["ask", "strict", "open"]) {
+    localRequest.mockClear();
+    await act(async () => {
+      select.value = mode;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush(4);
+    assert.deepEqual(
+      localRequest.mock.calls.find(([, body]) => Boolean(body)),
+      [
+        "/v1/local-devices/device-1",
+        { networkMode: mode },
+        { localProof: true, method: "PATCH" },
+      ],
+    );
+    assert.equal(modeSelect(container).value, mode);
+  }
 });
 
 test("changing the mode PATCHes the device with the native proof", async () => {

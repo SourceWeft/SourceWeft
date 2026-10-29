@@ -1364,11 +1364,14 @@
       "networkTitle": "Network access",
       "networkDescription": "Choose what commands run on this computer may reach on the internet. Private and local network addresses are always blocked.",
       "networkSelectAria": "Network access mode",
-      "networkAsk": "Ask each time",
-      "networkOpen": "Allow all public hosts",
-      "networkStrict": "Only allowed hosts",
+      "networkAsk": "Ask me about new sites",
+      "networkOpen": "Allow public sites (default)",
+      "networkStrict": "Only sites I allow",
       "networkHelperEnforced": "Enforced by the sandbox on this computer.",
-      "networkHelperUnenforced": "This setting is not enforced on this computer yet. Commands can still reach any public host."
+      "networkHelperUnenforced": "This setting is not enforced on this computer yet. Commands can still reach any public host.",
+      "networkDescription_open": "Commands can reach any public site. Private, local and cloud-metadata addresses are always blocked.",
+      "networkDescription_ask": "A command that reaches a new site pauses until you approve it in the conversation.",
+      "networkDescription_strict": "Commands can reach only the sites you have allowed. Nothing is asked."
     },
     "approvals": {
       "title": "Approvals",

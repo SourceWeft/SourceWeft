@@ -2,6 +2,10 @@
 import { authClient } from "../../../../lib/auth-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import {
+  DEFAULT_LOCAL_NETWORK_MODE,
+  localNetworkModeSchema,
+} from "@sourceweft/contracts";
 import type { LocalNetworkMode } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -90,6 +94,12 @@ export function LocalHostPanel() {
   // ready. A computer that still needs setup, is unsupported, or reports no readiness (a build
   // without a managed host) is not enforcing it, so no mode is offered as if it applied.
   const enforced = status?.readiness?.state === "ready";
+  // A device without a stored mode (an older backend) or with an unknown one is shown as the
+  // default, which is what the host applies.
+  const parsedMode = localNetworkModeSchema.safeParse(device?.networkMode);
+  const networkMode: LocalNetworkMode = parsedMode.success
+    ? parsedMode.data
+    : DEFAULT_LOCAL_NETWORK_MODE;
   if (!desktopBridge.isAvailable()) return null;
   if (dataOwner && dataOwner !== userId)
     return (
@@ -178,7 +188,7 @@ export function LocalHostPanel() {
           disabled={busy || !device || !enforced}
           onChange={async (event) => {
             if (!device || !enforced) return;
-            const networkMode = event.target.value as LocalNetworkMode;
+            const nextMode = event.target.value as LocalNetworkMode;
             setBusy(true);
             setError(null);
             try {
@@ -188,7 +198,7 @@ export function LocalHostPanel() {
                 networkMode: LocalNetworkMode;
               }>(
                 `/v1/local-devices/${device.id}`,
-                { networkMode },
+                { networkMode: nextMode },
                 { localProof: true, method: "PATCH" },
               );
               setDevice({ ...device, networkMode: value.networkMode });
@@ -198,12 +208,19 @@ export function LocalHostPanel() {
               setBusy(false);
             }
           }}
-          value={device?.networkMode ?? "ask"}
+          aria-describedby="network-mode-description"
+          value={networkMode}
         >
-          <option value="ask">{t("localHost.networkAsk")}</option>
           <option value="open">{t("localHost.networkOpen")}</option>
+          <option value="ask">{t("localHost.networkAsk")}</option>
           <option value="strict">{t("localHost.networkStrict")}</option>
         </select>
+        <p
+          id="network-mode-description"
+          className="text-sm text-muted-foreground"
+        >
+          {t(`localHost.networkDescription_${networkMode}`)}
+        </p>
         <p className="text-xs text-muted-foreground">
           {enforced
             ? t("localHost.networkHelperEnforced")

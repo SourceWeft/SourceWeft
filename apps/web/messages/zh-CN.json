@@ -1364,11 +1364,14 @@
       "networkTitle": "网络访问",
       "networkDescription": "选择在这台电脑上运行的命令可以访问互联网上的哪些内容。私有网络和本地网络地址始终会被拦截。",
       "networkSelectAria": "网络访问模式",
-      "networkAsk": "每次询问",
-      "networkOpen": "允许所有公共主机",
-      "networkStrict": "仅限已允许的主机",
+      "networkAsk": "访问新网站时询问我",
+      "networkOpen": "允许公共网站（默认）",
+      "networkStrict": "仅限我允许的网站",
       "networkHelperEnforced": "由这台电脑上的沙盒强制执行。",
-      "networkHelperUnenforced": "此设置在这台电脑上尚未生效，命令仍可访问任何公共主机。"
+      "networkHelperUnenforced": "此设置在这台电脑上尚未生效，命令仍可访问任何公共主机。",
+      "networkDescription_open": "命令可以访问任何公共网站。私有、本地和云元数据地址始终会被拦截。",
+      "networkDescription_ask": "命令访问新网站时会暂停，直到你在对话中批准。",
+      "networkDescription_strict": "命令只能访问你已允许的网站，不会再询问。"
     },
     "approvals": {
       "title": "审批",

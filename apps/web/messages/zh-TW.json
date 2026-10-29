@@ -1364,11 +1364,14 @@
       "networkTitle": "網路存取",
       "networkDescription": "選擇在這臺電腦上執行的命令可以存取網際網路上的哪些內容。私有網路和本機網路位址始終會被攔截。",
       "networkSelectAria": "網路存取模式",
-      "networkAsk": "每次詢問",
-      "networkOpen": "允許所有公用主機",
-      "networkStrict": "僅限已允許的主機",
+      "networkAsk": "存取新網站時詢問我",
+      "networkOpen": "允許公用網站（預設）",
+      "networkStrict": "僅限我允許的網站",
       "networkHelperEnforced": "由這臺電腦上的沙盒強制執行。",
-      "networkHelperUnenforced": "此設定在這臺電腦上尚未生效，命令仍可存取任何公用主機。"
+      "networkHelperUnenforced": "此設定在這臺電腦上尚未生效，命令仍可存取任何公用主機。",
+      "networkDescription_open": "命令可以存取任何公用網站。私有、本機和雲端中繼資料位址始終會被攔截。",
+      "networkDescription_ask": "命令存取新網站時會暫停，直到你在對話中核准。",
+      "networkDescription_strict": "命令只能存取你已允許的網站，不會再詢問。"
     },
     "approvals": {
       "title": "核准",
