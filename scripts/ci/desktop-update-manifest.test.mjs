@@ -137,6 +137,37 @@ test("release config requires actual signing prerequisites without exposing priv
   );
 });
 
+test("bundle-only validation covers the Windows arm64 sandbox bundle exactly like an installer target, minus the update-target check", () => {
+  const env = {
+    DESKTOP_RELEASE_TARGET: "aarch64-pc-windows-msvc",
+    DESKTOP_PUBLICATION_POLICY: "signed",
+    TAURI_UPDATER_PUBLIC_KEY: "public",
+    TAURI_SIGNING_PRIVATE_KEY: "secret",
+    WINDOWS_CERTIFICATE_THUMBPRINT: "A".repeat(40),
+    WINDOWS_TIMESTAMP_URL: "https://timestamp.example.com",
+  };
+  // Not an update target: the installer config refuses it, the bundle-only check accepts it.
+  assert.throws(() => releaseConfig(env), /Unsupported release target/);
+  assert.equal(releaseConfig(env, { bundleOnly: true }).bundle.createUpdaterArtifacts, true);
+  // Every required input is still required.
+  for (const key of Object.keys(env).filter((key) => key !== "DESKTOP_PUBLICATION_POLICY")) {
+    const missing = { ...env };
+    delete missing[key];
+    assert.throws(() => releaseConfig(missing, { bundleOnly: true }), Error, key);
+  }
+  assert.throws(() => releaseConfig({ ...env, WINDOWS_CERTIFICATE_THUMBPRINT: "nope" }, { bundleOnly: true }), /thumbprint/i);
+  // The updater-signed policy rejects ambient certificate inputs, as for the installers.
+  const unsigned = { ...env, DESKTOP_PUBLICATION_POLICY: "updater-signed" };
+  assert.throws(() => releaseConfig(unsigned, { bundleOnly: true }), /must be unset/);
+  assert.equal(
+    releaseConfig({ ...unsigned, WINDOWS_CERTIFICATE_THUMBPRINT: "", WINDOWS_TIMESTAMP_URL: "" }, { bundleOnly: true }).bundle.createUpdaterArtifacts,
+    true,
+  );
+  assert.throws(() => releaseConfig({ ...env, DESKTOP_PUBLICATION_POLICY: "unknown" }, { bundleOnly: true }));
+  // bundle-only never widens the targets: an unknown one is still refused.
+  assert.throws(() => releaseConfig({ ...env, DESKTOP_RELEASE_TARGET: "riscv64-pc-windows-msvc" }, { bundleOnly: true }), /Unsupported release target/);
+});
+
 test("Linux uses an updater-signed AppImage without claiming Windows or Apple code signing", async (t) => {
   const dir = await fixture(t);
   const prepared = await prepare(dir);

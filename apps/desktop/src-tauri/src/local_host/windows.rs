@@ -8,8 +8,10 @@
 //! user's profile, so the helper cannot run from the per-user bundle. The one-time elevated setup
 //! (`resources/windows/sourceweft-sandbox-setup.ps1`) copies it under `Program Files`, where
 //! `Users` can read and execute but only an administrator can write, after checking the copy
-//! against the SHA-256 in the signed bundle manifest. Everything that runs elevated or as the
-//! sandbox account is that copy, never the bundle.
+//! against the SHA-256 pinned in the application itself (`sandbox-sidecar/srt-win-pin.json`,
+//! embedded at compile time). The bundle's `manifest.json` is only a consistency check: it sits in
+//! the user-writable app data and is not what authorises anything to run elevated. Everything that
+//! runs elevated or as the sandbox account is the staged copy, never the bundle.
 //!
 //! # Coexistence
 //!
@@ -47,59 +49,169 @@ const STAGED_FILE: &str = "srt-win.exe";
 /// directories) nor forge a result.
 const RESULT_FILE: &str = "SourceWeft\\sandbox-setup-result.json";
 
-/// The 64-bit `Program Files` from the given `ProgramW6432` and `ProgramFiles` values.
-/// `ProgramW6432` (the 64-bit Program Files, also for a 32-bit process) wins; a value that is not
-/// a drive-absolute directory is skipped rather than repaired, and `None` means the location
-/// cannot be determined (the caller fails closed). Backslash-separated, without a trailing one.
-fn program_files_root(program_w6432: Option<&str>, program_files: Option<&str>) -> Option<String> {
-    [program_w6432, program_files]
-        .into_iter()
-        .flatten()
-        .find_map(|root| {
-            let bytes = root.as_bytes();
-            let drive = bytes.len() >= 3
-                && bytes[0].is_ascii_alphabetic()
-                && bytes[1] == b':'
-                && (bytes[2] == b'\\' || bytes[2] == b'/');
-            let trimmed = root.trim_end_matches(['\\', '/']);
-            (drive && trimmed.len() > 2 && !root.chars().any(char::is_control))
-                .then(|| trimmed.replace('/', "\\"))
-        })
+// ------------------------------------------------------------------ system locations
+
+/// The system locations this module needs, asked of Windows and never of the environment: a
+/// process of the same user can set `ProgramW6432`, `ProgramFiles` or `SystemRoot` for the app
+/// (`HKCU\Environment`), and a path taken from them would decide what runs elevated or as the
+/// sandbox account's shell. The shell known-folder API and `GetWindowsDirectoryW` read machine
+/// configuration that only an administrator can change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SystemFolder {
+    /// The 64-bit `Program Files` (`FOLDERID_ProgramFilesX64`), also for a 32-bit process.
+    ProgramFilesX64,
+    /// The `Program Files` of the process's own bitness (`FOLDERID_ProgramFiles`).
+    ProgramFiles,
+    /// The 32-bit `Program Files (x86)` (`FOLDERID_ProgramFilesX86`).
+    ProgramFilesX86,
+    /// The user's `AppData\Local` (`FOLDERID_LocalAppData`).
+    LocalAppData,
 }
 
-/// `%ProgramFiles%\SourceWeft\sandbox\srt-win.exe` from the given `ProgramW6432` and
-/// `ProgramFiles` values (see [`program_files_root`]).
-pub(crate) fn staged_srt_win_path_from(
-    program_w6432: Option<&str>,
-    program_files: Option<&str>,
-) -> Option<PathBuf> {
-    program_files_root(program_w6432, program_files)
+/// The path of a system folder as Windows reports it (no trailing separator), or `None` when it
+/// cannot be determined or is not a plain local drive path.
+#[cfg(windows)]
+pub(crate) fn system_folder(folder: SystemFolder) -> Option<String> {
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX64,
+        FOLDERID_ProgramFilesX86, SHGetKnownFolderPath,
+    };
+    let id = match folder {
+        SystemFolder::ProgramFilesX64 => &FOLDERID_ProgramFilesX64,
+        SystemFolder::ProgramFiles => &FOLDERID_ProgramFiles,
+        SystemFolder::ProgramFilesX86 => &FOLDERID_ProgramFilesX86,
+        SystemFolder::LocalAppData => &FOLDERID_LocalAppData,
+    };
+    let mut raw: *mut u16 = std::ptr::null_mut();
+    // SAFETY: `id` is a valid GUID, a null token means the current user, and `raw` receives a
+    // CoTaskMem-allocated, NUL-terminated wide string that is freed below.
+    let hr = unsafe { SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut raw) };
+    if raw.is_null() {
+        return None;
+    }
+    // SAFETY: on success `raw` is NUL-terminated; the length is found before the slice is made.
+    let text = (hr >= 0).then(|| unsafe {
+        let mut length = 0usize;
+        while *raw.add(length) != 0 {
+            length += 1;
+        }
+        String::from_utf16(std::slice::from_raw_parts(raw, length)).ok()
+    });
+    // SAFETY: `raw` came from SHGetKnownFolderPath, which documents CoTaskMemFree for it.
+    unsafe { CoTaskMemFree(raw as *const core::ffi::c_void) };
+    text.flatten().and_then(|path| plain_drive_dir(&path))
+}
+
+/// The Windows directory (`GetWindowsDirectoryW`), e.g. `C:\Windows`, or `None`.
+#[cfg(windows)]
+pub(crate) fn windows_dir() -> Option<String> {
+    use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
+    let mut buffer = vec![0u16; 1024];
+    // SAFETY: `buffer` is writable for the number of elements passed.
+    let length = unsafe { GetWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return None;
+    }
+    plain_drive_dir(&String::from_utf16(&buffer[..length]).ok()?)
+}
+
+/// The `Program Files` of this process (`FOLDERID_ProgramFiles`): the app is a 64-bit process on
+/// every Windows target it ships for, so this is the 64-bit `Program Files`, the very value the
+/// 64-bit PowerShell of the elevated script reports through `[Environment]::GetFolderPath`.
+#[cfg(windows)]
+pub(crate) fn program_files_dir() -> Option<String> {
+    system_folder(SystemFolder::ProgramFiles)
+}
+
+/// `dir` as a drive-absolute directory spelling, backslash-separated without a trailing
+/// separator; anything else (empty, relative, UNC, drive-relative, control characters, a bare
+/// drive root) is skipped rather than repaired, and the caller fails closed.
+pub(crate) fn plain_drive_dir(dir: &str) -> Option<String> {
+    let bytes = dir.as_bytes();
+    let drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    let trimmed = dir.trim_end_matches(['\\', '/']);
+    (drive && trimmed.len() > 2 && !dir.chars().any(char::is_control))
+        .then(|| trimmed.replace('/', "\\"))
+}
+
+/// `<program files>\SourceWeft\sandbox\srt-win.exe` for the given `Program Files` directory.
+pub(crate) fn staged_srt_win_path_in(program_files: &str) -> Option<PathBuf> {
+    plain_drive_dir(program_files)
         .map(|root| PathBuf::from(format!("{root}\\{STAGED_DIR}\\{STAGED_FILE}")))
 }
 
-/// [`staged_srt_win_path_from`] for this process's environment.
+/// `<program files>\SourceWeft\sandbox-setup-result.json` for the given `Program Files`
+/// directory.
+pub(crate) fn setup_result_path_in(program_files: &str) -> Option<PathBuf> {
+    plain_drive_dir(program_files).map(|root| PathBuf::from(format!("{root}\\{RESULT_FILE}")))
+}
+
+/// The staged helper of this machine, below the 64-bit `Program Files` Windows reports.
+#[cfg(windows)]
 pub(crate) fn staged_srt_win_path() -> Option<PathBuf> {
-    staged_srt_win_path_from(
-        std::env::var("ProgramW6432").ok().as_deref(),
-        std::env::var("ProgramFiles").ok().as_deref(),
-    )
+    staged_srt_win_path_in(&program_files_dir()?)
 }
 
-/// `%ProgramFiles%\SourceWeft\sandbox-setup-result.json` from the given values.
-pub(crate) fn setup_result_path_from(
-    program_w6432: Option<&str>,
-    program_files: Option<&str>,
-) -> Option<PathBuf> {
-    program_files_root(program_w6432, program_files)
-        .map(|root| PathBuf::from(format!("{root}\\{RESULT_FILE}")))
+// ---------------------------------------------------------------------- the pinned helper
+
+/// `sandbox-sidecar/srt-win-pin.json`, embedded in the app. The elevated setup runs the staged
+/// `srt-win.exe` as administrator, so which file may be staged is decided by this pin, compiled
+/// into the signed application, and not by anything in the user-writable runtime directory (the
+/// extracted bundle and its manifest can be rewritten by any process of the same user).
+pub(crate) const SRT_WIN_PIN: &str = include_str!("../../../sandbox-sidecar/srt-win-pin.json");
+
+#[derive(Deserialize)]
+struct RawPin {
+    #[cfg_attr(not(test), allow(dead_code))]
+    tag: String,
+    #[serde(rename = "srtWin")]
+    srt_win: std::collections::BTreeMap<String, String>,
 }
 
-/// [`setup_result_path_from`] for this process's environment.
-pub(crate) fn setup_result_path() -> Option<PathBuf> {
-    setup_result_path_from(
-        std::env::var("ProgramW6432").ok().as_deref(),
-        std::env::var("ProgramFiles").ok().as_deref(),
-    )
+/// The fork tag the pin was derived from (`v0.0.81-sourceweft.2`), from the pin text.
+#[cfg(test)]
+pub(crate) fn pinned_srt_win_tag_from(pin: &str) -> Result<String, String> {
+    serde_json::from_str::<RawPin>(pin)
+        .map(|pin| pin.tag)
+        .map_err(|error| format!("The embedded sandbox helper pin is unreadable: {error}"))
+}
+
+/// The pinned SHA-256 of `srt-win.exe` for the Rust target `triple`, from the pin text. Exactly
+/// 64 lowercase hex characters, or an error: a pin that is missing or malformed means no setup.
+pub(crate) fn pinned_srt_win_sha256_from(pin: &str, triple: &str) -> Result<String, String> {
+    let pin: RawPin = serde_json::from_str(pin)
+        .map_err(|error| format!("The embedded sandbox helper pin is unreadable: {error}"))?;
+    let hash = pin
+        .srt_win
+        .get(triple)
+        .ok_or_else(|| format!("No sandbox helper is pinned for {triple}."))?;
+    if hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        Ok(hash.clone())
+    } else {
+        Err(format!("The sandbox helper pin for {triple} is not a SHA-256."))
+    }
+}
+
+/// The Rust target triple of this build, for the architectures that have a Windows bundle.
+pub(crate) const fn windows_target_triple() -> Option<&'static str> {
+    if cfg!(target_arch = "x86_64") {
+        Some("x86_64-pc-windows-msvc")
+    } else if cfg!(target_arch = "aarch64") {
+        Some("aarch64-pc-windows-msvc")
+    } else {
+        None
+    }
+}
+
+/// The SHA-256 the staged `srt-win.exe` of this app must have.
+pub(crate) fn pinned_srt_win_sha256() -> Result<String, String> {
+    let triple = windows_target_triple()
+        .ok_or("The sandbox is not available for this processor architecture.")?;
+    pinned_srt_win_sha256_from(SRT_WIN_PIN, triple)
 }
 
 /// Lowercase hex SHA-256 of the file at `path`, read in chunks.
@@ -424,9 +536,9 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn the_staged_helper_lives_under_the_64_bit_program_files() {
+    fn the_staged_helper_lives_under_the_given_program_files() {
         assert_eq!(
-            staged_srt_win_path_from(Some(r"C:\Program Files"), Some(r"C:\Program Files (x86)")),
+            staged_srt_win_path_in(r"C:\Program Files"),
             Some(PathBuf::from(
                 r"C:\Program Files\SourceWeft\sandbox\srt-win.exe"
             ))
@@ -434,25 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn program_files_is_used_when_program_w6432_is_absent_or_unusable() {
-        let expected = Some(PathBuf::from(r"D:\Programs\SourceWeft\sandbox\srt-win.exe"));
-        assert_eq!(
-            staged_srt_win_path_from(None, Some(r"D:\Programs")),
-            expected
-        );
-        assert_eq!(
-            staged_srt_win_path_from(Some(""), Some(r"D:\Programs")),
-            expected
-        );
-        assert_eq!(
-            staged_srt_win_path_from(Some("relative"), Some("D:/Programs/")),
-            expected
-        );
-    }
-
-    #[test]
     fn nothing_usable_means_no_path() {
-        assert_eq!(staged_srt_win_path_from(None, None), None);
         for bad in [
             "",
             "relative",
@@ -462,17 +556,15 @@ mod tests {
             "C:rel",
             "C:\\x\n",
         ] {
-            assert_eq!(
-                staged_srt_win_path_from(Some(bad), Some(bad)),
-                None,
-                "{bad:?}"
-            );
+            assert_eq!(staged_srt_win_path_in(bad), None, "{bad:?}");
+            assert_eq!(setup_result_path_in(bad), None, "{bad:?}");
+            assert_eq!(plain_drive_dir(bad), None, "{bad:?}");
         }
     }
 
     #[test]
     fn the_result_is_a_native_absolute_drive_path() {
-        let path = staged_srt_win_path_from(Some("c:/Program Files//"), None).unwrap();
+        let path = staged_srt_win_path_in("c:/Program Files//").unwrap();
         assert_eq!(
             path,
             Path::new(r"c:\Program Files\SourceWeft\sandbox\srt-win.exe")
@@ -482,12 +574,91 @@ mod tests {
     #[test]
     fn the_result_file_sits_beside_the_staged_directory_in_program_files() {
         assert_eq!(
-            setup_result_path_from(Some(r"C:\Program Files"), None),
+            setup_result_path_in(r"C:\Program Files"),
             Some(PathBuf::from(
                 r"C:\Program Files\SourceWeft\sandbox-setup-result.json"
             ))
         );
-        assert_eq!(setup_result_path_from(Some("relative"), None), None);
+        assert_eq!(setup_result_path_in("relative"), None);
+    }
+
+    // ---- the pinned helper -------------------------------------------------------------
+
+    #[test]
+    fn the_embedded_pin_names_both_targets_with_sha256_hashes() {
+        for triple in ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"] {
+            let hash = pinned_srt_win_sha256_from(SRT_WIN_PIN, triple).unwrap();
+            assert_eq!(hash.len(), 64, "{triple}");
+        }
+        assert_ne!(
+            pinned_srt_win_sha256_from(SRT_WIN_PIN, "x86_64-pc-windows-msvc"),
+            pinned_srt_win_sha256_from(SRT_WIN_PIN, "aarch64-pc-windows-msvc")
+        );
+        assert!(pinned_srt_win_sha256_from(SRT_WIN_PIN, "x86_64-unknown-linux-gnu").is_err());
+        assert!(pinned_srt_win_sha256().is_ok() || windows_target_triple().is_none());
+    }
+
+    #[test]
+    fn a_pin_that_is_not_understood_is_an_error_not_a_guess() {
+        let triple = "x86_64-pc-windows-msvc";
+        let good = "a".repeat(64);
+        assert!(pinned_srt_win_sha256_from(&format!(r#"{{"tag":"t","srtWin":{{"{triple}":"{good}"}}}}"#), triple).is_ok());
+        for bad in [
+            "".to_string(),
+            "{}".to_string(),
+            r#"{"tag":"t"}"#.to_string(),
+            format!(r#"{{"tag":"t","srtWin":{{"{triple}":"{}"}}}}"#, good.to_uppercase()),
+            format!(r#"{{"tag":"t","srtWin":{{"{triple}":"{}"}}}}"#, &good[..63]),
+            format!(r#"{{"tag":"t","srtWin":{{"{triple}":"{good}g"}}}}"#),
+            format!(r#"{{"tag":"t","srtWin":{{"{triple}":""}}}}"#),
+        ] {
+            assert!(pinned_srt_win_sha256_from(&bad, triple).is_err(), "{bad}");
+        }
+    }
+
+    /// The pin is derived from one published fork tag; the dependency that supplies the bundled
+    /// `srt-win.exe` must be that very tag, or the build would be pinned to bytes it cannot produce.
+    #[test]
+    fn the_pin_names_the_fork_tag_the_sidecar_depends_on() {
+        let package = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sandbox-sidecar/package.json"
+        ))
+        .unwrap();
+        let tag = pinned_srt_win_tag_from(SRT_WIN_PIN).unwrap();
+        assert!(tag.starts_with('v') && tag.contains("-sourceweft."), "{tag}");
+        assert!(
+            package.contains(&format!("/releases/download/{tag}/sandbox-runtime-{tag}.tgz")),
+            "sandbox-sidecar/package.json must depend on the fork tag {tag} that srt-win-pin.json is derived from"
+        );
+        // The file on disk is the one embedded.
+        let on_disk = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sandbox-sidecar/srt-win-pin.json"
+        ))
+        .unwrap();
+        assert_eq!(on_disk, SRT_WIN_PIN);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_system_locations_come_from_windows_and_agree_with_a_normal_environment() {
+        // On a stock machine the environment agrees; the point is that the values do not depend on
+        // it (they come from the shell known-folder API and GetWindowsDirectoryW).
+        let program_files = program_files_dir().expect("Program Files");
+        assert!(Path::new(&program_files).is_dir(), "{program_files}");
+        if let Ok(env) = std::env::var("ProgramW6432") {
+            assert!(program_files.eq_ignore_ascii_case(env.trim_end_matches('\\')), "{program_files} vs {env}");
+        }
+        let windows = windows_dir().expect("Windows directory");
+        assert!(Path::new(&windows).join("System32").is_dir(), "{windows}");
+        if let Ok(env) = std::env::var("SystemRoot") {
+            assert!(windows.eq_ignore_ascii_case(env.trim_end_matches('\\')), "{windows} vs {env}");
+        }
+        assert!(system_folder(SystemFolder::LocalAppData).is_some());
+        assert!(system_folder(SystemFolder::ProgramFilesX86).is_some());
+        assert!(system_folder(SystemFolder::ProgramFiles).is_some());
+        assert!(staged_srt_win_path().unwrap().starts_with(&program_files));
     }
 
     #[test]

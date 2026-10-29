@@ -562,9 +562,9 @@ jobs:
         shell: pwsh
         run: ./apps/desktop/sandbox-sidecar/scripts/verify-windows-bundle.ps1 $env:BUNDLE_DIR $env:TARGET
       - name: Authenticode-sign with a throwaway certificate, re-verify and re-manifest
-        # The release signs the three executables before packing; this proves signing leaves them
-        # runnable (a Bun-compiled executable must still print its namespace) and that the bundle
-        # can be re-manifested over the signed bytes. The certificate is self-signed and created
+        # The release signs the sidecar and rg.exe (not srt-win.exe, whose bytes the app pins) before
+        # packing; this proves signing leaves them runnable (a Bun-compiled executable must still
+        # print its namespace) and that the bundle can be re-manifested over the signed bytes. The certificate is self-signed and created
         # for this run, so no production certificate or secret is involved.
         shell: pwsh
         run: |

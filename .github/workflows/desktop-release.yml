@@ -136,7 +136,10 @@ jobs:
       # code-signs the binaries (Developer ID + hardened runtime + entitlements in `signed`,
       # ad-hoc in `updater-signed`) BEFORE the tarball is hashed and minisigned. Windows x86_64 ships a
 # PE ripgrep, srt-win.exe and the sidecar as .exe files, and under `signed` Authenticode-signs
-# them with the installer's certificate before the tarball is hashed and minisigned; the
+# the sidecar and ripgrep with the installer's certificate before the tarball is hashed and
+# minisigned. srt-win.exe is deliberately NOT signed: the desktop app pins its exact SHA-256
+# (sandbox-sidecar/srt-win-pin.json) before it lets an elevated setup run it, and signing would
+# change those bytes. The build and the verify script assert the pin; the
 # aarch64 Windows bundle has no installer and is built by the `sandbox-bundle-windows-arm64` job
 # below on a native arm64 runner.
       - uses: oven-sh/setup-bun@v2
@@ -316,6 +319,9 @@ jobs:
             if ($signer.Count -ne 1) { throw "Expected one signing certificate" }
             "WINDOWS_CERTIFICATE_THUMBPRINT=$($signer[0].Thumbprint)" >> $env:GITHUB_ENV
           } finally { Remove-Item $path -ErrorAction SilentlyContinue }
+      - name: Validate release signing configuration
+        if: steps.existing.outputs.exists != 'true'
+        run: node scripts/ci/desktop-release-config.mjs --bundle-only
       - name: Build signature verifier
         if: steps.existing.outputs.exists != 'true'
         run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml

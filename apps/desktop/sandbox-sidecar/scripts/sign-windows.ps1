@@ -1,8 +1,15 @@
-# Authenticode-signs the three executables of a Windows sandbox bundle directory in place
-# (srt-sidecar.exe, srt-win.exe, rg.exe) with signtool, using a certificate that is already in
-# the CurrentUser\My store. The Windows counterpart of sign-macos.sh: run it BEFORE packing, then
-# rebuild the manifest over the signed files (`build -- --remanifest`), because signing changes
-# the bytes the manifest hashes.
+# Authenticode-signs the two executables of a Windows sandbox bundle directory that the app runs
+# as itself (srt-sidecar.exe, rg.exe) in place with signtool, using a certificate that is already
+# in the CurrentUser\My store. The Windows counterpart of sign-macos.sh: run it BEFORE packing,
+# then rebuild the manifest over the signed files (`build -- --remanifest`), because signing
+# changes the bytes the manifest hashes.
+#
+# srt-win.exe is deliberately NOT signed. The desktop app pins its exact SHA-256 in
+# srt-win-pin.json (embedded in the app) and the elevated setup refuses any other file; an
+# Authenticode signature changes the file's bytes and would break that pin. The pin is what
+# authorises srt-win.exe to run as administrator and as the sandbox account, and the pin is
+# stronger than a signature check here: it names one file. `build.ts` and
+# verify-windows-bundle.ps1 assert that the bundled srt-win.exe still equals the pin.
 #
 #   pwsh sign-windows.ps1 -BundleDir <dir> -Thumbprint <sha1> -TimestampUrl <rfc3161 url>
 #       Release signing: RFC 3161 timestamped, and every signature must verify as Valid (a trusted
@@ -52,7 +59,7 @@ function Find-SignTool {
 $signtool = Find-SignTool
 Write-Host "signtool: $signtool"
 
-foreach ($name in 'srt-sidecar.exe', 'srt-win.exe', 'rg.exe') {
+foreach ($name in 'srt-sidecar.exe', 'rg.exe') {
   $path = Join-Path $BundleDir $name
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing from the bundle: $name" }
   $arguments = @('sign', '/fd', 'sha256', '/sha1', $Thumbprint)

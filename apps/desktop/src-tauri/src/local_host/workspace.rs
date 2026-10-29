@@ -22,7 +22,7 @@ pub struct Workspace {
 }
 
 fn serialize_wire_path<S: serde::Serializer>(
-    path: &PathBuf,
+    path: &Path,
     serializer: S,
 ) -> std::result::Result<S::Ok, S::Error> {
     let wire = super::winpath::host_to_wire(path).map_err(serde::ser::Error::custom)?;

@@ -540,6 +540,12 @@ test("the Windows verify script catches a wrong namespace, architecture or non-n
   for (const name of ["srt-sidecar.exe", "rg.exe", "srt-win.exe"])
     assert(script.includes(`'${name}'`), `${name} is checked`);
   assert.match(script, /sourceweft-sandbox/);
+  // srt-win.exe must equal the SHA-256 pinned for the target (the file the desktop app embeds),
+  // read from srt-win-pin.json beside the package.
+  assert.match(script, /srt-win-pin\.json/);
+  assert.match(script, /Get-FileHash -LiteralPath \(Join-Path \$BundleDir 'srt-win\.exe'\) -Algorithm SHA256/);
+  assert.match(script, /\$pin\.srtWin\.\$Triple/);
+  assert.match(script, /\$actual -ne \$pinned/);
   // The define the check guards is the one the build passes.
   const manifest = await readFile(
     new URL("../../apps/desktop/sandbox-sidecar/scripts/manifest.ts", import.meta.url),
@@ -558,8 +564,15 @@ test("the signing script accepts only the expected certificate and a real timest
     new URL(`../../${WINDOWS_SCRIPTS}/sign-windows.ps1`, import.meta.url),
     "utf8",
   );
-  for (const name of ["srt-sidecar.exe", "srt-win.exe", "rg.exe"])
-    assert(script.includes(`'${name}'`), `${name} is signed`);
+  // srt-win.exe is NOT signed: signing would change the bytes the desktop app pins and the
+  // elevated setup checks.
+  assert.match(script, /foreach \(\$name in 'srt-sidecar\.exe', 'rg\.exe'\)/);
+  const code = script
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.doesNotMatch(code, /srt-win/, "srt-win.exe is never signed");
+  assert.match(script, /deliberately NOT signed/);
   assert.match(script, /'\/fd', 'sha256', '\/sha1', \$Thumbprint/);
   assert.match(script, /'\/tr', \$TimestampUrl, '\/td', 'sha256'/);
   // A release signature must verify as Valid and carry a timestamp; only the throwaway
@@ -659,16 +672,24 @@ test("the Windows arm64 bundle has its own release job: native runner, no instal
   assert.equal(job.env.DESKTOP_PUBLICATION_POLICY, "${{ inputs.publication_policy }}");
   assert.match(job.env.WINDOWS_TIMESTAMP_URL, /publication_policy == 'signed'/);
   const text = JSON.stringify(job.steps);
-  // No installer, no updater package, no release-config validation (the target is not an update
-  // target), no prepare-desktop-release.
-  assert.doesNotMatch(text, /tauri build|prepare-desktop-release|desktop-release-config/);
+  // No installer, no updater package, no prepare-desktop-release. The signing configuration is
+  // validated exactly as the installer legs do, in the mode for a target that has no installer.
+  assert.doesNotMatch(text, /tauri build|prepare-desktop-release/);
   const named = (name) => job.steps.findIndex((step) => step.name === name);
   const cert = named("Import Windows signing certificate");
   const rg = job.steps.findIndex((step) => step.id === "ripgrep_windows");
   const build = named("Build, sign and verify the sandbox runtime bundle (Windows)");
   const upload = job.steps.findIndex((step) => step.uses?.startsWith("actions/upload-artifact"));
-  assert(cert !== -1 && rg !== -1 && build !== -1 && upload !== -1);
+  const validate = named("Validate release signing configuration");
+  assert(cert !== -1 && rg !== -1 && build !== -1 && upload !== -1 && validate !== -1);
   assert(cert < build && rg < build && build < upload);
+  assert(cert < validate && validate < build, "validated after the certificate import, before the build");
+  assert.equal(
+    job.steps[validate].run,
+    "node scripts/ci/desktop-release-config.mjs --bundle-only",
+    "the release-config check runs without writing an installer config",
+  );
+  assert.match(job.steps[validate].if, /exists != 'true'/);
   assert.match(job.steps[cert].if, /publication_policy == 'signed'/);
   assert.match(job.steps[build].run, /build-sandbox-bundle-windows\.sh/);
   assert.match(job.env.DESKTOP_UPDATE_VERIFIER, /\.exe$/);

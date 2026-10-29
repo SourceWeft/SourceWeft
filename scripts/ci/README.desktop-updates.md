@@ -342,8 +342,13 @@ before the artifact upload):
    namespaced build and — by running the compiled `srt-sidecar.exe --print-namespace` — that the
    `--define __SRT_WIN_NAMESPACE__="sourceweft"` really reached the executable (a define that
    lost its quotes on the Windows command line still builds, silently with upstream names).
-   Only in the `signed` policy, `sign-windows.ps1` then Authenticode-signs `srt-sidecar.exe`,
-   `srt-win.exe` and `rg.exe` with signtool, using the installer's certificate
+   It also asserts that `srt-win.exe` is byte for byte the file pinned for the target in
+   `apps/desktop/sandbox-sidecar/srt-win-pin.json` (derived from the pinned fork tag's tarball;
+   the desktop app embeds the same file and its elevated setup runs only a file with that
+   SHA-256). `build.ts` asserts it too, so a changed `srt-win.exe` fails the build.
+   Only in the `signed` policy, `sign-windows.ps1` then Authenticode-signs `srt-sidecar.exe`
+   and `rg.exe` (never `srt-win.exe`: signing would change the bytes the pin names) with signtool,
+   using the installer's certificate
    (`WINDOWS_CERTIFICATE_THUMBPRINT`, imported by the workflow) and `WINDOWS_TIMESTAMP_URL`
    (every signature must verify as `Valid` and carry a timestamp), the executables are run
    again, and `build.ts --remanifest` rebuilds the manifest over the signed bytes. The

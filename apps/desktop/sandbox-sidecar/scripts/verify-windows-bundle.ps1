@@ -7,7 +7,10 @@
 #     `--define __SRT_WIN_NAMESPACE__="sourceweft"` to `bun build --compile`; if a Windows
 #     command line ever drops those quotes the build still succeeds and the executable silently
 #     carries upstream's `sandbox-runtime` names, so only running it can tell;
-#   * srt-win.exe is the namespaced build (it carries the `sourceweft-sandbox` account name);
+#   * srt-win.exe is the namespaced build (it carries the `sourceweft-sandbox` account name) and is
+#     byte for byte the file pinned for the target in srt-win-pin.json (the pin the desktop app
+#     embeds and the elevated setup enforces). It must therefore never have been Authenticode-signed
+#     or otherwise rewritten;
 #   * rg.exe runs (so a signature or a wrong architecture would have been noticed).
 # Running the executables needs the runner to be of the target's architecture, which holds for
 # every caller (x64 target on an x64 runner, arm64 target on an arm64 runner).
@@ -59,6 +62,18 @@ $srtWin = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes(
 $found = $srtWin.Contains('sourceweft-sandbox')
 if (-not $found) { throw 'srt-win.exe does not carry the sourceweft-sandbox account name (not the namespaced build)' }
 Write-Host 'srt-win.exe: namespaced build (sourceweft-sandbox)'
+
+# The pin: the exact SHA-256 of the srt-win.exe of the pinned fork tag, per target. A signed or
+# otherwise changed file would be refused by the app's elevated setup, so it is refused here.
+$pinPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'srt-win-pin.json'
+$pin = Get-Content -LiteralPath $pinPath -Raw | ConvertFrom-Json
+$pinned = $pin.srtWin.$Triple
+if (-not $pinned -or $pinned -cnotmatch '^[0-9a-f]{64}$') { throw "no valid srt-win.exe pin for $Triple in $pinPath" }
+$actual = (Get-FileHash -LiteralPath (Join-Path $BundleDir 'srt-win.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $pinned) {
+  throw "srt-win.exe sha256 $actual is not the pinned $pinned for $Triple ($($pin.tag)); it must be the unmodified, unsigned file of that release"
+}
+Write-Host "srt-win.exe: equals the pin for $Triple ($($pin.tag))"
 
 $sidecar = Join-Path $BundleDir 'srt-sidecar.exe'
 $printed = @(& $sidecar --print-namespace)

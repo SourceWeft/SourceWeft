@@ -330,12 +330,66 @@ pub fn folder_request_relative(root: &Path, requested: &str) -> Result<String> {
     Ok(requested.to_owned())
 }
 
+/// The credential locations below the profile (relative, backslash-separated) that no workspace
+/// or read root may equal or lie inside: the one list the sandbox sidecar's policy reads too
+/// (`sandbox-sidecar/src/windows-protected-paths.json`).
+const PROTECTED_LOCATIONS_JSON: &str =
+    include_str!("../../../sandbox-sidecar/src/windows-protected-paths.json");
+
+/// The relative credential locations from [`PROTECTED_LOCATIONS_JSON`].
+pub fn protected_relative_locations() -> Vec<String> {
+    #[derive(serde::Deserialize)]
+    struct List {
+        #[serde(rename = "relativeToHome")]
+        relative_to_home: Vec<String>,
+    }
+    // The file is embedded at compile time and a test parses it: a malformed list is a build
+    // defect, never a runtime state, so there is no fallback to an empty list.
+    serde_json::from_str::<List>(PROTECTED_LOCATIONS_JSON)
+        .expect("windows-protected-paths.json is valid")
+        .relative_to_home
+}
+
+/// The credential locations under `profile`, as native paths.
+pub fn protected_locations(profile: &Path) -> Vec<PathBuf> {
+    let base = profile.to_string_lossy().trim_end_matches(is_separator).to_owned();
+    protected_relative_locations()
+        .into_iter()
+        .map(|relative| PathBuf::from(format!("{base}\\{relative}")))
+        .collect()
+}
+
 /// Windows refuses to turn these into a workspace (W11): a write grant is a persistent NTFS ACL
 /// walk over the whole tree, kept until the sandbox is uninstalled. Refused: a drive root, the
 /// user's profile directory, any ancestor of the profile, and `AppData` and its `Roaming`/`Local`
 /// style children (every entry of `app_data_roots` and every ancestor of one). Folders *inside*
 /// those (`AppData\Local\Temp\x`, `Documents\proj`) are fine.
+///
+/// Also refused (`FOLDER_PROTECTED`): a folder that equals or lies INSIDE a credential location of
+/// the profile (`~\.ssh\proj`, `~\AppData\Roaming\Mozilla\Firefox\Profiles\x`, see
+/// [`protected_locations`]). The sandbox denies protected paths that lie *within* a granted root,
+/// so a root placed inside one would be granted with no deny at all. On Windows the folder is also
+/// checked under its canonical long-name spelling (an 8.3 short name such as `RUNNER~1` must not
+/// hide it from the comparison with the canonical `profile`).
 pub fn refuse_broad_grant(path: &Path, profile: &Path, app_data_roots: &[PathBuf]) -> Result<()> {
+    refuse_spelled_grant(path, profile, app_data_roots)?;
+    #[cfg(windows)]
+    if let Some(long) = long_spelling(path) {
+        if !same_path(&long, path) {
+            refuse_spelled_grant(&long, profile, app_data_roots)?;
+        }
+    }
+    Ok(())
+}
+
+/// The folder as the file system spells it: `canonicalize` (which expands 8.3 short names and
+/// resolves links) in the native, non-verbatim form; `None` when it does not exist.
+#[cfg(windows)]
+fn long_spelling(path: &Path) -> Option<PathBuf> {
+    to_native(&path.canonicalize().ok()?).ok()
+}
+
+fn refuse_spelled_grant(path: &Path, profile: &Path, app_data_roots: &[PathBuf]) -> Result<()> {
     let too_broad = || {
         HostError::new(
             "FOLDER_TOO_BROAD",
@@ -355,6 +409,16 @@ pub fn refuse_broad_grant(path: &Path, profile: &Path, app_data_roots: &[PathBuf
     }
     if is_inside(profile, path) || app_data_roots.iter().any(|root| is_inside(root, path)) {
         return Err(too_broad());
+    }
+    if protected_locations(profile)
+        .iter()
+        .any(|protected| is_inside(path, protected))
+    {
+        return Err(HostError::new(
+            "FOLDER_PROTECTED",
+            "That folder holds sign-in data (for example SSH keys, browser profiles or cloud \
+             credentials) or is inside a folder that does. Choose another folder.",
+        ));
     }
     Ok(())
 }
@@ -448,23 +512,6 @@ pub fn file_identity(path: &Path) -> std::io::Result<(u64, [u8; 16])> {
         return Err(std::io::Error::last_os_error());
     }
     Ok((info.VolumeSerialNumber, info.FileId.Identifier))
-}
-
-/// The number of hard links to `path` (1 for an ordinary file), via an attribute-only handle.
-#[cfg(windows)]
-pub fn link_count(path: &Path) -> std::io::Result<u32> {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-    };
-    let file = open_for_query(path)?;
-    // SAFETY: a zeroed BY_HANDLE_FILE_INFORMATION is a valid output buffer for the call below.
-    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-    // SAFETY: `file` owns a valid handle; `info` is a valid, writable structure.
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(info.nNumberOfLinks)
 }
 
 /// Whether an entry is any kind of reparse point: symbolic link, junction, mount point, cloud
@@ -804,6 +851,102 @@ mod tests {
     }
 
     #[test]
+    fn folders_that_are_or_lie_inside_a_credential_location_are_protected() {
+        for path in [
+            r"C:\Users\me\.ssh",
+            r"C:\Users\me\.ssh\proj",
+            r"c:\users\ME\.SSH\a\b",
+            r"\\?\C:\Users\me\.aws\creds-copy",
+            r"C:\Users\me\.claude",
+            r"C:\Users\me\.codex\work",
+            r"C:\Users\me\.config\op",
+            r"C:\Users\me\.config\rclone\x",
+            r"C:\Users\me\.oci",
+            r"C:\Users\me\.terraform.d\plugins",
+            r"C:\Users\me\.m2\settings.xml",
+            r"C:\Users\me\.gradle\gradle.properties",
+            r"C:\Users\me\.nuget\NuGet.Config",
+            r"C:\Users\me\.pgpass",
+            r"C:\Users\me\AppData\Roaming\Mozilla\Firefox\Profiles\x",
+            r"C:\Users\me\AppData\Roaming\Code\User\globalStorage\ext",
+            r"C:\Users\me\AppData\Roaming\npm\etc\npmrc",
+            r"C:\Users\me\AppData\Local\Google\Chrome\User Data\Default",
+            r"C:\Users\me\AppData\Local\Packages\Some.App_8wekyb3d8bbwe\LocalState",
+        ] {
+            assert_eq!(broad(path).unwrap_err().code, "FOLDER_PROTECTED", "{path}");
+        }
+    }
+
+    #[test]
+    fn neighbours_and_ancestors_of_a_credential_location_are_not_protected_by_that_rule() {
+        for path in [
+            r"C:\Users\me\.sshx",
+            r"C:\Users\me\.ssh-keys-backup",
+            r"C:\Users\me\.claude-notes",
+            r"C:\Users\me\.config\rclones",
+            r"C:\Users\me\.config\other",
+            r"C:\Users\me\AppData\Roaming\Code\User\settings",
+            r"C:\Users\me\AppData\Roaming\Code\User",
+            r"C:\Users\me\AppData\Roaming\npm",
+            r"C:\Users\me\AppData\Roaming\npm\etc",
+            r"C:\Users\me\AppData\Roaming\npm\node_modules",
+            r"C:\Users\me\AppData\Local\Google\Chrome",
+            r"C:\Users\other\.ssh\proj",
+            r"D:\Users\me\.ssh\proj",
+        ] {
+            broad(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        }
+        // An ancestor that contains a credential location is a broad folder or fine, but never
+        // "protected": the sandbox denies the credential location inside it per command.
+        broad(r"C:\Users\me\Documents").unwrap();
+    }
+
+    #[test]
+    fn the_protected_list_is_the_sidecars_list() {
+        let relative = protected_relative_locations();
+        assert!(relative.len() >= 40, "{relative:?}");
+        for must in [
+            ".ssh", ".pgpass", ".m2\\settings.xml", ".gradle\\gradle.properties", ".nuget\\NuGet.Config",
+            ".config\\rclone", ".oci", ".terraform.d", ".claude", ".codex", ".config\\op",
+            "AppData\\Roaming\\Code\\User\\globalStorage", "AppData\\Roaming\\npm\\etc\\npmrc",
+        ] {
+            assert!(relative.iter().any(|entry| entry == must), "{must}");
+        }
+        // Relative, backslash-separated, no duplicates (case-insensitively).
+        let mut seen = std::collections::HashSet::new();
+        for entry in &relative {
+            assert!(!entry.contains('/') && !entry.starts_with('\\') && !entry.ends_with('\\') && !entry.contains(':'), "{entry}");
+            assert!(seen.insert(entry.to_lowercase()), "duplicate {entry}");
+        }
+        let located = protected_locations(Path::new(r"C:\Users\me\"));
+        assert_eq!(located.len(), relative.len());
+        assert_eq!(located[0], PathBuf::from(r"C:\Users\me\.ssh"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_real_folder_inside_a_credential_location_is_refused_on_disk() {
+        let profile = tempfile::tempdir().unwrap();
+        let profile_path = to_native(&profile.path().canonicalize().unwrap()).unwrap();
+        let project = profile_path.join(".ssh").join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let roots: Vec<PathBuf> = Vec::new();
+        assert_eq!(
+            refuse_broad_grant(&project, &profile_path, &roots).unwrap_err().code,
+            "FOLDER_PROTECTED"
+        );
+        // The same folder spelled in upper case and with a verbatim prefix.
+        let verbatim = PathBuf::from(format!(r"\\?\{}", project.display().to_string().to_uppercase()));
+        assert_eq!(
+            refuse_broad_grant(&verbatim, &profile_path, &roots).unwrap_err().code,
+            "FOLDER_PROTECTED"
+        );
+        let fine = profile_path.join("work");
+        std::fs::create_dir_all(&fine).unwrap();
+        refuse_broad_grant(&fine, &profile_path, &roots).unwrap();
+    }
+
+    #[test]
     fn app_data_roots_cover_the_standard_children_and_the_variables() {
         assert_eq!(
             app_data_roots(r"C:\Users\me\", None, None),
@@ -891,17 +1034,6 @@ mod windows_tests {
         assert!(!is_reparse_point(
             &std::fs::symlink_metadata(&target).unwrap()
         ));
-    }
-
-    #[test]
-    fn link_count_reports_hard_links() {
-        let temp = tempfile::tempdir().unwrap();
-        let file = temp.path().join("f.txt");
-        std::fs::write(&file, "x").unwrap();
-        assert_eq!(link_count(&file).unwrap(), 1);
-        std::fs::hard_link(&file, temp.path().join("g.txt")).unwrap();
-        assert_eq!(link_count(&file).unwrap(), 2);
-        assert_eq!(link_count(&temp.path().join("g.txt")).unwrap(), 2);
     }
 
     #[test]

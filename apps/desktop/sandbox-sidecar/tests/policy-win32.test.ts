@@ -182,17 +182,27 @@ test("protectedPaths: denyRoots, then the credential stores under home", () => {
     ".azure",
     ".kube",
     ".gnupg",
+    ".oci",
+    ".terraform.d",
+    ".claude",
+    ".codex",
     ".docker\\config.json",
     ".npmrc",
     ".pypirc",
     ".netrc",
     "_netrc",
+    ".pgpass",
     ".git-credentials",
     ".cargo\\credentials",
     ".cargo\\credentials.toml",
+    ".m2\\settings.xml",
+    ".gradle\\gradle.properties",
+    ".nuget\\NuGet.Config",
     ".config\\gh",
     ".config\\gcloud",
     ".config\\git\\credentials",
+    ".config\\rclone",
+    ".config\\op",
     ...[
       "gcloud",
       "GitHub CLI",
@@ -206,6 +216,8 @@ test("protectedPaths: denyRoots, then the credential stores under home", () => {
       "1Password",
       "Bitwarden",
       "KeePass",
+      "Code\\User\\globalStorage",
+      "npm\\etc\\npmrc",
     ].map((name) => `AppData\\Roaming\\${name}`),
     ...[
       "Microsoft\\Credentials",
@@ -337,4 +349,64 @@ test("the allow lists in the win32 config carry only paths that pass the same va
   const c = buildConfig(winInit());
   for (const path of [...pathsOf(c.filesystem.allowRead), ...pathsOf(c.filesystem.allowWrite)])
     assert.match(path, /^[A-Za-z]:[\\/]/);
+});
+
+// A root inside a protected path is granted with no deny at all (the per-command deny list only
+// covers protected paths INSIDE a root), so the policy refuses it outright.
+test("win32 init refuses a workspace root that is or lies inside a protected path", () => {
+  for (const root of [
+    "C:\\Users\\u\\.ssh",
+    "C:\\Users\\u\\.ssh\\proj",
+    "c:/users/U/.SSH/proj/",
+    "C:\\Users\\u\\.claude\\worktrees\\x",
+    "C:\\Users\\u\\.codex",
+    "C:\\Users\\u\\.config\\op\\x",
+    "C:\\Users\\u\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\x",
+    "C:\\Users\\u\\AppData\\Roaming\\Code\\User\\globalStorage",
+    "C:\\Users\\u\\AppData\\Roaming\\npm\\etc\\npmrc",
+    "C:\\Users\\u\\AppData\\Local\\Packages\\Pkg\\LocalState",
+  ]) {
+    assertPolicyInvalid(() => buildConfig(winInit({ workspaceRoots: [root] })));
+  }
+  assert.throws(
+    () => buildConfig(winInit({ workspaceRoots: ["C:\\Users\\u\\.ssh\\proj"] })),
+    /workspaceRoots\[0\].*protected location/,
+  );
+});
+
+test("win32 init refuses a read root that is or lies inside a protected path", () => {
+  for (const root of [
+    "C:\\Users\\u\\.ssh\\bin",
+    "C:\\Users\\u\\AppData\\Local\\Packages\\Python.3.11\\LocalCache\\Scripts",
+    "C:\\Users\\u\\AppData\\Roaming\\Mozilla",
+  ]) {
+    assertPolicyInvalid(() => buildConfig(winInit({ readRoots: [root] })));
+  }
+});
+
+test("win32 init accepts roots next to, above or elsewhere than the protected paths", () => {
+  for (const root of [
+    "C:\\Users\\u\\.sshx",
+    "C:\\Users\\u\\.claude-notes",
+    "C:\\Users\\u\\AppData\\Roaming\\npm",
+    "C:\\Users\\u\\AppData\\Roaming\\Code\\User",
+    "C:\\Users\\u\\AppData\\Local\\Temp\\ws",
+    "C:\\Users\\u\\Documents\\proj",
+    "C:\\Users\\u",
+    "D:\\Users\\u\\.ssh",
+    "C:\\Users\\v\\.ssh\\proj",
+  ]) {
+    buildConfig(winInit({ workspaceRoots: [root] }));
+    buildConfig(winInit({ readRoots: [root] }));
+  }
+});
+
+test("the host's scratch probe workspace below a denyRoot is not a protected-path violation", () => {
+  const c = buildConfig(
+    winInit({
+      workspaceRoots: ["C:\\Users\\u\\AppData\\Roaming\\app\\sandbox\\probe"],
+      denyRoots: ["C:\\Users\\u\\AppData\\Roaming\\app\\sandbox"],
+    }),
+  );
+  assert.deepEqual(pathsOf(c.filesystem.allowWrite), ["C:\\Users\\u\\AppData\\Roaming\\app\\sandbox\\probe"]);
 });

@@ -12,7 +12,10 @@
  * `vendor/seccomp/<x64|arm64>/apply-seccomp` and is Linux-only (the daemon only needs it on
  * Linux, and there is no macOS build of it to copy); `srt-win.exe` is copied from
  * `vendor/srt-win/<x64|arm64>/srt-win.exe` (Windows only; the architecture is the target's);
- * `srt-proxy-agent.jar` is copied from `vendor/java-proxy-agent/srt-proxy-agent.jar`.
+ * `srt-proxy-agent.jar` is copied from `vendor/java-proxy-agent/srt-proxy-agent.jar`. On Windows
+ * the copied `srt-win.exe` must equal the SHA-256 pinned in `srt-win-pin.json` (the build fails
+ * otherwise): the desktop app runs a staged copy of it as administrator only if it has that hash,
+ * which is also why it is never Authenticode-signed.
  *
  * Finally it writes `manifest.json` (the wire contract the Rust installer and
  * `scripts/ci/sandbox-bundle.mjs` verify): schema version, `SANDBOX_PROTOCOL_VERSION`, the
@@ -34,6 +37,7 @@
  * never code-sign the bundle, so they never run this and their behaviour is unchanged.
  */
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -49,10 +53,12 @@ import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
 import {
   MANIFEST_FILENAME,
   assertBunVersion,
+  assertSrtWinMatchesPin,
   buildManifest,
   bundlePlan,
   bunCompileArgs,
   bunCompileTarget,
+  readSrtWinPin,
   resolveTarget,
 } from "./manifest.js";
 
@@ -103,6 +109,20 @@ function copyFile(source: string, destName: string, execBit: boolean): void {
 }
 
 /**
+ * A Windows bundle's `srt-win.exe` must be byte for byte the file pinned in `srt-win-pin.json`:
+ * the desktop app's elevated setup stages and runs only a file with that SHA-256 (the manifest is
+ * in user-writable app data and authorises nothing). Called after the files are copied and again
+ * before a re-manifest, which is what catches an `srt-win.exe` that was Authenticode-signed.
+ */
+function assertWindowsSrtWinPinned(target: string): void {
+  if (!target.endsWith("-pc-windows-msvc")) return;
+  const sha256 = createHash("sha256")
+    .update(readFileSync(join(outDir, "srt-win.exe")))
+    .digest("hex");
+  assertSrtWinMatchesPin(target, sha256, readSrtWinPin());
+}
+
+/**
  * Rewrites `manifest.json` over the current contents of `dist/bundle`, keeping the version and
  * target fields from the existing manifest. Used after the macOS bundle is code-signed in place.
  */
@@ -124,6 +144,7 @@ function remanifest(): void {
   ) {
     throw new Error(`existing manifest is missing fields: ${manifestPath}`);
   }
+  assertWindowsSrtWinPinned(p.target);
   const manifest = buildManifest({
     bundleDir: outDir,
     protocolVersion: p.protocolVersion,
@@ -159,6 +180,7 @@ function main(): void {
     requireFile(source, to);
     copyFile(source, to, executable);
   }
+  assertWindowsSrtWinPinned(target);
 
   // A native build compiles with no `--target` (byte-identical to the historical Linux build);
   // a same-OS cross build (macOS x86_64 on the arm64 runner) passes the explicit Bun target so

@@ -3,11 +3,12 @@
 # (x86_64-pc-windows-msvc or aarch64-pc-windows-msvc), run by the signed desktop release on the
 # Windows runner of that architecture, from the repository root, in Git Bash:
 #   1. builds the bundle with the pinned ripgrep ($RG_PATH, from install-ripgrep-windows.ps1);
-#   2. checks the real executables (architecture, namespaced srt-win, the compiled sidecar's
-#      embedded namespace) with verify-windows-bundle.ps1;
-#   3. under the `signed` publication policy only, Authenticode-signs srt-sidecar.exe,
-#      srt-win.exe and rg.exe with the installer's certificate (WINDOWS_CERTIFICATE_THUMBPRINT,
-#      imported by the workflow) and timestamp server (WINDOWS_TIMESTAMP_URL), re-checks them,
+#   2. checks the real executables (architecture, namespaced srt-win that equals the SHA-256 pinned
+#      in srt-win-pin.json, the compiled sidecar's embedded namespace) with
+#      verify-windows-bundle.ps1;
+#   3. under the `signed` publication policy only, Authenticode-signs srt-sidecar.exe and rg.exe
+#      (NOT srt-win.exe: the desktop app pins its exact bytes) with the installer's certificate
+#      (WINDOWS_CERTIFICATE_THUMBPRINT, imported by the workflow) and timestamp server (WINDOWS_TIMESTAMP_URL), re-checks them,
 #      and rebuilds the manifest over the signed bytes (as the macOS leg does after codesign);
 #      the `updater-signed` policy has no certificate and leaves the executables unsigned;
 #   4. packs the bundle, minisigns the tarball with the updater key, verifies the signature with

@@ -9,7 +9,8 @@
  */
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const MANIFEST_FILENAME = "manifest.json";
 
@@ -58,6 +59,64 @@ export function bunCompileArgs(input: {
     "--outfile",
     input.outFile,
   ];
+}
+
+/**
+ * The pinned SHA-256 of the fork's `srt-win.exe` per Windows target (`srt-win-pin.json`, beside
+ * `package.json`). The desktop app embeds the same file and its elevated setup runs only a file
+ * with exactly this hash, so the bundle must carry the unmodified, unsigned file of the pinned
+ * fork tag. The build asserts it (`assertSrtWinMatchesPin`), as does `verify-windows-bundle.ps1`.
+ */
+export const SRT_WIN_PIN_FILENAME = "srt-win-pin.json";
+
+export type SrtWinPin = { tag: string; srtWin: Record<string, string> };
+
+/** Parses the pin text; anything but a non-empty tag and lowercase 64-hex hashes is an error. */
+export function parseSrtWinPin(text: string): SrtWinPin {
+  const value: unknown = JSON.parse(text);
+  const pin = value as { tag?: unknown; srtWin?: unknown };
+  if (typeof pin.tag !== "string" || pin.tag === "") {
+    throw new Error("the srt-win pin has no tag");
+  }
+  if (typeof pin.srtWin !== "object" || pin.srtWin === null || Array.isArray(pin.srtWin)) {
+    throw new Error("the srt-win pin has no srtWin table");
+  }
+  const entries = Object.entries(pin.srtWin as Record<string, unknown>);
+  if (entries.length === 0) throw new Error("the srt-win pin lists no target");
+  for (const [target, hash] of entries) {
+    if (typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) {
+      throw new Error(`the srt-win pin for ${target} is not a lowercase SHA-256`);
+    }
+  }
+  return { tag: pin.tag, srtWin: pin.srtWin as Record<string, string> };
+}
+
+/** The committed pin of this package. */
+export function readSrtWinPin(): SrtWinPin {
+  const path = join(dirname(fileURLToPath(import.meta.url)), "..", SRT_WIN_PIN_FILENAME);
+  return parseSrtWinPin(readFileSync(path, "utf8"));
+}
+
+/**
+ * Throws unless `actualSha256` (the bundled `srt-win.exe`) is the pinned hash for `target`.
+ * The usual cause of a mismatch is Authenticode signing, which rewrites the file; the other is a
+ * dependency bump without a new pin.
+ */
+export function assertSrtWinMatchesPin(
+  target: string,
+  actualSha256: string,
+  pin: SrtWinPin,
+): void {
+  const pinned = pin.srtWin[target];
+  if (pinned === undefined) {
+    throw new Error(`no srt-win.exe pin for ${target} in ${SRT_WIN_PIN_FILENAME}`);
+  }
+  if (actualSha256.toLowerCase() !== pinned) {
+    throw new Error(
+      `srt-win.exe for ${target} has sha256 ${actualSha256.toLowerCase()}, but ${SRT_WIN_PIN_FILENAME} pins ${pinned} (fork ${pin.tag}). ` +
+        "It must be the unmodified, unsigned file of that release (Authenticode signing changes it); after a dependency bump, update the pin.",
+    );
+  }
 }
 
 export type Manifest = {

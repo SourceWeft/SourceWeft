@@ -17,6 +17,9 @@ import * as win32 from "node:path/win32";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { UNROUTABLE_V4, UNROUTABLE_V6 } from "./address-guard.js";
 import type { InitConfig } from "./protocol.js";
+// One list for both sides: the desktop host (`winpath.rs`) refuses a folder inside any of these
+// before it is ever granted, and the policy below refuses it again at `init`.
+import windowsProtectedPaths from "./windows-protected-paths.json" with { type: "json" };
 
 /**
  * Thrown by `buildConfig` when an `InitConfig` path field is not absolute. `code` is always
@@ -545,54 +548,15 @@ const WINDOWS_PROXY_PORT_RANGE: [number, number] = [60180, 60189];
 /**
  * Credential stores under the user's profile that must stay unreadable and unwritable even when
  * a granted workspace or a toolchain read root contains them (a granted profile, or a `PATH`
- * entry such as `~\.cargo\bin` that reads like a directory of its own). Relative to `home`,
- * backslash-separated. Dotfile credentials and CLI token directories first, then the Roaming
- * and Local `AppData` stores: the Credential Manager and DPAPI master keys
- * (`Microsoft\Credentials`, `Protect`, `Vault`, `Crypto`), certificate stores, password-manager
- * vaults and browser profiles (cookies and saved logins).
+ * entry such as `~\.cargo\bin` that reads like a directory of its own), and that no workspace or
+ * read root may lie inside (`assertRootsOutsideProtected`). Relative to `home`,
+ * backslash-separated; `windows-protected-paths.json` is the single list (the desktop host reads
+ * the same file). Dotfile credentials and CLI token directories first, then the Roaming and
+ * Local `AppData` stores: the Credential Manager and DPAPI master keys (`Microsoft\Credentials`,
+ * `Protect`, `Vault`, `Crypto`), certificate stores, password-manager vaults and browser profiles
+ * (cookies and saved logins), editor extension storage and the global npm configuration.
  */
-const WIN32_CREDENTIAL_PATHS: readonly string[] = [
-  ".ssh",
-  ".aws",
-  ".azure",
-  ".kube",
-  ".gnupg",
-  ".docker\\config.json",
-  ".npmrc",
-  ".pypirc",
-  ".netrc",
-  "_netrc",
-  ".git-credentials",
-  ".cargo\\credentials",
-  ".cargo\\credentials.toml",
-  ".config\\gh",
-  ".config\\gcloud",
-  ".config\\git\\credentials",
-  ...[
-    "gcloud",
-    "GitHub CLI",
-    "gnupg",
-    "Microsoft\\Credentials",
-    "Microsoft\\Protect",
-    "Microsoft\\Vault",
-    "Microsoft\\Crypto",
-    "Microsoft\\SystemCertificates",
-    "Mozilla",
-    "1Password",
-    "Bitwarden",
-    "KeePass",
-  ].map((name) => `AppData\\Roaming\\${name}`),
-  ...[
-    "Microsoft\\Credentials",
-    "Microsoft\\Vault",
-    "Microsoft\\IdentityCache",
-    "Microsoft\\TokenBroker",
-    "Google\\Chrome\\User Data",
-    "Microsoft\\Edge\\User Data",
-    "BraveSoftware\\Brave-Browser\\User Data",
-    "Packages",
-  ].map((name) => `AppData\\Local\\${name}`),
-];
+const WIN32_CREDENTIAL_PATHS: readonly string[] = windowsProtectedPaths.relativeToHome;
 
 /** `path` normalized to backslashes, minus a trailing separator (a drive root keeps its one), lowercased. */
 function windowsKey(path: string): string {
@@ -626,6 +590,31 @@ export function protectedPaths(
     ...(init.denyRoots ?? []).map((path) => win32.normalize(path)),
     ...WIN32_CREDENTIAL_PATHS.map((relative) => win32.join(init.home, relative)),
   ];
+}
+
+/**
+ * Refuses (POLICY_INVALID) any workspace root or read root that equals or lies INSIDE a protected
+ * credential store under `home`. (The host's own `denyRoots` are not part of this: the readiness
+ * probe's scratch workspace legitimately lives below one of them.) The per-command
+ * deny list only covers protected paths that lie inside a root, so a root placed inside one
+ * (`~\.ssh\proj` as a workspace, `~\AppData\Roaming\Mozilla\Firefox\Profiles\x` as a read
+ * root) would be granted without any deny. A root that CONTAINS a protected path is fine: that
+ * path is denied per command.
+ */
+function assertRootsOutsideProtected(init: InitConfig): void {
+  const protectedList = protectedPaths({ home: init.home });
+  const roots: Array<[string, string]> = [
+    ...init.workspaceRoots.map((path, i): [string, string] => [`workspaceRoots[${i}]`, path]),
+    ...init.readRoots.map((path, i): [string, string] => [`readRoots[${i}]`, path]),
+  ];
+  for (const [field, root] of roots) {
+    const hit = protectedList.find((protectedPath) => isWithinWin32(protectedPath, root));
+    if (hit !== undefined) {
+      throw new PolicyInvalidError(
+        `${field} ${JSON.stringify(root)} is inside the protected location ${JSON.stringify(hit)}`,
+      );
+    }
+  }
 }
 
 /**
@@ -678,6 +667,7 @@ function buildWin32Config(init: InitConfig): SandboxRuntimeConfig {
   (init.denyRoots ?? []).forEach((path, i) => assertAbsolute("win32", `denyRoots[${i}]`, path));
   assertAbsolute("win32", "windows.srtWin", windows.srtWin);
   assertAbsolute("win32", "windows.shell", windows.shell);
+  assertRootsOutsideProtected(init);
 
   const [workspaceRoot] = init.workspaceRoots as [string];
   return {

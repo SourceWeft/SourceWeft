@@ -80,15 +80,25 @@ pub struct ShellRoots {
 }
 
 impl ShellRoots {
-    /// From this process's environment.
+    /// From Windows itself (the shell known-folder API and `GetWindowsDirectoryW`), never from
+    /// environment variables: a process of the same user can set those for the app, and they
+    /// choose which `bash.exe` and which PowerShell the sandboxed commands run under. Off Windows
+    /// there are no roots (and no shell).
     pub fn from_env() -> Self {
-        let var = |name: &str| std::env::var(name).ok();
-        Self {
-            program_files: var("ProgramFiles"),
-            program_w6432: var("ProgramW6432"),
-            program_files_x86: var("ProgramFiles(x86)"),
-            local_app_data: var("LOCALAPPDATA"),
-            system_root: var("SystemRoot"),
+        #[cfg(windows)]
+        {
+            use super::windows::{system_folder, windows_dir, SystemFolder};
+            Self {
+                program_files: system_folder(SystemFolder::ProgramFiles),
+                program_w6432: system_folder(SystemFolder::ProgramFilesX64),
+                program_files_x86: system_folder(SystemFolder::ProgramFilesX86),
+                local_app_data: system_folder(SystemFolder::LocalAppData),
+                system_root: windows_dir(),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Self::default()
         }
     }
 }

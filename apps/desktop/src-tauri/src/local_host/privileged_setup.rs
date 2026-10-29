@@ -102,22 +102,37 @@ const EXIT_CANCELLED: i32 = 120;
 #[cfg(any(windows, test))]
 const EXIT_LAUNCH_FAILED: i32 = 121;
 
-/// The longest `-EncodedCommand` value handed to `Start-Process -Verb RunAs`. Windows limits a
-/// command line, and elevation passes it through the shell and the consent process; staying under
-/// the classic 8191-character `cmd` limit keeps clear of every one of them. The embedded script
-/// is compacted (comments and indentation removed) to fit.
+/// The longest `-EncodedCommand` value handed to `Start-Process -Verb RunAs`. A command line is
+/// limited to 32,767 characters (`CreateProcess`), and the elevation request carries it through
+/// the shell and the consent process; staying under half of that keeps clear of every one of
+/// them. The embedded script is compacted (comments and indentation removed), and UTF-16LE plus
+/// base64 more than doubles its size.
 #[cfg(any(windows, test))]
-const MAX_ENCODED_COMMAND: usize = 7000;
+const MAX_ENCODED_COMMAND: usize = 14_000;
+
+/// The helper the elevated script may stage: the bundle directory it is read from and the
+/// SHA-256 it must have. The hash is the application's own pin (`windows::pinned_srt_win_sha256`),
+/// never a value read from the user-writable runtime.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Helper {
+    /// The runtime directory that holds `srt-win.exe`.
+    pub bundle: String,
+    /// 64 lowercase hex characters.
+    pub sha256: String,
+}
 
 /// What the elevated script is asked to do.
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SetupAction {
-    /// Stage `srt-win.exe` from `bundle` (a directory) after checking its SHA-256 (64 lowercase
-    /// hex characters, from the bundle's manifest) and install the sandbox.
-    Install { bundle: String, sha256: String },
-    /// Remove the sandbox account, the network rules and the staged helper.
-    Uninstall,
+    /// Stage `srt-win.exe` from the helper's bundle after checking its SHA-256 and install the
+    /// sandbox.
+    Install(Helper),
+    /// Remove the sandbox account, the network rules and the staged helper. With a helper, the
+    /// script falls back to that pinned, hash-verified file when the staged one is missing (an
+    /// installation whose staged copy was deleted can still be removed).
+    Uninstall(Option<Helper>),
 }
 
 #[cfg(any(windows, test))]
@@ -137,33 +152,45 @@ fn is_lower_hex_sha256(text: &str) -> bool {
     text.len() == 64 && text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-/// The lines the script starts with, built only from validated values: the action, a GUID, a
-/// lowercase-hex hash, and the bundle directory as base64 of its UTF-8 bytes. A bundle directory
-/// must be an absolute local drive path (`super::winpath::to_wire_str`: no UNC, no device paths, no
-/// `..`, no characters Windows forbids); since it travels as base64, a quote or a dollar sign in a
-/// user name cannot be interpreted by PowerShell, and a path with one is simply a path.
+/// The lines the script starts with, built only from validated values: the action, a GUID, the
+/// `Program Files` directory the host asked Windows for (base64 of its UTF-8 bytes; the script
+/// checks it against its own answer), a lowercase-hex hash and the bundle directory as base64 of
+/// its UTF-8 bytes (both empty when the action has no helper). A bundle directory must be an
+/// absolute local drive path (`super::winpath::to_wire_str`: no UNC, no device paths, no `..`, no
+/// characters Windows forbids); since it travels as base64, a quote or a dollar sign in a user name
+/// cannot be interpreted by PowerShell, and a path with one is simply a path. All five variables
+/// are always defined: the script runs in strict mode.
 #[cfg(any(windows, test))]
-pub(crate) fn argument_block(action: &SetupAction, run_id: &str) -> Result<String, String> {
+pub(crate) fn argument_block(
+    action: &SetupAction,
+    run_id: &str,
+    program_files: &str,
+) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     if !is_run_id(run_id) {
         return Err("The setup run id is not a GUID.".to_string());
     }
-    match action {
-        SetupAction::Uninstall => {
-            Ok(format!("$Action = \"uninstall\"\n$RunId = \"{run_id}\"\n"))
-        }
-        SetupAction::Install { bundle, sha256 } => {
+    let program_files = super::windows::plain_drive_dir(program_files)
+        .ok_or("The Program Files location is not a local drive path.")?;
+    let (name, helper) = match action {
+        SetupAction::Install(helper) => ("install", Some(helper)),
+        SetupAction::Uninstall(helper) => ("uninstall", helper.as_ref()),
+    };
+    let (sha256, bundle) = match helper {
+        None => (String::new(), String::new()),
+        Some(Helper { bundle, sha256 }) => {
             if !is_lower_hex_sha256(sha256) {
                 return Err("The sandbox helper checksum is not a SHA-256.".to_string());
             }
             let wire = super::winpath::to_wire_str(bundle).map_err(|error| error.message)?;
             let native = wire.replace('/', "\\");
-            Ok(format!(
-                "$Action = \"install\"\n$RunId = \"{run_id}\"\n$Sha256 = \"{sha256}\"\n$BundleB64 = \"{}\"\n",
-                STANDARD.encode(native.as_bytes())
-            ))
+            (sha256.clone(), STANDARD.encode(native.as_bytes()))
         }
-    }
+    };
+    Ok(format!(
+        "$Action = \"{name}\"\n$RunId = \"{run_id}\"\n$ProgramFilesB64 = \"{}\"\n$Sha256 = \"{sha256}\"\n$BundleB64 = \"{bundle}\"\n",
+        STANDARD.encode(program_files.as_bytes())
+    ))
 }
 
 /// The script without comment lines, blank lines and indentation, which is all PowerShell needs
@@ -192,8 +219,16 @@ pub(crate) fn encode_command(text: &str) -> String {
 
 /// The script plus its argument block as one `-EncodedCommand` value.
 #[cfg(any(windows, test))]
-pub(crate) fn encoded_setup(action: &SetupAction, run_id: &str) -> Result<String, String> {
-    let text = format!("{}{}", argument_block(action, run_id)?, compact_script(WINDOWS_SETUP_SCRIPT));
+pub(crate) fn encoded_setup(
+    action: &SetupAction,
+    run_id: &str,
+    program_files: &str,
+) -> Result<String, String> {
+    let text = format!(
+        "{}{}",
+        argument_block(action, run_id, program_files)?,
+        compact_script(WINDOWS_SETUP_SCRIPT)
+    );
     let encoded = encode_command(&text);
     if encoded.len() > MAX_ENCODED_COMMAND {
         return Err(format!(
@@ -289,9 +324,12 @@ fn describe_exit(code: i32) -> String {
         17 => "The sandbox could not protect the system folders.".to_string(),
         22 => "A sandboxed command is still running. Stop it and try again.".to_string(),
         40 => "The setup did not get administrator rights.".to_string(),
-        41 => "The sandbox helper in the downloaded runtime does not match its signed manifest. Install the runtime again.".to_string(),
+        41 => "The sandbox helper in the downloaded runtime is not the one this version of SourceWeft expects. Install the runtime again.".to_string(),
         42 => "The setup could not finish.".to_string(),
         43 => "The setup could not find the sandbox runtime.".to_string(),
+        44 => "Windows reports a different Program Files location than SourceWeft expected, so the setup was stopped.".to_string(),
+        45 => "The folder the sandbox helper is installed in is not protected against changes by ordinary users, so the setup was stopped.".to_string(),
+        46 => "The sandbox is set up on this computer but its helper is missing, and the runtime to repair it from is not available. Install the runtime again, then remove the sandbox.".to_string(),
         EXIT_LAUNCH_FAILED => "Windows could not start the setup.".to_string(),
         other => format!("The setup failed (exit code {other})."),
     }
@@ -337,18 +375,64 @@ pub(crate) fn interpret_outcome(
     Err(message)
 }
 
-/// Runs the elevated setup: builds the encoded script for `action`, starts the launcher with
+/// How long after one attempt to start the elevated setup the next one is refused. A web page can
+/// ask the app to run the setup, and every attempt puts a UAC prompt on the user's screen; without
+/// this a page could keep the prompt coming until it is approved by reflex. A successful setup
+/// clears it, so a deliberate "set up, remove, set up" sequence is never held up.
+#[cfg(any(windows, test))]
+pub(crate) const ELEVATION_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// When the last elevated attempt was started and did not succeed.
+#[cfg(any(windows, test))]
+#[derive(Debug, Default)]
+pub(crate) struct Cooldown {
+    last_attempt: Option<std::time::Instant>,
+}
+
+#[cfg(any(windows, test))]
+impl Cooldown {
+    /// Refuses (with the wait) when an attempt was started less than [`ELEVATION_COOLDOWN`] ago.
+    pub(crate) fn check(&self, now: std::time::Instant) -> Result<(), String> {
+        if let Some(last) = self.last_attempt {
+            let elapsed = now.saturating_duration_since(last);
+            if elapsed < ELEVATION_COOLDOWN {
+                let wait = (ELEVATION_COOLDOWN - elapsed).as_secs() + 1;
+                return Err(format!(
+                    "The sandbox setup was just attempted. Wait {wait} seconds before trying again."
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Records that an attempt is being started.
+    pub(crate) fn started(&mut self, now: std::time::Instant) {
+        self.last_attempt = Some(now);
+    }
+
+    /// A successful setup or removal clears the wait.
+    pub(crate) fn succeeded(&mut self) {
+        self.last_attempt = None;
+    }
+}
+
+/// Runs the elevated setup: builds the encoded script for `action` (given the `Program Files`
+/// directory the host got from Windows), refuses while the cooldown runs, starts the launcher with
 /// `launch(powershell, args)`, reads the result file with `read_result`, and interprets both.
 /// `launch` and `read_result` are parameters so the whole flow is tested without Windows.
 #[cfg(any(windows, test))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_elevated_with(
     action: &SetupAction,
     run_id: &str,
+    program_files: &str,
     powershell: &str,
     launch: &dyn Fn(&str, &[String]) -> std::io::Result<LaunchOutput>,
     read_result: &dyn Fn() -> Option<String>,
+    cooldown: &std::sync::Mutex<Cooldown>,
+    now: std::time::Instant,
 ) -> Result<(), String> {
-    let encoded = encoded_setup(action, run_id)?;
+    let encoded = encoded_setup(action, run_id, program_files)?;
     let command = launch_command(powershell, &encoded)?;
     let args = [
         "-NoProfile".to_string(),
@@ -358,28 +442,44 @@ pub(crate) fn run_elevated_with(
         "-Command".to_string(),
         command,
     ];
+    {
+        let mut cooldown = cooldown.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        cooldown.check(now)?;
+        cooldown.started(now);
+    }
     let output = launch(powershell, &args)
         .map_err(|error| format!("Windows PowerShell could not be started: {error}"))?;
     let result = read_result().and_then(|text| parse_setup_result(&text, run_id));
-    interpret_outcome(&output, result.as_ref())
+    let outcome = interpret_outcome(&output, result.as_ref());
+    if outcome.is_ok() {
+        cooldown.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).succeeded();
+    }
+    outcome
 }
 
-/// The checksum to give the elevated script for the bundle's `srt-win.exe`: the one the bundle's
-/// manifest lists, and only if the file on disk really has it (so a damaged or half-replaced
-/// bundle is refused here, with the reason, instead of after a UAC prompt).
+/// The checksum to give the elevated script for the bundle's `srt-win.exe`: the application's own
+/// pin, and only if the file on disk has it. The bundle's manifest must list the same value, but
+/// only as a consistency check: the manifest lives in the user-writable runtime directory, so
+/// agreeing with it proves nothing about the file (a file that differs from its manifest is
+/// reported as such, a file that agrees with its manifest but not with the pin as not being the
+/// helper this release expects). A damaged, replaced or half-written bundle is refused here, with
+/// the reason, instead of after a UAC prompt.
 #[cfg(any(windows, test))]
 pub(crate) fn helper_checksum(
+    pinned: &str,
     manifest: super::Result<String>,
     on_disk: std::io::Result<String>,
 ) -> Result<String, String> {
     let listed = manifest.map_err(|error| error.message)?;
     let actual = on_disk
         .map_err(|error| format!("The sandbox helper in the runtime cannot be read: {error}"))?;
-    if actual.eq_ignore_ascii_case(&listed) {
-        Ok(listed)
-    } else {
-        Err("The sandbox helper in the runtime does not match its manifest. Install the runtime again.".to_string())
+    if !actual.eq_ignore_ascii_case(&listed) {
+        return Err("The sandbox helper in the runtime does not match its manifest. Install the runtime again.".to_string());
     }
+    if !actual.eq_ignore_ascii_case(pinned) {
+        return Err("The sandbox helper in the runtime is not the one this version of SourceWeft expects. Install the runtime again.".to_string());
+    }
+    Ok(pinned.to_ascii_lowercase())
 }
 
 /// Only one setup (or removal) at a time: a second UAC prompt for the same work would race the
@@ -408,19 +508,43 @@ impl Drop for SetupRunning {
     }
 }
 
+/// Process-wide: the web page and the settings UI share one elevation budget.
+#[cfg(windows)]
+static COOLDOWN: std::sync::Mutex<Cooldown> = std::sync::Mutex::new(Cooldown { last_attempt: None });
+
 #[cfg(windows)]
 impl super::LocalHost {
     /// Runs the one-time Windows setup: stages `srt-win.exe` from the installed runtime under
-    /// `Program Files` (checked against the signed manifest's SHA-256) and installs the sandbox
-    /// account and network rules, behind a UAC prompt. Every running sandbox is stopped first (the
-    /// setup replaces what they run) and cached readiness is invalidated before and after,
-    /// whatever the outcome. Blocking: call it from a blocking thread.
+    /// `Program Files` (checked against the SHA-256 pinned in this application) and installs the
+    /// sandbox account and network rules, behind a UAC prompt. Every running sandbox is stopped
+    /// first (the setup replaces what they run) and cached readiness is invalidated before and
+    /// after, whatever the outcome. Blocking: call it from a blocking thread.
     pub fn run_elevated_setup(&self) -> Result<(), String> {
         let _running = SetupRunning::begin()?;
         let _guard = self.begin_setup_guard()?;
+        let helper = self.pinned_helper()?;
+        self.run_setup_action(&SetupAction::Install(helper))
+    }
+
+    /// Removes what [`LocalHost::run_elevated_setup`] installed (the sandbox account, the network
+    /// rules, the staged helper), behind a UAC prompt. If the staged helper is gone, the pinned
+    /// helper of the installed runtime stands in for it; without that, a sandbox that is set up
+    /// is reported as not removable (never as removed). Used by the CI suite and available to a
+    /// future "remove" action. Blocking.
+    pub fn run_elevated_uninstall(&self) -> Result<(), String> {
+        let _running = SetupRunning::begin()?;
+        let _guard = self.begin_setup_guard()?;
+        let fallback = self.pinned_helper().ok();
+        self.run_setup_action(&SetupAction::Uninstall(fallback))
+    }
+
+    /// The runtime's `srt-win.exe` as the elevated script may stage it: it must be the file this
+    /// application pins (see [`helper_checksum`]).
+    fn pinned_helper(&self) -> Result<Helper, String> {
         let bundle = super::readiness::bundle_dir(&self.base);
         let helper = bundle.join("srt-win.exe");
         let sha256 = helper_checksum(
+            &super::windows::pinned_srt_win_sha256()?,
             super::bundle_install::bundle_file_sha256(&bundle, "srt-win.exe"),
             super::windows::file_sha256_hex(&helper),
         )?;
@@ -428,16 +552,7 @@ impl super::LocalHost {
             .to_str()
             .ok_or("The sandbox runtime location is not valid text.")?
             .to_string();
-        self.run_setup_action(&SetupAction::Install { bundle, sha256 })
-    }
-
-    /// Removes what [`LocalHost::run_elevated_setup`] installed (the sandbox account, the network
-    /// rules, the staged helper), behind a UAC prompt. Used by the CI suite and available to a
-    /// future "remove" action. Blocking.
-    pub fn run_elevated_uninstall(&self) -> Result<(), String> {
-        let _running = SetupRunning::begin()?;
-        let _guard = self.begin_setup_guard()?;
-        self.run_setup_action(&SetupAction::Uninstall)
+        Ok(Helper { bundle, sha256 })
     }
 
     /// While the setup runs, readiness reports "installing" instead of probing (a probe would run
@@ -451,19 +566,31 @@ impl super::LocalHost {
     }
 
     fn run_setup_action(&self, action: &SetupAction) -> Result<(), String> {
-        let powershell = windows_powershell_path_from(std::env::var("SystemRoot").ok().as_deref())
+        let powershell = super::windows::windows_dir()
+            .and_then(|dir| windows_powershell_path_from(Some(&dir)))
             .filter(|path| std::path::Path::new(path).is_file())
             .ok_or("Windows PowerShell was not found.")?;
+        let program_files = super::windows::program_files_dir()
+            .ok_or("The Program Files location could not be determined.")?;
+        // Refused before anything is stopped: a request that will not be launched must not cost
+        // the user a running sandbox.
+        COOLDOWN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .check(std::time::Instant::now())?;
         self.stop_sandbox_sidecar();
         self.invalidate_sandbox_readiness();
         let run_id = uuid::Uuid::new_v4().to_string();
-        let result_path = super::windows::setup_result_path();
+        let result_path = super::windows::setup_result_path_in(&program_files);
         let result = run_elevated_with(
             action,
             &run_id,
+            &program_files,
             &powershell,
             &launch_elevated,
             &|| read_result_file(result_path.as_deref()),
+            &COOLDOWN,
+            std::time::Instant::now(),
         );
         self.invalidate_sandbox_readiness();
         result
@@ -619,14 +746,23 @@ mod windows_tests {
     use std::cell::RefCell;
 
     const RUN_ID: &str = "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d";
+    const PF: &str = r"C:\Program Files";
     const HASH: &str = "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5";
     const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 
-    fn install(bundle: &str) -> SetupAction {
-        SetupAction::Install {
+    fn helper(bundle: &str) -> Helper {
+        Helper {
             bundle: bundle.to_string(),
             sha256: HASH.to_string(),
         }
+    }
+
+    fn install(bundle: &str) -> SetupAction {
+        SetupAction::Install(helper(bundle))
+    }
+
+    fn uninstall() -> SetupAction {
+        SetupAction::Uninstall(None)
     }
 
     fn decode(encoded: &str) -> String {
@@ -680,6 +816,50 @@ mod windows_tests {
     }
 
     #[test]
+    fn the_script_takes_no_location_or_trust_from_the_environment() {
+        let script = compact_script(WINDOWS_SETUP_SCRIPT);
+        // No environment variable of any kind, in code or in the header's promises.
+        for forbidden in ["$env:", "[Environment]::GetEnvironmentVariable", "ProgramW6432", "SystemRoot", "%ProgramFiles%"] {
+            assert!(!script.contains(forbidden), "{forbidden}");
+        }
+        // Program Files comes from the .NET known-folder call and is compared with the app's.
+        assert!(script.contains("$Root = [Environment]::GetFolderPath(\"ProgramFiles\")"));
+        assert!(script.contains("-ne $Expected) { Finish 44"), "{script}");
+        assert!(script.contains("-not [Environment]::Is64BitProcess"));
+        // The directories are verified before anything is placed in them.
+        let base_check = script.find("AssertProtected $Base").expect("the base directory is checked");
+        let dispatch = script.find("if ($Action -eq \"install\")").expect("the dispatch");
+        assert!(base_check < dispatch);
+        let stage = script.find("function Stage").unwrap();
+        let stage_check = script[stage..].find("AssertProtected $Dir").expect("the staging directory is checked");
+        let copy = script[stage..].find("Copy-Item").unwrap();
+        assert!(stage_check < copy, "the staging directory is checked before the copy");
+        // Reparse points, the owner and the write-granting entries are what AssertProtected looks at.
+        for part in ["-band 1024", "GetOwner([Security.Principal.SecurityIdentifier])", "GetAccessRules($true, $true", "-band 0x500D0156", "Finish 45"] {
+            assert!(script.contains(part), "{part}");
+        }
+    }
+
+    #[test]
+    fn the_script_uninstall_falls_back_to_the_pinned_helper_and_reports_honestly() {
+        let script = compact_script(WINDOWS_SETUP_SCRIPT);
+        let uninstall = &script[script.find("function Uninstall").unwrap()..script.rfind("try {").unwrap()];
+        // The staged helper first; when it is missing, the hash-checked one from the runtime
+        // (Stage verifies the copy against the pin before it is ever run).
+        let staged = uninstall.find("Test-Path -LiteralPath $Exe -PathType Leaf").unwrap();
+        let fallback = uninstall.find("Stage $Source").expect("falls back to the pinned helper");
+        let run = uninstall.find("RunSrtWin @(\"uninstall\")").unwrap();
+        assert!(staged < fallback && fallback < run);
+        // With neither helper, an existing sandbox account is a failure (46), not a silent success.
+        assert!(uninstall.contains("Get-LocalUser -Name \"sourceweft-sandbox\""));
+        assert!(uninstall.contains("Finish 46"));
+        // The staged directory goes, and a directory that cannot be removed is reported.
+        assert!(uninstall.contains("Remove-Item -LiteralPath $Dir -Recurse -Force"));
+        assert!(uninstall.contains("Finish 42 \"The staged folder could not be removed.\""));
+        assert!(uninstall.rfind("Finish 0 \"ok\"").unwrap() > uninstall.find("Finish 42").unwrap());
+    }
+
+    #[test]
     fn the_proxy_port_range_matches_the_sidecar_policy() {
         let policy = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -707,32 +887,50 @@ mod windows_tests {
 
     #[test]
     fn the_real_encoded_command_fits_the_command_line_budget() {
-        for action in [install(r"C:\Users\someone\AppData\Roaming\com.sourceweft.desktop\sandbox\current"), SetupAction::Uninstall] {
-            let encoded = encoded_setup(&action, RUN_ID).unwrap();
+        for action in [install(r"C:\Users\someone\AppData\Roaming\com.sourceweft.desktop\sandbox\current"), uninstall(), SetupAction::Uninstall(Some(helper(r"C:\Users\someone\AppData\Roaming\com.sourceweft.desktop\sandbox\current")))] {
+            let encoded = encoded_setup(&action, RUN_ID, PF).unwrap();
             assert!(encoded.len() <= MAX_ENCODED_COMMAND, "{} characters", encoded.len());
             let command = launch_command(POWERSHELL, &encoded).unwrap();
-            assert!(command.len() < 8000 + 700, "{}", command.len());
+            assert!(command.len() < MAX_ENCODED_COMMAND + 700, "{}", command.len());
         }
         // A very long (but legal) bundle path still fits, or is refused with a reason.
         let long = format!(r"C:\{}", vec!["a".repeat(60); 3].join(r"\"));
-        assert!(encoded_setup(&install(&long), RUN_ID).is_ok());
+        assert!(encoded_setup(&install(&long), RUN_ID, PF).is_ok());
     }
 
     // ---- the argument block ----------------------------------------------------------
 
     #[test]
     fn the_argument_block_carries_only_validated_values() {
-        let block = argument_block(&install(r"C:\Users\me\AppData\Roaming\app\sandbox\current"), RUN_ID).unwrap();
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let block = argument_block(&install(r"C:\Users\me\AppData\Roaming\app\sandbox\current"), RUN_ID, PF).unwrap();
         let lines: Vec<&str> = block.lines().collect();
         assert_eq!(lines[0], "$Action = \"install\"");
         assert_eq!(lines[1], format!("$RunId = \"{RUN_ID}\""));
-        assert_eq!(lines[2], format!("$Sha256 = \"{HASH}\""));
-        assert!(lines[3].starts_with("$BundleB64 = \""));
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[2], format!("$ProgramFilesB64 = \"{}\"", STANDARD.encode(PF)));
+        assert_eq!(lines[3], format!("$Sha256 = \"{HASH}\""));
+        assert_eq!(lines[4], format!("$BundleB64 = \"{}\"", STANDARD.encode(r"C:\Users\me\AppData\Roaming\app\sandbox\current")));
+        assert_eq!(lines.len(), 5);
+        // Every variable is defined for every action: the script runs in strict mode.
         assert_eq!(
-            argument_block(&SetupAction::Uninstall, RUN_ID).unwrap(),
-            format!("$Action = \"uninstall\"\n$RunId = \"{RUN_ID}\"\n")
+            argument_block(&uninstall(), RUN_ID, "C:/Program Files/").unwrap(),
+            format!(
+                "$Action = \"uninstall\"\n$RunId = \"{RUN_ID}\"\n$ProgramFilesB64 = \"{}\"\n$Sha256 = \"\"\n$BundleB64 = \"\"\n",
+                STANDARD.encode(PF)
+            )
         );
+        let with_fallback = argument_block(&SetupAction::Uninstall(Some(helper(r"C:\rt"))), RUN_ID, PF).unwrap();
+        assert!(with_fallback.starts_with("$Action = \"uninstall\"\n"));
+        assert!(with_fallback.contains(&format!("$Sha256 = \"{HASH}\"")));
+        assert!(with_fallback.contains(&format!("$BundleB64 = \"{}\"", STANDARD.encode(r"C:\rt"))));
+    }
+
+    #[test]
+    fn the_program_files_directory_must_be_a_local_drive_path() {
+        let action = uninstall();
+        for bad in ["", "relative", r"\\server\share", "C:", r"C:\", "C:\\x\n", "C:rel"] {
+            assert!(argument_block(&action, RUN_ID, bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
@@ -744,7 +942,7 @@ mod windows_tests {
             r"C:\Users\`n;x&y%PATH%\current",
             "C:/Users/\u{4e2d}\u{6587}/[x]/current",
         ] {
-            let block = argument_block(&install(dir), RUN_ID).unwrap();
+            let block = argument_block(&install(dir), RUN_ID, PF).unwrap();
             let value = block
                 .lines()
                 .find_map(|line| line.strip_prefix("$BundleB64 = \"")?.strip_suffix('"'))
@@ -770,24 +968,24 @@ mod windows_tests {
             (install(r"C:\Users\a|b"), "forbidden character"),
             (install(r"\\.\C:\x"), "device path"),
             (install(""), "empty"),
-            (SetupAction::Install { bundle: ok.into(), sha256: HASH.to_uppercase() }, "uppercase hash"),
-            (SetupAction::Install { bundle: ok.into(), sha256: HASH[..63].into() }, "short hash"),
-            (SetupAction::Install { bundle: ok.into(), sha256: format!("{}\"; calc; \"", &HASH[..40]) }, "injection in hash"),
-            (SetupAction::Install { bundle: ok.into(), sha256: String::new() }, "empty hash"),
+            (SetupAction::Install(Helper { bundle: ok.into(), sha256: HASH.to_uppercase() }), "uppercase hash"),
+            (SetupAction::Install(Helper { bundle: ok.into(), sha256: HASH[..63].into() }), "short hash"),
+            (SetupAction::Install(Helper { bundle: ok.into(), sha256: format!("{}\"; calc; \"", &HASH[..40]) }), "injection in hash"),
+            (SetupAction::Install(Helper { bundle: ok.into(), sha256: String::new() }), "empty hash"),
         ] {
-            assert!(argument_block(&action, RUN_ID).is_err(), "{why}");
+            assert!(argument_block(&action, RUN_ID, PF).is_err(), "{why}");
         }
         for run_id in ["", "x", "0B1C2D3E-4F50-4A6B-8C7D-9E0F1A2B3C4D", "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4", "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d\"; x"] {
-            assert!(argument_block(&SetupAction::Uninstall, run_id).is_err(), "{run_id:?}");
+            assert!(argument_block(&uninstall(), run_id, PF).is_err(), "{run_id:?}");
         }
     }
 
     #[test]
     fn the_encoded_command_is_utf16le_base64_of_the_block_then_the_compact_script() {
         let action = install(r"C:\Users\me\sandbox\current");
-        let encoded = encoded_setup(&action, RUN_ID).unwrap();
+        let encoded = encoded_setup(&action, RUN_ID, PF).unwrap();
         let text = decode(&encoded);
-        assert!(text.starts_with(&argument_block(&action, RUN_ID).unwrap()));
+        assert!(text.starts_with(&argument_block(&action, RUN_ID, PF).unwrap()));
         assert!(text.ends_with(&compact_script(WINDOWS_SETUP_SCRIPT)));
         assert_eq!(decode(&encode_command("Write-Output \"h\u{e9}\"")), "Write-Output \"h\u{e9}\"");
     }
@@ -796,7 +994,7 @@ mod windows_tests {
 
     #[test]
     fn the_launcher_is_windows_powershell_by_absolute_path_with_a_runas_start_process() {
-        let encoded = encoded_setup(&SetupAction::Uninstall, RUN_ID).unwrap();
+        let encoded = encoded_setup(&uninstall(), RUN_ID, PF).unwrap();
         let command = launch_command(POWERSHELL, &encoded).unwrap();
         assert!(command.contains(&format!("-FilePath '{POWERSHELL}'")));
         assert!(command.contains("-Verb RunAs -Wait -PassThru -WindowStyle Hidden"));
@@ -810,7 +1008,7 @@ mod windows_tests {
 
     #[test]
     fn the_launcher_refuses_values_it_cannot_quote() {
-        let encoded = encoded_setup(&SetupAction::Uninstall, RUN_ID).unwrap();
+        let encoded = encoded_setup(&uninstall(), RUN_ID, PF).unwrap();
         assert!(launch_command(r"C:\x'y\powershell.exe", &encoded).is_err());
         assert!(launch_command("C:\\x\n\\powershell.exe", &encoded).is_err());
         assert!(launch_command(POWERSHELL, "abc'; calc; '").is_err());
@@ -869,9 +1067,12 @@ mod windows_tests {
             (17, "The sandbox could not protect"),
             (22, "A sandboxed command is still running."),
             (40, "The setup did not get administrator rights."),
-            (41, "The sandbox helper in the downloaded runtime does not match"),
+            (41, "The sandbox helper in the downloaded runtime is not the one this version of SourceWeft expects."),
             (42, "The setup could not finish."),
             (43, "The setup could not find the sandbox runtime."),
+            (44, "Windows reports a different Program Files location"),
+            (45, "The folder the sandbox helper is installed in is not protected"),
+            (46, "The sandbox is set up on this computer but its helper is missing"),
             (121, "Windows could not start the setup."),
             (99, "The setup failed (exit code 99)."),
         ] {
@@ -900,6 +1101,20 @@ mod windows_tests {
 
     // ---- the whole flow, with an injected launcher ------------------------------------
 
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    /// `run_elevated_with` for tests: a fresh cooldown unless one is given.
+    fn run(
+        action: &SetupAction,
+        run_id: &str,
+        powershell: &str,
+        launch: &dyn Fn(&str, &[String]) -> std::io::Result<LaunchOutput>,
+        read_result: &dyn Fn() -> Option<String>,
+    ) -> Result<(), String> {
+        run_elevated_with(action, run_id, PF, powershell, launch, read_result, &Mutex::new(Cooldown::default()), Instant::now())
+    }
+
     #[test]
     fn the_flow_launches_powershell_with_the_encoded_script_and_reads_the_result() {
         let seen: RefCell<Vec<(String, Vec<String>)>> = RefCell::new(Vec::new());
@@ -908,7 +1123,7 @@ mod windows_tests {
             Ok(output(Some(0), ""))
         };
         let read = || Some(format!("{{\"runId\":\"{RUN_ID}\",\"exit\":0,\"message\":\"ok\"}}"));
-        run_elevated_with(&install(r"C:\Users\me\sandbox\current"), RUN_ID, POWERSHELL, &launch, &read).unwrap();
+        run(&install(r"C:\Users\me\sandbox\current"), RUN_ID, POWERSHELL, &launch, &read).unwrap();
         let seen = seen.borrow();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].0, POWERSHELL);
@@ -924,13 +1139,13 @@ mod windows_tests {
             Ok(output(Some(EXIT_CANCELLED), ""))
         };
         assert_eq!(
-            run_elevated_with(&SetupAction::Uninstall, RUN_ID, POWERSHELL, &cancelled, &|| None).unwrap_err(),
+            run(&uninstall(), RUN_ID, POWERSHELL, &cancelled, &|| None).unwrap_err(),
             "Authorization was cancelled or denied."
         );
         let missing = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> {
             Err(std::io::Error::from(std::io::ErrorKind::NotFound))
         };
-        assert!(run_elevated_with(&SetupAction::Uninstall, RUN_ID, POWERSHELL, &missing, &|| None)
+        assert!(run(&uninstall(), RUN_ID, POWERSHELL, &missing, &|| None)
             .unwrap_err()
             .starts_with("Windows PowerShell could not be started"));
     }
@@ -938,20 +1153,100 @@ mod windows_tests {
     #[test]
     fn nothing_is_launched_for_invalid_input() {
         let launch = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> { panic!("must not launch") };
-        assert!(run_elevated_with(&install(r"relative"), RUN_ID, POWERSHELL, &launch, &|| None).is_err());
-        assert!(run_elevated_with(&SetupAction::Uninstall, "not a guid", POWERSHELL, &launch, &|| None).is_err());
-        assert!(run_elevated_with(&SetupAction::Uninstall, RUN_ID, "C:\\a'b\\powershell.exe", &launch, &|| None).is_err());
+        assert!(run(&install(r"relative"), RUN_ID, POWERSHELL, &launch, &|| None).is_err());
+        assert!(run(&uninstall(), "not a guid", POWERSHELL, &launch, &|| None).is_err());
+        assert!(run(&uninstall(), RUN_ID, "C:\\a'b\\powershell.exe", &launch, &|| None).is_err());
+        let cooldown = Mutex::new(Cooldown::default());
+        assert!(run_elevated_with(&uninstall(), RUN_ID, "relative", POWERSHELL, &launch, &|| None, &cooldown, Instant::now()).is_err());
+        // Input that was refused never started an attempt.
+        assert!(cooldown.lock().unwrap().check(Instant::now()).is_ok());
+    }
+
+    // ---- the elevation cooldown ---------------------------------------------------------
+
+    fn ok_launch(_: &str, _: &[String]) -> std::io::Result<LaunchOutput> {
+        Ok(output(Some(0), ""))
+    }
+
+    fn ok_result() -> Option<String> {
+        Some(format!("{{\"runId\":\"{RUN_ID}\",\"exit\":0,\"message\":\"ok\"}}"))
+    }
+
+    #[test]
+    fn a_second_attempt_inside_the_cooldown_is_refused_without_launching() {
+        let cooldown = Mutex::new(Cooldown::default());
+        let start = Instant::now();
+        let launches = RefCell::new(0);
+        let cancelled = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> {
+            *launches.borrow_mut() += 1;
+            Ok(output(Some(EXIT_CANCELLED), ""))
+        };
+        let attempt = |at: Instant| run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &cancelled, &|| None, &cooldown, at);
+        assert_eq!(attempt(start).unwrap_err(), "Authorization was cancelled or denied.");
+        let refused = attempt(start + Duration::from_secs(5)).unwrap_err();
+        assert!(refused.contains("Wait 16 seconds"), "{refused}");
+        assert_eq!(*launches.borrow(), 1, "a refused attempt must not put a UAC prompt on the screen");
+        // The refused attempt did not extend the wait.
+        assert!(attempt(start + ELEVATION_COOLDOWN).is_err());
+        assert_eq!(*launches.borrow(), 2);
+    }
+
+    #[test]
+    fn a_failed_attempt_and_a_launcher_that_cannot_start_both_start_the_cooldown() {
+        let start = Instant::now();
+        for launch in [
+            (|_: &str, _: &[String]| Ok(output(Some(13), ""))) as fn(&str, &[String]) -> std::io::Result<LaunchOutput>,
+            |_: &str, _: &[String]| Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        ] {
+            let cooldown = Mutex::new(Cooldown::default());
+            let go = |at: Instant| run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &launch, &ok_result, &cooldown, at);
+            assert!(go(start).is_err());
+            assert!(go(start + Duration::from_secs(1)).unwrap_err().contains("just attempted"));
+        }
+    }
+
+    #[test]
+    fn a_successful_setup_clears_the_cooldown() {
+        let cooldown = Mutex::new(Cooldown::default());
+        let start = Instant::now();
+        let go = |action: &SetupAction, at: Instant| run_elevated_with(action, RUN_ID, PF, POWERSHELL, &ok_launch, &ok_result, &cooldown, at);
+        go(&install(r"C:\rt"), start).unwrap();
+        // Set up, remove, set up again: never held up.
+        go(&uninstall(), start + Duration::from_secs(1)).unwrap();
+        go(&install(r"C:\rt"), start + Duration::from_secs(2)).unwrap();
+    }
+
+    #[test]
+    fn the_cooldown_ends_after_the_window() {
+        let mut cooldown = Cooldown::default();
+        let start = Instant::now();
+        assert!(cooldown.check(start).is_ok());
+        cooldown.started(start);
+        assert!(cooldown.check(start + ELEVATION_COOLDOWN - Duration::from_millis(1)).is_err());
+        assert!(cooldown.check(start + ELEVATION_COOLDOWN).is_ok());
+        cooldown.started(start);
+        cooldown.succeeded();
+        assert!(cooldown.check(start).is_ok());
+        assert_eq!(ELEVATION_COOLDOWN, Duration::from_secs(20));
     }
 
     // ---- the checksum handed to the script ----------------------------------------------
 
     #[test]
-    fn the_helper_checksum_is_the_manifests_and_only_if_the_file_really_has_it() {
+    fn the_helper_checksum_is_the_pin_and_only_if_the_file_and_its_manifest_have_it() {
         use crate::local_host::HostError;
-        assert_eq!(helper_checksum(Ok(HASH.into()), Ok(HASH.into())), Ok(HASH.to_string()));
-        assert!(helper_checksum(Ok(HASH.into()), Ok("0".repeat(64))).unwrap_err().contains("does not match its manifest"));
-        assert!(helper_checksum(Err(HostError::new("SANDBOX_BUNDLE_INVALID", "The runtime does not contain srt-win.exe.")), Ok(HASH.into())).unwrap_err().contains("does not contain"));
-        assert!(helper_checksum(Ok(HASH.into()), Err(std::io::Error::from(std::io::ErrorKind::NotFound))).unwrap_err().contains("cannot be read"));
+        assert_eq!(helper_checksum(HASH, Ok(HASH.into()), Ok(HASH.into())), Ok(HASH.to_string()));
+        // Hex case does not matter; the script gets the lowercase pin.
+        assert_eq!(helper_checksum(HASH, Ok(HASH.to_uppercase()), Ok(HASH.into())), Ok(HASH.to_string()));
+        // A file that is not what its manifest says.
+        assert!(helper_checksum(HASH, Ok(HASH.into()), Ok("0".repeat(64))).unwrap_err().contains("does not match its manifest"));
+        // A file that agrees with a manifest that agrees with nothing the app knows: the manifest
+        // sits in user-writable app data, so a rewritten pair is refused by the pin alone.
+        let other = "0".repeat(64);
+        let err = helper_checksum(HASH, Ok(other.clone()), Ok(other)).unwrap_err();
+        assert!(err.contains("not the one this version of SourceWeft expects"), "{err}");
+        assert!(helper_checksum(HASH, Err(HostError::new("SANDBOX_BUNDLE_INVALID", "The runtime does not contain srt-win.exe.")), Ok(HASH.into())).unwrap_err().contains("does not contain"));
+        assert!(helper_checksum(HASH, Ok(HASH.into()), Err(std::io::Error::from(std::io::ErrorKind::NotFound))).unwrap_err().contains("cannot be read"));
     }
 }
 
@@ -964,7 +1259,7 @@ mod powershell_tests {
     use std::process::Command;
 
     fn powershell() -> String {
-        windows_powershell_path_from(std::env::var("SystemRoot").ok().as_deref()).unwrap()
+        windows_powershell_path_from(crate::local_host::windows::windows_dir().as_deref()).unwrap()
     }
 
     /// Parses `text` with PowerShell's own parser (the script arrives on standard input, so no
@@ -1008,16 +1303,23 @@ mod powershell_tests {
         for (name, action) in [
             (
                 "install",
-                SetupAction::Install {
+                SetupAction::Install(Helper {
                     bundle: r"C:\Users\O'Brien\AppData\Roaming\app\sandbox\current".to_string(),
                     sha256: "7".repeat(64),
-                },
+                }),
             ),
-            ("uninstall", SetupAction::Uninstall),
+            ("uninstall", SetupAction::Uninstall(None)),
+            (
+                "uninstall with a fallback helper",
+                SetupAction::Uninstall(Some(Helper {
+                    bundle: r"C:\Users\a\sandbox\current".to_string(),
+                    sha256: "7".repeat(64),
+                })),
+            ),
         ] {
             let text = format!(
                 "{}{}",
-                argument_block(&action, run_id).unwrap(),
+                argument_block(&action, run_id, r"C:\Program Files").unwrap(),
                 compact_script(WINDOWS_SETUP_SCRIPT)
             );
             assert_eq!(parse_errors(&text), "", "{name}");
@@ -1039,7 +1341,7 @@ mod powershell_tests {
     fn the_real_launcher_command_is_accepted_by_the_command_line_parser() {
         // Not elevated: a non-existent target makes Start-Process fail, which must come back as
         // the launcher's own failure code and not as a PowerShell parse error.
-        let encoded = encoded_setup(&SetupAction::Uninstall, "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d").unwrap();
+        let encoded = encoded_setup(&SetupAction::Uninstall(None), "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d", r"C:\Program Files").unwrap();
         let command = launch_command(r"C:\definitely\not\here\powershell.exe", &encoded).unwrap();
         let output = Command::new(powershell())
             .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &command])

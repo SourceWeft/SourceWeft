@@ -231,7 +231,7 @@ pub(crate) const fn ripgrep_file_name() -> &'static str {
 /// (Windows environment names are case-insensitive). The sidecar is a Bun program and needs the
 /// system locations; `PATH` is the toolchain `PATH` every sandboxed command sees (srt overlays
 /// the broker's `PATH`/`PATHEXT` on the sandbox account's own environment).
-const WINDOWS_SIDECAR_ENV_ALLOW: [&str; 17] = [
+const WINDOWS_SIDECAR_ENV_ALLOW: [&str; 25] = [
     "SystemRoot",
     "windir",
     "TEMP",
@@ -250,6 +250,14 @@ const WINDOWS_SIDECAR_ENV_ALLOW: [&str; 17] = [
     "COMPUTERNAME",
     "USERNAME",
 ];
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "CommonProgramW6432",
+    "SystemDrive",
+    "ALLUSERSPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERDOMAIN",
 
 /// The environment the Windows sidecar is started with, built from the host's own environment:
 /// only `PATH` and the names in `WINDOWS_SIDECAR_ENV_ALLOW` (matched case-insensitively, the
@@ -836,6 +844,26 @@ mod tests {
 
         #[test]
         fn sidecar_error_code_is_preserved() {
+    #[test]
+    fn sidecar_environment_keeps_the_drive_and_profile_locations_tools_expect() {
+        // Without these a sandboxed Git, Python or Java misplaces its profile and system paths.
+        let wanted = [
+            "SystemDrive",
+            "ALLUSERSPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "USERDOMAIN",
+            "CommonProgramFiles",
+            "CommonProgramFiles(x86)",
+            "CommonProgramW6432",
+        ];
+        let pairs: Vec<(&str, &str)> = wanted.iter().map(|name| (*name, "x")).collect();
+        let kept = env_of(&pairs);
+        let names: Vec<&str> = kept.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, wanted);
+        assert_eq!(WINDOWS_SIDECAR_ENV_ALLOW.len(), 25);
+    }
+
             let bundle = bundle_with_stub();
             let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
             let error = sidecar

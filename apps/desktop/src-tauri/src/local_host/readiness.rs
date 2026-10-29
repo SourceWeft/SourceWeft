@@ -865,7 +865,7 @@ mod tests {
                     },
                     sidecar: &|| {
                         self.log.borrow_mut().push("sidecar");
-                        self.sidecar.clone().map_err(host_error)
+                        self.sidecar.map_err(host_error)
                     },
                 })
             }
