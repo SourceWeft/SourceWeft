@@ -50,6 +50,7 @@ vi.mock("@sourceweft/model-gateway", async (importOriginal) => {
 });
 
 import { config } from "../config";
+import { MarketAiDeferredError } from "../market-ai-schedule";
 import { logger } from "../logger";
 import { buildRoutedModelGatewayConfig } from "./runtime";
 import {
@@ -87,6 +88,7 @@ const MODEL = "deepseek/deepseek-v4.1-flash";
 const BASE_URL = "https://openrouter.test/api/v1";
 
 const originalSettings = { ...config.systemModel };
+const originalOffPeak = config.market.aiOffPeakOnly;
 
 type Borrowed = RoutedGatewayConfig["providers"][string];
 
@@ -240,6 +242,80 @@ beforeEach(() => {
 
 afterEach(() => {
   Object.assign(config.systemModel, originalSettings);
+  config.market.aiOffPeakOnly = originalOffPeak;
+  vi.useRealTimers();
+});
+
+test("peak hours stop system calls before contacting a provider", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-28T01:00Z"));
+  config.market.aiOffPeakOnly = true;
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  const { seen, fetchSpy } = mockProvider();
+  try {
+    await assert.rejects(
+      withSystemModel(context(), (chat) => chat.complete({ messages })),
+      MarketAiDeferredError,
+    );
+    assert.equal(seen.length, 0);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
+test("each HTTP attempt is checked again after asynchronous preparation", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-28T00:59Z"));
+  config.market.aiOffPeakOnly = true;
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  // The real gateway's custom fetch must stop an SDK retry without reaching
+  // the network; the policy error's cause must survive SDK/gateway wrapping.
+  const { seen, fetchSpy } = mockProvider();
+  try {
+    await withSystemModel(context(), async () => {});
+    const gatewayConfig = mocks.createModelGateway.mock.calls.at(-1)![0];
+    vi.setSystemTime(new Date("2026-10-28T01:00Z"));
+    await assert.rejects(
+      gatewayConfig.fetch(
+        new Request("https://openrouter.test/api/v1/chat/completions"),
+      ),
+      (error: unknown) => {
+        assert.equal((error as { code: string }).code, "POLICY");
+        assert.ok((error as Error).cause instanceof MarketAiDeferredError);
+        return true;
+      },
+    );
+    assert.equal(seen.length, 0);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
+test("an SDK retry crossing into peak hours is deferred without a second provider request", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-28T00:59Z"));
+  config.market.aiOffPeakOnly = true;
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  const { fetchSpy } = mockProvider();
+  fetchSpy.mockImplementationOnce(async () => {
+    vi.setSystemTime(new Date("2026-10-28T01:00Z"));
+    return new Response(
+      JSON.stringify({ error: { message: "temporarily unavailable" } }),
+      {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      },
+    );
+  });
+  try {
+    await assert.rejects(
+      withSystemModel(context(), (chat) => chat.complete({ messages })),
+      MarketAiDeferredError,
+    );
+    assert.equal(fetchSpy.mock.calls.length, 1);
+  } finally {
+    fetchSpy.mockRestore();
+  }
 });
 
 test("readiness covers every enabled/configured combination and names what is missing", () => {
@@ -561,7 +637,10 @@ test("an overview through an OpenRouter definition declaring json_schema_strict 
     json_schema?: { name?: string; strict?: boolean };
   };
   assert.equal(responseFormat.type, "json_schema");
-  assert.equal(responseFormat.json_schema?.name, mcpOverviewAdapter.output.name);
+  assert.equal(
+    responseFormat.json_schema?.name,
+    mcpOverviewAdapter.output.name,
+  );
   assert.equal(responseFormat.json_schema?.strict, true);
   // No schema tool rides along, and OpenRouter must route to an endpoint that
   // honours the response format.
@@ -576,7 +655,10 @@ test("an overview through an OpenRouter definition declaring json_schema_strict 
   const line = logs[0]![1] as Record<string, unknown>;
   assert.equal(line.structuredOutputMechanism, "json_schema_strict");
   assert.equal(line.structuredOutputFallbackReason, undefined);
-  assert.doesNotMatch(JSON.stringify(info.mock.calls), /OUTPUT-MARKER|PROMPT-MARKER/);
+  assert.doesNotMatch(
+    JSON.stringify(info.mock.calls),
+    /OUTPUT-MARKER|PROMPT-MARKER/,
+  );
 });
 
 test("an MCP overview's per-input schema goes out as strict json_schema with its passage IDs", async () => {
@@ -649,7 +731,9 @@ test("a strict overview refused by OpenRouter falls back once and logs why", asy
               "No endpoints found that can handle the requested parameters. To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection",
             code: 404,
             metadata: {
-              routing_funnel: [{ step: "Initial Endpoints", endpoint_count: 1 }],
+              routing_funnel: [
+                { step: "Initial Endpoints", endpoint_count: 1 },
+              ],
               failed_routing_step: "Filter by Parameters",
             },
           },
@@ -807,7 +891,9 @@ test("each call logs exactly one line, without the prompt, the output or the key
 
 test("the log line counts reasoning tokens when the Provider reports them", async () => {
   mocks.loadRouted.mockResolvedValue(routedFixture());
-  mockProvider(undefined, { completion_tokens_details: { reasoning_tokens: 5 } });
+  mockProvider(undefined, {
+    completion_tokens_details: { reasoning_tokens: 5 },
+  });
   const info = vi.spyOn(logger, "info");
   await withSystemModel(context(), (chat) => chat.complete({ messages }));
   const logs = systemCallLogs(info);

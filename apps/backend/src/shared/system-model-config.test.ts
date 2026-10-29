@@ -9,6 +9,7 @@ const NAMES = [
   "SYSTEM_MODEL_PROVIDER",
   "SYSTEM_MODEL_API_KEY",
   "SYSTEM_MODEL_NAME",
+  "MARKET_AI_OFF_PEAK_ONLY",
 ] as const;
 
 beforeEach(() => {
@@ -36,6 +37,27 @@ test("the system model is off and unconfigured by default", async () => {
     apiKey: "",
     model: "",
   });
+});
+
+test("market off-peak scheduling is optional and disabled by default", async () => {
+  const { config } = await import("./config");
+  assert.equal(config.market.aiOffPeakOnly, false);
+});
+for (const [value, expected] of [
+  ["true", true],
+  [" 1 ", true],
+  ["FALSE", false],
+  ["0", false],
+] as const) {
+  test(`MARKET_AI_OFF_PEAK_ONLY=${value} is parsed strictly`, async () => {
+    vi.stubEnv("MARKET_AI_OFF_PEAK_ONLY", value);
+    const { config } = await import("./config");
+    assert.equal(config.market.aiOffPeakOnly, expected);
+  });
+}
+test("malformed off-peak setting fails config loading", async () => {
+  vi.stubEnv("MARKET_AI_OFF_PEAK_ONLY", "yes");
+  await assert.rejects(import("./config"), /MARKET_AI_OFF_PEAK_ONLY/);
 });
 
 test("settings are trimmed, and the key does not enable anything", async () => {
@@ -87,6 +109,7 @@ test("Docker and backend examples agree on the system model defaults", () => {
     "utf8",
   );
   for (const [name, value] of Object.entries({
+    MARKET_AI_OFF_PEAK_ONLY: "false",
     SYSTEM_MODEL_ENABLED: "false",
     SYSTEM_MODEL_PROVIDER: "",
     SYSTEM_MODEL_API_KEY: "",

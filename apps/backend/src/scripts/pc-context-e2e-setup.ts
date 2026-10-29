@@ -33,7 +33,6 @@ const { auth } = await import("../modules/auth");
 const { onboardingService } = await import("../modules/onboarding/service");
 const { db, workspaces, closeDatabase } = await import("@sourceweft/db");
 const { eq } = await import("drizzle-orm");
-const { createLocalAccountIssuer } = await import("@better-auth/core/db");
 const context = await auth.$context;
 const email = "pc-context-e2e@sourceweft.invalid",
   password = "PC-Context-E2E-2026!";
@@ -49,7 +48,6 @@ await context.internalAdapter.createAccount({
   userId: user.id,
   accountId: user.id,
   providerId: "credential",
-  issuer: createLocalAccountIssuer("credential"),
   password: await context.password.hash(password),
 });
 await onboardingService.ensurePersonalTeamForUser({ userId: user.id });
