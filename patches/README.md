@@ -161,3 +161,17 @@ while returning `status: error`, matching the existing permission and delete
 error branches. Successful reads/writes/edits and their state updates are unchanged.
 Run `filesystem-backend-errors-sdk.test.ts`, the full budget/governance SDK
 fixtures, and the sandbox backend tests before refreshing this patch.
+
+## macOS sandbox proxy endpoint
+
+`@anthropic-ai__sandbox-runtime@0.0.81.patch` applies to the existing pinned
+SourceWeft runtime tarball. For the owned, authenticated macOS HTTP/SOCKS mux
+only, generated proxy endpoints use `127.0.0.1`, matching the IPv4 listener,
+instead of relying on `localhost` address-family resolution inside Seatbelt.
+Ports, proxy credentials, `NO_PROXY`, target-address policy and sandbox rules
+are unchanged. External proxy settings, SOCKS-only configuration, Linux and
+Windows keep their original behavior.
+
+Run `apps/desktop/sandbox-sidecar/tests/proxy-endpoint.test.ts` against the
+installed package and retain the original real macOS sandbox CI assertions.
+Local passes do not substitute for that CI verification. Refs #427.

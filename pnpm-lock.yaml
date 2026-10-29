@@ -10,6 +10,7 @@ overrides:
   fast-uri: ^3.1.9
   body-parser@2: ^2.4.0
   qs: 6.16.1
+  systeminformation: 5.33.16
   '@xmldom/xmldom': 0.8.15
   dompurify: 3.4.17
   axios: ^1.20.0
@@ -53,6 +54,9 @@ overrides:
   vite: ^8.2.4
 
 patchedDependencies:
+  '@anthropic-ai/sandbox-runtime@0.0.81':
+    hash: e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8
+    path: patches/@anthropic-ai__sandbox-runtime@0.0.81.patch
   '@google/generative-ai@0.24.1':
     hash: f1c04dafce852c24000cc45bf3d72d885167ceb003077316c2daddc8cf383cb5
     path: patches/@google__generative-ai@0.24.1.patch
@@ -119,8 +123,8 @@ importers:
         specifier: 0.4.2
         version: 0.4.2
       '@hono/node-server':
-        specifier: ^1.19.17
-        version: 1.19.17(hono@4.13.13)
+        specifier: 2.1.3
+        version: 2.1.3(hono@4.13.13)
       '@langchain/core':
         specifier: ^1.2.9
         version: 1.2.9(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
@@ -386,7 +390,7 @@ importers:
     dependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.2/sandbox-runtime-v0.0.81-sourceweft.2.tgz
-        version: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.2/sandbox-runtime-v0.0.81-sourceweft.2.tgz
+        version: https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.2/sandbox-runtime-v0.0.81-sourceweft.2.tgz(patch_hash=e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8)
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -3076,9 +3080,9 @@ packages:
   '@hexagon/base64@1.1.28':
     resolution: {integrity: sha512-lhqDEAvWixy3bZ+UOYbPwUbBkwBq5C1LAJ/xPC8Oi+lL54oyakv/npbA0aU2hgCsx/1NUd4IBvV03+aUBWxerw==}
 
-  '@hono/node-server@1.19.17':
-    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
-    engines: {node: '>=18.14.1'}
+  '@hono/node-server@2.1.3':
+    resolution: {integrity: sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw==}
+    engines: {node: '>=20'}
     peerDependencies:
       hono: 4.13.13
 
@@ -10213,8 +10217,8 @@ packages:
   symbol-tree@3.2.4:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
 
-  systeminformation@5.33.1:
-    resolution: {integrity: sha512-DEN6ICHk3Tk0Uf/hrAHh7xlt7iL5CJFBtPZinA0H62DrGG/KPKqq/Nzj6lCXPS4Ay/sf/14zNnk9LpqKzBIc+w==}
+  systeminformation@5.33.16:
+    resolution: {integrity: sha512-R+Lh69IJXfJj6bfyH1In5cIR9FTr4hBS39YvlZHZjsK1p9cuELPq7hplZZIb56ZESMMb+DzdKqqE6Iomi01Mvg==}
     engines: {node: '>=10.0.0'}
     os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
     hasBin: true
@@ -11014,7 +11018,7 @@ snapshots:
       package-manager-detector: 1.8.0
       tinyexec: 1.3.0
 
-  '@anthropic-ai/sandbox-runtime@https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.2/sandbox-runtime-v0.0.81-sourceweft.2.tgz':
+  '@anthropic-ai/sandbox-runtime@https://github.com/SourceWeft/sandbox-runtime/releases/download/v0.0.81-sourceweft.2/sandbox-runtime-v0.0.81-sourceweft.2.tgz(patch_hash=e54e4bf5ad7755e025a74cae8f0b55c75c2a088adcccff6adca7f8f5867aada8)':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0
@@ -11787,7 +11791,7 @@ snapshots:
       object-treeify: 1.1.33
       open: 8.4.2
       picomatch: 4.0.7
-      systeminformation: 5.33.1
+      systeminformation: 5.33.16
       undici: 7.30.1
       which: 4.0.0
       yocto-spinner: 1.2.2
@@ -12201,7 +12205,7 @@ snapshots:
 
   '@hexagon/base64@1.1.28': {}
 
-  '@hono/node-server@1.19.17(hono@4.13.13)':
+  '@hono/node-server@2.1.3(hono@4.13.13)':
     dependencies:
       hono: 4.13.13
 
@@ -12641,7 +12645,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.32.1(@cfworker/json-schema@4.1.1)(zod@4.6.7)':
     dependencies:
-      '@hono/node-server': 1.19.17(hono@4.13.13)
+      '@hono/node-server': 2.1.3(hono@4.13.13)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -20161,7 +20165,7 @@ snapshots:
 
   symbol-tree@3.2.4: {}
 
-  systeminformation@5.33.1: {}
+  systeminformation@5.33.16: {}
 
   tagged-tag@1.0.0:
     optional: true

@@ -230,6 +230,7 @@ for (const [version, expand] of braceExpansionLines) {
 patchedDependency(backend, "undici", "6.29.1");
 patchedDependency(dotenvx, "undici", "7.30.1");
 
+patchedDependency(dotenvx, "systeminformation", "5.33.16");
 const qs = patchedDependency(express, "qs", "6.16.1");
 assert.throws(
   () =>

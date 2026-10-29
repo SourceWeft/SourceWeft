@@ -32,6 +32,7 @@
       "fast-uri": "^3.1.9",
       "body-parser@2": "^2.4.0",
       "qs": "6.16.1",
+      "systeminformation": "5.33.16",
       "@xmldom/xmldom": "0.8.15",
       "dompurify": "3.4.17",
       "axios": "^1.20.0",
@@ -109,7 +110,8 @@
       "openai@6.49.0": "patches/openai@6.49.0.patch",
       "streamdown@2.5.0": "patches/streamdown@2.5.0.patch",
       "langchain@1.5.10": "patches/langchain@1.5.10.patch",
-      "deepagents@1.13.1": "patches/deepagents@1.13.1.patch"
+      "deepagents@1.13.1": "patches/deepagents@1.13.1.patch",
+      "@anthropic-ai/sandbox-runtime@0.0.81": "patches/@anthropic-ai__sandbox-runtime@0.0.81.patch"
     }
   },
   "engines": {
