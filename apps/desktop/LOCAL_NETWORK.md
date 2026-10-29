@@ -4,16 +4,17 @@ Commands run by the desktop local host reach the network only through the sandbo
 sidecar's proxy (`sandbox-sidecar`, wrapping Anthropic's sandbox-runtime). Every
 connection is decided in the sidecar; nothing in this file applies to cloud sandboxes.
 
-## Modes (per device, `local_devices.network_mode`, default `ask`)
+## Modes (per device, `local_devices.network_mode`, default `open`)
 
 | Mode | Behaviour |
 |---|---|
-| `open` | Any public host. This was the behaviour before network approvals. |
+| `open` (default) | Any public host. This is today's behaviour; a device that never chose a mode stays here. |
 | `ask` | Hosts matching an allow rule or a trusted skill's `network-domains` connect directly. Any other host pauses the connection and raises an approval card in the conversation while the command keeps running. |
 | `strict` | Only allow rules and trusted-skill domains connect. Nothing is ever prompted. |
 
-The mode can only be changed from the desktop app (native proof), like the other local
-settings.
+`ask` and `strict` are opt-ins per device. The mode can only be changed from the desktop
+app (native proof), like the other local settings. The model is told which mode applies
+(the runtime prompt only mentions approvals in `ask` mode).
 
 ## What no mode or approval can override
 
