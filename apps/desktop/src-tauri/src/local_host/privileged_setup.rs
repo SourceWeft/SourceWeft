@@ -641,15 +641,84 @@ impl super::LocalHost {
     }
 }
 
+/// Variables the launcher PowerShell may take from the app's environment: where things are for
+/// the user (data locations, never anything PowerShell or .NET loads code from). Everything else
+/// is dropped, `PATH` and `PSModulePath` in particular, which `launcher_environment` sets itself.
+#[cfg(any(windows, test))]
+const LAUNCHER_ENV_ALLOW: [&str; 14] = [
+    "SystemDrive",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "ALLUSERSPROFILE",
+    "USERNAME",
+    "USERDOMAIN",
+    "COMPUTERNAME",
+];
+
+/// The whole environment of the non-elevated launcher PowerShell: `SystemRoot`, `windir`, a `PATH`
+/// of the two system directories and a `PSModulePath` of the modules that ship with Windows
+/// PowerShell, all derived from `windows_dir` (what Windows reports), plus the data locations in
+/// `LAUNCHER_ENV_ALLOW` copied from `host_env` (matched case-insensitively, first spelling wins).
+/// A `PSModulePath`, `PATH` or any `COMPLUS_*`/`DOTNET_*`/`PS*` variable the app inherited from the
+/// user's environment never reaches it. (The elevated child is started by Windows from the user's
+/// registry environment and not from this one; the script pins its own `PSModulePath`.)
+#[cfg(any(windows, test))]
+pub(crate) fn launcher_environment(
+    windows_dir: &str,
+    host_env: impl Iterator<Item = (String, String)>,
+) -> Vec<(String, String)> {
+    let mut env = vec![
+        ("SystemRoot".to_string(), windows_dir.to_string()),
+        ("windir".to_string(), windows_dir.to_string()),
+        ("PATH".to_string(), format!("{windows_dir}\\System32;{windows_dir}")),
+        (
+            "PSModulePath".to_string(),
+            format!("{windows_dir}\\System32\\WindowsPowerShell\\v1.0\\Modules"),
+        ),
+    ];
+    for (name, value) in host_env {
+        if LAUNCHER_ENV_ALLOW.iter().any(|allowed| allowed.eq_ignore_ascii_case(&name))
+            && !env.iter().any(|(seen, _)| seen.eq_ignore_ascii_case(&name))
+        {
+            env.push((name, value));
+        }
+    }
+    env
+}
+
+/// The launcher process: `program args` with an empty environment plus `env`, no stdin.
+#[cfg(any(windows, test))]
+pub(crate) fn launcher_command(
+    program: &str,
+    args: &[String],
+    env: &[(String, String)],
+) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    command
+        .args(args)
+        .env_clear()
+        .envs(env.iter().map(|(name, value)| (name, value)))
+        .stdin(std::process::Stdio::null());
+    command
+}
+
 /// Starts the non-elevated PowerShell that asks for elevation, and waits for it: the user is
 /// answering a system dialog, so there is no timeout. Its window is never shown.
 #[cfg(windows)]
 fn launch_elevated(powershell: &str, args: &[String]) -> std::io::Result<LaunchOutput> {
     use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-    let output = Command::new(powershell)
-        .args(args)
-        .stdin(Stdio::null())
+    let windows_dir = super::windows::windows_dir().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "the Windows directory is unknown")
+    })?;
+    let env = launcher_environment(&windows_dir, std::env::vars());
+    let output = launcher_command(powershell, args, &env)
         .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
         .output()?;
     Ok(LaunchOutput {
@@ -862,10 +931,12 @@ mod windows_tests {
     #[test]
     fn the_script_takes_no_location_or_trust_from_the_environment() {
         let script = compact_script(WINDOWS_SETUP_SCRIPT);
-        // No environment variable of any kind, in code or in the header's promises.
-        for forbidden in ["$env:", "[Environment]::GetEnvironmentVariable", "ProgramW6432", "SystemRoot", "%ProgramFiles%"] {
+        // No environment variable is read, in code or in the header's promises; the one use of
+        // `$env:` is the assignment that pins the module search path (first statement, below).
+        for forbidden in ["[Environment]::GetEnvironmentVariable", "ProgramW6432", "SystemRoot", "%ProgramFiles%"] {
             assert!(!script.contains(forbidden), "{forbidden}");
         }
+        assert_eq!(script.matches("$env:").count(), 1, "{script}");
         // Program Files comes from the .NET known-folder call and is compared with the app's.
         assert!(script.contains("$Root = [Environment]::GetFolderPath(\"ProgramFiles\")"));
         assert!(script.contains("-ne $Expected) { Finish 44"), "{script}");
@@ -876,7 +947,7 @@ mod windows_tests {
         assert!(base_check < dispatch);
         let stage = script.find("function Stage").unwrap();
         let stage_check = script[stage..].find("Ensure $Dir").expect("the staging directory is ensured and checked");
-        let copy = script[stage..].find("Copy-Item").unwrap();
+        let copy = script[stage..].find("$In.CopyTo($Out)").unwrap();
         assert!(stage_check < copy, "the staging directory is checked before the copy");
         // Reparse points, the owner and the write-granting entries are what AssertProtected looks at.
         for part in ["-band 1024", "GetOwner([Security.Principal.SecurityIdentifier])", "GetAccessRules($true, $true", "-band 0x500D0156", "Refuse 45"] {
@@ -930,6 +1001,140 @@ mod windows_tests {
         assert_eq!(trustees, ["SY", "BA", "BU"]);
         // Nothing but Ensure may call Claim.
         assert_eq!(script.matches("Claim $").count(), 1);
+    }
+
+    /// Module hijack: a cmdlet that is not loaded yet is looked up in PSModulePath, whose first
+    /// entry is a folder the user can write. The script pins it before anything else and uses only
+    /// cmdlets of the modules that ship with Windows PowerShell.
+    #[test]
+    fn the_script_pins_the_module_path_first_and_uses_only_core_cmdlets() {
+        let script = compact_script(WINDOWS_SETUP_SCRIPT);
+        assert!(
+            script.starts_with("$env:PSModulePath = Join-Path $PSHOME \"Modules\"\nSet-StrictMode -Version 2\n"),
+            "the first statement of the script: {}",
+            &script[..120]
+        );
+        // The cmdlets the script may use, with the module each one comes from. All of these ship
+        // in $PSHOME\Modules (or are built in), so the pinned path finds them.
+        let allowed = [
+            // Microsoft.PowerShell.Core
+            "Set-StrictMode",
+            "ForEach-Object",
+            // Microsoft.PowerShell.Management
+            "Join-Path",
+            "Test-Path",
+            "New-Item",
+            "Get-Item",
+            "Move-Item",
+            "Remove-Item",
+            // Microsoft.PowerShell.Utility
+            "New-Object",
+            "Get-FileHash",
+            "ConvertTo-Json",
+            "Out-Null",
+            // Microsoft.PowerShell.Security
+            "Get-Acl",
+        ];
+        let verb_noun = regex::Regex::new(r"\b[A-Z][a-z]+-[A-Z][A-Za-z]+\b").unwrap();
+        let mut used: Vec<&str> = verb_noun.find_iter(&script).map(|m| m.as_str()).collect();
+        used.sort_unstable();
+        used.dedup();
+        for cmdlet in &used {
+            assert!(allowed.contains(cmdlet), "{cmdlet} is not an allowed core cmdlet");
+        }
+        // The ones that were found are real uses, not an empty scan.
+        assert!(used.len() >= 8, "{used:?}");
+        // The module that loaded from the user's folder in review is gone, and nothing imports one.
+        for forbidden in ["Get-LocalUser", "Import-Module", "Start-Process", "Invoke-Expression", "Set-Acl"] {
+            assert!(!script.contains(forbidden), "{forbidden}");
+        }
+        // The account check is plain .NET name translation and only "no such account" means no.
+        assert!(script.contains("Security.Principal.NTAccount"));
+        assert!(script.contains("catch [Security.Principal.IdentityNotMappedException] {"));
+    }
+
+    /// A link in the runtime is refused, and the staged file is sealed to administrators before it
+    /// receives any content.
+    #[test]
+    fn the_staged_copy_is_sealed_before_it_has_content_and_a_link_is_never_a_source() {
+        let script = compact_script(WINDOWS_SETUP_SCRIPT);
+        let source = &script[script.find("function BundleSource").unwrap()..script.find("function Claim").unwrap()];
+        assert!(source.contains("-band 1024) -ne 0) { Finish 43 \"srt-win.exe in the runtime is a link\" }"), "{source}");
+        let stage = &script[script.find("function Stage").unwrap()..script.find("function Install").unwrap()];
+        let at = |part: &str| stage.find(part).unwrap_or_else(|| panic!("{part} in {stage}"));
+        let create = at("New-Item -ItemType File -Path $Temp");
+        let sealed = at("Seal $Temp \"O:BAD:PAI(A;;FA;;;SY)(A;;FA;;;BA)\"");
+        let copy = at("$In.CopyTo($Out)");
+        let hash = at("(Get-FileHash -LiteralPath $Temp -Algorithm SHA256).Hash -ne $Sha256");
+        let readable = at("Seal $Temp \"O:BAD:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)\"");
+        let moved = at("Move-Item -LiteralPath $Temp -Destination $Exe");
+        assert!(create < sealed && sealed < copy && copy < hash && hash < readable && readable < moved);
+        assert!(!stage.contains("Copy-Item"), "no cmdlet copy that would inherit the folder's readable ACL");
+        // Only the pinned and the copy's hash are ever reported.
+        assert!(stage.contains("\"the copy has sha256 \" + $Actual + \", the app pins \" + $Sha256"));
+        assert!(!script.contains("Get-FileHash -LiteralPath $Source"));
+    }
+
+    // ---- the launcher's environment -----------------------------------------------------
+
+    fn host(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn the_launcher_environment_is_system_derived_plus_data_locations_only() {
+        let env = launcher_environment(
+            r"C:\Windows",
+            host(&[
+                ("SystemRoot", r"C:\evil"),
+                ("windir", r"C:\evil"),
+                ("PATH", r"C:\evil\bin"),
+                ("PSModulePath", r"C:\Users\me\Documents\WindowsPowerShell\Modules"),
+                ("COMPLUS_Version", "v9"),
+                ("DOTNET_STARTUP_HOOKS", r"C:\evil\hook.dll"),
+                ("PSExecutionPolicyPreference", "Bypass"),
+                ("COR_ENABLE_PROFILING", "1"),
+                ("HTTPS_PROXY", "http://127.0.0.1:1"),
+                ("temp", r"C:\Users\me\AppData\Local\Temp"),
+                ("USERPROFILE", r"C:\Users\me"),
+                ("USERPROFILE", r"C:\Users\other"),
+                ("APPDATA", r"C:\Users\me\AppData\Roaming"),
+            ])
+            .into_iter(),
+        );
+        let get = |name: &str| env.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str());
+        // System locations come from what Windows reported, not from the app's environment.
+        assert_eq!(get("SystemRoot"), Some(r"C:\Windows"));
+        assert_eq!(get("windir"), Some(r"C:\Windows"));
+        assert_eq!(get("PATH"), Some(r"C:\Windows\System32;C:\Windows"));
+        assert_eq!(get("PSModulePath"), Some(r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules"));
+        // Data locations pass, the first spelling wins, case is kept as the host had it.
+        assert_eq!(get("USERPROFILE"), Some(r"C:\Users\me"));
+        assert_eq!(get("APPDATA"), Some(r"C:\Users\me\AppData\Roaming"));
+        assert!(env.iter().any(|(n, _)| n == "temp"));
+        // Nothing PowerShell or .NET could load code or policy from.
+        for dropped in ["COMPLUS_Version", "DOTNET_STARTUP_HOOKS", "PSExecutionPolicyPreference", "COR_ENABLE_PROFILING", "HTTPS_PROXY"] {
+            assert!(get(dropped).is_none(), "{dropped}");
+        }
+        assert_eq!(env.len(), 4 + 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_launcher_process_really_gets_an_empty_environment_plus_that_list() {
+        let env = launcher_environment(
+            "/win",
+            host(&[("USERPROFILE", "/home/me"), ("PSModulePath", "/home/me/Modules"), ("LD_PRELOAD", "/evil.so")]).into_iter(),
+        );
+        let output = launcher_command("/usr/bin/env", &[], &env).output().unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        let mut got: Vec<&str> = text.lines().collect();
+        got.sort_unstable();
+        let mut want: Vec<String> = env.iter().map(|(n, v)| format!("{n}={v}")).collect();
+        want.sort_unstable();
+        assert_eq!(got, want.iter().map(String::as_str).collect::<Vec<_>>(), "exactly the listed variables and nothing inherited");
+        assert!(!text.contains("evil") && text.contains("PSModulePath=/win\\System32"), "{text}");
     }
 
     /// One CI round must be enough to understand a refusal: the permissions of the folder and the
@@ -989,7 +1194,8 @@ mod windows_tests {
         let run = uninstall.find("RunSrtWin @(\"uninstall\")").unwrap();
         assert!(staged < fallback && fallback < run);
         // With neither helper, an existing sandbox account is a failure (46), not a silent success.
-        assert!(uninstall.contains("Get-LocalUser -Name \"sourceweft-sandbox\""));
+        assert!(uninstall.contains("elseif (AccountExists)"));
+        assert!(!uninstall.contains("Get-LocalUser"));
         assert!(uninstall.contains("Finish 46"));
         // The staged directory goes, and a directory that cannot be removed is reported.
         assert!(uninstall.contains("Remove-Item -LiteralPath $Dir -Recurse -Force"));

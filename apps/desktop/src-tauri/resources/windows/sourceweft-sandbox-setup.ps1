@@ -58,8 +58,16 @@
 # that is not protected, 46 a sandbox account that cannot be removed without its helper. The app
 # words these; the message is only srt-win output or an error.
 #
+# Modules: PowerShell loads a cmdlet that is not already loaded from the first matching folder of
+# PSModulePath, whose first entry is the Documents\WindowsPowerShell\Modules folder of the user, a folder
+# any process of the user can write. The first statement therefore pins PSModulePath to the
+# modules that ship with Windows PowerShell, and the script uses only cmdlets of its core modules
+# (Management, Utility, Security); a test lists the allowed ones. The account check goes through
+# .NET (name translation) and not through the LocalAccounts module for the same reason.
+#
 # This file must stay ASCII, free of single quote characters, block comments and here-strings:
 # the app removes comment lines and indentation before encoding it, and a test checks all of it.
+$env:PSModulePath = Join-Path $PSHOME "Modules"
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
@@ -127,11 +135,13 @@ function AssertProtected([string]$Path) {
 }
 
 # The srt-win.exe in the runtime directory, or $null when no directory was given or it has none.
+# A link there is refused (exit 43): copying through one would read a file the runtime does not hold.
 function BundleSource {
     if (-not $BundleB64) { return $null }
     $Path = Join-Path ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($BundleB64))) "srt-win.exe"
-    if (Test-Path -LiteralPath $Path -PathType Leaf) { return $Path }
-    return $null
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    if ((([int](Get-Item -LiteralPath $Path -Force).Attributes) -band 1024) -ne 0) { Finish 43 "srt-win.exe in the runtime is a link" }
+    return $Path
 }
 
 # Claims a directory this run has just created: replaces its owner and its whole permission list
@@ -146,6 +156,13 @@ function Claim([string]$Path) {
     [IO.Directory]::SetAccessControl($Path, $Sd)
 }
 
+# Replaces the owner and the whole permission list of the file $Path in one write, from SDDL.
+function Seal([string]$Path, [string]$Sddl) {
+    $Sd = New-Object Security.AccessControl.FileSecurity
+    $Sd.SetSecurityDescriptorSddlForm($Sddl, [Security.AccessControl.AccessControlSections]"Owner,Access")
+    [IO.File]::SetAccessControl($Path, $Sd)
+}
+
 # Makes sure $Path is a protected directory: one that exists is checked as it is, one that does not
 # is created (never with -Force, so an existing one cannot be mistaken for ours), claimed and
 # then checked. The check does not know that the folder was just claimed: it must pass on its own.
@@ -158,10 +175,20 @@ function Ensure([string]$Path) {
 }
 
 # Puts $Source into the staging directory as srt-win.exe, once its copy there has the pinned hash.
+# The temporary file is created empty and sealed to SYSTEM and administrators BEFORE any content is
+# written (the folder itself lets Users read), the content is streamed in, and the file is made
+# readable and executable for Users only after its hash has matched. Whatever else the source
+# might have been, nobody but an administrator can read it in between.
 function Stage([string]$Source) {
     Ensure $Dir
     $Temp = Join-Path $Dir ("srt-win-" + $RunId + ".tmp")
-    Copy-Item -LiteralPath $Source -Destination $Temp -Force
+    New-Item -ItemType File -Path $Temp | Out-Null
+    Seal $Temp "O:BAD:PAI(A;;FA;;;SY)(A;;FA;;;BA)"
+    $In = [IO.File]::OpenRead($Source)
+    try {
+        $Out = [IO.File]::Open($Temp, [IO.FileMode]::Open, [IO.FileAccess]::Write)
+        try { $In.CopyTo($Out) } finally { $Out.Dispose() }
+    } finally { $In.Dispose() }
     # The check that matters: the copy, now out of reach of non-administrators, is what was
     # pinned. Nothing has executed it yet. (The comparison ignores case.)
     if ((Get-FileHash -LiteralPath $Temp -Algorithm SHA256).Hash -ne $Sha256) {
@@ -169,6 +196,7 @@ function Stage([string]$Source) {
         Remove-Item -LiteralPath $Temp -Force
         Finish 41 ("the copy has sha256 " + $Actual + ", the app pins " + $Sha256)
     }
+    Seal $Temp "O:BAD:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
     Move-Item -LiteralPath $Temp -Destination $Exe -Force
 }
 
@@ -180,13 +208,24 @@ function Install {
     Finish 0 "ok"
 }
 
+# Whether the sandbox account exists, by translating its name to a SID (no module involved). Only
+# "no such account" means no; any other failure ends the script with its message (exit 42).
+function AccountExists {
+    try {
+        $Null = (New-Object Security.Principal.NTAccount ([Environment]::MachineName + "\sourceweft-sandbox")).Translate([Security.Principal.SecurityIdentifier])
+        return $true
+    } catch [Security.Principal.IdentityNotMappedException] {
+        return $false
+    }
+}
+
 function Uninstall {
     if (Test-Path -LiteralPath $Dir) { AssertProtected $Dir }
     if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
         $Source = BundleSource
         if ($Source) {
             Stage $Source
-        } elseif (Get-LocalUser -Name "sourceweft-sandbox" -ErrorAction SilentlyContinue) {
+        } elseif (AccountExists) {
             Finish 46 "the sourceweft-sandbox account exists and no srt-win.exe is available"
         }
     }
