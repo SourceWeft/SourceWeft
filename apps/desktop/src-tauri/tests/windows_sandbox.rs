@@ -70,12 +70,12 @@ use sourceweft_desktop::local_host::{
 use std::{
     ffi::{OsStr, OsString},
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
+        mpsc, Arc, Mutex, Once,
     },
     time::{Duration, Instant},
 };
@@ -340,6 +340,156 @@ fn copy_bundle_into(dest: &Path) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Nothing in this file may wait forever. A stuck command, setup or helper process ends the whole
+// test binary with a message that names what was stuck and a snapshot of the related processes,
+// so the job fails with its logs instead of running into the job timeout (and the cleanup steps
+// still run).
+// ---------------------------------------------------------------------------------------------
+
+/// Live deadlines: `(id, what, expires)`. Slot 0 is the current test's overall budget.
+static DEADLINES: Mutex<Vec<(u64, String, Instant)>> = Mutex::new(Vec::new());
+static DEADLINE_IDS: AtomicU64 = AtomicU64::new(1);
+
+/// How long one test may take in total, from the moment it opens its host. The whole suite takes
+/// minutes on a fast runner; this is for a hang, not for a slow machine.
+const TEST_BUDGET: Duration = Duration::from_secs(12 * 60);
+
+fn start_watchdog() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        std::thread::spawn(|| loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let expired = {
+                let slots = DEADLINES.lock().unwrap_or_else(|e| e.into_inner());
+                slots
+                    .iter()
+                    .find(|(_, _, at)| Instant::now() > *at)
+                    .map(|(_, what, _)| what.clone())
+            };
+            if let Some(what) = expired {
+                hung(&what);
+            }
+        });
+    });
+}
+
+/// Reports what hung, with the processes that matter, and ends the test binary (exit code 124).
+fn hung(what: &str) -> ! {
+    eprintln!("\nHUNG: {what}\nThe test binary is being stopped because this did not finish in time.");
+    let script = "\
+        Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'srt|powershell|pwsh|node|cmd|ping|git|curl|bash|bun|conhost|windows_sandbox' } | \
+        ForEach-Object { $c = [string]$_.CommandLine; if ($c.Length -gt 260) { $c = $c.Substring(0, 260) }; '{0} ppid={1} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $c }\n\
+        $r = Join-Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) 'SourceWeft\\sandbox-setup-result.json'\n\
+        if (Test-Path -LiteralPath $r) { 'setup result: ' + (Get-Content -Raw -LiteralPath $r) }\n";
+    let mut command = Command::new(windows_powershell());
+    command
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        .arg(encoded(script));
+    match run_bounded_result(command, Duration::from_secs(60)) {
+        Ok(output) => eprintln!(
+            "processes at the time:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Err(error) => eprintln!("(the process snapshot failed: {error})"),
+    }
+    std::process::exit(124);
+}
+
+/// Removes its deadline when dropped.
+struct Watch(u64);
+impl Drop for Watch {
+    fn drop(&mut self) {
+        let mut slots = DEADLINES.lock().unwrap_or_else(|e| e.into_inner());
+        slots.retain(|(id, _, _)| *id != self.0);
+    }
+}
+
+/// `what` must be over within `limit`, or the binary is stopped (see [`hung`]). Held while the
+/// guarded step runs.
+fn watch(what: impl Into<String>, limit: Duration) -> Watch {
+    start_watchdog();
+    let id = DEADLINE_IDS.fetch_add(1, Ordering::SeqCst);
+    DEADLINES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((id, what.into(), Instant::now() + limit));
+    Watch(id)
+}
+
+/// Starts the overall budget of the test that is beginning (replacing the previous test's).
+fn arm_test() {
+    start_watchdog();
+    let name = std::thread::current().name().unwrap_or("a test").to_string();
+    let mut slots = DEADLINES.lock().unwrap_or_else(|e| e.into_inner());
+    slots.retain(|(id, _, _)| *id != 0);
+    slots.push((
+        0,
+        format!("{name} did not finish within its {} minute budget", TEST_BUDGET.as_secs() / 60),
+        Instant::now() + TEST_BUDGET,
+    ));
+}
+
+/// Runs `command` (stdin closed, both streams captured) and kills it when it has not finished
+/// within `limit`. Output the process leaves in pipes that a grandchild still holds open is
+/// abandoned after a short grace period instead of waited for.
+fn run_bounded_result(mut command: Command, limit: Duration) -> Result<std::process::Output, String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| format!("cannot start it: {error}"))?;
+    let (sender, receiver) = mpsc::channel::<(bool, Vec<u8>)>();
+    for (is_stdout, stream) in [
+        (true, child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>)),
+        (false, child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>)),
+    ] {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut stream) = stream {
+                let _ = stream.read_to_end(&mut bytes);
+            }
+            let _ = sender.send((is_stdout, bytes));
+        });
+    }
+    drop(sender);
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("did not finish within {limit:?} and was killed"));
+            }
+            Err(error) => return Err(format!("cannot wait for it: {error}")),
+        }
+    };
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    for _ in 0..2 {
+        if let Ok((is_stdout, bytes)) = receiver.recv_timeout(Duration::from_secs(10)) {
+            if is_stdout {
+                stdout = bytes;
+            } else {
+                stderr = bytes;
+            }
+        }
+    }
+    Ok(std::process::Output { status, stdout, stderr })
+}
+
+/// [`run_bounded_result`], panicking with `what` when it fails.
+fn run_bounded(command: Command, limit: Duration, what: &str) -> std::process::Output {
+    run_bounded_result(command, limit).unwrap_or_else(|error| panic!("{what}: {error}"))
+}
+
+/// Host-side helper processes (status, PowerShell queries, curl controls) are quick; a minute and
+/// a half is a hang.
+const HELPER_LIMIT: Duration = Duration::from_secs(90);
+
 /// `text` as the UTF-16LE base64 that `powershell -EncodedCommand` takes.
 fn encoded(script: &str) -> String {
     let bytes: Vec<u8> = script
@@ -356,12 +506,11 @@ fn windows_powershell() -> PathBuf {
 /// Runs `script` in a fresh Windows PowerShell on the host (not sandboxed). Returns
 /// `(succeeded, stdout + stderr)`.
 fn host_powershell(script: &str) -> (bool, String) {
-    let output = Command::new(windows_powershell())
+    let mut command = Command::new(windows_powershell());
+    command
         .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-        .arg(encoded(script))
-        .stdin(Stdio::null())
-        .output()
-        .expect("start Windows PowerShell on the host");
+        .arg(encoded(script));
+    let output = run_bounded(command, HELPER_LIMIT, "Windows PowerShell on the host");
     let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
     text.push_str(&String::from_utf8_lossy(&output.stderr));
     (output.status.success(), text)
@@ -370,11 +519,9 @@ fn host_powershell(script: &str) -> (bool, String) {
 /// The `srt-win status` JSON of the helper at `exe` (not elevated-only: the runner is an
 /// administrator, so the WFP filters are readable).
 fn srt_win_status(exe: &Path) -> Value {
-    let output = Command::new(exe)
-        .arg("status")
-        .stdin(Stdio::null())
-        .output()
-        .unwrap_or_else(|error| panic!("cannot run `{exe:?} status`: {error}"));
+    let mut command = Command::new(exe);
+    command.arg("status");
+    let output = run_bounded(command, HELPER_LIMIT, &format!("`{exe:?} status`"));
     assert!(
         output.status.success(),
         "`{exe:?} status` failed ({}): {}",
@@ -419,7 +566,12 @@ fn ensure_installed(host: &LocalHost) {
     if INSTALLED.load(Ordering::SeqCst) {
         return;
     }
-    if !matches!(host.sandbox_readiness(), SandboxReadiness::Ready { .. }) {
+    let ready = {
+        let _w = watch("the first readiness check", Duration::from_secs(300));
+        matches!(host.sandbox_readiness(), SandboxReadiness::Ready { .. })
+    };
+    if !ready {
+        let _w = watch("the elevated sandbox setup (through the real launcher)", Duration::from_secs(600));
         host.run_elevated_setup().unwrap_or_else(|error| {
             panic!(
                 "the elevated sandbox setup failed: {error}. See %ProgramFiles%\\SourceWeft\\sandbox-setup-result.json \
@@ -428,7 +580,10 @@ fn ensure_installed(host: &LocalHost) {
             )
         });
     }
-    let readiness = host.sandbox_readiness();
+    let readiness = {
+        let _w = watch("the readiness check after the setup", Duration::from_secs(300));
+        host.sandbox_readiness()
+    };
     assert!(
         matches!(readiness, SandboxReadiness::Ready { .. }),
         "the sandbox must be ready after the setup, got {readiness:?}"
@@ -446,6 +601,7 @@ fn host_with_bundle() -> (tempfile::TempDir, LocalHost) {
 
 /// The same, without touching the machine-wide setup.
 fn host_without_setup() -> (tempfile::TempDir, LocalHost) {
+    arm_test();
     let app = tempfile::tempdir().unwrap();
     copy_bundle_into(&bundle_dir(app.path()));
     let host = LocalHost::open(app.path()).unwrap();
@@ -493,6 +649,11 @@ fn try_execute(
     timeout_ms: u64,
     max_chars: u64,
 ) -> Result<Value, HostError> {
+    // The command's own timeout, plus what starting a sidecar and stamping the folder may take.
+    let _w = watch(
+        format!("command.execute `{label}` ({command})"),
+        Duration::from_millis(timeout_ms) + Duration::from_secs(150),
+    );
     host.dispatch(
         executions,
         &call_id(label),
@@ -1660,6 +1821,7 @@ fn shells_cancel_kills_the_whole_process_tree() {
         let executions = executions.clone();
         let workspace = workspace.clone();
         std::thread::spawn(move || {
+            let _w = watch("command.execute `cancel-tree`", Duration::from_secs(260));
             host.dispatch(
                 &executions,
                 "cancel-tree",
@@ -1778,6 +1940,7 @@ fn spawn_hold(
     let seconds = seconds.to_string();
     let command = node(shell, "sw-hold.cjs", &[name, seconds.as_str()]);
     std::thread::spawn(move || {
+        let _w = watch(format!("command.execute `{id}`"), Duration::from_secs(260));
         host.dispatch(
             &executions,
             &id,
@@ -2035,11 +2198,9 @@ fn schannel_clients_cannot_do_https_under_the_sandbox_known_limit() {
     let curl = system_root().join(r"System32\curl.exe");
 
     // Controls, on the host and without the poisoned proxy variables.
-    let control = without_proxies(Command::new(&curl))
-        .args(["-sS", "-m", "30", "-o", "NUL", "-w", "%{http_code}", url])
-        .stdin(Stdio::null())
-        .output()
-        .expect("run System32 curl.exe on the host");
+    let mut control_curl = without_proxies(Command::new(&curl));
+    control_curl.args(["-sS", "-m", "30", "-o", "NUL", "-w", "%{http_code}", url]);
+    let control = run_bounded(control_curl, HELPER_LIMIT, "System32 curl.exe on the host");
     assert_eq!(
         String::from_utf8_lossy(&control.stdout).trim(),
         "200",
@@ -2050,12 +2211,11 @@ fn schannel_clients_cannot_do_https_under_the_sandbox_known_limit() {
     let iwr = format!(
         "try {{ $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 {url}; 'IWR-STATUS ' + $r.StatusCode }} catch {{ 'IWR-FAILED ' + $_.Exception.Message }}"
     );
-    let control = without_proxies(Command::new(windows_powershell()))
+    let mut control_iwr = without_proxies(Command::new(windows_powershell()));
+    control_iwr
         .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-        .arg(encoded(&iwr))
-        .stdin(Stdio::null())
-        .output()
-        .expect("run PowerShell on the host");
+        .arg(encoded(&iwr));
+    let control = run_bounded(control_iwr, HELPER_LIMIT, "PowerShell on the host");
     assert!(
         String::from_utf8_lossy(&control.stdout).contains("IWR-STATUS 200"),
         "control: Invoke-WebRequest must reach {url} outside the sandbox: {}{}",

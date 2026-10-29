@@ -702,6 +702,10 @@ jobs:
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
           --test windows_sandbox --no-run
       - name: Real-sandbox suite (setup through the real launcher, execution, fences, kill, coexistence)
+        # A hung step must not eat the whole job: the test binary stops itself with a "HUNG:" report
+        # (tests/windows_sandbox.rs), and this is the backstop that still leaves time for the
+        # always-run steps (cleanup, log upload).
+        timeout-minutes: 25
         env:
           # Windows environment variable names are case-insensitive, so these are also the lowercase
           # variables; the suite fails when they are missing and proves the sidecar strips them.
@@ -737,20 +741,33 @@ jobs:
         run: ./scripts/ci/windows-sandbox-coexist.ps1 hide-bash
       - name: Shell-matrix tests again under Windows PowerShell
         if: steps.git.outputs.bash == 'true'
+        # pwsh, not bash: with Git's bash.exe hidden, `bash` on PATH is the WSL launcher in
+        # System32 ("Windows Subsystem for Linux has no installed distributions").
+        shell: pwsh
+        timeout-minutes: 25
         env:
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
         run: |
-          set -euo pipefail
-          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml \
-            --test windows_sandbox -- --include-ignored --test-threads=1 --nocapture shells_ 2>&1 | tee "$RUNNER_TEMP/suite-powershell.log"
-          expected=$(grep -c '^fn shells_' "$SUITE")
-          passed=$(grep -E '^test result: ok\. [0-9]+ passed' "$RUNNER_TEMP/suite-powershell.log" | tail -1 | sed -E 's/^test result: ok\. ([0-9]+) passed.*/\1/')
-          echo "shell-matrix tests in the file: ${expected}; passed: ${passed:-none}"
-          if [ -z "${passed}" ] || [ "${passed}" -lt "${expected}" ]; then
-            echo "::error::only ${passed:-0} of ${expected} shell-matrix tests ran under PowerShell"
+          $ErrorActionPreference = 'Continue'
+          $log = Join-Path $env:RUNNER_TEMP 'suite-powershell.log'
+          # Stringify stderr records (cargo and --nocapture write there) and keep a copy for the guard.
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml `
+            --test windows_sandbox -- --include-ignored --test-threads=1 --nocapture shells_ 2>&1 |
+            ForEach-Object { "$_" } | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Host "::error::the shell-matrix tests failed under PowerShell (cargo exit $code)"
             exit 1
-          fi
+          }
+          $expected = @(Select-String -Path $env:SUITE -Pattern '^fn shells_').Count
+          $match = Select-String -Path $log -Pattern 'test result: .{0,12}ok.{0,12}\. (\d+) passed' | Select-Object -Last 1
+          $passed = if ($match) { [int]$match.Matches[0].Groups[1].Value } else { 0 }
+          Write-Host "shell-matrix tests in the file: $expected; passed: $passed"
+          if ($passed -lt $expected -or $expected -eq 0) {
+            Write-Host "::error::only $passed of $expected shell-matrix tests ran under PowerShell"
+            exit 1
+          }
       - name: Restore Git Bash
         if: always() && steps.git.outputs.bash == 'true'
         shell: pwsh
