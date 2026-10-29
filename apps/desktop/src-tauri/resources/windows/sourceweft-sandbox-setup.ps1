@@ -22,11 +22,15 @@
 # reparse point, owned by an administrator account, and not writable through any entry that
 # grants write access to anyone else. A directory that already exists is checked as it is: one
 # owned by an ordinary account is refused. A directory this run creates is first claimed: its
-# owner is set to BUILTIN\Administrators and its permissions are made explicit without any entry
-# for another account that could write. (An elevated token whose default owner is the user, such
-# as the built-in administrator account without a split token, would otherwise leave the new
-# folder owned by that user, with the creator-owner entry turned into a full-control entry for
-# that user.) The check then runs on the result.
+# owner and its whole permission list are REPLACED (never edited rule by rule) with a fixed
+# protected list: SYSTEM and the administrators full control, Users read and execute, nothing
+# inherited. (An elevated token whose default owner is the user, such as the built-in
+# administrator account without a split token, would otherwise leave the new folder owned by
+# that user with a full-control entry for that user, made from the creator-owner entry.) The
+# check then runs on the result.
+#
+# Every refusal of the 40s carries what is needed to understand it from one log: the
+# permissions of the folder in SDDL form and the user, token owner and elevation of the process.
 #
 # install:
 #   1. Copies srt-win.exe from the runtime into Program Files\SourceWeft\sandbox (administrators
@@ -84,19 +88,40 @@ function RunSrtWin([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { Finish $LASTEXITCODE $Text }
 }
 
+# The identity of this process: user SID, the token default owner and whether it is elevated.
+function WhoAmI {
+    try {
+        $Id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $Admin = ([Security.Principal.WindowsPrincipal]$Id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        return "user=" + $Id.User.Value + " tokenOwner=" + $Id.Owner.Value + " elevated=" + $Admin
+    } catch { return "identity unreadable: " + $_.Exception.Message }
+}
+
+# The owner, group and permissions of $Path in SDDL form, or why they cannot be read.
+function Sddl([string]$Path) {
+    try {
+        return (Get-Acl -LiteralPath $Path).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All)
+    } catch { return "unreadable: " + $_.Exception.Message }
+}
+
+# Ends the script with $Code and a message that says why, what $Path looks like and who ran it.
+function Refuse([int]$Code, [string]$Why, [string]$Path) {
+    Finish $Code ($Why + "; sddl=" + (Sddl $Path) + "; " + (WhoAmI))
+}
+
 # Ends the script (exit 45) unless $Path is a real directory, not a reparse point, owned by
 # SYSTEM, the administrators or TrustedInstaller, with no allow entry for anyone else that grants
 # any right to write, delete, change permissions or take ownership.
 function AssertProtected([string]$Path) {
     $Item = Get-Item -LiteralPath $Path -Force
-    if (-not $Item.PSIsContainer -or (([int]$Item.Attributes) -band 1024) -ne 0) { Finish 45 "not a plain directory: $Path" }
+    if (-not $Item.PSIsContainer -or (([int]$Item.Attributes) -band 1024) -ne 0) { Refuse 45 "not a plain directory: $Path" $Path }
     $Acl = Get-Acl -LiteralPath $Path
     $Owner = $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-    if ($Trusted -notcontains $Owner) { Finish 45 "owner of $Path is $Owner" }
+    if ($Trusted -notcontains $Owner) { Refuse 45 "owner of $Path is $Owner" $Path }
     foreach ($Rule in $Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
         $Who = $Rule.IdentityReference.Value
         if ($Rule.AccessControlType -eq "Allow" -and ($Trusted -notcontains $Who) -and (([int]$Rule.FileSystemRights) -band 0x500D0156) -ne 0) {
-            Finish 45 "$Who can change $Path"
+            Refuse 45 "$Who can change $Path" $Path
         }
     }
 }
@@ -109,26 +134,21 @@ function BundleSource {
     return $null
 }
 
-# Claims a directory this run has just created: owner BUILTIN\Administrators (the elevated token may
-# assign it), inheritance cut with the inherited entries kept as explicit ones, and every allow
-# entry for an account that is not SYSTEM, an administrator or TrustedInstaller and grants a
-# write-like right removed (the creator-owner entry becomes one for the creating user when that
-# user, not the Administrators group, is the token default owner).
+# Claims a directory this run has just created: replaces its owner and its whole permission list
+# in one write with a fixed protected one. SDDL: owner BUILTIN\Administrators; DACL protected
+# (nothing inherited), SYSTEM and Administrators full control, Users read and execute (0x1200a9),
+# all inherited by files and folders below. The write goes through the .NET call directly: the
+# Set-Acl cmdlet adds its own choice of sections on top, and this call writes exactly the owner and
+# the DACL that were set. The write enables the take-ownership and restore privileges itself.
 function Claim([string]$Path) {
-    $Acl = Get-Acl -LiteralPath $Path
-    $Acl.SetOwner((New-Object Security.Principal.SecurityIdentifier "S-1-5-32-544"))
-    $Acl.SetAccessRuleProtection($true, $true)
-    foreach ($Rule in @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
-        if ($Rule.AccessControlType -eq "Allow" -and ($Trusted -notcontains $Rule.IdentityReference.Value) -and (([int]$Rule.FileSystemRights) -band 0x500D0156) -ne 0) {
-            [void]$Acl.RemoveAccessRuleSpecific($Rule)
-        }
-    }
-    Set-Acl -LiteralPath $Path -AclObject $Acl
+    $Sd = New-Object Security.AccessControl.DirectorySecurity
+    $Sd.SetSecurityDescriptorSddlForm("O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)", [Security.AccessControl.AccessControlSections]"Owner,Access")
+    [IO.Directory]::SetAccessControl($Path, $Sd)
 }
 
 # Makes sure $Path is a protected directory: one that exists is checked as it is, one that does not
 # is created (never with -Force, so an existing one cannot be mistaken for ours), claimed and
-# then checked.
+# then checked. The check does not know that the folder was just claimed: it must pass on its own.
 function Ensure([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) {
         New-Item -ItemType Directory -Path $Path | Out-Null
@@ -145,15 +165,16 @@ function Stage([string]$Source) {
     # The check that matters: the copy, now out of reach of non-administrators, is what was
     # pinned. Nothing has executed it yet. (The comparison ignores case.)
     if ((Get-FileHash -LiteralPath $Temp -Algorithm SHA256).Hash -ne $Sha256) {
+        $Actual = (Get-FileHash -LiteralPath $Temp -Algorithm SHA256).Hash
         Remove-Item -LiteralPath $Temp -Force
-        Finish 41 ""
+        Finish 41 ("the copy has sha256 " + $Actual + ", the app pins " + $Sha256)
     }
     Move-Item -LiteralPath $Temp -Destination $Exe -Force
 }
 
 function Install {
     $Source = BundleSource
-    if (-not $Source) { Finish 43 "" }
+    if (-not $Source) { Finish 43 "srt-win.exe is not in the runtime directory" }
     Stage $Source
     RunSrtWin @("install", "--proxy-port-range", "60180-60189")
     Finish 0 "ok"
@@ -166,7 +187,7 @@ function Uninstall {
         if ($Source) {
             Stage $Source
         } elseif (Get-LocalUser -Name "sourceweft-sandbox" -ErrorAction SilentlyContinue) {
-            Finish 46 ""
+            Finish 46 "the sourceweft-sandbox account exists and no srt-win.exe is available"
         }
     }
     if (Test-Path -LiteralPath $Exe -PathType Leaf) { RunSrtWin @("uninstall") }
@@ -177,9 +198,9 @@ function Uninstall {
 
 try {
     $Admin = [Security.Principal.WindowsBuiltInRole]::Administrator
-    if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole($Admin)) { Finish 40 "" }
+    if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole($Admin)) { Finish 40 (WhoAmI) }
     $Expected = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ProgramFilesB64))
-    if (-not [Environment]::Is64BitProcess -or $Root.TrimEnd("\") -ne $Expected) { Finish 44 "Windows reports $Root, the app expected $Expected" }
+    if (-not [Environment]::Is64BitProcess -or $Root.TrimEnd("\") -ne $Expected) { Finish 44 ("Windows reports " + $Root + ", the app expected " + $Expected + "; " + (WhoAmI)) }
     Ensure $Base
     if ($Action -eq "install") { Install } elseif ($Action -eq "uninstall") { Uninstall } else { Finish 43 "" }
 } catch {

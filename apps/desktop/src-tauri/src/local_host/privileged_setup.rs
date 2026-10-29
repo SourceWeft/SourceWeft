@@ -103,12 +103,13 @@ const EXIT_CANCELLED: i32 = 120;
 const EXIT_LAUNCH_FAILED: i32 = 121;
 
 /// The longest `-EncodedCommand` value handed to `Start-Process -Verb RunAs`. A command line is
-/// limited to 32,767 characters (`CreateProcess`), and the elevation request carries it through
-/// the shell and the consent process; staying under half of that keeps clear of every one of
-/// them. The embedded script is compacted (comments and indentation removed), and UTF-16LE plus
-/// base64 more than doubles its size.
+/// limited to 32,767 characters (`CreateProcess`); the elevation request carries it through the
+/// shell and the consent process, which add a little. CI has run about 12,000 characters through
+/// the real launcher; this leaves room for the script to grow while staying well clear of the
+/// hard limit. The embedded script is compacted (comments and indentation removed), and UTF-16LE
+/// plus base64 more than doubles its size.
 #[cfg(any(windows, test))]
-const MAX_ENCODED_COMMAND: usize = 14_000;
+const MAX_ENCODED_COMMAND: usize = 20_000;
 
 /// The helper the elevated script may stage: the bundle directory it is read from and the
 /// SHA-256 it must have. The hash is the application's own pin (`windows::pinned_srt_win_sha256`),
@@ -375,6 +376,10 @@ pub(crate) fn interpret_outcome(
     Err(message)
 }
 
+/// How much of the result file a failed setup's error shows.
+#[cfg(any(windows, test))]
+const RESULT_EXCERPT: usize = 600;
+
 /// How long after one attempt to start the elevated setup the next one is refused. A web page can
 /// ask the app to run the setup, and every attempt puts a UAC prompt on the user's screen; without
 /// this a page could keep the prompt coming until it is approved by reflex. A successful setup
@@ -422,7 +427,7 @@ impl Cooldown {
 
     /// The attempt that was started did not succeed.
     pub(crate) fn failed(&mut self, reason: &str) {
-        self.last_failure = Some(reason.chars().take(300).collect());
+        self.last_failure = Some(reason.chars().take(1000).collect());
     }
 
     /// A successful setup or removal clears the wait.
@@ -463,11 +468,25 @@ pub(crate) fn run_elevated_with(
         cooldown.check(now)?;
         cooldown.started(now);
     }
+    let mut result_text: Option<String> = None;
     let outcome = launch(powershell, &args)
         .map_err(|error| format!("Windows PowerShell could not be started: {error}"))
         .and_then(|output| {
-            let result = read_result().and_then(|text| parse_setup_result(&text, run_id));
+            result_text = read_result();
+            let result = result_text.as_deref().and_then(|text| parse_setup_result(text, run_id));
             interpret_outcome(&output, result.as_ref())
+        })
+        // A failure that has this run's result file shows the start of that file: the script puts
+        // what it found (permissions, identity, hashes) there, and a log that has it needs no
+        // second run to be understood.
+        .map_err(|reason| {
+            match result_text.as_deref().filter(|text| parse_setup_result(text, run_id).is_some()) {
+                Some(text) => {
+                    let excerpt: String = text.trim_start_matches('\u{feff}').trim().chars().take(RESULT_EXCERPT).collect();
+                    format!("{reason} Result file: {excerpt}")
+                }
+                None => reason,
+            }
         });
     let mut cooldown = cooldown.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     match &outcome {
@@ -860,7 +879,7 @@ mod windows_tests {
         let copy = script[stage..].find("Copy-Item").unwrap();
         assert!(stage_check < copy, "the staging directory is checked before the copy");
         // Reparse points, the owner and the write-granting entries are what AssertProtected looks at.
-        for part in ["-band 1024", "GetOwner([Security.Principal.SecurityIdentifier])", "GetAccessRules($true, $true", "-band 0x500D0156", "Finish 45"] {
+        for part in ["-band 1024", "GetOwner([Security.Principal.SecurityIdentifier])", "GetAccessRules($true, $true", "-band 0x500D0156", "Refuse 45"] {
             assert!(script.contains(part), "{part}");
         }
     }
@@ -880,27 +899,83 @@ mod windows_tests {
         let check = ensure.find("AssertProtected $Path").unwrap();
         assert!(absent < create && create < claim && claim < check);
         assert!(!ensure.contains("-Force"), "an existing folder must not pass as ours");
-        // Claim: owner Administrators, explicit permissions, no write-like entry for others.
+        // Claim replaces owner and the whole permission list in one write (never rule by rule):
+        // owner Administrators, protected DACL, SYSTEM and Administrators full control, Users
+        // read and execute, inherited by what is below.
         let claim_fn = &script[script.find("function Claim").unwrap()..script.find("function Ensure").unwrap()];
         for part in [
-            "SetOwner((New-Object Security.Principal.SecurityIdentifier \"S-1-5-32-544\"))",
-            "SetAccessRuleProtection($true, $true)",
-            "RemoveAccessRuleSpecific($Rule)",
-            "-band 0x500D0156",
-            "Set-Acl -LiteralPath $Path -AclObject $Acl",
+            "SetSecurityDescriptorSddlForm(\"O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)\", [Security.AccessControl.AccessControlSections]\"Owner,Access\")",
+            "[IO.Directory]::SetAccessControl($Path, $Sd)",
         ] {
             assert!(claim_fn.contains(part), "{part}");
+        }
+        for rule_by_rule in ["RemoveAccessRule", "Set-Acl", "GetAccessRules", "icacls"] {
+            assert!(!claim_fn.contains(rule_by_rule), "{rule_by_rule}");
         }
         // The strict check itself still refuses an owner that is not SYSTEM, an administrator
         // account or TrustedInstaller, and the uninstall of an existing folder still only checks.
         let assert_fn = &script[script.find("function AssertProtected").unwrap()..script.find("function Claim").unwrap()];
         assert!(assert_fn.contains("$Trusted -notcontains $Owner"));
-        assert!(assert_fn.contains("Finish 45 \"owner of $Path is $Owner\""));
+        assert!(assert_fn.contains("Refuse 45 \"owner of $Path is $Owner\" $Path"));
         let uninstall = &script[script.find("function Uninstall").unwrap()..script.rfind("try {").unwrap()];
         assert!(uninstall.contains("if (Test-Path -LiteralPath $Dir) { AssertProtected $Dir }"));
         assert!(!uninstall.contains("Claim"));
-        // Nothing but AssertProtected, Claim and Ensure may call Claim.
+        // The SDDL grants only to trustees AssertProtected accepts (and Users, read and execute).
+        let sddl = claim_fn.split('"').find(|part| part.starts_with("O:BA")).unwrap();
+        let trustees: Vec<&str> = sddl[sddl.find('(').unwrap()..]
+            .split(')')
+            .filter(|ace| !ace.is_empty())
+            .map(|ace| ace.rsplit(';').next().unwrap())
+            .collect();
+        assert_eq!(trustees, ["SY", "BA", "BU"]);
+        // Nothing but Ensure may call Claim.
         assert_eq!(script.matches("Claim $").count(), 1);
+    }
+
+    /// One CI round must be enough to understand a refusal: the permissions of the folder and the
+    /// identity of the process ride along in the result message, and the host shows the start of
+    /// the result file.
+    #[test]
+    fn a_refusal_carries_the_folders_permissions_and_the_identity_of_the_process() {
+        let script = compact_script(WINDOWS_SETUP_SCRIPT);
+        let refuse = &script[script.find("function Refuse").unwrap()..script.find("function AssertProtected").unwrap()];
+        assert!(refuse.contains("\"; sddl=\" + (Sddl $Path)") && refuse.contains("(WhoAmI)"), "{refuse}");
+        let sddl = &script[script.find("function Sddl").unwrap()..script.find("function Refuse").unwrap()];
+        assert!(sddl.contains("GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All)"));
+        let who = &script[script.find("function WhoAmI").unwrap()..script.find("function Sddl").unwrap()];
+        for part in ["$Id.User.Value", "$Id.Owner.Value", "IsInRole"] {
+            assert!(who.contains(part), "{part}");
+        }
+        // The exits that mean "refused" say what was found, not just a code.
+        for exit in ["Finish 40 (WhoAmI)", "Finish 41 (", "Finish 44 (", "Finish 46 \"the sourceweft-sandbox account exists"] {
+            assert!(script.contains(exit), "{exit}");
+        }
+        assert!(!script.contains("Finish 45"), "45 goes through Refuse");
+    }
+
+    #[test]
+    fn a_failed_setup_shows_the_start_of_its_result_file() {
+        let cooldown = Mutex::new(Cooldown::default());
+        let detail = format!("owner of C:/x is S-1-5-21-1-2-3-500; sddl=O:S-1-5-21-1-2-3-500D:{}", "(A;;FA;;;SY)".repeat(80));
+        let text = format!("{{\"runId\":\"{RUN_ID}\",\"exit\":45,\"message\":\"{detail}\"}}");
+        let failing = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> { Ok(output(Some(45), "")) };
+        let read = || Some(text.clone());
+        let error = run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &failing, &read, &cooldown, Instant::now()).unwrap_err();
+        let (_, excerpt) = error.split_once(" Result file: ").unwrap();
+        assert_eq!(excerpt.chars().count(), 600, "the first 600 characters of the file");
+        assert!(excerpt.starts_with(&text[..600]));
+        assert!(excerpt.contains("S-1-5-21-1-2-3-500"));
+        // A result file of another run is not shown (it says nothing about this one) ...
+        let stale = |_: &str, _: &[String]| -> std::io::Result<LaunchOutput> { Ok(output(Some(13), "boom")) };
+        let other = || Some("{\"runId\":\"11111111-1111-4111-8111-111111111111\",\"exit\":0,\"message\":\"ok\"}".to_string());
+        let error = run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &stale, &other, &Mutex::new(Cooldown::default()), Instant::now()).unwrap_err();
+        assert!(!error.contains("Result file"), "{error}");
+        // ... and neither is one for a launch that failed before the script ran or a success.
+        let ok = run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &ok_launch, &ok_result, &Mutex::new(Cooldown::default()), Instant::now());
+        assert!(ok.is_ok());
+        // The cooldown's refusal repeats the cause, with the file excerpt.
+        let again = run_elevated_with(&uninstall(), RUN_ID, PF, POWERSHELL, &failing, &read, &cooldown, Instant::now()).unwrap_err();
+        assert!(again.contains("The previous attempt failed: ") && again.contains("S-1-5-21-1-2-3-500"), "{again}");
     }
 
     #[test]
