@@ -645,7 +645,7 @@ impl super::LocalHost {
 /// the user (data locations, never anything PowerShell or .NET loads code from). Everything else
 /// is dropped, `PATH` and `PSModulePath` in particular, which `launcher_environment` sets itself.
 #[cfg(any(windows, test))]
-const LAUNCHER_ENV_ALLOW: [&str; 14] = [
+const LAUNCHER_ENV_ALLOW: [&str; 16] = [
     "SystemDrive",
     "TEMP",
     "TMP",
@@ -660,11 +660,19 @@ const LAUNCHER_ENV_ALLOW: [&str; 14] = [
     "USERNAME",
     "USERDOMAIN",
     "COMPUTERNAME",
+    "PROCESSOR_ARCHITECTURE",
+    "NUMBER_OF_PROCESSORS",
 ];
 
+/// The executable extensions Windows PowerShell treats as programs; the script pins the same value.
+#[cfg(any(windows, test))]
+const LAUNCHER_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+
 /// The whole environment of the non-elevated launcher PowerShell: `SystemRoot`, `windir`, a `PATH`
-/// of the two system directories and a `PSModulePath` of the modules that ship with Windows
-/// PowerShell, all derived from `windows_dir` (what Windows reports), plus the data locations in
+/// of the two system directories, a `PSModulePath` of the modules that ship with Windows
+/// PowerShell, the standard `PATHEXT` (without it PowerShell will not run a `.exe` through the
+/// call operator: "Cannot run a document in the middle of a pipeline"), `ComSpec` and `OS`, all
+/// derived from `windows_dir` (what Windows reports) or fixed, plus the data locations in
 /// `LAUNCHER_ENV_ALLOW` copied from `host_env` (matched case-insensitively, first spelling wins).
 /// A `PSModulePath`, `PATH` or any `COMPLUS_*`/`DOTNET_*`/`PS*` variable the app inherited from the
 /// user's environment never reaches it. (The elevated child is started by Windows from the user's
@@ -682,6 +690,9 @@ pub(crate) fn launcher_environment(
             "PSModulePath".to_string(),
             format!("{windows_dir}\\System32\\WindowsPowerShell\\v1.0\\Modules"),
         ),
+        ("PATHEXT".to_string(), LAUNCHER_PATHEXT.to_string()),
+        ("ComSpec".to_string(), format!("{windows_dir}\\System32\\cmd.exe")),
+        ("OS".to_string(), "Windows_NT".to_string()),
     ];
     for (name, value) in host_env {
         if LAUNCHER_ENV_ALLOW.iter().any(|allowed| allowed.eq_ignore_ascii_case(&name))
@@ -931,12 +942,13 @@ mod windows_tests {
     #[test]
     fn the_script_takes_no_location_or_trust_from_the_environment() {
         let script = compact_script(WINDOWS_SETUP_SCRIPT);
-        // No environment variable is read, in code or in the header's promises; the one use of
-        // `$env:` is the assignment that pins the module search path (first statement, below).
+        // No environment variable is read, in code or in the header's promises; the two uses of
+        // `$env:` are the assignments that pin the module search path and PATHEXT (first
+        // statements, below).
         for forbidden in ["[Environment]::GetEnvironmentVariable", "ProgramW6432", "SystemRoot", "%ProgramFiles%"] {
             assert!(!script.contains(forbidden), "{forbidden}");
         }
-        assert_eq!(script.matches("$env:").count(), 1, "{script}");
+        assert_eq!(script.matches("$env:").count(), 2, "{script}");
         // Program Files comes from the .NET known-folder call and is compared with the app's.
         assert!(script.contains("$Root = [Environment]::GetFolderPath(\"ProgramFiles\")"));
         assert!(script.contains("-ne $Expected) { Finish 44"), "{script}");
@@ -1010,8 +1022,10 @@ mod windows_tests {
     fn the_script_pins_the_module_path_first_and_uses_only_core_cmdlets() {
         let script = compact_script(WINDOWS_SETUP_SCRIPT);
         assert!(
-            script.starts_with("$env:PSModulePath = Join-Path $PSHOME \"Modules\"\nSet-StrictMode -Version 2\n"),
-            "the first statement of the script: {}",
+            script.starts_with(&format!(
+                "$env:PSModulePath = Join-Path $PSHOME \"Modules\"\n$env:PATHEXT = \"{LAUNCHER_PATHEXT}\"\nSet-StrictMode -Version 2\n"
+            )),
+            "the first statements of the script: {}",
             &script[..120]
         );
         // The cmdlets the script may use, with the module each one comes from. All of these ship
@@ -1116,7 +1130,11 @@ mod windows_tests {
         for dropped in ["COMPLUS_Version", "DOTNET_STARTUP_HOOKS", "PSExecutionPolicyPreference", "COR_ENABLE_PROFILING", "HTTPS_PROXY"] {
             assert!(get(dropped).is_none(), "{dropped}");
         }
-        assert_eq!(env.len(), 4 + 3);
+        assert_eq!(env.len(), 7 + 3);
+        // PowerShell runs a .exe through `&` only with PATHEXT set (the failure of CI round 7).
+        assert_eq!(get("PATHEXT"), Some(".COM;.EXE;.BAT;.CMD"));
+        assert_eq!(get("ComSpec"), Some(r"C:\Windows\System32\cmd.exe"));
+        assert_eq!(get("OS"), Some("Windows_NT"));
     }
 
     #[cfg(unix)]
@@ -1701,6 +1719,31 @@ mod powershell_tests {
             );
             assert_eq!(parse_errors(&text), "", "{name}");
         }
+    }
+
+    /// CI round 7: with an environment that has no PATHEXT, `& $Exe` fails with "Cannot run a
+    /// document in the middle of a pipeline". The launcher's environment now has it, and the script
+    /// pins it itself, so even a launcher with a bare environment cannot break the call.
+    #[test]
+    fn an_exe_runs_through_the_call_operator_under_the_launcher_environment_and_a_bare_one() {
+        let windows_dir = crate::local_host::windows::windows_dir().unwrap();
+        let whoami = format!("{windows_dir}\\System32\\whoami.exe");
+        let call = format!("$Exe = \"{whoami}\"; $Text = (& $Exe /user 2>&1 | ForEach-Object {{ \"$_\" }}) -join \" \"; Write-Output $Text; exit $LASTEXITCODE");
+        let run = |env: &[(String, String)], text: &str| {
+            let encoded = encode_command(text);
+            let args = ["-NoProfile".to_string(), "-NonInteractive".to_string(), "-EncodedCommand".to_string(), encoded];
+            launcher_command(&powershell(), &args, env).output().unwrap()
+        };
+        // The launcher's own environment.
+        let launcher = launcher_environment(&windows_dir, std::env::vars());
+        let output = run(&launcher, &call);
+        assert_eq!(output.status.code(), Some(0), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        // A bare environment (what the failing launcher had), with the script's own two pins in front.
+        let bare = vec![("SystemRoot".to_string(), windows_dir.clone()), ("windir".to_string(), windows_dir.clone())];
+        let pins: String = compact_script(WINDOWS_SETUP_SCRIPT).lines().take(2).map(|line| format!("{line}\n")).collect();
+        assert!(pins.contains("PATHEXT"), "{pins}");
+        let output = run(&bare, &format!("{pins}{call}"));
+        assert_eq!(output.status.code(), Some(0), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     }
 
     #[test]

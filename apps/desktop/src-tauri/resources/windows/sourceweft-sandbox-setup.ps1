@@ -63,11 +63,15 @@
 # any process of the user can write. The first statement therefore pins PSModulePath to the
 # modules that ship with Windows PowerShell, and the script uses only cmdlets of its core modules
 # (Management, Utility, Security); a test lists the allowed ones. The account check goes through
-# .NET (name translation) and not through the LocalAccounts module for the same reason.
+# .NET (name translation) and not through the LocalAccounts module for the same reason. PATHEXT is
+# pinned next to it: the call operator refuses to run a file whose extension is not listed in it
+# ("Cannot run a document in the middle of a pipeline"), and the script must not depend on what
+# environment it was started with.
 #
 # This file must stay ASCII, free of single quote characters, block comments and here-strings:
 # the app removes comment lines and indentation before encoding it, and a test checks all of it.
 $env:PSModulePath = Join-Path $PSHOME "Modules"
+$env:PATHEXT = ".COM;.EXE;.BAT;.CMD"
 Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
