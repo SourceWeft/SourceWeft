@@ -1779,7 +1779,7 @@ mod windows_tests {
         assert!(output.status.success(), "{output:?}");
         let before = dacl_of(outside.path());
         let error = ensure_with(&WindowsDirAcls, &record_path(base.path()), &guests(), &[link]).unwrap_err();
-        assert!(error.contains("reparse point"), "{error}");
+        assert!(error.contains("link or junction"), "{error}");
         assert_eq!(dacl_of(outside.path()), before);
     }
 
