@@ -698,6 +698,7 @@ export const config = {
     // raise them for a while to get through a backlog, then put them back.
     // The jobs run behind tenant work on the worker either way. A value that
     // is not an integer or is out of range fails configuration loading.
+    aiOffPeakOnly: parseStrictBooleanEnv("MARKET_AI_OFF_PEAK_ONLY", false),
     skillOverviewBatchSize: parseBoundedIntegerEnv({
       name: "SKILL_OVERVIEW_BATCH_SIZE",
       fallback: 20,

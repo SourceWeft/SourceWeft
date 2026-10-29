@@ -481,6 +481,8 @@ export function assertGatewayConfigAvailable(
 }
 
 export type RoutedModelGatewayBuildOptions = {
+  /** Checked before every HTTP attempt, while retaining the shared endpoint policy. */
+  beforeFetch?: () => void;
   /**
    * Replaces the tenant observability sink, which persists every generation
    * as an `llm_generations` row. `null` observes nothing.
@@ -498,17 +500,19 @@ export function buildRoutedModelGatewayConfig(
   options: RoutedModelGatewayBuildOptions = {},
 ): ModelGatewayConfig {
   const byok = options.byok ?? true;
+  const policyFetch = createLlmFetch(
+    llmEndpointPolicy(
+      Object.values(configInput.providers).map((provider) => provider.baseUrl),
+    ),
+  );
   return {
     // Without this the package's retry/failover/quota lines never print:
     // only the agent middleware's `agent.model_call.retry` was visible.
     logger: createGatewayLogger(),
-    fetch: createLlmFetch(
-      llmEndpointPolicy(
-        Object.values(configInput.providers).map(
-          (provider) => provider.baseUrl,
-        ),
-      ),
-    ),
+    fetch: async (...args) => {
+      options.beforeFetch?.();
+      return policyFetch(...args);
+    },
     providers: Object.fromEntries(
       Object.entries(configInput.providers).map(([name, provider]) => [
         name,
