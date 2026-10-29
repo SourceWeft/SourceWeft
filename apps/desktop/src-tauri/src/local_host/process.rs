@@ -177,7 +177,7 @@ pub(crate) fn run_wrapped(
 /// A Job Object that kills every process assigned to it (and their descendants) when
 /// terminated or closed.
 #[cfg(windows)]
-mod windows_job {
+pub(crate) mod windows_job {
     use super::{HostError, Result};
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::{
@@ -189,13 +189,18 @@ mod windows_job {
         },
     };
 
-    pub(super) struct Job(HANDLE);
+    pub(crate) struct Job(HANDLE);
+
+    // SAFETY: a Job Object handle is a kernel handle; terminating or closing it is valid from
+    // any thread, and nothing else is stored.
+    unsafe impl Send for Job {}
+    unsafe impl Sync for Job {}
 
     impl Job {
         /// A new kill-on-close job that `child` has been assigned to. A grandchild started in
         /// the instant between the child's creation and this assignment would escape the job;
         /// the sandbox broker does not start one that early.
-        pub(super) fn containing(child: &std::process::Child) -> Result<Self> {
+        pub(crate) fn containing(child: &std::process::Child) -> Result<Self> {
             unsafe {
                 let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if handle.is_null() {
@@ -221,7 +226,7 @@ mod windows_job {
             }
         }
 
-        pub(super) fn terminate(&self, exit_code: u32) {
+        pub(crate) fn terminate(&self, exit_code: u32) {
             unsafe {
                 TerminateJobObject(self.0, exit_code);
             }

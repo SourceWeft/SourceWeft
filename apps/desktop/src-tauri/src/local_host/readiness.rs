@@ -8,7 +8,7 @@
 //! missing helper, a failed `init`/`probe` round trip, or a dead sidecar: those are reported as
 //! `NeedsSetup` with a reason, so local execution fails loudly instead of silently running
 //! unsandboxed. Readiness never reads or writes the state of an upstream default srt install.
-use super::LocalHost;
+use super::{HostError, LocalHost};
 #[cfg(any(unix, windows))]
 use super::sidecar::Sidecar;
 use serde::Serialize;
@@ -499,6 +499,10 @@ pub(crate) struct ReadinessCache {
     epoch: u64,
     /// A runtime install is running (see `InstallGuard`): readiness reports `installing`.
     installing: bool,
+    /// Windows: consecutive probes whose first start did not finish within the init timeout
+    /// (`SANDBOX_INIT_TIMEOUT`). Reset by a successful probe and when an install or setup begins
+    /// (a new bundle or helper is a new situation); deliberately not by `invalidate`.
+    init_timeouts: u32,
 }
 
 #[allow(dead_code)]
@@ -579,6 +583,20 @@ impl ReadinessCache {
         Self::lock(cache).last.as_ref().map(|(value, _)| value.clone())
     }
 
+    /// Records one more probe that hit the init timeout; returns how many in a row there are.
+    #[cfg(any(windows, test))]
+    pub(crate) fn note_init_timeout(cache: &Mutex<Self>) -> u32 {
+        let mut state = Self::lock(cache);
+        state.init_timeouts = state.init_timeouts.saturating_add(1);
+        state.init_timeouts
+    }
+
+    /// A probe got past the first start: the streak is over.
+    #[cfg(any(windows, test))]
+    pub(crate) fn clear_init_timeouts(cache: &Mutex<Self>) {
+        Self::lock(cache).init_timeouts = 0;
+    }
+
     /// Marks an install as running. `None` when one already is: installs never overlap. The
     /// returned guard ends the install, and invalidates the cache, when dropped, whatever the
     /// outcome, so neither a success nor a failure leaves a stale answer behind.
@@ -588,6 +606,7 @@ impl ReadinessCache {
             return None;
         }
         state.installing = true;
+        state.init_timeouts = 0;
         Some(InstallGuard { cache })
     }
 
@@ -682,6 +701,34 @@ pub(crate) fn windows_readiness(probe: &WindowsProbe<'_>) -> SandboxReadiness {
     }
 }
 
+/// How many probes in a row may report "still getting ready" before it is called a failure.
+#[cfg(any(windows, test))]
+pub(crate) const MAX_PREPARING_PROBES: u32 = 3;
+
+/// The error a probe reports for its `streak`-th consecutive init timeout: the transient one
+/// (`SANDBOX_INIT_TIMEOUT`, shown as "getting ready") until [`MAX_PREPARING_PROBES`] have passed,
+/// then a failure that says so and where to look. `minutes` is the init timeout each probe waited,
+/// `result_file` the setup's result file.
+#[cfg(any(windows, test))]
+pub(crate) fn cap_init_timeout(
+    streak: u32,
+    error: HostError,
+    minutes: u64,
+    result_file: &str,
+) -> HostError {
+    if streak < MAX_PREPARING_PROBES {
+        return error;
+    }
+    HostError::new(
+        "SANDBOX_START_INCOMPLETE",
+        format!(
+            "The sandbox did not finish its first start: {streak} checks in a row each waited \
+             {minutes} minutes for it. The setup's own account of what it did is in {result_file}; \
+             running the sandbox setup again (or removing and reinstalling it) usually fixes this."
+        ),
+    )
+}
+
 impl LocalHost {
     /// Whether local sandboxed execution can run right now, and why not if it cannot. macOS,
     /// Linux and Windows probe the bundle under this host's own app-data directory (Windows also
@@ -773,7 +820,27 @@ impl LocalHost {
                     super::srt_exec::windows_init_config_for(&bundle, &self.base, &probe_root)?;
                 // The first start after a fresh setup is slow (the sandbox account's profile is
                 // created at its first logon): the same long `init` timeout as a workspace.
-                Sidecar::start_for_workspace(&bundle, &init)?.probe()
+                let outcome = Sidecar::start_for_workspace(&bundle, &init).and_then(|sidecar| sidecar.probe());
+                match outcome {
+                    Ok(()) => {
+                        ReadinessCache::clear_init_timeouts(&self.sandbox_readiness_cache);
+                        Ok(())
+                    }
+                    Err(error) if error.code == "SANDBOX_INIT_TIMEOUT" => {
+                        let streak = ReadinessCache::note_init_timeout(&self.sandbox_readiness_cache);
+                        let result_file = super::windows::program_files_dir()
+                            .and_then(|dir| super::windows::setup_result_path_in(&dir))
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "%ProgramFiles%\\SourceWeft\\sandbox-setup-result.json".into());
+                        Err(cap_init_timeout(
+                            streak,
+                            error,
+                            super::sidecar::WINDOWS_INIT_TIMEOUT.as_secs() / 60,
+                            &result_file,
+                        ))
+                    }
+                    Err(error) => Err(error),
+                }
             },
         })
     }
@@ -791,6 +858,49 @@ impl LocalHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slow_first_start_is_transient_three_times_then_a_failure_that_says_where_to_look() {
+        use crate::local_host::windows::classify_windows_probe_failure;
+        let cache = Mutex::new(ReadinessCache::default());
+        let timeout = || HostError::new("SANDBOX_INIT_TIMEOUT", "slow");
+        let answer = |streak: u32| {
+            let error = cap_init_timeout(streak, timeout(), 10, r"C:\Program Files\SourceWeft\sandbox-setup-result.json");
+            classify_windows_probe_failure(error.code, &error.message)
+        };
+        for expected in 1..MAX_PREPARING_PROBES {
+            let streak = ReadinessCache::note_init_timeout(&cache);
+            assert_eq!(streak, expected);
+            match answer(streak) {
+                SandboxReadiness::NeedsSetup { code: SetupCode::Installing, remedy: Remedy::None, .. } => {}
+                other => panic!("probe {streak} must still be transient, got {other:?}"),
+            }
+        }
+        let streak = ReadinessCache::note_init_timeout(&cache);
+        assert_eq!(streak, MAX_PREPARING_PROBES);
+        match answer(streak) {
+            SandboxReadiness::NeedsSetup { code: SetupCode::SandboxFailed, remedy: Remedy::None, reason, .. } => {
+                assert!(reason.contains("10 minutes"), "{reason}");
+                assert!(reason.contains("sandbox-setup-result.json"), "{reason}");
+                assert!(reason.contains("setup again"), "{reason}");
+            }
+            other => panic!("the third consecutive timeout must be a failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_init_timeout_streak_ends_on_success_and_when_an_install_begins_but_not_on_invalidate() {
+        let cache = Mutex::new(ReadinessCache::default());
+        ReadinessCache::note_init_timeout(&cache);
+        ReadinessCache::note_init_timeout(&cache);
+        ReadinessCache::invalidate(&cache);
+        assert_eq!(ReadinessCache::note_init_timeout(&cache), 3, "invalidate keeps the streak");
+        ReadinessCache::clear_init_timeouts(&cache);
+        assert_eq!(ReadinessCache::note_init_timeout(&cache), 1, "a success starts over");
+        ReadinessCache::note_init_timeout(&cache);
+        drop(ReadinessCache::begin_install(&cache).unwrap());
+        assert_eq!(ReadinessCache::note_init_timeout(&cache), 1, "a new install starts over");
+    }
 
     #[test]
     fn windows_path_is_the_process_path_verbatim_or_empty() {

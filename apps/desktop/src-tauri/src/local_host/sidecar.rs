@@ -332,6 +332,11 @@ pub(crate) struct Sidecar {
     /// sidecar unusable); see the type-level doc above. Checked, lock-free, at the top of
     /// every `call()`.
     poisoned: AtomicBool,
+    /// Windows: a kill-on-close Job Object the sidecar (and so everything it starts, such as an
+    /// `srt-win` walking a tree to grant access) belongs to. Killing the sidecar only with
+    /// `child.kill()` would leave that walker orphaned and a restart would run a second one.
+    #[cfg(windows)]
+    job: super::process::windows_job::Job,
 }
 
 impl Sidecar {
@@ -408,6 +413,15 @@ impl Sidecar {
                 format!("failed to start sandbox sidecar: {error}"),
             )
         })?;
+        #[cfg(windows)]
+        let job = match super::process::windows_job::Job::containing(&child) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(HostError::new("SANDBOX_UNAVAILABLE", error.message));
+            }
+        };
         let stdin = child.stdin.take().ok_or_else(|| {
             HostError::new("SANDBOX_UNAVAILABLE", "sidecar stdin was not piped")
         })?;
@@ -441,6 +455,8 @@ impl Sidecar {
             next_id: AtomicU64::new(0),
             timeout,
             poisoned: AtomicBool::new(false),
+            #[cfg(windows)]
+            job,
         };
         let id = sidecar.allocate_id();
         let init_result = sidecar.call_within(
@@ -448,18 +464,9 @@ impl Sidecar {
             &Request::Init { id: id.clone(), config: init },
             init_timeout,
             &|| {
-                // Not a desynchronised connection to report as a dead sidecar: the workspace
-                // preparation is simply still running. The sidecar is discarded either way.
+                // The sidecar is discarded either way; the job (Windows) takes any walker with it.
                 sidecar.kill_now();
-                HostError::new(
-                    "SANDBOX_INIT_TIMEOUT",
-                    format!(
-                        "Preparing this folder for the sandbox did not finish within {} \
-                         (the first use of a folder grants access to everything in it). Use a \
-                         smaller folder, or try again.",
-                        describe_wait(init_timeout)
-                    ),
-                )
+                init_timeout_error(init_timeout, cfg!(windows))
             },
         )?;
         if let Err(rejection) = check_protocol_version(&init_result) {
@@ -541,10 +548,18 @@ impl Sidecar {
     /// for a sidecar that has been rejected and is about to be dropped.
     fn kill_now(&self) {
         self.poisoned.store(true, Ordering::SeqCst);
+        self.kill_tree();
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = wait_up_to(&mut child, Duration::from_secs(2));
         }
+    }
+
+    /// Windows: terminates the whole job (the sidecar and every descendant). Elsewhere the
+    /// sidecar's descendants are not tracked and this does nothing.
+    fn kill_tree(&self) {
+        #[cfg(windows)]
+        self.job.terminate(1);
     }
 
     fn allocate_id(&self) -> String {
@@ -625,6 +640,26 @@ impl Sidecar {
     }
 }
 
+/// The error for an `init` that did not reply within `init_timeout`. On Windows that is the
+/// distinct `SANDBOX_INIT_TIMEOUT`: the first `init` of a workspace walks its tree (and the first
+/// start after a setup creates the sandbox account's profile), so the sandbox is not known to be
+/// broken and nothing may restart and retry behind the caller's back. Everywhere else it is what
+/// it always was: an unresponsive sidecar, `SANDBOX_UNAVAILABLE`.
+fn init_timeout_error(init_timeout: Duration, windows: bool) -> HostError {
+    if !windows {
+        return HostError::new("SANDBOX_UNAVAILABLE", "sidecar did not reply in time");
+    }
+    HostError::new(
+        "SANDBOX_INIT_TIMEOUT",
+        format!(
+            "Preparing this folder for the sandbox did not finish within {} \
+             (the first use of a folder grants access to everything in it). Use a \
+             smaller folder, or try again.",
+            describe_wait(init_timeout)
+        ),
+    )
+}
+
 /// A wait as the user reads it: whole minutes from one minute up, seconds below.
 fn describe_wait(wait: Duration) -> String {
     let seconds = wait.as_secs();
@@ -669,6 +704,7 @@ impl Drop for Sidecar {
             if wait_up_to(&mut child, Duration::from_secs(2)) {
                 return;
             }
+            self.kill_tree();
             let _ = child.kill();
             // And up to 2 more seconds to actually die after SIGKILL. `wait()` itself can
             // block forever on a process stuck in an uninterruptible kernel state, so this
@@ -980,7 +1016,7 @@ mod tests {
         }
 
         #[test]
-        fn an_init_that_outlasts_its_own_timeout_is_an_init_timeout_not_a_dead_sidecar() {
+        fn on_unix_an_init_that_outlasts_its_timeout_is_an_unavailable_sidecar_as_before() {
             let bundle = bundle_with_stub();
             let mut init = test_init();
             init.home = "/tmp/sourceweft-sidecar-test-home/hang-init".to_string();
@@ -994,13 +1030,24 @@ mod tests {
                 Ok(_) => panic!("an init that never replies must fail"),
                 Err(error) => error,
             };
-            assert_eq!(error.code, "SANDBOX_INIT_TIMEOUT");
-            assert!(error.message.contains("2 seconds"), "{}", error.message);
+            // SANDBOX_INIT_TIMEOUT is produced by the Windows start path only.
+            assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
+            assert_eq!(error.message, "sidecar did not reply in time");
             assert!(
                 started.elapsed() < Duration::from_secs(8),
                 "the init timeout, not the stub's 10 s sleep or the 30 s reply timeout, ended it: {:?}",
                 started.elapsed()
             );
+        }
+
+        #[test]
+        fn the_init_timeout_error_is_distinct_on_windows_only() {
+            let windows = init_timeout_error(WINDOWS_INIT_TIMEOUT, true);
+            assert_eq!(windows.code, "SANDBOX_INIT_TIMEOUT");
+            assert!(windows.message.contains("10 minutes"), "{}", windows.message);
+            let other = init_timeout_error(WINDOWS_INIT_TIMEOUT, false);
+            assert_eq!(other.code, "SANDBOX_UNAVAILABLE");
+            assert_eq!(other.message, "sidecar did not reply in time");
         }
 
         #[test]

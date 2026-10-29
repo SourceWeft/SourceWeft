@@ -240,6 +240,55 @@ pub(crate) fn remove_exact(acl: &Acl, sid: &[u8], mask: u32, flags: u8) -> Optio
     })
 }
 
+/// The groups every account of this kind belongs to: `Everyone`, `Authenticated Users` and
+/// `BUILTIN\Users`. (The sandbox account is a member of all three.)
+fn well_known_groups() -> [Vec<u8>; 3] {
+    [
+        vec![1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+        vec![1, 1, 0, 0, 0, 0, 0, 5, 11, 0, 0, 0],
+        vec![1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 33, 2, 0, 0],
+    ]
+}
+
+/// Whether `sid` can traverse the directory `acl` belongs to through the account's own entries or
+/// through `Everyone`, `Authenticated Users` or `Users`: the allow entries that apply to the
+/// directory itself together cover [`TRAVERSE_MASK`], and no applicable deny entry of those
+/// trustees touches it. This is how a directory whose access list this app may not change (for
+/// example one owned by someone else) can still be fine: it already admits the account.
+pub(crate) fn effective_via_groups(acl: &Acl, sid: &[u8]) -> bool {
+    let mut trustees = well_known_groups().to_vec();
+    trustees.push(sid.to_vec());
+    let mut allowed = 0u32;
+    for ace in &acl.aces {
+        if ace.flags() & INHERIT_ONLY_ACE != 0 {
+            continue;
+        }
+        let Some((mask, trustee)) = ace.plain() else { continue };
+        if !trustees.iter().any(|known| known == trustee) {
+            continue;
+        }
+        match ace.kind() {
+            ACCESS_DENIED_ACE_TYPE if mask & TRAVERSE_MASK != 0 => return false,
+            ACCESS_ALLOWED_ACE_TYPE => allowed |= mask,
+            _ => {}
+        }
+    }
+    allowed & TRAVERSE_MASK == TRAVERSE_MASK
+}
+
+/// `IO_REPARSE_TAG_*` values carry the "name surrogate" bit (`0x2000_0000`) when the entry names
+/// another file system object: symbolic links and mount points/junctions. Cloud placeholders
+/// (OneDrive and the like, tags `0x9000_001A` and `0x9000_xxxx`), deduplication and WSL entries
+/// do not: they are ordinary folders as far as paths go.
+const REPARSE_NAME_SURROGATE: u32 = 0x2000_0000;
+const FILE_ATTRIBUTE_REPARSE: u32 = 0x0000_0400;
+
+/// Whether a directory with these attributes and reparse tag redirects elsewhere (a link or
+/// junction), which this module refuses to change. A cloud placeholder is not one.
+pub(crate) fn redirects_elsewhere(attributes: u32, reparse_tag: u32) -> bool {
+    attributes & FILE_ATTRIBUTE_REPARSE != 0 && reparse_tag & REPARSE_NAME_SURROGATE != 0
+}
+
 // ---------------------------------------------------------------------------------------------
 // Which directories
 // ---------------------------------------------------------------------------------------------
@@ -378,6 +427,8 @@ fn same_grant(a: &RecordedGrant, b: &RecordedGrant) -> bool {
 pub(crate) enum AclError {
     /// The directory is gone.
     Missing,
+    /// Windows refused this app permission to change the directory's access list (`WRITE_DAC`).
+    Denied(String),
     Failed(String),
 }
 
@@ -385,7 +436,7 @@ impl std::fmt::Display for AclError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AclError::Missing => write!(f, "the directory does not exist"),
-            AclError::Failed(reason) => write!(f, "{reason}"),
+            AclError::Denied(reason) | AclError::Failed(reason) => write!(f, "{reason}"),
         }
     }
 }
@@ -395,8 +446,14 @@ impl std::fmt::Display for AclError {
 pub(crate) type AclChange<'a> =
     &'a mut dyn FnMut(Option<&Acl>) -> std::result::Result<Option<Acl>, String>;
 
-/// The directory DACLs, as one atomic read-modify-write per directory.
+/// The directory DACLs: a read that needs only `READ_CONTROL`, and an atomic read-modify-write
+/// per directory that additionally needs `WRITE_DAC`.
 pub(crate) trait DirAcls {
+    /// Opens `dir` (a directory; a link or junction is refused, a cloud placeholder is not) for
+    /// reading and returns its DACL (`None` for a NULL DACL, which already admits everyone). Never
+    /// asks for permission to change anything.
+    fn read(&self, dir: &Path) -> std::result::Result<Option<Acl>, AclError>;
+
     /// Opens `dir` (a directory, not a reparse point), reads its DACL (`None` for a NULL DACL,
     /// which already admits everyone), and passes it to `change`. `Ok(None)` from `change` leaves
     /// the directory alone; `Ok(Some(acl))` is written back with the descriptor's protection
@@ -426,17 +483,16 @@ pub(crate) fn ensure_with(
 ) -> std::result::Result<Vec<PathBuf>, String> {
     let _guard = lock_acls();
     let mut missing: Vec<&PathBuf> = Vec::new();
+    // Read-only first pass: needs READ_CONTROL only, so a directory this app may not change is
+    // not a problem unless it actually needs the entry.
     for dir in dirs {
-        let mut needed = false;
-        store
-            .modify(dir, &mut |acl| {
-                needed = match acl {
-                    Some(acl) => add_traversal(acl, sid)?.is_some(),
-                    None => false,
-                };
-                Ok(None)
-            })
-            .map_err(|error| format!("{}: {error}", dir.display()))?;
+        let needed = match store
+            .read(dir)
+            .map_err(|error| format!("{}: {error}", dir.display()))?
+        {
+            Some(acl) => add_traversal(&acl, sid)?.is_some() && !effective_via_groups(&acl, sid),
+            None => false,
+        };
         if needed {
             missing.push(dir);
         }
@@ -462,14 +518,31 @@ pub(crate) fn ensure_with(
     write_record(record_file, &record)?;
     let mut changed = Vec::new();
     for dir in missing {
-        let written = store
-            .modify(dir, &mut |acl| match acl {
-                Some(acl) => add_traversal(acl, sid),
-                None => Ok(None),
-            })
-            .map_err(|error| format!("{}: {error}", dir.display()))?;
-        if written {
-            changed.push(dir.clone());
+        let outcome = store.modify(dir, &mut |acl| match acl {
+            Some(acl) => add_traversal(acl, sid),
+            None => Ok(None),
+        });
+        match outcome {
+            Ok(true) => changed.push(dir.clone()),
+            Ok(false) => {}
+            // Windows will not let this app change the list. Fine if the account is admitted by
+            // the entries that are there; otherwise fail closed and say what to do.
+            Err(AclError::Denied(reason)) => {
+                let admitted = matches!(
+                    store.read(dir),
+                    Ok(Some(ref acl)) if effective_via_groups(acl, sid) || grants_traversal(acl, sid)
+                );
+                if !admitted {
+                    return Err(format!(
+                        "{}: {reason}. The sandbox account ({SANDBOX_ACCOUNT}) must be able to traverse this \
+                         folder to run programs from the workspace below it, and this app may not change its \
+                         permissions. Give {SANDBOX_ACCOUNT} (or the Users group) read and traverse access to \
+                         the folder, or choose a working folder elsewhere.",
+                        dir.display()
+                    ));
+                }
+            }
+            Err(error) => return Err(format!("{}: {error}", dir.display())),
         }
     }
     Ok(changed)
@@ -511,7 +584,7 @@ pub(crate) fn revoke_with(store: &dyn DirAcls, record_file: &Path) -> RevokeRepo
         match outcome {
             Ok(true) => report.removed += 1,
             Ok(false) | Err(AclError::Missing) => {}
-            Err(AclError::Failed(reason)) => {
+            Err(AclError::Failed(reason) | AclError::Denied(reason)) => {
                 report.failed.push(format!("{}: {reason}", grant.path));
                 remaining.push(grant);
             }
@@ -616,7 +689,7 @@ pub(crate) mod win {
     use std::{
         mem::zeroed,
         os::windows::{
-            fs::{MetadataExt, OpenOptionsExt},
+            fs::OpenOptionsExt,
             io::AsRawHandle,
         },
         path::Path,
@@ -624,8 +697,8 @@ pub(crate) mod win {
     };
     use windows_sys::Win32::{
         Foundation::{
-            LocalFree, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER, ERROR_NONE_MAPPED,
-            ERROR_PATH_NOT_FOUND, HANDLE,
+            LocalFree, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
+            ERROR_NONE_MAPPED, ERROR_PATH_NOT_FOUND, HANDLE,
         },
         Security::{
             Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
@@ -636,9 +709,10 @@ pub(crate) mod win {
             SE_DACL_PROTECTED, SidTypeUser,
         },
         Storage::FileSystem::{
-            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-            FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-            FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL, WRITE_DAC,
+            FileAttributeTagInfo, GetFileInformationByHandleEx, FILE_ATTRIBUTE_DIRECTORY,
+            FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            READ_CONTROL, WRITE_DAC,
         },
     };
 
@@ -807,7 +881,12 @@ pub(crate) mod win {
                 return Err(failed("SetSecurityDescriptorControl", std::io::Error::last_os_error()));
             }
             if SetKernelObjectSecurity(handle, DACL_SECURITY_INFORMATION, descriptor) == 0 {
-                return Err(failed("SetKernelObjectSecurity", std::io::Error::last_os_error()));
+                let error = std::io::Error::last_os_error();
+                return Err(if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
+                    AclError::Denied("Windows refused permission to change its access list".into())
+                } else {
+                    failed("SetKernelObjectSecurity", error)
+                });
             }
         }
         Ok(())
@@ -816,34 +895,61 @@ pub(crate) mod win {
     /// The real directory DACLs.
     pub(crate) struct WindowsDirAcls;
 
+    /// Opens the directory itself (never what a final reparse point points at) with
+    /// `READ_CONTROL`, and with `WRITE_DAC` too when `write`. A link or junction is refused; a
+    /// cloud placeholder (a reparse point that names no other object) is an ordinary folder.
+    fn open_directory(dir: &Path, write: bool) -> std::result::Result<std::fs::File, AclError> {
+        let access = FILE_READ_ATTRIBUTES | READ_CONTROL | if write { WRITE_DAC } else { 0 };
+        let file = std::fs::OpenOptions::new()
+            .access_mode(access)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(dir)
+            .map_err(|error| match error.raw_os_error().map(|code| code as u32) {
+                Some(ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) => AclError::Missing,
+                Some(ERROR_ACCESS_DENIED) if write => {
+                    AclError::Denied("Windows refused permission to change its access list".into())
+                }
+                _ => failed("open", error),
+            })?;
+        let mut tag: FILE_ATTRIBUTE_TAG_INFO = unsafe { zeroed() };
+        // SAFETY: `file` owns a valid handle opened with FILE_READ_ATTRIBUTES; `tag` is a
+        // correctly sized, writable FILE_ATTRIBUTE_TAG_INFO.
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle() as HANDLE,
+                FileAttributeTagInfo,
+                (&mut tag as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+                std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(failed("attributes", std::io::Error::last_os_error()));
+        }
+        if super::redirects_elsewhere(tag.FileAttributes, tag.ReparseTag) {
+            return Err(AclError::Failed(format!(
+                "it is a link or junction (reparse tag {:#x}); refusing to change it",
+                tag.ReparseTag
+            )));
+        }
+        if tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+            return Err(AclError::Failed("it is not a directory".into()));
+        }
+        Ok(file)
+    }
+
     impl DirAcls for WindowsDirAcls {
+        fn read(&self, dir: &Path) -> std::result::Result<Option<Acl>, AclError> {
+            let file = open_directory(dir, false)?;
+            Ok(read_dacl(file.as_raw_handle() as HANDLE)?.0)
+        }
+
         fn modify(
             &self,
             dir: &Path,
             change: super::AclChange<'_>,
         ) -> std::result::Result<bool, AclError> {
-            // The object itself, never what a final reparse point points at.
-            let file = std::fs::OpenOptions::new()
-                .access_mode(FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC)
-                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-                .open(dir)
-                .map_err(|error| match error.raw_os_error().map(|code| code as u32) {
-                    Some(ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) => AclError::Missing,
-                    _ => failed("open", error),
-                })?;
-            let attributes = file
-                .metadata()
-                .map_err(|error| failed("attributes", error))?
-                .file_attributes();
-            if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                return Err(AclError::Failed(
-                    "it is a reparse point (link, junction or placeholder); refusing to change it".into(),
-                ));
-            }
-            if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
-                return Err(AclError::Failed("it is not a directory".into()));
-            }
+            let file = open_directory(dir, true)?;
             let handle = file.as_raw_handle() as HANDLE;
             let (current, control) = read_dacl(handle)?;
             let Some(next) = change(current.as_ref()).map_err(AclError::Failed)? else {
@@ -1227,6 +1333,10 @@ mod tests {
         dirs: RefCell<HashMap<String, Option<Acl>>>,
         writes: RefCell<Vec<String>>,
         fail_on: RefCell<Option<String>>,
+        /// Directories whose access list Windows will not let this app change.
+        deny_write: RefCell<Vec<String>>,
+        /// Directories `modify` was called for (it needs WRITE_DAC; `read` does not).
+        modified: RefCell<Vec<String>>,
     }
 
     impl Model {
@@ -1248,12 +1358,20 @@ mod tests {
     }
 
     impl DirAcls for Model {
+        fn read(&self, dir: &Path) -> std::result::Result<Option<Acl>, AclError> {
+            self.dirs.borrow().get(&Model::key(dir)).cloned().ok_or(AclError::Missing)
+        }
+
         fn modify(
             &self,
             dir: &Path,
             change: super::AclChange<'_>,
         ) -> std::result::Result<bool, AclError> {
             let key = Model::key(dir);
+            self.modified.borrow_mut().push(key.clone());
+            if self.deny_write.borrow().contains(&key) {
+                return Err(AclError::Denied("access denied".into()));
+            }
             let mut dirs = self.dirs.borrow_mut();
             let Some(current) = dirs.get(&key).cloned() else {
                 return Err(AclError::Missing);
@@ -1455,6 +1573,134 @@ mod tests {
         let acl = model.acl(r"C:\Users\Me").unwrap();
         assert!(acl.aces.iter().all(|a| a.plain().is_none_or(|(_, trustee)| trustee != sandbox().as_slice())));
     }
+    // ---- availability: directories this app may not change, and placeholders ----
+
+    #[test]
+    fn the_groups_the_account_belongs_to_can_admit_it() {
+        let users_read_exec = Acl { revision: 2, aces: vec![ace(0, INHERITED_ACE | 3, READ_EXEC, &users())] };
+        assert!(effective_via_groups(&users_read_exec, &sandbox()));
+        // Everyone and Authenticated Users count too; the SID bytes are the well-known ones.
+        for group in [vec![1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0], vec![1, 1, 0, 0, 0, 0, 0, 5, 11, 0, 0, 0]] {
+            let acl = Acl { revision: 2, aces: vec![ace(0, 0, READ_EXEC, &group)] };
+            assert!(effective_via_groups(&acl, &sandbox()));
+        }
+        // Several entries together cover the mask.
+        let acl = Acl {
+            revision: 2,
+            aces: vec![
+                ace(0, 0, FILE_TRAVERSE | FILE_READ_ATTRIBUTES, &users()),
+                ace(0, 0, READ_CONTROL | SYNCHRONIZE, &sandbox()),
+            ],
+        };
+        assert!(effective_via_groups(&acl, &sandbox()));
+    }
+
+    #[test]
+    fn entries_that_do_not_admit_the_account() {
+        // Administrators only, an inherit-only entry, a partial mask, a deny of the same bits.
+        assert!(!effective_via_groups(&typical(), &sandbox()));
+        let acl = Acl { revision: 2, aces: vec![ace(0, 0x03 | INHERIT_ONLY_ACE, READ_EXEC, &users())] };
+        assert!(!effective_via_groups(&acl, &sandbox()));
+        let acl = Acl { revision: 2, aces: vec![ace(0, 0, FILE_TRAVERSE, &users())] };
+        assert!(!effective_via_groups(&acl, &sandbox()));
+        let acl = Acl {
+            revision: 2,
+            aces: vec![ace(1, 0, FILE_TRAVERSE, &users()), ace(0, 0, READ_EXEC, &users())],
+        };
+        assert!(!effective_via_groups(&acl, &sandbox()), "a deny of traverse wins");
+        // A deny that touches other bits only does not matter.
+        let acl = Acl {
+            revision: 2,
+            aces: vec![ace(1, 0, 0x2, &users()), ace(0, 0, READ_EXEC, &users())],
+        };
+        assert!(effective_via_groups(&acl, &sandbox()));
+    }
+
+    #[test]
+    fn only_links_and_junctions_redirect_cloud_placeholders_do_not() {
+        const DIRECTORY: u32 = 0x10;
+        const REPARSE: u32 = 0x400;
+        // IO_REPARSE_TAG_SYMLINK, IO_REPARSE_TAG_MOUNT_POINT (junctions, volume mounts).
+        assert!(redirects_elsewhere(DIRECTORY | REPARSE, 0xA000_000C));
+        assert!(redirects_elsewhere(DIRECTORY | REPARSE, 0xA000_0003));
+        // OneDrive / cloud files placeholders (IO_REPARSE_TAG_CLOUD, _CLOUD_1..F, _CLOUD_ROOT),
+        // dedup, WSL and app execution aliases are ordinary folders as far as paths go.
+        for tag in [0x9000_001A, 0x9000_101A, 0x9000_F01A, 0x8000_0013, 0x8000_001B, 0x8000_0017] {
+            assert!(!redirects_elsewhere(DIRECTORY | REPARSE, tag), "{tag:#x}");
+        }
+        // Without the reparse attribute the tag is meaningless.
+        assert!(!redirects_elsewhere(DIRECTORY, 0xA000_000C));
+    }
+
+    #[test]
+    fn the_first_pass_never_asks_for_write_access_to_a_directory_that_needs_nothing() {
+        let base = tempfile::tempdir().unwrap();
+        let model = profile_model();
+        // The profile already admits the account (Users, inherited), and Windows would refuse a
+        // change there anyway: it must never be opened for writing.
+        model.dirs.borrow_mut().insert(
+            Model::key(Path::new(r"C:\Users\Me")),
+            Some(Acl { revision: 2, aces: vec![ace(0, INHERITED_ACE | 3, READ_EXEC, &users())] }),
+        );
+        model.deny_write.borrow_mut().push(Model::key(Path::new(r"C:\Users\Me")));
+        ensure_for(&model, base.path(), Path::new(PROFILE), &[PathBuf::from(WORKSPACE)], Some(&sandbox()))
+            .unwrap();
+        let modified = model.modified.borrow().clone();
+        assert!(!modified.contains(&Model::key(Path::new(r"C:\Users\Me"))), "{modified:?}");
+        assert_eq!(modified.len(), 3, "only the three directories that needed the entry: {modified:?}");
+        let record = read_record(&record_path(base.path())).unwrap();
+        assert!(record.grants.iter().all(|g| g.path != r"C:\Users\Me"), "{record:?}");
+    }
+
+    #[test]
+    fn a_directory_that_refuses_the_write_is_fine_when_the_account_is_admitted_anyway() {
+        // Needs the entry by our own test (no entry for the SID), is not admitted by group entries
+        // in the first pass (a deny of an unrelated bit does not matter, but an explicit deny of
+        // traverse does), so it is attempted; the write is refused; and a re-read says admitted.
+        let base = tempfile::tempdir().unwrap();
+        let model = profile_model();
+        // The first pass reads "not admitted"; make the later read say admitted by flipping the
+        // list when the write is attempted.
+        model.deny_write.borrow_mut().push(Model::key(Path::new(r"C:\Users\Me\AppData")));
+        struct Flip<'a>(&'a Model);
+        impl DirAcls for Flip<'_> {
+            fn read(&self, dir: &Path) -> std::result::Result<Option<Acl>, AclError> {
+                self.0.read(dir)
+            }
+            fn modify(&self, dir: &Path, change: super::AclChange<'_>) -> std::result::Result<bool, AclError> {
+                let outcome = self.0.modify(dir, change);
+                if matches!(outcome, Err(AclError::Denied(_))) {
+                    self.0.dirs.borrow_mut().insert(
+                        Model::key(dir),
+                        Some(Acl { revision: 2, aces: vec![ace(0, 0, READ_EXEC, &users())] }),
+                    );
+                }
+                outcome
+            }
+        }
+        let changed = ensure_for(
+            &Flip(&model),
+            base.path(),
+            Path::new(PROFILE),
+            &[PathBuf::from(WORKSPACE)],
+            Some(&sandbox()),
+        );
+        assert!(changed.is_ok(), "{changed:?}");
+    }
+
+    #[test]
+    fn a_directory_that_refuses_the_write_and_does_not_admit_the_account_fails_closed_with_advice() {
+        let base = tempfile::tempdir().unwrap();
+        let model = profile_model();
+        model.deny_write.borrow_mut().push(Model::key(Path::new(r"C:\Users\Me\AppData")));
+        let error = ensure_for(&model, base.path(), Path::new(PROFILE), &[PathBuf::from(WORKSPACE)], Some(&sandbox()))
+            .unwrap_err();
+        assert_eq!(error.code, "SANDBOX_GRANT_FAILED");
+        assert!(error.message.contains(r"C:\Users\Me\AppData"), "{}", error.message);
+        assert!(error.message.contains("Give sourceweft-sandbox"), "{}", error.message);
+        assert!(error.message.contains("choose a working folder elsewhere"), "{}", error.message);
+    }
+
 }
 
 // Real DACLs. These use a well-known group (BUILTIN\Guests) as the trustee, so they need neither
@@ -1473,14 +1719,7 @@ mod windows_tests {
     }
 
     fn dacl_of(dir: &Path) -> Option<Acl> {
-        let mut seen = None;
-        WindowsDirAcls
-            .modify(dir, &mut |acl| {
-                seen = Some(acl.cloned());
-                Ok(None)
-            })
-            .unwrap();
-        seen.unwrap()
+        WindowsDirAcls.read(dir).unwrap()
     }
 
     #[test]
