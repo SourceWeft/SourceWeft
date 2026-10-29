@@ -1011,3 +1011,64 @@ fn unanswered_ask_in_a_short_command_is_denied_at_once() {
 fn unanswered_ask_in_a_longer_command_times_out_before_the_kill() {
     unanswered_ask_ends_before_the_command_timeout(18_000, "ask-medium");
 }
+
+/// The default is `open`: with no `network` payload, or a policy that names no mode, a public
+/// host is allowed (audit source `open`) and nothing is asked. The decision is read from the
+/// audit and the ask frames, not from the upstream's reply, so a flaky upstream cannot fail it.
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn network_defaults_to_open_without_asking() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    for (call, network) in [
+        ("default-absent", None),
+        ("default-no-mode", Some(serde_json::json!({"allow": ["example.org"]}))),
+        ("default-open", Some(net_policy("open", &[]))),
+    ] {
+        let result = execute_net(&host, call, &workspace, &format!("{FETCH_NPM}; true"), network);
+        audit_entry(&result, |entry| npm_connection(entry, "allow", "open"));
+        assert!(!output(&result).contains("public internet only"), "{call}: {result}");
+    }
+    assert!(approvals.asks().is_empty(), "open mode must not ask: {:?}", approvals.asks());
+}
+
+/// The address guard is authoritative in EVERY mode: a private, loopback or metadata address is
+/// refused even with a matching allow rule and a bridge that approves anything, and the bridge is
+/// never asked.
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn guard_denies_private_loopback_and_metadata_in_every_mode() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    for address in ["10.0.0.1", "127.0.0.1", "169.254.169.254"] {
+        for (label, network) in [
+            ("absent", None),
+            ("open", Some(net_policy("open", &[address]))),
+            ("ask", Some(net_policy("ask", &[address]))),
+            ("strict", Some(net_policy("strict", &[address]))),
+        ] {
+            let result = execute_net(
+                &host,
+                &format!("guard-{address}-{label}"),
+                &workspace,
+                &format!("curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{{http_code}} http://{address}/; true"),
+                network,
+            );
+            let text = output(&result);
+            assert!(
+                text.contains("403") && text.contains("public internet only"),
+                "{address} ({label}) must be refused by the address guard: {result}"
+            );
+            audit_entry(&result, |entry| {
+                entry["decision"] == "deny" && entry["source"] == "guard" && entry["host"] == address
+            });
+        }
+    }
+    assert!(
+        approvals.asks().is_empty(),
+        "guarded addresses must never reach the bridge: {:?}",
+        approvals.asks()
+    );
+}

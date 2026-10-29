@@ -34,9 +34,14 @@ pub const DEADLINE_MARGIN: Duration = Duration::from_secs(10);
 /// How often a waiting ask re-checks whether its command was cancelled.
 const CANCEL_POLL: Duration = Duration::from_millis(100);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `open` is the default everywhere (a policy without a mode, no policy at all): any public
+/// host is reachable, exactly as before network modes existed. The private, loopback, metadata
+/// and own-interface address guard denies in every mode. `ask` and `strict` are per-device
+/// opt-ins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkMode {
+    #[default]
     Open,
     Ask,
     Strict,
@@ -47,6 +52,8 @@ pub enum NetworkMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkPolicy {
+    /// Absent means `open`, like an absent policy.
+    #[serde(default)]
     pub mode: NetworkMode,
     #[serde(default)]
     pub allow: Vec<String>,
@@ -56,7 +63,9 @@ pub struct NetworkPolicy {
 
 impl NetworkPolicy {
     /// Reads `payload.network`. Absent or null means "no policy" (the sidecar treats that as
-    /// `open`); a present but malformed value is an error rather than a silent downgrade.
+    /// `open`, the default mode), and a policy object without a `mode` is `open` too; a present
+    /// but malformed value (an unknown mode, a non-array `allow`, a non-object) is an error
+    /// rather than a silent change of mode.
     pub fn from_payload(payload: &Value) -> super::Result<Option<NetworkPolicy>> {
         match payload.get("network") {
             None | Some(Value::Null) => Ok(None),
@@ -673,11 +682,41 @@ mod tests {
     }
 
     #[test]
+    fn open_is_the_default_mode_everywhere() {
+        assert_eq!(NetworkMode::default(), NetworkMode::Open);
+        // No policy at all: nothing is forwarded, which the sidecar reads as `open`.
+        assert!(NetworkPolicy::from_payload(&json!({"workspaceId": "w", "command": "ls"}))
+            .unwrap()
+            .is_none());
+        // A policy object without a mode is open (not ask, not an error), with its fields intact.
+        let bare = NetworkPolicy::from_payload(&json!({"network": {}})).unwrap().unwrap();
+        assert_eq!(bare.mode, NetworkMode::Open);
+        let allow_only = NetworkPolicy::from_payload(&json!({"network": {"allow": ["a.com"]}}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(allow_only.mode, NetworkMode::Open);
+        assert_eq!(allow_only.allow, ["a.com"]);
+        // And what goes to the sidecar names the mode explicitly.
+        assert_eq!(
+            serde_json::to_string(&bare).unwrap(),
+            r#"{"mode":"open","allow":[],"suggested":{}}"#
+        );
+        // `ask` and `strict` only ever come from an explicit mode.
+        for (text, mode) in [("ask", NetworkMode::Ask), ("strict", NetworkMode::Strict)] {
+            let policy = NetworkPolicy::from_payload(&json!({"network": {"mode": text}}))
+                .unwrap()
+                .unwrap();
+            assert_eq!(policy.mode, mode);
+        }
+    }
+
+    #[test]
     fn a_malformed_policy_is_rejected_not_downgraded() {
         for bad in [
             json!({"network": {"mode": "wide-open"}}),
-            json!({"network": {"allow": []}}),
             json!({"network": "open"}),
+            json!({"network": {"mode": null}}),
+            json!({"network": {"mode": 1}}),
             json!({"network": {"mode": "ask", "allow": "a.com"}}),
         ] {
             let error = NetworkPolicy::from_payload(&bad).unwrap_err();

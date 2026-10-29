@@ -1173,7 +1173,53 @@ fn open_mode_unchanged() {
     let absent = execute_net(&host, "absent", &workspace, FETCH_NPM, None);
     assert_eq!(output(&absent).trim(), "200", "{absent}");
     audit_entry(&absent, |entry| npm_connection(entry, "allow", "open"));
+    // A policy object that names no mode is open as well (the default), allow list or not.
+    let no_mode = execute_net(
+        &host,
+        "no-mode",
+        &workspace,
+        FETCH_NPM,
+        Some(json!({"allow": ["example.org"]})),
+    );
+    assert_eq!(output(&no_mode).trim(), "200", "{no_mode}");
+    audit_entry(&no_mode, |entry| npm_connection(entry, "allow", "open"));
     assert!(approvals.asks().is_empty(), "open mode must not ask");
+}
+
+/// The address guard is authoritative in EVERY mode: a private, loopback or metadata address is
+/// refused even with a matching allow rule and a bridge that approves anything, and the bridge is
+/// never asked.
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn guard_denies_private_loopback_and_metadata_in_every_mode() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    for address in ["10.0.0.1", "127.0.0.1", "169.254.169.254"] {
+        for (label, network) in [
+            ("absent", None),
+            ("open", Some(policy("open", &[address]))),
+            ("ask", Some(policy("ask", &[address]))),
+            ("strict", Some(policy("strict", &[address]))),
+        ] {
+            let result = execute_net(
+                &host,
+                &format!("guard-{address}-{label}"),
+                &workspace,
+                &format!("curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{{http_code}} http://{address}/; true"),
+                network,
+            );
+            let text = output(&result);
+            assert!(
+                text.contains("403") && text.contains("public internet only"),
+                "{address} ({label}) must be refused by the address guard: {result}"
+            );
+            audit_entry(&result, |entry| {
+                entry["decision"] == "deny" && entry["source"] == "guard" && entry["host"] == address
+            });
+        }
+    }
+    assert!(approvals.asks().is_empty(), "guarded addresses must never reach the bridge: {:?}", approvals.asks());
 }
 
 #[test]
