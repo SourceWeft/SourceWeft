@@ -72,8 +72,11 @@
       "mocha>serialize-javascript": "7.0.5",
       "mocha>diff": "8.0.3",
       "handlebars": "4.7.10",
-      "follow-redirects": "^1.16.1",
-      "vite": "^8.2.4"
+      "follow-redirects": "^1.16.2",
+      "vite": "^8.2.4",
+      "node-forge": "^1.4.2",
+      "minimatch": "^11.0.3",
+      "mocha>glob": "^14.0.3"
     },
     "peerDependencyRules": {
       "allowedVersions": {
@@ -85,11 +88,6 @@
         "@browserbasehq/stagehand>openai": "6",
         "@browserbasehq/stagehand>zod": "4"
       }
-    },
-    "auditConfig": {
-      "ignoreGhsas": [
-        "GHSA-86w9-cpqp-85rv"
-      ]
     },
     "onlyBuiltDependencies": [
       "@parcel/watcher",
