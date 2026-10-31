@@ -31,6 +31,9 @@ pub struct LocalHost {
     // readiness.rs for the policy. Present on every platform (only macOS and Linux read it) so
     // the struct's shape does not depend on target OS.
     pub(super) sandbox_readiness_cache: Mutex<ReadinessCache>,
+    /// Relays sandbox network approvals to the backend over the device WebSocket
+    /// (`remote_host.rs` installs the outbound channel while connected).
+    pub network: super::network::NetworkBridge,
     // The sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(super) sandbox: super::srt_exec::SandboxSlot,
@@ -143,6 +146,7 @@ impl LocalHost {
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
                 sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
+                network: Default::default(),
                 #[cfg(any(target_os = "macos", target_os = "linux"))]
                 sandbox: Default::default(),
             })

@@ -748,19 +748,25 @@ mod tests {
                 "protocol-null",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol none, this app needs 1). Install the update.",
+                "The sandbox runtime is out of date (protocol none, this app needs 2). Install the update.",
             ),
             (
                 "protocol-0",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol 0, this app needs 1). Install the update.",
+                "The sandbox runtime is out of date (protocol 0, this app needs 2). Install the update.",
             ),
             (
-                "protocol-2",
+                "protocol-1",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
+                "The sandbox runtime is out of date (protocol 1, this app needs 2). Install the update.",
+            ),
+            (
+                "protocol-3",
                 SetupCode::BundleNewer,
                 Remedy::UpdateApp,
-                "The sandbox runtime (protocol 2) is newer than this app supports (1). Update SourceWeft.",
+                "The sandbox runtime (protocol 3) is newer than this app supports (2). Update SourceWeft.",
             ),
         ] {
             let mut init = test_init();

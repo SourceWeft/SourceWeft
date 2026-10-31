@@ -23,6 +23,8 @@
 //! how this test locates its fixtures: the bundle is located relative to
 //! `CARGO_MANIFEST_DIR`, at `apps/desktop/sandbox-sidecar/dist/bundle` (git-ignored). The
 //! verification recipe copies a container-built bundle there before running `cargo test`.
+mod common;
+
 use serde_json::{json, Value};
 use sourceweft_desktop::local_host::{
     execution::Executions,
@@ -31,11 +33,15 @@ use sourceweft_desktop::local_host::{
     },
     LocalHost, Workspace,
 };
+use sourceweft_desktop::local_host::network::{NetworkBridge, OutboundLease};
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 
 /// `apps/desktop/sandbox-sidecar/dist/bundle`, built by that package's
@@ -241,19 +247,8 @@ fn writes_inside_workspace() {
         &workspace,
         "printf hello > out.txt && /bin/pwd && printf '%s\\n' \"$HOME\" \"$TMPDIR\" \"$npm_config_cache\" \"$PIP_CACHE_DIR\" \"$NODE_USE_ENV_PROXY\" && mktemp",
     );
-    // Exactly the macOS result shape.
-    let mut keys: Vec<&str> = result
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    keys.sort_unstable();
-    assert_eq!(
-        keys,
-        ["cancelled", "exitCode", "output", "truncated"],
-        "{result}"
-    );
+    // The macOS result shape: the four original fields, plus at most the sandbox extras.
+    common::assert_result_shape(&result);
     assert_eq!(result["exitCode"], 0, "{result}");
     assert_eq!(result["cancelled"], false, "{result}");
     assert_eq!(result["truncated"], false, "{result}");
@@ -873,4 +868,591 @@ fn cannot_read_cargo_credentials_under_a_toolchain_read_root() {
         "~/.cargo/credentials.toml was readable inside the sandbox: {result}"
     );
     drop(planted);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Network approvals: modes, rules, the address guard, and the audit trail.
+//
+// The backend half is replaced by `ApprovalBridge`: it plays the WebSocket in-process by
+// installing an outbound channel on `host.network`, recording every `network.ask` frame and
+// answering through `host.network.resolve` exactly as `remote_host.rs` does for a
+// `network.decision`. These tests reach the public internet (registry.npmjs.org and
+// example.com), like `public_https_allowed`.
+// ---------------------------------------------------------------------------------------------
+
+const NPM_URL: &str = "https://registry.npmjs.org/left-pad";
+const FETCH_NPM: &str = "curl -sS -o /dev/null -w %{http_code} https://registry.npmjs.org/left-pad";
+
+/// A `network` payload for `command.execute`.
+fn policy(mode: &str, allow: &[&str]) -> Value {
+    json!({"mode": mode, "allow": allow, "suggested": {}})
+}
+
+/// `command.execute` with an explicit network policy (`None` omits the field entirely).
+fn execute_net(
+    host: &LocalHost,
+    call: &str,
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+) -> Value {
+    host.dispatch(
+        &Executions::default(),
+        call,
+        "owner",
+        &workspace.thread_id,
+        "command.execute",
+        net_payload(workspace, command, network),
+    )
+    .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
+}
+
+fn net_payload(workspace: &Workspace, command: &str, network: Option<Value>) -> Value {
+    net_payload_timeout(workspace, command, network, 60000)
+}
+
+fn net_payload_timeout(
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+    timeout_ms: u64,
+) -> Value {
+    let mut payload = json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": 20000});
+    if let Some(network) = network {
+        payload["network"] = network;
+    }
+    payload
+}
+
+/// What the stand-in backend does with each `network.ask`: wait `delay`, then answer.
+#[derive(Clone)]
+struct Answer {
+    delay: Duration,
+    allow: bool,
+    reason: Option<&'static str>,
+}
+
+/// Installs an outbound channel on `host.network` for its lifetime. With `answer` it resolves
+/// every ask after the delay; without, it only records them (the ask stays pending).
+struct ApprovalBridge {
+    bridge: NetworkBridge,
+    lease: Option<OutboundLease>,
+    asks: Arc<Mutex<Vec<Value>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ApprovalBridge {
+    fn start(host: &LocalHost, answer: Option<Answer>) -> Self {
+        let bridge = host.network.clone();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let lease = bridge.attach(sender);
+        let asks = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let (bridge, asks, stop) = (bridge.clone(), asks.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match frames.try_recv() {
+                        Ok(frame) => {
+                            asks.lock().unwrap().push(frame.clone());
+                            if let Some(answer) = &answer {
+                                std::thread::sleep(answer.delay);
+                                let ask_id = frame["askId"].as_str().unwrap();
+                                bridge.resolve(ask_id, answer.allow, answer.reason.map(str::to_string));
+                            }
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+            })
+        };
+        Self {
+            bridge,
+            lease: Some(lease),
+            asks,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    fn allowing(host: &LocalHost, delay_ms: u64) -> Self {
+        Self::start(
+            host,
+            Some(Answer {
+                delay: Duration::from_millis(delay_ms),
+                allow: true,
+                reason: None,
+            }),
+        )
+    }
+
+    fn asks(&self) -> Vec<Value> {
+        self.asks.lock().unwrap().clone()
+    }
+
+    fn wait_for_ask(&self) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(first) = self.asks().first() {
+                return first.clone();
+            }
+            assert!(Instant::now() < deadline, "no network.ask was sent within 30 s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for ApprovalBridge {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        drop(self.lease.take());
+    }
+}
+
+fn audit(result: &Value) -> &Vec<Value> {
+    result["networkAudit"]
+        .as_array()
+        .unwrap_or_else(|| panic!("result has no networkAudit: {result}"))
+}
+
+/// The first audit entry for which `matches` holds.
+fn audit_entry<'a>(result: &'a Value, matches: impl Fn(&Value) -> bool) -> &'a Value {
+    audit(result)
+        .iter()
+        .find(|entry| matches(entry))
+        .unwrap_or_else(|| panic!("no matching audit entry in: {result}"))
+}
+
+fn npm_connection(entry: &Value, decision: &str, source: &str) -> bool {
+    entry["kind"] == "connection"
+        && entry["host"] == "registry.npmjs.org"
+        && entry["port"] == 443
+        && entry["decision"] == decision
+        && entry["source"] == source
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn ask_mode_blocks_until_decision_then_connects() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 300);
+    let started = Instant::now();
+    let result = execute_net(&host, "ask-allow", &workspace, FETCH_NPM, Some(policy("ask", &[])));
+    assert!(
+        started.elapsed() >= Duration::from_millis(300),
+        "the connection cannot complete before the decision"
+    );
+    assert_eq!(output(&result).trim(), "200", "{result}");
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let asks = approvals.asks();
+    assert_eq!(asks.len(), 1, "exactly one network.ask: {asks:?}");
+    assert_eq!(asks[0]["type"], "network.ask");
+    assert_eq!(asks[0]["id"], "ask-allow");
+    assert_eq!(asks[0]["host"], "registry.npmjs.org");
+    assert_eq!(asks[0]["port"], 443);
+    audit_entry(&result, |entry| npm_connection(entry, "allow", "approval"));
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn ask_mode_deny_reaches_model_text() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // A real user denial: the backend's exact text ("denied by user") is what the sidecar
+    // recognises as the user saying no.
+    let approvals = ApprovalBridge::start(
+        &host,
+        Some(Answer {
+            delay: Duration::from_millis(100),
+            allow: false,
+            reason: Some("denied by user"),
+        }),
+    );
+    let result = execute_net(
+        &host,
+        "ask-deny",
+        &workspace,
+        &format!("{FETCH_NPM}; true"),
+        Some(policy("ask", &[])),
+    );
+    assert_eq!(approvals.asks().len(), 1);
+    let text = output(&result);
+    assert!(text.contains("<sandbox_violations>"), "{result}");
+    assert!(text.contains("denied by user"), "{result}");
+    assert!(!text.starts_with("200"), "the request must not succeed: {result}");
+    let entry = audit_entry(&result, |entry| npm_connection(entry, "deny", "user"));
+    assert_eq!(entry["reason"], "denied by user");
+    drop(approvals);
+
+    // Any other reason is a system denial (a cancelled command, a timeout, an unavailable
+    // approval...), not the user's decision: same model-visible text, source `unavailable`.
+    let approvals = ApprovalBridge::start(
+        &host,
+        Some(Answer {
+            delay: Duration::from_millis(100),
+            allow: false,
+            reason: Some("blocked by the test policy"),
+        }),
+    );
+    let other = execute_net(
+        &host,
+        "ask-deny-system",
+        &workspace,
+        &format!("{FETCH_NPM}; true"),
+        Some(policy("ask", &[])),
+    );
+    assert_eq!(approvals.asks().len(), 1);
+    assert!(output(&other).contains("<sandbox_violations>"), "{other}");
+    assert!(output(&other).contains("blocked by the test policy"), "{other}");
+    let entry = audit_entry(&other, |entry| npm_connection(entry, "deny", "unavailable"));
+    assert_eq!(entry["reason"], "blocked by the test policy");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn strict_mode_denies_without_asking() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // A bridge that would allow anything, to prove it is never consulted.
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let result = execute_net(
+        &host,
+        "strict",
+        &workspace,
+        &format!("{FETCH_NPM}; true"),
+        Some(policy("strict", &[])),
+    );
+    assert!(approvals.asks().is_empty(), "strict mode must not ask: {:?}", approvals.asks());
+    assert!(output(&result).contains("<sandbox_violations>"), "{result}");
+    audit_entry(&result, |entry| npm_connection(entry, "deny", "strict"));
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn rule_allows_without_asking() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let result = execute_net(
+        &host,
+        "rule",
+        &workspace,
+        FETCH_NPM,
+        Some(policy("ask", &["registry.npmjs.org"])),
+    );
+    assert_eq!(output(&result).trim(), "200", "{result}");
+    assert!(approvals.asks().is_empty(), "a rule match must not ask");
+    audit_entry(&result, |entry| npm_connection(entry, "allow", "rule"));
+    // The same rule in strict mode connects too.
+    let strict = execute_net(
+        &host,
+        "rule-strict",
+        &workspace,
+        FETCH_NPM,
+        Some(policy("strict", &["registry.npmjs.org"])),
+    );
+    assert_eq!(output(&strict).trim(), "200", "{strict}");
+    assert!(approvals.asks().is_empty());
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn open_mode_unchanged() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let open = execute_net(&host, "open", &workspace, FETCH_NPM, Some(policy("open", &[])));
+    assert_eq!(output(&open).trim(), "200", "{open}");
+    audit_entry(&open, |entry| npm_connection(entry, "allow", "open"));
+    // No network field at all behaves as open.
+    let absent = execute_net(&host, "absent", &workspace, FETCH_NPM, None);
+    assert_eq!(output(&absent).trim(), "200", "{absent}");
+    audit_entry(&absent, |entry| npm_connection(entry, "allow", "open"));
+    // A policy object that names no mode is open as well (the default), allow list or not.
+    let no_mode = execute_net(
+        &host,
+        "no-mode",
+        &workspace,
+        FETCH_NPM,
+        Some(json!({"allow": ["example.org"]})),
+    );
+    assert_eq!(output(&no_mode).trim(), "200", "{no_mode}");
+    audit_entry(&no_mode, |entry| npm_connection(entry, "allow", "open"));
+    assert!(approvals.asks().is_empty(), "open mode must not ask");
+}
+
+/// The address guard is authoritative in EVERY mode: a private, loopback or metadata address is
+/// refused even with a matching allow rule and a bridge that approves anything, and the bridge is
+/// never asked.
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn guard_denies_private_loopback_and_metadata_in_every_mode() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    for address in ["10.0.0.1", "127.0.0.1", "169.254.169.254"] {
+        for (label, network) in [
+            ("absent", None),
+            ("open", Some(policy("open", &[address]))),
+            ("ask", Some(policy("ask", &[address]))),
+            ("strict", Some(policy("strict", &[address]))),
+        ] {
+            let result = execute_net(
+                &host,
+                &format!("guard-{address}-{label}"),
+                &workspace,
+                &format!("curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{{http_code}} http://{address}/; true"),
+                network,
+            );
+            let text = output(&result);
+            assert!(
+                text.contains("403") && text.contains("public internet only"),
+                "{address} ({label}) must be refused by the address guard: {result}"
+            );
+            audit_entry(&result, |entry| {
+                entry["decision"] == "deny" && entry["source"] == "guard" && entry["host"] == address
+            });
+        }
+    }
+    assert!(approvals.asks().is_empty(), "guarded addresses must never reach the bridge: {:?}", approvals.asks());
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and /etc/hosts test entries"]
+fn guard_beats_rule_and_approval() {
+    require_hosts_entry("sw-private.test", "10.0.0.1");
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // Every way to say yes: a rule for the target and a bridge that approves anything.
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    for (call, target) in [
+        ("guard-literal", "10.0.0.1:80"),
+        ("guard-name", "sw-private.test:80"),
+    ] {
+        let allow = [target.split(':').next().unwrap(), target];
+        let result = execute_net(
+            &host,
+            call,
+            &workspace,
+            &CONNECT_PROBE.replace("@TARGET@", target),
+            Some(policy("ask", &allow)),
+        );
+        assert_connect_refused(&result, target, None);
+        if call == "guard-literal" {
+            // The sidecar's own guard refuses a literal address before any rule or approval.
+            // (A name that merely resolves to a private address is refused by srt's dial-time
+            // check instead, with a different message, so only the 403 is asserted for it.)
+            assert!(
+                output(&result).contains("public internet only"),
+                "{target} must be refused by the address guard: {result}"
+            );
+            audit_entry(&result, |entry| {
+                entry["decision"] == "deny" && entry["source"] == "guard" && entry["host"] == "10.0.0.1"
+            });
+        }
+        assert!(
+            audit(&result)
+                .iter()
+                .all(|entry| entry["decision"] == "deny" || entry["kind"] != "connection" || call == "guard-name"),
+            "no connection to {target} may be audited as allowed: {result}"
+        );
+    }
+    assert!(
+        approvals.asks().is_empty(),
+        "the bridge must not even be asked about guarded addresses: {:?}",
+        approvals.asks()
+    );
+    // And the literal in `curl` form, mirroring `private_literal_blocked`.
+    let curl = execute_net(
+        &host,
+        "guard-curl",
+        &workspace,
+        "curl -sS --noproxy '' --max-time 10 -o /dev/null -w %{http_code} http://10.0.0.1/; true",
+        Some(policy("ask", &["10.0.0.1"])),
+    );
+    assert!(
+        output(&curl).contains("sandbox_violations") || output(&curl).contains("403"),
+        "{curl}"
+    );
+    audit_entry(&curl, |entry| {
+        entry["decision"] == "deny" && entry["source"] == "guard" && entry["host"] == "10.0.0.1"
+    });
+    assert!(approvals.asks().is_empty());
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn concurrent_connections_share_one_ask() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // A long answer delay, so the second curl's connection arrives while the first ask is
+    // still in flight (and would raise a second one if asks were not shared).
+    let approvals = ApprovalBridge::allowing(&host, 1500);
+    let result = execute_net(
+        &host,
+        "concurrent",
+        &workspace,
+        r#"curl -sS -o /dev/null -w 'a=%{http_code}\n' https://registry.npmjs.org/left-pad & curl -sS -o /dev/null -w 'b=%{http_code}\n' https://registry.npmjs.org/is-number & wait"#,
+        Some(policy("ask", &[])),
+    );
+    let text = output(&result);
+    assert!(text.contains("a=200") && text.contains("b=200"), "{result}");
+    let asks = approvals.asks();
+    assert_eq!(asks.len(), 1, "two connections to one host:port share one ask: {asks:?}");
+    assert_eq!(asks[0]["host"], "registry.npmjs.org");
+    audit_entry(&result, |entry| npm_connection(entry, "allow", "approval"));
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cancel_denies_pending_ask() {
+    let (_app, host) = host_with_bundle();
+    let host = Arc::new(host);
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // Records asks but never answers, so the connection stays pending until the cancel.
+    let approvals = ApprovalBridge::start(&host, None);
+    let executions = Arc::new(Executions::default());
+    let worker = {
+        let host = host.clone();
+        let executions = executions.clone();
+        let payload = net_payload(
+            &workspace,
+            &format!("curl -sS --max-time 90 -o /dev/null {NPM_URL}; true"),
+            Some(policy("ask", &[])),
+        );
+        let thread_id = workspace.thread_id.clone();
+        std::thread::spawn(move || {
+            host.dispatch(&executions, "cancel-ask", "owner", &thread_id, "command.execute", payload)
+        })
+    };
+    let ask = approvals.wait_for_ask();
+    let ask_id = ask["askId"].as_str().unwrap().to_string();
+    assert_eq!(ask["id"], "cancel-ask");
+    assert!(executions.cancel("cancel-ask"));
+    let result = worker.join().unwrap().unwrap();
+    assert_eq!(result["cancelled"], true, "{result}");
+    // The pending ask was answered (denied) by the cancel: a late decision finds nothing.
+    assert!(
+        !approvals.bridge.resolve(&ask_id, true, None),
+        "the cancelled command's ask must no longer be pending"
+    );
+    if let Some(entries) = result["networkAudit"].as_array() {
+        assert!(
+            entries
+                .iter()
+                .all(|entry| !(entry["kind"] == "connection" && entry["decision"] == "allow")),
+            "a cancelled, unanswered ask must never be audited as allowed: {result}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn ask_timeout_denies() {
+    let (_app, mut host) = host_with_bundle();
+    // The sidecar starts lazily on the first command and captures the bridge then, so a bridge
+    // with a short deadline swapped in now governs every ask of this test.
+    host.network = NetworkBridge::with_timeout(Duration::from_secs(2));
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let approvals = ApprovalBridge::start(&host, None);
+    let started = Instant::now();
+    let result = execute_net(
+        &host,
+        "ask-timeout",
+        &workspace,
+        &format!("{FETCH_NPM}; true"),
+        Some(policy("ask", &[])),
+    );
+    assert!(started.elapsed() >= Duration::from_secs(2), "{result}");
+    assert_eq!(approvals.asks().len(), 1);
+    let text = output(&result);
+    assert!(text.contains("<sandbox_violations>"), "{result}");
+    assert!(text.contains("approval timed out"), "{result}");
+    // A timeout is the system's denial, not the user's: source `unavailable`.
+    let entry = audit_entry(&result, |entry| npm_connection(entry, "deny", "unavailable"));
+    assert_eq!(entry["reason"], "approval timed out");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn plain_http_audit_has_method_and_path() {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let _approvals = ApprovalBridge::allowing(&host, 0);
+    let result = execute_net(
+        &host,
+        "plain-http",
+        &workspace,
+        "curl -sS -o /dev/null -w %{http_code} http://example.com/",
+        Some(policy("ask", &["example.com"])),
+    );
+    assert_eq!(result["exitCode"], 0, "{result}");
+    let entry = audit_entry(&result, |entry| entry["kind"] == "http");
+    assert_eq!(entry["method"], "GET", "{result}");
+    assert_eq!(entry["host"], "example.com", "{result}");
+    assert_eq!(entry["path"], "/", "{result}");
+    assert_eq!(entry["decision"], "allow", "{result}");
+    assert_eq!(entry["source"], "rule", "{result}");
+    assert!(entry["status"].is_u64(), "status must be numeric: {result}");
+}
+
+/// An ask nobody answers, in a command with its own (short) timeout: the bridge must deny it
+/// before the command is killed, so the command finishes by itself (not exit 124) and its output
+/// carries the `<sandbox_violations>` text with the reason.
+fn unanswered_ask_ends_before_the_command_timeout(timeout_ms: u64, call: &str) {
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    // Records the ask, never answers it.
+    let approvals = ApprovalBridge::start(&host, None);
+    let started = Instant::now();
+    let result = host
+        .dispatch(
+            &Executions::default(),
+            call,
+            "owner",
+            &workspace.thread_id,
+            "command.execute",
+            net_payload_timeout(
+                &workspace,
+                &format!("{FETCH_NPM}; echo; echo CURL_EXIT=$?"),
+                Some(policy("ask", &[])),
+                timeout_ms,
+            ),
+        )
+        .unwrap_or_else(|error| panic!("command.execute failed: {error}"));
+    let elapsed = started.elapsed();
+    assert_ne!(result["exitCode"], 124, "the command was killed by its timeout: {result}");
+    assert_eq!(result["cancelled"], false, "{result}");
+    let text = output(&result);
+    assert!(text.contains("<sandbox_violations>"), "{result}");
+    assert!(text.contains("approval timed out"), "{result}");
+    assert!(text.contains("CURL_EXIT="), "the command must have finished by itself: {result}");
+    assert!(
+        elapsed < Duration::from_millis(timeout_ms),
+        "finished in {elapsed:?}, after its {timeout_ms} ms timeout: {result}"
+    );
+    // A short command's ask is denied at once (inside the margin) and never reaches the
+    // backend; a longer one is relayed and then times out before the kill.
+    if timeout_ms <= 10_000 {
+        assert!(approvals.asks().is_empty(), "{:?}", approvals.asks());
+    } else {
+        assert_eq!(approvals.asks().len(), 1);
+    }
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn unanswered_ask_in_a_short_command_is_denied_at_once() {
+    unanswered_ask_ends_before_the_command_timeout(6_000, "ask-short");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn unanswered_ask_in_a_longer_command_times_out_before_the_kill() {
+    unanswered_ask_ends_before_the_command_timeout(18_000, "ask-medium");
 }

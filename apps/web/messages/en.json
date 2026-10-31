@@ -1360,7 +1360,18 @@
       "workingDirectoriesTitle": "Working directories",
       "workingDirectoriesDescription": "Each conversation gets a separate task folder. Removing folder access stops further local operations for affected tasks and preserves the files.",
       "removeAccess": "Remove access",
-      "addFolder": "Add folder"
+      "addFolder": "Add folder",
+      "networkTitle": "Network access",
+      "networkDescription": "Choose what commands run on this computer may reach on the internet. Private and local network addresses are always blocked.",
+      "networkSelectAria": "Network access mode",
+      "networkAsk": "Ask me about new sites",
+      "networkOpen": "Allow public sites (default)",
+      "networkStrict": "Only sites I allow",
+      "networkHelperEnforced": "Enforced by the sandbox on this computer.",
+      "networkHelperUnenforced": "This setting is not enforced on this computer yet. Commands can still reach any public host.",
+      "networkDescription_open": "Commands can reach any public site. Private, local and cloud-metadata addresses are always blocked.",
+      "networkDescription_ask": "A command that reaches a new site pauses until you approve it in the conversation.",
+      "networkDescription_strict": "Commands can reach only the sites you have allowed. Nothing is asked."
     },
     "approvals": {
       "title": "Approvals",
@@ -1381,7 +1392,9 @@
       "expired": "Expired",
       "noExpiry": "No expiry",
       "neverUsed": "Never used",
-      "unknownPrompt": "Unknown prompt"
+      "unknownPrompt": "Unknown prompt",
+      "networkRule": "Network · {host}",
+      "networkRuleDetail": "Local commands may reach this host on any port"
     },
     "about": {
       "title": "About",
@@ -2324,6 +2337,21 @@
       "summaryFailed": "This run used {steps} of {limit} steps, but its summary failed. You can continue from saved progress.",
       "continue": "Continue remaining work",
       "continueMessage": "Continue the unfinished work from the saved progress in this conversation. Check existing results first and avoid repeating completed actions."
+    },
+    "networkAccess": {
+      "region": "Network access requests",
+      "title": "Network access requested",
+      "target": "{host}:{port}",
+      "intro": "A command on your computer is trying to reach this host. It keeps running while it waits for your answer.",
+      "commandLabel": "Command",
+      "requestedBy": "Requested by skill {skill}",
+      "expiresIn": "Denied automatically in {time}",
+      "deny": "Deny",
+      "allowOnce": "Allow once",
+      "allowWorkspace": "Allow for this workspace",
+      "sending": "Sending...",
+      "forbidden": "Only workspace admins can allow a host for the whole workspace. You can still allow it once.",
+      "failed": "Could not send your answer. Try again."
     }
   },
   "dashboardChatFiles": {

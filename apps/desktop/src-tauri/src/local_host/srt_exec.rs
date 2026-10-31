@@ -12,8 +12,9 @@
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
 use super::{
+    network::{ActiveCommand, Decision, NetworkPolicy},
     readiness::{bundle_dir, user_path, Helpers, InitConfig, Platform},
-    sidecar::{Sidecar, WrappedCommand},
+    sidecar::{EventHandler, Sidecar, SidecarEvent, WrappedCommand},
     HostError, LocalHost, Result,
 };
 use serde_json::{json, Value};
@@ -369,8 +370,11 @@ fn try_wrap(
     script: &str,
     cwd: &Path,
     root: &Path,
+    network: Option<&NetworkPolicy>,
 ) -> Result<WrappedCommand> {
-    let wrapped = instance.sidecar.wrap(command_id, script, cwd, root)?;
+    let wrapped = instance
+        .sidecar
+        .wrap(command_id, script, cwd, root, network)?;
     if wrapped.argv.is_empty() {
         // srt counted this wrap; balance it before reporting the sidecar unusable.
         instance.finish(command_id);
@@ -400,6 +404,7 @@ fn wrap_in_sandbox(
     cwd: &Path,
     script: &str,
     command_id: &str,
+    network: Option<&NetworkPolicy>,
     mut start: impl FnMut() -> Result<SandboxInstance>,
 ) -> Result<(Arc<SandboxInstance>, WrappedCommand)> {
     let instance = {
@@ -413,7 +418,7 @@ fn wrap_in_sandbox(
             }
         }
     };
-    match try_wrap(&instance, command_id, script, cwd, root) {
+    match try_wrap(&instance, command_id, script, cwd, root, network) {
         Ok(wrapped) => Ok((instance, wrapped)),
         Err(error) if error.code == "SANDBOX_UNAVAILABLE" => {
             let replacement = {
@@ -432,7 +437,7 @@ fn wrap_in_sandbox(
                 }
             };
             drop(instance);
-            let wrapped = try_wrap(&replacement, command_id, script, cwd, root)?;
+            let wrapped = try_wrap(&replacement, command_id, script, cwd, root, network)?;
             Ok((replacement, wrapped))
         }
         Err(error) => Err(error),
@@ -458,11 +463,33 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let sidecar = Sidecar::start(
+    // Every instance — including one that replaces a poisoned predecessor, on every platform —
+    // is built here, so every sidecar answers its network asks through the host's bridge.
+    let sidecar = Sidecar::start_with_events(
         &bundle,
         &init_config(HOST_PLATFORM, &bundle, &host.base, names),
+        event_handler(host.network.clone()),
     )?;
     Ok(SandboxInstance::new(sidecar, roots))
+}
+
+/// Routes sidecar `ask` events to the bridge. Runs on the sidecar's reader thread, so it only
+/// hands the ask over; the bridge waits on a thread of its own and then answers through the
+/// responder.
+fn event_handler(bridge: super::network::NetworkBridge) -> EventHandler {
+    Arc::new(move |event, responder| match event {
+        SidecarEvent::Ask(ask) => {
+            let ask_id = ask.ask_id.clone();
+            bridge.on_ask(
+                ask,
+                Box::new(move |Decision { allow, reason }| {
+                    if let Err(error) = responder.reply(&ask_id, allow, reason.as_deref()) {
+                        eprintln!("sourceweft-desktop: could not answer network ask: {error}");
+                    }
+                }),
+            );
+        }
+    })
 }
 
 /// The wrapped command's environment with the pinned toolchain, home, temp and cache locations
@@ -524,7 +551,10 @@ fn prepare_tmpdir(root: &Path) -> Result<()> {
 
 /// Runs `script` under `/bin/sh`-compatible wrapping in `cwd` (inside `root`), with write access
 /// to `root` only, and returns the JSON shape the backend expects
-/// (`{"output","exitCode","truncated","cancelled"}`).
+/// (`{"output","exitCode","truncated","cancelled"}`) plus `networkAudit` (the sidecar's recorded
+/// connection decisions for this command). If the audit cannot be read the command's result is
+/// still returned, with `networkAuditError` in place of `networkAudit`. `network` is forwarded
+/// to the sidecar; `None` means the sidecar's default (`open`).
 pub(crate) fn execute_command(
     host: &LocalHost,
     root: &Path,
@@ -533,14 +563,25 @@ pub(crate) fn execute_command(
     timeout_ms: u64,
     max_chars: usize,
     cancel: Arc<AtomicBool>,
+    network: Option<&NetworkPolicy>,
+    active: &ActiveCommand,
 ) -> Result<Value> {
     prepare_tmpdir(root)?;
     let command_id = new_command_id();
+    // Before `wrap`: the sidecar's first ask can follow the wrap reply immediately, and the
+    // bridge only attributes asks that name this command.
+    active.set_command_id(&command_id);
     let script = pinned_script(root, script);
     let (instance, wrapped) =
-        match wrap_in_sandbox(&host.sandbox, root, cwd, &script, &command_id, || {
-            start_instance(host)
-        }) {
+        match wrap_in_sandbox(
+            &host.sandbox,
+            root,
+            cwd,
+            &script,
+            &command_id,
+            network,
+            || start_instance(host),
+        ) {
             Ok(found) => found,
             Err(error) => {
                 if matches!(
@@ -571,12 +612,19 @@ pub(crate) fn execute_command(
             ),
         };
         let output = format!("{}{}", String::from_utf8_lossy(&run.stdout), stderr);
-        json!({
+        let mut result = json!({
             "output": output.chars().take(max_chars).collect::<String>(),
             "exitCode": run.exit_code,
             "truncated": run.truncated || output.chars().count() > max_chars,
             "cancelled": run.cancelled,
-        })
+        });
+        // Drained before `finish`, which makes the sidecar forget the command. A failed audit
+        // never fails the command; it is reported honestly instead of as an empty list.
+        match instance.sidecar.audit(&command_id) {
+            Ok(entries) => result["networkAudit"] = Value::Array(entries),
+            Err(error) => result["networkAuditError"] = Value::String(error.message),
+        }
+        result
     });
     instance.finish(&command_id);
     result
@@ -662,6 +710,7 @@ mod tests {
                 Path::new("/w/a/files"),
                 "echo hi",
                 "id",
+                None,
                 || {
                     starts += 1;
                     stub_instance(bundle.path(), &["/w"])
@@ -691,6 +740,7 @@ mod tests {
                 Path::new("/w/a/files"),
                 "echo hi",
                 "id",
+                None,
                 || {
                     starts += 1;
                     stub_instance(bundle.path(), &["/w"])
@@ -716,6 +766,7 @@ mod tests {
             Path::new("/granted"),
             "echo hi",
             "id",
+            None,
             || {
                 starts += 1;
                 stub_instance(bundle.path(), &["/w", "/granted"])
@@ -750,10 +801,10 @@ mod tests {
         let start = || stub_instance_at(bundle.path(), &["/w"], home);
         let w = Path::new("/w");
         // Two overlapping commands: the second is wrapped before the first has finished.
-        let (first, _) = wrap_in_sandbox(&slot, w, w, "echo a", "cmd-a", start).unwrap();
-        let (second, _) = wrap_in_sandbox(&slot, w, w, "echo b", "cmd-b", start).unwrap();
+        let (first, _) = wrap_in_sandbox(&slot, w, w, "echo a", "cmd-a", None, start).unwrap();
+        let (second, _) = wrap_in_sandbox(&slot, w, w, "echo b", "cmd-b", None, start).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
-        let failed = wrap_in_sandbox(&slot, w, w, "ERROR:POLICY_INVALID", "cmd-c", start)
+        let failed = wrap_in_sandbox(&slot, w, w, "ERROR:POLICY_INVALID", "cmd-c", None, start)
             .err()
             .expect("a policy error must be returned");
         assert_eq!(failed.code, "POLICY_INVALID");
@@ -778,6 +829,7 @@ mod tests {
             Path::new("/w"),
             "ERROR:SANDBOX_UNAVAILABLE",
             "id",
+            None,
             || {
                 starts += 1;
                 stub_instance_at(bundle.path(), &["/w"], home)
@@ -803,6 +855,7 @@ mod tests {
             Path::new("/w"),
             "ERROR:POLICY_INVALID",
             "id",
+            None,
             || {
                 starts += 1;
                 stub_instance(bundle.path(), &["/w"])
@@ -842,6 +895,7 @@ mod tests {
             Path::new("/w"),
             "echo hi",
             "id",
+            None,
             || stub_instance_at(dir.path(), &["/w"], home.to_str().unwrap()),
         )
         .err()
@@ -861,6 +915,7 @@ mod tests {
             Path::new("/w"),
             "true",
             "id",
+            None,
             || Err(HostError::new("HELPER_MISSING", "stub")),
         )
         .err()
@@ -1194,5 +1249,193 @@ mod tests {
         assert_eq!(wire["platform"], "darwin");
         assert!(wire.get("bwrapPath").is_none());
         assert!(wire["helpers"].get("applySeccomp").is_none());
+    }
+
+    fn host_with_stub_bundle() -> (tempfile::TempDir, LocalHost, PathBuf) {
+        let app = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        let current = bundle_dir(&host.base);
+        fs::create_dir_all(&current).unwrap();
+        let target = current.join("srt-sidecar");
+        fs::copy(STUB, &target).unwrap();
+        let mut permissions = fs::metadata(&target).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&target, permissions).unwrap();
+        fs::File::open(&target).unwrap().sync_all().unwrap();
+        let root = host.base.join("task-workspaces/ws1");
+        fs::create_dir_all(&root).unwrap();
+        (app, host, root)
+    }
+
+    fn next_ask(frames: &mut tokio::sync::mpsc::UnboundedReceiver<Value>) -> Value {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Ok(frame) = frames.try_recv() {
+                return frame;
+            }
+            assert!(std::time::Instant::now() < deadline, "no network.ask was sent");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// A kill deadline that never matters in a test.
+    fn far() -> std::time::Instant {
+        std::time::Instant::now() + Duration::from_secs(3600)
+    }
+
+    fn ask_policy() -> NetworkPolicy {
+        NetworkPolicy {
+            mode: super::super::network::NetworkMode::Ask,
+            allow: vec![],
+            suggested: Default::default(),
+        }
+    }
+
+    #[test]
+    fn execute_command_relays_an_ask_and_reports_the_audit() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default(), far());
+        let bridge = host.network.clone();
+        let answerer = std::thread::spawn(move || {
+            let frame = next_ask(&mut frames);
+            assert_eq!(frame["type"], "network.ask");
+            assert_eq!(frame["id"], "inv-1");
+            assert_eq!(frame["host"], "example.com");
+            assert_eq!(frame["port"], 443);
+            assert!(bridge.resolve(frame["askId"].as_str().unwrap(), true, None));
+        });
+        let result = execute_command(
+            &host,
+            &root,
+            &root,
+            "SLEEP_ASK:example.com:443",
+            20_000,
+            1000,
+            Arc::default(),
+            Some(&ask_policy()), &active,
+        )
+        .unwrap();
+        answerer.join().unwrap();
+        assert_eq!(result["exitCode"], 0);
+        let audit = result["networkAudit"].as_array().unwrap();
+        assert_eq!(audit.len(), 1);
+        // The stub reports the answer it received via `ask.reply`.
+        assert_eq!(audit[0]["decision"], "allow");
+        assert!(result.get("networkAuditError").is_none());
+    }
+
+    #[test]
+    fn a_denied_ask_reaches_the_sidecar_as_a_deny() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default(), far());
+        let bridge = host.network.clone();
+        let answerer = std::thread::spawn(move || {
+            let frame = next_ask(&mut frames);
+            bridge.resolve(frame["askId"].as_str().unwrap(), false, Some("no".into()));
+        });
+        let result = execute_command(
+            &host, &root, &root, "SLEEP_ASK:example.com:443", 20_000, 1000, Arc::default(),
+            Some(&ask_policy()), &active,
+        )
+        .unwrap();
+        answerer.join().unwrap();
+        assert_eq!(result["networkAudit"][0]["decision"], "deny");
+    }
+
+    #[test]
+    fn an_ask_naming_another_command_is_denied_and_never_reaches_the_backend() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default(), far());
+        let result = execute_command(
+            &host, &root, &root, "SLEEP_ASK_OTHER:example.com:443", 20_000, 1000, Arc::default(),
+            Some(&ask_policy()), &active,
+        )
+        .unwrap();
+        assert!(frames.try_recv().is_err(), "an ask for another command must not be relayed");
+        assert_eq!(result["networkAudit"][0]["decision"], "deny");
+    }
+
+    #[test]
+    fn asks_without_a_connection_are_denied_and_the_command_still_finishes() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let active = host.network.begin("inv-1", Arc::default(), far());
+        let result = execute_command(
+            &host, &root, &root, "SLEEP_ASK:example.com:443", 20_000, 1000, Arc::default(), None, &active,
+        )
+        .unwrap();
+        assert_eq!(result["exitCode"], 0);
+        assert_eq!(result["networkAudit"][0]["decision"], "deny");
+    }
+
+    #[test]
+    fn a_failing_audit_never_fails_the_command() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let active = host.network.begin("inv", Arc::default(), far());
+        let result = execute_command(
+            &host, &root, &root, "AUDIT_FAIL", 20_000, 1000, Arc::default(), None, &active,
+        )
+        .unwrap();
+        assert_eq!(result["exitCode"], 0);
+        assert!(result.get("networkAudit").is_none());
+        assert_eq!(result["networkAuditError"], "stub audit error");
+    }
+
+    #[test]
+    fn the_result_is_the_macos_shape_plus_the_audit() {
+        let (_app, host, root) = host_with_stub_bundle();
+        let active = host.network.begin("inv", Arc::default(), far());
+        let result = execute_command(
+            &host, &root, &root, "echo hi", 20_000, 1000, Arc::default(), None, &active,
+        )
+        .unwrap();
+        super::super::execution::network_tests::assert_result_shape(&result);
+        assert!(result["networkAudit"].is_array(), "{result}");
+    }
+
+    #[test]
+    fn a_replacement_sidecar_also_answers_asks_through_the_bridge() {
+        let (_app, host, root) = host_with_stub_bundle();
+        // Seed the slot with a sidecar that has already desynchronized (a wrap that never
+        // answers), so the next wrap replaces it via the production `start_instance`.
+        let bundle = bundle_dir(&host.base);
+        let init = init_config(HOST_PLATFORM, &bundle, &host.base, vec![host.base.join("task-workspaces").to_str().unwrap().to_string()]);
+        let dead = Sidecar::start_with_timeout(&bundle, &init, Duration::from_secs(5)).unwrap();
+        assert!(dead
+            .wrap("x", "HANG", &root, &root, None)
+            .is_err());
+        *host.sandbox.lock().unwrap() = Some(Arc::new(SandboxInstance::new(
+            dead,
+            vec![host.base.join("task-workspaces")],
+        )));
+        let before = host.sandbox.lock().unwrap().clone().unwrap();
+
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel();
+        let _lease = host.network.attach(sender);
+        let active = host.network.begin("inv-1", Arc::default(), far());
+        active.set_command_id("cmd");
+        let (instance, _) = wrap_in_sandbox(
+            &host.sandbox, &root, &root, "SLEEP_ASK:example.com:443", "cmd", None,
+            || start_instance(&host),
+        )
+        .unwrap();
+        assert!(!Arc::ptr_eq(&before, &instance));
+        let frame = next_ask(&mut frames);
+        assert!(host.network.resolve(frame["askId"].as_str().unwrap(), true, None));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let entries = instance.sidecar.audit("cmd").unwrap();
+            if entries[0]["decision"] == "allow" {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "the answer never reached the sidecar");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        instance.finish("cmd");
     }
 }

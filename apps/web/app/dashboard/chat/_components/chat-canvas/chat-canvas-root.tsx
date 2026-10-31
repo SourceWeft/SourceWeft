@@ -28,6 +28,7 @@ import {
 import { MessageList } from "./message-list";
 import { getMessageImageParts, normalizeAssetUrl } from "./message-assets";
 import { ToolInterventionBar } from "./tool-confirmation";
+import { NetworkAccessBar } from "./network-access-bar";
 import { useLocalOperationStatus } from "../local-conversation-status";
 import { UserQuestionInterventionBar } from "./user-question-panel";
 import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
@@ -884,6 +885,13 @@ export function ChatCanvas({
             });
         }}
         resolvedConfirmations={confirmationResolutions}
+        workspaceId={workspaceId}
+      />
+
+      <NetworkAccessBar
+        activeThreadRun={activeThreadRun}
+        isLocalThread={localStatus.isLocalThread === true}
+        threadId={localStatus.threadId}
         workspaceId={workspaceId}
       />
 

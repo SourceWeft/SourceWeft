@@ -79,7 +79,10 @@ impl LocalHost {
                 "Invocation was cancelled before execution",
             ));
         }
-        let fingerprint = serde_json::to_string(&(owner, thread, action, &payload))
+        // The network policy is the backend's per-call decision input, not part of what the
+        // call *is*: a redelivery after a rule change must still match its journal entry.
+        let fingerprint_payload = fingerprint_payload(action, &payload);
+        let fingerprint = serde_json::to_string(&(owner, thread, action, &fingerprint_payload))
             .map_err(|e| HostError::new("INVALID_CALL", e.to_string()))?;
         {
             let db = self
@@ -278,12 +281,18 @@ impl LocalHost {
                 .and_then(Value::as_u64)
                 .unwrap_or(20000)
                 .clamp(1, 100000) as usize;
+            let network = super::network::NetworkPolicy::from_payload(payload)?;
             let cancel = Arc::new(AtomicBool::new(false));
             calls
                 .active
                 .lock()
                 .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?
                 .insert(id.into(), cancel.clone());
+            // Network asks raised while this command runs are attributed to this invocation
+            // (and denied if it is cancelled or ends). The command is killed `timeout` ms after
+            // it starts; asks must settle before that.
+            let kill_deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
+            let running = self.network.begin(id, cancel.clone(), kill_deadline);
             let result = super::srt_exec::execute_command(
                 self,
                 &workspace.path,
@@ -292,6 +301,8 @@ impl LocalHost {
                 timeout,
                 max_output,
                 cancel,
+                network.as_ref(),
+                &running,
             );
             if let Ok(mut active) = calls.active.lock() {
                 active.remove(id);
@@ -478,6 +489,19 @@ impl LocalHost {
     }
 }
 
+/// `payload` as it is journaled for duplicate detection: a `command.execute` payload without its
+/// `network` policy.
+fn fingerprint_payload<'a>(action: &str, payload: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if action == "command.execute" && payload.get("network").is_some() {
+        let mut stripped = payload.clone();
+        if let Some(object) = stripped.as_object_mut() {
+            object.remove("network");
+        }
+        return std::borrow::Cow::Owned(stripped);
+    }
+    std::borrow::Cow::Borrowed(payload)
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
     payload
@@ -516,4 +540,74 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
         return Err(HostError::new("PATH_MISSING", "Path does not exist"));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+pub(crate) mod network_tests {
+    use super::*;
+
+    /// The shape every result has: the four original fields with the right types, and nothing
+    /// but the optional extras a sandboxed run adds (`networkAudit`, `networkAuditError`,
+    /// `vaultWarning`). The integration tests have the same check in `tests/common/mod.rs`.
+    #[allow(dead_code)]
+    pub(crate) fn assert_result_shape(result: &Value) {
+        let object = result.as_object().expect("a result object");
+        assert!(object.get("output").is_some_and(Value::is_string), "{result}");
+        assert!(object.get("exitCode").is_some_and(Value::is_i64), "{result}");
+        assert!(object.get("truncated").is_some_and(Value::is_boolean), "{result}");
+        assert!(object.get("cancelled").is_some_and(Value::is_boolean), "{result}");
+        for key in object.keys() {
+            assert!(
+                ["output", "exitCode", "truncated", "cancelled", "networkAudit", "networkAuditError", "vaultWarning"]
+                    .contains(&key.as_str()),
+                "unexpected result key {key:?}: {result}"
+            );
+        }
+    }
+    // Not imported at file level on every platform (it is cfg-gated there).
+    use serde_json::json;
+
+    #[test]
+    fn the_network_policy_is_not_part_of_the_journal_fingerprint() {
+        let with = json!({"workspaceId":"w","command":"ls","network":{"mode":"ask","allow":["a.com"],"suggested":{}}});
+        let other = json!({"workspaceId":"w","command":"ls","network":{"mode":"strict","allow":[],"suggested":{}}});
+        let without = json!({"workspaceId":"w","command":"ls"});
+        let print = |payload: &Value| {
+            serde_json::to_string(&("o", "t", "command.execute", &*fingerprint_payload("command.execute", payload))).unwrap()
+        };
+        assert_eq!(print(&with), print(&without));
+        assert_eq!(print(&with), print(&other));
+        // Other fields still distinguish calls, and other actions keep their payload as is.
+        let changed = json!({"workspaceId":"w","command":"pwd","network":{"mode":"ask"}});
+        assert_ne!(print(&with), print(&changed));
+        let read = json!({"path":"a","network":{"mode":"ask"}});
+        assert_eq!(*fingerprint_payload("file.read", &read), read);
+    }
+
+    /// Redelivering a call with a different `network` policy is the same call: the journal must
+    /// answer it (here `OUTCOME_UNKNOWN`, since the first attempt never completed) instead of
+    /// re-executing or rejecting it as a changed call. Calls that differ in anything else still
+    /// conflict. The payload has no `workspaceId`, so nothing ever runs.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_redelivery_with_a_different_network_policy_is_not_executed_again() {
+        let app = tempfile::tempdir().unwrap();
+        let host = LocalHost::open(app.path()).unwrap();
+        host.initialize_invocation_journal().unwrap();
+        let calls = Executions::default();
+        let dispatch = |payload: Value| {
+            host.dispatch(&calls, "call-1", "owner", "thread", "command.execute", payload)
+        };
+        let first = dispatch(json!({"command":"echo hi","network":{"mode":"ask","allow":[],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(first.code, "INVALID_CALL", "{first}");
+        let second = dispatch(json!({"command":"echo hi","network":{"mode":"strict","allow":["a.com"],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(second.code, "OUTCOME_UNKNOWN", "{second}");
+        let third = dispatch(json!({"command":"echo hi"})).unwrap_err();
+        assert_eq!(third.code, "OUTCOME_UNKNOWN", "{third}");
+        let changed = dispatch(json!({"command":"echo bye","network":{"mode":"ask","allow":[],"suggested":{}}}))
+            .unwrap_err();
+        assert_eq!(changed.code, "INVOCATION_CONFLICT", "{changed}");
+    }
 }
