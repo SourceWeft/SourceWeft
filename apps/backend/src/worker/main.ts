@@ -18,6 +18,7 @@ import {
   runWorkerJobWithIsolation,
 } from "./job-isolation";
 import { processConnectorSyncJob } from "./processors/connector-sync";
+import { runMarketAiJob } from "./market-ai-job";
 import {
   processSourceParseJob,
   processSourceParsePollJob,
@@ -106,7 +107,9 @@ async function runIsolatedJob(
   if (!processor) {
     throw new Error(`Unknown job type: ${job.name}`);
   }
-  return runWorkerJobWithIsolation(job, processor);
+  return runWorkerJobWithIsolation(job, (active) =>
+    runMarketAiJob(active, processor),
+  );
 }
 
 // After an uncaught exception: stop taking jobs, give the ones in flight a

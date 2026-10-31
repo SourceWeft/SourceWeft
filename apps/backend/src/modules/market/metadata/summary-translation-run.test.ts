@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, expect, test, vi } from "vitest";
+import { MarketAiDeferredError } from "../../../shared/market-ai-schedule";
 
 vi.mock("../../../shared/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() },
@@ -36,7 +37,14 @@ function candidate(
   summary: string,
   over: Partial<SummaryTranslationCandidate> = {},
 ): SummaryTranslationCandidate {
-  return { versionId: `v-${id}`, identifier: `io.github.acme/${id}`, summary, record: null, previous: null, ...over };
+  return {
+    versionId: `v-${id}`,
+    identifier: `io.github.acme/${id}`,
+    summary,
+    record: null,
+    previous: null,
+    ...over,
+  };
 }
 
 function harness(
@@ -66,6 +74,15 @@ function harness(
 const ENGLISH = "Search and read pages in your Notion workspace.";
 
 describe("a pass", () => {
+  test("peak deferral is propagated without recording a translation failure", async () => {
+    const deferred = new MarketAiDeferredError(new Date("2026-10-28T04:00Z"));
+    const { deps, written } = harness(
+      [candidate("a", ENGLISH)],
+      () => deferred,
+    );
+    await expect(runSummaryTranslationPass({}, deps)).rejects.toBe(deferred);
+    expect(written).toEqual([]);
+  });
   test("translates a candidate and stores both Chinese texts with the source hash", async () => {
     const { deps, written, asked } = harness([candidate("a", ENGLISH)]);
     const result = await runSummaryTranslationPass({}, deps);
@@ -94,7 +111,9 @@ describe("a pass", () => {
   });
 
   test("a Chinese description needs no translation: recorded, no model call", async () => {
-    const { deps, written, asked } = harness([candidate("zh", "搜索并读取 Notion 工作区中的页面")]);
+    const { deps, written, asked } = harness([
+      candidate("zh", "搜索并读取 Notion 工作区中的页面"),
+    ]);
     const result = await runSummaryTranslationPass({}, deps);
     assert.equal(result.reports[0]?.outcome, "not-needed");
     assert.equal(asked.length, 0);
@@ -111,8 +130,15 @@ describe("a pass", () => {
   });
 
   test("an earlier version's current translation of the same text is reused without a model call", async () => {
-    const previous = translatedRecord({ summary: ENGLISH, zhCN: "旧译文。", model: "old", now: new Date("2026-10-01T00:00:00Z") });
-    const { deps, written, asked } = harness([candidate("a", ENGLISH, { previous })]);
+    const previous = translatedRecord({
+      summary: ENGLISH,
+      zhCN: "旧译文。",
+      model: "old",
+      now: new Date("2026-10-01T00:00:00Z"),
+    });
+    const { deps, written, asked } = harness([
+      candidate("a", ENGLISH, { previous }),
+    ]);
     const result = await runSummaryTranslationPass({}, deps);
     assert.equal(result.reports[0]?.outcome, "reused");
     assert.equal(asked.length, 0);
@@ -120,7 +146,12 @@ describe("a pass", () => {
   });
 
   test("a translation of different text in an earlier version is not reused", async () => {
-    const previous = translatedRecord({ summary: "An older description of it.", zhCN: "旧译文。", model: "old", now: NOW });
+    const previous = translatedRecord({
+      summary: "An older description of it.",
+      zhCN: "旧译文。",
+      model: "old",
+      now: NOW,
+    });
     const { deps, asked } = harness([candidate("a", ENGLISH, { previous })]);
     const result = await runSummaryTranslationPass({}, deps);
     assert.equal(result.reports[0]?.outcome, "translated");
@@ -128,15 +159,29 @@ describe("a pass", () => {
   });
 
   test("a current record is left alone (the refresh is on the English changing, not on a clock)", async () => {
-    const record = translatedRecord({ summary: ENGLISH, zhCN: "译文。", model: "m", now: NOW });
-    const { deps, written, asked } = harness([candidate("a", ENGLISH, { record })]);
+    const record = translatedRecord({
+      summary: ENGLISH,
+      zhCN: "译文。",
+      model: "m",
+      now: NOW,
+    });
+    const { deps, written, asked } = harness([
+      candidate("a", ENGLISH, { record }),
+    ]);
     await runSummaryTranslationPass({}, deps);
     assert.equal(asked.length + written.length, 0);
   });
 
   test("a changed English text is translated again and replaces the record", async () => {
-    const stale = translatedRecord({ summary: "Old text about pages.", zhCN: "旧译文。", model: "m", now: NOW });
-    const { deps, written } = harness([candidate("a", ENGLISH, { record: stale })]);
+    const stale = translatedRecord({
+      summary: "Old text about pages.",
+      zhCN: "旧译文。",
+      model: "m",
+      now: NOW,
+    });
+    const { deps, written } = harness([
+      candidate("a", ENGLISH, { record: stale }),
+    ]);
     await runSummaryTranslationPass({}, deps);
     assert.equal(written[0]![1]["zh-CN"], "搜索页面。");
     assert.notEqual(written[0]![1].sourceHash, stale.sourceHash);
@@ -144,30 +189,51 @@ describe("a pass", () => {
 
   test("an answer that is not a Chinese translation is recorded as failed, and the pass goes on", async () => {
     const { deps, written } = harness(
-      [candidate("bad", ENGLISH), candidate("good", "Another server that reads calendars.")],
-      (user) => (user.includes("calendars") ? { zhCN: "读取日历。" } : { zhCN: "English only" }),
+      [
+        candidate("bad", ENGLISH),
+        candidate("good", "Another server that reads calendars."),
+      ],
+      (user) =>
+        user.includes("calendars")
+          ? { zhCN: "读取日历。" }
+          : { zhCN: "English only" },
     );
     const result = await runSummaryTranslationPass({}, deps);
-    assert.deepEqual(result.reports.map((r) => r.outcome), ["failed", "translated"]);
+    assert.deepEqual(
+      result.reports.map((r) => r.outcome),
+      ["failed", "translated"],
+    );
     assert.equal(written[0]![1].status, "failed");
     assert.equal(written[0]![1]["zh-CN"], undefined);
   });
 
   test("a model error records a failure; three in a row end the pass; an unready model ends it at once", async () => {
-    const many = ["a", "b", "c", "d"].map((id) => candidate(id, `${ENGLISH} (${id})`));
+    const many = ["a", "b", "c", "d"].map((id) =>
+      candidate(id, `${ENGLISH} (${id})`),
+    );
     const flaky = harness(many, () => new Error("502"));
     const result = await runSummaryTranslationPass({}, flaky.deps);
-    assert.deepEqual(result.reports.map((r) => r.outcome), ["failed", "failed"]);
+    assert.deepEqual(
+      result.reports.map((r) => r.outcome),
+      ["failed", "failed"],
+    );
     assert.equal(vi.mocked(flaky.deps.callModel).mock.calls.length, 3);
 
-    const unavailable = harness(many, () => new SystemModelUnavailableError({} as never));
+    const unavailable = harness(
+      many,
+      () => new SystemModelUnavailableError({} as never),
+    );
     const stopped = await runSummaryTranslationPass({}, unavailable.deps);
     assert.equal(stopped.reports.length, 0);
     assert.equal(vi.mocked(unavailable.deps.callModel).mock.calls.length, 1);
   });
 
   test("does nothing while the system model is not ready", async () => {
-    const { deps, written } = harness([candidate("a", ENGLISH)], undefined, false);
+    const { deps, written } = harness(
+      [candidate("a", ENGLISH)],
+      undefined,
+      false,
+    );
     const result = await runSummaryTranslationPass({}, deps);
     assert.equal(result.skipped, true);
     assert.equal(written.length, 0);
@@ -180,7 +246,10 @@ describe("a pass", () => {
     assert.equal(result.dryRun, true);
     assert.equal(asked.length, 1);
     assert.equal(written.length, 0);
-    assert.equal(summaryTranslationText(result.reports[0]!.record, "zh-TW"), "搜尋頁面。");
+    assert.equal(
+      summaryTranslationText(result.reports[0]!.record, "zh-TW"),
+      "搜尋頁面。",
+    );
     assert.equal(result.reports[0]?.summary, ENGLISH);
   });
 
@@ -195,7 +264,11 @@ describe("a pass", () => {
   });
 
   test("a repeated failure at the same text counts its attempts", async () => {
-    const first = settledRecord({ summary: ENGLISH, status: "failed", now: new Date(NOW.getTime() - 2 * 86_400_000) });
+    const first = settledRecord({
+      summary: ENGLISH,
+      status: "failed",
+      now: new Date(NOW.getTime() - 2 * 86_400_000),
+    });
     const { deps, written } = harness(
       [candidate("a", ENGLISH, { record: first })],
       () => ({ zhCN: "English only" }),
@@ -206,10 +279,14 @@ describe("a pass", () => {
   });
 
   test("a failed write of a finished translation is the database's error, not a model error", async () => {
-    const many = ["a", "b", "c", "d"].map((id) => candidate(id, `${ENGLISH} (${id})`));
+    const many = ["a", "b", "c", "d"].map((id) =>
+      candidate(id, `${ENGLISH} (${id})`),
+    );
     const { deps } = harness(many);
     vi.mocked(deps.write).mockRejectedValue(new Error("database is down"));
-    await expect(runSummaryTranslationPass({}, deps)).rejects.toThrow("database is down");
+    await expect(runSummaryTranslationPass({}, deps)).rejects.toThrow(
+      "database is down",
+    );
     // Not swallowed as model failures that would record 'failed' for the rest.
     expect(vi.mocked(deps.callModel).mock.calls.length).toBe(1);
   });
@@ -229,13 +306,21 @@ describe("the system model call", () => {
   };
 
   test("uses the structured answer when there is one", async () => {
-    const answer = await ask({ structuredOutput: { zhCN: "搜索页面。" }, model: "m" });
+    const answer = await ask({
+      structuredOutput: { zhCN: "搜索页面。" },
+      model: "m",
+    });
     assert.deepEqual(answer, { output: { zhCN: "搜索页面。" }, model: "m" });
   });
 
   test("falls back to the text of the message, whether a string or parts", async () => {
     const parts = await ask({
-      raw: { content: [{ type: "text", text: '{"zhCN":' }, { type: "text", text: '"搜索页面。"}' }] },
+      raw: {
+        content: [
+          { type: "text", text: '{"zhCN":' },
+          { type: "text", text: '"搜索页面。"}' },
+        ],
+      },
       providerModel: "provider/m",
       model: "m",
     });

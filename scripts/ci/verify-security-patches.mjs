@@ -49,6 +49,7 @@ for (const app of [backend, web]) {
   verifyVersion(vitest, "vite", "8.3.5");
 }
 verifyVersion(backend, "hono", "4.13.13");
+verifyVersion(backend, "@hono/node-server", "2.1.3");
 verifyVersion(
   backend,
   "@modelcontextprotocol/sdk",

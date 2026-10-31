@@ -184,6 +184,7 @@ Model gateway catalog sync:
     "isActive": true
   }
   ```
+
 - Hand-written profiles in the JSON remain available when catalog sync is
   disabled. Global dynamic catalog import skips models that cannot be matched
   to LiteLLM pricing/capabilities; BYOK still allows manual unknown models.
@@ -234,12 +235,24 @@ categories that come with them. These go through the system model (`withSystemMo
 Model calls a user triggers (titles, ingestion, retrieval) stay billed to that
 user's team.
 
-| Variable | Meaning |
-|---|---|
-| `SYSTEM_MODEL_ENABLED` | Strict boolean, default `false`. Only `true`, `false`, `1` or `0` (any case, surrounding whitespace ignored); any other value fails configuration loading. |
-| `SYSTEM_MODEL_PROVIDER` | The `providerName` of a gateway in the global gateway config whose definition is borrowed, e.g. `openrouter`. |
-| `SYSTEM_MODEL_API_KEY` | The dedicated key for these calls. |
-| `SYSTEM_MODEL_NAME` | The model id at that Provider, e.g. `deepseek/deepseek-v4.1-flash`. |
+| Variable                  | Meaning                                                                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYSTEM_MODEL_ENABLED`    | Strict boolean, default `false`. Only `true`, `false`, `1` or `0` (any case, surrounding whitespace ignored); any other value fails configuration loading.                            |
+| `SYSTEM_MODEL_PROVIDER`   | The `providerName` of a gateway in the global gateway config whose definition is borrowed, e.g. `openrouter`.                                                                         |
+| `SYSTEM_MODEL_API_KEY`    | The dedicated key for these calls.                                                                                                                                                    |
+| `SYSTEM_MODEL_NAME`       | The model id at that Provider, e.g. `deepseek/deepseek-v4.1-flash`.                                                                                                                   |
+| `MARKET_AI_OFF_PEAK_ONLY` | Optional strict boolean, default `false`. Enable on API, scheduler and worker to defer market AI generation and translations during weekday Beijing time 09:00–12:00 and 14:00–18:00. |
+
+With `MARKET_AI_OFF_PEAK_ONLY=true`, MCP/Skill overview jobs, their retries,
+and MCP summary translations wait for the next off-peak window. The scheduler
+stops adding these jobs at peak hours; already queued jobs are delayed without
+using up their failure retry budget or occupying worker slots. Every outgoing
+system-model HTTP attempt is checked, including SDK retries. Requests already
+in flight may finish. Tenant model calls, provider activation and credentials
+are unaffected. Times use UTC+8 regardless of the server timezone. Weekends run
+all day; no public-holiday calendar is loaded, so holidays conservatively follow
+the weekday rule. Turn the option off and restart to permit all-day calls;
+jobs already delayed keep their recorded due time and resume then.
 
 - The system model is `configured` when the named Provider exists in the active
   gateway configuration, declares `chat` and `json_schema` in `supports` and

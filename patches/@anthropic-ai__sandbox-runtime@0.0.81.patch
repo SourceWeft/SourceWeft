@@ -1,0 +1,86 @@
+diff --git a/dist/sandbox/sandbox-utils.js b/dist/sandbox/sandbox-utils.js
+index f2f122821ae19cc7d705f13eba853ed4d47f30dd..7a303088a974f83b9e01c357086439635722afd3 100644
+--- a/dist/sandbox/sandbox-utils.js
++++ b/dist/sandbox/sandbox-utils.js
+@@ -702,6 +702,12 @@ export function generateProxyEnvVars(httpProxyPort, socksProxyPort, caCertPath,
+     if (!httpProxyPort && !socksProxyPort) {
+         return envVars;
+     }
++    // The owned macOS mux binds IPv4 only. Advertising localhost makes clients
++    // depend on address-family resolution inside Seatbelt. External proxy and
++    // other-platform behavior stays unchanged.
++    const proxyHost = getPlatform() === 'macos' && proxyAuthToken && httpProxyPort === socksProxyPort
++        ? '127.0.0.1'
++        : 'localhost';
+     // Always set NO_PROXY to exclude localhost and private networks from
+     // proxying. *.local is intentionally absent: under network restriction the
+     // child has no usable resolver/routes (bwrap --unshare-net on Linux,
+@@ -720,11 +726,11 @@ export function generateProxyEnvVars(httpProxyPort, socksProxyPort, caCertPath,
+     envVars.push(`NO_PROXY=${noProxyAddresses}`);
+     envVars.push(`no_proxy=${noProxyAddresses}`);
+     if (httpProxyPort) {
+-        envVars.push(`HTTP_PROXY=http://${auth}localhost:${httpProxyPort}`);
+-        envVars.push(`HTTPS_PROXY=http://${auth}localhost:${httpProxyPort}`);
++        envVars.push(`HTTP_PROXY=http://${auth}${proxyHost}:${httpProxyPort}`);
++        envVars.push(`HTTPS_PROXY=http://${auth}${proxyHost}:${httpProxyPort}`);
+         // Lowercase versions for compatibility with some tools
+-        envVars.push(`http_proxy=http://${auth}localhost:${httpProxyPort}`);
+-        envVars.push(`https_proxy=http://${auth}localhost:${httpProxyPort}`);
++        envVars.push(`http_proxy=http://${auth}${proxyHost}:${httpProxyPort}`);
++        envVars.push(`https_proxy=http://${auth}${proxyHost}:${httpProxyPort}`);
+         if (proxyAuthToken) {
+             // Pre-send Basic so git never gets a 407 and never invokes a
+             // credential helper for the proxy URL (Windows GCM intercepts the
+@@ -739,8 +745,8 @@ export function generateProxyEnvVars(httpProxyPort, socksProxyPort, caCertPath,
+     // SOCKS to it still reaches the SOCKS handler. Falls back to socks5h://
+     // only when no HTTP proxy port exists, which no current caller configures.
+     const connectProxyUrl = httpProxyPort
+-        ? `http://${auth}localhost:${httpProxyPort}`
+-        : `socks5h://${auth}localhost:${socksProxyPort}`;
++        ? `http://${auth}${proxyHost}:${httpProxyPort}`
++        : `socks5h://${auth}${proxyHost}:${socksProxyPort}`;
+     // ALL_PROXY: prefer the HTTP proxy URL over SOCKS. httpx (and similar
+     // Python clients) eagerly import `socksio` at client construction when
+     // ALL_PROXY is a socks5h:// URL and crash with ImportError in envs that
+@@ -787,7 +793,7 @@ export function generateProxyEnvVars(httpProxyPort, socksProxyPort, caCertPath,
+         else if (platform === 'macos') {
+             // A SOCKS listener that wants no token of ours, an external one
+             // included: BSD nc's SOCKS5 support (-X 5 -x).
+-            envVars.push(`GIT_SSH_COMMAND=ssh ${sshMuxOverride} -o ProxyCommand='nc -X 5 -x localhost:${socksProxyPort} %h %p'`);
++            envVars.push(`GIT_SSH_COMMAND=ssh ${sshMuxOverride} -o ProxyCommand='nc -X 5 -x ${proxyHost}:${socksProxyPort} %h %p'`);
+         }
+         else if (platform === 'linux' && httpProxyPort) {
+             // Linux: use socat HTTP CONNECT via the HTTP proxy bridge.
+@@ -804,18 +810,18 @@ export function generateProxyEnvVars(httpProxyPort, socksProxyPort, caCertPath,
+         // `GET ftp://host/path HTTP/1.1` to the proxy — which the mux does not
+         // implement, and an env var can't ask curl for --proxytunnel. socks5h is
+         // transparent at the TCP layer, so it is the value that works here.
+-        envVars.push(`FTP_PROXY=socks5h://${auth}localhost:${socksProxyPort}`);
+-        envVars.push(`ftp_proxy=socks5h://${auth}localhost:${socksProxyPort}`);
++        envVars.push(`FTP_PROXY=socks5h://${auth}${proxyHost}:${socksProxyPort}`);
++        envVars.push(`ftp_proxy=socks5h://${auth}${proxyHost}:${socksProxyPort}`);
+         // rsync proxy support — RSYNC_PROXY is host:port only, no userinfo. With
+         // proxy auth on, rsync via this var fails at the CONNECT (407); use SSH
+         // transport or wrap with proxychains instead.
+-        envVars.push(`RSYNC_PROXY=localhost:${socksProxyPort}`);
++        envVars.push(`RSYNC_PROXY=${proxyHost}:${socksProxyPort}`);
+         // Database tools NOTE: Most database clients don't have built-in proxy support
+         // You typically need to use SSH tunneling or a SOCKS wrapper like tsocks/proxychains
+         // Docker CLI uses HTTP for the API
+         // This makes Docker use the HTTP proxy for registry operations
+-        envVars.push(`DOCKER_HTTP_PROXY=http://${auth}localhost:${httpProxyPort || socksProxyPort}`);
+-        envVars.push(`DOCKER_HTTPS_PROXY=http://${auth}localhost:${httpProxyPort || socksProxyPort}`);
++        envVars.push(`DOCKER_HTTP_PROXY=http://${auth}${proxyHost}:${httpProxyPort || socksProxyPort}`);
++        envVars.push(`DOCKER_HTTPS_PROXY=http://${auth}${proxyHost}:${httpProxyPort || socksProxyPort}`);
+         // Google Cloud SDK - has specific proxy settings.
+         // proxy/type names the protocol the *proxy* speaks, not the traffic it
+         // tunnels. Our HTTP CONNECT proxy carries TLS to Google APIs, so the
+@@ -823,7 +829,7 @@ export function generateProxyEnvVars(httpProxyPort, socksProxyPort, caCertPath,
+         // socks4, socks5; "https" is rejected at startup).
+         if (httpProxyPort) {
+             envVars.push(`CLOUDSDK_PROXY_TYPE=http`);
+-            envVars.push(`CLOUDSDK_PROXY_ADDRESS=localhost`);
++            envVars.push(`CLOUDSDK_PROXY_ADDRESS=${proxyHost}`);
+             envVars.push(`CLOUDSDK_PROXY_PORT=${httpProxyPort}`);
+             if (proxyAuthToken) {
+                 envVars.push(`CLOUDSDK_PROXY_USERNAME=${userRaw}`);

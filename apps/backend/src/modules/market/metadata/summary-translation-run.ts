@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { MarketAiDeferredError } from "../../../shared/market-ai-schedule";
 import { logger } from "../../../shared/logger";
 import { textOf } from "../../catalog-overview/model";
 import {
@@ -103,10 +104,7 @@ const defaultDeps: SummaryTranslationDeps = {
 };
 
 export type SummaryTranslationOutcome =
-  | "translated"
-  | "reused"
-  | "not-needed"
-  | "failed";
+  "translated" | "reused" | "not-needed" | "failed";
 
 export type SummaryTranslationReport = {
   identifier: string;
@@ -175,7 +173,11 @@ export async function runSummaryTranslationPass(
     if (!needsTranslation(detectDescriptionLanguage(text))) {
       await report(
         "not-needed",
-        settledRecord({ summary: candidate.summary, status: "not-needed", now }),
+        settledRecord({
+          summary: candidate.summary,
+          status: "not-needed",
+          now,
+        }),
       );
       continue;
     }
@@ -209,6 +211,7 @@ export async function runSummaryTranslationPass(
         scopeId,
       });
     } catch (error) {
+      if (error instanceof MarketAiDeferredError) throw error;
       logger.warn("MCP summary translation call failed", {
         identifier: candidate.identifier,
         error: error instanceof Error ? error.message : String(error),
