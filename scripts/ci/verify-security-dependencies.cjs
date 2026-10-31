@@ -27,6 +27,12 @@ const mocha = createRequire(
     "mocha",
   ),
 );
+// @streamdown/math is ESM-only, so it has no CommonJS entry to resolve.
+const streamdownMath = createRequire(
+  fs.realpathSync(
+    path.join(root, "apps/web/node_modules/@streamdown/math/package.json"),
+  ),
+);
 const sidecar = createRequire(
   path.join(root, "apps/desktop/sandbox-sidecar/package.json"),
 );
@@ -258,6 +264,31 @@ for (const consumer of [minimatch10, eslintMinimatch, mocha]) {
 }
 const { globSync } = patchedDependency(mocha, "glob", "14.0.3");
 assert.ok(Array.isArray(globSync("package.json", { cwd: root })));
+
+// GHSA-m5mm-p8h7-m29v: a serialized function whose source ends in a bare
+// `</script` was emitted unescaped. Only mocha (dev tooling) serializes, but the
+// release is held and the original proof of concept must stay escaped.
+const serialize = patchedDependency(mocha, "serialize-javascript", "7.1.4");
+function endsInScriptTag() {}
+endsInScriptTag.toString = () => "function f(){ return 1 }//</script";
+assert.ok(!serialize({ endsInScriptTag }, { space: 2 }).includes("</script"));
+
+// GHSA-238p-pmpm-9mq7: an inherited Object.prototype.trust was read as the
+// caller's `trust` option, turning on javascript: links in rendered math. The
+// chat renderer reaches KaTeX through @streamdown/math.
+const katex = patchedDependency(streamdownMath, "katex", "0.18.10");
+assert.match(katex.renderToString("x^2 + \\frac{a}{b}"), /katex-html/);
+Object.prototype.trust = true;
+try {
+  assert.doesNotMatch(
+    katex.renderToString("\\href{javascript:alert(1)}{x}", {
+      throwOnError: false,
+    }),
+    /href="javascript:/,
+  );
+} finally {
+  delete Object.prototype.trust;
+}
 
 // node-forge 1.4.2 closes the 1.4.0 signature-verification advisories,
 // including GHSA-86w9-cpqp-85rv, which the audit gate used to ignore.
