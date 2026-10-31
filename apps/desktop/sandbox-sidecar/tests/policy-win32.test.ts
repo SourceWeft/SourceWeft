@@ -296,6 +296,32 @@ test("perWrapDenies: a workspace elsewhere is not denied anything outside it or 
   );
 });
 
+// `read_roots_windows` keeps a profile-internal PATH entry as a recursive read root, including one
+// that is an ANCESTOR of a credential store (the host only drops entries that are inside one). The
+// per-command denies are what protects the stores below such a root.
+test("perWrapDenies: a read root that is an ancestor of a credential store still denies it", () => {
+  const present = new Set([
+    "C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Credentials",
+    "C:\\Users\\u\\AppData\\Roaming\\npm",
+    "C:\\Users\\u\\.ssh",
+  ]);
+  const exists = (path: string) => present.has(path);
+  for (const readRoot of ["C:\\Users\\u\\AppData\\Roaming", "C:\\Users\\u\\AppData", "c:/users/U/appdata/roaming"]) {
+    const init = winInit({
+      home: "C:\\Users\\u",
+      workspaceRoots: ["D:\\proj"],
+      readRoots: [readRoot],
+    });
+    const denies = perWrapDenies(init, "D:\\proj", exists);
+    assert.ok(
+      denies.includes("C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Credentials"),
+      `${readRoot}: the Credential Manager store below the read root must be denied: ${JSON.stringify(denies)}`,
+    );
+    // The profile's other stores are not below this root, so they are not listed.
+    assert.ok(!denies.includes("C:\\Users\\u\\.ssh"), readRoot);
+  }
+});
+
 test("perWrapDenies compares case-insensitively and across slash styles", () => {
   // Home is spelled one way, the workspace another: they are the same directory on Windows.
   const init = winInit({ home: "c:/users/U/ws", workspaceRoots: ["C:\\USERS\\u\\WS"], readRoots: [] });

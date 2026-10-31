@@ -1318,6 +1318,15 @@ pub(crate) mod nt {
             let final_part = index == parts.len() - 1;
             let role = if final_part { last } else { Role::Dir };
             let (next, _) = open_entry(&directory, name, role).map_err(classify)?;
+            // The same alias refusal as the write and list walks (`step`): the host must act on
+            // the name it validated, not on an 8.3 alias of it.
+            match verify_name(&next, name) {
+                Ok(()) => {}
+                Err(error) if error.raw_os_error() == Some(ERROR_INVALID_NAME as i32) => {
+                    return Err(denied("Short (8.3) name aliases and redirected paths are not allowed"));
+                }
+                Err(error) => return Err(classify(error)),
+            }
             if final_part {
                 return Ok(next);
             }
@@ -2292,6 +2301,35 @@ mod windows_tests {
             "PATH_DENIED"
         );
         assert!(!long.join("x").exists());
+        // Reads go through the same refusal: an alias of the directory, and an alias of the file.
+        std::fs::write(long.join("a long file name.txt"), "secret").unwrap();
+        let file_wide: Vec<u16> = long.join("a long file name.txt").as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut file_buffer = vec![0u16; 1024];
+        let file_written =
+            unsafe { GetShortPathNameW(file_wide.as_ptr(), file_buffer.as_mut_ptr(), 1024) } as usize;
+        assert!(file_written > 0, "GetShortPathNameW failed for the file");
+        let file_alias = std::path::PathBuf::from(std::ffi::OsString::from_wide(&file_buffer[..file_written]))
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        for read_parts in [
+            vec![alias.as_str(), "a long file name.txt"],
+            vec!["a long directory name", file_alias.as_str()],
+        ] {
+            assert_eq!(
+                code(nt::open_file_beneath(root.path(), &parts(&read_parts), super::OpenKind::Read)),
+                "PATH_DENIED",
+                "{read_parts:?}"
+            );
+        }
+        nt::open_file_beneath(
+            root.path(),
+            &parts(&["A LONG DIRECTORY NAME", "A Long File Name.TXT"]),
+            super::OpenKind::Read,
+        )
+        .unwrap();
         // The real name in another case is the same name.
         nt::create_dir_all_beneath(root.path(), &parts(&["A LONG DIRECTORY NAME", "x"])).unwrap();
         assert!(long.join("x").is_dir());
