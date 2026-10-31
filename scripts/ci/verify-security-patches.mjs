@@ -130,7 +130,7 @@ verifyVersion(shadcn, "zod", "4.6.7");
 // follow-redirects is reached only through axios (via @anycrawl/js-sdk).
 const anycrawl = createRequire(backend.resolve("@anycrawl/js-sdk"));
 const axios = createRequire(anycrawl.resolve("axios"));
-verifyVersion(axios, "follow-redirects", "1.16.1");
+verifyVersion(axios, "follow-redirects", "1.16.2");
 
 // Resolve YAML through an actual affected consumer, not an extra test dependency.
 const eslint = createRequire(web.resolve("eslint"));
