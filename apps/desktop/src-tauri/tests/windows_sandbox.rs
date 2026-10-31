@@ -1394,9 +1394,12 @@ fn shells_write_inside_the_workspace_with_the_pinned_environment() {
     let (_app, host) = host_with_bundle();
     let workspace = new_workspace(&host, "thread");
     let (result, env) = env_probe(&host, "write", &workspace, shell);
+    // The macOS shape (output, exitCode, truncated, cancelled) plus the sidecar's `networkAudit`
+    // (protocol 2): an empty list here, because the command made no connection.
     let mut keys: Vec<&str> = result.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["cancelled", "exitCode", "output", "truncated"], "{result}");
+    assert_eq!(keys, ["cancelled", "exitCode", "networkAudit", "output", "truncated"], "{result}");
+    assert_eq!(result["networkAudit"], json!([]), "a command that made no connection has an empty audit: {result}");
     assert_eq!(result["exitCode"], 0, "{shell:?}: {result}");
     assert_eq!(result["cancelled"], false, "{result}");
     assert_eq!(result["truncated"], false, "{result}");
