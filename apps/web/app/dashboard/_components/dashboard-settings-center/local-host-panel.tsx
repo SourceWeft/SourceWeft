@@ -2,6 +2,11 @@
 import { authClient } from "../../../../lib/auth-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import {
+  DEFAULT_LOCAL_NETWORK_MODE,
+  localNetworkModeSchema,
+} from "@sourceweft/contracts";
+import type { LocalNetworkMode } from "@sourceweft/sdk";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopBridge,
@@ -85,6 +90,16 @@ export function LocalHostPanel() {
       clearInterval(timer);
     };
   }, [userId]);
+  // The network policy is enforced by the sandbox, on every platform, once the host reports it
+  // ready. A computer that still needs setup, is unsupported, or reports no readiness (a build
+  // without a managed host) is not enforcing it, so no mode is offered as if it applied.
+  const enforced = status?.readiness?.state === "ready";
+  // A device without a stored mode (an older backend) or with an unknown one is shown as the
+  // default, which is what the host applies.
+  const parsedMode = localNetworkModeSchema.safeParse(device?.networkMode);
+  const networkMode: LocalNetworkMode = parsedMode.success
+    ? parsedMode.data
+    : DEFAULT_LOCAL_NETWORK_MODE;
   if (!desktopBridge.isAvailable()) return null;
   if (dataOwner && dataOwner !== userId)
     return (
@@ -159,6 +174,58 @@ export function LocalHostPanel() {
             ? t("localHost.turnOffRemoteAccess")
             : t("localHost.remoteAccessTitle")}
         </Button>
+      </div>
+      <div className="space-y-3 rounded-lg border p-4">
+        <h3 className="font-medium">{t("localHost.networkTitle")}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t("localHost.networkDescription")}
+        </p>
+        <select
+          aria-label={t("localHost.networkSelectAria")}
+          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+          // Until the host reports the sandbox ready the policy is not enforced, so no
+          // mode may be offered as if it were.
+          disabled={busy || !device || !enforced}
+          onChange={async (event) => {
+            if (!device || !enforced) return;
+            const nextMode = event.target.value as LocalNetworkMode;
+            setBusy(true);
+            setError(null);
+            try {
+              // Like the remote-access switch, only this computer may change
+              // its own policy: the request carries the native proof.
+              const value = await localRequest<{
+                networkMode: LocalNetworkMode;
+              }>(
+                `/v1/local-devices/${device.id}`,
+                { networkMode: nextMode },
+                { localProof: true, method: "PATCH" },
+              );
+              setDevice({ ...device, networkMode: value.networkMode });
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          aria-describedby="network-mode-description"
+          value={networkMode}
+        >
+          <option value="open">{t("localHost.networkOpen")}</option>
+          <option value="ask">{t("localHost.networkAsk")}</option>
+          <option value="strict">{t("localHost.networkStrict")}</option>
+        </select>
+        <p
+          id="network-mode-description"
+          className="text-sm text-muted-foreground"
+        >
+          {t(`localHost.networkDescription_${networkMode}`)}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {enforced
+            ? t("localHost.networkHelperEnforced")
+            : t("localHost.networkHelperUnenforced")}
+        </p>
       </div>
       <div className="space-y-3 rounded-lg border p-4">
         <h3 className="font-medium">{t("localHost.workingDirectoriesTitle")}</h3>

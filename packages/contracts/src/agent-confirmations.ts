@@ -161,6 +161,7 @@ export const toolConfirmationDomainSchema = z.enum([
   "artifact",
   "mcp",
   "skill",
+  "network",
 ]);
 
 export const toolConfirmationStatusSchema = z.enum([

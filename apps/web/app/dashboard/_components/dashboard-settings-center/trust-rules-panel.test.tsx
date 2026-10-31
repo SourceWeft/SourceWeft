@@ -88,6 +88,28 @@ test("lists a rule with the facts needed to judge it", async () => {
   assert.match(text, /confirmation-1/);
 });
 
+test("a network rule reads 'Network · host' and hides the connector and risk line", async () => {
+  listAgentToolTrustRules.mockResolvedValue({
+    rules: [
+      rule({
+        id: "rule-net",
+        domain: "network",
+        toolName: "network_access",
+        connectorId: null,
+        targetType: "host",
+        targetId: "api.example.com",
+        allowedRiskLevels: [],
+      }),
+    ],
+  });
+  const element = await render();
+  const text = rows(element)[0]?.textContent ?? "";
+  assert.match(text, /Network \u00b7 api\.example\.com/);
+  assert.doesNotMatch(text, /network_access/);
+  assert.doesNotMatch(text, /Connector:|Risk:/);
+  assert.match(text, /Local commands may reach this host on any port/);
+});
+
 test("revoked rules are not listed", async () => {
   listAgentToolTrustRules.mockResolvedValue({
     rules: [rule({ id: "rule-2", status: "revoked" })],

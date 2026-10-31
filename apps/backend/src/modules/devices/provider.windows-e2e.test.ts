@@ -56,6 +56,9 @@ vi.mock("@sourceweft/db", () => ({
   },
 }));
 vi.mock("./service", () => ({ localCall: state.call }));
+vi.mock("./network-approvals", () => ({
+  resolveCommandNetworkPolicy: async () => ({ mode: "open", allow: [], suggested: {} }),
+}));
 import { localProviderForTurn } from "./provider";
 import { ContentError } from "../content/errors";
 

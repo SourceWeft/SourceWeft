@@ -97,6 +97,9 @@ const getChecking = () => checkingConversation;
 export const LocalOperationContext = createContext<{
   blocked: boolean;
   message: string | null;
+  /** True once the conversation is known to run on one of the user's computers. */
+  isLocalThread?: boolean;
+  threadId?: string | null;
 }>({ blocked: false, message: null });
 export const useLocalOperationStatus = () => useContext(LocalOperationContext);
 

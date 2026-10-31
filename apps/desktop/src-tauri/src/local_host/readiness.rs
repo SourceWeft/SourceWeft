@@ -820,7 +820,7 @@ impl LocalHost {
                     super::srt_exec::windows_init_config_for(&bundle, &self.base, &probe_root)?;
                 // The first start after a fresh setup is slow (the sandbox account's profile is
                 // created at its first logon): the same long `init` timeout as a workspace.
-                let outcome = Sidecar::start_for_workspace(&bundle, &init).and_then(|sidecar| sidecar.probe());
+                let outcome = Sidecar::start_for_workspace(&bundle, &init, None).and_then(|sidecar| sidecar.probe());
                 match outcome {
                     Ok(()) => {
                         ReadinessCache::clear_init_timeouts(&self.sandbox_readiness_cache);
@@ -1210,25 +1210,31 @@ mod tests {
                 "protocol-null",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol none, this app needs 2). Install the update.",
+                "The sandbox runtime is out of date (protocol none, this app needs 3). Install the update.",
             ),
             (
                 "protocol-0",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol 0, this app needs 2). Install the update.",
+                "The sandbox runtime is out of date (protocol 0, this app needs 3). Install the update.",
             ),
             (
                 "protocol-1",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol 1, this app needs 2). Install the update.",
+                "The sandbox runtime is out of date (protocol 1, this app needs 3). Install the update.",
             ),
             (
-                "protocol-3",
+                "protocol-2",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
+                "The sandbox runtime is out of date (protocol 2, this app needs 3). Install the update.",
+            ),
+            (
+                "protocol-4",
                 SetupCode::BundleNewer,
                 Remedy::UpdateApp,
-                "The sandbox runtime (protocol 3) is newer than this app supports (2). Update SourceWeft.",
+                "The sandbox runtime (protocol 4) is newer than this app supports (3). Update SourceWeft.",
             ),
         ] {
             let mut init = test_init();

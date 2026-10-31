@@ -14,8 +14,9 @@
 import { lstatSync } from "node:fs";
 import { isAbsolute, normalize as normalizePosix } from "node:path/posix";
 import * as win32 from "node:path/win32";
-import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import type { FilterRequestCallback, SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { UNROUTABLE_V4, UNROUTABLE_V6 } from "./address-guard.js";
+import type { NetworkPolicy } from "./network-policy.js";
 import type { InitConfig } from "./protocol.js";
 // One list for both sides: the desktop host (`winpath.rs`) refuses a folder inside any of these
 // before it is ever granted, and the policy below refuses it again at `init`.
@@ -685,5 +686,50 @@ function buildWin32Config(init: InitConfig): SandboxRuntimeConfig {
       sandboxUser: WINDOWS_SANDBOX_USER,
       proxyPortRange: [...WINDOWS_PROXY_PORT_RANGE],
     },
+  };
+}
+
+/**
+ * The srt `network.filterRequest` hook that audits plain-HTTP traffic. It is not a policy point:
+ * it always allows, because every connection was already judged by the ask callback
+ * (`NetworkPolicy.decide`) before srt's proxy got as far as parsing an HTTP request. Its only job
+ * is to record method, host, port, path (no query) and the response status through
+ * `NetworkPolicy.beginHttp`, which attributes the request to the single active command; a request
+ * it cannot attribute is allowed and recorded nowhere.
+ *
+ * srt only calls a `filterRequest` for plain HTTP, and for HTTPS only when it terminates TLS, which
+ * this sidecar does not do yet — so HTTPS appears in the audit as connections, never as requests.
+ *
+ * A throw here would deny the request (srt fails closed on a throwing callback), and an audit
+ * must never change what a command can do, so everything that can fail is contained.
+ *
+ * Setting any `filterRequest` makes srt judge the request-target of plain HTTP: its default
+ * `ambiguousRequestTarget` is `refuse`, so a target with dot segments or a backslash is refused
+ * with a 400 where srt without a filter would have normalised and forwarded it.
+ */
+export function auditFilterRequest(begin: NetworkPolicy["beginHttp"]): FilterRequestCallback {
+  return async (request, info) => {
+    try {
+      const url = new URL(request.url);
+      const secure = info?.scheme === undefined ? url.protocol === "https:" : info.scheme === "https";
+      const host = info?.target?.host ?? url.hostname;
+      const port =
+        info?.target?.port ?? (url.port === "" ? (secure ? 443 : 80) : Number(url.port));
+      const path = info?.requestTarget ?? url.pathname;
+      const done = begin({ host, port, method: request.method, path });
+      if (done === null) return { action: "allow" };
+      return {
+        action: "allow",
+        onResponse: (status) => {
+          try {
+            done(status);
+          } catch {
+            // Recording is best effort; srt would only log a failing callback anyway.
+          }
+        },
+      };
+    } catch {
+      return { action: "allow" };
+    }
   };
 }

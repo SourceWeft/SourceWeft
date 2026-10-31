@@ -1363,7 +1363,18 @@
       "workingDirectoriesTitle": "工作目錄",
       "workingDirectoriesDescription": "每個對話都會獲得獨立的任務資料夾。移除資料夾存取權限會停止受影響任務的後續本機操作，並保留其中的檔案。",
       "removeAccess": "移除存取權限",
-      "addFolder": "新增資料夾"
+      "addFolder": "新增資料夾",
+      "networkTitle": "網路存取",
+      "networkDescription": "選擇在這臺電腦上執行的命令可以存取網際網路上的哪些內容。私有網路和本機網路位址始終會被攔截。",
+      "networkSelectAria": "網路存取模式",
+      "networkAsk": "存取新網站時詢問我",
+      "networkOpen": "允許公用網站（預設）",
+      "networkStrict": "僅限我允許的網站",
+      "networkHelperEnforced": "由這臺電腦上的沙盒強制執行。",
+      "networkHelperUnenforced": "此設定在這臺電腦上尚未生效，命令仍可存取任何公用主機。",
+      "networkDescription_open": "命令可以存取任何公用網站。私有、本機和雲端中繼資料位址始終會被攔截。",
+      "networkDescription_ask": "命令存取新網站時會暫停，直到你在對話中核准。",
+      "networkDescription_strict": "命令只能存取你已允許的網站，不會再詢問。"
     },
     "approvals": {
       "title": "核准",
@@ -1384,7 +1395,9 @@
       "expired": "已過期",
       "noExpiry": "永不過期",
       "neverUsed": "從未使用",
-      "unknownPrompt": "未知確認請求"
+      "unknownPrompt": "未知確認請求",
+      "networkRule": "網路 · {host}",
+      "networkRuleDetail": "本機命令可透過任意連接埠存取此主機"
     },
     "about": {
       "title": "關於",
@@ -2327,6 +2340,21 @@
       "summaryFailed": "本次執行已使用 {steps}/{limit} 步，但總結產生失敗。你可以從已儲存的進度繼續。",
       "continue": "繼續剩餘任務",
       "continueMessage": "請根據目前工作階段已儲存的進度繼續尚未完成的工作。先確認現有結果，避免重複已完成的操作。"
+    },
+    "networkAccess": {
+      "region": "網路存取請求",
+      "title": "請求存取網路",
+      "target": "{host}:{port}",
+      "intro": "你電腦上的某條命令正在嘗試存取此主機。等待你答覆期間，命令會繼續執行。",
+      "commandLabel": "命令",
+      "requestedBy": "由技能 {skill} 請求",
+      "expiresIn": "{time} 後自動拒絕",
+      "deny": "拒絕",
+      "allowOnce": "僅允許一次",
+      "allowWorkspace": "在此工作區始終允許",
+      "sending": "正在傳送…",
+      "forbidden": "只有工作區管理員才能在整個工作區範圍內允許某個主機。你仍可以僅允許一次。",
+      "failed": "未能傳送你的答覆，請重試。"
     }
   },
   "dashboardChatFiles": {

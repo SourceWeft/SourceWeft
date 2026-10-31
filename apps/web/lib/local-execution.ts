@@ -12,6 +12,7 @@ export type LocalDevice = {
   name: string;
   online: boolean;
   remoteEnabled: boolean;
+  networkMode?: import("@sourceweft/contracts").LocalNetworkMode;
   connected: boolean;
   /** Last status report from the host; null/absent until it has reported. */
   platform?: "macos" | "linux" | "windows" | null;
@@ -28,6 +29,8 @@ export type LocalDevice = {
 export type LocalRequestOptions = {
   /** Override the path policy when the endpoint needs native authorization. */
   localProof?: boolean;
+  /** Body-carrying requests are POST unless the endpoint is a PATCH. */
+  method?: "PATCH";
 };
 
 export async function localRequest<T>(
@@ -47,7 +50,8 @@ export async function localRequest<T>(
     return (await requestHubFile(path)) as T;
   }
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: body === undefined ? "GET" : "POST",
+    method:
+      body === undefined ? "GET" : (options?.method ?? "POST"),
     credentials: "include",
     cache: "no-store",
     signal: path.endsWith("/local-execution")

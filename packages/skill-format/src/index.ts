@@ -25,3 +25,13 @@ export {
   stringifySkillMetadata,
   type SkillFrontmatter,
 } from "./frontmatter";
+
+export {
+  normalizeSkillNetworkDomain,
+  readSkillNetworkDomains,
+  SKILL_NETWORK_DOMAIN_MAX_LENGTH,
+  SKILL_NETWORK_DOMAINS_KEY,
+  SKILL_NETWORK_DOMAINS_MAX_ENTRIES,
+  type SkillNetworkDomainIssue,
+  type SkillNetworkDomainIssueCode,
+} from "./network-domains";

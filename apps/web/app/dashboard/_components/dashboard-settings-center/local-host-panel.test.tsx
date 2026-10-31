@@ -134,7 +134,7 @@ test("a ready device shows its system and shell; no card appears", async () => {
   assert.match(text, /This computer is online/);
 });
 
-test("a macOS-style status with no readiness shows no card", async () => {
+test("a status with no readiness (no managed host) shows no card", async () => {
   bridge.localHostStatus.mockResolvedValue({ ...baseStatus });
   localRequest.mockResolvedValue({ devices: [] });
   const container = await render();

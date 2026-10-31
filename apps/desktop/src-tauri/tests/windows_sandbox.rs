@@ -731,19 +731,37 @@ fn try_execute(
     timeout_ms: u64,
     max_chars: u64,
 ) -> Result<Value, HostError> {
+    try_execute_net(host, executions, label, workspace, command, timeout_ms, max_chars, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn try_execute_net(
+    host: &LocalHost,
+    executions: &Executions,
+    label: &str,
+    workspace: &Workspace,
+    command: &str,
+    timeout_ms: u64,
+    max_chars: u64,
+    network: Option<Value>,
+) -> Result<Value, HostError> {
     // The command's own timeout, plus what starting a sidecar and stamping the folder may take.
     let _w = watch(
         format!("command.execute `{label}` ({command})"),
         Duration::from_millis(timeout_ms) + Duration::from_secs(150),
     );
     let started = Instant::now();
+    let mut payload = json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": max_chars});
+    if let Some(network) = network {
+        payload["network"] = network;
+    }
     let result = host.dispatch(
         executions,
         &call_id(label),
         "owner",
         &workspace.thread_id,
         "command.execute",
-        json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": max_chars}),
+        payload,
     );
     if started.elapsed() > Duration::from_secs(5) {
         eprintln!("TIMING: command.execute `{label}` took {:?}", started.elapsed());
@@ -767,6 +785,23 @@ fn execute(host: &LocalHost, label: &str, workspace: &Workspace, command: &str) 
             describe_node()
         )
     })
+}
+
+/// `execute` with an explicit per-command network policy (what the backend sends as `network`).
+fn execute_net(
+    host: &LocalHost,
+    label: &str,
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+) -> Value {
+    try_execute_net(host, &Executions::default(), label, workspace, command, 110_000, 20_000, network)
+        .unwrap_or_else(|error| {
+            panic!(
+                "command.execute failed: {error}\ncommand: {command}\n{}",
+                describe_node()
+            )
+        })
 }
 
 fn output(result: &Value) -> &str {
@@ -2452,6 +2487,220 @@ fn metadata_and_private_shorthand_literals_are_refused() {
         let result = socks_probe(&host, &workspace, shell, spelling, port);
         assert_socks_refused(&result, spelling, None);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Network approvals (protocol 2 / Plan 4) on Windows: the sidecar's policy is platform-independent,
+// the proxy is the one srt-win's WFP fence forces every connection through. These mirror the
+// macOS and Linux suites with a stand-in for the backend (`ApprovalBridge`).
+// ---------------------------------------------------------------------------------------------
+
+fn net_policy(mode: &str, allow: &[&str]) -> Value {
+    json!({"mode": mode, "allow": allow, "suggested": {}})
+}
+
+/// What the stand-in backend does with each `network.ask`: wait `delay`, then answer.
+struct Answer {
+    delay: Duration,
+    allow: bool,
+    reason: Option<&'static str>,
+}
+
+/// Installs an outbound channel on `host.network` for its lifetime, records every `network.ask`
+/// frame and resolves it through `host.network.resolve` (as `remote_host.rs` does for a
+/// `network.decision`).
+struct ApprovalBridge {
+    lease: Option<sourceweft_desktop::local_host::network::OutboundLease>,
+    asks: Arc<Mutex<Vec<Value>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ApprovalBridge {
+    fn start(host: &LocalHost, answer: Answer) -> Self {
+        let bridge = host.network.clone();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let lease = bridge.attach(sender);
+        let asks = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let (asks, stop) = (asks.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match frames.try_recv() {
+                        Ok(frame) => {
+                            asks.lock().unwrap().push(frame.clone());
+                            std::thread::sleep(answer.delay);
+                            let ask_id = frame["askId"].as_str().unwrap();
+                            bridge.resolve(ask_id, answer.allow, answer.reason.map(str::to_string));
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+            })
+        };
+        Self { lease: Some(lease), asks, stop, worker: Some(worker) }
+    }
+
+    fn allowing(host: &LocalHost, delay_ms: u64) -> Self {
+        Self::start(host, Answer { delay: Duration::from_millis(delay_ms), allow: true, reason: None })
+    }
+
+    fn asks(&self) -> Vec<Value> {
+        self.asks.lock().unwrap().clone()
+    }
+}
+
+impl Drop for ApprovalBridge {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        drop(self.lease.take());
+    }
+}
+
+/// The first `networkAudit` entry for which `matches` holds.
+fn audit_entry<'a>(result: &'a Value, matches: impl Fn(&Value) -> bool) -> &'a Value {
+    result["networkAudit"]
+        .as_array()
+        .unwrap_or_else(|| panic!("result has no networkAudit: {result}"))
+        .iter()
+        .find(|entry| matches(entry))
+        .unwrap_or_else(|| panic!("no matching audit entry in: {result}"))
+}
+
+fn npm_connection(entry: &Value, decision: &str, source: &str) -> bool {
+    entry["kind"] == "connection"
+        && entry["host"] == "registry.npmjs.org"
+        && entry["port"] == 443
+        && entry["decision"] == decision
+        && entry["source"] == source
+}
+
+const NPM_URL: &str = "https://registry.npmjs.org/left-pad";
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn ask_mode_blocks_until_decision_then_connects() {
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let workspace = new_workspace(&host, "thread");
+    let approvals = ApprovalBridge::allowing(&host, 300);
+    let started = Instant::now();
+    let result = execute_net(
+        &host,
+        "ask-allow",
+        &workspace,
+        &node(shell, "sw-net.cjs", &["GET", NPM_URL]),
+        Some(net_policy("ask", &[])),
+    );
+    assert!(started.elapsed() >= Duration::from_millis(300), "{result}");
+    assert_eq!(probe_line(&result)["status"], 200, "{result}");
+    let asks = approvals.asks();
+    assert_eq!(asks.len(), 1, "{asks:?}");
+    assert_eq!(asks[0]["type"], "network.ask");
+    assert_eq!(asks[0]["host"], "registry.npmjs.org");
+    assert_eq!(asks[0]["port"], 443);
+    audit_entry(&result, |entry| npm_connection(entry, "allow", "approval"));
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn ask_mode_denial_reaches_the_model_text() {
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let workspace = new_workspace(&host, "thread");
+    // The backend's exact user-denial text is what the sidecar recognises as the user saying no.
+    let approvals = ApprovalBridge::start(
+        &host,
+        Answer { delay: Duration::from_millis(100), allow: false, reason: Some("denied by user") },
+    );
+    let result = execute_net(
+        &host,
+        "ask-deny",
+        &workspace,
+        &node(shell, "sw-net.cjs", &["GET", NPM_URL]),
+        Some(net_policy("ask", &[])),
+    );
+    assert_eq!(approvals.asks().len(), 1);
+    let probe = probe_line(&result);
+    assert_eq!(probe["stage"], "connect", "{result}");
+    assert_eq!(probe["status"], 403, "{result}");
+    let text = output(&result);
+    assert!(text.contains("<sandbox_violations>"), "{result}");
+    assert!(text.contains("denied by user"), "{result}");
+    let entry = audit_entry(&result, |entry| npm_connection(entry, "deny", "user"));
+    assert_eq!(entry["reason"], "denied by user");
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn strict_mode_denies_without_asking_and_a_rule_allows_without_asking() {
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let workspace = new_workspace(&host, "thread");
+    // A bridge that would allow anything, to prove it is never consulted.
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let fetch = node(shell, "sw-net.cjs", &["GET", NPM_URL]);
+    let strict = execute_net(&host, "strict", &workspace, &fetch, Some(net_policy("strict", &[])));
+    assert_eq!(probe_line(&strict)["status"], 403, "{strict}");
+    assert!(output(&strict).contains("<sandbox_violations>"), "{strict}");
+    audit_entry(&strict, |entry| npm_connection(entry, "deny", "strict"));
+    let rule = execute_net(
+        &host,
+        "rule",
+        &workspace,
+        &fetch,
+        Some(net_policy("ask", &["registry.npmjs.org"])),
+    );
+    assert_eq!(probe_line(&rule)["status"], 200, "{rule}");
+    audit_entry(&rule, |entry| npm_connection(entry, "allow", "rule"));
+    assert!(approvals.asks().is_empty(), "{:?}", approvals.asks());
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn the_address_guard_beats_a_rule_and_an_approval() {
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let workspace = new_workspace(&host, "thread");
+    // Every way to say yes: a rule for the target and a bridge that approves anything.
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let result = execute_net(
+        &host,
+        "guard",
+        &workspace,
+        &node(shell, "sw-connect.cjs", &["10.0.0.1:80"]),
+        Some(net_policy("ask", &["10.0.0.1"])),
+    );
+    assert_connect_refused(&result, "10.0.0.1:80", None);
+    assert!(output(&result).contains("public internet only"), "{result}");
+    assert!(
+        approvals.asks().is_empty(),
+        "the bridge must not even be asked about guarded addresses: {:?}",
+        approvals.asks()
+    );
+    audit_entry(&result, |entry| {
+        entry["decision"] == "deny" && entry["source"] == "guard" && entry["host"] == "10.0.0.1"
+    });
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn network_defaults_to_open_without_asking() {
+    let shell = active_shell();
+    let (_app, host) = host_with_bundle();
+    let workspace = new_workspace(&host, "thread");
+    let approvals = ApprovalBridge::allowing(&host, 0);
+    let fetch = node(shell, "sw-net.cjs", &["GET", NPM_URL]);
+    for (label, network) in [("no-policy", None), ("open", Some(net_policy("open", &[])))] {
+        let result = execute_net(&host, label, &workspace, &fetch, network);
+        assert_eq!(probe_line(&result)["status"], 200, "{label}: {result}");
+        audit_entry(&result, |entry| npm_connection(entry, "allow", "open"));
+    }
+    assert!(approvals.asks().is_empty(), "{:?}", approvals.asks());
 }
 
 /// Asserts the hosts file maps `name` to `address`. The windows-sandbox CI job adds these

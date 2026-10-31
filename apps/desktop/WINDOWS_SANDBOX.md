@@ -237,6 +237,18 @@ cloud-metadata addresses, including shorthand spellings (`127.1`, `2130706433`, 
 connect to a server on `localhost` (loopback is open only for the proxy ports; the optional
 "allow local binding" mode of upstream stays off).
 
+**Network modes and approvals** (`open`, `ask`, `strict`, per computer; see `LOCAL_NETWORK.md`) work
+on Windows exactly as on macOS and Linux: the sidecar's proxy decides every connection, an `ask`
+raises an approval card in the conversation while the command keeps running, `strict` and the
+address guard never ask, and each command's result carries its `networkAudit`. Nothing about them
+is Windows-specific except that a command can only reach the network through that proxy (the
+firewall rules srt-win installs leave no other route), so a mode that refuses a host cannot be
+bypassed by a client that ignores proxy variables. The host attributes asks to the one running
+command on the computer; commands running at the same time in different working folders (each
+folder has its own sidecar) deny every ask, as documented in `LOCAL_NETWORK.md`. HTTPS request
+paths and methods are not visible without TLS termination, so the audit lists HTTPS as
+connections only.
+
 ## The Schannel limitation
 
 Programs built on the Windows **Schannel** TLS stack cannot do HTTPS under the sandbox: Schannel

@@ -22,6 +22,8 @@ import {
   isDeviceAbsolutePath,
   joinDevicePath,
 } from "./device-path";
+import { resolveCommandNetworkPolicy } from "./network-approvals";
+import type { NetworkSkillInput } from "./network-skill-domains";
 
 /**
  * The environment the host last reported for the computer a local thread is
@@ -31,13 +33,14 @@ import {
  */
 export async function boundDeviceEnvironment(
   threadId: string,
-): Promise<LocalExecutionDevice | null> {
+): Promise<(LocalExecutionDevice & { networkMode: string | null }) | null> {
   const [row] = await db
     .select({
       platform: localDevices.platform,
       arch: localDevices.arch,
       shell: localDevices.shell,
       sandboxState: localDevices.sandboxState,
+      networkMode: localDevices.networkMode,
     })
     .from(localThreadBindings)
     .innerJoin(localDevices, eq(localDevices.id, localThreadBindings.deviceId))
@@ -52,6 +55,13 @@ export async function localProviderForTurn(
     "teamId" | "workspaceId" | "threadId" | "userId"
   > &
     Partial<Pick<SandboxRuntimeContext, "runId" | "localCaller" | "messageId">>,
+  options: {
+    /**
+     * The turn's enabled skills, for the domains they declare. Absent means
+     * no skill contributes (nothing is pre-allowed, nothing is suggested).
+     */
+    networkSkills?: readonly NetworkSkillInput[];
+  } = {},
 ): Promise<SandboxProviderFactory | null> {
   const thread = await db.query.threads.findFirst({
     where: and(
@@ -260,6 +270,18 @@ export async function localProviderForTurn(
       const executionId = input.executionId
         ? `${binding.deviceId}:${input.executionId}`
         : undefined;
+      // Resolved per command: a rule created a moment ago applies to the very
+      // next command. Hosts that do not enforce it (macOS until it is ported)
+      // ignore the field.
+      const network = await resolveCommandNetworkPolicy({
+        deviceId: binding.deviceId,
+        tenant: {
+          teamId: context.teamId,
+          workspaceId: context.workspaceId,
+          userId: context.userId,
+        },
+        skills: options.networkSkills ?? [],
+      });
       const result = await call(
         "command.execute",
         {
@@ -268,6 +290,7 @@ export async function localProviderForTurn(
           cwd: input.cwd ? relative(input.cwd) : ".",
           timeoutMs: Math.min(input.timeoutMs, 120_000),
           maxOutputChars: input.maxOutputChars,
+          network,
         },
         {
           id: executionId,

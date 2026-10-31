@@ -58,6 +58,9 @@ export async function listAgentToolTrustRuleRecords(input: {
   workspaceId: string;
   userId: string;
   status?: AgentToolTrustRuleStatus;
+  /** Narrow to one rule family; both are exact-equality filters. */
+  domain?: string;
+  toolName?: string;
 }) {
   const rows = await db
     .select()
@@ -71,6 +74,10 @@ export async function listAgentToolTrustRuleRecords(input: {
         // member's standing approvals.
         eq(agentToolTrustRules.userId, input.userId),
         ...(input.status ? [eq(agentToolTrustRules.status, input.status)] : []),
+        ...(input.domain ? [eq(agentToolTrustRules.domain, input.domain)] : []),
+        ...(input.toolName
+          ? [eq(agentToolTrustRules.toolName, input.toolName)]
+          : []),
       ),
     )
     .orderBy(desc(agentToolTrustRules.createdAt))
