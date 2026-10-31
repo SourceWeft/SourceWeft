@@ -127,6 +127,12 @@ user (see [Limits](#limits)). Uninstalling the app does not remove them. The app
 path (`LocalHost::run_elevated_uninstall`, used by the CI suite) does the same through the
 real UAC launcher. The status then becomes **windowsNotInstalled** and the setup button returns.
 
+These manual commands do **not** take back the *"this folder only"* permissions the app added on
+the folders above your working folders (see
+[The folders above a working folder](#the-folders-above-a-working-folder)); only the app's own
+removal path does, using `ancestor-grants.json`. After a manual removal those entries stay and
+name the deleted sandbox account's SID. They grant nothing to anyone else.
+
 ## Which shell commands run in
 
 The shell is chosen by the app; there is no setting.
@@ -207,6 +213,15 @@ finish."). The first command in a folder pays for stamping the permission on it 
 the size of the tree); that first start may take up to 10 minutes before it is reported as
 `SANDBOX_INIT_TIMEOUT` ("Preparing this folder for the sandbox did not finish ... Use a smaller
 folder, or try again"). It is not treated as a broken sandbox and is not retried automatically.
+
+The readiness check in **Settings → This computer** starts a sandbox of its own the same way, and
+the first start after a fresh setup is slow for the same reason (Windows creates the sandbox
+account's profile at its first logon). Each check waits up to the same 10 minutes and, while it
+times out, the device shows *getting ready* and is checked again. After **3 checks in a row** that
+each waited the full time, the state changes to a failure, `SANDBOX_START_INCOMPLETE` ("The sandbox
+did not finish its first start ..."), whose message names the setup result file
+(`%ProgramFiles%\SourceWeft\sandbox-setup-result.json`). Run the setup again, or remove the sandbox
+and set it up again ([Remove](#remove)). A successful check resets the count.
 
 ### The folders above a working folder
 
@@ -376,6 +391,12 @@ Other states in **Settings → This computer**:
 - **`SANDBOX_UNAVAILABLE`** after the setup — see the message; if it names `seclogon` or
   *Secondary Logon*, start the Secondary Logon service (`sc start seclogon`) **(not run)**.
 - **`SANDBOX_BUSY`** — four working folders are running commands; wait for one to finish.
+- **`SANDBOX_INIT_TIMEOUT`** — the first start in a working folder (or the first readiness check
+  after setup) did not finish within 10 minutes. Shown as *getting ready* and not a failure; use a
+  smaller folder, or try again.
+- **`SANDBOX_START_INCOMPLETE`** — three readiness checks in a row each waited the full 10 minutes
+  for the sandbox's first start. Read `sandbox-setup-result.json`, then run the setup again or
+  remove and set up the sandbox again ([Remove](#remove)).
 - **A command cannot find a tool** — the tool's folder is outside the profile and not readable
   by `Users`, or inside the profile and not a `PATH` entry. Put its `bin` folder on the `PATH`
   *before starting the app*, or install it for all users.
