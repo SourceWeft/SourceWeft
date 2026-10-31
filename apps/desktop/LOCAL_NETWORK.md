@@ -49,7 +49,7 @@ The audit is stored with the invocation result; it is not exposed in the UI yet.
 
 ## Known limits
 
-- The policy is enforced identically on macOS and Linux (both run commands through the sandbox sidecar); Windows does not run local commands yet.
+- The policy is enforced identically on macOS, Linux and Windows: all three run commands through the sandbox sidecar, whose proxy decides every connection. On Windows the sandbox's firewall rules (srt-win) leave the proxy as the only reachable address, and the Windows suite repeats the ask, strict, rule and guard tests (`tests/windows_sandbox.rs`). Windows runs one sidecar per working folder, but the host still treats every running command on the device as one pool for attribution (see the next limit).
 - Attribution assumes one command at a time per device (srt's ask callback carries no
   command id); zero or several concurrently active commands deny everything.
 - Setting a request filter makes srt refuse plain-HTTP request targets with dot segments

@@ -1,14 +1,21 @@
 #!/usr/bin/env bun
 /**
- * Builds the sidecar bundle: `dist/bundle/{srt-sidecar, rg, apply-seccomp, srt-proxy-agent.jar}`.
+ * Builds the sidecar bundle: `dist/bundle/{srt-sidecar, rg, apply-seccomp, srt-proxy-agent.jar}`
+ * (Linux), `{srt-sidecar, rg, srt-proxy-agent.jar}` (macOS) or
+ * `{srt-sidecar.exe, rg.exe, srt-win.exe, srt-proxy-agent.jar}` (Windows). Which files, what
+ * they are called and where they are copied from is decided by `bundlePlan` in `manifest.ts`
+ * (pure and unit-tested; this script only does the I/O).
  *
  * `srt-sidecar` is `src/main.ts` compiled by Bun into a single executable; `rg` is copied from
- * the path given via `--rg <path>` (CI passes `$(command -v rg)` — this script never bundles
+ * the path given via `--rg <path>` (CI passes the pinned ripgrep — this script never bundles
  * ripgrep itself); `apply-seccomp` is copied from the installed srt package's
- * `vendor/seccomp/<x64|arm64>/apply-seccomp`, matching the build machine's architecture, and is
- * Linux-only (skipped on macOS — the daemon only needs it on Linux, and there is no macOS
- * build of it to copy); `srt-proxy-agent.jar` is copied from
- * `vendor/java-proxy-agent/srt-proxy-agent.jar`.
+ * `vendor/seccomp/<x64|arm64>/apply-seccomp` and is Linux-only (the daemon only needs it on
+ * Linux, and there is no macOS build of it to copy); `srt-win.exe` is copied from
+ * `vendor/srt-win/<x64|arm64>/srt-win.exe` (Windows only; the architecture is the target's);
+ * `srt-proxy-agent.jar` is copied from `vendor/java-proxy-agent/srt-proxy-agent.jar`. On Windows
+ * the copied `srt-win.exe` must equal the SHA-256 pinned in `srt-win-pin.json` (the build fails
+ * otherwise): the desktop app runs a staged copy of it as administrator only if it has that hash,
+ * which is also why it is never Authenticode-signed.
  *
  * Finally it writes `manifest.json` (the wire contract the Rust installer and
  * `scripts/ci/sandbox-bundle.mjs` verify): schema version, `SANDBOX_PROTOCOL_VERSION`, the
@@ -30,6 +37,7 @@
  * never code-sign the bundle, so they never run this and their behaviour is unchanged.
  */
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -45,9 +53,12 @@ import { SANDBOX_PROTOCOL_VERSION } from "../src/protocol.js";
 import {
   MANIFEST_FILENAME,
   assertBunVersion,
+  assertSrtWinMatchesPin,
   buildManifest,
+  bundlePlan,
   bunCompileArgs,
   bunCompileTarget,
+  readSrtWinPin,
   resolveTarget,
 } from "./manifest.js";
 
@@ -84,24 +95,31 @@ function readVersion(packageJsonPath: string, what: string): string {
   return version;
 }
 
-/** srt's vendored `apply-seccomp` directory for this machine's architecture; no guessing. */
-function seccompArch(arch: string): "x64" | "arm64" {
-  if (arch === "x64" || arch === "arm64") return arch;
-  throw new Error(
-    `no vendored apply-seccomp for architecture ${arch} (expected x64 or arm64)`,
-  );
-}
-
 function requireFile(path: string, what: string): void {
   if (!existsSync(path)) {
     throw new Error(`${what} not found at ${path}`);
   }
 }
 
-function copyExecutable(source: string, destName: string): void {
+function copyFile(source: string, destName: string, execBit: boolean): void {
   const dest = join(outDir, destName);
   copyFileSync(source, dest);
-  chmodSync(dest, 0o755);
+  // Windows has no exec bit; `sandbox-bundle.mjs pack` assigns tar modes by extension there.
+  if (execBit) chmodSync(dest, 0o755);
+}
+
+/**
+ * A Windows bundle's `srt-win.exe` must be byte for byte the file pinned in `srt-win-pin.json`:
+ * the desktop app's elevated setup stages and runs only a file with that SHA-256 (the manifest is
+ * in user-writable app data and authorises nothing). Called after the files are copied and again
+ * before a re-manifest, which is what catches an `srt-win.exe` that was Authenticode-signed.
+ */
+function assertWindowsSrtWinPinned(target: string): void {
+  if (!target.endsWith("-pc-windows-msvc")) return;
+  const sha256 = createHash("sha256")
+    .update(readFileSync(join(outDir, "srt-win.exe")))
+    .digest("hex");
+  assertSrtWinMatchesPin(target, sha256, readSrtWinPin());
 }
 
 /**
@@ -126,6 +144,7 @@ function remanifest(): void {
   ) {
     throw new Error(`existing manifest is missing fields: ${manifestPath}`);
   }
+  assertWindowsSrtWinPinned(p.target);
   const manifest = buildManifest({
     bundleDir: outDir,
     protocolVersion: p.protocolVersion,
@@ -154,30 +173,14 @@ function main(): void {
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
-  copyExecutable(rgPath, "rg");
-
-  if (process.platform === "linux") {
-    const arch = seccompArch(process.arch);
-    const seccompSource = join(
-      packageRoot,
-      "node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp",
-      arch,
-      "apply-seccomp",
-    );
-    requireFile(seccompSource, `apply-seccomp (${arch})`);
-    copyExecutable(seccompSource, "apply-seccomp");
-  } else {
-    console.log(
-      `skipping apply-seccomp: not Linux (platform is ${process.platform})`,
-    );
+  const plan = bundlePlan(target);
+  copyFile(rgPath, plan.rgName, plan.setExecBit);
+  for (const { from, to, executable } of plan.vendorCopies) {
+    const source = join(packageRoot, ...from.split("/"));
+    requireFile(source, to);
+    copyFile(source, to, executable);
   }
-
-  const jarSource = join(
-    packageRoot,
-    "node_modules/@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar",
-  );
-  requireFile(jarSource, "srt-proxy-agent.jar");
-  copyFileSync(jarSource, join(outDir, "srt-proxy-agent.jar"));
+  assertWindowsSrtWinPinned(target);
 
   // A native build compiles with no `--target` (byte-identical to the historical Linux build);
   // a same-OS cross build (macOS x86_64 on the arm64 runner) passes the explicit Bun target so
@@ -192,7 +195,7 @@ function main(): void {
     process.execPath,
     bunCompileArgs({
       entry: join(packageRoot, "src/main.ts"),
-      outFile: join(outDir, "srt-sidecar"),
+      outFile: join(outDir, plan.sidecarName),
       crossTarget,
     }),
     { stdio: "inherit", cwd: packageRoot },

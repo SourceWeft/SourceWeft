@@ -19,6 +19,10 @@ const DARWIN_BUNDLES = [
   "sourceweft-sandbox-aarch64-apple-darwin.tar.gz",
   "sourceweft-sandbox-x86_64-apple-darwin.tar.gz",
 ];
+const WINDOWS_BUNDLES = [
+  "sourceweft-sandbox-x86_64-pc-windows-msvc.tar.gz",
+  "sourceweft-sandbox-aarch64-pc-windows-msvc.tar.gz",
+];
 const globToRegExp = (glob) =>
   new RegExp(
     `^${glob
@@ -40,7 +44,7 @@ test("release publishes the signed bundle and its signature for signed policies 
     (step) => step.id === "github_release_candidate",
   );
   // The Linux bundle and every macOS bundle (both architectures) plus their .sig files.
-  for (const bundle of [BUNDLE, ...DARWIN_BUNDLES])
+  for (const bundle of [BUNDLE, ...DARWIN_BUNDLES, ...WINDOWS_BUNDLES])
     for (const file of [bundle, `${bundle}.sig`]) {
       assert(
         covers(signed.with.files, `release-installers/${file}`),
@@ -57,6 +61,7 @@ test("release publishes the signed bundle and its signature for signed policies 
   assert.doesNotMatch(signed.with.body, /requires macOS/);
   assert.match(signed.with.body, /Linux x86_64/);
   assert.match(signed.with.body, /macOS/);
+  assert.match(signed.with.body, /Windows/);
   assert.doesNotMatch(candidate.with.body, /currently requires macOS/);
   assert.doesNotMatch(candidate.with.body, /requires macOS in this release/);
 });
@@ -91,6 +96,8 @@ test("recovery attaches the bundle only when the original artifacts have one", a
     "must not rewrite the release body",
   );
   assert(covers(bundle.with.files, `release-installers/${BUNDLE}`));
+  for (const windows of WINDOWS_BUNDLES)
+    assert(covers(bundle.with.files, `release-installers/x/${windows}`));
   assert(steps.indexOf(installers) < steps.indexOf(bundle));
   assert(
     steps.indexOf(bundle) < steps.findIndex((step) => step.id === "assets"),
@@ -316,6 +323,52 @@ test("the macOS release leg uses the pinned macOS ripgrep, not brew", async () =
   assert.doesNotMatch(script, /brew install/);
 });
 
+test("the Windows ripgrep pins are release-shaped and installed through a verify-before-extract script", async () => {
+  const pin = JSON.parse(
+    await readFile(new URL("./ripgrep-release.json", import.meta.url), "utf8"),
+  );
+  // The pre-existing keys (Linux top level, darwin block) are consumed by the shell installers
+  // and stay as they were; Windows is an additive per-triple block.
+  assert.deepEqual(Object.keys(pin), [
+    "version",
+    "asset",
+    "sha256",
+    "url",
+    "darwin",
+    "windows",
+  ]);
+  assert.deepEqual(Object.keys(pin.windows).sort(), [
+    "aarch64-pc-windows-msvc",
+    "x86_64-pc-windows-msvc",
+  ]);
+  const expected = {
+    "x86_64-pc-windows-msvc":
+      "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+    "aarch64-pc-windows-msvc":
+      "e4abca10c3a64ebea742667dd7009449d49403db5460dd6873e389fa2945360f",
+  };
+  for (const [triple, entry] of Object.entries(pin.windows)) {
+    assert.equal(entry.sha256, expected[triple]);
+    assert.equal(entry.asset, `ripgrep-${pin.version}-${triple}.zip`);
+    assert.equal(
+      entry.url,
+      `https://github.com/BurntSushi/ripgrep/releases/download/${pin.version}/${entry.asset}`,
+    );
+  }
+  const script = await readFile(
+    new URL("./install-ripgrep-windows.ps1", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /Get-FileHash/);
+  assert(
+    script.indexOf("Get-FileHash") < script.indexOf("ZipFile"),
+    "verify before extracting",
+  );
+  assert.match(script, /0x8664/);
+  assert.match(script, /0xAA64/i);
+  assert.doesNotMatch(script, /choco|winget|scoop|Invoke-Expression|\biex\b/);
+});
+
 test("pull-request CI packs, signs and verifies the bundle with a throwaway key only", async () => {
   const text = await readFile(
     new URL("../../.github/workflows/desktop-build.yml", import.meta.url),
@@ -372,4 +425,374 @@ test("pull-request CI also packs, ad-hoc signs and verifies both macOS bundles w
   assert(
     job.steps.some((step) => (step.run ?? "").includes("sandbox-bundle.test.mjs")),
   );
+});
+
+const WINDOWS_TARGETS = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
+const WINDOWS_SCRIPTS = "apps/desktop/sandbox-sidecar/scripts";
+
+test("pull-request CI builds, runs, throwaway-signs and verifies both Windows bundles natively", async () => {
+  const { jobs, on } = await workflow("desktop-build");
+  const job = jobs["sandbox-bundle-windows"];
+  assert(job, "sandbox-bundle-windows job must exist");
+  // The name keeps the other bundle jobs' "Sandbox bundle pack, sign and verify (...)" shape.
+  assert.equal(
+    job.name,
+    "Sandbox bundle pack, sign and verify (Windows ${{ matrix.arch }})",
+  );
+  assert.equal(job["runs-on"], "${{ matrix.os }}");
+  assert.equal(job.strategy["fail-fast"], false);
+  assert.deepEqual(
+    job.strategy.matrix.include.map((leg) => [leg.os, leg.target, leg.arch]),
+    [
+      ["windows-2025", "x86_64-pc-windows-msvc", "x64"],
+      ["windows-11-arm", "aarch64-pc-windows-msvc", "arm64"],
+    ],
+  );
+  const text = JSON.stringify(job);
+  assert.doesNotMatch(
+    text,
+    /secrets\.|upload-artifact|environment|WINDOWS_CERTIFICATE/,
+    "no production secrets, certificate, environment or artifact upload",
+  );
+  assert(text.includes("tauri signer generate"), "throwaway updater key only");
+  assert(text.includes("New-SelfSignedCertificate"), "throwaway Authenticode certificate only");
+
+  const setupBun = job.steps.find((step) => step.uses?.startsWith("oven-sh/setup-bun"));
+  assert.equal(setupBun.with["bun-version"], "1.4.2");
+  const named = (prefix) => job.steps.findIndex((step) => step.name?.startsWith(prefix));
+  const order = [
+    "Build the signature verifier",
+    "Archive tooling unit tests",
+    "Sidecar build helper and manifest unit tests",
+    "Install the pinned ripgrep",
+    "Build the sandbox bundle for the target",
+    "Verify the built executables",
+    "Authenticode-sign with a throwaway certificate",
+    "Pack, sign (throwaway key) and verify",
+  ].map(named);
+  assert(order.every((index) => index !== -1), `missing step in ${order}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), "steps are in build order");
+
+  const run = (prefix) => job.steps[named(prefix)].run;
+  // Only the Windows-specific archive tests run on a Windows host (the others need exec bits).
+  assert.match(run("Archive tooling unit tests"), /--test-name-pattern="\[Ww\]indows"/);
+  assert.match(run("Install the pinned ripgrep"), /install-ripgrep-windows\.ps1/);
+  assert.match(run("Install the pinned ripgrep"), /\$env:TARGET/);
+  assert.match(run("Build the sandbox bundle"), /--target "\$TARGET" --rg "\$RG_PATH"/);
+  // The compiled executables are inspected and run, before and after signing.
+  const verify = `${WINDOWS_SCRIPTS}/verify-windows-bundle.ps1`;
+  assert(run("Verify the built executables").includes(verify));
+  const sign = run("Authenticode-sign with a throwaway certificate");
+  assert(sign.includes(`${WINDOWS_SCRIPTS}/sign-windows.ps1`));
+  assert.match(sign, /-Throwaway/);
+  assert(sign.includes(verify), "signed executables are run again");
+  assert(
+    sign.indexOf("sign-windows.ps1") < sign.indexOf("verify-windows-bundle.ps1"),
+    "sign, then run the signed executables",
+  );
+  // The manifest is rebuilt over the signed files in bash: in PowerShell `pnpm` can be pnpm.ps1,
+  // which swallows the `--` before --remanifest.
+  assert.doesNotMatch(sign, /pnpm|--remanifest/);
+  const remanifest = named("Re-manifest over the signed executables");
+  assert(remanifest > named("Authenticode-sign with a throwaway certificate"));
+  assert(remanifest < named("Pack, sign (throwaway key) and verify"));
+  assert.equal(job.steps[remanifest].shell, "bash");
+  assert.match(job.steps[remanifest].run, /build -- --remanifest/);
+  assert.match(sign, /Remove-Item[^\n]*Cert:/, "the throwaway certificate is removed again");
+  // Pack/sign/verify exactly as the release does, with a deterministic second pack.
+  const pack = run("Pack, sign (throwaway key) and verify");
+  for (const part of [
+    "sandbox-bundle.mjs pack",
+    "sandbox-bundle.mjs verify ",
+    "sandbox-bundle.mjs sign",
+    "sandbox-bundle.mjs verify-signature",
+    "cmp ",
+    "sourceweft-sandbox-$TARGET.tar.gz",
+  ])
+    assert(pack.includes(part), `Windows PR job missing: ${part}`);
+  assert(pack.indexOf("mjs pack") < pack.indexOf("mjs verify "));
+  assert(pack.indexOf(" sign ") < pack.indexOf("verify-signature"));
+  // Verifier is the Windows .exe of the cargo build above.
+  assert.match(job.env.DESKTOP_UPDATE_VERIFIER, /sourceweft-update-verifier\.exe$/);
+
+  for (const path of [
+    "scripts/ci/install-ripgrep-windows.ps1",
+    "scripts/ci/build-sandbox-bundle-windows.sh",
+    "scripts/ci/sandbox-bundle*.mjs",
+    "apps/desktop/**",
+    ".github/workflows/desktop-release.yml",
+  ])
+    assert(on.pull_request.paths.includes(path), `PR paths miss ${path}`);
+});
+
+test("the Windows verify script catches a wrong namespace, architecture or non-namespaced srt-win", async () => {
+  const script = await readFile(
+    new URL(`../../${WINDOWS_SCRIPTS}/verify-windows-bundle.ps1`, import.meta.url),
+    "utf8",
+  );
+  // The compiled sidecar is executed with the test-only flag and must print exactly `sourceweft`.
+  assert.match(script, /& \$sidecar --print-namespace/);
+  assert.match(script, /-ne 'sourceweft'/);
+  assert.match(script, /\$printed\.Count -ne 1/);
+  // PE machine of all three executables, from the target triple.
+  assert.match(script, /0x8664/);
+  assert.match(script, /0xAA64/i);
+  for (const name of ["srt-sidecar.exe", "rg.exe", "srt-win.exe"])
+    assert(script.includes(`'${name}'`), `${name} is checked`);
+  assert.match(script, /sourceweft-sandbox/);
+  // srt-win.exe must equal the SHA-256 pinned for the target (the file the desktop app embeds),
+  // read from srt-win-pin.json beside the package.
+  assert.match(script, /srt-win-pin\.json/);
+  assert.match(script, /Get-FileHash -LiteralPath \(Join-Path \$BundleDir 'srt-win\.exe'\) -Algorithm SHA256/);
+  assert.match(script, /\$pin\.srtWin\.\$Triple/);
+  assert.match(script, /\$actual -ne \$pinned/);
+  // The define the check guards is the one the build passes.
+  const manifest = await readFile(
+    new URL("../../apps/desktop/sandbox-sidecar/scripts/manifest.ts", import.meta.url),
+    "utf8",
+  );
+  assert(manifest.includes("'__SRT_WIN_NAMESPACE__=\"sourceweft\"'"));
+  const main = await readFile(
+    new URL("../../apps/desktop/sandbox-sidecar/src/main.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(main, /--print-namespace/);
+});
+
+test("the signing script accepts only the expected certificate and a real timestamp for releases", async () => {
+  const script = await readFile(
+    new URL(`../../${WINDOWS_SCRIPTS}/sign-windows.ps1`, import.meta.url),
+    "utf8",
+  );
+  // srt-win.exe is NOT signed: signing would change the bytes the desktop app pins and the
+  // elevated setup checks.
+  assert.match(script, /foreach \(\$name in 'srt-sidecar\.exe', 'rg\.exe'\)/);
+  const code = script
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.doesNotMatch(code, /srt-win/, "srt-win.exe is never signed");
+  assert.match(script, /deliberately NOT signed/);
+  assert.match(script, /'\/fd', 'sha256', '\/sha1', \$Thumbprint/);
+  assert.match(script, /'\/tr', \$TimestampUrl, '\/td', 'sha256'/);
+  // A release signature must verify as Valid and carry a timestamp; only the throwaway
+  // self-signed run may report an untrusted chain.
+  assert.match(script, /\$signature\.Status -ne 'Valid'/);
+  assert.match(script, /TimeStamperCertificate/);
+  assert.match(script, /-notin @\('Valid', 'UnknownError', 'NotTrusted'\)/);
+  assert.match(script, /a release signature needs -TimestampUrl/);
+});
+
+test("the signed desktop build produces the Windows x64 bundle beside the installer, Authenticode-signed only under the signed policy", async () => {
+  const { jobs } = await workflow("desktop-release");
+  const steps = jobs.build.steps;
+  assert(
+    jobs.build.strategy.matrix.include.some(
+      (leg) => leg.target === "x86_64-pc-windows-msvc" && leg.os.startsWith("windows"),
+    ),
+  );
+  const upload = steps.findIndex((step) => step.uses?.startsWith("actions/upload-artifact"));
+  const rg = steps.findIndex((step) => step.id === "ripgrep_windows");
+  const bundle = steps.findIndex(
+    (step) => step.name === "Build, sign and verify the sandbox runtime bundle (Windows)",
+  );
+  const importCert = steps.findIndex((step) => step.name === "Import Windows signing certificate");
+  const verifier = steps.findIndex((step) => step.name === "Build signature verifier");
+  assert(importCert !== -1 && verifier !== -1 && rg !== -1 && bundle !== -1);
+  assert(importCert < bundle && verifier < bundle && rg < bundle && bundle < upload);
+  for (const index of [rg, bundle]) {
+    assert.match(steps[index].if, /runner\.os == 'Windows'/);
+    assert.match(steps[index].if, /exists != 'true'/);
+  }
+  assert.match(steps[rg].run, /install-ripgrep-windows\.ps1/);
+  assert.match(steps[rg].run, /\$env:DESKTOP_RELEASE_TARGET/);
+  const leg = steps[bundle];
+  assert.equal(leg.shell, "bash");
+  assert.match(leg.env.DESKTOP_UPDATE_VERIFIER, /sourceweft-update-verifier\.exe$/);
+  assert.equal(leg.env.RG_PATH, "${{ steps.ripgrep_windows.outputs.path }}");
+  assert.match(leg.run, /build-sandbox-bundle-windows\.sh/);
+  assert.doesNotMatch(JSON.stringify(leg), /secrets\./);
+  // Bun is set up on Windows too.
+  const setup = steps.find(
+    (step) => step.uses?.startsWith("oven-sh/setup-bun") && /runner\.os == 'macOS'/.test(step.if ?? ""),
+  );
+  assert.match(setup.if, /runner\.os == 'Windows'/);
+  assert.equal(setup.with["bun-version"], "1.4.2");
+});
+
+test("the Windows release script signs before packing under `signed` only, then re-manifests, packs, minisigns and verifies", async () => {
+  // Comments (the header names every tool) are not part of what runs.
+  const script = (
+    await readFile(
+      new URL("./build-sandbox-bundle-windows.sh", import.meta.url),
+      "utf8",
+    )
+  )
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  const at = (part) => {
+    const index = script.indexOf(part);
+    assert(index !== -1, `script missing: ${part}`);
+    return index;
+  };
+  assert.match(script, /set -euo pipefail/);
+  const order = [
+    'build -- --target "$DESKTOP_RELEASE_TARGET" --rg "$RG_PATH"',
+    "verify-windows-bundle.ps1",
+    '[ "$DESKTOP_PUBLICATION_POLICY" = "signed" ]',
+    "sign-windows.ps1",
+    "--remanifest",
+    "sandbox-bundle.mjs pack",
+    "sandbox-bundle.mjs verify ",
+    "sandbox-bundle.mjs sign",
+    "sandbox-bundle.mjs verify-signature",
+    "desktop-release/",
+  ].map(at);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  // The installer's own certificate inputs, a timestamp, and a re-run of the executables after
+  // signing; the unsigned policy never touches a certificate.
+  assert.match(script, /-Thumbprint "\$WINDOWS_CERTIFICATE_THUMBPRINT" -TimestampUrl "\$WINDOWS_TIMESTAMP_URL"/);
+  assert.match(script, /WINDOWS_CERTIFICATE_THUMBPRINT:\?/);
+  assert.equal(script.split("verify-windows-bundle.ps1").length - 1, 2);
+  const unsigned = script.slice(0, at('[ "$DESKTOP_PUBLICATION_POLICY" = "signed" ]'));
+  assert.doesNotMatch(unsigned, /sign-windows|--remanifest/);
+  assert.doesNotMatch(script, /secrets\./);
+});
+
+test("the Windows arm64 bundle has its own release job: native runner, no installer, same artifact naming", async () => {
+  const { jobs } = await workflow("desktop-release");
+  const job = jobs["sandbox-bundle-windows-arm64"];
+  assert(job, "sandbox-bundle-windows-arm64 job must exist");
+  assert.equal(job["runs-on"], "windows-11-arm");
+  assert.equal(job.environment, "desktop-release");
+  // Not a `build` leg: the recovery check requires the exact installer target set there.
+  assert(!jobs.build.strategy.matrix.include.some((leg) => leg.target === "aarch64-pc-windows-msvc"));
+  assert.equal(job.env.DESKTOP_RELEASE_TARGET, "aarch64-pc-windows-msvc");
+  assert.equal(job.env.DESKTOP_PUBLICATION_POLICY, "${{ inputs.publication_policy }}");
+  assert.match(job.env.WINDOWS_TIMESTAMP_URL, /publication_policy == 'signed'/);
+  const text = JSON.stringify(job.steps);
+  // No installer, no updater package, no prepare-desktop-release. The signing configuration is
+  // validated exactly as the installer legs do, in the mode for a target that has no installer.
+  assert.doesNotMatch(text, /tauri build|prepare-desktop-release/);
+  const named = (name) => job.steps.findIndex((step) => step.name === name);
+  const cert = named("Import Windows signing certificate");
+  const rg = job.steps.findIndex((step) => step.id === "ripgrep_windows");
+  const build = named("Build, sign and verify the sandbox runtime bundle (Windows)");
+  const upload = job.steps.findIndex((step) => step.uses?.startsWith("actions/upload-artifact"));
+  const validate = named("Validate release signing configuration");
+  assert(cert !== -1 && rg !== -1 && build !== -1 && upload !== -1 && validate !== -1);
+  assert(cert < build && rg < build && build < upload);
+  assert(cert < validate && validate < build, "validated after the certificate import, before the build");
+  assert.equal(
+    job.steps[validate].run,
+    "node scripts/ci/desktop-release-config.mjs --bundle-only",
+    "the release-config check runs without writing an installer config",
+  );
+  assert.match(job.steps[validate].if, /exists != 'true'/);
+  assert.match(job.steps[cert].if, /publication_policy == 'signed'/);
+  assert.match(job.steps[build].run, /build-sandbox-bundle-windows\.sh/);
+  assert.match(job.env.DESKTOP_UPDATE_VERIFIER, /\.exe$/);
+  // A rerun reuses the artifact, named like every other leg's so one download pattern gets it.
+  assert(job.steps.some((step) => step.run === "node scripts/ci/reuse-desktop-release.mjs"));
+  assert.equal(
+    job.steps[upload].with.name,
+    "desktop-release-${{ env.DESKTOP_RELEASE_TARGET }}-${{ github.sha }}",
+  );
+  assert.equal(job.steps[upload].with.path, "desktop-release/*");
+  const setupBun = job.steps.find((step) => step.uses?.startsWith("oven-sh/setup-bun"));
+  assert.equal(setupBun.with["bun-version"], "1.4.2");
+  for (const target of WINDOWS_TARGETS)
+    assert.match(
+      await readFile(new URL("./ripgrep-release.json", import.meta.url), "utf8"),
+      new RegExp(target),
+    );
+});
+
+test("no backslash reaches pnpm: the ripgrep path is handed off with forward slashes", async () => {
+  // `pnpm run` re-escapes backslashes in forwarded arguments on Windows (CI run for PR #423:
+  // D:\\a\\_temp\\ripgrep\\rg.exe reached bun doubled and copyfile failed with ENOENT).
+  const steps = [
+    ...(await workflow("desktop-build")).jobs["sandbox-bundle-windows"].steps,
+    ...Object.values((await workflow("desktop-release")).jobs).flatMap((job) => job.steps),
+  ].filter((step) => /install-ripgrep-windows\.ps1/.test(step.run ?? ""));
+  assert.equal(steps.length, 3, "PR job, release x64 leg, release arm64 job");
+  for (const step of steps)
+    assert.match(step.run, /"path=\$\(\$rg\.Replace\('\\', '\/'\)\)" >> \$env:GITHUB_OUTPUT/);
+  const script = await readFile(
+    new URL("./build-sandbox-bundle-windows.sh", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /RG_PATH must use forward slashes/);
+  // The PR job's updater key directory is a D:/... path as well.
+  const pack = (await workflow("desktop-build")).jobs["sandbox-bundle-windows"].steps.find((step) =>
+    step.name?.startsWith("Pack, sign (throwaway key)"),
+  ).run;
+  assert.match(pack, /cygpath -m "\$RUNNER_TEMP"/);
+});
+
+test("the Windows real-sandbox job installs upstream first, drives the real launcher, runs both shells and guards the runs", async () => {
+  const wf = await workflow("desktop-build");
+  const job = wf.jobs["windows-sandbox"];
+  assert(job, "windows-sandbox job must exist");
+  assert.equal(job["timeout-minutes"], 90);
+  assert.deepEqual(
+    job.strategy.matrix.include.map((leg) => [leg.os, leg.target]),
+    [
+      ["windows-2025", "x86_64-pc-windows-msvc"],
+      ["windows-11-arm", "aarch64-pc-windows-msvc"],
+    ],
+  );
+  assert.equal(job.strategy["fail-fast"], false);
+  const named = (prefix) => job.steps.findIndex((step) => step.name?.startsWith(prefix));
+  const upstream = named("Install the UPSTREAM default sandbox-runtime first");
+  const hosts = named("Add the hosts-file entries");
+  const prebuild = named("Pre-build the real-sandbox test binary");
+  const suite = named("Real-sandbox suite (");
+  const guard = named("Guard - every test ran");
+  const hide = named("Hide Git Bash");
+  const second = named("Shell-matrix tests again under Windows PowerShell");
+  const restore = named("Restore Git Bash");
+  const coexist = named("Both installs are still present");
+  const secrets = named("Real Credential Manager round trip");
+  const final = named("Uninstall ours, check the upstream install is untouched");
+  const cleanup = named("Cleanup (");
+  for (const index of [upstream, hosts, prebuild, suite, guard, hide, second, restore, coexist, secrets, final, cleanup])
+    assert.notEqual(index, -1);
+  assert(upstream < suite && hosts < suite && prebuild < suite);
+  assert(suite < guard && guard < hide && hide < second && second < restore && restore < coexist);
+  assert(coexist < final);
+  // The suite runs one test at a time, includes the ignored tests, and poisons the proxy
+  // variables only after the binary has been compiled.
+  assert.match(job.steps[prebuild].run, /--test windows_sandbox --no-run/);
+  assert.match(job.steps[suite].run, /--test windows_sandbox -- --include-ignored --test-threads=1/);
+  assert.equal(job.steps[suite].env.HTTP_PROXY, "http://127.0.0.1:9");
+  assert.equal(job.steps[suite].env.HTTPS_PROXY, "http://127.0.0.1:9");
+  assert.match(job.steps[second].run, /shells_/);
+  // With Git's bash.exe hidden, `bash` on PATH is the WSL launcher: the PowerShell pass and the
+  // steps around it must not depend on bash resolving.
+  assert.equal(job.steps[second].shell, "pwsh");
+  for (const index of [hide, restore, cleanup]) assert.equal(job.steps[index].shell, "pwsh");
+  assert.match(job.steps[second].run, /Select-String/);
+  // A hung suite step is bounded so the always-run steps and the log upload still happen.
+  assert.equal(job.steps[suite]["timeout-minutes"], 45);
+  assert.equal(job.steps[second]["timeout-minutes"], 35);
+  // The upstream install is the plain default one: its executable's own `install`, no names.
+  const script = await readFile(new URL("./windows-sandbox-coexist.ps1", import.meta.url), "utf8");
+  const code = script
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .join("\n");
+  assert.match(code, /sandbox-runtime@\$Version/);
+  assert.match(code, /Run-Checked \$exe @\('install'\)/);
+  assert.doesNotMatch(code, /--sandbox-user|--sublayer-guid|--proxy-port-range|--force/);
+  assert.match(job.steps[upstream].run, /install-upstream .* -Version 0\.0\.81/);
+  // Cleanup always runs; Git Bash is restored even when the second pass fails.
+  assert.match(job.steps[cleanup].if, /always\(\)/);
+  assert.match(job.steps[restore].if, /always\(\)/);
+  // The Credential Manager guard fails on the no-store skip phrase, like the Linux job's.
+  assert.match(job.steps[secrets].run, /has no usable Credential Manager/);
+  // Both new files are PR triggers (the test file is covered by apps/desktop/**).
+  assert(wf.on.pull_request.paths.includes("scripts/ci/windows-sandbox*.ps1"));
+  assert(wf.on.pull_request.paths.includes("apps/desktop/**"));
 });

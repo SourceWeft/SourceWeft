@@ -10,6 +10,8 @@ export const SANDBOX_SETUP_CODES = [
   "userNamespaceRestricted",
   "sandboxFailed",
   "installing",
+  "windowsNotInstalled",
+  "windowsSetupOutdated",
 ] as const;
 export type SandboxSetupCode = (typeof SANDBOX_SETUP_CODES)[number];
 
@@ -18,6 +20,7 @@ export const SANDBOX_REMEDIES = [
   "updateApp",
   "reinstallPackage",
   "privilegedSetup",
+  "elevatedSetup",
   "none",
 ] as const;
 export type SandboxRemedy = (typeof SANDBOX_REMEDIES)[number];

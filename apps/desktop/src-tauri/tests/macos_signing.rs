@@ -142,6 +142,7 @@ fn harness_init(bundle: &Path, workspace_root: &Path) -> InitConfig {
             java_agent_jar: None,
         },
         bwrap_path: None,
+        windows: None,
     }
 }
 

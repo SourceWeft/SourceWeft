@@ -85,6 +85,7 @@ fn harness_init(bwrap_path: &str, workspace_root: &std::path::Path) -> InitConfi
             java_agent_jar: None,
         },
         bwrap_path: Some(bwrap_path.to_string()),
+        windows: None,
     }
 }
 

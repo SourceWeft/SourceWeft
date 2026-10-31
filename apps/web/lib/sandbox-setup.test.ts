@@ -30,6 +30,7 @@ test.each([
   ["updateApp", "updateApp"],
   ["reinstallPackage", "reinstallPackage"],
   ["privilegedSetup", "privilegedSetup"],
+  ["elevatedSetup", "elevatedSetup"],
   ["none", "none"],
 ] as const)("remedy %s maps to action %s", (remedy, action) => {
   const card = sandboxSetupCard(
@@ -55,6 +56,23 @@ test("the setup command is exposed only for the privileged setup remedy", () => 
     sandboxSetupCard(needs("downloadRuntime", { setupCommand: "pkexec x" }))
       ?.setupCommand,
     null,
+  );
+});
+
+test("the elevated Windows setup carries no copyable command and the Windows codes pass through", () => {
+  const card = sandboxSetupCard(
+    needs("elevatedSetup", {
+      code: "windowsNotInstalled",
+      setupCommand: "must not be shown",
+    }),
+  );
+  assert.equal(card?.action, "elevatedSetup");
+  assert.equal(card?.code, "windowsNotInstalled");
+  assert.equal(card?.setupCommand, null);
+  assert.equal(
+    sandboxSetupCard(needs("elevatedSetup", { code: "windowsSetupOutdated" }))
+      ?.code,
+    "windowsSetupOutdated",
   );
 });
 

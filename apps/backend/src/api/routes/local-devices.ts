@@ -22,6 +22,10 @@ import {
   localFolderGrants,
   localCreationContexts,
 } from "@sourceweft/db";
+import {
+  deviceBasename,
+  isDeviceAbsolutePath,
+} from "../../modules/devices/device-path";
 import { requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 import {
@@ -33,6 +37,11 @@ import {
   validateThreadExecutionTarget,
   ownedThread,
 } from "../../modules/devices/service";
+
+const devicePathSchema = z
+  .string()
+  .max(4096)
+  .refine(isDeviceAbsolutePath, "Must be an absolute device path");
 
 export function registerLocalDeviceRoutes(app: Hono) {
   app.post("/v1/local-devices/creation-context", async (c) => {
@@ -137,7 +146,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
         c.header("Content-Type", "application/octet-stream");
         c.header(
           "Content-Disposition",
-          `attachment; filename*=UTF-8''${encodeURIComponent(path.split("/").pop() ?? "file")}`,
+          `attachment; filename*=UTF-8''${encodeURIComponent(deviceBasename(path) ?? "file")}`,
         );
         return c.body(new Uint8Array(bytes));
       }
@@ -161,7 +170,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
     const data = z
       .object({
         ticket: z.string().min(32),
-        workspaceBase: z.string().startsWith("/").max(4096),
+        workspaceBase: devicePathSchema,
         name: z.string().trim().min(1).max(256).optional(),
       })
       .parse(await c.req.json());
@@ -311,7 +320,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
       .object({
         id: z.string().uuid(),
         name: z.string().min(1).max(256),
-        path: z.string().startsWith("/").max(4096),
+        path: devicePathSchema,
       })
       .strict()
       .parse(await c.req.json());

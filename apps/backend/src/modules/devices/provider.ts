@@ -16,6 +16,12 @@ import type {
   SandboxRuntimeContext,
 } from "@sourceweft/builtin-tool-sandbox";
 import { localCall } from "./service";
+import {
+  deviceRelative,
+  hasParentSegment,
+  isDeviceAbsolutePath,
+  joinDevicePath,
+} from "./device-path";
 import { resolveCommandNetworkPolicy } from "./network-approvals";
 import type { NetworkSkillInput } from "./network-skill-domains";
 
@@ -121,7 +127,7 @@ export async function localProviderForTurn(
     if (
       typeof workspace.id !== "string" ||
       typeof workspace.path !== "string" ||
-      !workspace.path.startsWith("/")
+      !isDeviceAbsolutePath(workspace.path)
     )
       throw new ContentError(
         409,
@@ -173,7 +179,11 @@ export async function localProviderForTurn(
       .update(localThreadBindings)
       .set({
         localWorkspaceId: reservedId,
-        workspacePath: `${device.workspaceBase}/${reservedId}/files`,
+        workspacePath: joinDevicePath(
+          device.workspaceBase,
+          reservedId,
+          "files",
+        ),
       })
       .where(
         and(
@@ -227,14 +237,12 @@ export async function localProviderForTurn(
     return dispatch(action, payload, extra);
   };
   const relative = (path: string) => {
-    if (path === workspaceRoot) return ".";
-    if (!path.startsWith(`${workspaceRoot}/`))
+    const result = deviceRelative(workspaceRoot, path);
+    if (result === null)
       throw new Error(
         "LOCAL_PATH_DENIED: Path is outside the bound workspace.",
       );
-    const result = path.slice(workspaceRoot.length + 1);
-    if (result.split("/").some((part) => part === ".."))
-      throw new Error("LOCAL_PATH_DENIED");
+    if (hasParentSegment(result)) throw new Error("LOCAL_PATH_DENIED");
     return result;
   };
   const observed = new Map<string, string>();
@@ -242,7 +250,7 @@ export async function localProviderForTurn(
     id: "local",
     cancellationScope: "command",
     pathPolicy: {
-      skillsRoot: `${workspaceRoot}/.sourceweft-skills`,
+      skillsRoot: joinDevicePath(workspaceRoot, ".sourceweft-skills"),
       workspaceRoot,
       defaultCwd: workspaceRoot,
       prepareTargetRoots: [workspaceRoot],
@@ -386,7 +394,10 @@ export async function localProviderForTurn(
       });
       return (
         result.files as Array<{ path: string; is_dir?: boolean; size?: number }>
-      ).map((file) => ({ ...file, path: `${root}/${file.path}` }));
+      ).map((file) => ({
+        ...file,
+        path: joinDevicePath(workspaceRoot, file.path),
+      }));
     },
     readTextFile: async (input) => {
       const result = await call("file.read", {

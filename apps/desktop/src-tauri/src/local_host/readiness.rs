@@ -2,11 +2,14 @@
 //! inside it.
 //!
 //! On macOS and Linux readiness is the sandbox bundle's probe (the sidecar's `init` + `probe`
-//! round trip). Nothing here ever reports `Ready` on a missing helper, a failed `init`/`probe`
-//! round trip, or a dead sidecar: those are reported as `NeedsSetup` with a reason, so local
-//! execution fails loudly instead of silently running unsandboxed.
-use super::LocalHost;
-#[cfg(unix)]
+//! round trip). On Windows it is a chain (`windows_readiness`): the bundle, the staged
+//! `srt-win.exe` against the bundle's manifest hash, that helper's own status, and then the same
+//! `init` + `probe` round trip on a scratch workspace. Nothing here ever reports `Ready` on a
+//! missing helper, a failed `init`/`probe` round trip, or a dead sidecar: those are reported as
+//! `NeedsSetup` with a reason, so local execution fails loudly instead of silently running
+//! unsandboxed. Readiness never reads or writes the state of an upstream default srt install.
+use super::{HostError, LocalHost};
+#[cfg(any(unix, windows))]
 use super::sidecar::Sidecar;
 use serde::Serialize;
 use std::{
@@ -25,8 +28,8 @@ use std::{
 /// integration test in `tests/linux_sandbox.rs` can build one directly, to probe a bundle
 /// against an explicit `bwrap` path rather than the production one. Production code never
 /// needs this path; it always goes through `LocalHost::sandbox_readiness` below.
-#[cfg(unix)]
-pub use super::sidecar::{Helpers, InitConfig, Platform};
+#[cfg(any(unix, windows))]
+pub use super::sidecar::{Helpers, InitConfig, Platform, WindowsInit};
 
 /// Readiness of local sandboxed execution on this platform, reported to the Web UI via
 /// `local_bridge::local_host_status` (`state` is the serde tag).
@@ -70,6 +73,10 @@ pub enum SetupCode {
     UserNamespaceRestricted,
     SandboxFailed,
     Installing,
+    /// Windows: the helper or the sandbox account has not been set up on this computer.
+    WindowsNotInstalled,
+    /// Windows: a setup exists but is not the one this release needs.
+    WindowsSetupOutdated,
 }
 
 /// What the user can do about a `NeedsSetup`.
@@ -80,6 +87,8 @@ pub enum Remedy {
     UpdateApp,
     ReinstallPackage,
     PrivilegedSetup,
+    /// Windows: one UAC-elevated setup (a button; there is no command to copy).
+    ElevatedSetup,
     None,
 }
 
@@ -87,7 +96,7 @@ pub enum Remedy {
 // `cargo build` sees no caller for some of them.
 #[allow(dead_code)]
 impl SandboxReadiness {
-    fn needs_setup(code: SetupCode, reason: impl Into<String>, remedy: Remedy) -> Self {
+    pub(crate) fn needs_setup(code: SetupCode, reason: impl Into<String>, remedy: Remedy) -> Self {
         Self::NeedsSetup {
             code,
             reason: reason.into(),
@@ -184,7 +193,7 @@ fn is_user_namespace_denial(message: &str) -> bool {
 /// can follow: the install would fail with `SANDBOX_PLATFORM_UNSUPPORTED`. Such a result is
 /// reported as a failure without a remedy and with the platform reason instead. Results that do
 /// not offer a download are returned unchanged.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[allow(dead_code)]
 fn without_unavailable_download(readiness: SandboxReadiness, published: bool) -> SandboxReadiness {
     match readiness {
@@ -237,24 +246,37 @@ pub(crate) fn settled_readiness(
 /// - Anything else -> `SandboxFailed` with the message verbatim and no remedy: we do not guess.
 #[cfg(unix)]
 fn classify_probe_failure(code: &str, message: &str, appimage: bool) -> SandboxReadiness {
+    if let Some(readiness) = classify_bundle_failure(code, message) {
+        return readiness;
+    }
+    if is_user_namespace_denial(message) {
+        return SandboxReadiness::bwrap_setup(SetupCode::UserNamespaceRestricted, message, appimage);
+    }
+    SandboxReadiness::needs_setup(SetupCode::SandboxFailed, message, Remedy::None)
+}
+
+/// The failures that are about the downloaded bundle and mean the same on every platform: an older
+/// protocol or a missing file -> reinstall the runtime, a newer protocol -> update the app. `None`
+/// for any other code.
+#[cfg(any(unix, windows))]
+pub(crate) fn classify_bundle_failure(code: &str, message: &str) -> Option<SandboxReadiness> {
     match code {
-        "BUNDLE_STALE" => SandboxReadiness::needs_setup(
+        "BUNDLE_STALE" => Some(SandboxReadiness::needs_setup(
             SetupCode::BundleStale,
             message,
             Remedy::DownloadRuntime,
-        ),
-        "BUNDLE_NEWER" => {
-            SandboxReadiness::needs_setup(SetupCode::BundleNewer, message, Remedy::UpdateApp)
-        }
-        "HELPER_MISSING" => SandboxReadiness::needs_setup(
+        )),
+        "BUNDLE_NEWER" => Some(SandboxReadiness::needs_setup(
+            SetupCode::BundleNewer,
+            message,
+            Remedy::UpdateApp,
+        )),
+        "HELPER_MISSING" => Some(SandboxReadiness::needs_setup(
             SetupCode::BundleInvalid,
             message,
             Remedy::DownloadRuntime,
-        ),
-        _ if is_user_namespace_denial(message) => {
-            SandboxReadiness::bwrap_setup(SetupCode::UserNamespaceRestricted, message, appimage)
-        }
-        _ => SandboxReadiness::needs_setup(SetupCode::SandboxFailed, message, Remedy::None),
+        )),
+        _ => None,
     }
 }
 
@@ -385,6 +407,26 @@ fn extract_path(output: &str) -> Option<&str> {
     Some(&output[begin..end])
 }
 
+/// The `PATH` of the host process on Windows, as the sandboxed command will resolve tools through
+/// it. The sandbox sidecar is started with this very `PATH` and srt hands it to the broker, whose
+/// `PATH` is the one overlay the sandboxed child inherits (Plan 6, fact 6): there is no login shell
+/// to ask, and `System` is what is reported. A `PATH` that is not valid Unicode is converted
+/// lossily; an unset one is empty.
+#[cfg(any(windows, test))]
+pub(crate) fn windows_path_value(raw: Option<std::ffi::OsString>) -> String {
+    raw.map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Cached for the lifetime of the process, like the unix login-shell lookup: `PATH` is not
+/// expected to change while the app runs, and the sidecar captured it at start anyway.
+#[cfg(windows)]
+pub(crate) fn user_path() -> (String, ToolchainPath) {
+    static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let path = CACHE.get_or_init(|| windows_path_value(std::env::var_os("PATH")));
+    (path.clone(), ToolchainPath::System)
+}
+
 /// Probes an already-unpacked sandbox bundle: starts the sidecar with `init`, sends a `probe`
 /// request, and reports exactly why execution is unavailable when either step fails, using the
 /// sidecar's own error message verbatim. Never returns `Ready` unless both the start/`init`
@@ -407,7 +449,7 @@ pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
 /// init names one) a missing or non-executable bubblewrap. Only then is the sidecar started.
 #[cfg(unix)]
 fn probe_bundle_with(bundle: &Path, init: &InitConfig, appimage: bool) -> SandboxReadiness {
-    if !bundle.join("srt-sidecar").is_file() {
+    if !bundle.join(super::sidecar::sidecar_file_name()).is_file() {
         return SandboxReadiness::bundle_missing();
     }
     if let Some(bwrap) = init.bwrap_path.as_deref() {
@@ -457,6 +499,10 @@ pub(crate) struct ReadinessCache {
     epoch: u64,
     /// A runtime install is running (see `InstallGuard`): readiness reports `installing`.
     installing: bool,
+    /// Windows: consecutive probes whose first start did not finish within the init timeout
+    /// (`SANDBOX_INIT_TIMEOUT`). Reset by a successful probe and when an install or setup begins
+    /// (a new bundle or helper is a new situation); deliberately not by `invalidate`.
+    init_timeouts: u32,
 }
 
 #[allow(dead_code)]
@@ -537,6 +583,20 @@ impl ReadinessCache {
         Self::lock(cache).last.as_ref().map(|(value, _)| value.clone())
     }
 
+    /// Records one more probe that hit the init timeout; returns how many in a row there are.
+    #[cfg(any(windows, test))]
+    pub(crate) fn note_init_timeout(cache: &Mutex<Self>) -> u32 {
+        let mut state = Self::lock(cache);
+        state.init_timeouts = state.init_timeouts.saturating_add(1);
+        state.init_timeouts
+    }
+
+    /// A probe got past the first start: the streak is over.
+    #[cfg(any(windows, test))]
+    pub(crate) fn clear_init_timeouts(cache: &Mutex<Self>) {
+        Self::lock(cache).init_timeouts = 0;
+    }
+
     /// Marks an install as running. `None` when one already is: installs never overlap. The
     /// returned guard ends the install, and invalidates the cache, when dropped, whatever the
     /// outcome, so neither a success nor a failure leaves a stale answer behind.
@@ -546,6 +606,7 @@ impl ReadinessCache {
             return None;
         }
         state.installing = true;
+        state.init_timeouts = 0;
         Some(InstallGuard { cache })
     }
 
@@ -571,14 +632,108 @@ impl Drop for InstallGuard<'_> {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 const SANDBOX_READINESS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The steps of the Windows readiness check, as functions of the machine, so the order and the
+/// fail-closed behaviour of the check are tested with injected answers on every platform.
+#[cfg(any(windows, test))]
+pub(crate) struct WindowsProbe<'a> {
+    /// The bundle's sidecar executable exists.
+    pub bundle_present: &'a dyn Fn() -> bool,
+    /// The SHA-256 the bundle's manifest lists for `srt-win.exe`.
+    pub bundle_srt_win_hash: &'a dyn Fn() -> super::Result<String>,
+    /// The SHA-256 of the staged helper: `Ok(None)` when none is staged, `Err` (with the reason)
+    /// when it cannot be determined.
+    pub staged_hash: &'a dyn Fn() -> Result<Option<String>, String>,
+    /// `srt-win status` of the staged helper.
+    pub status: &'a dyn Fn() -> Result<super::windows::SrtWinStatus, String>,
+    /// The sidecar `init` + `probe` round trip on a scratch workspace.
+    pub sidecar: &'a dyn Fn() -> super::Result<()>,
+}
+
+/// Windows readiness: bundle present -> the staged helper exists and is the bundle's -> its status
+/// -> the sidecar's `init` + `probe` (srt's own provisioning and WFP fence check, under the token a
+/// command gets). The first step that fails decides; `Ready` only when every step passed, and no
+/// step is skipped or substituted when another fails.
+#[cfg(any(windows, test))]
+pub(crate) fn windows_readiness(probe: &WindowsProbe<'_>) -> SandboxReadiness {
+    use super::windows::{
+        classify_staged_helper, classify_windows_probe_failure, classify_windows_status,
+    };
+    if !(probe.bundle_present)() {
+        return SandboxReadiness::bundle_missing();
+    }
+    let bundle_hash = match (probe.bundle_srt_win_hash)() {
+        Ok(hash) => hash,
+        Err(error) => {
+            return SandboxReadiness::needs_setup(
+                SetupCode::BundleInvalid,
+                error.message,
+                Remedy::DownloadRuntime,
+            )
+        }
+    };
+    let staged_hash = match (probe.staged_hash)() {
+        Ok(hash) => hash,
+        Err(reason) => {
+            return SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
+        }
+    };
+    if let Some(readiness) = classify_staged_helper(staged_hash.as_deref(), &bundle_hash) {
+        return readiness;
+    }
+    let staged_hash = staged_hash.unwrap_or_default();
+    let status = match (probe.status)() {
+        Ok(status) => status,
+        Err(reason) => {
+            return SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
+        }
+    };
+    if let Some(readiness) = classify_windows_status(&status, &bundle_hash, &staged_hash) {
+        return readiness;
+    }
+    if let Err(error) = (probe.sidecar)() {
+        return classify_windows_probe_failure(error.code, &error.message);
+    }
+    SandboxReadiness::Ready {
+        toolchain_path: Some(ToolchainPath::System),
+    }
+}
+
+/// How many probes in a row may report "still getting ready" before it is called a failure.
+#[cfg(any(windows, test))]
+pub(crate) const MAX_PREPARING_PROBES: u32 = 3;
+
+/// The error a probe reports for its `streak`-th consecutive init timeout: the transient one
+/// (`SANDBOX_INIT_TIMEOUT`, shown as "getting ready") until [`MAX_PREPARING_PROBES`] have passed,
+/// then a failure that says so and where to look. `minutes` is the init timeout each probe waited,
+/// `result_file` the setup's result file.
+#[cfg(any(windows, test))]
+pub(crate) fn cap_init_timeout(
+    streak: u32,
+    error: HostError,
+    minutes: u64,
+    result_file: &str,
+) -> HostError {
+    if streak < MAX_PREPARING_PROBES {
+        return error;
+    }
+    HostError::new(
+        "SANDBOX_START_INCOMPLETE",
+        format!(
+            "The sandbox did not finish its first start: {streak} checks in a row each waited \
+             {minutes} minutes for it. The setup's own account of what it did is in {result_file}; \
+             running the sandbox setup again (or removing and reinstalling it) usually fixes this."
+        ),
+    )
+}
+
 impl LocalHost {
-    /// Whether local sandboxed execution can run right now, and why not if it cannot. macOS and
-    /// Linux probe the bundle under this host's own app-data directory, through
-    /// `ReadinessCache` so repeated polling doesn't repeatedly spawn a sidecar. Every other
-    /// platform is `Unsupported`.
+    /// Whether local sandboxed execution can run right now, and why not if it cannot. macOS,
+    /// Linux and Windows probe the bundle under this host's own app-data directory (Windows also
+    /// checks its elevated setup), through `ReadinessCache` so repeated polling doesn't repeatedly
+    /// spawn a sidecar. Every other platform is `Unsupported`.
     pub fn sandbox_readiness(&self) -> SandboxReadiness {
         // While the runtime is being replaced there is nothing meaningful to probe, and the
         // bundle directory may be mid-swap.
@@ -609,8 +764,85 @@ impl LocalHost {
             },
         );
 
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(windows)]
+        return ReadinessCache::get_or_probe(
+            &self.sandbox_readiness_cache,
+            SANDBOX_READINESS_RECHECK_INTERVAL,
+            || {
+                // A crash in the middle of a runtime swap leaves the previous runtime aside.
+                super::bundle_install::recover_previous_runtime(&self.base.join("sandbox"));
+                without_unavailable_download(
+                    self.probe_windows(),
+                    super::bundle_install::InstallSpec::runtime_published(),
+                )
+            },
+        );
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         SandboxReadiness::Unsupported
+    }
+
+    /// The Windows readiness check against this host's bundle and this machine's staged helper.
+    /// The sidecar round trip uses a scratch workspace root `<app data>/sandbox/probe`, never a
+    /// user folder, built through the same `InitConfig` code as a real command.
+    #[cfg(windows)]
+    fn probe_windows(&self) -> SandboxReadiness {
+        use super::windows::{file_sha256_hex, srt_win_status, staged_srt_win_path};
+        let bundle = bundle_dir(&self.base);
+        let probe_root = self.base.join("sandbox").join("probe");
+        let staged = staged_srt_win_path();
+        windows_readiness(&WindowsProbe {
+            bundle_present: &|| bundle.join(super::sidecar::sidecar_file_name()).is_file(),
+            bundle_srt_win_hash: &|| {
+                super::bundle_install::bundle_file_sha256(&bundle, "srt-win.exe")
+            },
+            staged_hash: &|| {
+                let path = staged.as_ref().ok_or_else(|| {
+                    "The Program Files location could not be determined, so the sandbox helper cannot be found."
+                        .to_string()
+                })?;
+                match file_sha256_hex(path) {
+                    Ok(hash) => Ok(Some(hash)),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                    Err(error) => Err(format!(
+                        "The sandbox helper could not be read ({}): {error}",
+                        path.display()
+                    )),
+                }
+            },
+            status: &|| match staged.as_ref() {
+                Some(path) => srt_win_status(path),
+                None => Err("The sandbox helper cannot be found.".to_string()),
+            },
+            sidecar: &|| {
+                std::fs::create_dir_all(&probe_root)?;
+                let (init, _) =
+                    super::srt_exec::windows_init_config_for(&bundle, &self.base, &probe_root)?;
+                // The first start after a fresh setup is slow (the sandbox account's profile is
+                // created at its first logon): the same long `init` timeout as a workspace.
+                let outcome = Sidecar::start_for_workspace(&bundle, &init, None).and_then(|sidecar| sidecar.probe());
+                match outcome {
+                    Ok(()) => {
+                        ReadinessCache::clear_init_timeouts(&self.sandbox_readiness_cache);
+                        Ok(())
+                    }
+                    Err(error) if error.code == "SANDBOX_INIT_TIMEOUT" => {
+                        let streak = ReadinessCache::note_init_timeout(&self.sandbox_readiness_cache);
+                        let result_file = super::windows::program_files_dir()
+                            .and_then(|dir| super::windows::setup_result_path_in(&dir))
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "%ProgramFiles%\\SourceWeft\\sandbox-setup-result.json".into());
+                        Err(cap_init_timeout(
+                            streak,
+                            error,
+                            super::sidecar::WINDOWS_INIT_TIMEOUT.as_secs() / 60,
+                            &result_file,
+                        ))
+                    }
+                    Err(error) => Err(error),
+                }
+            },
+        })
     }
 
     /// Clears the cached sandbox readiness, forcing the next `sandbox_readiness()` call to
@@ -626,6 +858,235 @@ impl LocalHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slow_first_start_is_transient_three_times_then_a_failure_that_says_where_to_look() {
+        use crate::local_host::windows::classify_windows_probe_failure;
+        let cache = Mutex::new(ReadinessCache::default());
+        let timeout = || HostError::new("SANDBOX_INIT_TIMEOUT", "slow");
+        let answer = |streak: u32| {
+            let error = cap_init_timeout(streak, timeout(), 10, r"C:\Program Files\SourceWeft\sandbox-setup-result.json");
+            classify_windows_probe_failure(error.code, &error.message)
+        };
+        for expected in 1..MAX_PREPARING_PROBES {
+            let streak = ReadinessCache::note_init_timeout(&cache);
+            assert_eq!(streak, expected);
+            match answer(streak) {
+                SandboxReadiness::NeedsSetup { code: SetupCode::Installing, remedy: Remedy::None, .. } => {}
+                other => panic!("probe {streak} must still be transient, got {other:?}"),
+            }
+        }
+        let streak = ReadinessCache::note_init_timeout(&cache);
+        assert_eq!(streak, MAX_PREPARING_PROBES);
+        match answer(streak) {
+            SandboxReadiness::NeedsSetup { code: SetupCode::SandboxFailed, remedy: Remedy::None, reason, .. } => {
+                assert!(reason.contains("10 minutes"), "{reason}");
+                assert!(reason.contains("sandbox-setup-result.json"), "{reason}");
+                assert!(reason.contains("setup again"), "{reason}");
+            }
+            other => panic!("the third consecutive timeout must be a failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_init_timeout_streak_ends_on_success_and_when_an_install_begins_but_not_on_invalidate() {
+        let cache = Mutex::new(ReadinessCache::default());
+        ReadinessCache::note_init_timeout(&cache);
+        ReadinessCache::note_init_timeout(&cache);
+        ReadinessCache::invalidate(&cache);
+        assert_eq!(ReadinessCache::note_init_timeout(&cache), 3, "invalidate keeps the streak");
+        ReadinessCache::clear_init_timeouts(&cache);
+        assert_eq!(ReadinessCache::note_init_timeout(&cache), 1, "a success starts over");
+        ReadinessCache::note_init_timeout(&cache);
+        drop(ReadinessCache::begin_install(&cache).unwrap());
+        assert_eq!(ReadinessCache::note_init_timeout(&cache), 1, "a new install starts over");
+    }
+
+    #[test]
+    fn windows_path_is_the_process_path_verbatim_or_empty() {
+        use std::ffi::OsString;
+        assert_eq!(
+            windows_path_value(Some(OsString::from(r"C:\Windows\System32;C:\Users\me\.cargo\bin"))),
+            r"C:\Windows\System32;C:\Users\me\.cargo\bin"
+        );
+        assert_eq!(windows_path_value(None), "");
+    }
+
+    // ---- Windows readiness (injected steps; runs on every platform) ----------------------------
+
+    mod windows_flow {
+        use super::*;
+        use crate::local_host::{windows::SrtWinStatus, HostError};
+        use std::cell::RefCell;
+
+        const BUNDLE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        fn healthy_status() -> SrtWinStatus {
+            SrtWinStatus {
+                user_exists: true,
+                in_sandbox_group: true,
+                cred_present: true,
+                marker_version: Some(3),
+                setup_version: 3,
+                wfp_state: "cannot-read".into(),
+                port_range: None,
+                allow_loopback: false,
+            }
+        }
+
+        /// A machine for the flow: each step is a closure over a log so the order can be asserted.
+        struct Machine {
+            bundle_present: bool,
+            bundle_hash: Result<String, (&'static str, &'static str)>,
+            staged: Result<Option<String>, String>,
+            status: Result<SrtWinStatus, String>,
+            sidecar: Result<(), (&'static str, &'static str)>,
+            log: RefCell<Vec<&'static str>>,
+        }
+
+        impl Machine {
+            fn ready() -> Self {
+                Self {
+                    bundle_present: true,
+                    bundle_hash: Ok(BUNDLE.to_string()),
+                    staged: Ok(Some(BUNDLE.to_string())),
+                    status: Ok(healthy_status()),
+                    sidecar: Ok(()),
+                    log: RefCell::new(Vec::new()),
+                }
+            }
+
+            fn run(&self) -> SandboxReadiness {
+                let host_error = |(code, message): (&'static str, &'static str)| HostError::new(code, message);
+                windows_readiness(&WindowsProbe {
+                    bundle_present: &|| {
+                        self.log.borrow_mut().push("bundle");
+                        self.bundle_present
+                    },
+                    bundle_srt_win_hash: &|| {
+                        self.log.borrow_mut().push("bundle hash");
+                        self.bundle_hash.clone().map_err(host_error)
+                    },
+                    staged_hash: &|| {
+                        self.log.borrow_mut().push("staged hash");
+                        self.staged.clone()
+                    },
+                    status: &|| {
+                        self.log.borrow_mut().push("status");
+                        self.status.clone()
+                    },
+                    sidecar: &|| {
+                        self.log.borrow_mut().push("sidecar");
+                        self.sidecar.map_err(host_error)
+                    },
+                })
+            }
+
+            fn steps(&self) -> Vec<&'static str> {
+                self.log.borrow().clone()
+            }
+        }
+
+        fn parts(readiness: &SandboxReadiness) -> (SetupCode, Remedy) {
+            match readiness {
+                SandboxReadiness::NeedsSetup { code, remedy, .. } => (*code, *remedy),
+                other => panic!("expected NeedsSetup, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn every_step_passing_is_ready_and_nothing_else_is() {
+            let machine = Machine::ready();
+            assert_eq!(
+                machine.run(),
+                SandboxReadiness::Ready { toolchain_path: Some(ToolchainPath::System) }
+            );
+            assert_eq!(machine.steps(), ["bundle", "bundle hash", "staged hash", "status", "sidecar"]);
+        }
+
+        #[test]
+        fn a_missing_bundle_asks_for_the_download_and_runs_nothing_else() {
+            let machine = Machine { bundle_present: false, ..Machine::ready() };
+            assert_eq!(machine.run(), SandboxReadiness::bundle_missing());
+            assert_eq!(machine.steps(), ["bundle"]);
+        }
+
+        #[test]
+        fn a_bundle_without_a_helper_entry_is_invalid_and_never_probed() {
+            let machine = Machine {
+                bundle_hash: Err(("SANDBOX_BUNDLE_INVALID", "The runtime does not contain srt-win.exe.")),
+                ..Machine::ready()
+            };
+            let readiness = machine.run();
+            assert_eq!(parts(&readiness), (SetupCode::BundleInvalid, Remedy::DownloadRuntime));
+            assert_eq!(machine.steps(), ["bundle", "bundle hash"]);
+        }
+
+        #[test]
+        fn no_staged_helper_needs_the_elevated_setup_and_never_runs_the_sidecar() {
+            let machine = Machine { staged: Ok(None), ..Machine::ready() };
+            let readiness = machine.run();
+            assert_eq!(parts(&readiness), (SetupCode::WindowsNotInstalled, Remedy::ElevatedSetup));
+            assert_eq!(machine.steps(), ["bundle", "bundle hash", "staged hash"]);
+            // The wire form is what the backend and the web page accept.
+            let value = serde_json::to_value(&readiness).unwrap();
+            assert_eq!(value["code"], "windowsNotInstalled");
+            assert_eq!(value["remedy"], "elevatedSetup");
+            assert!(value.get("setupCommand").is_none(), "there is no command to copy on Windows");
+        }
+
+        #[test]
+        fn a_different_staged_helper_is_outdated_and_its_status_is_never_run() {
+            let machine = Machine { staged: Ok(Some("c".repeat(64))), ..Machine::ready() };
+            assert_eq!(parts(&machine.run()), (SetupCode::WindowsSetupOutdated, Remedy::ElevatedSetup));
+            // A helper that is not the bundle's is not executed to ask it anything.
+            assert_eq!(machine.steps(), ["bundle", "bundle hash", "staged hash"]);
+        }
+
+        #[test]
+        fn an_unreadable_helper_or_status_fails_with_its_reason_and_no_remedy() {
+            let unreadable = Machine { staged: Err("access denied".into()), ..Machine::ready() };
+            let readiness = unreadable.run();
+            assert_eq!(parts(&readiness), (SetupCode::SandboxFailed, Remedy::None));
+            assert!(matches!(&readiness, SandboxReadiness::NeedsSetup { reason, .. } if reason == "access denied"));
+            let broken = Machine { status: Err("did not start".into()), ..Machine::ready() };
+            let readiness = broken.run();
+            assert_eq!(parts(&readiness), (SetupCode::SandboxFailed, Remedy::None));
+            assert_eq!(broken.steps(), ["bundle", "bundle hash", "staged hash", "status"]);
+        }
+
+        #[test]
+        fn a_status_verdict_stops_before_the_sidecar() {
+            let machine = Machine {
+                status: Ok(SrtWinStatus { marker_version: Some(2), ..healthy_status() }),
+                ..Machine::ready()
+            };
+            assert_eq!(parts(&machine.run()), (SetupCode::WindowsSetupOutdated, Remedy::ElevatedSetup));
+            assert_eq!(machine.steps().last(), Some(&"status"));
+            let machine = Machine {
+                status: Ok(SrtWinStatus { user_exists: false, ..healthy_status() }),
+                ..Machine::ready()
+            };
+            assert_eq!(parts(&machine.run()), (SetupCode::WindowsNotInstalled, Remedy::ElevatedSetup));
+        }
+
+        #[test]
+        fn sidecar_failures_are_classified_and_never_ready() {
+            for (code, message, expected) in [
+                ("SANDBOX_UNAVAILABLE", "[not_provisioned] not provisioned", (SetupCode::WindowsNotInstalled, Remedy::ElevatedSetup)),
+                ("SANDBOX_UNAVAILABLE", "[reinstall_required] other release", (SetupCode::WindowsSetupOutdated, Remedy::ElevatedSetup)),
+                ("BUNDLE_STALE", "old protocol", (SetupCode::BundleStale, Remedy::DownloadRuntime)),
+                ("BUNDLE_NEWER", "new protocol", (SetupCode::BundleNewer, Remedy::UpdateApp)),
+                ("HELPER_MISSING", "no ripgrep", (SetupCode::BundleInvalid, Remedy::DownloadRuntime)),
+                ("SANDBOX_UNAVAILABLE", "sidecar did not reply in time", (SetupCode::SandboxFailed, Remedy::None)),
+            ] {
+                let machine = Machine { sidecar: Err((code, message)), ..Machine::ready() };
+                let readiness = machine.run();
+                assert_eq!(parts(&readiness), expected, "{message}");
+                assert!(!matches!(readiness, SandboxReadiness::Ready { .. }));
+            }
+        }
+    }
 
     fn needs_setup_for_test(reason: &str) -> SandboxReadiness {
         SandboxReadiness::needs_setup(SetupCode::SandboxFailed, reason, Remedy::None)
@@ -668,6 +1129,7 @@ mod tests {
                 java_agent_jar: None,
             },
             bwrap_path: None,
+            windows: None,
         }
     }
 
@@ -748,25 +1210,31 @@ mod tests {
                 "protocol-null",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol none, this app needs 2). Install the update.",
+                "The sandbox runtime is out of date (protocol none, this app needs 3). Install the update.",
             ),
             (
                 "protocol-0",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol 0, this app needs 2). Install the update.",
+                "The sandbox runtime is out of date (protocol 0, this app needs 3). Install the update.",
             ),
             (
                 "protocol-1",
                 SetupCode::BundleStale,
                 Remedy::DownloadRuntime,
-                "The sandbox runtime is out of date (protocol 1, this app needs 2). Install the update.",
+                "The sandbox runtime is out of date (protocol 1, this app needs 3). Install the update.",
             ),
             (
-                "protocol-3",
+                "protocol-2",
+                SetupCode::BundleStale,
+                Remedy::DownloadRuntime,
+                "The sandbox runtime is out of date (protocol 2, this app needs 3). Install the update.",
+            ),
+            (
+                "protocol-4",
                 SetupCode::BundleNewer,
                 Remedy::UpdateApp,
-                "The sandbox runtime (protocol 3) is newer than this app supports (2). Update SourceWeft.",
+                "The sandbox runtime (protocol 4) is newer than this app supports (3). Update SourceWeft.",
             ),
         ] {
             let mut init = test_init();

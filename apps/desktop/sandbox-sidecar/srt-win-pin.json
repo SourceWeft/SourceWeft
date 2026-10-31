@@ -1,0 +1,7 @@
+{
+  "tag": "v0.0.81-sourceweft.2",
+  "srtWin": {
+    "x86_64-pc-windows-msvc": "21273a8b9874126f636461329de772d18500f10785ca969db1372849c9c021ec",
+    "aarch64-pc-windows-msvc": "914d141ee4ebc04cb78b2c850ba7cbe63e69ebd318be8a1dbdc0282a3243b756"
+  }
+}

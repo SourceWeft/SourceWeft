@@ -28,7 +28,14 @@ use std::{
 /// the init, policy or wrap semantics change (for example a new `InitConfig` policy field).
 /// `Sidecar::start` requires the bundle's `init` reply to report exactly this version, so a
 /// bundle that predates a policy field can never run commands while ignoring that field.
-pub(crate) const SANDBOX_PROTOCOL_VERSION: u32 = 2;
+pub(crate) const SANDBOX_PROTOCOL_VERSION: u32 = 3;
+
+/// How long a Windows `init` may take: the first `init` of a workspace walks its whole tree to
+/// grant the sandbox account write access, which takes minutes on a large folder (the ordinary
+/// 30 s reply timeout killed that walk and the retry restarted it). See
+/// `Sidecar::start_for_workspace`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) const WINDOWS_INIT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// `InitConfig` as sent on `init`, mirroring the TypeScript type (camelCase on the wire).
 ///
@@ -48,13 +55,31 @@ pub struct InitConfig {
     pub helpers: Helpers,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bwrap_path: Option<String>,
+    /// Required on Windows and omitted elsewhere (the sidecar rejects it on other platforms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows: Option<WindowsInit>,
 }
 
+/// The `windows` block of `InitConfig`: absolute drive paths chosen by the host. The sandbox
+/// account, proxy port range and WFP sublayer are fixed inside the sidecar and never sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsInit {
+    /// The `srt-win.exe` the sandbox account runs (installed where `Users` can execute it).
+    pub srt_win: String,
+    /// The `bash.exe` / `powershell.exe` srt launches commands with.
+    pub shell: String,
+}
+
+/// The sandbox platform, serialized as the TypeScript `InitConfig.platform` value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum Platform {
+    #[serde(rename = "linux")]
     Linux,
+    #[serde(rename = "darwin")]
     Darwin,
+    #[serde(rename = "win32")]
+    Windows,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -205,6 +230,84 @@ fn newer_error(theirs: &str) -> HostError {
             "The sandbox runtime (protocol {theirs}) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
         ),
     )
+}
+
+/// File name of the sidecar executable inside a runtime bundle.
+pub(crate) const fn sidecar_file_name() -> &'static str {
+    if cfg!(windows) {
+        "srt-sidecar.exe"
+    } else {
+        "srt-sidecar"
+    }
+}
+
+/// File name of the bundled ripgrep executable.
+pub(crate) const fn ripgrep_file_name() -> &'static str {
+    if cfg!(windows) {
+        "rg.exe"
+    } else {
+        "rg"
+    }
+}
+
+/// Variables the Windows sidecar process may inherit from the host, compared case-insensitively
+/// (Windows environment names are case-insensitive). The sidecar is a Bun program and needs the
+/// system locations; `PATH` is the toolchain `PATH` every sandboxed command sees (srt overlays
+/// the broker's `PATH`/`PATHEXT` on the sandbox account's own environment).
+const WINDOWS_SIDECAR_ENV_ALLOW: [&str; 25] = [
+    "SystemRoot",
+    "windir",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "CommonProgramW6432",
+    "SystemDrive",
+    "ALLUSERSPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERDOMAIN",
+    "COMSPEC",
+    "PATHEXT",
+    "OS",
+    "PROCESSOR_ARCHITECTURE",
+    "COMPUTERNAME",
+    "USERNAME",
+];
+
+/// The environment the Windows sidecar is started with, built from the host's own environment:
+/// only `PATH` and the names in `WINDOWS_SIDECAR_ENV_ALLOW` (matched case-insensitively, the
+/// host's spelling kept, the first occurrence of a name wins), and never a proxy variable of any
+/// case. Pure, so it is tested on every platform; the spawn applies it on Windows.
+pub(crate) fn sidecar_environment(
+    host_env: impl Iterator<Item = (String, String)>,
+) -> Vec<(String, String)> {
+    let mut kept: Vec<(String, String)> = Vec::new();
+    for (name, value) in host_env {
+        let lower = name.to_ascii_lowercase();
+        if lower.contains("proxy") {
+            continue;
+        }
+        let allowed = lower == "path"
+            || WINDOWS_SIDECAR_ENV_ALLOW
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(&name));
+        if allowed
+            && !kept
+                .iter()
+                .any(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+        {
+            kept.push((name, value));
+        }
+    }
+    kept
 }
 
 fn path_to_string(path: &Path) -> Result<String> {
@@ -393,14 +496,38 @@ pub(crate) struct Sidecar {
     /// sidecar unusable); see the type-level doc above. Checked, lock-free, at the top of
     /// every `call()`.
     poisoned: AtomicBool,
+    /// Windows: a kill-on-close Job Object the sidecar (and so everything it starts, such as an
+    /// `srt-win` walking a tree to grant access) belongs to. Killing the sidecar only with
+    /// `child.kill()` would leave that walker orphaned and a restart would run a second one.
+    #[cfg(windows)]
+    job: super::process::windows_job::Job,
 }
 
 impl Sidecar {
-    /// Starts `<bundle>/srt-sidecar` and sends `init`, using the production 30 s reply
-    /// timeout for every call made over the lifetime of the returned `Sidecar`. Network asks
-    /// are all denied (there is no handler to answer them).
+    /// Starts `<bundle>/srt-sidecar` (`srt-sidecar.exe` on Windows) and sends `init`, using the
+    /// production 30 s reply timeout for every call made over the lifetime of the returned
+    /// `Sidecar`. Network asks are all denied (there is no handler to answer them).
     pub(crate) fn start(bundle: &Path, init: &InitConfig) -> Result<Sidecar> {
         Self::start_with_timeout(bundle, init, Duration::from_secs(30))
+    }
+
+    /// `start` for a sidecar that serves a real workspace. On Windows the first `init` of a
+    /// workspace walks the whole tree to grant the sandbox account its write access (minutes on a
+    /// large folder), so `init` gets [`WINDOWS_INIT_TIMEOUT`] there; every later call keeps the
+    /// 30 s reply timeout. An `init` that is still running when that expires fails with
+    /// `SANDBOX_INIT_TIMEOUT`, not `SANDBOX_UNAVAILABLE`: the sandbox is not broken, the folder
+    /// was too large to prepare in time, and nothing may restart and retry the same walk behind
+    /// the caller's back. macOS and Linux have no such walk and keep the 30 s for `init`.
+    /// Sidecar events (network asks) go to `handler`.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn start_for_workspace(
+        bundle: &Path,
+        init: &InitConfig,
+        handler: Option<EventHandler>,
+    ) -> Result<Sidecar> {
+        let reply = Duration::from_secs(30);
+        let init_timeout = if cfg!(windows) { WINDOWS_INIT_TIMEOUT } else { reply };
+        Self::start_inner(bundle, init, reply, init_timeout, handler)
     }
 
     /// Same as `start`, but sidecar events go to `handler`.
@@ -409,7 +536,13 @@ impl Sidecar {
         init: &InitConfig,
         handler: EventHandler,
     ) -> Result<Sidecar> {
-        Self::start_inner(bundle, init, Duration::from_secs(30), Some(handler))
+        Self::start_inner(
+            bundle,
+            init,
+            Duration::from_secs(30),
+            Duration::from_secs(30),
+            Some(handler),
+        )
     }
 
     /// Same as `start`, but with an explicit reply timeout, applied to `init` and to every
@@ -420,27 +553,55 @@ impl Sidecar {
         init: &InitConfig,
         timeout: Duration,
     ) -> Result<Sidecar> {
-        Self::start_inner(bundle, init, timeout, None)
+        Self::start_inner(bundle, init, timeout, timeout, None)
+    }
+
+    /// `start_with_timeout` with a separate (usually longer) timeout for the `init` reply.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pub(crate) fn start_with_timeouts(
+        bundle: &Path,
+        init: &InitConfig,
+        timeout: Duration,
+        init_timeout: Duration,
+    ) -> Result<Sidecar> {
+        Self::start_inner(bundle, init, timeout, init_timeout, None)
     }
 
     pub(crate) fn start_inner(
         bundle: &Path,
         init: &InitConfig,
         timeout: Duration,
+        init_timeout: Duration,
         handler: Option<EventHandler>,
     ) -> Result<Sidecar> {
-        let mut command = Command::new(bundle.join("srt-sidecar"));
+        let mut command = Command::new(bundle.join(sidecar_file_name()));
         command
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-        if let Ok(home) = std::env::var("HOME") {
-            command.env("HOME", home);
+            .stderr(Stdio::inherit())
+            .env_clear();
+        #[cfg(unix)]
+        {
+            command.env("PATH", "/usr/bin:/bin");
+            if let Ok(home) = std::env::var("HOME") {
+                command.env("HOME", home);
+            }
+            if let Ok(lang) = std::env::var("LANG") {
+                command.env("LANG", lang);
+            }
         }
-        if let Ok(lang) = std::env::var("LANG") {
-            command.env("LANG", lang);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // The release build is a GUI-subsystem exe: without this a console window would
+            // flash for every sidecar.
+            command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+            // A name that is not valid Unicode cannot be one of the allow-listed ASCII names, so
+            // skipping it is exact; a value is converted lossily (a `PATH` with unpaired
+            // surrogates is already unusable to the Bun runtime).
+            command.envs(sidecar_environment(std::env::vars_os().filter_map(
+                |(name, value)| Some((name.into_string().ok()?, value.to_string_lossy().into_owned())),
+            )));
         }
         let mut child = command.spawn().map_err(|error| {
             HostError::new(
@@ -448,6 +609,15 @@ impl Sidecar {
                 format!("failed to start sandbox sidecar: {error}"),
             )
         })?;
+        #[cfg(windows)]
+        let job = match super::process::windows_job::Job::containing(&child) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(HostError::new("SANDBOX_UNAVAILABLE", error.message));
+            }
+        };
         let stdin = child.stdin.take().ok_or_else(|| {
             HostError::new("SANDBOX_UNAVAILABLE", "sidecar stdin was not piped")
         })?;
@@ -506,10 +676,20 @@ impl Sidecar {
             next_id: AtomicU64::new(0),
             timeout,
             poisoned: AtomicBool::new(false),
+            #[cfg(windows)]
+            job,
         };
         let id = sidecar.allocate_id();
-        let init_result =
-            sidecar.call(&id, &Request::Init { id: id.clone(), config: init })?;
+        let init_result = sidecar.call_within(
+            &id,
+            &Request::Init { id: id.clone(), config: init },
+            init_timeout,
+            &|| {
+                // The sidecar is discarded either way; the job (Windows) takes any walker with it.
+                sidecar.kill_now();
+                init_timeout_error(init_timeout, cfg!(windows))
+            },
+        )?;
         if let Err(rejection) = check_protocol_version(&init_result) {
             // A bundle that fails the handshake must never be used, and must not linger either:
             // kill it now rather than relying on `Drop`'s polite shutdown-then-wait.
@@ -655,10 +835,18 @@ impl Sidecar {
     /// for a sidecar that has been rejected and is about to be dropped.
     fn kill_now(&self) {
         self.poisoned.store(true, Ordering::SeqCst);
+        self.kill_tree();
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = wait_up_to(&mut child, Duration::from_secs(2));
         }
+    }
+
+    /// Windows: terminates the whole job (the sidecar and every descendant). Elsewhere the
+    /// sidecar's descendants are not tracked and this does nothing.
+    fn kill_tree(&self) {
+        #[cfg(windows)]
+        self.job.terminate(1);
     }
 
     fn allocate_id(&self) -> String {
@@ -678,6 +866,20 @@ impl Sidecar {
     /// type-level doc comment) before returning; a call made after that returns immediately,
     /// without touching stdin/stdout.
     fn call(&self, id: &str, request: &Request) -> Result<serde_json::Value> {
+        self.call_within(id, request, self.timeout, &|| {
+            self.poison("sidecar did not reply in time")
+        })
+    }
+
+    /// `call` with an explicit reply timeout and the error to report when it expires (which must
+    /// also leave the instance unusable: the reply may still arrive later).
+    fn call_within(
+        &self,
+        id: &str,
+        request: &Request,
+        timeout: Duration,
+        on_timeout: &dyn Fn() -> HostError,
+    ) -> Result<serde_json::Value> {
         if self.poisoned.load(Ordering::SeqCst) {
             return Err(HostError::new(
                 "SANDBOX_UNAVAILABLE",
@@ -692,12 +894,9 @@ impl Sidecar {
 
         write_request(&self.stdin, request).map_err(|message| self.poison(message))?;
 
-        let raw = conn.replies.recv_timeout(self.timeout).map_err(|error| {
-            let reason = match error {
-                RecvTimeoutError::Timeout => "sidecar did not reply in time",
-                RecvTimeoutError::Disconnected => "sidecar exited without replying",
-            };
-            self.poison(reason)
+        let raw = conn.replies.recv_timeout(timeout).map_err(|error| match error {
+            RecvTimeoutError::Timeout => on_timeout(),
+            RecvTimeoutError::Disconnected => self.poison("sidecar exited without replying"),
         })?;
         drop(conn);
 
@@ -719,6 +918,36 @@ impl Sidecar {
             }
             None => Err(self.poison("sidecar reported failure without an error body")),
         }
+    }
+}
+
+/// The error for an `init` that did not reply within `init_timeout`. On Windows that is the
+/// distinct `SANDBOX_INIT_TIMEOUT`: the first `init` of a workspace walks its tree (and the first
+/// start after a setup creates the sandbox account's profile), so the sandbox is not known to be
+/// broken and nothing may restart and retry behind the caller's back. Everywhere else it is what
+/// it always was: an unresponsive sidecar, `SANDBOX_UNAVAILABLE`.
+fn init_timeout_error(init_timeout: Duration, windows: bool) -> HostError {
+    if !windows {
+        return HostError::new("SANDBOX_UNAVAILABLE", "sidecar did not reply in time");
+    }
+    HostError::new(
+        "SANDBOX_INIT_TIMEOUT",
+        format!(
+            "Preparing this folder for the sandbox did not finish within {} \
+             (the first use of a folder grants access to everything in it). Use a \
+             smaller folder, or try again.",
+            describe_wait(init_timeout)
+        ),
+    )
+}
+
+/// A wait as the user reads it: whole minutes from one minute up, seconds below.
+fn describe_wait(wait: Duration) -> String {
+    let seconds = wait.as_secs();
+    match seconds {
+        60 => "1 minute".to_string(),
+        120.. if seconds.is_multiple_of(60) => format!("{} minutes", seconds / 60),
+        _ => format!("{seconds} seconds"),
     }
 }
 
@@ -750,6 +979,7 @@ impl Drop for Sidecar {
             if wait_up_to(&mut child, Duration::from_secs(2)) {
                 return;
             }
+            self.kill_tree();
             let _ = child.kill();
             // And up to 2 more seconds to actually die after SIGKILL. `wait()` itself can
             // block forever on a process stuck in an uninterruptible kernel state, so this
@@ -765,11 +995,7 @@ impl Drop for Sidecar {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use super::super::network::NetworkMode;
-    use std::{fs, os::unix::fs::PermissionsExt};
-
+mod tests {
     #[test]
     fn the_protocol_version_equals_the_sidecars_typescript_constant() {
         let source = std::fs::read_to_string(concat!(
@@ -795,548 +1021,792 @@ pub(crate) mod tests {
         );
     }
 
-    const STUB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stub-sidecar.sh");
+    use super::*;
 
-    pub(crate) fn bundle_with_stub() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("srt-sidecar");
-        fs::copy(STUB, &target).unwrap();
-        let mut permissions = fs::metadata(&target).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&target, permissions).unwrap();
-        // Force the copy to disk before any test execs it. Under heavy parallel test load on
-        // an overlayfs-backed container filesystem, exec-ing a just-written file can transiently
-        // fail with ETXTBSY ("Text file busy") if the copy-up hasn't settled yet; an explicit
-        // fsync here (observed to close the race in practice) is cheap insurance against that,
-        // confined to this test helper rather than touching `Sidecar::start` itself.
-        fs::File::open(&target).unwrap().sync_all().unwrap();
-        dir
+    #[test]
+    fn the_protocol_version_is_pinned_at_three() {
+        // Version 2 added network approvals; version 3 added the `win32` platform and the
+        // `windows` init block.
+        assert_eq!(SANDBOX_PROTOCOL_VERSION, 3);
     }
 
-    pub(crate) fn test_init() -> InitConfig {
+    #[test]
+    fn platforms_serialize_as_the_typescript_values() {
+        let shown = |platform: Platform| serde_json::to_string(&platform).unwrap();
+        assert_eq!(shown(Platform::Linux), "\"linux\"");
+        assert_eq!(shown(Platform::Darwin), "\"darwin\"");
+        assert_eq!(shown(Platform::Windows), "\"win32\"");
+    }
+
+    fn portable_init(windows: Option<WindowsInit>) -> InitConfig {
         InitConfig {
-            platform: Platform::Darwin,
-            home: "/tmp/sourceweft-sidecar-test-home".to_string(),
-            workspace_roots: vec!["/tmp/sourceweft-sidecar-test-workspace".to_string()],
+            platform: Platform::Windows,
+            home: "C:/Users/me".to_string(),
+            workspace_roots: vec!["C:/Users/me/work".to_string()],
             read_roots: vec![],
             deny_roots: vec![],
             helpers: Helpers {
-                ripgrep: "/usr/bin/rg".to_string(),
+                ripgrep: "C:/b/rg.exe".to_string(),
                 apply_seccomp: None,
-                java_agent_jar: None,
+                java_agent_jar: Some("C:/b/srt-proxy-agent.jar".to_string()),
             },
             bwrap_path: None,
+            windows,
         }
     }
 
     #[test]
-    fn wrap_returns_argv_and_env() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        let wrapped = sidecar
-            .wrap(
-                "cmd-1",
-                "echo hi",
-                Path::new("/tmp"),
-                Path::new("/tmp/sourceweft-sidecar-test-workspace"),
-                None,
+    fn init_config_carries_the_windows_block_in_the_typescript_shape() {
+        let init = portable_init(Some(WindowsInit {
+            srt_win: "C:/Program Files/SourceWeft/sandbox/srt-win.exe".to_string(),
+            shell: "C:/Program Files/Git/bin/bash.exe".to_string(),
+        }));
+        assert_eq!(
+            serde_json::to_value(&init).unwrap(),
+            serde_json::json!({
+                "platform": "win32",
+                "home": "C:/Users/me",
+                "workspaceRoots": ["C:/Users/me/work"],
+                "readRoots": [],
+                "helpers": {
+                    "ripgrep": "C:/b/rg.exe",
+                    "javaAgentJar": "C:/b/srt-proxy-agent.jar"
+                },
+                "windows": {
+                    "srtWin": "C:/Program Files/SourceWeft/sandbox/srt-win.exe",
+                    "shell": "C:/Program Files/Git/bin/bash.exe"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn init_config_omits_the_windows_block_when_absent() {
+        let mut init = portable_init(None);
+        init.platform = Platform::Linux;
+        let value = serde_json::to_value(&init).unwrap();
+        assert!(value.get("windows").is_none(), "{value}");
+        assert!(value.get("bwrapPath").is_none(), "{value}");
+    }
+
+    #[test]
+    fn bundle_file_names_follow_the_platform() {
+        if cfg!(windows) {
+            assert_eq!(sidecar_file_name(), "srt-sidecar.exe");
+            assert_eq!(ripgrep_file_name(), "rg.exe");
+        } else {
+            assert_eq!(sidecar_file_name(), "srt-sidecar");
+            assert_eq!(ripgrep_file_name(), "rg");
+        }
+    }
+
+    fn env_of(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        sidecar_environment(
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string())),
+        )
+    }
+
+    #[test]
+    fn sidecar_environment_keeps_only_the_allow_list_and_path() {
+        let kept = env_of(&[
+            ("SystemRoot", "C:\\Windows"),
+            ("Path", "C:\\tools;C:\\Windows\\System32"),
+            ("PATHEXT", ".COM;.EXE"),
+            ("USERNAME", "me"),
+            ("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+            ("AWS_SECRET_ACCESS_KEY", "secret"),
+            ("GITHUB_TOKEN", "token"),
+            ("SHELL", "/bin/zsh"),
+            ("=C:", "C:\\work"),
+        ]);
+        let names: Vec<&str> = kept.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["SystemRoot", "Path", "PATHEXT", "USERNAME", "ProgramFiles(x86)"]
+        );
+        assert_eq!(kept[1].1, "C:\\tools;C:\\Windows\\System32");
+    }
+
+    #[test]
+    fn sidecar_environment_matches_names_case_insensitively() {
+        let kept = env_of(&[
+            ("SYSTEMROOT", "C:\\Windows"),
+            ("windir", "C:\\Windows"),
+            ("LocalAppData", "C:\\Users\\me\\AppData\\Local"),
+            ("PATH", "C:\\a"),
+        ]);
+        assert_eq!(kept.len(), 4, "{kept:?}");
+        // The host's own spelling is kept.
+        assert_eq!(kept[0].0, "SYSTEMROOT");
+        assert_eq!(kept[2].0, "LocalAppData");
+    }
+
+    #[test]
+    fn sidecar_environment_strips_proxy_variables_of_any_case() {
+        let kept = env_of(&[
+            ("HTTP_PROXY", "http://127.0.0.1:1"),
+            ("https_proxy", "http://127.0.0.1:1"),
+            ("All_Proxy", "x"),
+            ("NO_PROXY", "localhost"),
+            ("GLOBAL_AGENT_HTTP_PROXY", "x"),
+            ("PATH", "C:\\a"),
+        ]);
+        assert_eq!(kept, vec![("PATH".to_string(), "C:\\a".to_string())]);
+    }
+
+    #[test]
+    fn sidecar_environment_keeps_the_drive_and_profile_locations_tools_expect() {
+        // Without these a sandboxed Git, Python or Java misplaces its profile and system paths.
+        let wanted = [
+            "SystemDrive",
+            "ALLUSERSPROFILE",
+            "HOMEDRIVE",
+            "HOMEPATH",
+            "USERDOMAIN",
+            "CommonProgramFiles",
+            "CommonProgramFiles(x86)",
+            "CommonProgramW6432",
+        ];
+        let pairs: Vec<(&str, &str)> = wanted.iter().map(|name| (*name, "x")).collect();
+        let kept = env_of(&pairs);
+        let names: Vec<&str> = kept.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, wanted);
+        assert_eq!(WINDOWS_SIDECAR_ENV_ALLOW.len(), 25);
+    }
+
+    #[test]
+    fn sidecar_environment_keeps_the_first_of_two_spellings() {
+        let kept = env_of(&[("Path", "first"), ("PATH", "second")]);
+        assert_eq!(kept, vec![("Path".to_string(), "first".to_string())]);
+    }
+
+    #[test]
+    fn sidecar_environment_of_nothing_is_empty() {
+        assert!(env_of(&[]).is_empty());
+    }
+
+
+    #[cfg(unix)]
+    pub(crate) mod stubbed {
+        use super::super::*;
+        use super::super::super::network::NetworkMode;
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        const STUB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/stub-sidecar.sh");
+
+        pub(crate) fn bundle_with_stub() -> tempfile::TempDir {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("srt-sidecar");
+            fs::copy(STUB, &target).unwrap();
+            let mut permissions = fs::metadata(&target).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&target, permissions).unwrap();
+            // Force the copy to disk before any test execs it. Under heavy parallel test load on
+            // an overlayfs-backed container filesystem, exec-ing a just-written file can transiently
+            // fail with ETXTBSY ("Text file busy") if the copy-up hasn't settled yet; an explicit
+            // fsync here (observed to close the race in practice) is cheap insurance against that,
+            // confined to this test helper rather than touching `Sidecar::start` itself.
+            fs::File::open(&target).unwrap().sync_all().unwrap();
+            dir
+        }
+
+        pub(crate) fn test_init() -> InitConfig {
+            InitConfig {
+                platform: Platform::Darwin,
+                home: "/tmp/sourceweft-sidecar-test-home".to_string(),
+                workspace_roots: vec!["/tmp/sourceweft-sidecar-test-workspace".to_string()],
+                read_roots: vec![],
+                deny_roots: vec![],
+                helpers: Helpers {
+                    ripgrep: "/usr/bin/rg".to_string(),
+                    apply_seccomp: None,
+                    java_agent_jar: None,
+                },
+                bwrap_path: None,
+                windows: None,
+            }
+        }
+
+        #[test]
+        fn wrap_returns_argv_and_env() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            let wrapped = sidecar
+                .wrap(
+                    "cmd-1",
+                    "echo hi",
+                    Path::new("/tmp"),
+                    Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(wrapped.argv, vec!["/bin/echo".to_string(), "hi".to_string()]);
+            assert!(wrapped.env.contains(&("FOO".to_string(), "bar".to_string())));
+        }
+
+        #[test]
+        fn sidecar_error_code_is_preserved() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            let error = sidecar
+                .wrap(
+                    "cmd-2",
+                    "ERROR:HELPER_MISSING",
+                    Path::new("/tmp"),
+                    Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                    None,
+                )
+                .unwrap_err();
+            assert_eq!(error.code, "HELPER_MISSING");
+        }
+
+        #[test]
+        fn dead_sidecar_is_sandbox_unavailable() {
+            let bundle = bundle_with_stub();
+            let mut init = test_init();
+            init.home = "/tmp/sourceweft-sidecar-test-home/exit-after-init".to_string();
+            let sidecar = Sidecar::start_with_timeout(bundle.path(), &init, Duration::from_secs(5))
+                .expect("init reply arrives before the stub exits");
+            let error = sidecar.probe().unwrap_err();
+            assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
+        }
+
+        #[test]
+        fn no_reply_times_out() {
+            let bundle = bundle_with_stub();
+            let sidecar =
+                Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(3))
+                    .unwrap();
+            let started = Instant::now();
+            let error = sidecar
+                .wrap(
+                    "cmd-3",
+                    "HANG",
+                    Path::new("/tmp"),
+                    Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                    None,
+                )
+                .unwrap_err();
+            assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "expected the 3s sidecar timeout to fire well before the stub's 10s sleep ends"
+            );
+        }
+
+        #[test]
+        fn desynced_sidecar_fails_fast_on_second_call() {
+            let bundle = bundle_with_stub();
+            let sidecar =
+                Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(3))
+                    .unwrap();
+            let first = sidecar
+                .wrap(
+                    "cmd-5",
+                    "HANG",
+                    Path::new("/tmp"),
+                    Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                    None,
+                )
+                .unwrap_err();
+            assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
+
+            // The stub never replied to "cmd-5"; any later call must not wait around for that
+            // stale reply (or any real reply at all) to decide this connection is unusable.
+            let started = Instant::now();
+            let second = sidecar.probe().unwrap_err();
+            assert_eq!(second.code, "SANDBOX_UNAVAILABLE");
+            assert!(
+                started.elapsed() < Duration::from_millis(500),
+                "expected a poisoned Sidecar to fail fast, not wait out another timeout: {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn environment_has_no_proxy() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            let names = sidecar.violations("cmd-4", "DUMP_ENV").unwrap();
+            assert!(
+                !names.to_uppercase().contains("PROXY"),
+                "sidecar environment leaked a proxy variable: {names}"
+            );
+        }
+
+        const WORKSPACE: &str = "/tmp/sourceweft-sidecar-test-workspace";
+
+        fn wrap(sidecar: &Sidecar, command: &str, network: Option<&NetworkPolicy>) -> Result<WrappedCommand> {
+            sidecar.wrap("cmd-ev", command, Path::new("/tmp"), Path::new(WORKSPACE), network)
+        }
+
+        /// A handler that forwards every ask to a channel and answers `allow` from `answer`.
+        fn collecting_handler(
+            answer: bool,
+        ) -> (EventHandler, mpsc::Receiver<AskEvent>) {
+            let (sender, receiver) = mpsc::channel();
+            let sender = Mutex::new(sender);
+            let handler: EventHandler = Arc::new(move |event, responder| {
+                let SidecarEvent::Ask(ask) = event;
+                let _ = responder.reply(&ask.ask_id, answer, Some("handler says so"));
+                let _ = sender.lock().unwrap().send(ask);
+            });
+            (handler, receiver)
+        }
+
+        fn recording_init(dir: &Path) -> (InitConfig, std::path::PathBuf) {
+            let mut init = test_init();
+            init.home = dir.join("record-ops").to_str().unwrap().to_string();
+            (init, dir.join("record-ops.log"))
+        }
+
+        fn wait_for_log(log: &Path, needle: &str) -> String {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let text = fs::read_to_string(log).unwrap_or_default();
+                if text.contains(needle) {
+                    return text;
+                }
+                assert!(Instant::now() < deadline, "log never contained {needle:?}: {text}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        #[test]
+        fn ask_event_after_a_reply_reaches_the_handler() {
+            let bundle = bundle_with_stub();
+            let (handler, asks) = collecting_handler(true);
+            let sidecar =
+                Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+            wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+            let ask = asks.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(ask.ask_id, "ask-1");
+            assert_eq!(ask.command_id, "cmd-ev");
+            assert_eq!(ask.host, "example.com");
+            assert_eq!(ask.port, 443);
+            assert_eq!(ask.suggested_by, None);
+        }
+
+        #[test]
+        fn an_event_arriving_mid_call_does_not_desync() {
+            let bundle = bundle_with_stub();
+            let (handler, asks) = collecting_handler(true);
+            let sidecar =
+                Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+            // The stub writes the event line first, then the wrap reply.
+            let wrapped = wrap(&sidecar, "EVENT_FIRST:example.com:80", None).unwrap();
+            assert_eq!(wrapped.argv, ["/bin/echo", "hi"]);
+            assert_eq!(asks.recv_timeout(Duration::from_secs(5)).unwrap().port, 80);
+            // The framing is intact: later calls still pair with their own replies.
+            sidecar.probe().unwrap();
+            wrap(&sidecar, "echo ok", None).unwrap();
+            sidecar.cleanup("cmd-ev").unwrap();
+            assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+        }
+
+        #[test]
+        fn handler_answers_are_written_and_their_replies_are_not_delivered_to_callers() {
+            let dir = tempfile::tempdir().unwrap();
+            let bundle = bundle_with_stub();
+            let (init, log) = recording_init(dir.path());
+            let (handler, asks) = collecting_handler(false);
+            let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
+            wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+            asks.recv_timeout(Duration::from_secs(5)).unwrap();
+            let text = wait_for_log(&log, "ask.reply ask-1 false handler says so");
+            assert!(text.contains("wrap cmd-ev"), "{text}");
+            // The stub's `ok` for that reply carries an `ev-` id; if it leaked into the reply
+            // channel the next call would see a mismatched id and poison the connection.
+            sidecar.probe().unwrap();
+            sidecar.probe().unwrap();
+            assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+        }
+
+        #[test]
+        fn without_a_handler_every_ask_is_denied() {
+            let dir = tempfile::tempdir().unwrap();
+            let bundle = bundle_with_stub();
+            let (init, log) = recording_init(dir.path());
+            let sidecar = Sidecar::start(bundle.path(), &init).unwrap();
+            wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+            wait_for_log(&log, "ask.reply ask-1 false network approvals are not available");
+            sidecar.probe().unwrap();
+        }
+
+        #[test]
+        fn a_panicking_handler_does_not_kill_the_connection() {
+            let bundle = bundle_with_stub();
+            let handler: EventHandler = Arc::new(|_, _| panic!("boom"));
+            let sidecar =
+                Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
+            wrap(&sidecar, "EVENT_FIRST:example.com:443", None).unwrap();
+            sidecar.probe().unwrap();
+        }
+
+        #[test]
+        fn a_blocked_handler_thread_does_not_stall_calls() {
+            // The handler hands the ask to another thread and returns. That thread stays blocked on
+            // a gate the test opens only after the calls below have returned, so the calls provably
+            // complete while an ask is unanswered; it then answers through the responder.
+            let dir = tempfile::tempdir().unwrap();
+            let bundle = bundle_with_stub();
+            let (init, log) = recording_init(dir.path());
+            let (open_gate, gate) = mpsc::channel::<()>();
+            let gate = Mutex::new(Some(gate));
+            let handler: EventHandler = Arc::new(move |event, responder| {
+                let SidecarEvent::Ask(ask) = event;
+                let gate = gate.lock().unwrap().take().expect("one ask");
+                std::thread::spawn(move || {
+                    let _ = gate.recv_timeout(Duration::from_secs(30));
+                    let _ = responder.reply(&ask.ask_id, true, None);
+                });
+            });
+            let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
+            wrap(&sidecar, "ASK:example.com:443", None).unwrap();
+            // Several round trips while the ask is still unanswered.
+            sidecar.probe().unwrap();
+            wrap(&sidecar, "echo while-pending", None).unwrap();
+            sidecar.probe().unwrap();
+            let before_release = fs::read_to_string(&log).unwrap_or_default();
+            assert!(
+                !before_release.contains("ask.reply"),
+                "the answer must not have been written yet: {before_release}"
+            );
+            open_gate.send(()).unwrap();
+            wait_for_log(&log, "ask.reply ask-1 true");
+            sidecar.probe().unwrap();
+        }
+
+        #[test]
+        fn ask_reply_goes_through_the_normal_call_path() {
+            let dir = tempfile::tempdir().unwrap();
+            let bundle = bundle_with_stub();
+            let (init, log) = recording_init(dir.path());
+            let sidecar = Sidecar::start(bundle.path(), &init).unwrap();
+            assert_eq!(
+                sidecar.ask_reply("ask-9", true, None).unwrap(),
+                AskReplyOutcome::Delivered
+            );
+            sidecar.ask_reply("ask-10", false, Some("nope")).unwrap();
+            let text = fs::read_to_string(&log).unwrap();
+            assert!(text.contains("ask.reply ask-9 true"), "{text}");
+            assert!(text.contains("ask.reply ask-10 false nope"), "{text}");
+        }
+
+        #[test]
+        fn a_late_ask_reply_is_benign_and_does_not_poison() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            // The stub rejects askId "ask-gone" the way the sidecar rejects an unknown or
+            // already-answered one.
+            assert_eq!(
+                sidecar.ask_reply("ask-gone", true, None).unwrap(),
+                AskReplyOutcome::UnknownAsk
+            );
+            sidecar.probe().unwrap();
+            assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+        }
+
+        #[test]
+        fn a_rejected_responder_reply_is_dropped_without_a_desync() {
+            let dir = tempfile::tempdir().unwrap();
+            let bundle = bundle_with_stub();
+            let (init, log) = recording_init(dir.path());
+            let handler: EventHandler = Arc::new(|_, responder| {
+                let _ = responder.reply("ask-gone", true, None);
+            });
+            let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
+            wrap(&sidecar, "EVENT_FIRST:example.com:443", None).unwrap();
+            wait_for_log(&log, "ask.reply ask-gone true");
+            sidecar.probe().unwrap();
+            sidecar.probe().unwrap();
+            assert!(!sidecar.poisoned.load(Ordering::SeqCst));
+        }
+
+        #[test]
+        fn audit_returns_the_entries() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            let entries = sidecar.audit("cmd-1").unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0]["host"], "example.com");
+            assert_eq!(entries[0]["source"], "approval");
+        }
+
+        #[test]
+        fn an_audit_error_keeps_its_code_and_does_not_poison() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            let error = sidecar.audit("AUDIT_ERROR").unwrap_err();
+            assert_eq!(error.code, "BAD_REQUEST");
+            sidecar.probe().unwrap();
+        }
+
+        #[test]
+        fn wrap_sends_the_network_policy_and_omits_it_when_absent() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
+            let policy = NetworkPolicy {
+                mode: NetworkMode::Ask,
+                allow: vec!["a.com".to_string()],
+                suggested: BTreeMap::from([("a.com".to_string(), "skill".to_string())]),
+            };
+            let with = wrap(&sidecar, "SHOW_NETWORK", Some(&policy)).unwrap();
+            assert_eq!(
+                with.argv[1],
+                r#"{"mode":"ask","allow":["a.com"],"suggested":{"a.com":"skill"}}"#
+            );
+            let without = wrap(&sidecar, "SHOW_NETWORK", None).unwrap();
+            assert_eq!(without.argv[1], "");
+        }
+
+        #[test]
+        fn poisoned_semantics_are_unchanged_with_a_handler_present() {
+            let bundle = bundle_with_stub();
+            let (handler, _asks) = collecting_handler(true);
+            let sidecar = Sidecar::start_inner(
+                bundle.path(),
+                &test_init(),
+                Duration::from_secs(4),
+                Duration::from_secs(4),
+                Some(handler),
             )
             .unwrap();
-        assert_eq!(wrapped.argv, vec!["/bin/echo".to_string(), "hi".to_string()]);
-        assert!(wrapped.env.contains(&("FOO".to_string(), "bar".to_string())));
-    }
+            let first = wrap(&sidecar, "HANG", None).unwrap_err();
+            assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
+            let started = Instant::now();
+            assert_eq!(sidecar.probe().unwrap_err().code, "SANDBOX_UNAVAILABLE");
+            assert!(started.elapsed() < Duration::from_millis(500));
+        }
 
-    #[test]
-    fn sidecar_error_code_is_preserved() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        let error = sidecar
-            .wrap(
-                "cmd-2",
-                "ERROR:HELPER_MISSING",
-                Path::new("/tmp"),
-                Path::new("/tmp/sourceweft-sidecar-test-workspace"),
-                None,
-            )
-            .unwrap_err();
-        assert_eq!(error.code, "HELPER_MISSING");
-    }
-
-    #[test]
-    fn dead_sidecar_is_sandbox_unavailable() {
-        let bundle = bundle_with_stub();
-        let mut init = test_init();
-        init.home = "/tmp/sourceweft-sidecar-test-home/exit-after-init".to_string();
-        let sidecar = Sidecar::start_with_timeout(bundle.path(), &init, Duration::from_secs(5))
-            .expect("init reply arrives before the stub exits");
-        let error = sidecar.probe().unwrap_err();
-        assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
-    }
-
-    #[test]
-    fn no_reply_times_out() {
-        let bundle = bundle_with_stub();
-        let sidecar =
-            Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(3))
-                .unwrap();
-        let started = Instant::now();
-        let error = sidecar
-            .wrap(
-                "cmd-3",
-                "HANG",
-                Path::new("/tmp"),
-                Path::new("/tmp/sourceweft-sidecar-test-workspace"),
-                None,
-            )
-            .unwrap_err();
-        assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "expected the 3s sidecar timeout to fire well before the stub's 10s sleep ends"
+        const STALE_STUB: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/stub-sidecar-stale.sh"
         );
-    }
 
-    #[test]
-    fn desynced_sidecar_fails_fast_on_second_call() {
-        let bundle = bundle_with_stub();
-        let sidecar =
-            Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(3))
-                .unwrap();
-        let first = sidecar
-            .wrap(
-                "cmd-5",
-                "HANG",
-                Path::new("/tmp"),
-                Path::new("/tmp/sourceweft-sidecar-test-workspace"),
-                None,
-            )
-            .unwrap_err();
-        assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
+        fn bundle_with_script(script: &str) -> tempfile::TempDir {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("srt-sidecar");
+            fs::copy(script, &target).unwrap();
+            let mut permissions = fs::metadata(&target).unwrap().permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&target, permissions).unwrap();
+            // See `bundle_with_stub`: avoids an observed ETXTBSY race on overlayfs.
+            fs::File::open(&target).unwrap().sync_all().unwrap();
+            dir
+        }
 
-        // The stub never replied to "cmd-5"; any later call must not wait around for that
-        // stale reply (or any real reply at all) to decide this connection is unusable.
-        let started = Instant::now();
-        let second = sidecar.probe().unwrap_err();
-        assert_eq!(second.code, "SANDBOX_UNAVAILABLE");
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "expected a poisoned Sidecar to fail fast, not wait out another timeout: {:?}",
-            started.elapsed()
-        );
-    }
+        /// `test_init` with the stub's `init.home`-suffix behaviour selector appended.
+        fn init_with_stub_mode(mode: &str) -> InitConfig {
+            let mut init = test_init();
+            init.home = format!("/tmp/sourceweft-sidecar-test-home/{mode}");
+            init
+        }
 
-    #[test]
-    fn environment_has_no_proxy() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        let names = sidecar.violations("cmd-4", "DUMP_ENV").unwrap();
-        assert!(
-            !names.to_uppercase().contains("PROXY"),
-            "sidecar environment leaked a proxy variable: {names}"
-        );
-    }
-
-    const WORKSPACE: &str = "/tmp/sourceweft-sidecar-test-workspace";
-
-    fn wrap(sidecar: &Sidecar, command: &str, network: Option<&NetworkPolicy>) -> Result<WrappedCommand> {
-        sidecar.wrap("cmd-ev", command, Path::new("/tmp"), Path::new(WORKSPACE), network)
-    }
-
-    /// A handler that forwards every ask to a channel and answers `allow` from `answer`.
-    fn collecting_handler(
-        answer: bool,
-    ) -> (EventHandler, mpsc::Receiver<AskEvent>) {
-        let (sender, receiver) = mpsc::channel();
-        let sender = Mutex::new(sender);
-        let handler: EventHandler = Arc::new(move |event, responder| {
-            let SidecarEvent::Ask(ask) = event;
-            let _ = responder.reply(&ask.ask_id, answer, Some("handler says so"));
-            let _ = sender.lock().unwrap().send(ask);
-        });
-        (handler, receiver)
-    }
-
-    fn recording_init(dir: &Path) -> (InitConfig, std::path::PathBuf) {
-        let mut init = test_init();
-        init.home = dir.join("record-ops").to_str().unwrap().to_string();
-        (init, dir.join("record-ops.log"))
-    }
-
-    fn wait_for_log(log: &Path, needle: &str) -> String {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let text = fs::read_to_string(log).unwrap_or_default();
-            if text.contains(needle) {
-                return text;
+        fn start_expecting_error(init: &InitConfig) -> HostError {
+            let bundle = bundle_with_stub();
+            match Sidecar::start_with_timeout(bundle.path(), init, Duration::from_secs(5)) {
+                Ok(_) => panic!("start must reject this init reply"),
+                Err(error) => error,
             }
-            assert!(Instant::now() < deadline, "log never contained {needle:?}: {text}");
-            std::thread::sleep(Duration::from_millis(20));
         }
-    }
 
-    #[test]
-    fn ask_event_after_a_reply_reaches_the_handler() {
-        let bundle = bundle_with_stub();
-        let (handler, asks) = collecting_handler(true);
-        let sidecar =
-            Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
-        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
-        let ask = asks.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(ask.ask_id, "ask-1");
-        assert_eq!(ask.command_id, "cmd-ev");
-        assert_eq!(ask.host, "example.com");
-        assert_eq!(ask.port, 443);
-        assert_eq!(ask.suggested_by, None);
-    }
-
-    #[test]
-    fn an_event_arriving_mid_call_does_not_desync() {
-        let bundle = bundle_with_stub();
-        let (handler, asks) = collecting_handler(true);
-        let sidecar =
-            Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
-        // The stub writes the event line first, then the wrap reply.
-        let wrapped = wrap(&sidecar, "EVENT_FIRST:example.com:80", None).unwrap();
-        assert_eq!(wrapped.argv, ["/bin/echo", "hi"]);
-        assert_eq!(asks.recv_timeout(Duration::from_secs(5)).unwrap().port, 80);
-        // The framing is intact: later calls still pair with their own replies.
-        sidecar.probe().unwrap();
-        wrap(&sidecar, "echo ok", None).unwrap();
-        sidecar.cleanup("cmd-ev").unwrap();
-        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn handler_answers_are_written_and_their_replies_are_not_delivered_to_callers() {
-        let dir = tempfile::tempdir().unwrap();
-        let bundle = bundle_with_stub();
-        let (init, log) = recording_init(dir.path());
-        let (handler, asks) = collecting_handler(false);
-        let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
-        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
-        asks.recv_timeout(Duration::from_secs(5)).unwrap();
-        let text = wait_for_log(&log, "ask.reply ask-1 false handler says so");
-        assert!(text.contains("wrap cmd-ev"), "{text}");
-        // The stub's `ok` for that reply carries an `ev-` id; if it leaked into the reply
-        // channel the next call would see a mismatched id and poison the connection.
-        sidecar.probe().unwrap();
-        sidecar.probe().unwrap();
-        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn without_a_handler_every_ask_is_denied() {
-        let dir = tempfile::tempdir().unwrap();
-        let bundle = bundle_with_stub();
-        let (init, log) = recording_init(dir.path());
-        let sidecar = Sidecar::start(bundle.path(), &init).unwrap();
-        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
-        wait_for_log(&log, "ask.reply ask-1 false network approvals are not available");
-        sidecar.probe().unwrap();
-    }
-
-    #[test]
-    fn a_panicking_handler_does_not_kill_the_connection() {
-        let bundle = bundle_with_stub();
-        let handler: EventHandler = Arc::new(|_, _| panic!("boom"));
-        let sidecar =
-            Sidecar::start_with_events(bundle.path(), &test_init(), handler).unwrap();
-        wrap(&sidecar, "EVENT_FIRST:example.com:443", None).unwrap();
-        sidecar.probe().unwrap();
-    }
-
-    #[test]
-    fn a_blocked_handler_thread_does_not_stall_calls() {
-        // The handler hands the ask to another thread and returns. That thread stays blocked on
-        // a gate the test opens only after the calls below have returned, so the calls provably
-        // complete while an ask is unanswered; it then answers through the responder.
-        let dir = tempfile::tempdir().unwrap();
-        let bundle = bundle_with_stub();
-        let (init, log) = recording_init(dir.path());
-        let (open_gate, gate) = mpsc::channel::<()>();
-        let gate = Mutex::new(Some(gate));
-        let handler: EventHandler = Arc::new(move |event, responder| {
-            let SidecarEvent::Ask(ask) = event;
-            let gate = gate.lock().unwrap().take().expect("one ask");
-            std::thread::spawn(move || {
-                let _ = gate.recv_timeout(Duration::from_secs(30));
-                let _ = responder.reply(&ask.ask_id, true, None);
-            });
-        });
-        let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
-        wrap(&sidecar, "ASK:example.com:443", None).unwrap();
-        // Several round trips while the ask is still unanswered.
-        sidecar.probe().unwrap();
-        wrap(&sidecar, "echo while-pending", None).unwrap();
-        sidecar.probe().unwrap();
-        let before_release = fs::read_to_string(&log).unwrap_or_default();
-        assert!(
-            !before_release.contains("ask.reply"),
-            "the answer must not have been written yet: {before_release}"
-        );
-        open_gate.send(()).unwrap();
-        wait_for_log(&log, "ask.reply ask-1 true");
-        sidecar.probe().unwrap();
-    }
-
-    #[test]
-    fn ask_reply_goes_through_the_normal_call_path() {
-        let dir = tempfile::tempdir().unwrap();
-        let bundle = bundle_with_stub();
-        let (init, log) = recording_init(dir.path());
-        let sidecar = Sidecar::start(bundle.path(), &init).unwrap();
-        assert_eq!(
-            sidecar.ask_reply("ask-9", true, None).unwrap(),
-            AskReplyOutcome::Delivered
-        );
-        sidecar.ask_reply("ask-10", false, Some("nope")).unwrap();
-        let text = fs::read_to_string(&log).unwrap();
-        assert!(text.contains("ask.reply ask-9 true"), "{text}");
-        assert!(text.contains("ask.reply ask-10 false nope"), "{text}");
-    }
-
-    #[test]
-    fn a_late_ask_reply_is_benign_and_does_not_poison() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        // The stub rejects askId "ask-gone" the way the sidecar rejects an unknown or
-        // already-answered one.
-        assert_eq!(
-            sidecar.ask_reply("ask-gone", true, None).unwrap(),
-            AskReplyOutcome::UnknownAsk
-        );
-        sidecar.probe().unwrap();
-        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn a_rejected_responder_reply_is_dropped_without_a_desync() {
-        let dir = tempfile::tempdir().unwrap();
-        let bundle = bundle_with_stub();
-        let (init, log) = recording_init(dir.path());
-        let handler: EventHandler = Arc::new(|_, responder| {
-            let _ = responder.reply("ask-gone", true, None);
-        });
-        let sidecar = Sidecar::start_with_events(bundle.path(), &init, handler).unwrap();
-        wrap(&sidecar, "EVENT_FIRST:example.com:443", None).unwrap();
-        wait_for_log(&log, "ask.reply ask-gone true");
-        sidecar.probe().unwrap();
-        sidecar.probe().unwrap();
-        assert!(!sidecar.poisoned.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn audit_returns_the_entries() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        let entries = sidecar.audit("cmd-1").unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["host"], "example.com");
-        assert_eq!(entries[0]["source"], "approval");
-    }
-
-    #[test]
-    fn an_audit_error_keeps_its_code_and_does_not_poison() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        let error = sidecar.audit("AUDIT_ERROR").unwrap_err();
-        assert_eq!(error.code, "BAD_REQUEST");
-        sidecar.probe().unwrap();
-    }
-
-    #[test]
-    fn wrap_sends_the_network_policy_and_omits_it_when_absent() {
-        let bundle = bundle_with_stub();
-        let sidecar = Sidecar::start(bundle.path(), &test_init()).unwrap();
-        let policy = NetworkPolicy {
-            mode: NetworkMode::Ask,
-            allow: vec!["a.com".to_string()],
-            suggested: BTreeMap::from([("a.com".to_string(), "skill".to_string())]),
-        };
-        let with = wrap(&sidecar, "SHOW_NETWORK", Some(&policy)).unwrap();
-        assert_eq!(
-            with.argv[1],
-            r#"{"mode":"ask","allow":["a.com"],"suggested":{"a.com":"skill"}}"#
-        );
-        let without = wrap(&sidecar, "SHOW_NETWORK", None).unwrap();
-        assert_eq!(without.argv[1], "");
-    }
-
-    #[test]
-    fn poisoned_semantics_are_unchanged_with_a_handler_present() {
-        let bundle = bundle_with_stub();
-        let (handler, _asks) = collecting_handler(true);
-        let sidecar = Sidecar::start_inner(
-            bundle.path(),
-            &test_init(),
-            Duration::from_secs(4),
-            Some(handler),
-        )
-        .unwrap();
-        let first = wrap(&sidecar, "HANG", None).unwrap_err();
-        assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
-        let started = Instant::now();
-        assert_eq!(sidecar.probe().unwrap_err().code, "SANDBOX_UNAVAILABLE");
-        assert!(started.elapsed() < Duration::from_millis(500));
-    }
-
-    const STALE_STUB: &str = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/stub-sidecar-stale.sh"
-    );
-
-    fn bundle_with_script(script: &str) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("srt-sidecar");
-        fs::copy(script, &target).unwrap();
-        let mut permissions = fs::metadata(&target).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&target, permissions).unwrap();
-        // See `bundle_with_stub`: avoids an observed ETXTBSY race on overlayfs.
-        fs::File::open(&target).unwrap().sync_all().unwrap();
-        dir
-    }
-
-    /// `test_init` with the stub's `init.home`-suffix behaviour selector appended.
-    fn init_with_stub_mode(mode: &str) -> InitConfig {
-        let mut init = test_init();
-        init.home = format!("/tmp/sourceweft-sidecar-test-home/{mode}");
-        init
-    }
-
-    fn start_expecting_error(init: &InitConfig) -> HostError {
-        let bundle = bundle_with_stub();
-        match Sidecar::start_with_timeout(bundle.path(), init, Duration::from_secs(5)) {
-            Ok(_) => panic!("start must reject this init reply"),
-            Err(error) => error,
+        #[test]
+        fn matching_protocol_version_starts() {
+            let bundle = bundle_with_stub();
+            Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(5))
+                .expect("the current protocolVersion is accepted");
         }
-    }
 
-    #[test]
-    fn matching_protocol_version_starts() {
-        let bundle = bundle_with_stub();
-        Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(5))
-            .expect("the current protocolVersion is accepted");
-    }
+        #[test]
+        fn older_or_malformed_protocol_versions_are_bundle_stale() {
+            for (mode, shown) in [
+                ("protocol-null", "none"),
+                ("protocol-missing", "none"),
+                ("protocol-string", "none"),
+                ("protocol-float", "none"),
+                ("protocol-0", "0"),
+                // A bundle from before the network-approval protocol (version 1): the host would
+                // wrap commands with a policy it ignores, so it is rejected as out of date.
+                ("protocol-1", "1"),
+            ] {
+                let error = start_expecting_error(&init_with_stub_mode(mode));
+                assert_eq!(error.code, "BUNDLE_STALE", "{mode}");
+                assert_eq!(
+                    error.message,
+                    format!(
+                        "The sandbox runtime is out of date (protocol {shown}, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
+                    ),
+                    "{mode}"
+                );
+            }
+        }
 
-    #[test]
-    fn older_or_malformed_protocol_versions_are_bundle_stale() {
-        for (mode, shown) in [
-            ("protocol-null", "none"),
-            ("protocol-missing", "none"),
-            ("protocol-string", "none"),
-            ("protocol-float", "none"),
-            ("protocol-0", "0"),
-            // A bundle from before the network-approval protocol (version 1): the host would
-            // wrap commands with a policy it ignores, so it is rejected as out of date.
-            ("protocol-1", "1"),
-        ] {
-            let error = start_expecting_error(&init_with_stub_mode(mode));
-            assert_eq!(error.code, "BUNDLE_STALE", "{mode}");
+        #[test]
+        fn a_version_1_bundle_is_rejected_with_the_install_the_update_message() {
+            let error = start_expecting_error(&init_with_stub_mode("protocol-1"));
+            assert_eq!(error.code, "BUNDLE_STALE");
             assert_eq!(
                 error.message,
                 format!(
-                    "The sandbox runtime is out of date (protocol {shown}, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
-                ),
-                "{mode}"
+                    "The sandbox runtime is out of date (protocol 1, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
+                )
             );
+            assert!(error.message.ends_with("Install the update."));
         }
-    }
 
-    #[test]
-    fn a_version_1_bundle_is_rejected_with_the_install_the_update_message() {
-        let error = start_expecting_error(&init_with_stub_mode("protocol-1"));
-        assert_eq!(error.code, "BUNDLE_STALE");
-        assert_eq!(
-            error.message,
-            format!(
-                "The sandbox runtime is out of date (protocol 1, this app needs {SANDBOX_PROTOCOL_VERSION}). Install the update."
-            )
-        );
-        assert!(error.message.ends_with("Install the update."));
-    }
-
-    #[test]
-    fn newer_protocol_version_is_bundle_newer() {
-        let error = start_expecting_error(&init_with_stub_mode("protocol-3"));
-        assert_eq!(error.code, "BUNDLE_NEWER");
-        assert_eq!(
-            error.message,
-            format!(
-                "The sandbox runtime (protocol 3) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
-            )
-        );
-    }
-
-    #[test]
-    fn check_protocol_version_edge_cases() {
-        use serde_json::json;
-        let ours = u64::from(SANDBOX_PROTOCOL_VERSION);
-        assert!(check_protocol_version(&json!({"protocolVersion": ours, "extra": true})).is_ok());
-        for stale in [
-            json!(null),
-            json!([]),
-            json!("1"),
-            json!({}),
-            json!({"protocolVersion": null}),
-            json!({"protocolVersion": -1}),
-            json!({"protocolVersion": 1.5}),
-            json!({"protocolVersion": 0}),
-        ] {
+        #[test]
+        fn newer_protocol_version_is_bundle_newer() {
+            let error = start_expecting_error(&init_with_stub_mode("protocol-4"));
+            assert_eq!(error.code, "BUNDLE_NEWER");
             assert_eq!(
-                check_protocol_version(&stale).unwrap_err().code,
-                "BUNDLE_STALE",
-                "{stale}"
+                error.message,
+                format!(
+                    "The sandbox runtime (protocol 4) is newer than this app supports ({SANDBOX_PROTOCOL_VERSION}). Update SourceWeft."
+                )
             );
         }
-        assert_eq!(
-            check_protocol_version(&json!({"protocolVersion": u64::MAX}))
-                .unwrap_err()
-                .code,
-            "BUNDLE_NEWER"
-        );
-    }
 
-    #[test]
-    fn host_generated_bundle_codes_pass_through_map_error_code() {
-        assert_eq!(map_error_code("BUNDLE_STALE"), "BUNDLE_STALE");
-        assert_eq!(map_error_code("BUNDLE_NEWER"), "BUNDLE_NEWER");
-        assert_eq!(map_error_code("anything else"), "SANDBOX_UNAVAILABLE");
-    }
+        #[test]
+        fn check_protocol_version_edge_cases() {
+            use serde_json::json;
+            let ours = u64::from(SANDBOX_PROTOCOL_VERSION);
+            assert!(check_protocol_version(&json!({"protocolVersion": ours, "extra": true})).is_ok());
+            for stale in [
+                json!(null),
+                json!([]),
+                json!("1"),
+                json!({}),
+                json!({"protocolVersion": null}),
+                json!({"protocolVersion": -1}),
+                json!({"protocolVersion": 1.5}),
+                json!({"protocolVersion": 0}),
+            ] {
+                assert_eq!(
+                    check_protocol_version(&stale).unwrap_err().code,
+                    "BUNDLE_STALE",
+                    "{stale}"
+                );
+            }
+            assert_eq!(
+                check_protocol_version(&json!({"protocolVersion": u64::MAX}))
+                    .unwrap_err()
+                    .code,
+                "BUNDLE_NEWER"
+            );
+        }
 
-    fn process_is_alive(pid: &str) -> bool {
-        std::process::Command::new("/bin/kill")
-            .args(["-0", pid])
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
+        #[test]
+        fn host_generated_bundle_codes_pass_through_map_error_code() {
+            assert_eq!(map_error_code("BUNDLE_STALE"), "BUNDLE_STALE");
+            assert_eq!(map_error_code("BUNDLE_NEWER"), "BUNDLE_NEWER");
+            assert_eq!(map_error_code("anything else"), "SANDBOX_UNAVAILABLE");
+        }
 
-    /// An old sidecar that ignores policy fields it does not know (here `denyRoots`) and acks
-    /// `init` with `null` must be refused, killed, and never be asked to wrap anything.
-    #[test]
-    fn stale_sidecar_that_ignores_deny_roots_is_rejected_and_killed() {
-        let bundle = bundle_with_script(STALE_STUB);
-        let record = tempfile::tempdir().unwrap();
-        let home = record.path().join("home");
-        let log = record.path().join("home.log");
-        let mut init = test_init();
-        init.home = home.to_string_lossy().into_owned();
-        init.deny_roots = vec!["/tmp/sourceweft-denied".to_string()];
-        let error = match Sidecar::start_with_timeout(bundle.path(), &init, Duration::from_secs(5))
-        {
-            Ok(_) => panic!("a bundle that does not report its protocol must be rejected"),
-            Err(error) => error,
-        };
-        assert_eq!(error.code, "BUNDLE_STALE");
-        let logged = fs::read_to_string(&log).unwrap();
-        assert!(logged.lines().any(|line| line == "init"), "{logged}");
-        assert!(!logged.lines().any(|line| line == "wrap"), "{logged}");
-        let pid = logged
-            .lines()
-            .find_map(|line| line.strip_prefix("pid "))
-            .expect("the stub logs its pid");
-        assert!(!process_is_alive(pid), "rejected sidecar {pid} is still running");
+        fn process_is_alive(pid: &str) -> bool {
+            std::process::Command::new("/bin/kill")
+                .args(["-0", pid])
+                .stderr(Stdio::null())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        }
+
+        /// An old sidecar that ignores policy fields it does not know (here `denyRoots`) and acks
+        /// `init` with `null` must be refused, killed, and never be asked to wrap anything.
+        #[test]
+        fn stale_sidecar_that_ignores_deny_roots_is_rejected_and_killed() {
+            let bundle = bundle_with_script(STALE_STUB);
+            let record = tempfile::tempdir().unwrap();
+            let home = record.path().join("home");
+            let log = record.path().join("home.log");
+            let mut init = test_init();
+            init.home = home.to_string_lossy().into_owned();
+            init.deny_roots = vec!["/tmp/sourceweft-denied".to_string()];
+            let error = match Sidecar::start_with_timeout(bundle.path(), &init, Duration::from_secs(5))
+            {
+                Ok(_) => panic!("a bundle that does not report its protocol must be rejected"),
+                Err(error) => error,
+            };
+            assert_eq!(error.code, "BUNDLE_STALE");
+            let logged = fs::read_to_string(&log).unwrap();
+            assert!(logged.lines().any(|line| line == "init"), "{logged}");
+            assert!(!logged.lines().any(|line| line == "wrap"), "{logged}");
+            let pid = logged
+                .lines()
+                .find_map(|line| line.strip_prefix("pid "))
+                .expect("the stub logs its pid");
+            assert!(!process_is_alive(pid), "rejected sidecar {pid} is still running");
+        }
+
+        #[test]
+        fn on_unix_an_init_that_outlasts_its_timeout_is_an_unavailable_sidecar_as_before() {
+            let bundle = bundle_with_stub();
+            let mut init = test_init();
+            init.home = "/tmp/sourceweft-sidecar-test-home/hang-init".to_string();
+            let started = Instant::now();
+            let error = match Sidecar::start_with_timeouts(
+                bundle.path(),
+                &init,
+                Duration::from_secs(30),
+                Duration::from_secs(2),
+            ) {
+                Ok(_) => panic!("an init that never replies must fail"),
+                Err(error) => error,
+            };
+            // SANDBOX_INIT_TIMEOUT is produced by the Windows start path only.
+            assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
+            assert_eq!(error.message, "sidecar did not reply in time");
+            assert!(
+                started.elapsed() < Duration::from_secs(8),
+                "the init timeout, not the stub's 10 s sleep or the 30 s reply timeout, ended it: {:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn the_init_timeout_error_is_distinct_on_windows_only() {
+            let windows = init_timeout_error(WINDOWS_INIT_TIMEOUT, true);
+            assert_eq!(windows.code, "SANDBOX_INIT_TIMEOUT");
+            assert!(windows.message.contains("10 minutes"), "{}", windows.message);
+            let other = init_timeout_error(WINDOWS_INIT_TIMEOUT, false);
+            assert_eq!(other.code, "SANDBOX_UNAVAILABLE");
+            assert_eq!(other.message, "sidecar did not reply in time");
+        }
+
+        #[test]
+        fn the_long_init_timeout_does_not_lengthen_the_other_calls() {
+            let bundle = bundle_with_stub();
+            let sidecar = Sidecar::start_with_timeouts(
+                bundle.path(),
+                &test_init(),
+                Duration::from_secs(2),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+            let started = Instant::now();
+            let error = sidecar
+                .wrap(
+                    "cmd-6",
+                    "HANG",
+                    Path::new("/tmp"),
+                    Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+                    None,
+                )
+                .unwrap_err();
+            assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
+            assert!(started.elapsed() < Duration::from_secs(8), "{:?}", started.elapsed());
+        }
+
+        #[test]
+        fn waits_are_described_in_minutes_or_seconds() {
+            assert_eq!(describe_wait(WINDOWS_INIT_TIMEOUT), "10 minutes");
+            assert_eq!(describe_wait(Duration::from_secs(60)), "1 minute");
+            assert_eq!(describe_wait(Duration::from_secs(90)), "90 seconds");
+            assert_eq!(describe_wait(Duration::from_secs(2)), "2 seconds");
+        }
+
     }
 }

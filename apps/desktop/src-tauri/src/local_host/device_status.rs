@@ -48,6 +48,14 @@ const MACOS_COMMAND_SHELL: &str = "bash";
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const LINUX_COMMAND_SHELL: &str = "bash";
 
+/// The shell sandboxed commands run under on Windows: the one `win_shell::detect` finds (Git Bash
+/// when installed, else Windows PowerShell 5.1), passed to srt as `windows.shell`. `None` when the
+/// machine has neither, in which case no status is reported (and no command runs).
+#[cfg(windows)]
+fn windows_command_shell() -> Option<&'static str> {
+    super::win_shell::detect().map(|shell| shell.kind.name())
+}
+
 /// Basename of the shell that sandboxed commands run under on this platform; `None` where this
 /// host has no sandboxed command execution at all (then no status is reported).
 pub fn command_shell() -> Option<&'static str> {
@@ -56,6 +64,9 @@ pub fn command_shell() -> Option<&'static str> {
     } else if cfg!(target_os = "linux") {
         Some(LINUX_COMMAND_SHELL)
     } else {
+        #[cfg(windows)]
+        return windows_command_shell();
+        #[cfg(not(windows))]
         None
     }
 }
@@ -294,12 +305,15 @@ mod tests {
             (SetupCode::UserNamespaceRestricted, "userNamespaceRestricted"),
             (SetupCode::SandboxFailed, "sandboxFailed"),
             (SetupCode::Installing, "installing"),
+            (SetupCode::WindowsNotInstalled, "windowsNotInstalled"),
+            (SetupCode::WindowsSetupOutdated, "windowsSetupOutdated"),
         ];
         let remedies = [
             (Remedy::DownloadRuntime, "downloadRuntime"),
             (Remedy::UpdateApp, "updateApp"),
             (Remedy::ReinstallPackage, "reinstallPackage"),
             (Remedy::PrivilegedSetup, "privilegedSetup"),
+            (Remedy::ElevatedSetup, "elevatedSetup"),
             (Remedy::None, "none"),
         ];
         for (code, wire_code) in codes {
@@ -314,6 +328,58 @@ mod tests {
                 assert_eq!(message["sandbox"]["remedy"], wire_remedy);
             }
         }
+    }
+
+    /// The wire names the backend accepts (`invocation-reply.ts`), read from its source so the two
+    /// lists cannot drift: every Rust variant must be one of them and every one of theirs must be
+    /// a Rust variant.
+    #[test]
+    fn the_codes_and_remedies_are_exactly_the_backends() {
+        let source = include_str!("../../../../backend/src/modules/devices/invocation-reply.ts")
+            .replace("\r\n", "\n");
+        let list = |name: &str| -> Vec<String> {
+            let start = source.find(&format!("export const {name} = [")).unwrap();
+            let body = &source[start..];
+            let body = &body[body.find('[').unwrap() + 1..body.find("] as const").unwrap()];
+            body.split(',')
+                .map(|item| item.trim().trim_matches('"').to_string())
+                .filter(|item| !item.is_empty())
+                .collect()
+        };
+        let wire = |value: serde_json::Value| value.as_str().unwrap().to_string();
+        let mut codes: Vec<String> = [
+            SetupCode::BundleMissing,
+            SetupCode::BundleStale,
+            SetupCode::BundleNewer,
+            SetupCode::BundleInvalid,
+            SetupCode::BwrapMissing,
+            SetupCode::UserNamespaceRestricted,
+            SetupCode::SandboxFailed,
+            SetupCode::Installing,
+            SetupCode::WindowsNotInstalled,
+            SetupCode::WindowsSetupOutdated,
+        ]
+        .into_iter()
+        .map(|code| wire(json!(code)))
+        .collect();
+        let mut remedies: Vec<String> = [
+            Remedy::DownloadRuntime,
+            Remedy::UpdateApp,
+            Remedy::ReinstallPackage,
+            Remedy::PrivilegedSetup,
+            Remedy::ElevatedSetup,
+            Remedy::None,
+        ]
+        .into_iter()
+        .map(|remedy| wire(json!(remedy)))
+        .collect();
+        let (mut theirs_codes, mut theirs_remedies) =
+            (list("SANDBOX_SETUP_CODES"), list("SANDBOX_REMEDIES"));
+        for list in [&mut codes, &mut remedies, &mut theirs_codes, &mut theirs_remedies] {
+            list.sort();
+        }
+        assert_eq!(codes, theirs_codes);
+        assert_eq!(remedies, theirs_remedies);
     }
 
     #[test]
@@ -418,7 +484,7 @@ mod tests {
         let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
         let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            squashed.contains("config.platform === \"darwin\" ? \"/bin/bash\" : undefined"),
+            squashed.contains("if (config.platform === \"darwin\") return \"/bin/bash\";"),
             "the sidecar's binShellFor no longer returns /bin/bash for darwin: update MACOS_COMMAND_SHELL"
         );
         assert_eq!(MACOS_COMMAND_SHELL, "bash");
@@ -427,8 +493,8 @@ mod tests {
     #[test]
     fn linux_shell_is_srts_default_because_the_sidecar_passes_no_bin_shell() {
         // The sidecar passes `binShellFor(state.config)` as srt's `binShell`, and `binShellFor`
-        // returns `undefined` for every non-darwin platform, so on Linux srt falls back to its own
-        // default (`const shellPath = shell || 'bash'`).
+        // returns `undefined` for linux (darwin has `/bin/bash`, win32 the host-chosen shell), so on
+        // Linux srt falls back to its own default (`const shellPath = shell || 'bash'`).
         let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
         let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
@@ -436,10 +502,51 @@ mod tests {
             "the sidecar no longer routes binShell through binShellFor: update LINUX_COMMAND_SHELL"
         );
         assert!(
-            squashed.contains("config.platform === \"darwin\" ? \"/bin/bash\" : undefined"),
-            "binShellFor no longer returns undefined for non-darwin: update LINUX_COMMAND_SHELL"
+            squashed.contains(
+                "if (config.platform === \"win32\") return config.windows?.shell; return undefined;"
+            ),
+            "binShellFor no longer returns undefined for linux: update LINUX_COMMAND_SHELL"
         );
         assert_eq!(LINUX_COMMAND_SHELL, "bash");
+    }
+
+    #[test]
+    fn windows_shell_is_the_one_the_host_names_in_the_sidecar_init() {
+        // On win32 the sidecar passes `windows.shell` (an absolute `bash.exe` or
+        // `powershell.exe` the host chose, `win_shell`) to srt as `binShell`, and srt picks the
+        // `-c` / `-NoProfile -Command` flags from that file name. The name reported to the
+        // backend is the kind of that very shell.
+        use crate::local_host::win_shell::{detect_with, ShellKind, ShellRoots};
+        let source = include_str!("../../../sandbox-sidecar/src/server.ts").replace("\r\n", "\n");
+        let squashed = source.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            squashed.contains(
+                "if (config.platform === \"win32\") return config.windows?.shell; return undefined;"
+            ),
+            "binShellFor no longer hands the host's win32 shell to srt: update the Windows shell names"
+        );
+        let roots = ShellRoots {
+            program_files: Some(r"C:\Program Files".into()),
+            system_root: Some(r"C:\Windows".into()),
+            ..ShellRoots::default()
+        };
+        let basename = |kind, present: &'static str| {
+            let shell = detect_with(&roots, |path| path.to_str() == Some(present)).unwrap();
+            assert_eq!(shell.kind, kind);
+            shell.exe.to_str().unwrap().rsplit('\\').next().unwrap().to_string()
+        };
+        assert_eq!(basename(ShellKind::GitBash, r"C:\Program Files\Git\bin\bash.exe"), "bash.exe");
+        assert_eq!(
+            basename(
+                ShellKind::PowerShell,
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+            ),
+            "powershell.exe"
+        );
+        assert_eq!(ShellKind::GitBash.name(), "bash");
+        assert_eq!(ShellKind::PowerShell.name(), "powershell");
+        // Both reported names satisfy the backend's pattern.
+        assert!(is_valid_shell(ShellKind::GitBash.name()) && is_valid_shell(ShellKind::PowerShell.name()));
     }
 
     #[test]
@@ -449,6 +556,9 @@ mod tests {
         }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         assert!(command_shell().is_some());
+        // Windows PowerShell 5.1 ships with every supported Windows, so there is always a shell.
+        #[cfg(windows)]
+        assert!(matches!(command_shell(), Some("bash" | "powershell")));
     }
 
     #[test]
@@ -497,7 +607,7 @@ mod tests {
         assert!(reporter.begin_probe());
         assert!(!reporter.begin_probe());
         let first = reporter.on_readiness(Some(ready()));
-        if cfg!(any(target_os = "macos", target_os = "linux")) {
+        if command_shell().is_some() {
             assert_eq!(first.unwrap()["sandbox"], json!({"state": "ready"}));
             // unchanged: nothing, however often it is asked
             for _ in 0..3 {
@@ -521,7 +631,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     #[test]
     fn reporter_skips_the_transient_checking_placeholder_and_failed_probes() {
         let mut reporter = StatusReporter::default();
@@ -535,7 +645,7 @@ mod tests {
         assert!(reporter.on_readiness(Some(ready())).is_some());
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     #[test]
     fn a_new_connection_reports_again() {
         let connected = json!({"features": ["status"]});

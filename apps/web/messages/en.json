@@ -1352,6 +1352,9 @@
         "copied": "Copied",
         "runSetup": "Run setup",
         "runningSetup": "Running setup…",
+        "elevatedSetupDescription": "A one-time administrator step is needed. It installs the SourceWeft sandbox helper under Program Files and creates a restricted sandbox account and network rules for it on this PC. Windows will ask for your approval; SourceWeft never sees your password.",
+        "elevatedSetup": "Set up (needs administrator approval)",
+        "elevatedSetupRunning": "Setting up…",
         "checkAgain": "Check again"
       },
       "remoteAccessTitle": "Allow access from other devices",
@@ -5254,7 +5257,7 @@
       "badgePreview": "Preview build",
       "badgeDefault": "Desktop app",
       "heading": "Download SourceWeft.",
-      "subtitle": "Native apps for macOS and Windows today, with iOS and Android on the way. Every app signs in to the same account and workspaces as the web; local device execution works on macOS and Linux x64, and is not available on Windows yet.",
+      "subtitle": "Native apps for macOS and Windows today, with iOS and Android on the way. Every app signs in to the same account and workspaces as the web; local device execution works on macOS, Windows, and Linux x64.",
       "releaseNotes": "Release notes",
       "changelog": "Changelog",
       "screenshotAlt": "SourceWeft desktop app on macOS: a workspace with a selected reading-notes source, a drafted question in the composer, and the Hub panel listing sources"
@@ -5262,7 +5265,7 @@
     "highlights": [
       "The same account, workspaces, and chats as the web app",
       "A native window instead of a browser tab",
-      "Local working directories and file panels on macOS and Linux",
+      "Local working directories and file panels on macOS, Windows, and Linux",
       "Desktop MCP servers that need a local process"
     ],
     "channels": {
@@ -5346,8 +5349,8 @@
       "account": "Account",
       "accountDescription": "the desktop app signs in with your existing SourceWeft account",
       "localExecution": "Local device execution",
-      "localExecutionAvailable": "Supported on {platforms}; Linux x64 needs a one-time runtime install from the app",
-      "localExecutionFallback": "macOS and Linux x64; Windows is not available yet",
+      "localExecutionAvailable": "Supported on {platforms}; Linux x64 needs a one-time runtime install from the app, and Windows a one-time setup that asks for administrator approval",
+      "localExecutionFallback": "macOS, Windows, and Linux x64; Windows needs a one-time setup that asks for administrator approval",
       "listJoiner": " and ",
       "unsignedEyebrow": "Unsigned builds",
       "verifyingEyebrow": "Verifying your download",
@@ -5388,7 +5391,7 @@
       "items": {
         "desktopVsWeb": {
           "question": "Is the desktop app different from the web app?",
-          "answer": "It signs in to the same SourceWeft account and opens the same workspaces, chats, and sources. On top of that it adds a native window and, on macOS and Linux x64, local device capabilities such as working directories and file panels."
+          "answer": "It signs in to the same SourceWeft account and opens the same workspaces, chats, and sources. On top of that it adds a native window and, on macOS, Windows, and Linux x64, local device capabilities such as working directories and file panels."
         },
         "macosVerification": {
           "question": "Why does macOS say the app cannot be verified?",
@@ -5408,7 +5411,7 @@
         },
         "linuxBuild": {
           "question": "Is there a Linux build?",
-          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: open Settings → This computer and install the sandbox runtime (a signed download that starts only when you click Install). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution is not available on Windows yet."
+          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: open Settings → This computer and install the sandbox runtime (a signed download that starts only when you click Install). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution also works on Windows 10 and 11 (64-bit) after a one-time setup: the app asks for administrator approval once, through the standard Windows prompt, to install its sandbox helper and a restricted sandbox account."
         }
       }
     }

@@ -57,7 +57,9 @@ function makeFakeSrt(): SrtLike & {
     params: { host: string; port: number | undefined },
   ) => Promise<boolean | { allow: false; reason: string }>;
   lastCustomConfig?: unknown;
+  lastInitConfig?: unknown;
   binShells: Array<string | undefined>;
+  commands: string[];
   probeExit: { code: number; stderr: string };
   initError?: Error;
   wrapError?: Error;
@@ -70,6 +72,8 @@ function makeFakeSrt(): SrtLike & {
     cleanupCalls: 0,
     resetCalls: 0,
     binShells: [] as Array<string | undefined>,
+    commands: [] as string[],
+    lastInitConfig: undefined as unknown,
     ask: undefined as
       | ((
           params: { host: string; port: number | undefined },
@@ -79,11 +83,12 @@ function makeFakeSrt(): SrtLike & {
     initError: undefined as Error | undefined,
     wrapError: undefined as Error | undefined,
     async initialize(
-      _config: unknown,
+      config: unknown,
       askCallback?: (
         params: { host: string; port: number | undefined },
       ) => Promise<boolean | { allow: false; reason: string }>,
     ): Promise<void> {
+      fake.lastInitConfig = config;
       if (fake.initError) throw fake.initError;
       fake.ask = askCallback;
     },
@@ -97,8 +102,9 @@ function makeFakeSrt(): SrtLike & {
     ): Promise<{ argv: string[]; env: NodeJS.ProcessEnv }> {
       fake.lastCustomConfig = customConfig;
       fake.binShells.push(binShell);
+      fake.commands.push(command);
       if (fake.wrapError) throw fake.wrapError;
-      if (command === "true") {
+      if (command === "true" || command === "exit 0") {
         const script = `process.stderr.write(${JSON.stringify(fake.probeExit.stderr)});process.exit(${fake.probeExit.code})`;
         return { argv: [process.execPath, "-e", script], env: { FAKE_ENV: "1" } };
       }
@@ -220,10 +226,9 @@ test("init replies with the bundle's protocol version", async () => {
   assert.equal(response.ok, true);
   if (response.ok) {
     assert.deepEqual(response.result, { protocolVersion: SANDBOX_PROTOCOL_VERSION });
-    assert.deepEqual(response.result, { protocolVersion: 2 });
   }
   // Pinned: bumping the constant is deliberate, and the Rust host's copy must move with it.
-  assert.equal(SANDBOX_PROTOCOL_VERSION, 2);
+  assert.equal(SANDBOX_PROTOCOL_VERSION, 3);
   await harness.stop();
 });
 
@@ -1272,4 +1277,283 @@ test("linux wrap and probe add write denies only for existing credential paths i
     join(home, ".aws"),
   ]);
   await harness.stop();
+});
+
+// ---------------------------------------------------------------------------------------------
+// win32: Windows-shaped paths with an injected `pathExists`, so these run on any OS.
+// ---------------------------------------------------------------------------------------------
+
+const WIN_RG = "C:\\app\\sandbox\\rg.exe";
+const WIN_SRT = "C:\\Program Files\\SourceWeft\\sandbox\\srt-win.exe";
+const WIN_BASH = "C:\\Program Files\\Git\\bin\\bash.exe";
+const WIN_POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+const WIN_WORKSPACE = "C:\\Users\\u\\ws";
+
+function win32Init(overrides: Partial<InitConfig> = {}): InitConfig {
+  return {
+    platform: "win32",
+    home: "C:\\Users\\u",
+    workspaceRoots: [WIN_WORKSPACE],
+    readRoots: ["C:\\Users\\u\\.cargo\\bin"],
+    helpers: { ripgrep: WIN_RG },
+    windows: { srtWin: WIN_SRT, shell: WIN_BASH },
+    ...overrides,
+  };
+}
+
+/** Everything the win32 helper check looks for exists, plus whatever `extra` names. */
+function winPathExists(extra: Iterable<string> = []): Partial<ServerDeps> {
+  const present = new Set([WIN_RG, WIN_SRT, WIN_BASH, WIN_POWERSHELL, ...extra]);
+  return { pathExists: (path) => present.has(path) };
+}
+
+type WinCustomConfig = {
+  filesystem: {
+    allowRead: unknown[];
+    allowWrite: unknown[];
+    denyRead: Array<{ path: string; literal: boolean }>;
+    denyWrite: Array<{ path: string; literal: boolean }>;
+  };
+};
+
+test("win32 init builds the namespaced windows config and passes it to srt", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, win32Init(), winPathExists());
+  const config = srt.lastInitConfig as ReturnType<typeof buildConfig>;
+  // The server adds only the plain-HTTP audit hook (`filterRequest`) to `buildConfig`'s result.
+  const { filterRequest, ...network } = config.network;
+  assert.equal(typeof filterRequest, "function");
+  assert.deepEqual({ ...config, network }, buildConfig(win32Init()));
+  assert.deepEqual(config.windows, {
+    srtWin: { path: WIN_SRT },
+    sandboxUser: "sourceweft-sandbox",
+    proxyPortRange: [60180, 60189],
+  });
+  assert.deepEqual(config.filesystem.allowWrite, [{ path: WIN_WORKSPACE, literal: true }]);
+  assert.deepEqual(config.filesystem.denyRead, []);
+  await harness.stop();
+});
+
+test("win32 init validation: root count and the windows block are POLICY_INVALID", async () => {
+  for (const config of [
+    win32Init({ workspaceRoots: ["C:\\a", "C:\\b", "C:\\c"] }),
+    win32Init({ workspaceRoots: [] }),
+    win32Init({ windows: undefined }),
+    win32Init({ workspaceRoots: ["ws"] }),
+    win32Init({ workspaceRoots: ["\\\\srv\\share\\ws"] }),
+    win32Init({ workspaceRoots: ["\\\\?\\C:\\ws"] }),
+    win32Init({ windows: { srtWin: "srt-win.exe", shell: WIN_BASH } }),
+  ]) {
+    const srt = makeFakeSrt();
+    const harness = startHarness(srt, undefined, winPathExists());
+    expectError(await harness.send({ op: "init", config }), "POLICY_INVALID");
+    assert.equal(srt.lastInitConfig, undefined, "srt must never see an invalid policy");
+    await harness.stop();
+  }
+});
+
+test("a windows block on linux is POLICY_INVALID", async () => {
+  const harness = startHarness(makeFakeSrt());
+  expectError(
+    await harness.send({
+      op: "init",
+      config: linuxInit({ windows: { srtWin: WIN_SRT, shell: WIN_BASH } }),
+    }),
+    "POLICY_INVALID",
+  );
+  await harness.stop();
+});
+
+test("win32 init with a missing srt-win or shell is HELPER_MISSING and names it", async () => {
+  for (const missing of [WIN_SRT, WIN_BASH, WIN_RG]) {
+    const present = new Set([WIN_RG, WIN_SRT, WIN_BASH]);
+    present.delete(missing);
+    const srt = makeFakeSrt();
+    const harness = startHarness(srt, undefined, { pathExists: (path) => present.has(path) });
+    const response = await harness.send({ op: "init", config: win32Init() });
+    expectError(response, "HELPER_MISSING");
+    if (!response.ok) assert.ok(response.error.message.includes(missing), response.error.message);
+    assert.equal(srt.lastInitConfig, undefined);
+    await harness.stop();
+  }
+});
+
+test("win32 init prefixes srt's WindowsSandboxError code on the message", async () => {
+  for (const code of ["not_provisioned", "reinstall_required", "wfp_fence_inactive"]) {
+    const srt = makeFakeSrt();
+    const error = Object.assign(new Error("Windows sandbox user is not provisioned"), {
+      name: "WindowsSandboxError",
+      code,
+    });
+    srt.initError = error;
+    const harness = startHarness(srt, undefined, winPathExists());
+    const response = await harness.send({ op: "init", config: win32Init() });
+    expectError(response, "SANDBOX_UNAVAILABLE");
+    if (!response.ok) {
+      assert.equal(response.error.message, `[${code}] Windows sandbox user is not provisioned`);
+    }
+    await harness.stop();
+  }
+});
+
+test("win32 init leaves other failures unprefixed, and linux never prefixes", async () => {
+  // A plain error, and a Node-style `code` that is not a WindowsSandboxError.
+  const srt = makeFakeSrt();
+  srt.initError = Object.assign(new Error("EACCES: spawn"), { code: "EACCES" });
+  const harness = startHarness(srt, undefined, winPathExists());
+  const response = await harness.send({ op: "init", config: win32Init() });
+  expectError(response, "SANDBOX_UNAVAILABLE");
+  if (!response.ok) assert.equal(response.error.message, "EACCES: spawn");
+  await harness.stop();
+
+  const linux = makeFakeSrt();
+  linux.initError = Object.assign(new Error("bwrap failed"), { name: "WindowsSandboxError", code: "x" });
+  const linuxHarness = startHarness(linux);
+  const linuxResponse = await linuxHarness.send({ op: "init", config: linuxInit() });
+  expectError(linuxResponse, "SANDBOX_UNAVAILABLE");
+  if (!linuxResponse.ok) assert.equal(linuxResponse.error.message, "bwrap failed");
+  await linuxHarness.stop();
+});
+
+test("win32 wrap passes only the per-command denies and the host-chosen shell, never a grant", async () => {
+  const profile = "C:\\Users\\u";
+  const init = win32Init({ home: profile, workspaceRoots: [profile], readRoots: [] });
+  const ssh = `${profile}\\.ssh`;
+  const npmrc = `${profile}\\.npmrc`;
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, init, winPathExists([ssh, npmrc]));
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: `${profile}\\src`,
+    workspaceRoot: profile,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  assert.deepEqual(srt.binShells, [WIN_BASH]);
+  assert.deepEqual(srt.commands, ["echo hi"]);
+  const custom = srt.lastCustomConfig as WinCustomConfig;
+  // Exactly the filesystem block, with empty grants (srt throws on a non-empty one) and the
+  // existing credential paths denied for read AND write; the absent ones are not listed.
+  assert.deepEqual(srt.lastCustomConfig, {
+    filesystem: {
+      allowRead: [],
+      allowWrite: [],
+      denyRead: [ssh, npmrc].map((path) => ({ path, literal: true })),
+      denyWrite: [ssh, npmrc].map((path) => ({ path, literal: true })),
+    },
+  });
+  assert.deepEqual(custom.filesystem.allowRead, []);
+  assert.deepEqual(custom.filesystem.allowWrite, []);
+  await harness.stop();
+});
+
+test("win32 wrap denies nothing that is absent or outside the workspace and read roots", async () => {
+  const srt = makeFakeSrt();
+  // The credential paths exist, but the workspace is elsewhere (and the read root is a cargo bin).
+  const harness = await initHarness(
+    srt,
+    undefined,
+    win32Init(),
+    winPathExists(["C:\\Users\\u\\.ssh", "C:\\Users\\u\\.npmrc"]),
+  );
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "dir",
+    cwd: WIN_WORKSPACE,
+    workspaceRoot: WIN_WORKSPACE,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  const custom = srt.lastCustomConfig as WinCustomConfig;
+  assert.deepEqual(custom.filesystem.denyRead, []);
+  assert.deepEqual(custom.filesystem.denyWrite, []);
+  await harness.stop();
+});
+
+test("win32 wrap checks workspaceRoot and cwd with Windows semantics", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, win32Init(), winPathExists());
+  const wrap = (workspaceRoot: string, cwd: string) =>
+    harness.send({ op: "wrap", commandId: "c".repeat(22), command: "dir", cwd, workspaceRoot });
+  // Wire form (forward slashes) and a different case are the same directory.
+  assert.equal((await wrap("c:/USERS/u/ws", "c:/users/U/ws/pkg")).ok, true);
+  await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  expectError(await wrap("C:\\Users\\u\\other", "C:\\Users\\u\\other"), "POLICY_INVALID");
+  expectError(await wrap(WIN_WORKSPACE, "C:\\Users\\u"), "POLICY_INVALID");
+  expectError(await wrap(`${WIN_WORKSPACE}\\..\\other`, `${WIN_WORKSPACE}\\..\\other`), "POLICY_INVALID");
+  expectError(await wrap("\\\\srv\\share\\ws", "\\\\srv\\share\\ws"), "POLICY_INVALID");
+  expectError(await wrap("relative", "relative"), "POLICY_INVALID");
+  await harness.stop();
+});
+
+test("win32 honours the per-command network policy: strict denies, an allow rule allows, the guard still wins", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, win32Init(), winPathExists());
+  assert.ok(srt.ask, "init must register an ask callback on win32 too");
+  const wrapWin = async (network?: WrapNetwork) => {
+    const response = await harness.send({
+      op: "wrap",
+      commandId: "c".repeat(22),
+      command: "dir",
+      cwd: WIN_WORKSPACE,
+      workspaceRoot: WIN_WORKSPACE,
+      ...(network === undefined ? {} : { network }),
+    });
+    assert.equal(response.ok, true, JSON.stringify(response));
+  };
+  await wrapWin({ mode: "strict", allow: ["allowed.example.com"] });
+  assert.deepEqual(await srt.ask?.({ host: "example.com", port: 443 }), {
+    allow: false,
+    reason: "host is not on the allow list (strict network mode)",
+  });
+  assert.equal(await srt.ask?.({ host: "allowed.example.com", port: 443 }), true);
+  assert.deepEqual((await srt.ask?.({ host: "10.0.0.1", port: 80 })) !== true, true);
+  const entries = await auditOf(harness);
+  assert.deepEqual(
+    entries.map((entry) => [entry.host, entry.decision, entry.source]),
+    [
+      ["example.com", "deny", "strict"],
+      ["allowed.example.com", "allow", "rule"],
+      ["10.0.0.1", "deny", "guard"],
+    ],
+  );
+  await harness.send({ op: "cleanup", commandId: "c".repeat(22) });
+  // Without a policy the connection is open (and audited), as on the other platforms.
+  await wrapWin();
+  assert.equal(await srt.ask?.({ host: "example.com", port: 443 }), true);
+  await harness.stop();
+});
+
+test("win32 uses powershell when the host chose it, and probes with a command both shells run", async () => {
+  const srt = makeFakeSrt();
+  const harness = await initHarness(
+    srt,
+    undefined,
+    win32Init({ windows: { srtWin: WIN_SRT, shell: WIN_POWERSHELL } }),
+    winPathExists(),
+  );
+  // The probe's child cannot start off Windows (the workspace is a Windows path), so the
+  // response is not asserted: what matters is what was wrapped, and that it was released.
+  await harness.send({ op: "probe" });
+  assert.deepEqual(srt.binShells, [WIN_POWERSHELL]);
+  assert.deepEqual(srt.commands, ["exit 0"]);
+  assert.deepEqual(srt.lastCustomConfig, {
+    filesystem: { allowRead: [], allowWrite: [], denyRead: [], denyWrite: [] },
+  });
+  assert.equal(srt.cleanupCalls, 1);
+  await harness.stop();
+});
+
+test("linux and darwin probes still wrap `true`", async () => {
+  const linux = makeFakeSrt();
+  const linuxHarness = await initHarness(linux);
+  await linuxHarness.send({ op: "probe" });
+  assert.deepEqual(linux.commands, ["true"]);
+  await linuxHarness.stop();
+  const darwin = makeFakeSrt();
+  const darwinHarness = await initHarness(darwin, undefined, darwinInit());
+  await darwinHarness.send({ op: "probe" });
+  assert.deepEqual(darwin.commands, ["true"]);
+  await darwinHarness.stop();
 });

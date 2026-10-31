@@ -54,7 +54,9 @@ export type SandboxSetupCode =
   | "bwrapMissing"
   | "userNamespaceRestricted"
   | "sandboxFailed"
-  | "installing";
+  | "installing"
+  | "windowsNotInstalled"
+  | "windowsSetupOutdated";
 
 /** What the user can do about it. Mirrors the Rust `Remedy` wire values. */
 export type SandboxRemedy =
@@ -62,12 +64,13 @@ export type SandboxRemedy =
   | "updateApp"
   | "reinstallPackage"
   | "privilegedSetup"
+  | "elevatedSetup"
   | "none";
 
 /**
- * Readiness of local sandboxed execution. Absent when no LocalHost is managed. macOS and Linux
- * both report it, from the sandbox bundle's probe. `setupCommand` is present only for the
- * `privilegedSetup` remedy.
+ * Readiness of local sandboxed execution. Absent when no LocalHost is managed. macOS, Linux and
+ * Windows report it, from the sandbox bundle's probe. `setupCommand` is present only for the
+ * `privilegedSetup` remedy; `elevatedSetup` (Windows) is a button only, never a command.
  */
 export type SandboxReadiness =
   | { state: "ready"; toolchainPath?: "loginShell" | "system" }
@@ -175,7 +178,10 @@ export const desktopBridge = {
   installSandboxRuntime() {
     return invokeDesktop<SandboxReadiness>("install_sandbox_runtime");
   },
-  /** Linux AppImage: runs the one-time privileged setup through the system admin prompt. */
+  /**
+   * Runs the one-time privileged setup through the system admin prompt: pkexec on a Linux
+   * AppImage, UAC on Windows.
+   */
   runSandboxPrivilegedSetup() {
     return invokeDesktop<void>("run_sandbox_privileged_setup");
   },

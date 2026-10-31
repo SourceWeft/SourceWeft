@@ -1352,6 +1352,9 @@
         "copied": "已複製",
         "runSetup": "執行設定",
         "runningSetup": "正在執行設定…",
+        "elevatedSetupDescription": "需要執行一次管理員操作。它會把 SourceWeft 沙箱輔助程式安裝到 Program Files 下，並在這臺電腦上為它建立受限的沙箱帳戶和網路規則。Windows 會請求你的核准；SourceWeft 不會取得你的密碼。",
+        "elevatedSetup": "設定（需要管理員核准）",
+        "elevatedSetupRunning": "正在設定…",
         "checkAgain": "重新檢查"
       },
       "remoteAccessTitle": "允許其他裝置存取",
@@ -5254,7 +5257,7 @@
       "badgePreview": "預覽版",
       "badgeDefault": "桌面版",
       "heading": "下載 SourceWeft。",
-      "subtitle": "macOS 和 Windows 原生應用程式已上線，iOS 與 Android 正在路上。每個客戶端都登入同一帳戶和工作區，與網頁版保持一致；本機裝置執行可在 macOS 和 Linux x64 上使用，Windows 暫不支援。",
+      "subtitle": "macOS 和 Windows 原生應用程式已上線，iOS 與 Android 正在路上。每個客戶端都登入同一帳戶和工作區，與網頁版保持一致；本機裝置執行可在 macOS、Windows 和 Linux x64 上使用。",
       "releaseNotes": "更新說明",
       "changelog": "更新日誌",
       "screenshotAlt": "macOS 上的 SourceWeft 桌面版：已選中一個閱讀筆記來源，輸入框中有草擬的問題，Hub 面板列出了各個來源"
@@ -5262,7 +5265,7 @@
     "highlights": [
       "與網頁版共用同一帳戶、工作區和對話",
       "原生視窗，而非瀏覽器分頁",
-      "macOS 和 Linux 上的本機工作目錄和檔案面板",
+      "macOS、Windows 和 Linux 上的本機工作目錄和檔案面板",
       "需要本機處理程序的桌面版 MCP 伺服器"
     ],
     "channels": {
@@ -5346,8 +5349,8 @@
       "account": "帳戶",
       "accountDescription": "桌面版使用你已有的 SourceWeft 帳戶登入",
       "localExecution": "本機裝置執行",
-      "localExecutionAvailable": "支援 {platforms}；Linux x64 需要先在應用內一次性安裝執行環境",
-      "localExecutionFallback": "支援 macOS 和 Linux x64；Windows 暫不支援",
+      "localExecutionAvailable": "支援 {platforms}；Linux x64 需要先在應用內一次性安裝執行環境，Windows 需要一次性設定並需管理員授權",
+      "localExecutionFallback": "支援 macOS、Windows 和 Linux x64；Windows 需要一次性設定並需管理員授權",
       "listJoiner": "和",
       "unsignedEyebrow": "未簽名安裝程式",
       "verifyingEyebrow": "驗證你的下載",
@@ -5388,7 +5391,7 @@
       "items": {
         "desktopVsWeb": {
           "question": "桌面版和網頁版有什麼不同？",
-          "answer": "桌面版登入同一個 SourceWeft 帳戶，開啟的也是同樣的工作區、對話和來源。在此基礎上，它還提供原生視窗，以及在 macOS 和 Linux x64 上的本機裝置能力，比如工作目錄和檔案面板。"
+          "answer": "桌面版登入同一個 SourceWeft 帳戶，開啟的也是同樣的工作區、對話和來源。在此基礎上，它還提供原生視窗，以及在 macOS、Windows 和 Linux x64 上的本機裝置能力，比如工作目錄和檔案面板。"
         },
         "macosVerification": {
           "question": "為什麼 macOS 提示該應用程式無法驗證？",
@@ -5408,7 +5411,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本嗎？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：開啟「設定 → 這臺電腦」並安裝沙箱執行環境（帶簽名的下載，只有在你點選「安裝」後才會開始）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 暫不支援本機裝置執行。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：開啟「設定 → 這臺電腦」並安裝沙箱執行環境（帶簽名的下載，只有在你點選「安裝」後才會開始）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 10 和 11（64 位）在一次性設定後也可使用本機裝置執行：應用會彈出一次標準的 Windows 管理員授權提示，用來安裝沙箱輔助程式和一個受限的沙箱帳戶。"
         }
       }
     }

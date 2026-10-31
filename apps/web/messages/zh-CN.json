@@ -1352,6 +1352,9 @@
         "copied": "已复制",
         "runSetup": "运行设置",
         "runningSetup": "正在运行设置…",
+        "elevatedSetupDescription": "需要执行一次管理员操作。它会把 SourceWeft 沙箱辅助程序安装到 Program Files 下，并在这台电脑上为它创建受限的沙箱账户和网络规则。Windows 会请求你的批准；SourceWeft 不会获取你的密码。",
+        "elevatedSetup": "设置（需要管理员批准）",
+        "elevatedSetupRunning": "正在设置…",
         "checkAgain": "重新检查"
       },
       "remoteAccessTitle": "允许其他设备访问",
@@ -5254,7 +5257,7 @@
       "badgePreview": "预览版",
       "badgeDefault": "桌面版",
       "heading": "下载 SourceWeft。",
-      "subtitle": "macOS 和 Windows 原生应用已上线，iOS 与 Android 正在路上。每个客户端都登录同一账户和工作区，与网页版保持一致；本机设备执行可在 macOS 和 Linux x64 上使用，Windows 暂不支持。",
+      "subtitle": "macOS 和 Windows 原生应用已上线，iOS 与 Android 正在路上。每个客户端都登录同一账户和工作区，与网页版保持一致；本机设备执行可在 macOS、Windows 和 Linux x64 上使用。",
       "releaseNotes": "更新说明",
       "changelog": "更新日志",
       "screenshotAlt": "macOS 上的 SourceWeft 桌面版：已选中一个阅读笔记来源，输入框中有草拟的问题，Hub 面板列出了各个来源"
@@ -5262,7 +5265,7 @@
     "highlights": [
       "与网页版共用同一账户、工作区和对话",
       "原生窗口，而非浏览器标签页",
-      "macOS 和 Linux 上的本地工作目录和文件面板",
+      "macOS、Windows 和 Linux 上的本地工作目录和文件面板",
       "需要本地进程的桌面端 MCP 服务器"
     ],
     "channels": {
@@ -5346,8 +5349,8 @@
       "account": "账户",
       "accountDescription": "桌面版使用你已有的 SourceWeft 账户登录",
       "localExecution": "本地设备执行",
-      "localExecutionAvailable": "支持 {platforms}；Linux x64 需要先在应用内一次性安装运行时",
-      "localExecutionFallback": "支持 macOS 和 Linux x64；Windows 暂不支持",
+      "localExecutionAvailable": "支持 {platforms}；Linux x64 需要先在应用内一次性安装运行时，Windows 需要一次性设置并需管理员授权",
+      "localExecutionFallback": "支持 macOS、Windows 和 Linux x64；Windows 需要一次性设置并需管理员授权",
       "listJoiner": "和",
       "unsignedEyebrow": "未签名安装包",
       "verifyingEyebrow": "校验你的下载",
@@ -5388,7 +5391,7 @@
       "items": {
         "desktopVsWeb": {
           "question": "桌面版和网页版有什么不同？",
-          "answer": "桌面版登录同一个 SourceWeft 账户，打开的也是同样的工作区、对话和来源。在此基础上，它还提供原生窗口，以及在 macOS 和 Linux x64 上的本地设备能力，比如工作目录和文件面板。"
+          "answer": "桌面版登录同一个 SourceWeft 账户，打开的也是同样的工作区、对话和来源。在此基础上，它还提供原生窗口，以及在 macOS、Windows 和 Linux x64 上的本地设备能力，比如工作目录和文件面板。"
         },
         "macosVerification": {
           "question": "为什么 macOS 提示该应用无法验证？",
@@ -5408,7 +5411,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本吗？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。Linux x64 在一次性设置后即可使用本地设备执行：打开“设置 → 这台电脑”并安装沙箱运行时（带签名的下载，只有在你点击“安装”后才会开始）。.deb 软件包会在安装时配置沙箱辅助程序；使用 AppImage 时，应用会显示一条需要运行一次的管理员命令。Windows 暂不支持本地设备执行。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。Linux x64 在一次性设置后即可使用本地设备执行：打开“设置 → 这台电脑”并安装沙箱运行时（带签名的下载，只有在你点击“安装”后才会开始）。.deb 软件包会在安装时配置沙箱辅助程序；使用 AppImage 时，应用会显示一条需要运行一次的管理员命令。Windows 10 和 11（64 位）在一次性设置后也可使用本地设备执行：应用会弹出一次标准的 Windows 管理员授权提示，用来安装沙箱辅助程序和一个受限的沙箱账户。"
         }
       }
     }

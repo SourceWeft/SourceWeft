@@ -4,7 +4,12 @@ import { pathToFileURL } from "node:url";
 import { UPDATE_TARGETS } from "./desktop-update-manifest.mjs";
 import { updatePublicationPolicy } from "./desktop-publication-policy.mjs";
 
-export function releaseConfig(env) {
+/**
+ * `bundleOnly` validates the signing inputs for a target that has a sandbox runtime bundle but
+ * no installer or updater package (Windows arm64): everything is checked exactly as for an
+ * installer target except that the target need not be an update target.
+ */
+export function releaseConfig(env, { bundleOnly = false } = {}) {
   const policy = updatePublicationPolicy(env.DESKTOP_PUBLICATION_POLICY);
   const require = (name) => {
     assert(
@@ -14,7 +19,11 @@ export function releaseConfig(env) {
     return env[name].trim();
   };
   const target = require("DESKTOP_RELEASE_TARGET");
-  assert(UPDATE_TARGETS[target], "Unsupported release target");
+  assert(
+    UPDATE_TARGETS[target] ||
+      (bundleOnly && target === "aarch64-pc-windows-msvc"),
+    "Unsupported release target",
+  );
   const pubkey = require("TAURI_UPDATER_PUBLIC_KEY");
   require("TAURI_SIGNING_PRIVATE_KEY");
   const config = {
@@ -79,8 +88,13 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  await writeFile(
-    "apps/desktop/src-tauri/tauri.release.generated.json",
-    JSON.stringify(releaseConfig(process.env), null, 2),
-  );
+  if (process.argv.includes("--bundle-only")) {
+    // Validation only: this target has no installer, so no installer config is written.
+    releaseConfig(process.env, { bundleOnly: true });
+  } else {
+    await writeFile(
+      "apps/desktop/src-tauri/tauri.release.generated.json",
+      JSON.stringify(releaseConfig(process.env), null, 2),
+    );
+  }
 }

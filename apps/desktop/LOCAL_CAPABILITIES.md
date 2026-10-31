@@ -11,7 +11,8 @@ in [LINUX_SANDBOX.md](./LINUX_SANDBOX.md).
 
 The desktop client continues to load the existing Web URL and reuse the existing
 chat/settings UI. There is no separate desktop homepage or native settings page.
-Windows implementation is deferred.
+Windows local execution (a separate-account sandbox with a one-time administrator setup) is
+documented in [WINDOWS_SANDBOX.md](./WINDOWS_SANDBOX.md).
 
 ## Implemented foundation
 

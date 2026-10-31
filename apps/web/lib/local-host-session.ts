@@ -28,10 +28,10 @@ export async function ensureLocalHostSession(
   if (pending) return pending;
   const status = await desktopBridge.localHostStatus();
   if (!status.platformSupported) return null;
-  // A desktop that reports sandbox readiness (Linux) is enrolled only once its sandbox is
+  // A desktop that reports sandbox readiness (macOS, Linux, Windows) is enrolled only once its sandbox is
   // ready: enrolment writes the device credential to the OS keyring and registers the device,
   // and every command would fail until setup completes. Desktops that report no readiness
-  // (macOS, older builds) keep enrolling as before.
+  // (older builds) keep enrolling as before.
   if (status.readiness && status.readiness.state !== "ready") return null;
   if (status.protocolVersion !== 2)
     throw new Error("Update the PC app to use local features.");

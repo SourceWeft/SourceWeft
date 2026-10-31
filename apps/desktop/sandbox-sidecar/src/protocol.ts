@@ -19,12 +19,15 @@
  *    unsolicited `ask` event lines, the `ask.reply` and `audit` ops, and `AuditSource`. A
  *    version-1 sidecar would ignore `wrap.network` and allow every public host, which is why a
  *    host that needs approvals must refuse it.
+ *  - 3: Windows (Plan 6). The `win32` platform and the `windows` block of `InitConfig`. A
+ *    version-2 sidecar would reject `platform: "win32"`, and a version-2 host cannot start a
+ *    Windows sidecar, so the two must agree.
  */
-export const SANDBOX_PROTOCOL_VERSION = 2;
+export const SANDBOX_PROTOCOL_VERSION = 3;
 
 /** Sent once, before any other request, to hand the sidecar its policy inputs. */
 export type InitConfig = {
-  platform: "linux" | "darwin";
+  platform: "linux" | "darwin" | "win32";
   home: string;
   workspaceRoots: string[];
   readRoots: string[];
@@ -36,6 +39,14 @@ export type InitConfig = {
     javaAgentJar?: string;
   };
   bwrapPath?: string;
+  /**
+   * Required on `win32` and rejected elsewhere. Both are absolute drive paths chosen by the
+   * host: `srtWin` is the `srt-win.exe` the sandbox account runs (so it must live where
+   * `Users` can read and execute it, not in the per-user bundle) and `shell` is the
+   * `bash.exe`/`powershell.exe` srt launches commands with. The namespace (sandbox account,
+   * proxy port range) is fixed in the sidecar and never sent by the host.
+   */
+  windows?: { srtWin: string; shell: string };
 };
 
 /** One inbound request line, always carrying its own `id` for correlation with the reply. */

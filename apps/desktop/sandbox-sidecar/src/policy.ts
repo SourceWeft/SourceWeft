@@ -5,13 +5,22 @@
  * write access. `perCommandConfig` is the small, per-command overlay that grants write
  * access to exactly that command's workspace root — the caller (Task 3's server) merges the
  * two before handing the result to srt.
+ *
+ * `win32` is a different model from the two POSIX platforms (see `buildWin32Config`): srt
+ * bounds reads there with NTFS ACLs rather than a deny-by-default policy, and cannot take a
+ * per-command grant. Every Windows path operation here uses `node:path/win32` explicitly, so
+ * the policy (and its tests) behave the same on whatever OS the sidecar happens to run on.
  */
 import { lstatSync } from "node:fs";
 import { isAbsolute, normalize as normalizePosix } from "node:path/posix";
+import * as win32 from "node:path/win32";
 import type { FilterRequestCallback, SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { UNROUTABLE_V4, UNROUTABLE_V6 } from "./address-guard.js";
 import type { NetworkPolicy } from "./network-policy.js";
 import type { InitConfig } from "./protocol.js";
+// One list for both sides: the desktop host (`winpath.rs`) refuses a folder inside any of these
+// before it is ever granted, and the policy below refuses it again at `init`.
+import windowsProtectedPaths from "./windows-protected-paths.json" with { type: "json" };
 
 /**
  * Thrown by `buildConfig` when an `InitConfig` path field is not absolute. `code` is always
@@ -30,17 +39,23 @@ export class PolicyInvalidError extends Error {
 /**
  * `home`/`workspaceRoots`/`readRoots` are passed straight into srt's filesystem policy as
  * `literal: true` paths — srt does not resolve them against a cwd, so a relative entry would
- * silently fail to deny/allow what the caller intended. Both platforms `InitConfig.platform`
- * allows (`linux`, `darwin`) are POSIX, so "absolute" is checked with POSIX semantics
- * regardless of the host OS this sidecar happens to run its tests on.
+ * silently fail to deny/allow what the caller intended. "Absolute" is checked with the
+ * semantics of the platform the path is for, regardless of the host OS this sidecar happens
+ * to run its tests on: POSIX for `linux`/`darwin`, and for `win32` a drive path only
+ * (`C:\x` or `C:/x`). Root-relative (`\x`), drive-relative (`C:x`), UNC (`\\srv\share`)
+ * and device/verbatim (`\\?\`, `\\.\`) spellings are refused: srt grants and stamps ACLs on
+ * what a path names, and those forms name network shares or bypass normalization.
  */
-function assertAbsolute(field: string, path: string): void {
-  if (!isAbsolute(path)) {
+function assertAbsolute(platform: InitConfig["platform"], field: string, path: string): void {
+  const ok = platform === "win32" ? WIN32_DRIVE_PATH.test(path) : isAbsolute(path);
+  if (!ok) {
     throw new PolicyInvalidError(
-      `${field} must be an absolute path, got ${JSON.stringify(path)}`,
+      `${field} must be an absolute ${platform === "win32" ? "drive " : ""}path, got ${JSON.stringify(path)}`,
     );
   }
 }
+
+const WIN32_DRIVE_PATH = /^[A-Za-z]:[\\/]/;
 
 /**
  * srt always makes its own `/tmp/claude` TMPDIR writable (`SANDBOX_OWN_WRITE_PATHS`) when it
@@ -256,16 +271,19 @@ function existsNoFollow(path: string): boolean {
  * transiently litter the real home, and leave a stray file there if the sidecar died mid-command.
  * Skipping absent paths is the safe subset: it leaves "the command creates a missing
  * `~/.ssh` itself" unprotected on Linux (reads of those paths stay denied everywhere).
+ *
+ * win32: none here; `perWrapDenies` returns the paths to deny for both read and write.
  */
 export function perWrapWriteDenies(
   init: Pick<InitConfig, "platform" | "home">,
   workspaceRoot: string,
   exists: (path: string) => boolean = existsNoFollow,
 ): string[] {
-  if (init.platform === "darwin") return [];
+  // win32 has its own combined read+write list (`perWrapDenies`).
+  if (init.platform === "darwin" || init.platform === "win32") return [];
   const root = normalizePosix(workspaceRoot);
   return credentialDenies(init.platform, init.home).filter(
-    (path) => isWithin(root, normalizePosix(path)) && exists(path),
+    (path) => isWithin(init.platform, root, normalizePosix(path)) && exists(path),
   );
 }
 
@@ -291,6 +309,15 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
   ...UNROUTABLE_V6,
 ];
 
+/** The network policy, identical on every platform: nothing allowed up front, private space denied. */
+function networkConfig(): SandboxRuntimeConfig["network"] {
+  return {
+    allowedDomains: [],
+    deniedDomains: [],
+    deniedResolvedAddresses: [...DENIED_RESOLVED_ADDRESSES],
+  };
+}
+
 /**
  * The read roots every wrapped command gets on top of its own workspace root: on Linux the
  * system read set (`LINUX_SYSTEM_READ_ROOTS`) and the sidecar's own `runtimeDir`, on darwin the
@@ -303,6 +330,10 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
  * carved out. `ripgrep` runs host-side and is not included.
  */
 export function perWrapReadRoots(init: InitConfig, runtimeDir?: string): string[] {
+  // win32: the read roots are the whole story. There is no system set to re-allow (the sandbox
+  // account already reads what `Users` reads), no runtime directory, and the helpers run
+  // host-side or from the world-readable `srt-win.exe` install, not from the bundle.
+  if (init.platform === "win32") return [...init.readRoots];
   const helpers = [init.helpers.applySeccomp, init.helpers.javaAgentJar].filter(
     (path): path is string => path !== undefined,
   );
@@ -330,31 +361,35 @@ export function perWrapReadRoots(init: InitConfig, runtimeDir?: string): string[
  * them again; re-allowing exactly this directory keeps them reachable without re-allowing `/tmp`.
  * It holds only srt's sockets and empty mount-source directories for this one sidecar.
  *
+ * `win32` is a different model and is built by `buildWin32Config`.
+ *
  * @throws {PolicyInvalidError} if `init.home`, `runtimeDir`, or any entry of
- * `init.workspaceRoots` or `init.readRoots`, is not an absolute path.
+ * `init.workspaceRoots` or `init.readRoots`, is not an absolute path, or if `init.windows` is
+ * given for a non-Windows platform.
  */
 export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRuntimeConfig {
-  assertAbsolute("home", init.home);
-  if (runtimeDir !== undefined) assertAbsolute("runtimeDir", runtimeDir);
+  if (init.platform === "win32") return buildWin32Config(init);
+  if (init.windows !== undefined) {
+    throw new PolicyInvalidError(`windows is only valid on win32, not ${init.platform}`);
+  }
+  const { platform } = init;
+  assertAbsolute(platform, "home", init.home);
+  if (runtimeDir !== undefined) assertAbsolute(platform, "runtimeDir", runtimeDir);
   init.workspaceRoots.forEach((path, i) =>
-    assertAbsolute(`workspaceRoots[${i}]`, path),
+    assertAbsolute(platform, `workspaceRoots[${i}]`, path),
   );
-  init.readRoots.forEach((path, i) => assertAbsolute(`readRoots[${i}]`, path));
+  init.readRoots.forEach((path, i) => assertAbsolute(platform, `readRoots[${i}]`, path));
   if (init.helpers.applySeccomp !== undefined) {
-    assertAbsolute("helpers.applySeccomp", init.helpers.applySeccomp);
+    assertAbsolute(platform, "helpers.applySeccomp", init.helpers.applySeccomp);
   }
   if (init.helpers.javaAgentJar !== undefined) {
-    assertAbsolute("helpers.javaAgentJar", init.helpers.javaAgentJar);
+    assertAbsolute(platform, "helpers.javaAgentJar", init.helpers.javaAgentJar);
   }
   const denyRoots = init.denyRoots ?? [];
-  denyRoots.forEach((path, i) => assertAbsolute(`denyRoots[${i}]`, path));
+  denyRoots.forEach((path, i) => assertAbsolute(platform, `denyRoots[${i}]`, path));
 
   const config: SandboxRuntimeConfig = {
-    network: {
-      allowedDomains: [],
-      deniedDomains: [],
-      deniedResolvedAddresses: [...DENIED_RESOLVED_ADDRESSES],
-    },
+    network: networkConfig(),
     filesystem: {
       denyRead: [
         "/",
@@ -415,23 +450,25 @@ export function perCommandConfig(
 }
 
 /**
- * Normalizes an already-absolute POSIX `path` — collapsing `.`/`..` segments and duplicate
- * separators purely lexically (never resolving against a cwd, unlike `node:path.resolve`) —
- * so a `..`-traversal attempt in a caller-supplied path is defanged before it is compared
- * against anything or handed to srt. Throws `PolicyInvalidError` first if `path` is not
- * absolute to begin with.
+ * Normalizes an already-absolute `path` for `platform` — collapsing `.`/`..` segments and
+ * duplicate separators purely lexically (never resolving against a cwd, unlike
+ * `node:path.resolve`) — so a `..`-traversal attempt in a caller-supplied path is defanged
+ * before it is compared against anything or handed to srt. On `win32` the result also uses
+ * backslashes only. Throws `PolicyInvalidError` first if `path` is not absolute to begin with.
  */
-function normalizedAbsolute(field: string, path: string): string {
-  assertAbsolute(field, path);
-  return normalizePosix(path);
+function normalizedAbsolute(platform: InitConfig["platform"], field: string, path: string): string {
+  assertAbsolute(platform, field, path);
+  return platform === "win32" ? win32.normalize(path) : normalizePosix(path);
 }
 
 /**
  * True when `child` is `parent` itself, or lexically nested inside it. Both arguments must
  * already be normalized absolute paths (see `normalizedAbsolute`) — this does only a string
- * comparison, with a `/` boundary so `/a/b` is not mistaken for being inside `/a/bc`.
+ * comparison, with a `/` boundary so `/a/b` is not mistaken for being inside `/a/bc`. On
+ * `win32` it is `isWithinWin32`: case-insensitive, with a `\` boundary.
  */
-function isWithin(parent: string, child: string): boolean {
+function isWithin(platform: InitConfig["platform"], parent: string, child: string): boolean {
+  if (platform === "win32") return isWithinWin32(parent, child);
   if (child === parent) return true;
   const prefix = parent.endsWith("/") ? parent : `${parent}/`;
   return child.startsWith(prefix);
@@ -452,10 +489,15 @@ function isWithin(parent: string, child: string): boolean {
 export function assertWorkspaceRootAllowed(
   workspaceRoot: string,
   initWorkspaceRoots: readonly string[],
+  platform: InitConfig["platform"],
 ): string {
-  const normalized = normalizedAbsolute("workspaceRoot", workspaceRoot);
+  const normalized = normalizedAbsolute(platform, "workspaceRoot", workspaceRoot);
   const allowed = initWorkspaceRoots.some((root) =>
-    isWithin(normalizePosix(root), normalized),
+    isWithin(
+      platform,
+      platform === "win32" ? win32.normalize(root) : normalizePosix(root),
+      normalized,
+    ),
   );
   if (!allowed) {
     throw new PolicyInvalidError(
@@ -476,14 +518,175 @@ export function assertWorkspaceRootAllowed(
  * @throws {PolicyInvalidError} if `cwd` is not absolute, or is not `workspaceRoot` itself nor
  * nested inside it.
  */
-export function assertCwdWithinWorkspace(cwd: string, workspaceRoot: string): string {
-  const normalized = normalizedAbsolute("cwd", cwd);
-  if (!isWithin(workspaceRoot, normalized)) {
+export function assertCwdWithinWorkspace(
+  cwd: string,
+  workspaceRoot: string,
+  platform: InitConfig["platform"],
+): string {
+  const normalized = normalizedAbsolute(platform, "cwd", cwd);
+  if (!isWithin(platform, workspaceRoot, normalized)) {
     throw new PolicyInvalidError(
       `cwd ${JSON.stringify(cwd)} is not workspaceRoot ${JSON.stringify(workspaceRoot)}, nor nested inside it`,
     );
   }
   return normalized;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Windows
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The machine-wide names the namespaced `srt-win` of the SourceWeft fork was built with
+ * (`.sourceweft/README.md` in the fork: namespace `sourceweft`, account `sourceweft-sandbox`,
+ * proxy ports `60180-60189`, and a compile-time WFP sublayer GUID). They are fixed at build
+ * time in the binary, so they are fixed here too and never taken from the host: a different
+ * value could only ever make srt look at the wrong (or upstream's) install.
+ */
+const WINDOWS_SANDBOX_USER = "sourceweft-sandbox";
+const WINDOWS_PROXY_PORT_RANGE: [number, number] = [60180, 60189];
+
+/**
+ * Credential stores under the user's profile that must stay unreadable and unwritable even when
+ * a granted workspace or a toolchain read root contains them (a granted profile, or a `PATH`
+ * entry such as `~\.cargo\bin` that reads like a directory of its own), and that no workspace or
+ * read root may lie inside (`assertRootsOutsideProtected`). Relative to `home`,
+ * backslash-separated; `windows-protected-paths.json` is the single list (the desktop host reads
+ * the same file). Dotfile credentials and CLI token directories first, then the Roaming and
+ * Local `AppData` stores: the Credential Manager and DPAPI master keys (`Microsoft\Credentials`,
+ * `Protect`, `Vault`, `Crypto`), certificate stores, password-manager vaults and browser profiles
+ * (cookies and saved logins), editor extension storage and the global npm configuration.
+ */
+const WIN32_CREDENTIAL_PATHS: readonly string[] = windowsProtectedPaths.relativeToHome;
+
+/** `path` normalized to backslashes, minus a trailing separator (a drive root keeps its one), lowercased. */
+function windowsKey(path: string): string {
+  const normalized = win32.normalize(path);
+  const trimmed = normalized.length > 3 && normalized.endsWith("\\") ? normalized.slice(0, -1) : normalized;
+  return trimmed.toLowerCase();
+}
+
+/**
+ * `isWithin` for Windows: NTFS paths compare case-insensitively and `/` equals `\\`, so both
+ * sides go through `windowsKey` first. A separator boundary keeps `C:\a\bc` out of `C:\a\b`.
+ */
+function isWithinWin32(parent: string, child: string): boolean {
+  const p = windowsKey(parent);
+  const c = windowsKey(child);
+  if (c === p) return true;
+  return c.startsWith(p.endsWith("\\") ? p : `${p}\\`);
+}
+
+/**
+ * Every path whose contents must be hidden from a command that can otherwise reach it: the
+ * host's own extra denies (`init.denyRoots`), then `WIN32_CREDENTIAL_PATHS` under `init.home`.
+ * This is the candidate list only; `perWrapDenies` narrows it per command. Unlike POSIX it is
+ * never handed to srt wholesale: an ACL deny on a path that does not exist makes `srt-win`
+ * create a placeholder, and a deny outside every granted root protects nothing.
+ */
+export function protectedPaths(
+  init: Pick<InitConfig, "home" | "denyRoots">,
+): string[] {
+  return [
+    ...(init.denyRoots ?? []).map((path) => win32.normalize(path)),
+    ...WIN32_CREDENTIAL_PATHS.map((relative) => win32.join(init.home, relative)),
+  ];
+}
+
+/**
+ * Refuses (POLICY_INVALID) any workspace root or read root that equals or lies INSIDE a protected
+ * credential store under `home`. (The host's own `denyRoots` are not part of this: the readiness
+ * probe's scratch workspace legitimately lives below one of them.) The per-command
+ * deny list only covers protected paths that lie inside a root, so a root placed inside one
+ * (`~\.ssh\proj` as a workspace, `~\AppData\Roaming\Mozilla\Firefox\Profiles\x` as a read
+ * root) would be granted without any deny. A root that CONTAINS a protected path is fine: that
+ * path is denied per command.
+ */
+function assertRootsOutsideProtected(init: InitConfig): void {
+  const protectedList = protectedPaths({ home: init.home });
+  const roots: Array<[string, string]> = [
+    ...init.workspaceRoots.map((path, i): [string, string] => [`workspaceRoots[${i}]`, path]),
+    ...init.readRoots.map((path, i): [string, string] => [`readRoots[${i}]`, path]),
+  ];
+  for (const [field, root] of roots) {
+    const hit = protectedList.find((protectedPath) => isWithinWin32(protectedPath, root));
+    if (hit !== undefined) {
+      throw new PolicyInvalidError(
+        `${field} ${JSON.stringify(root)} is inside the protected location ${JSON.stringify(hit)}`,
+      );
+    }
+  }
+}
+
+/**
+ * The protected paths to deny for one `win32` command, for read and for write: those that
+ * exist right now (`lstat`, so a symlink or junction counts) and equal or lie inside
+ * `workspaceRoot` or any init read root, compared case-insensitively. The workspace is the
+ * only writable root and the read roots are the only other readable ones (the sandbox account
+ * has no profile grant), so a deny anywhere else protects nothing, and an absent path would
+ * be created as a placeholder by `srt-win`. Checked per command: a path that appears later is
+ * covered by the next wrap. Both lists passed to srt are this same one, because a read deny
+ * alone would leave the credential file overwritable inside a writable workspace.
+ */
+export function perWrapDenies(
+  init: Pick<InitConfig, "home" | "denyRoots" | "readRoots">,
+  workspaceRoot: string,
+  exists: (path: string) => boolean = existsNoFollow,
+): string[] {
+  const roots = [workspaceRoot, ...init.readRoots];
+  return protectedPaths(init).filter(
+    (path) => roots.some((root) => isWithinWin32(root, path)) && exists(path),
+  );
+}
+
+/**
+ * The sidecar-lifetime srt config on `win32`. Differences from the POSIX platforms, all forced
+ * by how srt-win works:
+ * - **No blanket read deny.** The sandbox runs as a separate local account; reads are bounded by
+ *   NTFS ACLs (it sees what `Users` sees, plus explicit grants). Denying `C:\` or the profile
+ *   would stamp inheriting ACEs across a volume, so `denyRead`/`denyWrite` are empty here and
+ *   the credential paths are denied per command instead (`perWrapDenies`).
+ * - **Write access is per session.** `allowWrite` is the one workspace root, granted at
+ *   `initialize`; srt refuses a per-command `allowWrite`. Hence exactly one workspace root per
+ *   sidecar.
+ * - `allowRead` is the read roots (the toolchain directories inside the profile), literal.
+ * - The `windows` block names the namespaced install and the `srt-win.exe` the host staged.
+ */
+function buildWin32Config(init: InitConfig): SandboxRuntimeConfig {
+  const { windows } = init;
+  if (windows === undefined) {
+    throw new PolicyInvalidError("windows (srtWin and shell) is required on win32");
+  }
+  assertAbsolute("win32", "home", init.home);
+  if (init.workspaceRoots.length !== 1) {
+    throw new PolicyInvalidError(
+      `win32 needs exactly one workspace root per sidecar, got ${String(init.workspaceRoots.length)}`,
+    );
+  }
+  init.workspaceRoots.forEach((path, i) => assertAbsolute("win32", `workspaceRoots[${i}]`, path));
+  init.readRoots.forEach((path, i) => assertAbsolute("win32", `readRoots[${i}]`, path));
+  (init.denyRoots ?? []).forEach((path, i) => assertAbsolute("win32", `denyRoots[${i}]`, path));
+  assertAbsolute("win32", "windows.srtWin", windows.srtWin);
+  assertAbsolute("win32", "windows.shell", windows.shell);
+  assertRootsOutsideProtected(init);
+
+  const [workspaceRoot] = init.workspaceRoots as [string];
+  return {
+    network: networkConfig(),
+    filesystem: {
+      denyRead: [],
+      allowRead: init.readRoots.map((path) => ({ path, literal: true as const })),
+      allowWrite: [{ path: workspaceRoot, literal: true as const }],
+      denyWrite: [],
+      allowGitConfig: true,
+    },
+    ripgrep: { command: init.helpers.ripgrep },
+    windows: {
+      srtWin: { path: windows.srtWin },
+      sandboxUser: WINDOWS_SANDBOX_USER,
+      proxyPortRange: [...WINDOWS_PROXY_PORT_RANGE],
+    },
+  };
 }
 
 /**
