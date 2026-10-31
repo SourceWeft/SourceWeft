@@ -291,15 +291,23 @@ export function brandPosition(
   group: Pick<ProductGroupKey, "brandTokens">,
   entry: { name: string; identifier: string },
 ): number {
-  const nameTokens = slugTokens(entry.name);
-  const inTail = lastSequenceIndex(
-    slugTokens(identifierTail(entry.identifier)),
+  return brandPositionInTokens(
     group.brandTokens,
+    slugTokens(entry.name),
+    slugTokens(identifierTail(entry.identifier)),
   );
+}
+
+function brandPositionInTokens(
+  brandTokens: readonly string[],
+  nameTokens: readonly string[],
+  tailTokens: readonly string[],
+): number {
+  const inTail = lastSequenceIndex(tailTokens, brandTokens);
   if (inTail >= 0) {
     return nameTokens.length + inTail;
   }
-  return lastSequenceIndex(nameTokens, group.brandTokens);
+  return lastSequenceIndex(nameTokens, brandTokens);
 }
 
 /** Whether a server's name or identifier tail carries the brand as whole tokens. */
@@ -359,15 +367,27 @@ export function groupAdmits(
 export function productGroupsOf(
   officials: readonly ProductGroupEntry[],
 ): ProductGroupKey[] {
+  const groups: ProductGroupKey[] = [];
+  for (const group of productGroupsInOrder(officials)) {
+    if (group) groups.push(group);
+  }
+  return groups;
+}
+
+function* productGroupsInOrder(
+  officials: readonly ProductGroupEntry[],
+): Generator<ProductGroupKey | null> {
   const sorted = [...officials].sort(compareByPublication);
-  const byDomain = new Map<string, ProductGroupKey>();
+  const domains = new Set<string>();
   for (const official of sorted) {
     const group = productGroupOf(official);
-    if (group && !byDomain.has(group.domain)) {
-      byDomain.set(group.domain, group);
+    if (group && !domains.has(group.domain)) {
+      domains.add(group.domain);
+      yield group;
+    } else {
+      yield null;
     }
   }
-  return [...byDomain.values()];
 }
 
 /**
@@ -379,24 +399,138 @@ export function productGroupsOf(
  * (2); a shared repository owner (3). Ties go to the longer brand, then the
  * first domain alphabetically.
  */
-function fitOf(
-  group: ProductGroupKey,
-  entry: ProductGroupEntry,
-): readonly [tier: number, position: number] {
-  if (
-    entry.identifier === group.officialIdentifier ||
-    (isOfficialEntry(entry) && entry.publisher?.domain === group.domain)
-  ) {
-    return [0, 0];
+export type ProductGroupResolver = {
+  groupFor(entry: ProductGroupEntry): ProductGroupKey | null;
+  isMember(
+    group: Pick<ProductGroupKey, "domain">,
+    entry: ProductGroupEntry,
+  ): boolean;
+};
+
+/**
+ * A reusable snapshot of the official groups. Build publication order, brands
+ * and repository owners once, then visit only groups that can admit an entry.
+ * The query cache owns this snapshot's lifetime; no catalog mutation is hidden
+ * behind a process-global cache in this pure module.
+ */
+export function createProductGroupResolver(
+  officials: readonly ProductGroupEntry[],
+): ProductGroupResolver {
+  const preparation = prepareProductGroupResolver(officials);
+  let step = preparation.next();
+  while (!step.done) step = preparation.next();
+  return step.value;
+}
+
+/**
+ * The same pure preparation in bounded steps. Async catalog readers can let
+ * other requests run between steps, including on a cold official snapshot.
+ */
+export function* prepareProductGroupResolver(
+  officials: readonly ProductGroupEntry[],
+): Generator<void, ProductGroupResolver> {
+  const byIdentifier = new Map<string, ProductGroupKey[]>();
+  const byDomain = new Map<string, ProductGroupKey[]>();
+  const byBrandToken = new Map<string, ProductGroupKey[]>();
+  const byOwner = new Map<string, ProductGroupKey[]>();
+  const add = (
+    index: Map<string, ProductGroupKey[]>,
+    key: string,
+    group: ProductGroupKey,
+  ) => {
+    const groups = index.get(key);
+    if (groups) groups.push(group);
+    else index.set(key, [group]);
+  };
+  let processed = 0;
+  for (const group of productGroupsInOrder(officials)) {
+    if (group) {
+      add(byIdentifier, group.officialIdentifier, group);
+      add(byDomain, group.domain, group);
+      const firstToken = group.brandTokens[0];
+      if (firstToken) add(byBrandToken, firstToken, group);
+      if (group.repoOwner) add(byOwner, group.repoOwner, group);
+    }
+    if (++processed % 128 === 0) yield;
   }
-  const position = brandPosition(group, entry);
-  if (position >= 0) {
-    return [1, -position];
-  }
-  if (entry.publisher?.domain === group.domain) {
-    return [2, 0];
-  }
-  return [3, 0];
+
+  const resolve = (entry: ProductGroupEntry): ProductGroupKey | null => {
+    const identifier = entry.identifier;
+    const publisher = entry.publisher;
+    const nameTokens = slugTokens(entry.name);
+    const tailTokens = slugTokens(identifierTail(identifier));
+    const owners = new Set(
+      entryGithubOwners({ identifier, repoUrl: entry.repoUrl }),
+    );
+    const candidates = new Set<ProductGroupKey>();
+    const include = (groups: ProductGroupKey[] | undefined) => {
+      for (const group of groups ?? []) candidates.add(group);
+    };
+    include(byIdentifier.get(identifier));
+    if (publisher) include(byDomain.get(publisher.domain));
+    for (const token of new Set([...nameTokens, ...tailTokens])) {
+      include(byBrandToken.get(token));
+    }
+    for (const owner of owners) include(byOwner.get(owner));
+
+    let best: ProductGroupKey | null = null;
+    let bestTier = Infinity;
+    let bestPosition = Infinity;
+    for (const group of candidates) {
+      let tier: number;
+      let position = 0;
+      if (
+        identifier === group.officialIdentifier ||
+        (publisher?.endpointMatch === true && publisher.domain === group.domain)
+      ) {
+        tier = 0;
+      } else {
+        const brandPosition = brandPositionInTokens(
+          group.brandTokens,
+          nameTokens,
+          tailTokens,
+        );
+        if (brandPosition >= 0) {
+          tier = 1;
+          position = -brandPosition;
+        } else if (publisher?.domain === group.domain) {
+          tier = 2;
+        } else if (group.repoOwner !== null && owners.has(group.repoOwner)) {
+          tier = 3;
+        } else {
+          // A first-token match alone does not admit a partial brand or a
+          // sequence that crosses from the name into the identifier tail.
+          continue;
+        }
+      }
+      if (
+        best === null ||
+        tier < bestTier ||
+        (tier === bestTier &&
+          (position < bestPosition ||
+            (position === bestPosition &&
+              (group.brand.length > best.brand.length ||
+                (group.brand.length === best.brand.length &&
+                  group.domain < best.domain)))))
+      ) {
+        best = group;
+        bestTier = tier;
+        bestPosition = position;
+      }
+    }
+    return best;
+  };
+  return {
+    groupFor(entry) {
+      const group = resolve(entry);
+      // Preserve the fresh-result behavior of productGroupFor. A caller
+      // cannot mutate the cached index through a returned group.
+      return group ? { ...group, brandTokens: [...group.brandTokens] } : null;
+    },
+    isMember(group, entry) {
+      return resolve(entry)?.domain === group.domain;
+    },
+  };
 }
 
 /**
@@ -408,26 +542,7 @@ export function productGroupFor(
   entry: ProductGroupEntry,
   officials: readonly ProductGroupEntry[],
 ): ProductGroupKey | null {
-  const candidates = productGroupsOf(officials)
-    .filter((group) => groupAdmits(group, entry))
-    .map((group) => ({ group, fit: fitOf(group, entry) }))
-    .sort((left, right) => {
-      if (left.fit[0] !== right.fit[0]) {
-        return left.fit[0] - right.fit[0];
-      }
-      if (left.fit[1] !== right.fit[1]) {
-        return left.fit[1] - right.fit[1];
-      }
-      if (left.group.brand.length !== right.group.brand.length) {
-        return right.group.brand.length - left.group.brand.length;
-      }
-      return left.group.domain < right.group.domain
-        ? -1
-        : left.group.domain > right.group.domain
-          ? 1
-          : 0;
-    });
-  return candidates[0]?.group ?? null;
+  return createProductGroupResolver(officials).groupFor(entry);
 }
 
 /**
