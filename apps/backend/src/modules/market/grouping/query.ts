@@ -1,13 +1,14 @@
 import { and, desc, eq, or, sql } from "drizzle-orm";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { db, mcpServers } from "@sourceweft/db";
 import { publisherMeta } from "../publisher";
 import {
   brandOfDomain,
   compareProductGroupMembers,
-  isProductGroupMember,
-  productGroupFor,
+  prepareProductGroupResolver,
   type ProductGroupEntry,
   type ProductGroupKey,
+  type ProductGroupResolver,
 } from "./product-group";
 
 /**
@@ -104,6 +105,11 @@ let officialEntries: {
   entries: Promise<ProductGroupEntry[]>;
 } | null = null;
 
+let officialGroupResolvers = new WeakMap<
+  readonly ProductGroupEntry[],
+  Promise<ProductGroupResolver>
+>();
+
 /**
  * The official servers, remembered for `OFFICIAL_ENTRIES_TTL_MS` across
  * reads in this process. A failed read is not remembered.
@@ -129,6 +135,33 @@ export function findOfficialProductEntries(
 /** Forget the remembered official servers (tests that write publishers). */
 export function forgetOfficialProductEntries() {
   officialEntries = null;
+  officialGroupResolvers = new WeakMap();
+}
+
+/** The prepared index lives exactly as long as its cached official snapshot. */
+export async function findOfficialProductGroupResolver(
+  now = Date.now(),
+): Promise<ProductGroupResolver> {
+  const entries = await findOfficialProductEntries(now);
+  let preparation = officialGroupResolvers.get(entries);
+  if (!preparation) {
+    preparation = (async () => {
+      const steps = prepareProductGroupResolver(entries);
+      let step = steps.next();
+      while (!step.done) {
+        await yieldToEventLoop();
+        step = steps.next();
+      }
+      return step.value;
+    })();
+    officialGroupResolvers.set(entries, preparation);
+    preparation.catch(() => {
+      if (officialGroupResolvers.get(entries) === preparation) {
+        officialGroupResolvers.delete(entries);
+      }
+    });
+  }
+  return preparation;
 }
 
 /**
@@ -261,37 +294,37 @@ export async function findProductGroupMembers(
   row: ServerRow,
   options: { pageSize?: number } = {},
 ): Promise<{ group: ProductGroupKey; rows: ServerRow[] } | null> {
-  const officials = await findOfficialProductEntries();
-  const group = productGroupFor(productGroupEntryOf(row), officials);
+  const resolver = await findOfficialProductGroupResolver();
+  const group = resolver.groupFor(productGroupEntryOf(row));
   if (!group) {
     return null;
   }
   const pageSize = options.pageSize ?? PRODUCT_GROUP_CANDIDATE_LIMIT;
-  const rows: ServerRow[] = [];
+  const members: Array<{ row: ServerRow; entry: ProductGroupEntry }> = [];
   for (
     let offset = 0;
     offset < PRODUCT_GROUP_SCAN_LIMIT &&
-    rows.length < PRODUCT_GROUP_MEMBER_LIMIT;
+    members.length < PRODUCT_GROUP_MEMBER_LIMIT;
     offset += pageSize
   ) {
     const candidates = await findProductGroupCandidateRows(group, {
       limit: pageSize,
       offset,
     });
-    rows.push(
-      ...candidates.filter((candidate) =>
-        isProductGroupMember(group, productGroupEntryOf(candidate), officials),
-      ),
-    );
+    for (const candidate of candidates) {
+      const entry = productGroupEntryOf(candidate);
+      if (resolver.isMember(group, entry)) {
+        members.push({ row: candidate, entry });
+      }
+    }
     if (candidates.length < pageSize) {
       break;
     }
   }
-  rows.sort((left, right) =>
-    compareProductGroupMembers(group)(
-      productGroupEntryOf(left),
-      productGroupEntryOf(right),
-    ),
-  );
-  return { group, rows: rows.slice(0, PRODUCT_GROUP_MEMBER_LIMIT) };
+  const compare = compareProductGroupMembers(group);
+  members.sort((left, right) => compare(left.entry, right.entry));
+  return {
+    group,
+    rows: members.slice(0, PRODUCT_GROUP_MEMBER_LIMIT).map(({ row }) => row),
+  };
 }
