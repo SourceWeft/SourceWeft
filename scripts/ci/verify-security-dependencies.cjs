@@ -21,7 +21,18 @@ const eslintConfig = createRequire(
   path.join(root, "packages/eslint-config/package.json"),
 );
 const eslint = createRequire(eslintConfig.resolve("eslint"));
-const minimatch3 = createRequire(eslint.resolve("minimatch"));
+const eslintMinimatch = createRequire(eslint.resolve("minimatch"));
+const mocha = createRequire(
+  createRequire(path.join(root, "packages/security-braces/package.json")).resolve(
+    "mocha",
+  ),
+);
+const sidecar = createRequire(
+  path.join(root, "apps/desktop/sandbox-sidecar/package.json"),
+);
+const sandboxRuntime = createRequire(
+  sidecar.resolve("@anthropic-ai/sandbox-runtime"),
+);
 const publisher = createRequire(
   path.join(root, "packages/builtin-tool-publish-artifact/package.json"),
 );
@@ -175,14 +186,17 @@ assert.equal(
   56,
 );
 
-// brace-expansion ships two lines: 5.x under minimatch 10 (production, through
-// shadcn and ts-morph) and 1.x under minimatch 3 (eslint).
+// brace-expansion 5.x is the only line left: every minimatch consumer (eslint,
+// typescript-estree, ts-morph) resolves minimatch 11, which depends on it.
 const braceExpansionLines = [
   [
     "5.0.12",
     patchedDependency(minimatch10, "brace-expansion", "5.0.12").expand,
   ],
-  ["1.1.21", patchedDependency(minimatch3, "brace-expansion", "1.1.21")],
+  [
+    "5.0.12",
+    patchedDependency(eslintMinimatch, "brace-expansion", "5.0.12").expand,
+  ],
 ];
 for (const [version, expand] of braceExpansionLines) {
   const label = "brace-expansion " + version + ": ";
@@ -231,6 +245,23 @@ patchedDependency(backend, "undici", "6.29.1");
 patchedDependency(dotenvx, "undici", "7.30.1");
 
 patchedDependency(dotenvx, "systeminformation", "5.33.16");
+
+// GHSA-g3hv-75wg-m249 (minimatch globParts amplification) and
+// GHSA-3g3m-2fjr-6pw4 (glob ignores abort during async walks) need
+// attacker-controlled patterns or signals that only dev tooling would see, so
+// every consumer is held to the reviewed releases. minimatch 11 must keep the
+// named export that eslint and typescript-estree call from CommonJS.
+for (const consumer of [minimatch10, eslintMinimatch, mocha]) {
+  const { minimatch } = patchedDependency(consumer, "minimatch", "11.0.3");
+  assert.equal(minimatch("src/a/b.ts", "src/**/*.ts"), true);
+  assert.equal(minimatch("src/a/b.js", "src/**/*.ts"), false);
+}
+const { globSync } = patchedDependency(mocha, "glob", "14.0.3");
+assert.ok(Array.isArray(globSync("package.json", { cwd: root })));
+
+// node-forge 1.4.2 closes the 1.4.0 signature-verification advisories,
+// including GHSA-86w9-cpqp-85rv, which the audit gate used to ignore.
+patchedDependency(sandboxRuntime, "node-forge", "1.4.2");
 const qs = patchedDependency(express, "qs", "6.16.1");
 assert.throws(
   () =>
