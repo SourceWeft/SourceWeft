@@ -397,7 +397,7 @@ test("pull-request CI also packs, ad-hoc signs and verifies both macOS bundles w
   );
   const job = jobs["sandbox-bundle-macos"];
   assert(job, "sandbox-bundle-macos job must exist");
-  assert.equal(job["runs-on"], "macos-14");
+  assert.equal(job["runs-on"], "macos-15");
   const text = JSON.stringify(job);
   assert.doesNotMatch(
     text,

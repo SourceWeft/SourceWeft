@@ -431,9 +431,9 @@ jobs:
 
   sandbox-bundle-macos:
     name: Sandbox bundle pack, sign and verify (macOS)
-    # macos-14 (arm64), like the real-sandbox macOS job: the arm64 bundle builds natively and the
-    # x86_64 bundle cross-compiles here exactly as the Tauri installers do on macos-15.
-    runs-on: macos-14
+    # macos-15 (arm64), like the real-sandbox macOS job: the arm64 bundle builds natively and the
+    # x86_64 bundle cross-compiles here exactly as the Tauri installers do.
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -819,9 +819,10 @@ jobs:
 
   macos-sandbox:
     name: Real sandbox suite on macOS
-    # Pinned to macos-14 (arm64) instead of macos-latest: the real suite depends on the
+    # Pinned to macos-15 (arm64) instead of macos-latest: the real suite depends on the
     # runner's Seatbelt behaviour and Xcode/CLT layout, which can change when -latest moves.
-    runs-on: macos-14
+    # Moved from macos-14, which GitHub retires on 2026-11-02.
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
