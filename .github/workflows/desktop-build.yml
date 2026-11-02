@@ -431,9 +431,9 @@ jobs:
 
   sandbox-bundle-macos:
     name: Sandbox bundle pack, sign and verify (macOS)
-    # macos-14 (arm64), like the real-sandbox macOS job: the arm64 bundle builds natively and the
-    # x86_64 bundle cross-compiles here exactly as the Tauri installers do on macos-15.
-    runs-on: macos-14
+    # macos-15 (arm64), like the real-sandbox macOS job: the arm64 bundle builds natively and the
+    # x86_64 bundle cross-compiles here exactly as the Tauri installers do.
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -623,7 +623,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             arch: arm64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         # bash, not pwsh: in PowerShell `pnpm` can resolve to pnpm.ps1, which swallows the `--`.
@@ -704,9 +704,10 @@ jobs:
       - name: Real-sandbox suite (setup through the real launcher, execution, fences, kill, coexistence)
         # A hung step must not eat the whole job: the test binary stops itself with a "HUNG:" report
         # (tests/windows_sandbox.rs), and this is the backstop that still leaves time for the
-        # always-run steps (cleanup, log upload). The suite took 3.5 minutes on windows-2025 and 20
-        # on windows-11-arm (about half a minute per test, see the TIMING lines in its log).
-        timeout-minutes: 45
+        # always-run steps (cleanup, log upload). The suite takes about 3.5 minutes on windows-2025
+        # and 40 to 45 on windows-11-arm, where each launched command costs 80 to 100 seconds (see
+        # the TIMING lines in its log); 45 was the edge and timed out healthy runs.
+        timeout-minutes: 60
         env:
           # Windows environment variable names are case-insensitive, so these are also the lowercase
           # variables; the suite fails when they are missing and proves the sidecar strips them.
@@ -819,9 +820,10 @@ jobs:
 
   macos-sandbox:
     name: Real sandbox suite on macOS
-    # Pinned to macos-14 (arm64) instead of macos-latest: the real suite depends on the
+    # Pinned to macos-15 (arm64) instead of macos-latest: the real suite depends on the
     # runner's Seatbelt behaviour and Xcode/CLT layout, which can change when -latest moves.
-    runs-on: macos-14
+    # Moved from macos-14, which GitHub retires on 2026-11-02.
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
