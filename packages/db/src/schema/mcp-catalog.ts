@@ -174,6 +174,14 @@ export const mcpServerVersions = pgTable(
       table.serverId,
       table.status,
     ),
+    // "The latest published version of a server" (`latestPublishedVersionOf`
+    // in modules/market/latest-version.ts): one index probe per server, in the
+    // order that helper sorts by, instead of sorting every published version
+    // of the server. The README, overview, summary-translation and stdio
+    // schedulers run that lookup once per candidate row.
+    index("mcp_server_versions_latest_published_idx")
+      .on(table.serverId, desc(table.publishedAt), desc(table.createdAt))
+      .where(sql`${table.status} = 'published'`),
     // The README fetch scheduler's scan for versions that are due.
     index("mcp_server_versions_readme_due_idx").on(table.readmeNextFetchAt),
     // Servers showing one shared README file are kept out of search
