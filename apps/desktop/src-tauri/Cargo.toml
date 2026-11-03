@@ -33,7 +33,7 @@ futures-util = "0.3"
 # OS locale detection for the tray's startup-time guess, before the webview
 # has had a chance to report its own resolved locale (see tray_locale.rs).
 sys-locale = "0.3"
-tauri-plugin-updater = "=2.11.0"
+tauri-plugin-updater = "=2.14.1"
 tauri-plugin-dialog = "2"
 semver = "1"
 httpdate = "1"

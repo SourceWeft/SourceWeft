@@ -25,6 +25,7 @@ cbc 0.1.2 | MIT OR Apache-2.0 | LICENSE-MIT sha256:63af4bea227c94d021e99427f6ca3
 cc 1.4.0 | MIT OR Apache-2.0 | LICENSE-MIT sha256:378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397, LICENSE-APACHE sha256:a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
 cfb 0.14.0 | MIT | LICENSE sha256:ebaac853b53fec0ed475796f533ce676912a4df9ad9d8a621fa76d5060591e10
 cfg-if 1.0.4 | MIT OR Apache-2.0 | LICENSE-MIT sha256:378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397, LICENSE-APACHE sha256:a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
+cfg_aliases 0.2.2 | MIT | LICENSE sha256:31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812
 chacha20 0.10.1 | MIT OR Apache-2.0 | LICENSE-MIT sha256:b8c6939380a400f53e11923d50fcc4dd2fa1ba8339fd9d04cda38a0251b6c9b0, LICENSE-APACHE sha256:a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5
 chrono 0.4.45 | MIT OR Apache-2.0 | LICENSE.txt sha256:946c9835d8034d24404f8cfec5f4654cee5dad17e944afc3d06d742cf2882831
 cipher 0.4.4 | MIT OR Apache-2.0 | LICENSE-MIT sha256:5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec, LICENSE-APACHE sha256:a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5
@@ -104,6 +105,7 @@ napi-build 2.4.0 | MIT | No standard notice file in published source; declared l
 napi-derive 3.6.2 | MIT | No standard notice file in published source; declared license applies.
 napi-derive-backend 6.1.1 | MIT | No standard notice file in published source; declared license applies.
 napi-sys 3.3.0 | MIT | No standard notice file in published source; declared license applies.
+nix 0.31.3 | MIT | LICENSE sha256:66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70
 nohash-hasher 0.2.0 | Apache-2.0 OR MIT | LICENSE-MIT sha256:ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a, LICENSE-APACHE sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 nom 8.0.0 | MIT | LICENSE sha256:4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0
 num-conv 0.2.2 | MIT OR Apache-2.0 | LICENSE-MIT sha256:e2e245f2b566d0bfafb0f6a04c16b82d710c4e6e7d799e39bb4ef6e541b85b98, LICENSE-APACHE sha256:0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
@@ -184,7 +186,7 @@ windows-link 0.2.1 | MIT OR Apache-2.0 | LICENSE-MIT sha256:c2cfccb812fe482101a8
 windows-result 0.4.1 | MIT OR Apache-2.0 | LICENSE-MIT sha256:c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 windows-strings 0.5.1 | MIT OR Apache-2.0 | LICENSE-MIT sha256:c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 windows-sys 0.61.2 | MIT OR Apache-2.0 | LICENSE-MIT sha256:c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
-zip 9.0.0 | MIT | LICENSE sha256:58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79
+zip 9.0.5 | MIT | LICENSE sha256:58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79
 zlib-rs 0.6.6 | Zlib | LICENSE sha256:e72111c52b7d96ebe25348dee19f0744f444d3c95ae6b1ecb6ccaecc5bce05ba
 zopfli 0.8.3 | Apache-2.0 | COPYING sha256:018b1cb87efdf7a04c2fcc13d57ed63f62149113fb207b27ea13430d64f13513
 
