@@ -90,6 +90,26 @@ describe("the model's answer", () => {
     assert.equal(accepts("搜索 pages and read all of the pages of your workspace"), null);
     assert.notEqual(accepts("搜索并读取 Notion 工作区页面"), null);
   });
+
+  test("names kept from the source do not count against the Chinese share", () => {
+    // Real descriptions whose faithful translations were refused (2026-11-04).
+    const products =
+      "Plan and run brand content on X, LinkedIn, TikTok, YouTube Shorts, Instagram and Hashnode.";
+    const productsZh =
+      "在X、LinkedIn、TikTok、YouTube Shorts、Instagram和Hashnode上规划和发布品牌内容。";
+    assert.equal(accepts(productsZh, products), productsZh);
+    const alpic = "Alpic Test MCP Server - great server!";
+    assert.equal(accepts("Alpic Test MCP Server - 很棒的服务器！", alpic), "Alpic Test MCP Server - 很棒的服务器！");
+    // Only names the source has, as it writes them, are set aside.
+    assert.equal(accepts("在 Facebook、Pinterest、Snapchat 和 Reddit 上发布。", products), null);
+    // Ordinary English left untranslated still counts, even when the source has the words.
+    assert.equal(
+      accepts("规划 brand content on X and LinkedIn", products),
+      null,
+    );
+    // Nothing but the kept names is not a translation.
+    assert.equal(accepts("X, LinkedIn, TikTok", products), null);
+  });
 });
 
 describe("the prompt", () => {
