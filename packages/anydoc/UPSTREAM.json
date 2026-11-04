@@ -8,7 +8,7 @@
     {
       "path": "Cargo.lock",
       "sha256": "7faf5b93ab3d496d848556be84eda6def764a18f50e4de39298847b612980d26",
-      "patchedSha256": "c2ff7551d141dd0dcb41ecfe8a14907f7aa9aea1eae5030f36376177bb829f87"
+      "patchedSha256": "a494ab1e2985d88864a5c91527fa4dba40dc72bd227554612733416260dd0c4d"
     },
     {
       "path": "Cargo.toml",
@@ -369,7 +369,7 @@
       "sha256": "11b3c6ded88dd5f9310af2cb2793d100192189b1f13061d4308d02df4415b05f"
     }
   ],
-  "patch": "src/formats/pdf.rs: disable ambiguous isolated-line page-number removal; Cargo.toml/Cargo.lock: upgrade zip to 9.0.0 for RUSTSEC-2026-0367, RUSTSEC-2026-0368, and RUSTSEC-2026-0369",
+  "patch": "src/formats/pdf.rs: disable ambiguous isolated-line page-number removal; Cargo.toml/Cargo.lock: upgrade zip to 9.0.5 for RUSTSEC-2026-0367, RUSTSEC-2026-0368, and RUSTSEC-2026-0369 and the zip 9.0.5 advisory fixes",
   "wrapperFiles": [
     {
       "path": "anydoc.js",
@@ -384,5 +384,5 @@
       "sha256": "be3a2053efdbf31e59736e0308422775228d9001cbdab6c32bef7bdaa05d049f"
     }
   ],
-  "licenseNoticesSha256": "5e4340a2142a00d9cba55349ba60f26dbbba6d9741c9f0468c2803cb0221ef4a"
+  "licenseNoticesSha256": "53f3943fcbb9b9360763606f79f61d37012f6b38d21de4aadc83a9f283073cfd"
 }

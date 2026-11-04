@@ -708,6 +708,17 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
       ? null
       : await agentSandboxService.createRuntimeForTurn({
           executionTarget: prepared.thread.executionTarget ?? { kind: "cloud" },
+          // Only the descriptor fields the network policy reads; the source
+          // type is the platform's record of where the skill came from.
+          ...(prepared.thread.executionTarget?.kind === "local"
+            ? {
+                localNetworkSkills: prepared.enabledSkills.map((skill) => ({
+                  name: skill.name,
+                  sourceType: skill.sourceType,
+                  skillMd: skill.skillMd,
+                })),
+              }
+            : {}),
           filesystem: filesystemBackend.backend,
           context: {
             localCaller: prepared.localCaller,

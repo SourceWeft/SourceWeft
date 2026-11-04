@@ -62,3 +62,29 @@ test("bunCompileArgs: a same-OS cross build inserts exactly one --target=<bun ta
   ]);
   assert.equal(args.filter((a) => a.startsWith("--target")).length, 1);
 });
+
+test("bunCompileArgs: a Windows compile writes the .exe outfile and a cross-arch build names the Bun windows target", () => {
+  assert.deepEqual(
+    bunCompileArgs({
+      entry: "C:\\pkg\\src\\main.ts",
+      outFile: "C:\\pkg\\dist\\bundle\\srt-sidecar.exe",
+      crossTarget: undefined,
+    }),
+    [
+      "build",
+      "--compile",
+      "--define",
+      '__SRT_WIN_NAMESPACE__="sourceweft"',
+      "C:\\pkg\\src\\main.ts",
+      "--outfile",
+      "C:\\pkg\\dist\\bundle\\srt-sidecar.exe",
+    ],
+  );
+  const cross = bunCompileArgs({
+    entry: "src/main.ts",
+    outFile: "dist/bundle/srt-sidecar.exe",
+    crossTarget: "bun-windows-arm64",
+  });
+  assert.equal(cross[2], "--target=bun-windows-arm64");
+  assert.equal(cross.at(-1), "dist/bundle/srt-sidecar.exe");
+});

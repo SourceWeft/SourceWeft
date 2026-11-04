@@ -551,6 +551,8 @@ test("the bound device's reported environment is read through the thread binding
     arch: null,
     shell: null,
     sandboxState: null,
+    // No explicit choice: open, the default.
+    networkMode: "open",
   });
   await schema.db
     .update(schema.localDevices)
@@ -567,6 +569,7 @@ test("the bound device's reported environment is read through the thread binding
     arch: "x64",
     shell: "bash",
     sandboxState: "needsSetup",
+    networkMode: "open",
   });
 });
 test("offline local Provider assembly does not dispatch a workspace or use cloud", async () => {

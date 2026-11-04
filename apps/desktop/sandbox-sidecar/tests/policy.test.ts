@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  auditFilterRequest,
   buildConfig,
   perCommandConfig,
   perWrapReadRoots,
@@ -324,4 +325,59 @@ test("rejects a relative readRoots entry", () => {
       return true;
     },
   );
+});
+
+test("buildConfig sets no request filter itself (the server attaches the audit one)", () => {
+  assert.equal(buildConfig(validInit()).network.filterRequest, undefined);
+});
+
+type Begin = Parameters<typeof auditFilterRequest>[0];
+type Begun = { host: string; port: number; method: string; path: string };
+
+function recordingBegin(attributable = true): { begin: Begin; begun: Begun[]; statuses: number[] } {
+  const begun: Begun[] = [];
+  const statuses: number[] = [];
+  const begin: Begin = (request) => {
+    begun.push(request);
+    return attributable ? (status) => statuses.push(status) : null;
+  };
+  return { begin, begun, statuses };
+}
+
+test("auditFilterRequest always allows and reports the response status", async () => {
+  const { begin, begun, statuses } = recordingBegin();
+  const decision = await auditFilterRequest(begin)(
+    new Request("http://example.com/p/q?token=1", { method: "POST" }),
+    { scheme: "http", target: { host: "example.com", port: 80 }, requestTarget: "/p/q?token=1" },
+  );
+  assert.equal(decision.action, "allow");
+  assert.deepEqual(begun, [{ host: "example.com", port: 80, method: "POST", path: "/p/q?token=1" }]);
+  decision.onResponse?.(204, {});
+  assert.deepEqual(statuses, [204]);
+});
+
+test("auditFilterRequest falls back to the URL when the proxy gives no extra info", async () => {
+  const { begin, begun } = recordingBegin();
+  await auditFilterRequest(begin)(new Request("http://example.com/a"));
+  await auditFilterRequest(begin)(new Request("https://example.com:8443/b"));
+  await auditFilterRequest(begin)(new Request("https://example.com/c"));
+  assert.deepEqual(
+    begun.map((r) => [r.host, r.port, r.path]),
+    [
+      ["example.com", 80, "/a"],
+      ["example.com", 8443, "/b"],
+      ["example.com", 443, "/c"],
+    ],
+  );
+});
+
+test("auditFilterRequest still allows when the request cannot be attributed or recording fails", async () => {
+  const unattributable = await auditFilterRequest(recordingBegin(false).begin)(
+    new Request("http://example.com/"),
+  );
+  assert.deepEqual(unattributable, { action: "allow" });
+  const throwing = await auditFilterRequest(() => {
+    throw new Error("boom");
+  })(new Request("http://example.com/"));
+  assert.equal(throwing.action, "allow");
 });

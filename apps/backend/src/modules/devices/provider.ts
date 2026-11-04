@@ -16,6 +16,14 @@ import type {
   SandboxRuntimeContext,
 } from "@sourceweft/builtin-tool-sandbox";
 import { localCall } from "./service";
+import {
+  deviceRelative,
+  hasParentSegment,
+  isDeviceAbsolutePath,
+  joinDevicePath,
+} from "./device-path";
+import { resolveCommandNetworkPolicy } from "./network-approvals";
+import type { NetworkSkillInput } from "./network-skill-domains";
 
 /**
  * The environment the host last reported for the computer a local thread is
@@ -25,13 +33,14 @@ import { localCall } from "./service";
  */
 export async function boundDeviceEnvironment(
   threadId: string,
-): Promise<LocalExecutionDevice | null> {
+): Promise<(LocalExecutionDevice & { networkMode: string | null }) | null> {
   const [row] = await db
     .select({
       platform: localDevices.platform,
       arch: localDevices.arch,
       shell: localDevices.shell,
       sandboxState: localDevices.sandboxState,
+      networkMode: localDevices.networkMode,
     })
     .from(localThreadBindings)
     .innerJoin(localDevices, eq(localDevices.id, localThreadBindings.deviceId))
@@ -46,6 +55,13 @@ export async function localProviderForTurn(
     "teamId" | "workspaceId" | "threadId" | "userId"
   > &
     Partial<Pick<SandboxRuntimeContext, "runId" | "localCaller" | "messageId">>,
+  options: {
+    /**
+     * The turn's enabled skills, for the domains they declare. Absent means
+     * no skill contributes (nothing is pre-allowed, nothing is suggested).
+     */
+    networkSkills?: readonly NetworkSkillInput[];
+  } = {},
 ): Promise<SandboxProviderFactory | null> {
   const thread = await db.query.threads.findFirst({
     where: and(
@@ -111,7 +127,7 @@ export async function localProviderForTurn(
     if (
       typeof workspace.id !== "string" ||
       typeof workspace.path !== "string" ||
-      !workspace.path.startsWith("/")
+      !isDeviceAbsolutePath(workspace.path)
     )
       throw new ContentError(
         409,
@@ -163,7 +179,11 @@ export async function localProviderForTurn(
       .update(localThreadBindings)
       .set({
         localWorkspaceId: reservedId,
-        workspacePath: `${device.workspaceBase}/${reservedId}/files`,
+        workspacePath: joinDevicePath(
+          device.workspaceBase,
+          reservedId,
+          "files",
+        ),
       })
       .where(
         and(
@@ -217,14 +237,12 @@ export async function localProviderForTurn(
     return dispatch(action, payload, extra);
   };
   const relative = (path: string) => {
-    if (path === workspaceRoot) return ".";
-    if (!path.startsWith(`${workspaceRoot}/`))
+    const result = deviceRelative(workspaceRoot, path);
+    if (result === null)
       throw new Error(
         "LOCAL_PATH_DENIED: Path is outside the bound workspace.",
       );
-    const result = path.slice(workspaceRoot.length + 1);
-    if (result.split("/").some((part) => part === ".."))
-      throw new Error("LOCAL_PATH_DENIED");
+    if (hasParentSegment(result)) throw new Error("LOCAL_PATH_DENIED");
     return result;
   };
   const observed = new Map<string, string>();
@@ -232,7 +250,7 @@ export async function localProviderForTurn(
     id: "local",
     cancellationScope: "command",
     pathPolicy: {
-      skillsRoot: `${workspaceRoot}/.sourceweft-skills`,
+      skillsRoot: joinDevicePath(workspaceRoot, ".sourceweft-skills"),
       workspaceRoot,
       defaultCwd: workspaceRoot,
       prepareTargetRoots: [workspaceRoot],
@@ -252,6 +270,18 @@ export async function localProviderForTurn(
       const executionId = input.executionId
         ? `${binding.deviceId}:${input.executionId}`
         : undefined;
+      // Resolved per command: a rule created a moment ago applies to the very
+      // next command. Hosts that do not enforce it (macOS until it is ported)
+      // ignore the field.
+      const network = await resolveCommandNetworkPolicy({
+        deviceId: binding.deviceId,
+        tenant: {
+          teamId: context.teamId,
+          workspaceId: context.workspaceId,
+          userId: context.userId,
+        },
+        skills: options.networkSkills ?? [],
+      });
       const result = await call(
         "command.execute",
         {
@@ -260,6 +290,7 @@ export async function localProviderForTurn(
           cwd: input.cwd ? relative(input.cwd) : ".",
           timeoutMs: Math.min(input.timeoutMs, 120_000),
           maxOutputChars: input.maxOutputChars,
+          network,
         },
         {
           id: executionId,
@@ -363,7 +394,10 @@ export async function localProviderForTurn(
       });
       return (
         result.files as Array<{ path: string; is_dir?: boolean; size?: number }>
-      ).map((file) => ({ ...file, path: `${root}/${file.path}` }));
+      ).map((file) => ({
+        ...file,
+        path: joinDevicePath(workspaceRoot, file.path),
+      }));
     },
     readTextFile: async (input) => {
       const result = await call("file.read", {

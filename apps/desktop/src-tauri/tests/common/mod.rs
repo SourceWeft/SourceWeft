@@ -15,9 +15,15 @@ use serde_json::{json, Value};
 use sourceweft_desktop::local_host::{
     execution::Executions, readiness::bundle_dir, LocalHost, Workspace,
 };
+use sourceweft_desktop::local_host::network::{NetworkBridge, OutboundLease};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 
 /// `apps/desktop/sandbox-sidecar/dist/bundle`.
@@ -95,11 +101,69 @@ pub fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &st
         "command.execute",
         json!({"workspaceId": workspace.id, "command": command, "timeoutMs": 60000, "maxOutputChars": 20000}),
     )
+    .map(|result| {
+        diagnose_proxy_refusal(host, workspace, &result);
+        result
+    })
     .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
 }
 
 pub fn output(result: &Value) -> &str {
     result["output"].as_str().unwrap()
+}
+
+/// A sandboxed command that "could not connect to localhost port N" never reached the sidecar's
+/// proxy at all. Right then, while the sidecar is still alive, ask the host what it can see —
+/// otherwise the failure is indistinguishable from a dead or not-yet-listening sidecar. Prints to
+/// stderr (shown for a failing test); never fails a test by itself.
+pub fn diagnose_proxy_refusal(host: &LocalHost, workspace: &Workspace, result: &Value) {
+    let Some(text) = result["output"].as_str() else { return };
+    let Some(rest) = text.split("Failed to connect to localhost port ").nth(1) else { return };
+    let port: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if port.is_empty() {
+        return;
+    }
+    let run = |script: String| {
+        std::process::Command::new("/bin/sh")
+            .args(["-c", &script])
+            .output()
+            .map(|out| {
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                )
+            })
+            .unwrap_or_else(|error| error.to_string())
+    };
+    eprintln!(
+        "--- proxy refusal diagnostics (port {port}) ---\nsidecars:\n{}\nlisteners on {port}:\n{}\nconnect 127.0.0.1: {}\nconnect ::1: {}\nsockets:\n{}",
+        run("ps -axo pid,ppid,etime,stat,command | grep '[s]rt-sidecar'".into()),
+        run(format!("lsof -nP -iTCP:{port} 2>&1 | head -5")),
+        run(format!("nc -z -w1 127.0.0.1 {port} && echo open || echo refused")),
+        run(format!("nc -z -w1 ::1 {port} && echo open || echo refused")),
+        run(format!("netstat -an 2>/dev/null | grep '\\.{port} ' | head -5")),
+    );
+    // The same question from inside a fresh sandbox of the same host: is the refusal per command
+    // (a new profile can connect) or lasting (this sidecar's proxy is unreachable from sandboxes)?
+    let probe = format!(
+        "env | grep -i '_proxy=' ; \
+         for target in http://127.0.0.1:{port}/ 'http://[::1]:{port}/' http://localhost:{port}/; do \
+           echo \"== $target\"; curl -sS --noproxy '*' -m 3 -o /dev/null -w '%{{http_code}}' \"$target\" 2>&1 | tail -2; echo; \
+         done"
+    );
+    let follow_up = host.dispatch(
+        &Executions::default(),
+        &format!("proxy-diag-{port}"),
+        "owner",
+        &workspace.thread_id,
+        "command.execute",
+        json!({"workspaceId": workspace.id, "command": probe, "timeoutMs": 30000, "maxOutputChars": 4000, "network": {"mode": "open", "allow": [], "suggested": {}}}),
+    );
+    match follow_up {
+        Ok(value) => eprintln!("in-sandbox follow-up:\n{}", value["output"].as_str().unwrap_or("<no output>")),
+        Err(error) => eprintln!("in-sandbox follow-up failed: {error}"),
+    }
 }
 
 /// Runs `command` after a positive control that must succeed inside the sandbox, and asserts the
@@ -164,3 +228,183 @@ impl Drop for EnvVarGuard {
         }
     }
 }
+
+/// The shape every `command.execute` result has, on every platform: the four original fields
+/// with the right types, and nothing else except the optional extras a sandboxed run adds
+/// (`networkAudit`, `networkAuditError`, `vaultWarning`). Panics naming the problem otherwise.
+pub fn assert_result_shape(result: &Value) {
+    let object = result
+        .as_object()
+        .unwrap_or_else(|| panic!("result is not an object: {result}"));
+    assert!(object.get("output").is_some_and(Value::is_string), "output: {result}");
+    assert!(object.get("exitCode").is_some_and(Value::is_i64), "exitCode: {result}");
+    assert!(object.get("truncated").is_some_and(Value::is_boolean), "truncated: {result}");
+    assert!(object.get("cancelled").is_some_and(Value::is_boolean), "cancelled: {result}");
+    for key in object.keys() {
+        assert!(
+            ["output", "exitCode", "truncated", "cancelled", "networkAudit", "networkAuditError", "vaultWarning"]
+                .contains(&key.as_str()),
+            "unexpected result key {key:?}: {result}"
+        );
+    }
+    if let Some(audit) = object.get("networkAudit") {
+        assert!(audit.is_array(), "networkAudit must be an array: {result}");
+    }
+    for key in ["networkAuditError", "vaultWarning"] {
+        if let Some(value) = object.get(key) {
+            assert!(value.is_string(), "{key} must be a string: {result}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Network approvals. The backend half is replaced by `ApprovalBridge`: it installs an outbound
+// channel on `host.network`, records every `network.ask` frame, and answers through
+// `host.network.resolve`, exactly as `remote_host.rs` does for a `network.decision`.
+// ---------------------------------------------------------------------------------------------
+
+/// A `network` payload for `command.execute`.
+pub fn net_policy(mode: &str, allow: &[&str]) -> Value {
+    json!({"mode": mode, "allow": allow, "suggested": {}})
+}
+
+/// `command.execute` with an explicit network policy and command timeout.
+pub fn execute_net_timeout(
+    host: &LocalHost,
+    call: &str,
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+    timeout_ms: u64,
+) -> Value {
+    let mut payload = json!({"workspaceId": workspace.id, "command": command, "timeoutMs": timeout_ms, "maxOutputChars": 20000});
+    if let Some(network) = network {
+        payload["network"] = network;
+    }
+    host.dispatch(
+        &Executions::default(),
+        call,
+        "owner",
+        &workspace.thread_id,
+        "command.execute",
+        payload,
+    )
+    .map(|result| {
+        diagnose_proxy_refusal(host, workspace, &result);
+        result
+    })
+    .unwrap_or_else(|error| panic!("command.execute failed: {error}"))
+}
+
+pub fn execute_net(
+    host: &LocalHost,
+    call: &str,
+    workspace: &Workspace,
+    command: &str,
+    network: Option<Value>,
+) -> Value {
+    execute_net_timeout(host, call, workspace, command, network, 60000)
+}
+
+/// What the stand-in backend does with each `network.ask`: wait `delay`, then answer.
+#[derive(Clone)]
+pub struct Answer {
+    pub delay: Duration,
+    pub allow: bool,
+    pub reason: Option<&'static str>,
+}
+
+/// Installs an outbound channel on `host.network` for its lifetime. With `answer` it resolves
+/// every ask after the delay; without, it only records them (the ask stays pending).
+pub struct ApprovalBridge {
+    lease: Option<OutboundLease>,
+    asks: Arc<Mutex<Vec<Value>>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ApprovalBridge {
+    pub fn start(host: &LocalHost, answer: Option<Answer>) -> Self {
+        let bridge: NetworkBridge = host.network.clone();
+        let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        let lease = bridge.attach(sender);
+        let asks = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker = {
+            let (asks, stop) = (asks.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match frames.try_recv() {
+                        Ok(frame) => {
+                            asks.lock().unwrap().push(frame.clone());
+                            if let Some(answer) = &answer {
+                                std::thread::sleep(answer.delay);
+                                let ask_id = frame["askId"].as_str().unwrap();
+                                bridge.resolve(ask_id, answer.allow, answer.reason.map(str::to_string));
+                            }
+                        }
+                        Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+            })
+        };
+        Self {
+            lease: Some(lease),
+            asks,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    pub fn allowing(host: &LocalHost, delay_ms: u64) -> Self {
+        Self::start(
+            host,
+            Some(Answer {
+                delay: Duration::from_millis(delay_ms),
+                allow: true,
+                reason: None,
+            }),
+        )
+    }
+
+    pub fn asks(&self) -> Vec<Value> {
+        self.asks.lock().unwrap().clone()
+    }
+}
+
+impl Drop for ApprovalBridge {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        drop(self.lease.take());
+    }
+}
+
+pub fn audit_of(result: &Value) -> &Vec<Value> {
+    result["networkAudit"]
+        .as_array()
+        .unwrap_or_else(|| panic!("result has no networkAudit: {result}"))
+}
+
+/// The first audit entry for which `matches` holds.
+pub fn audit_entry<'a>(result: &'a Value, matches: impl Fn(&Value) -> bool) -> &'a Value {
+    audit_of(result)
+        .iter()
+        .find(|entry| matches(entry))
+        .unwrap_or_else(|| panic!("no matching audit entry in: {result}"))
+}
+
+/// A `connection` audit entry for the npm registry over HTTPS.
+pub fn npm_connection(entry: &Value, decision: &str, source: &str) -> bool {
+    entry["kind"] == "connection"
+        && entry["host"] == "registry.npmjs.org"
+        && entry["port"] == 443
+        && entry["decision"] == decision
+        && entry["source"] == source
+}
+
+pub const FETCH_NPM: &str =
+    "curl -sS -o /dev/null -w %{http_code} https://registry.npmjs.org/left-pad";
+

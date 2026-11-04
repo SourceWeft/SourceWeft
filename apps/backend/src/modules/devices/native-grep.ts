@@ -3,6 +3,7 @@ import { fileRelativePathSchema } from "@sourceweft/contracts";
 import { localCall } from "./service";
 import type { LocalExecutionCaller } from "./access";
 import { ContentError } from "../content/errors";
+import { deviceRelative } from "./device-path";
 
 export async function grepLocalFilePaths(input: {
   userId: string;
@@ -20,13 +21,14 @@ export async function grepLocalFilePaths(input: {
 }) {
   const root = input.root.replace(/\/+$/, "");
   const paths = input.paths.map((path) => {
-    if (!path.startsWith(`${root}/`))
+    const relative = deviceRelative(root, path);
+    if (relative === null || relative === ".")
       throw new ContentError(
         403,
         "FILE_SCOPE_DENIED",
         "Search files inside the bound directory.",
       );
-    return fileRelativePathSchema.parse(path.slice(root.length + 1));
+    return fileRelativePathSchema.parse(relative);
   });
   const raw = await localCall({
     deviceId: input.deviceId,

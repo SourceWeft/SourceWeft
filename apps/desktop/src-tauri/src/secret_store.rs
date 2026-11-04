@@ -2,10 +2,16 @@
 //!
 //! macOS stores secrets in the Keychain via `security_framework`. Linux
 //! stores them in the platform's Secret Service (gnome-keyring, KWallet,
-//! etc.) via the `keyring` crate's synchronous DBus backend. There is
-//! intentionally no file-based fallback: if neither store is reachable,
-//! callers must surface that to the user rather than writing secrets to
-//! disk unencrypted.
+//! etc.) via the `keyring` crate's synchronous DBus backend. Windows stores
+//! them as Generic credentials in the Windows Credential Manager through the
+//! same crate (`windows-native`: CredReadW/CredWriteW, per-user, DPAPI
+//! protected). There is intentionally no file-based fallback: if no store is
+//! reachable, callers must surface that to the user rather than writing
+//! secrets to disk unencrypted.
+//!
+//! Credential Manager limits a credential blob to 2560 bytes
+//! (`CRED_MAX_CREDENTIAL_BLOB_SIZE`); a larger secret fails loudly with
+//! `Keyring access failed: ... longer than platform limit`, never truncated.
 //!
 //! `get` returns `Ok(None)` when the platform store has no matching item
 //! (never an error), so call sites can keep treating "not found" as a
@@ -97,12 +103,19 @@ mod imp {
     }
 }
 
-#[cfg(target_os = "linux")]
-mod imp {
+/// The `keyring` crate store shared by Linux (Secret Service) and Windows (Credential Manager).
+#[cfg(any(target_os = "linux", windows))]
+mod keyring_store {
     use keyring::Entry;
 
-    const NO_KEYRING_MESSAGE: &str =
+    /// What every call reports when the store itself cannot be used (as opposed to a failure of one
+    /// operation). The tests skip a round trip only for exactly this message.
+    #[cfg(target_os = "linux")]
+    pub(super) const UNAVAILABLE_MESSAGE: &str =
         "No system keyring is available (Secret Service). Install and unlock a keyring, then retry.";
+    #[cfg(windows)]
+    pub(super) const UNAVAILABLE_MESSAGE: &str =
+        "Windows Credential Manager is unavailable (no usable logon session for this process). Sign in to Windows normally and retry.";
 
     pub(crate) fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
         match entry(service, account)?.get_secret() {
@@ -133,7 +146,7 @@ mod imp {
         Entry::new(service, account).map_err(describe)
     }
 
-    /// Both of these variants mean the Secret Service couldn't do the work:
+    /// Linux: both of these variants mean the Secret Service couldn't do the work:
     /// `PlatformFailure` covers connecting to the DBus session/Secret
     /// Service at all (no bus, no provider registered on it), and
     /// `NoStorageAccess` covers a reachable-but-unusable store (e.g. a
@@ -142,18 +155,37 @@ mod imp {
     /// but the original error is logged first (not just discarded), since
     /// it's the only thing that lets anyone diagnose which of those two
     /// (or something else entirely, like a DBus timeout) actually happened.
+    #[cfg(target_os = "linux")]
     fn describe(error: keyring::Error) -> String {
         match error {
             keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_) => {
                 eprintln!("sourceweft-desktop: Secret Service unavailable: {error}");
-                NO_KEYRING_MESSAGE.to_owned()
+                UNAVAILABLE_MESSAGE.to_owned()
             }
             other => format!("Keyring access failed: {other}"),
         }
     }
+
+    /// Windows: only `NoStorageAccess` (`ERROR_NO_SUCH_LOGON_SESSION`: the process has no logon
+    /// session whose Credential Manager vault it may use) means "no store". Every other failure
+    /// (`PlatformFailure` carries the Win32 error code, `TooLong` the blob limit) keeps its own
+    /// text, so a broken backend is never reported as a missing one.
+    #[cfg(windows)]
+    fn describe(error: keyring::Error) -> String {
+        match error {
+            keyring::Error::NoStorageAccess(_) => {
+                eprintln!("sourceweft-desktop: Credential Manager unavailable: {error}");
+                UNAVAILABLE_MESSAGE.to_owned()
+            }
+            other => format!("Windows Credential Manager access failed: {other}"),
+        }
+    }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(any(target_os = "linux", windows))]
+use keyring_store as imp;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod imp {
     pub(crate) fn get(_service: &str, _account: &str) -> Result<Option<Vec<u8>>, String> {
         Err("UNSUPPORTED_PLATFORM".into())
@@ -211,20 +243,24 @@ mod tests {
         )
     }
 
-    #[cfg(target_os = "linux")]
-    const NO_KEYRING_MESSAGE: &str =
-        "No system keyring is available (Secret Service). Install and unlock a keyring, then retry.";
+    #[cfg(any(target_os = "linux", windows))]
+    const NO_KEYRING_MESSAGE: &str = keyring_store::UNAVAILABLE_MESSAGE;
 
-    /// On Linux, a missing Secret Service (no session bus, or a bus with no
-    /// provider registered on it) is a real possibility in CI/containers.
-    /// When that happens every one of these calls fails with the same
-    /// actionable message, so a round trip can't complete; skip instead of
-    /// failing in that case, but only after confirming we got exactly the
-    /// documented error, so a different failure still fails the test.
-    #[cfg(target_os = "linux")]
+    /// A missing store (Linux: no session bus, or a bus with no Secret Service provider on it;
+    /// Windows: `NoStorageAccess`, a process without a usable logon session) is a real possibility
+    /// in CI/containers. When that happens every one of these calls fails with the same
+    /// actionable message, so a round trip can't complete; skip instead of failing in that case,
+    /// but only after confirming we got exactly the documented error, so a different failure
+    /// (on Windows: any other Win32 error) still fails the test. The skip line is what the CI
+    /// guard greps for, so a runner that unexpectedly lost its store cannot pass silently.
+    #[cfg(any(target_os = "linux", windows))]
     fn skip_if_no_keyring(message: &str) -> bool {
+        #[cfg(target_os = "linux")]
+        const WHAT: &str = "Secret Service";
+        #[cfg(windows)]
+        const WHAT: &str = "Credential Manager";
         if message == NO_KEYRING_MESSAGE {
-            eprintln!("skipping: {message} (this environment has no usable Secret Service)");
+            eprintln!("skipping: {message} (this environment has no usable {WHAT})");
             true
         } else {
             false
@@ -238,7 +274,7 @@ mod tests {
         let secret = b"local-device-credential-bytes".to_vec();
 
         if let Err(message) = set(&service, account, &secret) {
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             if skip_if_no_keyring(&message) {
                 return;
             }
@@ -261,7 +297,7 @@ mod tests {
         match get(&service, account) {
             Ok(value) => assert_eq!(value, None),
             Err(message) => {
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", windows))]
                 if skip_if_no_keyring(&message) {
                     return;
                 }
@@ -292,5 +328,36 @@ mod tests {
                 assert_eq!(message, NO_KEYRING_MESSAGE);
             }
         }
+    }
+
+    /// Credential Manager stores at most 2560 bytes per credential (`CRED_MAX_CREDENTIAL_BLOB_SIZE`).
+    /// A blob of exactly that size must round-trip byte for byte and one byte more must fail with
+    /// the crate's explicit limit error: an over-long secret is rejected, never truncated. The
+    /// realistic credential JSON stays far below this (see `remote_host`'s size test).
+    #[cfg(windows)]
+    #[test]
+    fn blob_limit_is_exact_and_oversize_fails_loudly() {
+        const LIMIT: usize = 2560;
+        let service = unique_service("blob-limit");
+        let account = "device";
+        let largest: Vec<u8> = (0..LIMIT).map(|i| (i % 251) as u8).collect();
+
+        if let Err(message) = set(&service, account, &largest) {
+            if skip_if_no_keyring(&message) {
+                return;
+            }
+            panic!("a {LIMIT}-byte secret should be stored: {message}");
+        }
+        assert_eq!(get(&service, account).expect("get"), Some(largest.clone()));
+
+        let oversize = vec![7u8; LIMIT + 1];
+        let error = set(&service, account, &oversize).expect_err("an oversize secret must fail");
+        assert!(
+            error.contains("longer than platform limit"),
+            "unexpected oversize error: {error}"
+        );
+        // The failed write left the previous value untouched.
+        assert_eq!(get(&service, account).expect("get"), Some(largest));
+        delete(&service, account).expect("delete");
     }
 }

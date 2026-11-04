@@ -133,10 +133,11 @@ export function TrustRulesPanelContent({
                   {row.toolName}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {t("approvals.connectorRisk", {
-                    connector: row.connectorLabel,
-                    risk: row.riskLabel,
-                  })}
+                  {row.detailLabel ??
+                    t("approvals.connectorRisk", {
+                      connector: row.connectorLabel,
+                      risk: row.riskLabel,
+                    })}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
                   {t("approvals.expiresLastUsed", {

@@ -126,6 +126,23 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
           </Button>
         </>
       )}
+      {card.action === "elevatedSetup" && (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {t("localHost.setup.elevatedSetupDescription")}
+          </p>
+          <Button
+            disabled={locked}
+            onClick={() =>
+              void run("setup", () => desktopBridge.runSandboxPrivilegedSetup())
+            }
+          >
+            {busy === "setup"
+              ? t("localHost.setup.elevatedSetupRunning")
+              : t("localHost.setup.elevatedSetup")}
+          </Button>
+        </>
+      )}
       {card.action !== "install" && !card.installing && (
         <Button
           size="sm"

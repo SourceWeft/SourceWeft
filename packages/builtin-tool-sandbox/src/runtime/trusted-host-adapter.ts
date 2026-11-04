@@ -11,6 +11,7 @@ import {
   assertSandboxWritePath,
   commandReferencesSkillsRoot,
   dirname,
+  isPathRootOrChild,
   shellQuote,
 } from "./paths";
 import { redactSandboxText, sandboxRequestFingerprint } from "./redaction";
@@ -161,10 +162,6 @@ function effectiveMaxOutputChars(limits: SandboxRuntimeLimits) {
   );
 }
 
-function isRootOrChild(path: string, root: string) {
-  return path === root || path.startsWith(`${root}/`);
-}
-
 function manifestSignature(entries: readonly ManifestEntry[]) {
   return entries
     .map((entry) =>
@@ -214,7 +211,7 @@ function parseManifest(input: {
       );
     }
     const path = assertSandboxReadPath(rawPath, input.policy);
-    if (!isRootOrChild(path, input.root)) {
+    if (!isPathRootOrChild(path, input.root)) {
       throw new Error(
         "SANDBOX_HOST_MANIFEST_ESCAPE: sandbox tree contains a file outside its canonical root.",
       );

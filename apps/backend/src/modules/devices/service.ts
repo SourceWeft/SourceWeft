@@ -26,6 +26,15 @@ function canonical(value: unknown): string {
       .join(",")}}`;
   return JSON.stringify(value);
 }
+/**
+ * The network policy is resolved afresh for every dispatch (rules and skill
+ * domains change between a call and its retry), so it is not part of what a
+ * call identity pins: the stored payload's policy stays the one that applies.
+ */
+function identity(payload: Record<string, unknown>): string {
+  const { network: _network, ...rest } = payload;
+  return canonical(rest);
+}
 export const isOnline = (device: {
   heartbeatAt: Date | null;
   revokedAt: Date | null;
@@ -319,7 +328,7 @@ export async function localCall(input: {
     record.threadId !== input.threadId ||
     record.userId !== input.userId ||
     record.action !== input.action ||
-    canonical(record.payload) !== canonical(payload)
+    identity(record.payload) !== identity(payload)
   ) {
     throw new ContentError(
       409,

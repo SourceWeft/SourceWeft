@@ -143,3 +143,35 @@ test("draft folder listing and download use a folder scope without creating a co
     (await server.request("/v1/local-devices/pc/folders/grant/files")).status,
   ).toBe(401);
 });
+
+test.each([
+  ["/Users/test/Library/Application Support/app/task-workspaces", true],
+  ["C:/Users/test/AppData/Roaming/app/task-workspaces", true],
+  ["C:\\Users\\test\\AppData\\Roaming\\app", false],
+  ["//server/share/ws", false],
+  ["relative/ws", false],
+  ["C:/Users/test/../other", false],
+])(
+  "native sign-in workspaceBase %j is accepted: %s",
+  async (workspaceBase, ok) => {
+    const { createNativeAccess } = await import("../../modules/devices/access");
+    vi.mocked(createNativeAccess).mockResolvedValue({} as never);
+    const response = await app().request("/v1/local-devices/native-session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${"a".repeat(48)}`,
+      },
+      body: JSON.stringify({ ticket: "t".repeat(40), workspaceBase }),
+    });
+    expect(response.status === 200).toBe(ok);
+    if (ok)
+      expect(createNativeAccess).toHaveBeenCalledWith(
+        "t".repeat(40),
+        "a".repeat(48),
+        workspaceBase,
+        undefined,
+      );
+    else expect(createNativeAccess).not.toHaveBeenCalled();
+  },
+);

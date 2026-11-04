@@ -1,5 +1,6 @@
 import { formatDisplayDate } from "@/lib/i18n/format";
 import type { useTranslations } from "next-intl";
+import { LOCAL_NETWORK_TRUST_DOMAIN } from "@sourceweft/contracts";
 import type { AgentToolTrustRule } from "@sourceweft/sdk";
 
 /**
@@ -20,6 +21,8 @@ export type TrustRuleRow = {
   expiryLabel: string;
   lastUsedLabel: string;
   sourceConfirmationLabel: string;
+  /** Network rules carry no connector or risk level, so the line is hidden. */
+  detailLabel: string | null;
   isExpired: boolean;
 };
 
@@ -56,9 +59,13 @@ export function toTrustRuleRow(
 ): TrustRuleRow {
   const expiryDate = formatDate(rule.expiresAt, displayLocale);
   const expired = isExpiredRule(rule, now);
+  const isNetworkRule = rule.domain === LOCAL_NETWORK_TRUST_DOMAIN;
   return {
     id: rule.id,
-    toolName: rule.toolName,
+    toolName: isNetworkRule
+      ? t("approvals.networkRule", { host: rule.targetId ?? "?" })
+      : rule.toolName,
+    detailLabel: isNetworkRule ? t("approvals.networkRuleDetail") : null,
     connectorLabel: rule.connectorId ?? t("approvals.noConnector"),
     riskLabel:
       rule.allowedRiskLevels.length > 0

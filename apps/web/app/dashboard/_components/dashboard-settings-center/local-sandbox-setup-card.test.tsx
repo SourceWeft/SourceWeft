@@ -162,6 +162,51 @@ test("a privileged setup failure is shown verbatim", async () => {
   );
 });
 
+test("elevatedSetup offers the UAC setup button, no command, and runs the elevated setup", async () => {
+  runSandboxPrivilegedSetup.mockResolvedValue(undefined);
+  const container = await render(
+    needs("elevatedSetup", {
+      code: "windowsNotInstalled",
+      reason: "The Windows sandbox is not installed.",
+      setupCommand: "must not be shown",
+    }),
+  );
+  assert.match(
+    container.textContent ?? "",
+    /The Windows sandbox is not installed\./,
+  );
+  assert.match(container.textContent ?? "", /administrator/);
+  assert.match(container.textContent ?? "", /Windows will ask/);
+  assert.equal(container.querySelectorAll("pre").length, 0);
+  assert.equal(buttons("Copy", container).length, 0);
+  assert.equal(buttons("Run setup", container).length, 0);
+  assert.equal(buttons("Install sandbox runtime", container).length, 0);
+  assert.equal(runSandboxPrivilegedSetup.mock.calls.length, 0);
+  await click(button("Set up (needs administrator approval)", container));
+  assert.equal(runSandboxPrivilegedSetup.mock.calls.length, 1);
+  assert.equal(onChanged.mock.calls.length, 1);
+});
+
+test("an elevated setup failure or UAC cancel is shown verbatim and the button stays usable", async () => {
+  runSandboxPrivilegedSetup.mockRejectedValue(
+    new Error("SANDBOX_SETUP_CANCELLED: administrator approval was declined"),
+  );
+  const container = await render(
+    needs("elevatedSetup", { code: "windowsSetupOutdated" }),
+  );
+  await click(button("Set up (needs administrator approval)", container));
+  await flush(3);
+  assert.equal(
+    container.querySelector('[role="alert"]')?.textContent,
+    "SANDBOX_SETUP_CANCELLED: administrator approval was declined",
+  );
+  assert.equal(
+    button("Set up (needs administrator approval)", container).disabled,
+    false,
+  );
+  assert.equal(onChanged.mock.calls.length, 0);
+});
+
 test("remedy none shows the reason only, plus a re-check", async () => {
   const container = await render(
     needs("none", { code: "sandboxFailed", reason: "bwrap: exploded" }),

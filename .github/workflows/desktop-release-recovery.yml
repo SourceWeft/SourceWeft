@@ -107,7 +107,7 @@ jobs:
             Desktop repair release with verified Tauri updater signatures, plus self-hosting files for Web/Docker.
 
             ${{ steps.source.outputs.policy == 'signed' && 'macOS installers are Developer ID signed and notarized; Windows installers are publisher-signed.' || 'These installers have no Apple Developer ID or Windows publisher certificate; macOS is not notarized. Operating systems may warn or block installation.' }}
-            Historical clients missing the updater key require one manual overwrite installation. Local device execution runs in a signed sandbox runtime the app downloads and verifies on first use, on macOS (Apple silicon and Intel) and Linux x86_64.
+            Historical clients missing the updater key require one manual overwrite installation. Local device execution runs in a signed sandbox runtime the app downloads and verifies on first use, on macOS (Apple silicon and Intel), Linux x86_64 and Windows (x64 and arm64).
 
             Publication resumed using unchanged desktop artifacts and image from the original verified release build.
           generate_release_notes: true

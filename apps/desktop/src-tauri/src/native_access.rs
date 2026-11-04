@@ -32,6 +32,11 @@ pub fn web_capability(base: &Url) -> CapabilityBuilder {
         .permission("allow-disconnect-local-host")
         .permission("allow-choose-working-directory")
         .permission("allow-enable-local-host")
+        // The sandbox setup card calls these two from the web page. The static `main.json`
+        // capability lists them too, but it has no `remote` origin and so only covers the app's
+        // own local pages: the configured web origin is covered by this capability alone.
+        .permission("allow-run-sandbox-privileged-setup")
+        .permission("allow-install-sandbox-runtime")
         .permission("allow-hub-window-action")
         .permission("allow-hub-window-send")
 }
@@ -109,6 +114,21 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|permission| permission == "allow-desktop-titlebar-action"));
+            // Every command the web page invokes through `desktop-bridge.ts` for local execution.
+            for command in [
+                "allow-local-host-status",
+                "allow-authenticate-local-host",
+                "allow-choose-local-folder",
+                "allow-enable-local-host",
+                "allow-disconnect-local-host",
+                "allow-run-sandbox-privileged-setup",
+                "allow-install-sandbox-runtime",
+            ] {
+                assert!(
+                    permissions.as_array().unwrap().iter().any(|permission| permission == command),
+                    "{command} must be allowed for the configured web origin"
+                );
+            }
             let patterns: Vec<RemoteUrlPattern> = capability
                 .remote
                 .unwrap()
@@ -154,6 +174,8 @@ mod tests {
             "allow-choose-local-folder",
             "allow-enable-local-host",
             "allow-set-autostart",
+            "allow-run-sandbox-privileged-setup",
+            "allow-install-sandbox-runtime",
         ] {
             assert!(!permissions.iter().any(|p| p == denied));
         }

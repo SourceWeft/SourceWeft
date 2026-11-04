@@ -16,6 +16,12 @@ import {
 } from "./connection-lifecycle";
 import { db, localDevices, localToolInvocations } from "@sourceweft/db";
 import { tokenHash } from "./service";
+import {
+  deliverNetworkDecisions,
+  denyFrame,
+  handleNetworkAsk,
+  NETWORK_REASONS,
+} from "./network-approvals";
 import { logger } from "../../shared/logger";
 
 export function attachLocalDeviceGateway(server: HttpServer) {
@@ -126,6 +132,23 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
         ws.send(JSON.stringify({ type: "heartbeat" }));
         return;
       }
+      if (message.type === "network.ask") {
+        // A failed lookup must not take the command's connection down with it;
+        // the safe answer is no.
+        const frame = await handleNetworkAsk(
+          { id: deviceId, userId },
+          message,
+        ).catch((error: unknown) => {
+          logger.warn("Local network ask failed", {
+            deviceId,
+            error: String(error),
+          });
+          return denyFrame(message.askId, NETWORK_REASONS.unavailable);
+        });
+        if (frame && ws.readyState === WebSocket.OPEN)
+          ws.send(JSON.stringify(frame));
+        return;
+      }
       const target = and(
         eq(localToolInvocations.id, message.id),
         eq(localToolInvocations.deviceId, deviceId),
@@ -141,7 +164,7 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
               inArray(localToolInvocations.status, ["pending", "accepted"]),
             ),
           );
-      } else {
+      } else if (message.type === "result") {
         const invocation = await db.query.localToolInvocations.findFirst({
           where: target,
         });
@@ -191,6 +214,7 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
     });
   });
   let busy = false;
+  let tick = 0;
   const timer = setInterval(() => {
     if (busy || ws.readyState !== WebSocket.OPEN) return;
     busy = true;
@@ -266,6 +290,17 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
           }),
         );
       }
+      // Answers to `network.ask`: the user's decision, or an expiry. The
+      // settle-sweep runs about once a second; delivery every tick.
+      await deliverNetworkDecisions(
+        deviceId,
+        (frame) => {
+          if (ws.readyState !== WebSocket.OPEN) return false;
+          ws.send(JSON.stringify(frame));
+          return true;
+        },
+        { sweep: tick++ % 4 === 0 },
+      );
     })()
       .catch((error: unknown) =>
         logger.warn("Local device dispatch failed", {

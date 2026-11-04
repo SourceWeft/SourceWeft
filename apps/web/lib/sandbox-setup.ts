@@ -6,7 +6,12 @@ import type {
 
 /** What the "Set up local execution" card offers for a readiness report. */
 export type SandboxSetupAction =
-  "install" | "updateApp" | "reinstallPackage" | "privilegedSetup" | "none";
+  | "install"
+  | "updateApp"
+  | "reinstallPackage"
+  | "privilegedSetup"
+  | "elevatedSetup"
+  | "none";
 
 export type SandboxSetupCard = {
   code: SandboxSetupCode;
@@ -24,6 +29,7 @@ const ACTION_BY_REMEDY: Record<SandboxRemedy, SandboxSetupAction> = {
   updateApp: "updateApp",
   reinstallPackage: "reinstallPackage",
   privilegedSetup: "privilegedSetup",
+  elevatedSetup: "elevatedSetup",
   none: "none",
 };
 

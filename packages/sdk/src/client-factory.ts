@@ -5,6 +5,7 @@ import { ContentClient } from "./content-client";
 import { DashboardClient } from "./dashboard-client";
 import { HttpClient } from "./http-client";
 import { JobsClient } from "./jobs-client";
+import { LocalDevicesClient } from "./local-devices-client";
 import { LlmObservabilityClient } from "./llm-observability-client";
 import { UserSettingsClient } from "./user-settings-client";
 import { WorkspaceClient } from "./workspace-client";
@@ -18,6 +19,7 @@ export type SourceweftClient = {
   readonly dashboard: DashboardClient;
   readonly jobs: JobsClient;
   readonly llmObservability: LlmObservabilityClient;
+  readonly localDevices: LocalDevicesClient;
   readonly userSettings: UserSettingsClient;
   readonly workspace: WorkspaceClient;
 };
@@ -44,6 +46,7 @@ export function createSourceweftClient(baseUrl: string): SourceweftClient {
     dashboard: new DashboardClient(http),
     jobs: new JobsClient(http),
     llmObservability: new LlmObservabilityClient(http),
+    localDevices: new LocalDevicesClient(http),
     userSettings: new UserSettingsClient(http),
     workspace: new WorkspaceClient(http),
   };

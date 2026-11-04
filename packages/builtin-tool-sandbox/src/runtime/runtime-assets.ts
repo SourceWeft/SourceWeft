@@ -21,6 +21,8 @@
  * stage leaves no stamp and is restaged from scratch).
  */
 
+import { dirname, isPathRootOrChild } from "./paths";
+
 const STAMP_FILE = ".sourceweft-asset.json";
 
 /** P1 asset root: workspace-relative, zero preconditions on any provider.
@@ -119,13 +121,7 @@ function shellQuoteSingle(value: string): string {
 
 /** `/a/b/c.zip` → `/a/b`. Both arguments here are engine-built absolute paths. */
 function dirNameOf(path: string): string {
-  const slash = path.lastIndexOf("/");
-  return slash <= 0 ? "/" : path.slice(0, slash);
-}
-
-/** True when `path` is `root` itself or sits beneath it. */
-function isRootOrChild(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`);
+  return dirname(path);
 }
 
 function assetStamp(plan: RuntimeAssetPlan, rung: "fetch" | "upload") {
@@ -407,7 +403,7 @@ async function ensureRuntimeAsset(input: {
         // and already creates the staging directory a few lines up, so the
         // archive lands in the workspace first and is moved into place from
         // inside the sandbox.
-        const uploadPath = isRootOrChild(stagingDir, rootDir)
+        const uploadPath = isPathRootOrChild(stagingDir, rootDir)
           ? `${stagingDir}/asset.zip`
           : `${rootDir}/${ASSETS_DIR}/.inbox/${plan.name}-${plan.version}.zip`;
         const prepare = await execute(

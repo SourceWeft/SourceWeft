@@ -6,6 +6,7 @@ import {
   DashboardClient,
   HttpClient,
   JobsClient,
+  LocalDevicesClient,
   LlmObservabilityClient,
   UserSettingsClient,
   WorkspaceClient,
@@ -29,4 +30,5 @@ export const contentClient = new ContentClient(httpClient);
 export const dashboardClient = new DashboardClient(httpClient);
 export const userSettingsClient = new UserSettingsClient(httpClient);
 export const workspaceClient = new WorkspaceClient(httpClient);
+export const localDevicesClient = new LocalDevicesClient(httpClient);
 export const llmObservabilityClient = new LlmObservabilityClient(httpClient);

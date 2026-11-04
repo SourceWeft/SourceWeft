@@ -10,6 +10,8 @@ export const SANDBOX_SETUP_CODES = [
   "userNamespaceRestricted",
   "sandboxFailed",
   "installing",
+  "windowsNotInstalled",
+  "windowsSetupOutdated",
 ] as const;
 export type SandboxSetupCode = (typeof SANDBOX_SETUP_CODES)[number];
 
@@ -18,6 +20,7 @@ export const SANDBOX_REMEDIES = [
   "updateApp",
   "reinstallPackage",
   "privilegedSetup",
+  "elevatedSetup",
   "none",
 ] as const;
 export type SandboxRemedy = (typeof SANDBOX_REMEDIES)[number];
@@ -91,6 +94,18 @@ export const localDeviceReplySchema = z.discriminatedUnion("type", [
       .string()
       .regex(/^[A-Z][A-Z0-9_]{0,127}$/)
       .optional(),
+  }),
+  // A running `command.execute` asks whether it may reach a host. `id` is the
+  // call's invocation id; `askId` makes a re-sent ask idempotent. Only the
+  // envelope is checked here: the host comes from whatever the sandboxed
+  // program asked to connect to, so a malformed host or port is answered with a
+  // deny by the handler instead of costing the device its connection.
+  z.object({
+    type: z.literal("network.ask"),
+    id: z.string().max(256),
+    askId: z.string().max(256),
+    host: z.string(),
+    port: z.number(),
   }),
 ]);
 

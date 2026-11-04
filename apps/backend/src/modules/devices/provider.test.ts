@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   binding: { threadId: "t", userId: "owner", deviceId: "pc" },
   call: vi.fn(),
   update: vi.fn(),
+  policy: vi.fn(),
 }));
 vi.mock("@sourceweft/db", () => ({
   threads: {},
@@ -38,6 +39,9 @@ vi.mock("@sourceweft/db", () => ({
   },
 }));
 vi.mock("./service", () => ({ localCall: state.call }));
+vi.mock("./network-approvals", () => ({
+  resolveCommandNetworkPolicy: state.policy,
+}));
 import { localProviderForTurn } from "./provider";
 const context = {
   teamId: "team",
@@ -48,6 +52,7 @@ const context = {
 beforeEach(() => {
   vi.clearAllMocks();
   state.thread.createdBy = "owner";
+  state.policy.mockResolvedValue({ mode: "ask", allow: [], suggested: {} });
   state.call.mockImplementation(async (input) => {
     if (input.action === "workspace.ensure")
       return { id: "native", path: "/Users/test/task" };
@@ -135,4 +140,126 @@ test("PC download maps only structured FILE_NOT_FOUND into provider missing", as
     ).rejects.toBe(failure);
     expect(failure).not.toBeInstanceOf(SandboxProviderError);
   }
+});
+
+test("Windows forward-slash drive paths are bound, mapped and fenced like POSIX ones", async () => {
+  const root = "C:/Users/Test/AppData/Roaming/app/task-workspaces/id/files";
+  state.call.mockImplementation(async (input) => {
+    if (input.action === "workspace.ensure")
+      return { id: "native", path: root };
+    if (input.action === "file.list")
+      return { files: [{ path: "src/a.ts", is_dir: false, size: 3 }] };
+    return {};
+  });
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  expect(provider.pathPolicy.defaultCwd).toBe(root);
+  expect(provider.pathPolicy.skillsRoot).toBe(`${root}/.sourceweft-skills`);
+  await provider.ensureDirectory!({
+    providerSandboxId: "native",
+    directory: `${root}/src`,
+  });
+  expect(state.call.mock.calls.at(-1)![0]).toMatchObject({
+    action: "file.mkdir",
+    payload: { workspaceId: "native", path: "src" },
+  });
+  // NTFS is case-insensitive: the drive letter and directories may differ in case.
+  await provider.ensureDirectory!({
+    providerSandboxId: "native",
+    directory: `${root.toLowerCase()}/Src`,
+  });
+  expect(state.call.mock.calls.at(-1)![0]).toMatchObject({
+    payload: { path: "Src" },
+  });
+  await expect(
+    provider.listFiles!({ providerSandboxId: "native", sandboxPath: root }),
+  ).resolves.toEqual([{ path: `${root}/src/a.ts`, is_dir: false, size: 3 }]);
+  for (const path of [
+    "C:/Users/Test/other/a.txt",
+    "D:/Users/Test/AppData/Roaming/app/task-workspaces/id/files/a",
+    `${root}x/a`,
+    `${root}/../a`,
+  ]) {
+    await expect(
+      provider.downloadFile({ providerSandboxId: "native", sandboxPath: path }),
+    ).rejects.toThrow("LOCAL_PATH_DENIED");
+  }
+});
+
+test.each([
+  "relative/path",
+  "C:\\Users\\Test\\files",
+  "\\\\server\\share\\files",
+  "//server/share/files",
+  "C:/Users/Test/../Other",
+])(
+  "an invalid working directory from the host is refused: %s",
+  async (path) => {
+    state.call.mockImplementation(async (input) =>
+      input.action === "workspace.ensure" ? { id: "native", path } : {},
+    );
+    await expect(localProviderForTurn(context)).rejects.toMatchObject({
+      code: "LOCAL_WORKSPACE_MISMATCH",
+    });
+  },
+);
+
+test("each command carries a freshly resolved network policy for this user and the turn's skills", async () => {
+  const networkSkills = [
+    { name: "pdf", sourceType: "builtin", skillMd: "---\nname: pdf\n---" },
+  ];
+  const policy = {
+    mode: "ask",
+    allow: ["api.example.com"],
+    suggested: { "x.example.com": "mine" },
+  };
+  state.policy.mockResolvedValue(policy);
+  const provider = (await localProviderForTurn(context, {
+    networkSkills,
+  }))!.createProvider();
+  await provider.getSandbox("native");
+  await provider.execute({
+    providerSandboxId: "native",
+    command: "curl https://api.example.com",
+    timeoutMs: 10_000,
+    maxOutputChars: 1000,
+  } as never);
+  expect(state.policy).toHaveBeenCalledWith({
+    deviceId: "pc",
+    tenant: { teamId: "team", workspaceId: "w", userId: "owner" },
+    skills: networkSkills,
+  });
+  const execute = state.call.mock.calls.find(
+    ([input]) => input.action === "command.execute",
+  )![0];
+  expect(execute.payload).toMatchObject({
+    command: "curl https://api.example.com",
+    network: policy,
+  });
+  // The second command resolves again instead of reusing the first answer.
+  state.policy.mockResolvedValue({ mode: "strict", allow: [], suggested: {} });
+  await provider.execute({
+    providerSandboxId: "native",
+    command: "true",
+    timeoutMs: 10_000,
+    maxOutputChars: 1000,
+  } as never);
+  expect(state.policy).toHaveBeenCalledTimes(2);
+  expect(state.call.mock.calls.at(-1)![0].payload.network.mode).toBe("strict");
+});
+
+test("a failed policy lookup stops the command instead of running it unrestricted", async () => {
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  await provider.getSandbox("native");
+  state.policy.mockRejectedValue(new Error("LOCAL_DEVICE_NOT_FOUND"));
+  await expect(
+    provider.execute({
+      providerSandboxId: "native",
+      command: "true",
+      timeoutMs: 10_000,
+      maxOutputChars: 1000,
+    } as never),
+  ).rejects.toThrow("LOCAL_DEVICE_NOT_FOUND");
+  expect(
+    state.call.mock.calls.some(([input]) => input.action === "command.execute"),
+  ).toBe(false);
 });

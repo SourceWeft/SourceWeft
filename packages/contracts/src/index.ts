@@ -40,6 +40,7 @@ export * from "./api-response";
 export * from "./agent-tools";
 export * from "./agent-confirmations";
 export * from "./agent-questions";
+export * from "./local-network";
 
 export * from "./billing-runtime";
 export * from "./deployment-capabilities";

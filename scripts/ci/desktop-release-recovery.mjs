@@ -41,6 +41,9 @@ export const requiredRecoveryChecks = [
   ].map((target) => `quality / native-anydoc / AnyDoc (${target})`),
 ];
 
+// A release target that ships only the sandbox runtime bundle (the desktop installer is x64-only).
+const WINDOWS_ARM64_BUNDLE_TARGET = "aarch64-pc-windows-msvc";
+
 export function validateRecoverySource({
   run,
   jobs,
@@ -126,12 +129,19 @@ export function validateRecoverySource({
       "success",
       `Publisher prerequisite did not pass: ${name}`,
     );
-  const expected = Object.keys(UPDATE_TARGETS)
+  const installers = Object.keys(UPDATE_TARGETS)
     .map((target) => `desktop-release-${target}-${sha}`)
     .sort();
   const selected = artifacts.filter((artifact) =>
     artifact.name.startsWith("desktop-release-"),
   );
+  // The aarch64 Windows sandbox runtime bundle has no installer, so it is not an update target;
+  // it is built by its own release job and is absent from releases built before it existed.
+  // When present it is held to the same rules as every other original artifact.
+  const bundleOnly = `desktop-release-${WINDOWS_ARM64_BUNDLE_TARGET}-${sha}`;
+  const expected = selected.some((artifact) => artifact.name === bundleOnly)
+    ? [...installers, bundleOnly].sort()
+    : installers;
   assert.deepEqual(
     selected.map((artifact) => artifact.name).sort(),
     expected,

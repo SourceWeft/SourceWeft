@@ -21,6 +21,7 @@ const policy = updatePublicationPolicy(process.env.DESKTOP_PUBLICATION_POLICY);
 assert(UPDATE_TARGETS[target], "Explicit DESKTOP_RELEASE_TARGET is required");
 const mac = target.endsWith("apple-darwin");
 const linux = target.endsWith("unknown-linux-gnu");
+const windows = target.endsWith("pc-windows-msvc");
 assert.equal(
   process.platform,
   mac ? "darwin" : linux ? "linux" : "win32",
@@ -149,7 +150,9 @@ const installer = {
   platform: mac ? "macos" : linux ? "linux" : "windows",
   arch: target.startsWith("aarch64") ? "arm64" : "x64",
   filename: installerName,
-  localExecutionSupported: mac,
+  // Unchanged for Linux (false): the manifest entry describes the AppImage, and the .deb that carries
+  // the sandbox setup is not a manifest entry. macOS and Windows installers set the sandbox up.
+  localExecutionSupported: mac || windows,
   ...(await digest(createReadStream(installerSource))),
 };
 const update = {

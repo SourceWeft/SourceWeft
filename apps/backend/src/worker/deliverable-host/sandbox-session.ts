@@ -13,6 +13,7 @@ import {
   presignSandboxAssetUrl,
 } from "../../shared/sandbox-assets/cache";
 import { logger } from "../../shared/logger";
+import { trimDeviceTrailingSlash } from "../../modules/devices/device-path";
 
 /**
  * Sandbox adapter for deliverable pipelines: exposes the narrow session
@@ -114,7 +115,7 @@ export function createDeliverableSandboxAdapter(input: {
         return null;
       }
       return {
-        rootDir: runtime.pathPolicy.defaultCwd.replace(/\/$/u, ""),
+        rootDir: trimDeviceTrailingSlash(runtime.pathPolicy.defaultCwd),
         uploadFiles: (files) => runtime.backend.uploadFiles(files),
         execute: (command, options) =>
           runtime.backend.execute(command, {

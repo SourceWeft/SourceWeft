@@ -27,6 +27,10 @@ import {
   assertSandboxReadPath,
   assertSandboxWritePath,
   commandReferencesSkillsRoot,
+  dirname,
+  isDriveAbsolutePath,
+  normalizeSandboxPath,
+  policyUsesDrivePaths,
 } from "./paths";
 import type {
   SandboxProvider,
@@ -129,21 +133,14 @@ function escapeControlChars(value: string) {
   });
 }
 
-function normalizePath(value: string) {
-  if (hasControlChars(value)) {
-    return value;
-  }
-  const normalized = value.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
-  const absolute = normalized.startsWith("/") ? normalized : `/${normalized}`;
-  const withoutTrailingSlash = absolute.replace(/\/$/g, "");
-  return withoutTrailingSlash || "/";
-}
-
 function assertSandboxBackendPath(
   value: string | null | undefined,
   policy: SandboxProviderPathPolicy,
 ) {
-  const normalized = normalizePath(value || "/");
+  const normalized = normalizeSandboxPath(
+    value || "/",
+    policyUsesDrivePaths(policy),
+  );
   if (normalized === "/") {
     return normalized;
   }
@@ -155,12 +152,17 @@ function sandboxPathError(error: unknown) {
 }
 
 function rootListings(policy: SandboxProviderPathPolicy) {
-  return Array.from(new Set(policy.readWriteRoots.map(normalizePath))).map(
-    (root) => ({
-      path: `${root}/`,
-      is_dir: true,
-    }),
-  );
+  const driveAware = policyUsesDrivePaths(policy);
+  return Array.from(
+    new Set(
+      policy.readWriteRoots.map((root) =>
+        normalizeSandboxPath(root, driveAware),
+      ),
+    ),
+  ).map((root) => ({
+    path: isDriveAbsolutePath(root) && root.endsWith("/") ? root : `${root}/`,
+    is_dir: true,
+  }));
 }
 
 function shellQuote(value: string) {
@@ -232,7 +234,7 @@ function parseFindLine(line: string): FileInfo | null {
   };
 }
 
-function globToRegExp(pattern: string) {
+function globToRegExp(pattern: string, flags?: string) {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*\*\//g, "::DOUBLE_STAR_SLASH::")
@@ -241,7 +243,7 @@ function globToRegExp(pattern: string) {
     .replace(/\?/g, "[^/]")
     .replace(/::DOUBLE_STAR_SLASH::/g, "(?:.*/)?")
     .replace(/::DOUBLE_STAR::/g, ".*");
-  return new RegExp(`^${escaped}$`);
+  return new RegExp(`^${escaped}$`, flags);
 }
 
 function performStringReplacement(
@@ -718,7 +720,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         // Only the local path check above owns permission_denied; provider
         // exceptions retain their typed cause through the host operation.
         throwBackendOperationAbortReason(input.signal);
-        const dir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
+        const dir = dirname(normalized);
         await input.provider.ensureDirectory({
           providerSandboxId: input.sandbox.providerSandboxId,
           directory: dir,
@@ -1061,7 +1063,13 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         files: rootListings(policy),
       };
     }
-    const patternMatcherTargetIsAbsolute = pattern.trim().startsWith("/");
+    // A drive-absolute pattern (`C:/ws/**`) is absolute only for a
+    // drive-rooted policy; NTFS matches it case-insensitively.
+    const patternIsDriveAbsolute =
+      policyUsesDrivePaths(policy) &&
+      isDriveAbsolutePath(pattern.trim().replace(/\\/g, "/"));
+    const patternMatcherTargetIsAbsolute =
+      pattern.trim().startsWith("/") || patternIsDriveAbsolute;
     let normalizedPattern: string;
     try {
       normalizedPattern = patternMatcherTargetIsAbsolute
@@ -1079,7 +1087,10 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
             sandboxPath: normalized,
             recursive: true,
           });
-          const matcher = globToRegExp(normalizedPattern);
+          const matcher = globToRegExp(
+            normalizedPattern,
+            patternIsDriveAbsolute ? "i" : undefined,
+          );
           return {
             files: files.filter((file) =>
               matcher.test(
@@ -1099,7 +1110,10 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     if (result.exitCode !== 0) {
       return { error: `ENOENT: no such directory, glob '${normalized}'` };
     }
-    const matcher = globToRegExp(normalizedPattern);
+    const matcher = globToRegExp(
+      normalizedPattern,
+      patternIsDriveAbsolute ? "i" : undefined,
+    );
     return {
       files: result.output
         .trim()

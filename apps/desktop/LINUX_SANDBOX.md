@@ -30,7 +30,7 @@ driven by a small helper called the sandbox runtime):
 
 - Linux **x86_64**. No sandbox runtime is published for other architectures: on them the app
   reports "No sandbox runtime is published for this platform." with no action to take.
-  Windows reports local execution as unavailable.
+  Windows is covered by [WINDOWS_SANDBOX.md](./WINDOWS_SANDBOX.md).
 - An x86-64 CPU with SSE4.2 (any Intel or AMD processor from about 2009 onwards). The
   sandbox runtime is a Bun-compiled executable; since Bun 1.4 its x64 build targets
   Nehalem (SSE4.2) and picks AVX2 code at run time, so AVX2 is **not** required.

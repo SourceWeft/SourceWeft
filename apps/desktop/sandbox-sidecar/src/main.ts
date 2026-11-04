@@ -8,6 +8,13 @@
  * array, the names of whatever proxy variables are still in `process.env` after stripping
  * (expected to always be empty) — see `tests/server.test.ts`'s `main strips proxy variables`.
  *
+ * `--print-namespace` is test-only too: it prints the Windows namespace srt resolved at build
+ * time (the last segment of its state directory, `%ProgramData%\<namespace>`), so CI can run
+ * the compiled `srt-sidecar.exe` and prove the `--define __SRT_WIN_NAMESPACE__` that `build.ts`
+ * passes really reached the executable (a define whose quotes were lost on the Windows command
+ * line still builds, and silently falls back to upstream's names) — see
+ * `tests/print-namespace.test.ts`.
+ *
  * `startServer` already runs `srt.reset()` (best effort) when its own request loop ends,
  * whether that was an explicit `shutdown` or `input` simply hitting EOF (see `server.ts`'s
  * `teardown`) — but `reset()` tearing down srt's state does not guarantee every socket/proxy
@@ -27,7 +34,7 @@
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 
 /** Bounds how long `flushStdout` waits for `process.stdout` to drain before giving up on it. */
 const STDOUT_FLUSH_GRACE_MS = 2_000;
@@ -106,6 +113,17 @@ async function main(): Promise<void> {
 
   if (process.argv.includes("--print-env")) {
     process.stdout.write(`${JSON.stringify(remainingProxyVarNames(process.env))}\n`);
+    await flushStdout(STDOUT_FLUSH_GRACE_MS);
+    process.exit(0);
+    return;
+  }
+
+  if (process.argv.includes("--print-namespace")) {
+    // srt's state directory is `%ProgramData%\<namespace>`; its value is only read, never
+    // created. Off Windows `ProgramData` does not exist, so give srt a placeholder to join onto.
+    process.env.ProgramData ??= "C:\\ProgramData";
+    const { windowsStateDir } = await import("@anthropic-ai/sandbox-runtime");
+    process.stdout.write(`${win32.basename(windowsStateDir())}\n`);
     await flushStdout(STDOUT_FLUSH_GRACE_MS);
     process.exit(0);
     return;

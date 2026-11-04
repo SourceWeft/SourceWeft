@@ -33,7 +33,7 @@ futures-util = "0.3"
 # OS locale detection for the tray's startup-time guess, before the webview
 # has had a chance to report its own resolved locale (see tray_locale.rs).
 sys-locale = "0.3"
-tauri-plugin-updater = "=2.11.0"
+tauri-plugin-updater = "=2.14.1"
 tauri-plugin-dialog = "2"
 semver = "1"
 httpdate = "1"
@@ -49,6 +49,30 @@ security-framework = "3"
 # for that transport (vs. crypto-openssl); it needs no system OpenSSL and
 # avoids an extra native build dependency on the Linux desktop image.
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(windows)'.dependencies]
+# Windows Credential Manager (Generic credentials, per-user, DPAPI-protected) for the local-device
+# credentials (secret_store.rs). windows-native is the direct CredRead/CredWrite backend; there is
+# no file fallback.
+keyring = { version = "3", features = ["windows-native"] }
+# Process creation flags for the sidecar and the wrapped command (local_host/{sidecar,process}.rs)
+# and, in later tasks, Job Objects, ACL and Credential Manager calls. Same 0.61 line the tree
+# already resolves through tauri, so no second copy is built.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_IO",
+    "Win32_System_Console",
+    "Win32_System_SystemInformation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

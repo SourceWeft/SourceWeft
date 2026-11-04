@@ -33,14 +33,67 @@ const EXECUTE_ALWAYS_DENIED_ROOTS = Object.freeze([
   SOURCEWEFT_KB_ROOT,
 ]);
 
-function normalizePath(value: string) {
+/**
+ * A Windows device speaks forward-slash drive paths (`C:/Users/me/...`) on the
+ * wire. This matches only that shape; `C:foo` (drive-relative), `//server` and
+ * `\\?\` prefixes are not drive-absolute and stay rejectable.
+ */
+const DRIVE_ABSOLUTE = /^[A-Za-z]:(?:\/|$)/u;
+
+export function isDriveAbsolutePath(path: string) {
+  return DRIVE_ABSOLUTE.test(path);
+}
+
+/**
+ * True when the provider's roots are drive paths. Drive awareness is driven by
+ * the policy so a POSIX policy keeps its exact historical behaviour: an input
+ * such as `C:/x` is only understood as a drive path under a drive-rooted
+ * policy, and is otherwise treated as it always was.
+ */
+export function policyUsesDrivePaths(policy: SandboxProviderPathPolicy) {
+  return [
+    policy.workspaceRoot,
+    policy.defaultCwd,
+    ...policy.readWriteRoots,
+    ...policy.prepareTargetRoots,
+    ...policy.collectSourceRoots,
+  ].some((root) => typeof root === "string" && isDriveAbsolutePath(root));
+}
+
+/**
+ * Canonical form of a model- or host-supplied sandbox path: `/`-separated, no
+ * duplicate or trailing slash. With `driveAware`, a drive-absolute path keeps
+ * its drive (upper-cased letter, `C:/` for the drive root) instead of being
+ * rooted at `/`.
+ */
+export function normalizeSandboxPath(value: string, driveAware = false) {
   if (hasControlChars(value)) {
     return value;
   }
   const normalized = value.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (driveAware && DRIVE_ABSOLUTE.test(normalized)) {
+    const rest = normalized.slice(2).replace(/\/$/g, "");
+    return `${normalized.charAt(0).toUpperCase()}:${rest || "/"}`;
+  }
   const absolute = normalized.startsWith("/") ? normalized : `/${normalized}`;
   const withoutTrailingSlash = absolute.replace(/\/$/g, "");
   return withoutTrailingSlash || "/";
+}
+
+function normalizePath(value: string) {
+  return normalizeSandboxPath(value, false);
+}
+
+/**
+ * `~` expands to a home directory only at the start of a word. In a POSIX path
+ * any `~` is refused, as before. In a drive path a mid-name `~` is an ordinary
+ * 8.3 short-name character (`RUNNER~1`), so only a component that starts with
+ * it is refused.
+ */
+function hasHomeExpansion(path: string) {
+  return isDriveAbsolutePath(path)
+    ? path.split("/").some((part) => part.startsWith("~"))
+    : path.includes("~");
 }
 
 function hasControlChars(value: string) {
@@ -61,9 +114,23 @@ function disallowedExecuteVfsRoot(
   return roots.find((root) => command.includes(root));
 }
 
+/**
+ * True when `path` is `root` or lies beneath it. A POSIX root matches exactly;
+ * a drive root matches case-insensitively (NTFS) and a drive root such as
+ * `C:/` contains the whole drive. Both arguments are already normalised.
+ */
+export function isPathRootOrChild(path: string, root: string) {
+  if (isDriveAbsolutePath(root)) {
+    const lowerPath = path.toLowerCase();
+    const lowerRoot = root.toLowerCase();
+    const prefix = lowerRoot.endsWith("/") ? lowerRoot : `${lowerRoot}/`;
+    return lowerPath === lowerRoot || lowerPath.startsWith(prefix);
+  }
+  return path === root || path.startsWith(`${root}/`);
+}
+
 function isRootOrChild(path: string, root: string) {
-  const normalizedRoot = normalizePath(root);
-  return path === normalizedRoot || path.startsWith(`${normalizedRoot}/`);
+  return isPathRootOrChild(path, normalizePath(root));
 }
 
 export function assertSourceWorkPath(value: string) {
@@ -81,20 +148,21 @@ export function assertSourceWorkPath(value: string) {
   return path;
 }
 
-function formatRoots(roots: readonly string[]) {
-  return roots.map(normalizePath).join(", ");
+function formatRoots(roots: readonly string[], driveAware = false) {
+  return roots.map((root) => normalizeSandboxPath(root, driveAware)).join(", ");
 }
 
 function policyRoots(input: {
   policy: SandboxProviderPathPolicy;
   kind: keyof Pick<
     SandboxProviderPathPolicy,
-    | "prepareTargetRoots"
-    | "collectSourceRoots"
-    | "readWriteRoots"
+    "prepareTargetRoots" | "collectSourceRoots" | "readWriteRoots"
   >;
 }) {
-  return input.policy[input.kind].map(normalizePath);
+  const driveAware = policyUsesDrivePaths(input.policy);
+  return input.policy[input.kind].map((root) =>
+    normalizeSandboxPath(root, driveAware),
+  );
 }
 
 function assertProviderSandboxPath(input: {
@@ -102,16 +170,17 @@ function assertProviderSandboxPath(input: {
   roots: readonly string[];
   code: string;
   description: string;
+  driveAware: boolean;
 }) {
-  const path = normalizePath(input.value);
+  const path = normalizeSandboxPath(input.value, input.driveAware);
   if (
     hasControlChars(path) ||
     path.includes("..") ||
-    path.includes("~") ||
-    !input.roots.some((root) => isRootOrChild(path, root))
+    hasHomeExpansion(path) ||
+    !input.roots.some((root) => isPathRootOrChild(path, root))
   ) {
     throw new Error(
-      `${input.code}: ${input.description} must be under ${formatRoots(input.roots)}.`,
+      `${input.code}: ${input.description} must be under ${formatRoots(input.roots, input.driveAware)}.`,
     );
   }
   return path;
@@ -134,20 +203,20 @@ function assertSandboxPathForPolicy(input: {
   policy: SandboxProviderPathPolicy;
   kind: keyof Pick<
     SandboxProviderPathPolicy,
-    | "prepareTargetRoots"
-    | "collectSourceRoots"
-    | "readWriteRoots"
+    "prepareTargetRoots" | "collectSourceRoots" | "readWriteRoots"
   >;
   code: string;
   description: string;
 }) {
-  const path = normalizePath(input.value);
+  const driveAware = policyUsesDrivePaths(input.policy);
+  const path = normalizeSandboxPath(input.value, driveAware);
   assertNotSourceWeftVfsPath(path, input.code);
   return assertProviderSandboxPath({
     value: path,
     roots: policyRoots({ policy: input.policy, kind: input.kind }),
     code: input.code,
     description: input.description,
+    driveAware,
   });
 }
 
@@ -181,20 +250,21 @@ export function assertSandboxFilePath(
   value: string,
   policy: SandboxProviderPathPolicy,
 ) {
-  const path = normalizePath(value);
-  if (hasControlChars(path) || path.includes("..") || path.includes("~")) {
+  const driveAware = policyUsesDrivePaths(policy);
+  const path = normalizeSandboxPath(value, driveAware);
+  if (hasControlChars(path) || path.includes("..") || hasHomeExpansion(path)) {
     throw new Error(
-      `SANDBOX_FILE_PATH_DENIED: path must be under ${formatRoots(policy.readWriteRoots)}.`,
+      `SANDBOX_FILE_PATH_DENIED: path must be under ${formatRoots(policy.readWriteRoots, driveAware)}.`,
     );
   }
   assertNotSourceWeftVfsPath(path, "SANDBOX_FILE_PATH_DENIED");
   if (
     !policy.readWriteRoots
-      .map(normalizePath)
-      .some((root) => isRootOrChild(path, root))
+      .map((root) => normalizeSandboxPath(root, driveAware))
+      .some((root) => isPathRootOrChild(path, root))
   ) {
     throw new Error(
-      `SANDBOX_FILE_PATH_DENIED: ${path} is outside allowed sandbox roots. Use paths under ${formatRoots(policy.readWriteRoots)}.`,
+      `SANDBOX_FILE_PATH_DENIED: ${path} is outside allowed sandbox roots. Use paths under ${formatRoots(policy.readWriteRoots, driveAware)}.`,
     );
   }
   return path;
@@ -204,16 +274,18 @@ export function assertExecuteCwd(
   value: string | undefined,
   policy: SandboxProviderPathPolicy,
 ) {
-  const path = normalizePath(value || policy.defaultCwd);
+  const driveAware = policyUsesDrivePaths(policy);
+  const path = normalizeSandboxPath(value || policy.defaultCwd, driveAware);
+  const workspaceRoot = normalizeSandboxPath(policy.workspaceRoot, driveAware);
   assertNotSourceWeftVfsPath(path, "SANDBOX_EXECUTE_CWD_DENIED");
   if (
     hasControlChars(path) ||
     path.includes("..") ||
-    path.includes("~") ||
-    !isRootOrChild(path, policy.workspaceRoot)
+    hasHomeExpansion(path) ||
+    !isPathRootOrChild(path, workspaceRoot)
   ) {
     throw new Error(
-      `SANDBOX_EXECUTE_CWD_DENIED: cwd must be under ${normalizePath(policy.workspaceRoot)}.`,
+      `SANDBOX_EXECUTE_CWD_DENIED: cwd must be under ${workspaceRoot}.`,
     );
   }
   return path;
@@ -223,18 +295,19 @@ export function assertSandboxReadPath(
   value: string,
   policy: SandboxProviderPathPolicy,
 ) {
-  const path = normalizePath(value);
+  const driveAware = policyUsesDrivePaths(policy);
+  const path = normalizeSandboxPath(value, driveAware);
   assertNotSourceWeftVfsPath(path, "SANDBOX_READ_PATH_DENIED");
   if (
     hasControlChars(path) ||
     path.includes("..") ||
-    path.includes("~") ||
+    hasHomeExpansion(path) ||
     !policy.readWriteRoots
-      .map(normalizePath)
-      .some((root) => isRootOrChild(path, root))
+      .map((root) => normalizeSandboxPath(root, driveAware))
+      .some((root) => isPathRootOrChild(path, root))
   ) {
     throw new Error(
-      `SANDBOX_READ_PATH_DENIED: path must be under ${formatRoots(policy.readWriteRoots)}.`,
+      `SANDBOX_READ_PATH_DENIED: path must be under ${formatRoots(policy.readWriteRoots, driveAware)}.`,
     );
   }
   return path;
@@ -287,5 +360,7 @@ export function shellQuote(value: string) {
 
 export function dirname(path: string) {
   const index = path.lastIndexOf("/");
+  // `C:/a` → `C:/` and `C:/` → `C:/`: the parent of a drive child keeps its drive.
+  if (isDriveAbsolutePath(path) && index === 2) return path.slice(0, 3);
   return index <= 0 ? "/" : path.slice(0, index);
 }
