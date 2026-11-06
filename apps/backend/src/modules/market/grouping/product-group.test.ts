@@ -5,6 +5,7 @@ import {
   brandOfDomain,
   brandPosition,
   compareProductGroupMembers,
+  createProductGroupResolver,
   entryCarriesBrand,
   githubRepoOwner,
   groupAdmits,
@@ -127,6 +128,105 @@ const SUMMARY_ONLY_MENTIONS = [
   entry("io.github.acme/notionally", "Notionally"),
   entry("io.github.acme/notions", "Notions board"),
 ];
+
+test("a production-sized resolver does not rebuild official metadata for its candidates", () => {
+  let publisherReads = 0;
+  const officials = Array.from({ length: 20_000 }, (_, i) => {
+    const row = official(
+      `com.brand${i}/mcp`,
+      `Brand${i}`,
+      `brand${i}.example`,
+      {
+        repoUrl: `https://github.com/owner${i}/mcp`,
+      },
+    );
+    const publisher = row.publisher;
+    Object.defineProperty(row, "publisher", {
+      get() {
+        publisherReads += 1;
+        return publisher;
+      },
+    });
+    return row;
+  });
+  const resolver = createProductGroupResolver(officials);
+  const afterPreparation = publisherReads;
+  for (let i = 0; i < 2_000; i++) {
+    const mode = i % 6;
+    const candidate = entry(
+      mode === 2
+        ? `io.github.owner${i}/bridge`
+        : `io.github.integrator/bridge-${i}`,
+      mode === 0
+        ? `Utility brand${i}`
+        : mode === 1
+          ? `brand${i} brand${i + 1}`
+          : "Unrelated utility",
+      {
+        repoUrl: "https://github.com/integrator/bridge",
+        publisher: mode === 3 ? publisher(`brand${i}.example`, false) : null,
+      },
+    );
+    const expected =
+      mode <= 3 ? `brand${mode === 1 ? i + 1 : i}.example` : null;
+    assert.equal(resolver.groupFor(candidate)?.domain ?? null, expected);
+  }
+  assert.ok(afterPreparation > 0);
+  assert.equal(publisherReads, afterPreparation);
+});
+
+test("candidate fields are parsed once even when many groups share a brand token", () => {
+  const officials = Array.from({ length: 1_000 }, (_, i) =>
+    official(`com.claw-brand${i}/mcp`, "MCP", `claw-brand${i}.example`),
+  );
+  const resolver = createProductGroupResolver(officials);
+  const reads = { name: 0, identifier: 0, repoUrl: 0, publisher: 0 };
+  const candidate: ProductGroupEntry = {
+    id: "single-parse",
+    publishedAt: null,
+    get name() {
+      reads.name += 1;
+      return "Claw Brand999";
+    },
+    get identifier() {
+      reads.identifier += 1;
+      return "io.github.other/bridge";
+    },
+    get repoUrl() {
+      reads.repoUrl += 1;
+      return "https://github.com/other/bridge";
+    },
+    get publisher() {
+      reads.publisher += 1;
+      return null;
+    },
+  };
+  assert.equal(resolver.groupFor(candidate)?.domain, "claw-brand999.example");
+  assert.deepEqual(reads, { name: 1, identifier: 1, repoUrl: 1, publisher: 1 });
+});
+
+test("indexed first-token matches still require the full brand inside one field", () => {
+  const resolver = createProductGroupResolver([
+    official("dev.claw-link/mcp", "Claw Link", "claw-link.dev"),
+  ]);
+  assert.equal(resolver.groupFor(entry("io.github.o/link", "Claw")), null);
+  assert.equal(resolver.groupFor(entry("io.github.o/x", "Claw Linked")), null);
+  assert.equal(
+    resolver.groupFor(entry("io.github.o/claw-link", "Bridge"))?.domain,
+    "claw-link.dev",
+  );
+});
+
+test("returned groups cannot mutate the resolver snapshot", () => {
+  const resolver = createProductGroupResolver([NOTION_OFFICIAL]);
+  const candidate = NOTION_INTEGRATIONS[0]!;
+  const first = resolver.groupFor(candidate)!;
+  first.domain = "changed.example";
+  first.brandTokens = ["changed"];
+  assert.equal(resolver.groupFor(candidate)?.domain, "notion.com");
+  assert.deepEqual(resolver.groupFor(candidate)?.brandTokens, ["notion"]);
+  assert.equal(resolver.isMember({ domain: "notion.com" }, candidate), true);
+});
 
 test("slug tokens split on separators and camelCase, never inside a word", () => {
   assert.deepEqual(slugTokens("Notion MCP Server"), [
