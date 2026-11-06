@@ -155,7 +155,7 @@ function structuredOutputResponseDiagnostics(rawMessage: unknown) {
 
 type SalvagedStructuredOutput = {
   args: Record<string, unknown>;
-  source: "invalid_tool_calls" | "additional_kwargs";
+  source: "invalid_tool_calls" | "additional_kwargs" | "content";
   repaired: boolean;
 };
 
@@ -175,6 +175,20 @@ function parsePossiblyBrokenJson(
       return undefined;
     }
   }
+}
+
+/**
+ * A message text that is one JSON object and nothing else: the object itself,
+ * or the object inside a single Markdown code fence. Undefined for anything
+ * else, prose around an object included — that is not an answer in the
+ * schema's shape, and nothing is extracted from it.
+ */
+function jsonObjectAnswerText(content: string | undefined): string | undefined {
+  if (content === undefined) return undefined;
+  let text = content.trim();
+  const fenced = /^```[a-zA-Z]*\s*\n([\s\S]*?)\n?```$/.exec(text);
+  if (fenced) text = fenced[1]!.trim();
+  return text.startsWith("{") && text.endsWith("}") ? text : undefined;
 }
 
 /**
@@ -204,6 +218,12 @@ function salvageStructuredToolCall(input: {
   rawMessage: unknown;
   toolName: string;
   allowJsonRepair: boolean;
+  /**
+   * Also take a JSON object the model wrote as its message text. Only where
+   * calling the tool was optional (the available-tool path): there a text
+   * answer is one the API allowed, not a broken call.
+   */
+  acceptContentAnswer?: boolean;
 }): SalvagedStructuredOutput | undefined {
   const record = extractObjectRecord(input.rawMessage);
   if (!record) {
@@ -234,6 +254,12 @@ function salvageStructuredToolCall(input: {
     const fn = extractObjectRecord(extractObjectRecord(call)?.function);
     if (fn?.name === input.toolName && typeof fn.arguments === "string") {
       candidates.push({ argsText: fn.arguments, source: "additional_kwargs" });
+    }
+  }
+  if (input.acceptContentAnswer && candidates.length === 0) {
+    const answer = jsonObjectAnswerText(responseTextForDiagnostics(record));
+    if (answer !== undefined) {
+      candidates.push({ argsText: answer, source: "content" });
     }
   }
   for (const candidate of candidates) {
@@ -353,8 +379,11 @@ function classifyNativeStructuredOutputError(
  * `JsonOutputKeyToolsParser(key_name=..., first_tool_only=True)` behavior.
  * `@langchain/openai` (JS) ships no `disabled_params`, so the bridge assembles
  * it here. The decision is the planner's; this only executes it. The model may
- * occasionally answer without calling the tool; the caller's repair loop covers
- * that turn.
+ * answer without calling the tool: when its message text is one JSON object
+ * (bare or in a single code fence), that is taken as the answer, since `auto`
+ * allowed it to answer that way — DeepSeek does so for a few percent of long
+ * schemas. The caller validates it like any tool arguments. Any other text
+ * still fails as invalid structured output, for the caller's retry.
  */
 async function invokeStructuredViaAvailableTool(input: {
   model: LangChainChatModelLike;
@@ -406,10 +435,13 @@ async function invokeStructuredViaAvailableTool(input: {
     typeof call.args !== "object" ||
     Array.isArray(call.args)
   ) {
+    // The tool was only available, so the model may have answered in its
+    // message text instead; a JSON object there is that answer.
     const salvaged = salvageStructuredToolCall({
       rawMessage,
       toolName: input.name,
       allowJsonRepair: input.allowJsonRepair,
+      acceptContentAnswer: true,
     });
     if (salvaged) {
       input.logger?.warn?.("model-gateway.structured-output-repaired", {

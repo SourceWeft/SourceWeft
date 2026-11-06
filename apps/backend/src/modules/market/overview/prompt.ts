@@ -440,6 +440,15 @@ function categoryJsonSchema(
  * What the model is asked to fill (JSON Schema, for the gateway). With the
  * IDs of an input's numbered passages, every category's evidence must be one
  * of them: the schema `buildMcpOverviewPrompt` sends for that input.
+ *
+ * `classification` comes first. Where the schema is only advisory (DeepSeek's
+ * own API, which takes it as an optional tool), the model writes the keys in
+ * this order, and with `en` first it kept putting `classification` inside the
+ * locale it had just written — then repeating it in every locale, or stopping
+ * after `en`. Live, 40 real registry entries (2026-11-05): 11 answers in the
+ * wrong shape with `en` first, 1 with `classification` first. The order is no
+ * part of the contract (JSON objects are unordered, and the parser does not
+ * look at it), so stored overviews stay current.
  */
 export function buildMcpOverviewOutputSchema(
   passageIds?: readonly string[],
@@ -448,9 +457,6 @@ export function buildMcpOverviewOutputSchema(
     type: "object",
     additionalProperties: false,
     properties: {
-      en: localizedJsonSchema,
-      "zh-CN": localizedJsonSchema,
-      "zh-TW": localizedJsonSchema,
       classification: {
         type: "object",
         additionalProperties: false,
@@ -472,8 +478,11 @@ export function buildMcpOverviewOutputSchema(
         },
         required: ["primary", "secondary", "rationale"],
       },
+      en: localizedJsonSchema,
+      "zh-CN": localizedJsonSchema,
+      "zh-TW": localizedJsonSchema,
     },
-    required: ["en", "zh-CN", "zh-TW", "classification"],
+    required: ["classification", "en", "zh-CN", "zh-TW"],
   };
 }
 

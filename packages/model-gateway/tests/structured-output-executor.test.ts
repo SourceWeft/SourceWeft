@@ -30,10 +30,12 @@ function createFakeModel(input: {
   toolName?: string;
   toolCallArgs?: Record<string, unknown>;
   parsed?: Record<string, unknown>;
+  /** The message text, for a model that answers without calling the tool. */
+  content?: string;
 }): LangChainChatModelLike {
   const rawMessage = {
     id: "msg_1",
-    content: "",
+    content: input.content ?? "",
     tool_calls: input.toolCallArgs
       ? [
           {
@@ -174,6 +176,58 @@ test("executeStructuredOutput: a pinned method forces the native path even with 
     (capture.structuredConfig as Record<string, unknown>)?.method,
     "jsonSchema",
   );
+});
+
+test("executeStructuredOutput: a JSON object answered as text on the strip path is the answer", async () => {
+  // DeepSeek, with the schema only available (tool_choice auto), sometimes
+  // answers in its message text instead of calling the tool.
+  for (const content of [
+    '{"title":"Coffee"}',
+    '```json\n{"title":"Coffee"}\n```',
+    '  {"title":"Coffee"}\n',
+  ]) {
+    const capture: Record<string, unknown> = {};
+    const warnings: Array<Record<string, unknown>> = [];
+    const { parsed } = await executeStructuredOutput({
+      model: createFakeModel({ capture, content }),
+      schema: SCHEMA,
+      name: "storyboard",
+      messages: [{ role: "user", content: "hi" }],
+      target: TARGET,
+      supportsForcedToolChoice: false,
+      allowJsonRepair: false,
+      logger: {
+        warn: (_message: string, fields?: Record<string, unknown>) => {
+          warnings.push(fields ?? {});
+        },
+      } as never,
+    });
+    assert.deepEqual(parsed, { title: "Coffee" }, content);
+    assert.equal(warnings[0]?.source, "content");
+  }
+});
+
+test("executeStructuredOutput: other text on the strip path is still invalid structured output", async () => {
+  for (const content of [
+    "Here is the storyboard: {\"title\":\"Coffee\"}",
+    '["Coffee"]',
+    '{"title": "Coffee"',
+    "I cannot help with that.",
+  ]) {
+    await assert.rejects(
+      executeStructuredOutput({
+        model: createFakeModel({ capture: {}, content }),
+        schema: SCHEMA,
+        name: "storyboard",
+        messages: [{ role: "user", content: "hi" }],
+        target: TARGET,
+        supportsForcedToolChoice: false,
+        allowJsonRepair: false,
+      }),
+      /structured output/i,
+      content,
+    );
+  }
 });
 
 test("executeStructuredOutput: no tool call on the strip path surfaces as invalid structured output", async () => {

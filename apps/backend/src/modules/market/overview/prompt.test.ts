@@ -180,16 +180,31 @@ describe("prompt", () => {
       mcpCategoryDefinitions.map((category) => category.slug),
     );
     assert.equal(MCP_OVERVIEW_OUTPUT_NAME, "mcp_overview");
+    // classification first: a model following an advisory schema writes the
+    // keys in this order, and with a locale first it nested the
+    // classification inside that locale.
     assert.deepEqual(MCP_OVERVIEW_OUTPUT_JSON_SCHEMA.required, [
+      "classification",
       "en",
       "zh-CN",
       "zh-TW",
-      "classification",
     ]);
     const properties = MCP_OVERVIEW_OUTPUT_JSON_SCHEMA.properties as Record<
       string,
       { required?: string[]; properties?: Record<string, unknown> }
     >;
+    assert.deepEqual(Object.keys(properties), [
+      "classification",
+      "en",
+      "zh-CN",
+      "zh-TW",
+    ]);
+    assert.deepEqual(
+      Object.keys(
+        buildMcpOverviewOutputSchema(["D1"]).properties as Record<string, unknown>,
+      ),
+      ["classification", "en", "zh-CN", "zh-TW"],
+    );
     assert.deepEqual(properties.en!.required, [
       "summary",
       "whatItDoes",

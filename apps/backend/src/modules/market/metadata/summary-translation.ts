@@ -183,6 +183,35 @@ const WEB_ADDRESS =
  */
 const PRODUCT_SUFFIX = /\.(?:js|ts|jsx|tsx|py|rs|md|json|yaml|yml|toml|txt|sh)$/i;
 const MARKDOWN_LINK = /\[[^\]]*\]\([^)]*\)|!\[|\]\[/;
+/**
+ * A Latin word: letters and digits, joined inside by the dots and hyphens
+ * names use (`Node.js`, `gpt-4o`), never ending in one, so the full stop after
+ * a name at the end of a sentence is not part of it.
+ */
+const LATIN_WORD = /[\p{Script=Latin}\p{Nd}]+(?:[.-][\p{Script=Latin}\p{Nd}]+)*/gu;
+/** A name or acronym as the source writes it: a capital letter or a digit somewhere in it. */
+const NAME_LIKE = /[\p{Lu}\p{Nd}]/u;
+
+/**
+ * Whether a translation is mostly Chinese: at least MIN_HAN_SHARE of its
+ * letters are Chinese characters, not counting the names the prompt asks the
+ * model to keep as written. A name is a Latin word the source has too, written
+ * the same way, with a capital or a digit in it (`LinkedIn`, `MCP`, `S3`). So a
+ * faithful translation of a description that lists products — "在 X、LinkedIn、
+ * TikTok 上规划和发布品牌内容" — passes, while an answer that leaves ordinary
+ * English words untranslated still fails: those are lower case.
+ */
+function mostlyChinese(text: string, source: string): boolean {
+  const sourceWords = new Set(source.match(LATIN_WORD) ?? []);
+  const withoutNames = text.replace(LATIN_WORD, (word) =>
+    sourceWords.has(word) && NAME_LIKE.test(word) ? " " : word,
+  );
+  const han = Array.from(text).filter((char) => HAN_CHAR.test(char)).length;
+  const letters = Array.from(withoutNames).filter((char) =>
+    LETTER.test(char),
+  ).length;
+  return han > 0 && han / letters >= MIN_HAN_SHARE;
+}
 
 /**
  * The model's answer as a Simplified Chinese summary of `source`, or null when
@@ -213,9 +242,7 @@ export function parseSummaryTranslationOutput(
   if (!text || Array.from(text).length > MCP_SUMMARY_TRANSLATION_MAX_CHARS) {
     return null;
   }
-  const letters = Array.from(text).filter((char) => LETTER.test(char));
-  const han = letters.filter((char) => HAN_CHAR.test(char)).length;
-  if (han === 0 || han / letters.length < MIN_HAN_SHARE) return null;
+  if (!mostlyChinese(text, source)) return null;
   const known = source.toLowerCase();
   for (const match of text.match(WEB_ADDRESS) ?? []) {
     const address = match.replace(/[.,;:!?]+$/, "");
