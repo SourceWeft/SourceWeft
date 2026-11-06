@@ -11,10 +11,10 @@ import sys
 import brotli
 assert sys.version_info[:2] == (3, 11), sys.version
 assert importlib.metadata.version('fonttools') == '4.60.2'
-assert importlib.metadata.version('Brotli') == '1.2.0'
+assert importlib.metadata.version('Brotli') == '1.2.1'
 payload = b'SourceWeft WOFF2 security regression' * 32
 assert brotli.decompress(brotli.compress(payload)) == payload
-print('Python 3.11, fontTools 4.60.2, Brotli 1.2.0 and compression round-trip verified')
+print('Python 3.11, fontTools 4.60.2, Brotli 1.2.1 and compression round-trip verified')
 PY
 
 NODE_PATH="$(npm root -g)" node - <<'JS'
