@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
+  OAuthClientProvider,
   OAuthClientInformation,
   OAuthClientInformationFull,
   OAuthClientMetadata,
   OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
+} from "@modelcontextprotocol/client";
 
 /**
  * Persistence for one MCP OAuth session, scoped by the caller to a single

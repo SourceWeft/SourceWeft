@@ -3,7 +3,7 @@ import { and, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
+} from "@modelcontextprotocol/client";
 import { db, workspaceMcpOAuthSessions } from "@sourceweft/db";
 import {
   decryptTeamSecret,

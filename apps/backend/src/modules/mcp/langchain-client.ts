@@ -1,8 +1,15 @@
 import { loadMcpTools } from "@langchain/mcp-adapters";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import {
+  type Client,
+  type OAuthClientProvider,
+  SdkHttpError,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import {
+  createMcpClient,
+  MCP_TRANSPORT_DEFAULTS,
+} from "../../shared/mcp-client";
 import { McpError } from "./errors";
 import type { WorkspaceMcpInstallRecord } from "./types";
 import { createHash } from "node:crypto";
@@ -33,6 +40,18 @@ function automaticSSEFallbackFor(
     return false;
   }
   return false;
+}
+
+/** The HTTP status of a transport failure, wherever it sits in the cause chain. */
+function httpStatusOf(error: unknown) {
+  for (
+    let current: unknown = error, depth = 0;
+    current && depth < 5;
+    current = (current as { cause?: unknown }).cause, depth += 1
+  ) {
+    if (SdkHttpError.isInstance(current)) return current.status;
+  }
+  return undefined;
 }
 
 /**
@@ -118,9 +137,10 @@ export function createLangChainMcpClient(input: {
   async function connect(kind: "http" | "sse", url: string) {
     if (closed) throw new Error("MCP client is closed");
     requests.throwIfDenied();
-    const next = new Client({ name: "sourceweft", version: "1" });
+    const next = createMcpClient("sourceweft");
     client = next;
     const options = {
+      ...MCP_TRANSPORT_DEFAULTS,
       fetch: requests.fetch,
       requestInit: { headers: input.headers },
       ...(input.authProvider ? { authProvider: input.authProvider } : {}),
@@ -131,16 +151,15 @@ export function createLangChainMcpClient(input: {
           ? new StreamableHTTPClientTransport(new URL(url), options)
           : new SSEClientTransport(new URL(url), options),
       );
-      const tools = await loadMcpTools(
-        langChainMcpServerKey(input.install),
-        next,
-        {
-          throwOnLoadError: true,
-          prefixToolNameWithServerName: true,
-          additionalToolNamePrefix: "mcp",
-          useStandardContentBlocks: true,
-        },
-      );
+      const serverKey = langChainMcpServerKey(input.install);
+      const tools = await loadMcpTools(serverKey, next, {
+        throwOnLoadError: true,
+        prefixToolNameWithServerName: false,
+      });
+      // Named here rather than by the adapter, whose separators have changed
+      // between releases: stored tools, approvals and `interruptOn` rules all
+      // key on exactly `mcp__<serverKey>__<serverToolName>`.
+      for (const tool of tools) tool.name = `mcp__${serverKey}__${tool.name}`;
       if (closed) throw new Error("MCP client closed during discovery");
       requests.throwIfDenied();
       return tools;
@@ -156,16 +175,13 @@ export function createLangChainMcpClient(input: {
       return await connect(transport, endpoint);
     } catch (error) {
       requests.throwIfDenied();
-      const code =
-        error && typeof error === "object" && "code" in error
-          ? error.code
-          : undefined;
+      const status = httpStatusOf(error);
       if (
         transport !== "http" ||
         !automaticSSEFallbackFor(input.install.transport) ||
-        typeof code !== "number" ||
-        code < 400 ||
-        code >= 500
+        status === undefined ||
+        status < 400 ||
+        status >= 500
       )
         throw error;
       // Preserve only the manifest's explicit legacy HTTP/SSE compatibility.
