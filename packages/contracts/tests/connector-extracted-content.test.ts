@@ -21,9 +21,11 @@ test("text and file shapes are told apart", () => {
 
 test("skip errors are recognised structurally", () => {
   assert.deepEqual([...connectorItemSkipReasons], [
-    "unsupported_type", "too_large", "needs_ocr", "export_too_large", "empty_content"]);
+    "unsupported_type", "too_large", "needs_ocr", "export_too_large", "empty_content",
+    "unreadable"]);
   assert.equal(isConnectorItemSkipError(new ConnectorItemSkipError("too_large")), true);
   assert.equal(isConnectorItemSkipError({ code: "CONNECTOR_ITEM_SKIPPED", reason: "needs_ocr" }), true);
+  assert.equal(isConnectorItemSkipError({ code: "CONNECTOR_ITEM_SKIPPED", reason: "unreadable" }), true);
   assert.equal(isConnectorItemSkipError({ code: "CONNECTOR_ITEM_SKIPPED", reason: "nope" }), false);
   assert.equal(isConnectorItemSkipError(new Error("x")), false);
 });

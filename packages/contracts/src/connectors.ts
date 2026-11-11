@@ -559,6 +559,9 @@ export type ConnectorItem = {
   externalId: string;
   externalUri: string | null;
   title: string;
+  /** An adapter that returns file-shaped content must set `mimeType` on the
+   * discovered item, because an unchanged scan writes it straight to the source
+   * without re-extracting. */
   mimeType: string | null;
   sizeBytes: number | null;
   externalUpdatedAt: Date | null;
@@ -622,10 +625,16 @@ export type ConnectorActionResult = {
 };
 
 export type ConnectorExtractedFileDescriptor = {
+  /** `fileName` and `mimeType` drive classification: they decide the file kind
+   * and the parser branch before any bytes are downloaded, so an adapter must
+   * report the real name and type it discovered. */
   fileName: string;
   mimeType: string;
+  /** Known size in bytes, or `null` for "unknown, check after download" — the
+   * resolver re-checks the downloaded length against the cap when this is null. */
   sizeBytes: number | null;
-  /** 超过 maxBytes 必须抛出 ConnectorItemSkipError("too_large")，不能截断。 */
+  /** Must throw `ConnectorItemSkipError("too_large")` rather than truncate when
+   * the content exceeds `maxBytes`. */
   download(input: { maxBytes: number }): Promise<Buffer>;
 };
 
@@ -660,6 +669,7 @@ export const connectorItemSkipReasons = [
   "needs_ocr",
   "export_too_large",
   "empty_content",
+  "unreadable",
 ] as const;
 
 export type ConnectorItemSkipReason = (typeof connectorItemSkipReasons)[number];
