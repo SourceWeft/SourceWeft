@@ -158,3 +158,48 @@ test("workflow passes explicit policy, withholds platform secrets, and keeps upd
     /desktop_policy/,
   );
 });
+
+test("the macOS disk image is notarized and stapled before it is verified and hashed, only when macOS is distribution-signed", async () => {
+  const require = createRequire(
+    new URL("../../apps/backend/package.json", import.meta.url),
+  );
+  const { parse } = require("yaml");
+  const { steps } = parse(
+    await readFile(
+      new URL("../../.github/workflows/desktop-release.yml", import.meta.url),
+      "utf8",
+    ),
+  ).jobs.build;
+  const index = (name) => {
+    const found = steps.findIndex((s) => s.name === name);
+    assert(found >= 0, name);
+    return found;
+  };
+  const notarize = index("Notarize and staple the macOS disk image");
+  assert.equal(steps[notarize].run, "node scripts/ci/notarize-macos-dmg.mjs");
+  assert.match(steps[notarize].if, /runner\.os == 'macOS'/);
+  assert(
+    steps[notarize].if.includes(
+      `contains(fromJSON('["signed","macos-signed"]'), inputs.publication_policy)`,
+    ),
+  );
+  assert.doesNotMatch(steps[notarize].if, /updater-signed/);
+  assert.match(
+    steps[notarize].if,
+    /steps\.existing\.outputs\.exists != 'true'/,
+  );
+  // Stapling rewrites the image, so it has to follow the build and precede the step that
+  // asserts the ticket and records the installer's size and SHA-256.
+  assert(index("Build installers with required updater signatures") < notarize);
+  assert(notarize < index("Verify and describe macOS artifacts"));
+  // No new secret: the step reads the job-level Apple credentials.
+  assert.doesNotMatch(JSON.stringify(steps[notarize]), /secrets\./);
+  const prepare = await readFile(
+    new URL("./prepare-desktop-release.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    prepare,
+    /if \(claims\.notarized\) \{[\s\S]*"stapler", "validate", image[\s\S]*"open",[\s\S]*"context:primary-signature",\s*image,/,
+  );
+});

@@ -112,6 +112,13 @@ jobs:
             esac
           fi
           pnpm --filter @sourceweft/desktop exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.generated.json -- --locked
+      # `tauri build` notarizes and staples the app and signs the disk image, but does not submit
+      # the image itself, so Gatekeeper assesses the downloaded .dmg as "Unnotarized Developer ID".
+      # Submit and staple it here, before the artifacts are verified and hashed. Same secrets as
+      # the build step; no new secret.
+      - name: Notarize and staple the macOS disk image
+        if: runner.os == 'macOS' && contains(fromJSON('["signed","macos-signed"]'), inputs.publication_policy) && steps.existing.outputs.exists != 'true'
+        run: node scripts/ci/notarize-macos-dmg.mjs
       - name: Build signature verifier
         if: steps.existing.outputs.exists != 'true'
         run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
@@ -178,9 +185,7 @@ jobs:
       # is done inside `tauri build`, which imports this same certificate into its own temporary
       # keychain and does not leave it behind for a later codesign call, so the bundle job needs
       # its own import. Same secrets as the installers; no new secret. Runs only for the `signed`
-      # and `macos-signed` policies (the `updater-signed` path signs ad-hoc and needs no certificate). UNVERIFIED in
-      # this repository: no Apple Developer ID certificate is available to the authors, so the
-      # Developer ID branch has only ever been exercised against a fake codesign.
+      # and `macos-signed` policies (the `updater-signed` path signs ad-hoc and needs no certificate).
       - name: Import the Developer ID certificate for sandbox-bundle signing
         if: runner.os == 'macOS' && contains(fromJSON('["signed","macos-signed"]'), inputs.publication_policy) && steps.existing.outputs.exists != 'true'
         shell: bash
@@ -236,8 +241,8 @@ jobs:
           node scripts/ci/sandbox-bundle.mjs sign "$tarball"
           node scripts/ci/sandbox-bundle.mjs verify-signature "$tarball"
           # Signature checks on the signed binaries. --verify --strict is meaningful for both
-          # ad-hoc and Developer ID; the Developer ID assertions (codesign authority + a notarized
-          # spctl assessment) are UNVERIFIED here (no Apple credentials) and documented as such.
+          # ad-hoc and Developer ID. The authority chain and flags are printed for the log, not
+          # asserted, and the bare binaries are not notarized (README.desktop-updates.md).
           for file in srt-sidecar rg; do
             codesign --verify --strict --verbose=2 "apps/desktop/sandbox-sidecar/dist/bundle/$file"
             codesign -dvv "apps/desktop/sandbox-sidecar/dist/bundle/$file" 2>&1 | grep -E 'Signature=|Authority=|flags=' || true

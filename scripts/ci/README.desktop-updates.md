@@ -98,7 +98,8 @@ and clears empty values before building so they cannot override generated config
 `macos-signed` is for a release that has Apple credentials but no Windows publisher
 certificate. It is equally explicit: it is never selected because a credential happens
 to be present or absent. macOS installers, update packages and the macOS sandbox
-runtime are Developer ID signed and the app is notarized, exactly as in `signed`;
+runtime are Developer ID signed, and the app and its disk image are notarized and stapled,
+exactly as in `signed`;
 Windows and Linux are built exactly as in `updater-signed`. CI passes the Apple
 credentials to the macOS build legs only, every Apple credential is required there
 (a missing one fails the build instead of falling back to ad-hoc signing), and Windows
@@ -154,7 +155,9 @@ production update checks. Unsigned verification builds without a key report
 `UPDATE_PUBLIC_KEY_NOT_CONFIGURED`; they cannot install updates.
 
 In `signed`, macOS and Windows verify their OS distribution signatures (including
-macOS notarization). In `updater-signed`, macOS verifies its ad-hoc signature and
+macOS notarization of the app and of the disk image). `tauri build` notarizes only the
+app, so `notarize-macos-dmg.mjs` submits the signed disk image with the same Apple
+credentials and staples its ticket before the artifacts are verified and hashed. In `updater-signed`, macOS verifies its ad-hoc signature and
 disk image, and Windows verifies the absence of Authenticode signing. `macos-signed`
 runs the `signed` checks on macOS and the `updater-signed` check on Windows. The resulting
 artifact metadata explicitly records the selected policy and truthful signing
@@ -384,9 +387,9 @@ before the artifact upload):
    checks the `.sig` with the `update-verifier` (Tauri's `minisign-verify`) against
    `TAURI_UPDATER_PUBLIC_KEY`. No new secret or variable exists.
 
-The macOS Developer ID signing and notarization are **UNVERIFIED** here: the authors have no
-Apple Developer ID certificate, so only the ad-hoc path (`-`) is exercised (locally and in CI).
-A bare Mach-O binary cannot carry a stapled notarization ticket, and a file the app downloads
+The macOS Developer ID path has run with a real certificate in a `macos-signed` build: the
+binaries carried the Developer ID authority chain and the hardened runtime. They are **not
+notarized**. A bare Mach-O binary cannot carry a stapled notarization ticket, and a file the app downloads
 and writes itself carries no `com.apple.quarantine` attribute, so Gatekeeper does not assess it;
 notarizing a zip/pkg wrapper is an optional owner-decided follow-up (see `sign-macos.sh`).
 

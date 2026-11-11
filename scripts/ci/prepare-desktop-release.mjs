@@ -88,7 +88,21 @@ if (mac) {
       "A macOS app without Developer ID signing must be ad-hoc signed",
     );
   }
-  run("hdiutil", ["verify", one(".dmg")]);
+  const image = one(".dmg");
+  run("hdiutil", ["verify", image]);
+  if (claims.notarized) {
+    // The disk image is the file a customer downloads, so it carries its own stapled ticket
+    // (notarize-macos-dmg.mjs) and must pass Gatekeeper's assessment for opened documents.
+    run("xcrun", ["stapler", "validate", image]);
+    run("spctl", [
+      "--assess",
+      "--type",
+      "open",
+      "--context",
+      "context:primary-signature",
+      image,
+    ]);
+  }
 } else if (linux) {
   const file = await open(one(".AppImage"), "r");
   try {

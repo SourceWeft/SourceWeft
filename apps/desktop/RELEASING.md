@@ -73,6 +73,6 @@ code-signed before packing (Developer ID + hardened runtime + `allow-jit` entitl
 `signed` and `macos-signed` policies, ad-hoc in `updater-signed`); the macOS x86_64 bundle cross-compiles on the
 arm64 runner as the installers do. The desktop package version must therefore match the tag
 (already enforced), and a release must not be re-tagged without re-publishing the bundles. They
-are not mirrored to `download.sourceweft.com` yet. Developer ID signing and notarization of the
-macOS bundle are unverified here (no Apple credentials). Details and the offline checks are in
+are not mirrored to `download.sourceweft.com` yet. The macOS bundle's binaries are Developer ID
+signed but not notarized (a bare binary cannot carry a stapled ticket). Details and the offline checks are in
 `scripts/ci/README.desktop-updates.md`.
