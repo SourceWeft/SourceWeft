@@ -638,6 +638,14 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
+          # Not the default `~/setup-pnpm`: that puts pnpm's bin folder on PATH inside the user
+          # profile, and pnpm keeps its package store beneath that folder. The host grants every
+          # PATH folder inside the profile to the sandbox account as a read root, at every sandbox
+          # start, so each test's first command paid for the whole store. With a store that pnpm
+          # had just downloaded (no cache hit) that was 95 to 170 seconds per start on
+          # windows-11-arm instead of 30, and the suite could not finish (the preflight step
+          # reports the size of each such folder).
+          dest: ${{ runner.temp }}/setup-pnpm
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
@@ -705,8 +713,9 @@ jobs:
         # A hung step must not eat the whole job: the test binary stops itself with a "HUNG:" report
         # (tests/windows_sandbox.rs), and this is the backstop that still leaves time for the
         # always-run steps (cleanup, log upload). The suite takes about 3.5 minutes on windows-2025
-        # and 40 to 45 on windows-11-arm, where each launched command costs 80 to 100 seconds (see
-        # the TIMING lines in its log); 45 was the edge and timed out healthy runs.
+        # and about 30 on windows-11-arm, where the first command of a test (a sandbox start) costs
+        # about 30 seconds (see the TIMING lines in its log). A run that needs much longer has a
+        # slow sandbox start, not a slow runner: see the note on pnpm's `dest` above.
         timeout-minutes: 60
         env:
           # Windows environment variable names are case-insensitive, so these are also the lowercase
