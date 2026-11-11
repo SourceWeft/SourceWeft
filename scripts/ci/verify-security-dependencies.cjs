@@ -290,9 +290,10 @@ try {
   delete Object.prototype.trust;
 }
 
-// node-forge 1.4.2 closes the 1.4.0 signature-verification advisories,
-// including GHSA-86w9-cpqp-85rv, which the audit gate used to ignore.
-patchedDependency(sandboxRuntime, "node-forge", "1.4.2");
+// node-forge 1.4.2 closed the 1.4.0 signature-verification advisories,
+// including GHSA-86w9-cpqp-85rv, which the audit gate used to ignore. 1.4.3
+// closes GHSA-w4xr-hqv8-ch44, GHSA-6cv4-p8m7-4r25 and GHSA-j8rw-jp99-435v.
+patchedDependency(sandboxRuntime, "node-forge", "1.4.3");
 const qs = patchedDependency(express, "qs", "6.16.1");
 assert.throws(
   () =>
