@@ -754,6 +754,8 @@ describe("MCP README storage and fetch state", () => {
       readmeAttempts: 1,
       readmePath: "claim-read/README.md",
       readmeSha256: stored.readmeSha256,
+      // Nothing kept for the overview: it follows the stored file.
+      readmeOverviewSha256: null,
     });
     expect(byId.get(unread)).toMatchObject({
       readmeStatus: "pending",
