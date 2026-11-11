@@ -621,13 +621,70 @@ export type ConnectorActionResult = {
   resyncExternalIds?: string[];
 };
 
-export type ConnectorExtractedContent = {
+export type ConnectorExtractedFileDescriptor = {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number | null;
+  /** 超过 maxBytes 必须抛出 ConnectorItemSkipError("too_large")，不能截断。 */
+  download(input: { maxBytes: number }): Promise<Buffer>;
+};
+
+export type ConnectorExtractedText = {
   item: ConnectorItem;
   contentText: string;
   markdown?: string;
   parentExternalId?: string | null;
   directoryPath?: ConnectorDirectoryNode[];
 };
+
+export type ConnectorExtractedFile = {
+  item: ConnectorItem;
+  file: ConnectorExtractedFileDescriptor;
+  parentExternalId?: string | null;
+  directoryPath?: ConnectorDirectoryNode[];
+};
+
+export type ConnectorExtractedContent =
+  | ConnectorExtractedText
+  | ConnectorExtractedFile;
+
+export function isConnectorExtractedFile(
+  value: ConnectorExtractedContent,
+): value is ConnectorExtractedFile {
+  return (value as ConnectorExtractedFile).file !== undefined;
+}
+
+export const connectorItemSkipReasons = [
+  "unsupported_type",
+  "too_large",
+  "needs_ocr",
+  "export_too_large",
+  "empty_content",
+] as const;
+
+export type ConnectorItemSkipReason = (typeof connectorItemSkipReasons)[number];
+
+export class ConnectorItemSkipError extends Error {
+  readonly code = "CONNECTOR_ITEM_SKIPPED";
+
+  constructor(readonly reason: ConnectorItemSkipReason) {
+    super(`Connector item skipped: ${reason}`);
+    this.name = "ConnectorItemSkipError";
+  }
+}
+
+export function isConnectorItemSkipError(
+  error: unknown,
+): error is ConnectorItemSkipError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "CONNECTOR_ITEM_SKIPPED" &&
+    connectorItemSkipReasons.includes(
+      (error as { reason?: unknown }).reason as ConnectorItemSkipReason,
+    )
+  );
+}
 
 export type OAuthCodeExchangeInput = {
   code: string;

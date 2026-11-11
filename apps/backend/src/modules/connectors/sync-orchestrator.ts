@@ -39,6 +39,7 @@ import {
 } from "./repository";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
+import { isConnectorExtractedFile } from "./types";
 import type {
   ConnectorDirectoryNode,
   ConnectorItem,
@@ -1292,6 +1293,9 @@ export class ConnectorSyncOrchestrator {
       accessToken: input.accessToken,
       item: input.item,
     });
+    if (isConnectorExtractedFile(extracted)) {
+      throw new Error("file extraction not wired");
+    }
     const contentText = extracted.markdown ?? extracted.contentText;
     const contentHash =
       extracted.item.contentHash ?? computeContentHash(contentText);
