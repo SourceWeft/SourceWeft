@@ -372,6 +372,29 @@ test("skips a deterministic parser rejection as unreadable", async () => {
   assert.deepEqual(result, { kind: "skipped", reason: "unreadable" });
 });
 
+test("skips a missing-part document rejection as unreadable", async () => {
+  const parseDocument = vi.fn(async () => {
+    // Anydoc rejects a container that is missing a required part with a plain
+    // Error carrying the `missingPart` code — deterministic, so it must skip.
+    const error = new Error("missing required part");
+    (error as { code?: string }).code = "missingPart";
+    throw error;
+  });
+  const result = await resolveExtractedFile(
+    baseInput({
+      file: file({ mimeType: "application/pdf" }),
+      deps: {
+        classify: () =>
+          classification({ kind: "document", mimeType: "application/pdf" }),
+        isDocumentMime: () => true,
+        parseDocument,
+      },
+    }),
+  );
+
+  assert.deepEqual(result, { kind: "skipped", reason: "unreadable" });
+});
+
 test("skips a corrupt document through the real parser as unreadable", async () => {
   const result = await resolveExtractedFile(
     baseInput({

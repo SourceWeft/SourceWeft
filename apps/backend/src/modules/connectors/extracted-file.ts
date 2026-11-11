@@ -86,10 +86,15 @@ function classifyParseError(error: unknown): ConnectorItemSkipReason | null {
     return "empty_content";
   }
   if (code === "unsupported") return "unsupported_type";
+  // A structurally broken container (malformed/encrypted/resource-limited, a
+  // bytes-vs-declared mismatch, or a missing required part) is a deterministic
+  // rejection: retrying the same bytes can only fail the same way, so skip it
+  // rather than replay-and-fail the page forever. `io` and `hosted` stay thrown.
   if (
     code === "malformed" ||
     code === "encrypted" ||
     code === "resourceLimit" ||
+    code === "missingPart" ||
     code === "ANYDOC_FORMAT_MISMATCH"
   ) {
     return "unreadable";
