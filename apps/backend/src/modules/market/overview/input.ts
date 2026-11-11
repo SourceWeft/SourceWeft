@@ -556,6 +556,34 @@ export function extractMcpReadmeExcerpt(
 }
 
 /**
+ * Whether two READMEs give the overview the same text to write from (Issue
+ * #454): their excerpts, compared without regard to whitespace, letter case
+ * or the digits of a number. Whatever the excerpt drops (badges, images,
+ * markup, licence and changelog sections, text beyond the limit) and a
+ * release that only moves a version, a date or a count leave the overview as
+ * it is; any other change of wording does not.
+ */
+export function sameMcpOverviewReadme(
+  stored: string,
+  fresh: string,
+  limit = MCP_OVERVIEW_README_MAX_CHARS,
+): boolean {
+  if (stored === fresh) return true;
+  return (
+    overviewReadmeKey(extractMcpReadmeExcerpt(stored, limit)) ===
+    overviewReadmeKey(extractMcpReadmeExcerpt(fresh, limit))
+  );
+}
+
+function overviewReadmeKey(excerpt: McpReadmeExcerpt): string {
+  return excerpt.segments
+    .map((segment) =>
+      segment.toLowerCase().replace(/\d+/g, "0").replace(/\s+/g, " ").trim(),
+    )
+    .join("\n");
+}
+
+/**
  * Lines, with fenced code kept verbatim (trailing space aside) and prose
  * cleaned: HTML comments, images, badges and HTML tags removed, links reduced
  * to their text, whitespace collapsed.

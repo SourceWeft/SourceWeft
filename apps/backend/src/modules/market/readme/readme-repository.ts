@@ -84,6 +84,7 @@ export type ClaimedMcpReadme = {
   readmeAttempts: number;
   readmePath: string | null;
   readmeSha256: string | null;
+  readmeOverviewSha256: string | null;
 };
 
 /**
@@ -122,9 +123,22 @@ export async function claimMcpReadmes(input: {
       v.readme_status as "readmeStatus",
       v.readme_attempts as "readmeAttempts",
       v.readme_path as "readmePath",
-      v.readme_sha256 as "readmeSha256"
+      v.readme_sha256 as "readmeSha256",
+      v.readme_overview_sha256 as "readmeOverviewSha256"
   `);
   return result.rows;
+}
+
+/** The README text stored for a version; null when it has none. */
+export async function readStoredMcpReadme(
+  versionId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ readmeMd: mcpServerVersions.readmeMd })
+    .from(mcpServerVersions)
+    .where(eq(mcpServerVersions.id, versionId))
+    .limit(1);
+  return row?.readmeMd ?? null;
 }
 
 /** Write the README columns a transition or a submission produced. */
@@ -177,6 +191,9 @@ export async function carryOverMcpReadme(input: {
       readme_path = p.readme_path,
       readme_ref = p.readme_ref,
       readme_sha256 = p.readme_sha256,
+      -- The same input hash as the previous version's overview, so this
+      -- version's overview is still a copy of it.
+      readme_overview_sha256 = p.readme_overview_sha256,
       readme_fetched_at = p.readme_fetched_at,
       readme_error = p.readme_error,
       -- What GitHub said about the repository, until the new version's own
@@ -187,7 +204,8 @@ export async function carryOverMcpReadme(input: {
       end
     from (
       select readme_status, readme_md, readme_path, readme_ref,
-        readme_sha256, readme_fetched_at, readme_error,
+        readme_sha256, readme_overview_sha256, readme_fetched_at,
+        readme_error,
         provenance_json -> ${MCP_REPOSITORY_METADATA_KEY}::text as repository_metadata
       from ${mcpServerVersions}
       where server_id = ${input.serverId}

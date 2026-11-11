@@ -505,6 +505,13 @@
       "when": 1793640262236,
       "tag": "0071_mcp_latest_published_index",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794402011017,
+      "tag": "0072_mcp_readme_overview_sha256",
+      "breakpoints": true
     }
   ]
 }

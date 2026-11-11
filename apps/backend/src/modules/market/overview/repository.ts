@@ -237,6 +237,14 @@ export type McpOverviewSubjectRow = McpOverviewSourceRow & {
   readmeMd: string | null;
 };
 
+/**
+ * The README hash the overview's input fingerprint is computed from: the one
+ * kept for the overview when a refresh read new bytes that left the overview
+ * excerpt the same (`readme_overview_sha256`, Issue #454), else the stored
+ * file's own.
+ */
+const overviewReadmeSha256 = sql`coalesce(v.readme_overview_sha256, v.readme_sha256)`;
+
 /** One version and its server; null when there is no such version. */
 export async function findMcpOverviewSubjectRow(
   versionId: string,
@@ -255,7 +263,7 @@ export async function findMcpOverviewSubjectRow(
       v.manifest_json as "manifestJson",
       v.provenance_json as "provenanceJson",
       v.readme_status as "readmeStatus",
-      v.readme_sha256 as "readmeSha256",
+      ${overviewReadmeSha256} as "readmeSha256",
       case when v.readme_status = 'ok' then v.readme_md end as "readmeMd",
       ${ownerOverridesColumn} as "ownerOverrides"
     from ${mcpServerVersions} v
@@ -357,7 +365,7 @@ export async function findMcpOverviewAttempts(input: {
       v.manifest_json as "manifestJson",
       v.provenance_json as "provenanceJson",
       v.readme_status as "readmeStatus",
-      v.readme_sha256 as "readmeSha256",
+      ${overviewReadmeSha256} as "readmeSha256",
       (v.readme_md is not null) as "hasReadmeText",
       (
         select o.input_sha256 from ${mcpServerVersionOverviews} o

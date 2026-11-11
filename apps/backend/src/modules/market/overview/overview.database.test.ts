@@ -133,6 +133,7 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
   let registry: typeof import("../registry-server");
   let readmes: typeof import("../readme/readme-repository");
   let readmeState: typeof import("../readme/readme-state");
+  let overviewInput: typeof import("./input");
   let generate: typeof import("./generate");
   let repository: typeof import("./repository");
   let queue: typeof import("./queue");
@@ -151,6 +152,7 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     registry = await import("../registry-server");
     readmes = await import("../readme/readme-repository");
     readmeState = await import("../readme/readme-state");
+    overviewInput = await import("./input");
     generate = await import("./generate");
     repository = await import("./repository");
     queue = await import("./queue");
@@ -866,6 +868,82 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     });
     expect(await tick()).toMatchObject({ queued: 1 });
     expect(state.jobs[0]!.data).toMatchObject({ reason: "regenerate" });
+    await runJob(state.jobs[0]!);
+    const after = (await overviewRows(genesis.versionId))[0]!.inputSha256;
+    expect(after).not.toBe(before);
+    expect(await tick()).toMatchObject({ queued: 0 });
+    expect(state.calls).toHaveLength(2);
+  });
+
+  test("a README refresh that leaves the overview's excerpt as it was does not make it stale", async () => {
+    const genesis = await seed(genesis402RegistryServer);
+    await readmeFetched(genesis.versionId, genesisReadme);
+    await generated(genesis.versionId);
+    const before = (await overviewRows(genesis.versionId))[0]!.inputSha256;
+    /** A refresh that read `markdown`, as the README fetch stores it. */
+    const refreshed = async (markdown: string) => {
+      const [row] = await data.db
+        .select({
+          readmeStatus: data.mcpServerVersions.readmeStatus,
+          readmeAttempts: data.mcpServerVersions.readmeAttempts,
+          readmeSha256: data.mcpServerVersions.readmeSha256,
+          readmeOverviewSha256: data.mcpServerVersions.readmeOverviewSha256,
+        })
+        .from(data.mcpServerVersions)
+        .where(eq(data.mcpServerVersions.id, genesis.versionId));
+      const previous = await readmes.readStoredMcpReadme(genesis.versionId);
+      await readmes.writeMcpReadmeColumns(
+        genesis.versionId,
+        readmeState.mcpReadmeTransition(
+          row!,
+          {
+            status: "ok",
+            markdown,
+            path: "README.md",
+            ref: COMMIT,
+            sha256: createSha256(markdown),
+            byteSize: markdown.length,
+            overviewSha256: readmeState.keptOverviewReadmeSha256(
+              row!,
+              previous !== null &&
+                overviewInput.sameMcpOverviewReadme(previous, markdown),
+            ),
+          },
+          new Date(),
+        ),
+      );
+    };
+    const stored = async () => {
+      const [row] = await data.db
+        .select({
+          readmeSha256: data.mcpServerVersions.readmeSha256,
+          readmeOverviewSha256: data.mcpServerVersions.readmeOverviewSha256,
+          readmeMd: data.mcpServerVersions.readmeMd,
+        })
+        .from(data.mcpServerVersions)
+        .where(eq(data.mcpServerVersions.id, genesis.versionId));
+      return row!;
+    };
+
+    // New bytes the overview does not read: a badge and a licence section.
+    const cosmetic = `![build](https://ci.example/badge.svg)\n\n${genesisReadme.markdown}\n\n## License\n\nMIT\n`;
+    await refreshed(cosmetic);
+    expect(await stored()).toEqual({
+      readmeSha256: createSha256(cosmetic),
+      readmeOverviewSha256: genesisReadme.sha256,
+      readmeMd: cosmetic,
+    });
+    expect(await tick()).toMatchObject({ queued: 0 });
+    expect(state.calls).toHaveLength(1);
+
+    // A change of wording: the overview follows the new file and is redone.
+    const edited = `${cosmetic}\n\n## Limits\n\nEvery paid call is capped by GENESIS402_MAX_USD.\n`;
+    await refreshed(edited);
+    expect(await stored()).toMatchObject({
+      readmeSha256: createSha256(edited),
+      readmeOverviewSha256: null,
+    });
+    expect(await tick()).toMatchObject({ queued: 1 });
     await runJob(state.jobs[0]!);
     const after = (await overviewRows(genesis.versionId))[0]!.inputSha256;
     expect(after).not.toBe(before);

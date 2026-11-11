@@ -107,6 +107,7 @@ function claimed(
     readmeStatus: "pending",
     readmeAttempts: 0,
     readmeSha256: null,
+    readmeOverviewSha256: null,
     readmePath: null,
     ...overrides,
   };
@@ -124,6 +125,8 @@ function harness(input: {
   hasToken?: boolean;
   /** What GitHub says about each repository (by repo name); unanswered when absent. */
   facts?: Record<string, GitHubRepositoryFacts>;
+  /** The README text stored per version; none when absent. */
+  stored?: Record<string, string>;
 }) {
   const writes: Array<[string, McpReadmeColumns]> = [];
   const metadataWrites: Array<[string, McpRepositoryMetadata]> = [];
@@ -138,6 +141,9 @@ function harness(input: {
     write: vi.fn(async (versionId: string, columns: McpReadmeColumns) => {
       writes.push([versionId, columns]);
     }),
+    readStored: vi.fn(
+      async (versionId: string) => input.stored?.[versionId] ?? null,
+    ),
     writeRepositoryMetadata: vi.fn(
       async (versionId: string, record: McpRepositoryMetadata) => {
         metadataWrites.push([versionId, record]);
@@ -303,6 +309,86 @@ describe("fetching a batch", () => {
     assert.ok(same?.[1].readmeFetchedAt);
     assert.equal(changed?.[1].readmeMd, "# Hi");
     assert.deepEqual(summary.outcomes, { not_modified: 1, ok: 1 });
+    // Bytes identical: the stored text is not even read.
+    assert.deepEqual(
+      deps.readStored.mock.calls.map(([id]) => id),
+      ["changed"],
+    );
+  });
+
+  test("new bytes that leave the overview's excerpt as it was keep the overview's hash", async () => {
+    const usage =
+      "## Usage\n\nCall `forecast` with a city name to get the weather.\n";
+    const before = `# Weather\n\n![build](https://ci.example/badge.svg)\n\nForecasts for 1856+ cities, v1.2.0.\n\n${usage}\n## License\n\nMIT\n`;
+    const ok = (markdown: string): GitHubReadmeResult => ({
+      status: "ok",
+      markdown,
+      path: "README.md",
+      ref: COMMIT,
+      sha256: SHA,
+      byteSize: markdown.length,
+    });
+    const stored = (overrides: Partial<ClaimedMcpReadme> = {}) => ({
+      readmeStatus: "ok" as const,
+      readmeSha256: "b".repeat(64),
+      readmePath: "README.md",
+      ...overrides,
+    });
+    const { deps, writes, recorded } = harness({
+      rows: {
+        cosmetic: claimed("cosmetic", stored()),
+        again: claimed(
+          "again",
+          stored({ readmeOverviewSha256: "c".repeat(64) }),
+        ),
+        reworded: claimed(
+          "reworded",
+          stored({ readmeOverviewSha256: "c".repeat(64) }),
+        ),
+        first: claimed("first"),
+      },
+      stored: { cosmetic: before, again: before, reworded: before },
+      results: {
+        // Another badge, a bumped count and version, a new licence.
+        cosmetic: ok(
+          before
+            .replace("badge.svg", "badge.svg?branch=main")
+            .replace("1856+", "1865+")
+            .replace("v1.2.0", "v1.3.0")
+            .replace("MIT", "Apache-2.0"),
+        ),
+        again: ok(before.replace("1856+", "1901+")),
+        reworded: ok(before.replace("a city name", "a city or postal code")),
+        first: ok(before),
+      },
+    });
+    const summary = await fetchMcpReadmeBatch(
+      {
+        versionIds: ["cosmetic", "again", "reworded", "first"],
+        reason: "scheduled",
+      },
+      deps,
+    );
+    const written = Object.fromEntries(writes);
+    // The new file is stored either way.
+    assert.equal(written.cosmetic?.readmeSha256, SHA);
+    assert.match(written.cosmetic?.readmeMd ?? "", /1865\+/);
+    // The overview keeps the hash it was written under …
+    assert.equal(written.cosmetic?.readmeOverviewSha256, "b".repeat(64));
+    // … through any number of such refreshes …
+    assert.equal(written.again?.readmeOverviewSha256, "c".repeat(64));
+    // … until its excerpt's wording changes.
+    assert.equal(written.reworded?.readmeOverviewSha256, null);
+    // A first read has nothing to keep, and no stored text to compare.
+    assert.equal(written.first?.readmeOverviewSha256, null);
+    assert.deepEqual(deps.readStored.mock.calls.map(([id]) => id).sort(), [
+      "again",
+      "cosmetic",
+      "reworded",
+    ]);
+    assert.deepEqual(summary.outcomes, { ok: 4 });
+    assert.equal(summary.overviewUnchanged, 2);
+    assert.equal(recorded[0]?.overviewUnchanged, 2);
   });
 
   test("a repository that is not on GitHub is recorded without a request", async () => {
@@ -535,7 +621,10 @@ describe("repository metadata", () => {
     });
 
     await fetchMcpReadmeBatch(
-      { versionIds: ["licensed", "bare", "sub", "unanswered"], reason: "scheduled" },
+      {
+        versionIds: ["licensed", "bare", "sub", "unanswered"],
+        reason: "scheduled",
+      },
       deps,
     );
 
