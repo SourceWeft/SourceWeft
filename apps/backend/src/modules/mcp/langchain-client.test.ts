@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, test, vi } from "vitest";
+import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -369,6 +371,164 @@ describe("langchain-client.transport", () => {
       await assert.rejects(client.getTools(), /closed/);
     });
   }
+
+  /**
+   * A modern-only endpoint (protocol revision 2026-07-28, no legacy
+   * handshake), served over node:http the way an SDK 2 server deploys one.
+   */
+  async function modernFixture(token?: string) {
+    const handler = createMcpHandler(
+      () => {
+        const server = new McpServer({ name: "modern", version: "1" });
+        server.registerTool(
+          "echo",
+          {
+            description: "Echo",
+            inputSchema: z.object({ value: z.string() }),
+            annotations: { readOnlyHint: true },
+          },
+          async ({ value }) => ({
+            content: [{ type: "text", text: value }],
+            structuredContent: { echoed: value },
+          }),
+        );
+        return server;
+      },
+      { legacy: "reject" },
+    );
+    const seen: Array<{
+      method?: string;
+      rpc?: string;
+      authorization?: string;
+      custom?: string;
+    }> = [];
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const body = Buffer.concat(chunks);
+        let rpc: string | undefined;
+        try {
+          rpc = (JSON.parse(body.toString()) as { method?: string }).method;
+        } catch {
+          rpc = undefined;
+        }
+        seen.push({
+          method: req.method,
+          rpc,
+          authorization: req.headers.authorization,
+          custom: req.headers["x-test-key"] as string | undefined,
+        });
+        if (token && req.headers.authorization !== `Bearer ${token}`) {
+          res.writeHead(401);
+          res.end();
+          return;
+        }
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(req.headers)) {
+          if (typeof value === "string") headers.set(name, value);
+        }
+        void (async () => {
+          const response = await handler.fetch(
+            new Request(`http://${req.headers.host}${req.url}`, {
+              method: req.method,
+              headers,
+              body: body.length > 0 ? body : undefined,
+            }),
+          );
+          res.writeHead(response.status, Object.fromEntries(response.headers));
+          const reader = response.body?.getReader();
+          for (let read = await reader?.read(); read && !read.done;) {
+            res.write(read.value);
+            read = await reader!.read();
+          }
+          res.end();
+        })().catch((error) => {
+          if (!res.headersSent) res.writeHead(500);
+          res.end(String(error));
+        });
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    settings.mcpAllowedInternalOrigins = [origin];
+    return { origin, seen, close: () => handler.close?.() };
+  }
+
+  test("real modern-only discovery and tool calls preserve names, headers and content", async () => {
+    const fixture = await modernFixture("modern-token");
+    const record = install(`${fixture.origin}/mcp`, "streamable_http");
+    const client = createLangChainMcpClient({
+      install: record,
+      headers: {
+        Authorization: "Bearer modern-token",
+        "X-Test-Key": "fixture-key",
+      },
+    });
+    clients.push(client);
+    const tools = await client.getTools();
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0]?.name, `mcp__${langChainMcpServerKey(record)}__echo`);
+    assert.deepEqual(tools[0]?.metadata?.annotations, { readOnlyHint: true });
+    const result = await tools[0]!.invoke({ value: "modern hello" });
+    assert.ok(JSON.stringify(result).includes("modern hello"));
+    assert.equal(fixture.seen[0]?.rpc, "server/discover");
+    assert.ok(fixture.seen.some((request) => request.rpc === "tools/call"));
+    assert.ok(!fixture.seen.some((request) => request.rpc === "initialize"));
+    assert.ok(
+      fixture.seen.every(
+        (request) =>
+          request.custom === "fixture-key" &&
+          request.authorization === "Bearer modern-token",
+      ),
+    );
+    await client.close();
+    await fixture.close();
+  });
+
+  test("OAuth on a modern-only endpoint sends the user's token on every request", async () => {
+    const fixture = await modernFixture("oauth-modern-token");
+    const provider = new McpOAuthClientProvider({
+      issuer: fixture.origin,
+      redirectUrl: `${fixture.origin}/callback`,
+      clientName: "test",
+      configuredClients: {},
+      store: {
+        loadClientInformation: async () => undefined,
+        saveClientInformation: async () => {},
+        loadTokens: async () => ({
+          access_token: "oauth-modern-token",
+          token_type: "Bearer",
+        }),
+        saveTokens: async () => {},
+        loadCodeVerifier: async () => undefined,
+        saveCodeVerifier: async () => {},
+        loadState: async () => undefined,
+        saveState: async () => {},
+      },
+    });
+    const client = createLangChainMcpClient({
+      install: {
+        ...install(`${fixture.origin}/mcp`, "streamable_http"),
+        authType: "oauth",
+      },
+      authProvider: provider,
+    });
+    clients.push(client);
+    const tools = await client.getTools();
+    await tools[0]!.invoke({ value: "oauth modern" });
+    assert.ok(fixture.seen.some((request) => request.rpc === "tools/call"));
+    assert.ok(
+      fixture.seen.every(
+        (request) => request.authorization === "Bearer oauth-modern-token",
+      ),
+    );
+    await client.close();
+    await fixture.close();
+  });
 
   test("development MCP transport discovers and calls an unlisted local service", async () => {
     const fixture = await httpFixture("http");

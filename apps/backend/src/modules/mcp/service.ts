@@ -17,7 +17,7 @@ import { createMcpRequestScope } from "./network";
 import { logger } from "../../shared/logger";
 import { probeMcpEndpointAuth } from "../../shared/mcp-auth-probe";
 import { shortId } from "../../shared/log-ids";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import {
   decryptTeamSecret,
   encryptTeamSecret,

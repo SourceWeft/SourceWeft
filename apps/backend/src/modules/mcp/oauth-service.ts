@@ -1,7 +1,7 @@
 import {
   auth,
   discoverOAuthProtectedResourceMetadata,
-} from "@modelcontextprotocol/sdk/client/auth.js";
+} from "@modelcontextprotocol/client";
 import { config } from "../../shared/config";
 import { McpError } from "./errors";
 import { McpOAuthClientProvider, type McpOAuthStore } from "./oauth-provider";

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { test, vi } from "vitest";
+import { z } from "zod";
 import {
   boundedMcpListedTools,
   listMcpEndpointTools,
@@ -11,9 +13,9 @@ const ENDPOINT = "https://mcp.example.com/mcp";
 type JsonRpc = { id?: number; method: string; params?: { cursor?: string } };
 
 /**
- * A Streamable HTTP endpoint answering each JSON-RPC request through
- * `answer`; notifications are accepted, and the optional GET stream is not
- * offered.
+ * A legacy (2025-era) Streamable HTTP endpoint answering each JSON-RPC
+ * request through `answer`; `server/discover` is an unknown method to it,
+ * notifications are accepted, and the optional GET stream is not offered.
  */
 function endpoint(answer: (message: JsonRpc) => unknown) {
   const requests: Request[] = [];
@@ -23,6 +25,13 @@ function endpoint(answer: (message: JsonRpc) => unknown) {
     if (request.method !== "POST") return new Response(null, { status: 405 });
     const message = (await request.json()) as JsonRpc;
     if (message.id === undefined) return new Response(null, { status: 202 });
+    if (message.method === "server/discover") {
+      return Response.json({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: "Method not found" },
+      });
+    }
     return Response.json({
       jsonrpc: "2.0",
       id: message.id,
@@ -40,7 +49,7 @@ function initializeResult() {
   };
 }
 
-test("lists the endpoint's tools after initialize, with no credentials sent", async () => {
+test("lists a legacy endpoint's tools after initialize, with no credentials sent", async () => {
   const { fetch, requests } = endpoint((message) =>
     message.method === "initialize"
       ? initializeResult()
@@ -82,6 +91,7 @@ test("lists the endpoint's tools after initialize, with no credentials sent", as
       .map(async (request) => ((await request.json()) as JsonRpc).method),
   );
   assert.deepEqual(methods, [
+    "server/discover",
     "initialize",
     "notifications/initialized",
     "tools/list",
@@ -90,6 +100,53 @@ test("lists the endpoint's tools after initialize, with no credentials sent", as
     assert.equal(request.url, ENDPOINT);
     assert.equal(request.headers.get("authorization"), null);
   }
+});
+
+test("lists a modern-only endpoint's tools without the legacy handshake", async () => {
+  // Answers protocol revision 2026-07-28 only, as servers built on the SDK 2
+  // `createMcpHandler(..., { legacy: "reject" })` do.
+  const handler = createMcpHandler(
+    () => {
+      const server = new McpServer({ name: "modern", version: "1" });
+      server.registerTool(
+        "lookup",
+        {
+          title: "Lookup",
+          description: "Look a record up.",
+          inputSchema: z.object({ id: z.string() }),
+          annotations: { readOnlyHint: true },
+        },
+        async ({ id }) => ({ content: [{ type: "text", text: id }] }),
+      );
+      return server;
+    },
+    { legacy: "reject" },
+  );
+  const requests: Request[] = [];
+  const fetch = (async (input: unknown, init?: RequestInit) => {
+    const request = new Request(input as RequestInfo, init);
+    requests.push(request.clone());
+    return handler.fetch(request);
+  }) as typeof globalThis.fetch;
+
+  const tools = await listMcpEndpointTools(ENDPOINT, "streamable_http", fetch);
+
+  assert.deepEqual(
+    tools.map(({ name, title, annotations }) => ({ name, title, annotations })),
+    [{ name: "lookup", title: "Lookup", annotations: { readOnlyHint: true } }],
+  );
+  assert.deepEqual(Object.keys(tools[0]!.inputSchema.properties as object), [
+    "id",
+  ]);
+  const methods = await Promise.all(
+    requests
+      .filter((request) => request.method === "POST")
+      .map(async (request) => ((await request.json()) as JsonRpc).method),
+  );
+  assert.equal(methods[0], "server/discover");
+  assert.ok(methods.includes("tools/list"));
+  assert.ok(!methods.includes("initialize"));
+  await handler.close?.();
 });
 
 test("follows tools/list pages until the cursor ends", async () => {

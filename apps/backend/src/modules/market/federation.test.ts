@@ -1413,6 +1413,14 @@ function stubOpenMcpEndpoints(entries: unknown[], tools: unknown[]) {
       const message = (await request.json()) as { id?: number; method: string };
       methods.push({ url, method: message.method });
       if (message.id === undefined) return new Response(null, { status: 202 });
+      // A 2025-era server: the modern `server/discover` probe is unknown to it.
+      if (message.method === "server/discover") {
+        return Response.json({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32601, message: "Method not found" },
+        });
+      }
       return Response.json({
         jsonrpc: "2.0",
         id: message.id,
@@ -1446,10 +1454,17 @@ test("an open endpoint's tools are listed into the manifest with an unknown risk
 
   assert.equal(result.toolsListed, 1);
   assert.equal(result.toolsListFailed, 0);
-  // The auth probe's initialize, then the listing's own handshake.
+  // The auth probe's initialize, then the listing's own handshake: the
+  // modern probe, answered as unknown, and the legacy initialize.
   assert.deepEqual(
     methods.map((call) => call.method),
-    ["initialize", "initialize", "notifications/initialized", "tools/list"],
+    [
+      "initialize",
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+    ],
   );
   const input = mocks.upsert.mock.calls[0]?.[0];
   assert.deepEqual(input.manifest.tools, [
@@ -2013,9 +2028,11 @@ test("issue #367: an open endpoint's self-description is kept with the probe, va
   assert.deepEqual(input.provenanceJson.serverCard, SERVER_CARD);
   assert.equal(input.provenanceJson.authMetadata, undefined);
   // The probe's one initialize and the card lookup, then the listing's own
-  // client handshake; nothing carried a credential.
+  // client handshake (the modern probe, answered as unknown, and the legacy
+  // initialize); nothing carried a credential.
   assert.deepEqual(await postedMethods(requests), [
     "initialize",
+    "server/discover",
     "initialize",
     "notifications/initialized",
     "tools/list",

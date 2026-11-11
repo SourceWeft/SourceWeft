@@ -1,7 +1,9 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { z } from "zod";
+import { createMcpClient, MCP_TRANSPORT_DEFAULTS } from "./mcp-client";
 
 /**
  * A tool as an MCP endpoint lists it to an anonymous client, cut to the
@@ -170,7 +172,8 @@ function budgetedFetch(
 
 /**
  * The tools an MCP endpoint lists to a client that sends no credentials:
- * `initialize`, then `tools/list` page by page. Requests go through
+ * the protocol handshake (`server/discover` or `initialize`, see
+ * `createMcpClient`), then `tools/list` page by page. Requests go through
  * `fetchImpl`, which the caller scopes to its endpoint policy. One time and
  * byte budget covers the whole listing; a failure of any request is thrown.
  */
@@ -184,8 +187,11 @@ export async function listMcpEndpointTools(
     () => controller.abort(new Error("MCP tool listing timed out")),
     MCP_TOOL_LISTING_LIMITS.timeoutMs,
   );
-  const options = { fetch: budgetedFetch(fetchImpl, controller.signal) };
-  const client = new Client({ name: "sourceweft-tool-listing", version: "1" });
+  const options = {
+    ...MCP_TRANSPORT_DEFAULTS,
+    fetch: budgetedFetch(fetchImpl, controller.signal),
+  };
+  const client = createMcpClient("sourceweft-tool-listing");
   const requestOptions = {
     signal: controller.signal,
     timeout: MCP_TOOL_LISTING_LIMITS.timeoutMs,
