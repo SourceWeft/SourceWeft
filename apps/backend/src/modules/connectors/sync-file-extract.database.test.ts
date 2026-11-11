@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterAll, beforeAll, beforeEach, test, vi } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
-import { item, makeSetup } from "./sync-test-support";
+import { item, makeSetup, PAGE_CHARS } from "./sync-test-support";
 
 let schema: typeof import("@sourceweft/db");
 let connectorRuntime: typeof import("./index");
@@ -70,6 +70,8 @@ test("keeps connectorType and parentExternalId authoritative over parser metadat
   assert.equal(metadata.connectorType, "fake_quota");
   assert.equal(metadata.parentExternalId, null);
   assert.equal(row?.mimeType, "text/plain");
+  // A key the real text parser emits survives the merge ("alpha beta" = 10 chars).
+  assert.equal(metadata.charCount, 10);
 });
 
 test("records a skipped item without failing the run", async () => {
@@ -139,12 +141,31 @@ test("updates the title of an unchanged item without re-indexing", async () => {
   assert.equal(t.index.calls.length, 1);
 });
 
-test("still blocks the run when pages run out on a file-shaped item", async () => {
+test("blocks at per-item admission when a file-shaped item needs more pages than remain", async () => {
+  // One page left and a file whose parsed text is over 4,000 chars (2 pages):
+  // the opening admission of 1 page passes, extract runs, and the per-item
+  // admission is what blocks — not the opening check.
   const t = await setup({
-    pagesOf: [[fileItem("f1", "eta theta")]],
-    billing: { available: 0 },
+    pagesOf: [[fileItem("f1", "a".repeat(PAGE_CHARS + 1))]],
+    billing: { available: 1 },
   });
   const run = await t.sync();
   assert.equal(run.status, "blocked");
   assert.equal(run.errorCode, "PAGES_LIMIT_EXCEEDED");
+  assert.equal(t.fake.extract.mock.calls.length, 1);
+  assert.equal((await t.sourceRows()).length, 0);
+});
+
+test("records an empty file-shaped item as an empty_content skip", async () => {
+  const t = await setup({
+    pagesOf: [[fileItem("blank", "   \n  ")]],
+  });
+  const run = await t.sync();
+  assert.equal(run.status, "succeeded");
+  assert.equal(run.failedCount, 0);
+  assert.deepEqual(
+    (run.metadataJson as { skippedItems?: unknown[] }).skippedItems,
+    [{ externalId: "blank", title: "blank", reason: "empty_content" }],
+  );
+  assert.equal((await t.sourceRows()).length, 0);
 });

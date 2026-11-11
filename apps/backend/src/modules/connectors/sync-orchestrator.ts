@@ -1317,7 +1317,9 @@ export class ConnectorSyncOrchestrator {
       // exactly as before.
       if (isConnectorItemSkipError(error)) {
         return this.finishSkippedItem({
-          ...input,
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          runId: input.runId,
           existing,
           reason: error.reason,
         });
@@ -1341,7 +1343,9 @@ export class ConnectorSyncOrchestrator {
       });
       if (resolved.kind === "skipped") {
         return this.finishSkippedItem({
-          ...input,
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          runId: input.runId,
           existing,
           reason: resolved.reason,
         });

@@ -16,6 +16,7 @@ import { isSupportedImageMimeType } from "./utils";
 import { tryParseImageWithVision } from "./image-vision-provider";
 
 export class DocumentNeedsOcrError extends Error {
+  readonly name = "DocumentNeedsOcrError";
   readonly code = "DOCUMENT_NEEDS_OCR";
 }
 

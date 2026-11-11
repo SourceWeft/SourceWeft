@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
+import { ParserContentError } from "@sourceweft/builtin-document-parsers";
 import type { SourceFileClassification } from "../sources/source-file-classifier";
 import type { ParsedDocument } from "../sources/parsers/types";
 import type { ProviderParseOutcome } from "../sources/parsers/providers/types";
@@ -94,8 +95,8 @@ test("skips an unsupported type without downloading", async () => {
   assert.equal(download.mock.calls.length, 0);
 });
 
-test("skips images and audio", async () => {
-  for (const kind of ["image", "audio"] as const) {
+test("skips kinds outside the allowlist (image, audio, transcript)", async () => {
+  for (const kind of ["image", "audio", "transcript"] as const) {
     const result = await resolveExtractedFile(
       baseInput({
         deps: { classify: () => classification({ kind }) },
@@ -201,6 +202,67 @@ test("maps a needs-OCR document to a skip", async () => {
   assert.deepEqual(result, { kind: "skipped", reason: "needs_ocr" });
 });
 
+test("skips a zero-byte document-type file as empty before parsing", async () => {
+  const parseDocument = vi.fn();
+  const result = await resolveExtractedFile(
+    baseInput({
+      file: file({
+        fileName: "empty.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: null,
+        download: async () => Buffer.alloc(0),
+      }),
+      deps: {
+        classify: () =>
+          classification({ kind: "document", mimeType: "application/pdf" }),
+        isDocumentMime: () => true,
+        parseDocument,
+      },
+    }),
+  );
+
+  assert.deepEqual(result, { kind: "skipped", reason: "empty_content" });
+  assert.equal(parseDocument.mock.calls.length, 0);
+});
+
+test("maps a parser empty-content code to an empty skip", async () => {
+  for (const code of ["ANYDOC_EMPTY_FILE", "ANYDOC_NO_CONTENT"] as const) {
+    const parseDocument = vi.fn(async () => {
+      throw new ParserContentError(422, code, "no document content");
+    });
+    const result = await resolveExtractedFile(
+      baseInput({
+        file: file({ mimeType: "application/pdf" }),
+        deps: {
+          classify: () =>
+            classification({ kind: "document", mimeType: "application/pdf" }),
+          isDocumentMime: () => true,
+          parseDocument,
+        },
+      }),
+    );
+
+    assert.deepEqual(result, { kind: "skipped", reason: "empty_content" });
+  }
+});
+
+test("skips an empty document-type file through the real parser as empty_content", async () => {
+  // No parse stub: the real startDocumentParse drives the anydoc binding. A
+  // valid-but-contentless RTF extracts to "" and must skip, not fail the item.
+  const result = await resolveExtractedFile(
+    baseInput({
+      file: file({
+        fileName: "empty.rtf",
+        mimeType: "application/rtf",
+        sizeBytes: null,
+        download: async () => Buffer.from("{\\rtf1\\ansi}"),
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, { kind: "skipped", reason: "empty_content" });
+});
+
 test("parses a text file with the text parser", async () => {
   const parseDocument = vi.fn();
   const parse = vi.fn(async () =>
@@ -264,7 +326,7 @@ test("skips a file that parses to blank text", async () => {
   assert.deepEqual(result, { kind: "skipped", reason: "empty_content" });
 });
 
-test("rethrows a parser failure", async () => {
+test("rethrows an unknown parser error, keeping the original as cause", async () => {
   const parseDocument = vi.fn(async () => {
     throw new Error("boom");
   });
@@ -280,8 +342,97 @@ test("rethrows a parser failure", async () => {
         },
       }),
     ),
-    (error: unknown) => error instanceof Error && error.message === "boom",
+    (error: unknown) =>
+      error instanceof Error &&
+      error.cause instanceof Error &&
+      error.cause.message === "boom",
   );
+});
+
+test("skips a deterministic parser rejection as unreadable", async () => {
+  const parseDocument = vi.fn(async () => {
+    // The anydoc binding rejects with a plain Error carrying a code; this is
+    // the real shape for malformed/encrypted/resourceLimit rejections.
+    const error = new Error("malformed document: invalid structure");
+    (error as { code?: string }).code = "malformed";
+    throw error;
+  });
+  const result = await resolveExtractedFile(
+    baseInput({
+      file: file({ mimeType: "application/pdf" }),
+      deps: {
+        classify: () =>
+          classification({ kind: "document", mimeType: "application/pdf" }),
+        isDocumentMime: () => true,
+        parseDocument,
+      },
+    }),
+  );
+
+  assert.deepEqual(result, { kind: "skipped", reason: "unreadable" });
+});
+
+test("skips a corrupt document through the real parser as unreadable", async () => {
+  const result = await resolveExtractedFile(
+    baseInput({
+      file: file({
+        fileName: "corrupt.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: null,
+        download: async () => Buffer.from("%PDF-1.4\nnot a real pdf body at all"),
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, { kind: "skipped", reason: "unreadable" });
+});
+
+test("sanitizes a thrown parse error so no file text reaches its message", async () => {
+  const marker = "SENSITIVE_FILE_SNIPPET_8f3a";
+  const parse = vi.fn(async () => {
+    throw new Error(`Unexpected token in JSON at position 3: ${marker}`);
+  });
+  await assert.rejects(
+    resolveExtractedFile(
+      baseInput({
+        file: file({ fileName: "data.json", mimeType: "application/json" }),
+        deps: {
+          classify: () =>
+            classification({ kind: "json", mimeType: "application/json" }),
+          isDocumentMime: () => false,
+          getTextParser: () => ({
+            id: "json",
+            name: "JSON",
+            supportedMimeTypes: ["application/json"],
+            parse,
+          }),
+        },
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof Error && !error.message.includes(marker),
+  );
+});
+
+test("skips when the text lookup returns a non-text parser", async () => {
+  const parse = vi.fn();
+  const result = await resolveExtractedFile(
+    baseInput({
+      deps: {
+        classify: () => classification(),
+        isDocumentMime: () => false,
+        getTextParser: () => ({
+          id: "pdf",
+          name: "Document Provider Parser",
+          supportedMimeTypes: ["text/plain"],
+          parse,
+        }),
+      },
+    }),
+  );
+
+  assert.deepEqual(result, { kind: "skipped", reason: "unsupported_type" });
+  assert.equal(parse.mock.calls.length, 0);
 });
 
 test("skips a type the classifier accepts but no parser handles", async () => {
