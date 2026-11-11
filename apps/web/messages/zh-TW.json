@@ -5238,6 +5238,11 @@
     },
     "additionalField": {
       "noItemsFound": "找不到任何項目。"
+    },
+    "oneTap": {
+      "signingIn": "正在使用 Google 登入…",
+      "failed": "Google 登入失敗，請重試。",
+      "noSession": "已登入，但工作階段不可用。請重試。"
     }
   },
   "download": {

@@ -18,13 +18,15 @@ export const CLIENT_NAMESPACES = {
    * Shell shared by every route, plus the small routes that have no provider
    * of their own (artifact, guest-invite, join, organization, settings,
    * privacy, terms). `authLocale` feeds Better Auth's localization through
-   * `useMessages()` in `app/providers.tsx`.
+   * `useMessages()` in `app/providers.tsx`. `authPages.oneTap` is read by
+   * `GoogleOneTap`, which mounts in the root providers on every route.
    */
   root: [
     "artifactShare",
     "authLocale",
     "authPages.additionalField",
     "authPages.guestInvite",
+    "authPages.oneTap",
     "authProfile",
     "dashboardObservability",
     "footer",
