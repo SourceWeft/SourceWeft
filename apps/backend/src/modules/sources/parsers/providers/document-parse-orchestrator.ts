@@ -15,6 +15,10 @@ import { getDocumentProvider } from "./registry";
 import { isSupportedImageMimeType } from "./utils";
 import { tryParseImageWithVision } from "./image-vision-provider";
 
+export class DocumentNeedsOcrError extends Error {
+  readonly code = "DOCUMENT_NEEDS_OCR";
+}
+
 type ImageVisionParser = typeof tryParseImageWithVision;
 
 let imageVisionParser: ImageVisionParser = tryParseImageWithVision;
@@ -86,7 +90,13 @@ async function startConfiguredOcr(
   strategy: DocumentParseStrategy,
   requestedProvider: DocumentParseProviderId,
   reason: "needsOcr" | "image_strategy",
+  ocr: "allow" | "deny",
 ): Promise<ProviderParseOutcome> {
+  if (ocr === "deny") {
+    throw new DocumentNeedsOcrError(
+      "This file needs OCR to be read, and OCR is not allowed for this parse.",
+    );
+  }
   if (!config.documentParsing.ocrEnabled) {
     // The setting name is for whoever runs the deployment, so it goes to the
     // log. The thrown message is stored on the source and returned by the API.
@@ -121,15 +131,16 @@ export function isDocumentProviderMimeType(mimeType: string): boolean {
 }
 
 export async function startDocumentParse(
-  input: ProviderParseInput,
+  input: ProviderParseInput & { ocr?: "allow" | "deny" },
 ): Promise<ProviderParseOutcome> {
+  const ocr = input.ocr ?? "allow";
   const canonicalMimeType =
     getAnydocFormatByMimeType(input.mimeType)?.mimeType ?? input.mimeType;
   const canonicalInput =
     canonicalMimeType === input.mimeType
       ? input
       : { ...input, mimeType: canonicalMimeType };
-  const outcome = await startCanonicalDocumentParse(canonicalInput);
+  const outcome = await startCanonicalDocumentParse(canonicalInput, ocr);
   if (canonicalMimeType === input.mimeType) return outcome;
   const provenance = {
     documentParseInputMimeType: input.mimeType,
@@ -153,6 +164,7 @@ export async function startDocumentParse(
 
 async function startCanonicalDocumentParse(
   input: ProviderParseInput,
+  ocr: "allow" | "deny",
 ): Promise<ProviderParseOutcome> {
   const strategy = "explicit";
   const requestedProvider = "anydoc";
@@ -164,6 +176,7 @@ async function startCanonicalDocumentParse(
         strategy,
         requestedProvider,
         "image_strategy",
+        ocr,
       );
     }
     const visionOutcome = await imageVisionParser(input);
@@ -187,7 +200,13 @@ async function startCanonicalDocumentParse(
   } catch (error) {
     // OCR is a declared branch, never a catch-all replacement parser.
     if (!isAnydocNeedsOcrError(error)) throw error;
-    return startConfiguredOcr(input, strategy, requestedProvider, "needsOcr");
+    return startConfiguredOcr(
+      input,
+      strategy,
+      requestedProvider,
+      "needsOcr",
+      ocr,
+    );
   }
   return withDecisionMetadata({
     outcome,

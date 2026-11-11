@@ -292,6 +292,33 @@ test("direct parser canonicalizes every catalog MIME alias and preserves provena
   }
 });
 
+test("ocr: deny surfaces needs-OCR instead of calling the OCR provider", async () => {
+  vi.stubEnv("DOCUMENT_PARSE_PROVIDER", "anydoc");
+  vi.stubEnv("DOCUMENT_PARSE_OCR_ENABLED", "true");
+  parsers.anydoc.mockRejectedValue(
+    Object.assign(new Error("OCR required"), { code: "needsOcr" }),
+  );
+  const { startDocumentParse, DocumentNeedsOcrError } = await import(
+    "./document-parse-orchestrator"
+  );
+  await assert.rejects(
+    startDocumentParse({ ...input(), ocr: "deny" }),
+    (error: unknown) => error instanceof DocumentNeedsOcrError,
+  );
+  assert.equal(parsers.pdf2markdown.mock.calls.length, 0);
+});
+
+test("ocr defaults to allow", async () => {
+  vi.stubEnv("DOCUMENT_PARSE_PROVIDER", "anydoc");
+  vi.stubEnv("DOCUMENT_PARSE_OCR_ENABLED", "true");
+  parsers.anydoc.mockRejectedValue(
+    Object.assign(new Error("OCR required"), { code: "needsOcr" }),
+  );
+  const { startDocumentParse } = await import("./document-parse-orchestrator");
+  await startDocumentParse(input());
+  assert.equal(parsers.pdf2markdown.mock.calls.length, 1);
+});
+
 test("scanned PDF aliases use canonical MIME for the declared OCR branch", async () => {
   vi.stubEnv("DOCUMENT_PARSE_OCR_ENABLED", "true");
   parsers.anydoc.mockRejectedValue(
