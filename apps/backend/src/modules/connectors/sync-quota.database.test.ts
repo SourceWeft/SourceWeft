@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, test, vi } from "vitest";
-import { BillingError } from "@sourceweft/contracts/billing-runtime";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
-import type { ContentBillingPort } from "../content/billing-port";
-import type { ConnectorAdapter, ConnectorItem } from "./types";
+import {
+  OWNER,
+  PAGE_CHARS,
+  TRIGGER,
+  item,
+  makeSetup,
+  type IndexCall,
+} from "./sync-test-support";
 
 let schema: typeof import("@sourceweft/db");
 let connectorRuntime: typeof import("./index");
@@ -14,6 +18,7 @@ let schedules: typeof import("./repository/schedule") &
   typeof import("./repository/schedule-occurrence");
 let sources: typeof import("../sources/repository");
 let indexing: typeof import("../sources/indexing-service");
+let setup: ReturnType<typeof makeSetup>;
 let isolated: Awaited<ReturnType<typeof createIsolatedTestDatabase>>;
 const originalUrl = process.env.DATABASE_URL;
 
@@ -29,6 +34,7 @@ beforeAll(async () => {
   };
   sources = await import("../sources/repository");
   indexing = await import("../sources/indexing-service");
+  setup = makeSetup({ schema, connectorRuntime, syncRunRepo, indexing });
 }, 120_000);
 
 afterAll(async () => {
@@ -38,255 +44,6 @@ afterAll(async () => {
   if (originalUrl === undefined) delete process.env.DATABASE_URL;
   else process.env.DATABASE_URL = originalUrl;
 });
-
-const OWNER = "owner-user";
-const TRIGGER = "trigger-user";
-const PAGE_CHARS = 4_000; // DEFAULT_TOKENS_PER_STANDARD_PAGE (1000) × 4 chars
-
-type Pages = { available: number; cycleCapacity: number; enforced: boolean };
-
-/** Billing that answers admission from `pages`, which the fake indexer drains. */
-function fakeBilling(initial: Partial<Pages> = {}) {
-  const pages: Pages = {
-    available: 100,
-    cycleCapacity: 100,
-    enforced: true,
-    ...initial,
-  };
-  const port = {
-    getExecutionState: vi.fn(async () => ({
-      kind: "metered" as const,
-      mode: "enforced" as const,
-      availableCredits: 100,
-      consumedThisCycle: 0,
-      ingestionPages: { ...pages },
-    })),
-    settleModelUsage: vi.fn(),
-    meterIngestion: vi.fn(),
-    reconcileProviderCost: vi.fn(),
-  } as unknown as ContentBillingPort;
-  return { pages, port };
-}
-
-function item(
-  externalId: string,
-  chars = 20,
-): ConnectorItem & {
-  body: string;
-} {
-  return {
-    externalId,
-    externalUri: `https://example.com/${externalId}`,
-    title: externalId,
-    mimeType: "text/plain",
-    sizeBytes: null,
-    externalUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
-    contentHash: null,
-    metadata: {},
-    body: "x".repeat(chars),
-  };
-}
-
-/**
- * Cursor pages that resume from page N on continuation. `reconcile` makes the
- * last page a full reconciling scan (archives sources the run did not see).
- */
-function fakeAdapter(
-  pagesOf: Array<ReturnType<typeof item>[]>,
-  options: { reconcile?: boolean } = {},
-) {
-  const extract = vi.fn(async (input: { item: ConnectorItem }) => {
-    const found = pagesOf
-      .flat()
-      .find((entry) => entry.externalId === input.item.externalId)!;
-    return { item: input.item, contentText: found.body };
-  });
-  const discoverPages = vi.fn(async function* (input: {
-    cursor?: { continuation?: Record<string, unknown> | null };
-  }) {
-    const start = Number(input.cursor?.continuation?.page ?? 1) - 1;
-    for (let index = start; index < pagesOf.length; index += 1) {
-      const complete = index === pagesOf.length - 1;
-      yield {
-        items: pagesOf[index]!.map(({ body: _body, ...rest }) => rest),
-        continuation: complete ? null : { page: String(index + 2) },
-        checkpoint: complete ? { history: "h1" } : null,
-        complete,
-        ...(complete && options.reconcile ? { reconcileMissing: true } : {}),
-      };
-    }
-  });
-  const adapter = {
-    getManifest: () => ({
-      type: "fake_quota",
-      displayName: "Fake quota source",
-      auth: {
-        kind: "oauth2" as const,
-        authorizationUrl: "https://example.com/auth",
-        tokenUrl: "https://example.com/token",
-        scopes: [],
-      },
-      sync: {
-        supportsIncremental: true,
-        defaultFrequencyMinutes: 60,
-        resources: [
-          {
-            type: "document",
-            displayName: "Document",
-            supportsDeleteDetection: options.reconcile === true,
-          },
-        ],
-      },
-      actions: [],
-      configSchema: { type: "object" },
-    }),
-    async *discover() {},
-    discoverPages,
-    extract,
-  } as unknown as ConnectorAdapter;
-  return { adapter, extract, discoverPages };
-}
-
-type IndexCall = { sourceId: string; userId: string };
-
-/**
- * Stands in for embedding + settlement: charges the fake balance like
- * `meterIngestion` would, or rejects at settlement when `raceOnce` is set.
- */
-function stubIndexing(billing: ReturnType<typeof fakeBilling>) {
-  const calls: IndexCall[] = [];
-  const control = { raceOnce: false };
-  vi.spyOn(
-    indexing.SourceIndexingService.prototype,
-    "indexSourceRevision",
-  ).mockImplementation(async function (input) {
-    const [row] = await schema.db
-      .select()
-      .from(schema.sources)
-      .where(eq(schema.sources.id, input.sourceId));
-    const needed = Math.max(
-      1,
-      Math.ceil((row?.contentText.length ?? 0) / PAGE_CHARS),
-    );
-    calls.push({ sourceId: input.sourceId, userId: input.userId });
-    if (control.raceOnce || billing.pages.available < needed) {
-      control.raceOnce = false;
-      await schema.db
-        .update(schema.sources)
-        .set({ status: "failed" })
-        .where(eq(schema.sources.id, input.sourceId));
-      throw new BillingError(
-        "PAGES_LIMIT_EXCEEDED",
-        402,
-        "Ingestion pages limit exceeded",
-        {
-          requested: needed,
-          available: billing.pages.available,
-        },
-      );
-    }
-    billing.pages.available -= needed;
-    await schema.db
-      .update(schema.sources)
-      .set({ status: "indexed", indexedAt: new Date() })
-      .where(eq(schema.sources.id, input.sourceId));
-    return {} as never;
-  });
-  return { calls, control };
-}
-
-async function setup(input: {
-  pagesOf: Array<ReturnType<typeof item>[]>;
-  billing?: Partial<Pages>;
-  owner?: string | null;
-  reconcile?: boolean;
-}) {
-  const teamId = randomUUID();
-  const workspaceId = randomUUID();
-  const connectorId = randomUUID();
-  await schema.db.insert(schema.workspaces).values({
-    id: workspaceId,
-    organizationId: teamId,
-    name: "Quota test",
-    slug: workspaceId,
-  });
-  await schema.db.insert(schema.sourceConnectors).values({
-    id: connectorId,
-    teamId,
-    workspaceId,
-    connectorType: "fake_quota",
-    name: connectorId,
-    createdBy: input.owner === undefined ? OWNER : input.owner,
-  });
-  const billing = fakeBilling(input.billing);
-  const fake = fakeAdapter(input.pagesOf, { reconcile: input.reconcile });
-  const index = stubIndexing(billing);
-  const resolveActor = vi.fn(
-    async (actor: { ownerUserId: string | null }) => actor.ownerUserId,
-  );
-  const orchestrator = new connectorRuntime.ConnectorSyncOrchestrator(
-    billing.port,
-    new connectorRuntime.ConnectorRegistry([fake.adapter]),
-    {
-      getRuntimeToken: async () => "token",
-    } as unknown as InstanceType<typeof connectorRuntime.ConnectorOAuthService>,
-    resolveActor,
-  );
-  const target = { teamId, workspaceId, connectorId };
-  async function sync(
-    triggerType: "manual" | "scheduled" | "webhook" = "manual",
-    targetExternalIds?: string[],
-  ) {
-    const run = await syncRunRepo.createSyncRunRecord({
-      ...target,
-      triggerType,
-      status: "queued",
-    });
-    await orchestrator.run({
-      ...target,
-      runId: run.id,
-      userId: TRIGGER,
-      ...(targetExternalIds ? { targetExternalIds } : {}),
-    });
-    const [row] = await schema.db
-      .select()
-      .from(schema.connectorSyncRuns)
-      .where(eq(schema.connectorSyncRuns.id, run.id));
-    return row!;
-  }
-  async function connectorRow() {
-    const [row] = await schema.db
-      .select()
-      .from(schema.sourceConnectors)
-      .where(eq(schema.sourceConnectors.id, connectorId));
-    return row!;
-  }
-  async function sourceRows() {
-    return schema.db
-      .select()
-      .from(schema.sources)
-      .where(eq(schema.sources.connectorId, connectorId));
-  }
-  async function cursor() {
-    const [row] = await schema.db
-      .select()
-      .from(schema.connectorSyncState)
-      .where(eq(schema.connectorSyncState.connectorId, connectorId));
-    return row;
-  }
-  return {
-    ...target,
-    orchestrator,
-    billing,
-    fake,
-    index,
-    resolveActor,
-    sync,
-    connectorRow,
-    sourceRows,
-    cursor,
-  };
-}
 
 beforeEach(() => {
   vi.restoreAllMocks();
