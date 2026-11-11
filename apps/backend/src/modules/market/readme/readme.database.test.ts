@@ -220,7 +220,8 @@ describe("MCP README storage and fetch state", () => {
     };
     await readmes.writeMcpReadmeColumns(
       plan.mcpServerVersionId(carried.identifier, "1.0.0"),
-      previous,
+      // The overview was written under an earlier file's hash (Issue #454).
+      { ...previous, readmeOverviewSha256: "d".repeat(64) },
     );
 
     const before = Date.now();
@@ -236,6 +237,9 @@ describe("MCP README storage and fetch state", () => {
       readmePath: "README.md",
       readmeRef: COMMIT,
       readmeSha256: previous.readmeSha256,
+      // With the hash its overview is fingerprinted with, so the new
+      // version's overview is still a copy of the previous one's.
+      readmeOverviewSha256: "d".repeat(64),
       readmeFetchedAt: readAt,
       readmeError: previous.readmeError,
       // The version's own attempts, not the previous version's.
@@ -891,6 +895,7 @@ describe("MCP README storage and fetch state", () => {
       {
         claim: readmes.claimMcpReadmes,
         write: readmes.writeMcpReadmeColumns,
+        readStored: readmes.readStoredMcpReadme,
         writeRepositoryMetadata: readmes.writeMcpRepositoryMetadata,
         defer: readmes.deferMcpReadmes,
         fetchReadmes,

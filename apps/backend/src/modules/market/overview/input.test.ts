@@ -18,6 +18,7 @@ import {
   extractMcpManifestFacts,
   extractMcpReadmeExcerpt,
   mcpOverviewTextChars,
+  sameMcpOverviewReadme,
   shouldSkipMcpOverview,
   type McpOverviewSource,
 } from "./input";
@@ -604,6 +605,97 @@ describe("README excerpt", () => {
     );
     assert.match(genesis.excerpt, /never your main wallet/);
     assert.doesNotMatch(genesis.excerpt, /Permission is hereby granted/);
+  });
+});
+
+describe("README changes the overview does not read", () => {
+  const readme = [
+    "# Weather MCP",
+    "",
+    "[![npm](https://img.shields.io/npm/v/weather-mcp.svg)](https://npmjs.com/package/weather-mcp)",
+    "",
+    "Forecasts for 1856+ cities. Current release: v1.2.0 (2026-10-01).",
+    "",
+    "## Usage",
+    "",
+    "Call `forecast` with a city name to get the next three days.",
+    "",
+    "## Changelog",
+    "",
+    "- 1.2.0: faster responses",
+    "",
+    "## License",
+    "",
+    "MIT",
+    "",
+  ].join("\n");
+
+  test("identical text is the same", () => {
+    assert.equal(sameMcpOverviewReadme(readme, readme), true);
+  });
+
+  test("badges, markup, skipped sections and whitespace are not read", () => {
+    const edited = readme
+      .replace("npm/v/weather-mcp.svg", "npm/dm/weather-mcp.svg")
+      .replace(
+        "- 1.2.0: faster responses",
+        "- 1.3.0: more cities\n- 1.2.0: faster responses",
+      )
+      .replace("MIT", "Apache-2.0")
+      .replace("## Usage\n", "## Usage\n\n<!-- docs -->\n")
+      .replace("to get the next", "to  get the next");
+    assert.notEqual(edited, readme);
+    assert.equal(sameMcpOverviewReadme(readme, edited), true);
+  });
+
+  test("a number that moved, or letter case, does not change the overview", () => {
+    const edited = readme
+      .replace("1856+", "1865+")
+      .replace("v1.2.0 (2026-10-01)", "v1.3.0 (2026-11-03)")
+      .replace("Forecasts for", "FORECASTS for");
+    assert.equal(sameMcpOverviewReadme(readme, edited), true);
+  });
+
+  test("a change of wording in what the overview reads is a change", () => {
+    assert.equal(
+      sameMcpOverviewReadme(
+        readme,
+        readme.replace("a city name", "a city or postal code"),
+      ),
+      false,
+    );
+    // A new usage section.
+    assert.equal(
+      sameMcpOverviewReadme(
+        readme,
+        readme.replace(
+          "## Changelog",
+          "## Authentication\n\nSet WEATHER_API_KEY.\n\n## Changelog",
+        ),
+      ),
+      false,
+    );
+    // A number that appears or disappears is wording, not a moved number.
+    assert.equal(
+      sameMcpOverviewReadme(
+        readme,
+        readme.replace("1856+ cities", "many cities"),
+      ),
+      false,
+    );
+  });
+
+  test("text beyond the excerpt's limit is not read", () => {
+    const head = "## Usage\n\nCall `forecast` with a city name.\n\n";
+    const filler = "## Notes\n\n" + "Lorem ipsum dolor sit amet. ".repeat(400);
+    assert.equal(
+      sameMcpOverviewReadme(
+        `${head}${filler}\n\nFirst ending.\n`,
+        `${head}${filler}\n\nAnother ending altogether.\n`,
+        200,
+      ),
+      true,
+    );
   });
 });
 

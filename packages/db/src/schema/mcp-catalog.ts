@@ -135,6 +135,12 @@ export const mcpServerVersions = pgTable(
     readmePath: text("readme_path"),
     readmeRef: text("readme_ref"),
     readmeSha256: text("readme_sha256"),
+    // The README hash the AI overview's input fingerprint uses, when it is
+    // not `readme_sha256`: a refresh that reads new bytes whose overview
+    // excerpt is still the same keeps the hash the overview was written
+    // under here, so the overview is not regenerated (Issue #454). Null:
+    // the fingerprint uses `readme_sha256`.
+    readmeOverviewSha256: text("readme_overview_sha256"),
     // What the version's README is. A failed refresh does not change it; the
     // attempts and error below say the refresh is failing.
     readmeStatus: text("readme_status")

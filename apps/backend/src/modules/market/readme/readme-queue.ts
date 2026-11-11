@@ -84,6 +84,11 @@ export type McpReadmeBatchSummary = {
   /** Outcomes by fetch status. */
   outcomes: Record<string, number>;
   /**
+   * READMEs read with new bytes that left the AI overview's excerpt as it
+   * was, so the overview was not made stale (Issue #454). Absent when none.
+   */
+  overviewUnchanged?: number;
+  /**
    * Whether the worker has `GITHUB_TOKEN`. Without it nothing is read: GitHub's
    * GraphQL API has no anonymous access.
    */
