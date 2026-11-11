@@ -6,6 +6,10 @@ import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { digest, filesUnder } from "./desktop-release-artifacts.mjs";
 import { releaseVersion, publicationTag } from "./verify-release-config.mjs";
+import {
+  DESKTOP_PUBLICATION_POLICIES,
+  distributionClaims,
+} from "./desktop-publication-policy.mjs";
 
 const manifestPath = "output/downloads/manifest.json";
 const immutableCache = "public, max-age=31536000, immutable";
@@ -85,7 +89,7 @@ export async function prepareManifest(
   policy = "candidate",
 ) {
   assert(
-    ["candidate", "signed", "updater-signed"].includes(policy),
+    DESKTOP_PUBLICATION_POLICIES.includes(policy),
     "Invalid desktop publication policy",
   );
   const { version, prerelease } = releaseVersion(tag);
@@ -101,7 +105,7 @@ export async function prepareManifest(
   for (const path of descriptions) {
     const entry = JSON.parse(await readFile(path, "utf8"));
     assert.equal(entry.schemaVersion, 1, "Unknown artifact manifest schema");
-    if (policy === "updater-signed")
+    if (policy === "updater-signed" || policy === "macos-signed")
       assert.equal(
         entry.publicationPolicy,
         policy,
@@ -139,14 +143,15 @@ export async function prepareManifest(
       ),
       "Installer extension does not match platform",
     );
+    const claims = distributionClaims(policy, entry.platform);
     assert.equal(
       entry.distributionSigned,
-      policy === "signed" && entry.platform !== "linux",
+      claims.distributionSigned,
       "Installer signing does not match publication policy",
     );
     assert.equal(
       entry.notarized,
-      policy === "signed" && entry.platform === "macos",
+      claims.notarized,
       "Installer notarization does not match publication policy",
     );
     assert.equal(
@@ -182,7 +187,7 @@ export async function prepareManifest(
       artifacts.some((a) => a.platform === "windows"),
     "Both macOS and Windows installers are required",
   );
-  if (policy === "signed" || policy === "updater-signed") {
+  if (policy !== "candidate") {
     assert.deepEqual(
       [...seen].sort(),
       ["macos-arm64", "macos-x64", "windows-x64", "linux-x64"].sort(),

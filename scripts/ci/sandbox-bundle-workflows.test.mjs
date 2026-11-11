@@ -269,19 +269,25 @@ test("the signed desktop build produces the Linux and both macOS bundles, each s
   assert(
     macStep.run.indexOf(" sign ") < macStep.run.indexOf("verify-signature"),
   );
-  // Developer ID in `signed`, ad-hoc in `updater-signed`, same secrets as the installers.
+  // Developer ID in `signed` and `macos-signed`, ad-hoc in `updater-signed`, same secrets as
+  // the installers.
   assert.match(macStep.run, /DESKTOP_PUBLICATION_POLICY" = "signed"/);
+  assert.match(macStep.run, /DESKTOP_PUBLICATION_POLICY" = "macos-signed"/);
   assert.match(macStep.run, /identity="\$APPLE_SIGNING_IDENTITY"/);
   assert.match(macStep.run, /identity="-"/);
 
   // The Developer ID certificate import reuses the installer's Apple secrets and runs only for
-  // the signed policy, before the macOS bundle step.
+  // the signed and macos-signed policies, before the macOS bundle step.
   const importStep = steps.find((step) =>
     step.name?.startsWith("Import the Developer ID certificate"),
   );
   assert(importStep);
   assert.match(importStep.if, /runner\.os == 'macOS'/);
-  assert.match(importStep.if, /publication_policy == 'signed'/);
+  assert(
+    importStep.if.includes(
+      `contains(fromJSON('["signed","macos-signed"]'), inputs.publication_policy)`,
+    ),
+  );
   assert(steps.indexOf(importStep) < mac);
   assert.doesNotMatch(JSON.stringify(macStep), /secrets\./);
 

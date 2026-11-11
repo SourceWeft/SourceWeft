@@ -91,7 +91,7 @@ test("unsigned installers require an explicit candidate policy and stay off stab
             desktopPublicationPolicy,
           },
         ),
-      /must be signed, updater-signed or candidate/,
+      /must be signed, macos-signed, updater-signed or candidate/,
     );
   }
 });
@@ -115,6 +115,21 @@ test("GitHub release flag defaults to semver and rejects malformed overrides", (
       /must be a boolean/,
     );
   }
+});
+
+test("macos-signed is explicit and valid for prereleases and stable releases", () => {
+  const preview = validateReleaseConfig(
+    { GITHUB_REF_NAME: "v0.3.0-rc.9" },
+    { desktopPublicationPolicy: "macos-signed" },
+  );
+  assert.equal(preview.desktopPolicy, "macos-signed");
+  assert.equal(preview.prerelease, true);
+  const stable = validateReleaseConfig(
+    { GITHUB_REF_NAME: "v0.3.0" },
+    { desktopPublicationPolicy: "macos-signed" },
+  );
+  assert.equal(stable.desktopPolicy, "macos-signed");
+  assert.equal(stable.prerelease, false);
 });
 
 test("updater-signed is explicit and preserves preview/stable channel rules", () => {

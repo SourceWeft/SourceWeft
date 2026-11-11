@@ -10,7 +10,7 @@ on:
       publication_policy:
         description: Explicit signing policy for build-only validation (does not publish)
         type: choice
-        options: [signed, updater-signed]
+        options: [signed, macos-signed, updater-signed]
         default: updater-signed
 permissions:
   contents: read
@@ -44,12 +44,14 @@ jobs:
       TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      APPLE_CERTIFICATE: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_CERTIFICATE || '' }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-      APPLE_SIGNING_IDENTITY: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-      APPLE_ID: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_ID || '' }}
-      APPLE_PASSWORD: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_PASSWORD || '' }}
-      APPLE_TEAM_ID: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_TEAM_ID || '' }}
+      # Apple credentials reach every leg under `signed`, and only the macOS legs under
+      # `macos-signed`; Windows signing inputs exist under `signed` only.
+      APPLE_CERTIFICATE: ${{ (inputs.publication_policy == 'signed' || (inputs.publication_policy == 'macos-signed' && endsWith(matrix.target, '-apple-darwin'))) && secrets.APPLE_CERTIFICATE || '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ (inputs.publication_policy == 'signed' || (inputs.publication_policy == 'macos-signed' && endsWith(matrix.target, '-apple-darwin'))) && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+      APPLE_SIGNING_IDENTITY: ${{ (inputs.publication_policy == 'signed' || (inputs.publication_policy == 'macos-signed' && endsWith(matrix.target, '-apple-darwin'))) && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      APPLE_ID: ${{ (inputs.publication_policy == 'signed' || (inputs.publication_policy == 'macos-signed' && endsWith(matrix.target, '-apple-darwin'))) && secrets.APPLE_ID || '' }}
+      APPLE_PASSWORD: ${{ (inputs.publication_policy == 'signed' || (inputs.publication_policy == 'macos-signed' && endsWith(matrix.target, '-apple-darwin'))) && secrets.APPLE_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ (inputs.publication_policy == 'signed' || (inputs.publication_policy == 'macos-signed' && endsWith(matrix.target, '-apple-darwin'))) && secrets.APPLE_TEAM_ID || '' }}
       WINDOWS_TIMESTAMP_URL: ${{ inputs.publication_policy == 'signed' && vars.WINDOWS_TIMESTAMP_URL || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +103,13 @@ jobs:
         run: |
           if [ "$DESKTOP_PUBLICATION_POLICY" = "updater-signed" ]; then
             unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_TIMESTAMP_URL
+          elif [ "$DESKTOP_PUBLICATION_POLICY" = "macos-signed" ]; then
+            # macOS legs keep the Apple credentials; every other leg builds as in updater-signed.
+            unset WINDOWS_TIMESTAMP_URL
+            case "$DESKTOP_RELEASE_TARGET" in
+              *-apple-darwin) ;;
+              *) unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID ;;
+            esac
           fi
           pnpm --filter @sourceweft/desktop exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.generated.json -- --locked
       - name: Build signature verifier
@@ -133,8 +142,8 @@ jobs:
       # code-signs it, and minisign-signs the packed tarball with the same key and verifier the
       # installers use. Linux x86_64 ships a static ripgrep and srt's apply-seccomp helper; macOS
       # (both architectures) ships a Mach-O ripgrep and no apply-seccomp, and additionally
-      # code-signs the binaries (Developer ID + hardened runtime + entitlements in `signed`,
-      # ad-hoc in `updater-signed`) BEFORE the tarball is hashed and minisigned. Windows x86_64 ships a
+      # code-signs the binaries (Developer ID + hardened runtime + entitlements in `signed` and
+      # `macos-signed`, ad-hoc in `updater-signed`) BEFORE the tarball is hashed and minisigned. Windows x86_64 ships a
 # PE ripgrep, srt-win.exe and the sidecar as .exe files, and under `signed` Authenticode-signs
 # the sidecar and ripgrep with the installer's certificate before the tarball is hashed and
 # minisigned. srt-win.exe is deliberately NOT signed: the desktop app pins its exact SHA-256
@@ -169,16 +178,16 @@ jobs:
       # is done inside `tauri build`, which imports this same certificate into its own temporary
       # keychain and does not leave it behind for a later codesign call, so the bundle job needs
       # its own import. Same secrets as the installers; no new secret. Runs only for the `signed`
-      # policy (the `updater-signed` path signs ad-hoc and needs no certificate). UNVERIFIED in
+      # and `macos-signed` policies (the `updater-signed` path signs ad-hoc and needs no certificate). UNVERIFIED in
       # this repository: no Apple Developer ID certificate is available to the authors, so the
       # Developer ID branch has only ever been exercised against a fake codesign.
       - name: Import the Developer ID certificate for sandbox-bundle signing
-        if: runner.os == 'macOS' && inputs.publication_policy == 'signed' && steps.existing.outputs.exists != 'true'
+        if: runner.os == 'macOS' && contains(fromJSON('["signed","macos-signed"]'), inputs.publication_policy) && steps.existing.outputs.exists != 'true'
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${APPLE_CERTIFICATE:-}" ] || [ -z "${APPLE_CERTIFICATE_PASSWORD:-}" ] || [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            echo "::error::APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD and APPLE_SIGNING_IDENTITY are required for the signed policy"
+            echo "::error::APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD and APPLE_SIGNING_IDENTITY are required for Developer ID signing"
             exit 1
           fi
           keychain="$RUNNER_TEMP/sandbox-signing.keychain-db"
@@ -206,11 +215,11 @@ jobs:
           # Tauri installers do.
           rg="$(bash scripts/ci/install-ripgrep-macos.sh "$RUNNER_TEMP/ripgrep" "$DESKTOP_RELEASE_TARGET")"
           pnpm --filter @sourceweft/desktop-sandbox-sidecar build -- --target "$DESKTOP_RELEASE_TARGET" --rg "$rg"
-          # Code-sign the binaries BEFORE packing. signed => Developer ID Application identity
+          # Code-sign the binaries BEFORE packing. signed and macos-signed => Developer ID Application identity
           # (hardened runtime + entitlements + secure timestamp); updater-signed => ad-hoc (`-`),
           # exactly like the installers. sign-macos.sh exits non-zero on any failure (the bundle
           # must then be discarded, which `set -e` does by failing the job).
-          if [ "$DESKTOP_PUBLICATION_POLICY" = "signed" ]; then
+          if [ "$DESKTOP_PUBLICATION_POLICY" = "signed" ] || [ "$DESKTOP_PUBLICATION_POLICY" = "macos-signed" ]; then
             identity="$APPLE_SIGNING_IDENTITY"
           else
             identity="-"

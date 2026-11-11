@@ -77,12 +77,13 @@ signer, and `WINDOWS_TIMESTAMP_URL` to the signing certificate provider's RFC 31
 timestamp service. The public key must be available to the release preflight as
 well as protected build jobs, so use a repository variable.
 
-Both update-capable modes require the updater key pair; choose the mode explicitly
+Every update-capable mode requires the updater key pair; choose the mode explicitly
 with changelog `desktopPublicationPolicy`:
 
 | Mode | Tauri update signatures | Platform certificates | Automatic updates |
 | --- | --- | --- | --- |
 | `signed` (default) | Required | Required for macOS/Windows | Published |
+| `macos-signed` | Required | Required for macOS (Developer ID and notarization); Windows remains unsigned | Published |
 | `updater-signed` | Required | Not used; macOS uses ad-hoc signing, Windows remains unsigned | Published |
 | `candidate` | Not generated | Not used | Never published |
 
@@ -94,15 +95,31 @@ Ad-hoc macOS signatures provide integrity, not a Developer ID or notarization.
 Platform credential variables must be absent/empty in this mode; CI withholds them
 and clears empty values before building so they cannot override generated config.
 
-Required secrets for both update-capable modes:
+`macos-signed` is for a release that has Apple credentials but no Windows publisher
+certificate. It is equally explicit: it is never selected because a credential happens
+to be present or absent. macOS installers, update packages and the macOS sandbox
+runtime are Developer ID signed and the app is notarized, exactly as in `signed`;
+Windows and Linux are built exactly as in `updater-signed`. CI passes the Apple
+credentials to the macOS build legs only, every Apple credential is required there
+(a missing one fails the build instead of falling back to ad-hoc signing), and Windows
+signing inputs must be absent/empty on every leg. Windows publisher warnings remain.
+An ad-hoc install that updates to a Developer ID build changes its code-signing
+identity once: before rollout, check that keychain-backed device credentials and the
+microphone and screen-capture permissions survive or are re-granted cleanly, and that
+microphone capture works under the hardened runtime.
+
+Required secrets for every update-capable mode:
 
 - `TAURI_SIGNING_PRIVATE_KEY` and, if encrypted, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
-Additional protected secrets for **`signed` only**:
+Additional protected secrets for **`signed` and `macos-signed`**:
 
 - `APPLE_CERTIFICATE` (base64 P12), `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY` (Developer ID Application identity), `APPLE_ID`,
   `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID`.
+
+Additional protected secrets for **`signed` only**:
+
 - `WINDOWS_CERTIFICATE` (base64 PFX) and `WINDOWS_CERTIFICATE_PASSWORD`.
 - Existing `DOWNLOADS_S3_ACCESS_KEY_ID` and `DOWNLOADS_S3_SECRET_ACCESS_KEY` may
   remain repository secrets. Scope them to the download bucket only.
@@ -138,7 +155,8 @@ production update checks. Unsigned verification builds without a key report
 
 In `signed`, macOS and Windows verify their OS distribution signatures (including
 macOS notarization). In `updater-signed`, macOS verifies its ad-hoc signature and
-disk image, and Windows verifies the absence of Authenticode signing. The resulting
+disk image, and Windows verifies the absence of Authenticode signing. `macos-signed`
+runs the `signed` checks on macOS and the `updater-signed` check on Windows. The resulting
 artifact metadata explicitly records the selected policy and truthful signing
 claims; mismatched or mixed policies fail publication. Linux verifies the x64
 type-2 AppImage header and executable mode; it does not claim Apple/Windows code
@@ -332,7 +350,7 @@ before the artifact upload):
 2. **macOS only:** `apps/desktop/sandbox-sidecar/scripts/sign-macos.sh <bundle> [identity]`
    code-signs `srt-sidecar` (hardened runtime + `allow-jit` entitlement) and `rg` (hardened
    runtime, no entitlements) **before** packing. The identity is the Developer ID Application
-   identity in the `signed` policy (with `--timestamp`; a dedicated keychain holds the imported
+   identity in the `signed` and `macos-signed` policies (with `--timestamp`; a dedicated keychain holds the imported
    `APPLE_CERTIFICATE`, the same secret the installers use — no new secret) or `-` (ad-hoc) in
    `updater-signed`, exactly like the installers. Code-signing rewrites the binaries, so
    `build.ts --remanifest` then rebuilds `manifest.json` over the signed files so their hashes

@@ -226,6 +226,71 @@ test("updater-signed downloads require explicit artifact mode and all four targe
   await assert.rejects(prepare(), /every configured/);
 });
 
+test("macos-signed downloads claim signing and notarization for macOS installers only", async (t) => {
+  const { root } = await fixture(t);
+  const prepare = () =>
+    prepareManifest(
+      config,
+      root,
+      "v1.2.3-rc.1",
+      "SourceWeft/SourceWeft",
+      "macos-signed",
+    );
+  // Candidate descriptions carry no publication policy and cannot be published as macos-signed.
+  await assert.rejects(prepare(), /publication policy mismatch/);
+  for (const [platform, arch, filename] of [
+    ["linux", "x64", "linux.AppImage"],
+    ["darwin", "x64", "intel.dmg"],
+  ]) {
+    const dir = join(root, `${platform}-${arch}`);
+    await mkdir(dir);
+    await writeFile(join(dir, filename), "installer fixture");
+    const entry = await describeInstaller(dir, platform, arch, "1.2.3-rc.1");
+    await writeFile(
+      join(dir, `desktop-manifest-${platform}-${arch}.json`),
+      JSON.stringify(entry),
+    );
+  }
+  const { filesUnder } = await import("./desktop-release-artifacts.mjs");
+  const descriptions = (await filesUnder(root)).filter((p) =>
+    /desktop-manifest-.*\.json$/.test(p),
+  );
+  const rewrite = async (change) => {
+    for (const path of descriptions) {
+      const entry = JSON.parse(await readFile(path, "utf8"));
+      await writeFile(path, JSON.stringify({ ...entry, ...change(entry) }));
+    }
+  };
+  // Still declaring every platform unsigned: the macOS claims disagree with the policy.
+  await rewrite(() => ({ publicationPolicy: "macos-signed" }));
+  await assert.rejects(prepare(), /signing does not match publication policy/);
+  await rewrite((entry) => ({
+    distributionSigned: entry.platform === "macos",
+    notarized: false,
+  }));
+  await assert.rejects(
+    prepare(),
+    /notarization does not match publication policy/,
+  );
+  await rewrite((entry) => ({ notarized: entry.platform === "macos" }));
+  const { manifest } = await prepare();
+  assert.equal(manifest.artifacts.length, 4);
+  for (const item of manifest.artifacts) {
+    assert.equal(item.distributionSigned, item.platform === "macos");
+    assert.equal(item.notarized, item.platform === "macos");
+  }
+  // A Windows installer may not claim a publisher signature in this mode.
+  await rewrite((entry) => ({
+    distributionSigned: entry.platform !== "linux",
+  }));
+  await assert.rejects(prepare(), /signing does not match publication policy/);
+  await rewrite((entry) => ({
+    distributionSigned: entry.platform === "macos",
+  }));
+  await rm(join(root, "linux-x64"), { recursive: true });
+  await assert.rejects(prepare(), /every configured/);
+});
+
 test("missing platform, tampered payload and mismatched versions fail before upload", async (t) => {
   const { root, prepared } = await fixture(t);
   await assert.rejects(
@@ -401,7 +466,7 @@ test("candidate publication requires successful builds and never publishes appli
       "utf8",
     ),
   );
-  const signedOnly = `contains(fromJSON('["signed","updater-signed"]'), needs.preflight.outputs.desktop_policy)`;
+  const signedOnly = `contains(fromJSON('["signed","macos-signed","updater-signed"]'), needs.preflight.outputs.desktop_policy)`;
   assert.equal(workflow.jobs.desktop.if, signedOnly);
   assert.equal(
     workflow.jobs["desktop-candidate"].if,
@@ -438,7 +503,7 @@ test("candidate publication requires successful builds and never publishes appli
     workflow.jobs.preflight.steps.find(
       (step) => step.name === "Validate update publication configuration",
     ).if,
-    `contains(fromJSON('["signed","updater-signed"]'), steps.config.outputs.desktop_policy)`,
+    `contains(fromJSON('["signed","macos-signed","updater-signed"]'), steps.config.outputs.desktop_policy)`,
   );
   const draft = release.steps.find(
     (step) => step.id === "github_release_candidate",

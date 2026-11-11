@@ -1,6 +1,9 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { desktopPublicationPolicy } from "./desktop-publication-policy.mjs";
+import {
+  desktopPublicationPolicy,
+  DESKTOP_PUBLICATION_POLICY_MESSAGE,
+} from "./desktop-publication-policy.mjs";
 
 export function releaseVersion(tag) {
   const match =
@@ -37,9 +40,7 @@ export function validateReleaseConfig(env, metadata = {}) {
   // Missing metadata preserves the fully signed release default; never infer
   // a weaker mode from missing credentials.
   if (typeof desktopPolicy !== "string") {
-    throw new Error(
-      "Desktop publication policy must be signed, updater-signed or candidate",
-    );
+    throw new Error(DESKTOP_PUBLICATION_POLICY_MESSAGE);
   }
   desktopPublicationPolicy(desktopPolicy);
   if (desktopPolicy === "candidate" && !result.prerelease) {
