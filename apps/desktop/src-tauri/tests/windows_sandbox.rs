@@ -1957,6 +1957,23 @@ fn shells_cancel_kills_the_whole_process_tree() {
             )
         })
     };
+    // A command that ends before its tree starts (the sandbox did not start, the script failed) is
+    // reported with its own result, not as a tree that never appeared.
+    let file = workspace.path.join("tree.json");
+    let waiting = Instant::now();
+    wait_until(Duration::from_secs(90), || file.is_file() || worker.is_finished());
+    if !file.is_file() && worker.is_finished() {
+        panic!(
+            "the command ended after {:?} without starting its process tree: {:?}",
+            waiting.elapsed(),
+            worker.join().unwrap()
+        );
+    }
+    assert!(
+        file.is_file(),
+        "the process tree never started (no tree.json in the workspace within 90 s) although the command is still running"
+    );
+    eprintln!("TIMING: the process tree of `cancel-tree` started after {:?}", waiting.elapsed());
     let tree = wait_for_tree(&workspace.path, ping, marker);
     assert!(executions.cancel("cancel-tree"), "the running command must be known to the executions table");
     let result = worker.join().unwrap().unwrap();
