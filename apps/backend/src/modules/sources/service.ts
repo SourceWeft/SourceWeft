@@ -114,6 +114,30 @@ function normalizeExternalUrl(value: string) {
   return url.toString();
 }
 
+const YOUTUBE_HOST_SUFFIXES = ["youtube.com", "youtube-nocookie.com", "youtu.be"];
+
+/**
+ * The web fetch provider cannot read YouTube pages: short links and `watch`
+ * URLs alike run out the whole fetch budget and fail. Refusing them when the
+ * source is created tells the user straight away, instead of a minute later
+ * with a generic fetch timeout. Transcript ingestion is a separate source type.
+ */
+export function assertWebSourceUrlSupported(externalUri: string) {
+  const hostname = new URL(externalUri).hostname
+    .toLowerCase()
+    .replace(/\.$/, "");
+  const isYouTube = YOUTUBE_HOST_SUFFIXES.some(
+    (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
+  );
+  if (isYouTube) {
+    throw new ContentError(
+      422,
+      "WEB_SOURCE_YOUTUBE_UNSUPPORTED",
+      "YouTube links can't be added as web sources yet.",
+    );
+  }
+}
+
 function resolveUrlSourceTitle(input: { title?: string; url: string }) {
   const title = input.title?.trim();
   if (title) {
@@ -961,6 +985,7 @@ export class ContentSourceService {
   }) {
     const workspace = await requireContentWorkspace(input);
     const externalUri = normalizeExternalUrl(input.url);
+    assertWebSourceUrlSupported(externalUri);
 
     await validateSourceParent({
       teamId: workspace.organizationId,

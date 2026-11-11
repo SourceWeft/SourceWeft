@@ -4,6 +4,8 @@ import {
   isAnydocMimeType,
 } from "@sourceweft/builtin-document-parsers";
 import { config } from "../../../../shared/config";
+import { logger } from "../../../../shared/logger";
+import { ContentError } from "../../../content/errors";
 import type {
   DocumentParseProviderId,
   DocumentParseStrategy,
@@ -86,8 +88,20 @@ async function startConfiguredOcr(
   reason: "needsOcr" | "image_strategy",
 ): Promise<ProviderParseOutcome> {
   if (!config.documentParsing.ocrEnabled) {
-    throw new Error(
-      "Document requires OCR, but DOCUMENT_PARSE_OCR_ENABLED is false",
+    // The setting name is for whoever runs the deployment, so it goes to the
+    // log. The thrown message is stored on the source and returned by the API.
+    logger.warn(
+      "Document needs OCR but OCR is disabled; set DOCUMENT_PARSE_OCR_ENABLED=true to enable it",
+      {
+        sourceId: input.sourceId,
+        mimeType: input.mimeType,
+        reason,
+      },
+    );
+    throw new ContentError(
+      422,
+      "DOCUMENT_OCR_UNAVAILABLE",
+      "This file needs OCR to be read, and OCR is not enabled on this deployment.",
     );
   }
   return startWithProvider({
