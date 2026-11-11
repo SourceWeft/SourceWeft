@@ -2,6 +2,7 @@ import { chunk } from "../../../shared/chunk";
 import { logger } from "../../../shared/logger";
 import { repositoryMetadataFromGithub } from "../metadata/listing-metadata";
 import type { McpRepositoryMetadata } from "../metadata/listing-metadata";
+import { sameMcpOverviewReadme } from "../overview/input";
 import { hasGitHubToken } from "../parser/github";
 import {
   fetchGitHubReadmes,
@@ -15,6 +16,7 @@ import {
   claimMcpReadmes,
   deferMcpReadmes,
   findDueMcpReadmes,
+  readStoredMcpReadme,
   writeMcpReadmeColumns,
   writeMcpRepositoryMetadata,
   type ClaimedMcpReadme,
@@ -30,6 +32,7 @@ import {
   type McpReadmeFetchJobPayload,
 } from "./readme-queue";
 import {
+  keptOverviewReadmeSha256,
   mcpReadmeSubfolder,
   mcpReadmeTransition,
   mcpReadmeUnchanged,
@@ -111,6 +114,8 @@ export type FetchMcpReadmeBatchDeps = {
     now: Date;
   }) => Promise<ClaimedMcpReadme[]>;
   write: (versionId: string, columns: McpReadmeColumns) => Promise<void>;
+  /** The README text stored for a version; null when it has none. */
+  readStored: (versionId: string) => Promise<string | null>;
   writeRepositoryMetadata: (
     versionId: string,
     record: McpRepositoryMetadata,
@@ -129,6 +134,7 @@ export type FetchMcpReadmeBatchDeps = {
 const defaultFetchDeps: FetchMcpReadmeBatchDeps = {
   claim: claimMcpReadmes,
   write: writeMcpReadmeColumns,
+  readStored: readStoredMcpReadme,
   writeRepositoryMetadata: writeMcpRepositoryMetadata,
   defer: deferMcpReadmes,
   fetchReadmes: (targets) => fetchGitHubReadmes(targets),
@@ -305,10 +311,25 @@ export async function fetchMcpReadmeBatch(
       if (result.status === "rate_limited") {
         halt.stop = { by: "rate_limited", until: result.resetAt };
       }
-      await store(
-        row,
-        mcpReadmeUnchanged(row, result) ? { status: "not_modified" } : result,
-      );
+      if (mcpReadmeUnchanged(row, result)) {
+        await store(row, { status: "not_modified" });
+        continue;
+      }
+      if (result.status === "ok" && row.readmeStatus === "ok") {
+        // New bytes, but perhaps nothing the overview reads: then the
+        // overview keeps the hash it was written under (Issue #454).
+        const stored = await deps.readStored(row.versionId);
+        const overviewSha256 = keptOverviewReadmeSha256(
+          row,
+          stored !== null && sameMcpOverviewReadme(stored, result.markdown),
+        );
+        if (overviewSha256 !== null) {
+          summary.overviewUnchanged = (summary.overviewUnchanged ?? 0) + 1;
+        }
+        await store(row, { ...result, overviewSha256 });
+        continue;
+      }
+      await store(row, result);
     }
 
     if (

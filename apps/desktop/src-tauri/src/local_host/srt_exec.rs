@@ -899,7 +899,8 @@ struct RunLimits {
 /// violation annotation added to stderr and `networkAudit` (the sidecar's recorded connection
 /// decisions for this command; `networkAuditError` in its place if the audit cannot be read, which
 /// never fails the command). Calls `finish` exactly once for the wrap, however the run
-/// ended.
+/// ended. `active`'s kill clock starts here, with the process: everything before (starting the
+/// sidecar, preparing the folder, the wrap) is not the command's run time.
 fn run_and_report(
     instance: &SandboxInstance,
     command_id: &str,
@@ -907,12 +908,14 @@ fn run_and_report(
     env: &[(String, String)],
     cwd: &Path,
     limits: RunLimits,
+    active: &ActiveCommand,
 ) -> Result<Value> {
     let RunLimits {
         timeout_ms,
         max_chars,
         cancel,
     } = limits;
+    active.launched();
     let run = super::process::run_wrapped(argv, env, cwd, timeout_ms, max_chars, cancel);
     let result = run.map(|run| {
         let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
@@ -1003,6 +1006,7 @@ pub(crate) fn execute_command(
             max_chars,
             cancel,
         },
+        active,
     )
 }
 
@@ -1333,6 +1337,7 @@ pub(crate) fn execute_command(
             max_chars,
             cancel,
         },
+        active,
     )
 }
 
@@ -1985,9 +1990,9 @@ mod tests {
         }
     }
 
-    /// A kill deadline that never matters in a test.
-    fn far() -> std::time::Instant {
-        std::time::Instant::now() + Duration::from_secs(3600)
+    /// A command timeout that never matters in a test.
+    fn far() -> Duration {
+        Duration::from_secs(3600)
     }
 
     fn ask_policy() -> NetworkPolicy {
@@ -2180,11 +2185,9 @@ mod windows_tests {
         let host = LocalHost::open(app.path()).unwrap();
         let root = app.path().to_path_buf();
         let run = |host: &LocalHost| {
-            let active = host.network.begin(
-                "inv",
-                Arc::default(),
-                std::time::Instant::now() + std::time::Duration::from_secs(3600),
-            );
+            let active =
+                host.network
+                    .begin("inv", Arc::default(), std::time::Duration::from_secs(3600));
             execute_command(
                 host,
                 &root,
@@ -2271,11 +2274,9 @@ mod windows_tests {
         let host = LocalHost::open(app.path()).unwrap();
         let workspace = tempfile::tempdir().unwrap();
         let root = super::super::winpath::to_native(&workspace.path().canonicalize().unwrap()).unwrap();
-        let active = host.network.begin(
-            "inv",
-            Arc::default(),
-            std::time::Instant::now() + std::time::Duration::from_secs(3600),
-        );
+        let active =
+            host.network
+                .begin("inv", Arc::default(), std::time::Duration::from_secs(3600));
         let error = execute_command(
             &host,
             &root,

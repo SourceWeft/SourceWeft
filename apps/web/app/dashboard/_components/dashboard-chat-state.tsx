@@ -18,13 +18,12 @@ import type {
 } from "@sourceweft/contracts";
 import { authClient } from "../../../lib/auth-client";
 import { trackWorkspaceCreated } from "../../../lib/analytics-events";
-import { ensureDashboardWorkspace } from "../../../lib/dashboard-workspace-bootstrap";
-import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
 import {
-  contentClient,
-  dashboardClient,
-  workspaceClient,
-} from "../../../lib/sdk";
+  ensureDashboardWorkspace,
+  loadDashboardChatBootstrap,
+} from "../../../lib/dashboard-workspace-bootstrap";
+import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
+import { contentClient, workspaceClient } from "../../../lib/sdk";
 import { retryOnceOnServiceUnavailable } from "./dashboard-chat-request-retry";
 import {
   resolveWorkspaceSwitchTransition,
@@ -395,8 +394,14 @@ export function DashboardChatStateProvider({
       let shouldUseFallback = false;
 
       try {
-        const result = await dashboardClient.getChatBootstrap({
-          includeModelCatalog: false,
+        const result = await loadDashboardChatBootstrap({
+          // Without an active organization the server uses the personal one.
+          organizationIdHint:
+            activeOrg?.id ??
+            (orgs ?? []).find(isPersonalOrganization)?.id ??
+            null,
+          isSuperseded: () =>
+            cancelled || hydrateGenerationRef.current !== generation,
         });
         if (cancelled || hydrateGenerationRef.current !== generation) {
           return;

@@ -289,9 +289,11 @@ impl LocalHost {
                 .insert(id.into(), cancel.clone());
             // Network asks raised while this command runs are attributed to this invocation
             // (and denied if it is cancelled or ends). The command is killed `timeout` ms after
-            // it starts; asks must settle before that.
-            let kill_deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
-            let running = self.network.begin(id, cancel.clone(), kill_deadline);
+            // its process is launched, which is after the sandbox for its folder has started;
+            // asks must settle before that kill.
+            let running =
+                self.network
+                    .begin(id, cancel.clone(), std::time::Duration::from_millis(timeout));
             let result = super::srt_exec::execute_command(
                 self,
                 &workspace.path,

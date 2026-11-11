@@ -129,11 +129,27 @@ test("needsOcr cannot enable OCR through credentials or error text", async () =>
     Object.assign(new Error("OCR required"), { code: "needsOcr" }),
   );
   const { startDocumentParse } = await import("./document-parse-orchestrator");
+  await assert.rejects(startDocumentParse(input()), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal((error as { code?: string }).code, "DOCUMENT_OCR_UNAVAILABLE");
+    assert.equal((error as { statusCode?: number }).statusCode, 422);
+    // Stored on the source and returned by the API: no deployment internals.
+    assert.doesNotMatch(error.message, /DOCUMENT_PARSE|_ENABLED|\benv\b/i);
+    return true;
+  });
+  assert.equal(parsers.pdf2markdown.mock.calls.length, 0);
+});
+
+test("image OCR strategy reports OCR as unavailable when OCR is disabled", async () => {
+  vi.stubEnv("DOCUMENT_PARSE_IMAGE_STRATEGY", "ocr");
+  const { startDocumentParse } = await import("./document-parse-orchestrator");
   await assert.rejects(
-    startDocumentParse(input()),
-    /DOCUMENT_PARSE_OCR_ENABLED/,
+    startDocumentParse(input("image/png")),
+    (error: unknown) =>
+      (error as { code?: string }).code === "DOCUMENT_OCR_UNAVAILABLE",
   );
   assert.equal(parsers.pdf2markdown.mock.calls.length, 0);
+  assert.equal(parsers.vision.mock.calls.length, 0);
 });
 
 for (const code of ["encrypted", "invalidPdf", "resourceLimit", undefined]) {

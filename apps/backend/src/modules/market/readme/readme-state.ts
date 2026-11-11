@@ -47,6 +47,8 @@ export type McpReadmeColumns = {
   readmePath?: string | null;
   readmeRef?: string | null;
   readmeSha256?: string | null;
+  /** See `mcp_server_versions.readme_overview_sha256`. */
+  readmeOverviewSha256?: string | null;
   readmeFetchedAt?: Date | null;
   readmeNextFetchAt?: Date | null;
   readmeAttempts?: number;
@@ -76,7 +78,16 @@ export type McpReadmeNotModified = { status: "not_modified" };
  * stops the batch before anything is written (see `fetchMcpReadmeBatch`).
  */
 export type McpReadmeFetchOutcome =
-  | Exclude<GitHubReadmeResult, { status: "unauthorized" }>
+  | Exclude<GitHubReadmeResult, { status: "unauthorized" | "ok" }>
+  | (Extract<GitHubReadmeResult, { status: "ok" }> & {
+      /**
+       * The hash the overview keeps being fingerprinted with: set when the
+       * new README leaves the overview's excerpt as it was (see
+       * `keptOverviewReadmeSha256`); absent when the overview is to follow
+       * the new file.
+       */
+      overviewSha256?: string | null;
+    })
   | McpReadmeNotModified
   | McpReadmeUnsupportedHost
   | McpReadmeUnexpectedError;
@@ -111,6 +122,28 @@ export function mcpReadmeUnchanged(
     current.readmeSha256 === result.sha256 &&
     current.readmePath === result.path
   );
+}
+
+/**
+ * The hash the overview keeps being fingerprinted with after a refresh read
+ * different bytes: the one it has been using (the kept one, else the stored
+ * file's), when the stored README was shown and what the overview reads from
+ * the two READMEs is the same. Null otherwise: the overview follows the new
+ * file.
+ *
+ * @param sameForOverview Whether the stored and the new README give the
+ *   overview the same text (`sameMcpOverviewReadme`).
+ */
+export function keptOverviewReadmeSha256(
+  current: {
+    readmeStatus: McpReadmeStatus;
+    readmeSha256: string | null;
+    readmeOverviewSha256: string | null;
+  },
+  sameForOverview: boolean,
+): string | null {
+  if (current.readmeStatus !== "ok" || !sameForOverview) return null;
+  return current.readmeOverviewSha256 ?? current.readmeSha256;
 }
 
 function refreshIntervalFor(status: McpReadmeStatus) {
@@ -149,6 +182,7 @@ export function mcpReadmeTransition(
         readmePath: outcome.path,
         readmeRef: outcome.ref,
         readmeSha256: outcome.sha256,
+        readmeOverviewSha256: outcome.overviewSha256 ?? null,
         readmeNextFetchAt: after(now, MCP_README_REFRESH_MS),
       };
     case "not_modified":
@@ -163,6 +197,7 @@ export function mcpReadmeTransition(
         readmeStatus: "not_found",
         readmeMd: null,
         readmeSha256: null,
+        readmeOverviewSha256: null,
         readmeRef: null,
         readmePath: file?.path ?? null,
         readmeNextFetchAt: after(now, MCP_README_ABSENT_REFRESH_MS),
@@ -172,6 +207,7 @@ export function mcpReadmeTransition(
       return {
         ...settled,
         readmeStatus: "too_large",
+        readmeOverviewSha256: null,
         readmePath: outcome.path,
         // The fetch pins no commit for a README it does not store; the file's
         // links then name the default branch.
@@ -183,6 +219,7 @@ export function mcpReadmeTransition(
         readmeStatus: "unsupported_host",
         readmeMd: null,
         readmeSha256: null,
+        readmeOverviewSha256: null,
         readmeRef: null,
         readmePath: null,
         readmeFetchedAt: now,
@@ -239,6 +276,8 @@ export function submittedReadmeColumns(
   const name = input.path.slice(input.path.lastIndexOf("/") + 1);
   const read = {
     readmePath: input.path,
+    // A submission's README is the overview's input as it stands.
+    readmeOverviewSha256: null,
     readmeFetchedAt: now,
     readmeAttempts: 0,
     readmeError: null,

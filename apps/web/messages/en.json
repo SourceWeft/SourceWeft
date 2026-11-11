@@ -5238,6 +5238,11 @@
     },
     "additionalField": {
       "noItemsFound": "No items found."
+    },
+    "oneTap": {
+      "signingIn": "Signing in with Google…",
+      "failed": "Google sign-in failed. Please try again.",
+      "noSession": "Signed in, but your session was not available. Please try again."
     }
   },
   "download": {

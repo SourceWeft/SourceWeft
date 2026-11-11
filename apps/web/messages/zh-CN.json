@@ -5238,6 +5238,11 @@
     },
     "additionalField": {
       "noItemsFound": "未找到任何项目。"
+    },
+    "oneTap": {
+      "signingIn": "正在使用 Google 登录…",
+      "failed": "Google 登录失败，请重试。",
+      "noSession": "已登录，但会话不可用。请重试。"
     }
   },
   "download": {

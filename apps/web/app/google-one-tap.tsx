@@ -1,7 +1,17 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
+import { toast } from "sonner";
+import { Spinner } from "@sourceweft/ui-web/components/ui/spinner";
 import { recordAuthIntent } from "../lib/analytics/auth-intent";
 import { authClient } from "../lib/auth-client";
 import { apiBaseUrl } from "../lib/api-base-url";
@@ -92,13 +102,62 @@ function resolveCallbackURL(redirectTo: string | null) {
   return "/dashboard";
 }
 
+/**
+ * Covers the page from the moment Google hands back a credential until the
+ * signed-in destination is on screen. Without it the prompt closes and nothing
+ * moves for the length of the callback, the session confirmation and the route
+ * navigation, while the sign-in form underneath stays live.
+ */
+function SigningInOverlay({ label }: { label: string }) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Take focus off whatever control had it so Enter/Space cannot start a
+    // second sign-in underneath the overlay.
+    overlayRef.current?.focus();
+  }, []);
+
+  function keepFocus(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Tab") {
+      event.preventDefault();
+    }
+  }
+
+  return (
+    <div
+      ref={overlayRef}
+      role="dialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-labelledby="google-one-tap-signing-in"
+      tabIndex={-1}
+      onKeyDown={keepFocus}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-background/70 outline-none backdrop-blur-sm animate-in fade-in-0 duration-150"
+    >
+      <div className="flex items-center gap-3 rounded-lg border bg-background px-5 py-4 shadow-lg">
+        <Spinner aria-hidden="true" className="size-5" />
+        <p
+          id="google-one-tap-signing-in"
+          aria-live="polite"
+          className="text-sm font-medium text-foreground"
+        >
+          {label}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function GoogleOneTap() {
+  const t = useTranslations("authPages.oneTap");
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
   const promptedPathRef = useRef<string | null>(null);
   const [runtimeOneTapEnabled, setRuntimeOneTapEnabled] = useState(false);
   const [runtimeConfigLoaded, setRuntimeConfigLoaded] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const [, startRedirect] = useTransition();
   const { data, isPending, refetch } = authClient.useSession();
   const isSignedIn = hasActiveSession(data as SessionData | undefined);
   const callbackURL = useMemo(
@@ -166,41 +225,45 @@ export function GoogleOneTap() {
     }
 
     promptedPathRef.current = pathname;
-    void (async () => {
-      let callbackCompleted = false;
+    let credentialReceived = false;
+    let failureReported = false;
 
-      await authClient.oneTap({
-        cancelOnTapOutside: false,
-        fetchOptions: {
-          credentials: "include",
-          onSuccess: () => {
-            callbackCompleted = true;
-            recordAuthIntent("google_one_tap");
-          },
-        },
-      });
-
-      if (!callbackCompleted) {
+    const reportFailure = (message: string, error: unknown) => {
+      if (failureReported) {
         return;
       }
 
-      let confirmed = false;
+      failureReported = true;
+      console.error("[Google One Tap] sign-in failed", error);
+      setSigningIn(false);
+      toast.error(message);
+    };
+
+    const finishSignIn = async () => {
       for (let attempt = 0; attempt < SESSION_CONFIRM_ATTEMPTS; attempt += 1) {
         const session = await authClient.getSession({
           query: {
             disableCookieCache: true,
           },
         });
-        confirmed = hasActiveSessionResult(session);
 
-        if (confirmed) {
-          await refetch({
+        if (hasActiveSessionResult(session)) {
+          // `useSession` catches up beside the navigation, not ahead of it:
+          // awaiting it here would spend a second session round trip before
+          // the navigation even starts. Until it lands the hook reports
+          // pending, which the destination already treats as "still loading".
+          void refetch({
             query: {
               disableCookieCache: true,
             },
           });
-          router.replace(callbackURL);
-          router.refresh();
+          // The state update rides the same transition as the navigation, so
+          // the overlay stays up until the destination has rendered.
+          startRedirect(() => {
+            router.replace(callbackURL);
+            router.refresh();
+            setSigningIn(false);
+          });
           return;
         }
 
@@ -209,19 +272,48 @@ export function GoogleOneTap() {
         }
       }
 
-      if (!confirmed) {
-        console.error(
-          "[Google One Tap] sign-in callback completed, but no session was visible.",
-        );
-      }
-    })().catch((error: unknown) => {
-      promptedPathRef.current = null;
-      if (shouldIgnoreOneTapError(error)) {
-        return;
-      }
+      reportFailure(
+        t("noSession"),
+        new Error("Callback completed, but no session was visible."),
+      );
+    };
 
-      console.error("[Google One Tap] prompt failed", error);
-    });
+    // The rest of sign-in is driven from the callback request's own hooks, not
+    // from this promise: Google reports `credential_returned` as a dismissal,
+    // which can settle the prompt before the callback request has finished.
+    void authClient
+      .oneTap({
+        cancelOnTapOutside: false,
+        fetchOptions: {
+          credentials: "include",
+          onRequest: () => {
+            credentialReceived = true;
+            setSigningIn(true);
+          },
+          onError: (context: { error: unknown }) => {
+            reportFailure(t("failed"), context.error);
+          },
+          onSuccess: () => {
+            recordAuthIntent("google_one_tap");
+            void finishSignIn().catch((error: unknown) => {
+              reportFailure(t("failed"), error);
+            });
+          },
+        },
+      })
+      .catch((error: unknown) => {
+        promptedPathRef.current = null;
+        if (credentialReceived) {
+          reportFailure(t("failed"), error);
+          return;
+        }
+
+        if (shouldIgnoreOneTapError(error)) {
+          return;
+        }
+
+        console.error("[Google One Tap] prompt failed", error);
+      });
   }, [
     callbackURL,
     isPending,
@@ -231,7 +323,8 @@ export function GoogleOneTap() {
     router,
     runtimeConfigLoaded,
     runtimeOneTapEnabled,
+    t,
   ]);
 
-  return null;
+  return signingIn ? <SigningInOverlay label={t("signingIn")} /> : null;
 }

@@ -295,11 +295,28 @@ export function mapCatalogKindsToModelItems(
   kinds: CatalogModelKinds,
   t: CanvasT,
 ): Record<ModelType, ModelItem[]> {
+  const toItems = (entries: CatalogModelEntry[]) =>
+    entries
+      .filter(isSelectableCatalogEntry)
+      .map((entry) => mapCatalogEntryToModelItem(entry, t));
   return {
-    llm: kinds.llm.map((entry) => mapCatalogEntryToModelItem(entry, t)),
-    image: kinds.image.map((entry) => mapCatalogEntryToModelItem(entry, t)),
-    vision: kinds.vision.map((entry) => mapCatalogEntryToModelItem(entry, t)),
+    llm: toItems(kinds.llm),
+    image: toItems(kinds.image),
+    vision: toItems(kinds.vision),
   };
+}
+
+/**
+ * These items are the system models a member can pick and run without their
+ * own key. An entry the server reports as unavailable for GLOBAL traffic
+ * (Provider disabled or missing its deployment credential) would fail every
+ * turn, so it is not offered; a thread that stored one resolves to the catalog
+ * default instead. A member's own-key models come from their saved BYOK models,
+ * not from this list. A missing flag means the server did not report
+ * availability, which is not a reason to hide the model.
+ */
+function isSelectableCatalogEntry(entry: CatalogModelEntry) {
+  return entry.availableViaGlobal !== false;
 }
 
 function resolveAliasesForType(type: ModelType, aliases?: ModelAliasSettings) {

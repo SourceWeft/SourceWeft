@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   catalogProviderLabel,
   mapCatalogKindsToModelItems,
+  resolveSelectedModels,
 } from "./model-catalog-utils";
 
 test("catalog labels use configured names while preserving model identifiers", () => {
@@ -36,4 +37,71 @@ test("catalog labels use configured names while preserving model identifiers", (
 test("catalog provider label falls back when no configured name exists", () => {
   assert.equal(catalogProviderLabel(null, "openrouter"), "Openrouter");
   assert.equal(catalogProviderLabel("  ", "openrouter"), "Openrouter");
+});
+
+function catalogEntry(
+  profileAlias: string,
+  availableViaGlobal: boolean | undefined,
+) {
+  return {
+    profileAlias,
+    modelAlias: profileAlias,
+    displayName: profileAlias,
+    subtitle: profileAlias,
+    badges: [],
+    providerName: "provider",
+    availableViaGlobal,
+  };
+}
+
+test("system models unavailable for global traffic are not offered", () => {
+  const t = ((key: string) => key) as never;
+  const catalog = mapCatalogKindsToModelItems(
+    {
+      llm: [
+        catalogEntry("chat-default", true),
+        catalogEntry("disabled-provider-model", false),
+        catalogEntry("unreported-availability", undefined),
+      ],
+      image: [catalogEntry("disabled-image-model", false)],
+      vision: [],
+    },
+    t,
+  );
+
+  assert.deepEqual(
+    catalog.llm.map((model) => model.profileAlias),
+    ["chat-default", "unreported-availability"],
+  );
+  assert.deepEqual(catalog.image, []);
+});
+
+test("a thread that stored an unavailable model resolves to the catalog default", () => {
+  const t = ((key: string) => key) as never;
+  const availableModels = mapCatalogKindsToModelItems(
+    {
+      llm: [
+        catalogEntry("ready-model", true),
+        catalogEntry("chat-default", true),
+        catalogEntry("disabled-provider-model", false),
+      ],
+      image: [],
+      vision: [],
+    },
+    t,
+  );
+
+  const selected = resolveSelectedModels({
+    availableModels,
+    threadAliases: {
+      llmProfileAlias: "disabled-provider-model",
+      llmModelAlias: "disabled-provider-model",
+    },
+    fallbackAliases: {
+      llmProfileAlias: "chat-default",
+      llmModelAlias: "chat-default",
+    },
+  });
+
+  assert.equal(selected.llm?.profileAlias, "chat-default");
 });

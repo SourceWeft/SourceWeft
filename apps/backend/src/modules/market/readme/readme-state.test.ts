@@ -8,6 +8,7 @@ import {
   MCP_README_ERROR_BACKOFF_MAX_MS,
   MCP_README_MAX_ATTEMPTS,
   MCP_README_REFRESH_MS,
+  keptOverviewReadmeSha256,
   mcpReadmeErrorBackoffMs,
   mcpReadmeSubfolder,
   mcpReadmeTransition,
@@ -44,11 +45,32 @@ describe("fetch outcome transitions", () => {
       readmePath: "mcp/README.md",
       readmeRef: COMMIT,
       readmeSha256: "f".repeat(64),
+      // The overview follows the new file unless the fetch says otherwise.
+      readmeOverviewSha256: null,
       readmeFetchedAt: NOW,
       readmeAttempts: 0,
       readmeError: null,
       readmeNextFetchAt: at(MCP_README_REFRESH_MS),
     });
+  });
+
+  test("ok keeps the overview's hash when the fetch found its excerpt unchanged", () => {
+    const columns = mcpReadmeTransition(
+      ok,
+      {
+        status: "ok",
+        markdown: "# Server v2",
+        path: "README.md",
+        ref: COMMIT,
+        sha256: "f".repeat(64),
+        byteSize: 11,
+        overviewSha256: "e".repeat(64),
+      },
+      NOW,
+    );
+    assert.equal(columns.readmeSha256, "f".repeat(64));
+    assert.equal(columns.readmeOverviewSha256, "e".repeat(64));
+    assert.equal(columns.readmeMd, "# Server v2");
   });
 
   test("not_modified only moves the fetch times, at the stored status's interval", () => {
@@ -80,6 +102,7 @@ describe("fetch outcome transitions", () => {
       readmeStatus: "not_found",
       readmeMd: null,
       readmeSha256: null,
+      readmeOverviewSha256: null,
       readmeRef: null,
       readmePath: null,
       readmeFetchedAt: NOW,
@@ -120,6 +143,8 @@ describe("fetch outcome transitions", () => {
     );
     assert.equal("readmeMd" in columns, false);
     assert.equal("readmeSha256" in columns, false);
+    // Nothing is shown, so nothing is kept for the overview.
+    assert.equal(columns.readmeOverviewSha256, null);
   });
 
   test("unsupported_host clears a stale README and says why", () => {
@@ -135,6 +160,7 @@ describe("fetch outcome transitions", () => {
     assert.equal(columns.readmeMd, null);
     assert.equal(columns.readmePath, null);
     assert.equal(columns.readmeError, "The repository is not on github.com");
+    assert.equal(columns.readmeOverviewSha256, null);
     assert.deepEqual(
       columns.readmeNextFetchAt,
       at(MCP_README_ABSENT_REFRESH_MS),
@@ -230,6 +256,40 @@ describe("fetch outcome transitions", () => {
       false,
     );
   });
+
+  test("the overview keeps its hash only for a shown README whose excerpt is unchanged", () => {
+    const stored = {
+      readmeStatus: "ok" as const,
+      readmeSha256: "f".repeat(64),
+      readmeOverviewSha256: null,
+    };
+    // First such refresh: the hash the overview was written under is the
+    // stored file's.
+    assert.equal(keptOverviewReadmeSha256(stored, true), "f".repeat(64));
+    // Later ones keep the kept hash, not the intermediate file's.
+    assert.equal(
+      keptOverviewReadmeSha256(
+        { ...stored, readmeOverviewSha256: "e".repeat(64) },
+        true,
+      ),
+      "e".repeat(64),
+    );
+    // A changed excerpt: the overview follows the new file.
+    assert.equal(
+      keptOverviewReadmeSha256(
+        { ...stored, readmeOverviewSha256: "e".repeat(64) },
+        false,
+      ),
+      null,
+    );
+    // Nothing was shown, so there is nothing to keep.
+    for (const readmeStatus of ["pending", "not_found", "too_large"] as const) {
+      assert.equal(
+        keptOverviewReadmeSha256({ ...stored, readmeStatus }, true),
+        null,
+      );
+    }
+  });
 });
 
 describe("the README a submission stores", () => {
@@ -246,6 +306,7 @@ describe("the README a submission stores", () => {
         readmePath: "mcp/README.md",
         readmeRef: COMMIT,
         readmeSha256: createHash("sha256").update(bytes).digest("hex"),
+        readmeOverviewSha256: null,
         readmeFetchedAt: NOW,
         readmeAttempts: 0,
         readmeError: null,

@@ -20,7 +20,7 @@ Macro and slideshow MIME variants are explicit catalog entries. Existing CSV, PD
 
 ## OCR and image configuration
 
-- `DOCUMENT_PARSE_OCR_ENABLED=false` by default; credentials do not enable OCR.
+- `DOCUMENT_PARSE_OCR_ENABLED=false` by default; credentials do not enable OCR. A file that needs OCR while it is disabled fails with the `DOCUMENT_OCR_UNAVAILABLE` error code; the message stored on the source names no setting, and the worker log carries the hint for the operator.
 - `DOCUMENT_PARSE_OCR_PROVIDER=pdf2markdown` selects the explicitly supported OCR backend.
 - `DOCUMENT_PARSE_IMAGE_STRATEGY=vision|ocr` selects one image policy. Vision errors do not automatically call OCR. Image OCR requires OCR activation.
 - AnyDoc always uses `ocr: "reject"`, including when ambient Firecrawl credentials exist.

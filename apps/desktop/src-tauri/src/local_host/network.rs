@@ -132,10 +132,31 @@ struct Pending {
     answer: mpsc::Sender<Decision>,
 }
 
+/// When an invocation's command is killed for running too long. The command's `timeoutMs` counts
+/// from the moment its process is launched, not from the moment the invocation arrives: starting
+/// the sandbox for a folder comes first and can take minutes (see `WINDOWS_INIT_TIMEOUT`).
+#[derive(Debug, Clone, Copy)]
+enum KillClock {
+    /// The sandbox is still being prepared. Whenever the command is launched, it then has its
+    /// whole `timeout` to run.
+    Preparing { timeout: Duration },
+    /// The command was launched and is killed at this instant.
+    Launched { kill_at: Instant },
+}
+
+impl KillClock {
+    /// How long from `now` the command is certain to stay alive unless it ends by itself.
+    fn remaining(self, now: Instant) -> Duration {
+        match self {
+            KillClock::Preparing { timeout } => timeout,
+            KillClock::Launched { kill_at } => kill_at.saturating_duration_since(now),
+        }
+    }
+}
+
 struct Active {
     invocation: String,
-    /// When the command is killed for running too long (start + its `timeoutMs`).
-    kill_deadline: Instant,
+    kill: KillClock,
     /// The sidecar's id for the command this invocation is running, registered before the
     /// command is wrapped. An ask naming any other command is not this invocation's.
     command_id: Option<String>,
@@ -194,6 +215,24 @@ impl ActiveCommand {
             .find(|a| a.invocation == self.invocation)
         {
             active.command_id = Some(command_id.to_string());
+        }
+    }
+
+    /// Starts the command's kill clock: call immediately before its process is spawned. From
+    /// here the command is killed after its `timeout`, and asks are settled before that (see
+    /// [`NetworkBridge::begin`]).
+    pub fn launched(&self) {
+        let mut state = self.bridge.state();
+        if let Some(active) = state
+            .active
+            .iter_mut()
+            .find(|a| a.invocation == self.invocation)
+        {
+            if let KillClock::Preparing { timeout } = active.kill {
+                active.kill = KillClock::Launched {
+                    kill_at: Instant::now() + timeout,
+                };
+            }
         }
     }
 }
@@ -292,18 +331,21 @@ impl NetworkBridge {
     /// Records `invocation` as running a command. Commands run serially per device; if more
     /// than one is somehow active, asks are treated as having no active command.
     ///
-    /// `kill_deadline` is when the command will be killed for running too long. Asks wait at
-    /// most until `margin` before it, and an ask that arrives later than that is denied at once
+    /// `timeout` is how long the command may run once it is launched
+    /// ([`ActiveCommand::launched`]); it is killed when that runs out. Asks wait at most until
+    /// `margin` before the kill, and an ask that arrives later than that is denied at once
     /// (`approval timed out`), so a denial always reaches the command while it can still react.
+    /// The time the sandbox takes to start before the launch is not the command's run time and
+    /// takes nothing from an ask's wait.
     pub fn begin(
         &self,
         invocation: &str,
         cancel: Arc<AtomicBool>,
-        kill_deadline: Instant,
+        timeout: Duration,
     ) -> ActiveCommand {
         self.state().active.push(Active {
             invocation: invocation.to_string(),
-            kill_deadline,
+            kill: KillClock::Preparing { timeout },
             command_id: None,
             cancel,
         });
@@ -405,9 +447,7 @@ impl NetworkBridge {
             }
             let cancel = state.active[0].cancel.clone();
             // Settle the ask before the command's own kill deadline (see `DEADLINE_MARGIN`).
-            let remaining = state.active[0]
-                .kill_deadline
-                .saturating_duration_since(Instant::now());
+            let remaining = state.active[0].kill.remaining(Instant::now());
             let Some(budget) = remaining.checked_sub(self.inner.margin) else {
                 return Decision::deny("approval timed out");
             };
@@ -481,9 +521,9 @@ mod tests {
         (bridge.attach(sender), receiver)
     }
 
-    /// A kill deadline that never matters in a test.
-    fn far() -> Instant {
-        Instant::now() + Duration::from_secs(3600)
+    /// A command timeout that never matters in a test.
+    fn far() -> Duration {
+        Duration::from_secs(3600)
     }
 
     /// `begin` plus the command-id registration `srt_exec` does before wrapping.
@@ -864,7 +904,7 @@ mod tests {
     // ---- ask waits follow the command's own kill deadline ----
 
     /// A bridge whose ask timeout is `timeout` and whose margin is `margin`, with one command
-    /// that will be killed `kill_in` from now.
+    /// launched now that will be killed `kill_in` from now.
     fn bridge_killed_in(
         timeout: Duration,
         margin: Duration,
@@ -878,9 +918,60 @@ mod tests {
     ) {
         let bridge = NetworkBridge::with_limits(timeout, margin);
         let (lease, frames) = connected(&bridge);
-        let active = bridge.begin("inv", cancel, Instant::now() + kill_in);
+        let active = bridge.begin("inv", cancel, kill_in);
         active.set_command_id("cmd");
+        active.launched();
         (bridge, lease, frames, active)
+    }
+
+    #[test]
+    fn preparing_the_sandbox_takes_nothing_from_the_ask_wait() {
+        // The command may run for 1.0 s; the margin is 0.4 s. Preparing its sandbox takes longer
+        // than that whole timeout (a slow machine, a big folder): an ask raised right after the
+        // launch is still relayed and its answer honoured.
+        let bridge = NetworkBridge::with_limits(Duration::from_secs(60), Duration::from_millis(400));
+        let (_lease, mut frames) = connected(&bridge);
+        let active = bridge.begin("inv", Arc::default(), Duration::from_millis(1000));
+        active.set_command_id("cmd");
+        std::thread::sleep(Duration::from_millis(1200));
+        active.launched();
+        let waiting = spawn_decide(&bridge, ask("a.com"));
+        let id = next_frame(&mut frames)["askId"].as_str().unwrap().to_string();
+        assert!(bridge.resolve(&id, true, None));
+        assert!(waiting.join().unwrap().allow);
+    }
+
+    #[test]
+    fn the_kill_clock_starts_at_the_launch_and_only_once() {
+        // Launched with 1.0 s to run and a 0.4 s margin: 0.7 s later an ask is inside the margin.
+        let bridge = NetworkBridge::with_limits(Duration::from_secs(60), Duration::from_millis(400));
+        let (_lease, mut frames) = connected(&bridge);
+        let active = bridge.begin("inv", Arc::default(), Duration::from_millis(1000));
+        active.set_command_id("cmd");
+        active.launched();
+        std::thread::sleep(Duration::from_millis(700));
+        // A second call must not move the deadline.
+        active.launched();
+        assert_eq!(bridge.decide(&ask("a.com")), Decision::deny("approval timed out"));
+        assert!(frames.try_recv().is_err(), "nothing may reach the backend");
+    }
+
+    #[test]
+    fn an_ask_before_the_launch_waits_for_the_timeout_less_the_margin() {
+        // Not launched yet (a leftover process of an earlier command in the same sandbox can
+        // connect now): whenever the launch comes, the command then runs for its whole 1.0 s, so
+        // waiting 0.6 s from the ask always ends before the kill.
+        let bridge = NetworkBridge::with_limits(Duration::from_secs(60), Duration::from_millis(400));
+        let (_lease, mut frames) = connected(&bridge);
+        let active = bridge.begin("inv", Arc::default(), Duration::from_millis(1000));
+        active.set_command_id("cmd");
+        std::thread::sleep(Duration::from_millis(700));
+        let started = Instant::now();
+        let waiting = spawn_decide(&bridge, ask("a.com"));
+        next_frame(&mut frames);
+        assert_eq!(waiting.join().unwrap(), Decision::deny("approval timed out"));
+        let waited = started.elapsed();
+        assert!(waited >= Duration::from_millis(550) && waited < Duration::from_millis(1000), "{waited:?}");
     }
 
     #[test]
