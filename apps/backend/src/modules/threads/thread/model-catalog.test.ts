@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { projectThreadModelSelectorCatalog } from "./model-catalog";
+import {
+  projectThreadModelSelectorCatalog,
+  selectCatalogRouteTargets,
+} from "./model-catalog";
 
 const defaults = {
   llmProfileAlias: "chat-default",
@@ -83,4 +86,70 @@ test("representative selector catalog remains below the response threshold", () 
   });
 
   assert.ok(Buffer.byteLength(JSON.stringify(projected)) < 512 * 1024);
+});
+
+function routeTarget(
+  targetProviderName: string,
+  priority: number,
+  overrides: { alias?: string; weight?: number } = {},
+) {
+  return {
+    routeKind: "chat",
+    alias: overrides.alias ?? "profile",
+    targetProviderName,
+    targetModel: `${targetProviderName}/model`,
+    priority,
+    weight: overrides.weight ?? 0,
+  };
+}
+
+test("a profile whose only route target is not globally ready is unavailable", () => {
+  const selected = selectCatalogRouteTargets(
+    [routeTarget("disabled", 1)],
+    new Map([["disabled", false]]),
+  );
+
+  assert.equal(selected.get("chat:profile")?.globalReady, false);
+  assert.equal(selected.get("chat:profile")?.targetProviderName, "disabled");
+});
+
+test("a ready fallback target makes the profile available and is the one reported", () => {
+  const selected = selectCatalogRouteTargets(
+    [routeTarget("ready", 2), routeTarget("disabled", 1)],
+    new Map([
+      ["disabled", false],
+      ["ready", true],
+    ]),
+  );
+
+  assert.equal(selected.get("chat:profile")?.globalReady, true);
+  assert.equal(selected.get("chat:profile")?.targetProviderName, "ready");
+  assert.equal(selected.get("chat:profile")?.targetModel, "ready/model");
+});
+
+test("the first ready target in routing order is reported", () => {
+  const selected = selectCatalogRouteTargets(
+    [
+      routeTarget("second", 2),
+      routeTarget("light", 1, { weight: 1 }),
+      routeTarget("heavy", 1, { weight: 5 }),
+    ],
+    new Map([
+      ["second", true],
+      ["light", true],
+      ["heavy", true],
+    ]),
+  );
+
+  assert.equal(selected.get("chat:profile")?.targetProviderName, "heavy");
+});
+
+test("a provider missing from the active version counts as not ready", () => {
+  const selected = selectCatalogRouteTargets(
+    [routeTarget("unknown", 1), routeTarget("ready", 1, { alias: "other" })],
+    new Map([["ready", true]]),
+  );
+
+  assert.equal(selected.get("chat:profile")?.globalReady, false);
+  assert.equal(selected.get("chat:other")?.globalReady, true);
 });

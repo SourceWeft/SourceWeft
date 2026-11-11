@@ -127,6 +127,50 @@ function resolveCatalogPricing(configJson: Record<string, unknown>): CatalogPric
   };
 }
 
+type CatalogRouteTargetRow = {
+  routeKind: string;
+  alias: string;
+  targetProviderName: string;
+  targetModel: string;
+  priority: number;
+  weight: number;
+};
+
+/**
+ * Picks the route target a catalog entry reports, keyed by `kind:alias`.
+ *
+ * The gateway serves a GLOBAL request from any active target whose Provider is
+ * globally ready, so an entry is available when at least one such target
+ * exists, not only when the first-priority one is ready. The reported target
+ * is the first ready one in routing order; with none ready it is the first
+ * target, flagged `globalReady: false`.
+ */
+export function selectCatalogRouteTargets(
+  routeRows: CatalogRouteTargetRow[],
+  providerGlobalReadyByName: ReadonlyMap<string, boolean>,
+) {
+  const selected = new Map<
+    string,
+    CatalogRouteTargetRow & { globalReady: boolean }
+  >();
+  const ordered = [...routeRows].sort((left, right) => {
+    if (left.priority !== right.priority) {
+      return left.priority - right.priority;
+    }
+    return right.weight - left.weight;
+  });
+  for (const route of ordered) {
+    const key = `${route.routeKind}:${route.alias}`;
+    const globalReady =
+      providerGlobalReadyByName.get(route.targetProviderName) ?? false;
+    const current = selected.get(key);
+    if (!current || (!current.globalReady && globalReady)) {
+      selected.set(key, { ...route, globalReady });
+    }
+  }
+  return selected;
+}
+
 async function listThreadModelCatalogForView(input: {
   workspaceId: string;
   userId: string;
@@ -231,30 +275,20 @@ async function listThreadModelCatalogForView(input: {
       ]),
     );
 
-    routeRows
-      .sort((left, right) => {
-        if (left.priority !== right.priority) {
-          return left.priority - right.priority;
-        }
-        return right.weight - left.weight;
-      })
-      .forEach((route) => {
-        const key = `${route.routeKind}:${route.alias}`;
-        if (routeByKindAlias.has(key)) {
-          return;
-        }
-
-        routeByKindAlias.set(key, {
-          providerName: route.targetProviderName,
-          providerDisplayName:
-            providerDisplayNameByName.get(route.targetProviderName) ?? null,
-          providerKind:
-            providerKindByName.get(route.targetProviderName) ?? "unknown",
-          targetModel: route.targetModel,
-          globalReady:
-            providerGlobalReadyByName.get(route.targetProviderName) ?? false,
-        });
+    for (const [key, route] of selectCatalogRouteTargets(
+      routeRows,
+      providerGlobalReadyByName,
+    )) {
+      routeByKindAlias.set(key, {
+        providerName: route.targetProviderName,
+        providerDisplayName:
+          providerDisplayNameByName.get(route.targetProviderName) ?? null,
+        providerKind:
+          providerKindByName.get(route.targetProviderName) ?? "unknown",
+        targetModel: route.targetModel,
+        globalReady: route.globalReady,
       });
+    }
   }
 
   const defaults = normalizeThreadModelSettings(undefined);
