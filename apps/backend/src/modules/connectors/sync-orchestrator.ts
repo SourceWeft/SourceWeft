@@ -1270,11 +1270,19 @@ export class ConnectorSyncOrchestrator {
     accessToken: string;
     item: ConnectorItem;
   }): Promise<UpsertItemResult> {
+    // Include archived rows: an item that was archived (skipped, deleted, or
+    // reconciled away) and is discovered again must reuse its row and be revived
+    // in place. The `(connectorId, externalId)` unique index is not limited by
+    // status, so treating the archived row as absent would make a fresh insert
+    // collide. A non-indexed (including archived) row never satisfies
+    // `shouldSkipExtract` and never takes the unchanged-hash shortcut, so a
+    // revived item is always re-extracted and re-indexed.
     const existing = await findSourceRecordByConnectorExternalId({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       connectorId: input.connectorId,
       externalId: input.item.externalId,
+      includeArchived: true,
     });
 
     if (existing && shouldSkipExtract({ existing, item: input.item })) {
@@ -1319,7 +1327,6 @@ export class ConnectorSyncOrchestrator {
         return this.finishSkippedItem({
           teamId: input.teamId,
           workspaceId: input.workspaceId,
-          runId: input.runId,
           existing,
           reason: error.reason,
         });
@@ -1345,7 +1352,6 @@ export class ConnectorSyncOrchestrator {
         return this.finishSkippedItem({
           teamId: input.teamId,
           workspaceId: input.workspaceId,
-          runId: input.runId,
           existing,
           reason: resolved.reason,
         });
@@ -1544,24 +1550,31 @@ export class ConnectorSyncOrchestrator {
   }
 
   /**
-   * A skipped item writes no source content. An existing version is marked seen
-   * by this run (its syncRunId only, mirroring the oversized branch) so a
-   * reconciling scan keeps it searchable instead of archiving it; an item that
-   * was never indexed leaves nothing behind.
+   * A skipped item writes no source content. If an indexed source existed, its
+   * previously indexed text no longer matches the file (the file was emptied,
+   * grew past the cap, or became unreadable), so leaving it searchable would
+   * surface stale content. The source is archived immediately — the same
+   * repository operation and resulting state a deleted item (`deletedExternalIds`)
+   * or an `archive_source` webhook uses — rather than kept. This does not depend
+   * on a reconciling scan, so it applies on every kind of scan (full, incremental,
+   * targeted/backfill, webhook) and for every skip reason. A source that is
+   * already archived, or an item that was never indexed, is left untouched (no
+   * write). If the item later becomes indexable again, `upsertItem` finds the
+   * archived row (its lookup includes archived rows) and revives it in place
+   * through the ordinary extract/index path.
    */
   private async finishSkippedItem(input: {
     teamId: string;
     workspaceId: string;
-    runId: string;
     existing: Awaited<ReturnType<typeof findSourceRecordByConnectorExternalId>>;
     reason: ConnectorItemSkipReason;
   }): Promise<UpsertItemResult> {
-    if (input.existing) {
+    if (input.existing && input.existing.status !== "archived") {
       await updateSourceRecord({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         sourceId: input.existing.id,
-        syncRunId: input.runId,
+        status: "archived",
       });
     }
     return { kind: "skipped", reason: input.reason };
