@@ -19,15 +19,19 @@ type GoogleDrivePickerConfig = {
 };
 
 function isGoogleDrivePickerConfig(
-  value: Record<string, unknown>,
+  value: unknown,
 ): value is GoogleDrivePickerConfig {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
   return (
-    typeof value.appId === "string" &&
-    value.appId.length > 0 &&
-    typeof value.developerKey === "string" &&
-    value.developerKey.length > 0 &&
-    Array.isArray(value.mimeTypes) &&
-    value.mimeTypes.every((item) => typeof item === "string")
+    typeof record.appId === "string" &&
+    record.appId.length > 0 &&
+    typeof record.developerKey === "string" &&
+    record.developerKey.length > 0 &&
+    Array.isArray(record.mimeTypes) &&
+    record.mimeTypes.every((item) => typeof item === "string")
   );
 }
 

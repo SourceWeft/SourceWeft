@@ -184,6 +184,24 @@ test("rejects a malformed file id", () => {
   );
 });
 
+test("reports an invalid pattern in the schema as a schema error", () => {
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: {
+          type: "object",
+          properties: {
+            folderId: { type: "string", pattern: "(" },
+          },
+        },
+        value: { folderId: "root" },
+      }),
+    (error) =>
+      error instanceof ConnectorError && error.code === "CONNECTOR_SCHEMA_INVALID",
+  );
+});
+
 test("rejects unknown config keys", () => {
   assert.throws(
     () =>

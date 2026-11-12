@@ -142,6 +142,22 @@ test("passes through an account that needs reauthorization", async () => {
   );
 });
 
+test("rejects a null picker config from the adapter", async () => {
+  const d = deps({
+    executeAction: vi.fn().mockResolvedValue({ result: null }),
+  });
+
+  await assert.rejects(
+    createGoogleDrivePickerSession({
+      connector: connector(),
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      deps: d,
+    }),
+    { statusCode: 502, code: "GOOGLE_DRIVE_PICKER_CONFIG_INVALID" },
+  );
+});
+
 test("rejects a malformed picker config from the adapter", async () => {
   const d = deps({
     executeAction: vi.fn().mockResolvedValue({

@@ -54,7 +54,16 @@ function validateValue(input: {
   }
 
   if (type === "string" && typeof input.schema.pattern === "string") {
-    const pattern = new RegExp(input.schema.pattern);
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(input.schema.pattern);
+    } catch {
+      throw new ConnectorError(
+        500,
+        "CONNECTOR_SCHEMA_INVALID",
+        `${input.path} declares an invalid pattern`,
+      );
+    }
     if (!pattern.test(input.value as string)) {
       throw new ConnectorError(
         400,
