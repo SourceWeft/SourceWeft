@@ -186,16 +186,12 @@ test("yields one empty reconciling page when nothing is selected", async () => {
   assert.equal(calls, 0);
 });
 
-test("pages 50 files at a time and resumes from the continuation", async () => {
+test("pages 50 files at a time", async () => {
   const ids = Array.from(
     { length: 120 },
     (_, i) => `drivefile${String(i).padStart(4, "0")}`,
   );
-  let calls = 0;
-  const gdrive = adapter(async (url) => {
-    calls += 1;
-    return metadataFor(String(url));
-  });
+  const gdrive = adapter(async (url) => metadataFor(String(url)));
   const pages = [];
   for await (const page of gdrive.discoverPages!({
     ...context,
@@ -215,19 +211,48 @@ test("pages 50 files at a time and resumes from the continuation", async () => {
   assert.equal(pages[2]?.complete, true);
   assert.equal(pages[2]?.continuation, null);
   assert.equal(pages[2]?.reconcileMissing, true);
+});
 
-  calls = 0;
-  const resumed = [];
+test("replays from the first file when a stored continuation exists", async () => {
+  const ids = Array.from(
+    { length: 120 },
+    (_, i) => `drivefile${String(i).padStart(4, "0")}`,
+  );
+  let calls = 0;
+  const gdrive = adapter(async (url) => {
+    calls += 1;
+    return metadataFor(String(url));
+  });
+  const pages = [];
   for await (const page of gdrive.discoverPages!({
     ...context,
     config: { fileIds: ids },
     cursor: { continuation: { offset: 100 } },
   })) {
-    resumed.push(page);
+    pages.push(page);
   }
-  assert.equal(calls, 20);
-  assert.equal(resumed.length, 1);
-  assert.equal(resumed[0]?.items.length, 20);
+  assert.equal(pages.length, 3);
+  assert.equal(pages[0]?.items.length, 50);
+  assert.equal(pages[1]?.items.length, 50);
+  assert.equal(pages[2]?.items.length, 20);
+  assert.equal(calls, 120);
+});
+
+test("replays from the first file when the stored offset is past the end", async () => {
+  const ids = ["filenormal01", "filenormal02", "filenormal03"];
+  const gdrive = adapter(async (url) => metadataFor(String(url)));
+  const pages = [];
+  for await (const page of gdrive.discoverPages!({
+    ...context,
+    config: { fileIds: ids },
+    cursor: { continuation: { offset: 100 } },
+  })) {
+    pages.push(page);
+  }
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0]?.items.length, 3);
+  assert.equal(pages[0]?.complete, true);
+  assert.equal(pages[0]?.reconcileMissing, true);
 });
 
 test("omits trashed and missing files so reconcile archives them", async () => {

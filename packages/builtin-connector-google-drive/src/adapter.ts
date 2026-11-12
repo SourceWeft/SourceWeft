@@ -75,21 +75,6 @@ function selectedFileIds(config: Record<string, unknown>): string[] {
     : [];
 }
 
-/** Reads the resume offset out of `cursor.continuation.offset` (default 0). */
-function readOffset(cursor: ConnectorDiscoverInput["cursor"]): number {
-  const continuation =
-    cursor && typeof cursor === "object" && !Array.isArray(cursor)
-      ? (cursor as Record<string, unknown>).continuation
-      : null;
-  const offset =
-    continuation && typeof continuation === "object"
-      ? (continuation as Record<string, unknown>).offset
-      : null;
-  return typeof offset === "number" && Number.isInteger(offset) && offset > 0
-    ? offset
-    : 0;
-}
-
 function metadataField(item: ConnectorItem, key: string): unknown {
   const metadata = item.metadata;
   return metadata && typeof metadata === "object"
@@ -124,7 +109,13 @@ export function createGoogleDriveConnectorAdapter(
       };
       return;
     }
-    let offset = readOffset(input.cursor);
+    // Discovery always replays from the first selected file, ignoring any
+    // stored `cursor.continuation`. The platform's reconciliation archives
+    // every source not stamped with the CURRENT run id, so a run that resumed
+    // mid-way and reached its final page would archive the files an earlier,
+    // interrupted run had already indexed. The continuation we emit is progress
+    // information for the platform only; it is never a resume point here.
+    let offset = 0;
     while (true) {
       const slice = fileIds.slice(offset, offset + PAGE_SIZE);
       const items: ConnectorItem[] = [];
