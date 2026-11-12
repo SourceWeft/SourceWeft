@@ -87,7 +87,7 @@ const canonicalInstallers = {
   "windows-x86_64.exe": "Windows bytes",
   "linux-x86_64.AppImage": "Linux bytes",
 };
-for (const policy of ["signed", "updater-signed"]) {
+for (const policy of ["signed", "macos-signed", "updater-signed"]) {
   test(`${policy} canonical installer names produce all four aliases without changing bytes`, async (t) => {
     const { input, output } = await fixture(t);
     for (const file of await readdir(input)) await rm(join(input, file));

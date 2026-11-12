@@ -6,7 +6,8 @@
 # Actions (each is a workflow step; a failing expectation exits non-zero with the reason):
 #   preflight         The runner is an elevated administrator and Start-Process -Verb RunAs completes
 #                     without a prompt (the premise of the suite's setup tests). Prints facts the
-#                     tests depend on: UAC policy, where Node and Git live and who can read them.
+#                     tests depend on: UAC policy, where Node and Git live and who can read them,
+#                     and how big each PATH folder inside the profile is (a sandbox read root).
 #   install-upstream  Installs the UPSTREAM default sandbox-runtime (npm, the exact release the
 #                     fork is based on) into -UpstreamDir and runs its vendored srt-win.exe
 #                     `install` with every default name (account srt-sandbox, ports 60080-60089).
@@ -114,7 +115,37 @@ switch ($Action) {
     Note "ACL of the Node folder:`n$((icacls $nodeDir) -join "`n")"
     $git = Get-Command git -ErrorAction SilentlyContinue
     Note "git: $(if ($git) { $git.Source } else { 'not installed' }); bash.exe: $(if (Test-Path -LiteralPath (Bash-Exe)) { Bash-Exe } else { 'not installed' })"
-    Note "Profile: $env:USERPROFILE; temp: $env:TEMP; PATH entries inside the profile: $((($env:PATH -split ';') | Where-Object { $_ -and $_.ToLowerInvariant().StartsWith($env:USERPROFILE.ToLowerInvariant() + '\') }) -join '; ')"
+    $profileEntries = @(($env:PATH -split ';') | Where-Object { $_ -and $_.ToLowerInvariant().StartsWith($env:USERPROFILE.ToLowerInvariant() + '\') })
+    Note "Profile: $env:USERPROFILE; temp: $env:TEMP; PATH entries inside the profile: $($profileEntries -join '; ')"
+    # The host grants each of these to the sandbox account as a read root at every sandbox start
+    # (srt_exec::read_roots_windows), and the grant covers the whole tree beneath it. A big one (a
+    # package store, a registry cache) makes the first command of every test slow: the suite's
+    # TIMING lines show it, and this says which folder it is.
+    $walk = [IO.EnumerationOptions]::new()
+    $walk.RecurseSubdirectories = $true
+    $walk.IgnoreInaccessible = $true
+    $walk.AttributesToSkip = [IO.FileAttributes]::ReparsePoint
+    $limit = 20000
+    foreach ($entry in $profileEntries) {
+      if (-not (Test-Path -LiteralPath $entry -PathType Container)) { continue }
+      $count = 0
+      try {
+        foreach ($item in [IO.Directory]::EnumerateFileSystemEntries($entry, '*', $walk)) {
+          $count++
+          if ($count -ge $limit) { break }
+        }
+      } catch {
+        # A fact for the log only: never the reason the job fails.
+        Note "read root ${entry}: could not be counted ($($_.Exception.Message))"
+        continue
+      }
+      if ($count -ge $limit) {
+        Note "read root ${entry}: $limit or more files and folders"
+        Write-Host "::warning::$entry is on PATH inside the user profile and holds $limit or more files and folders. Every sandbox start grants that whole tree to the sandbox account, so every test's first command will be slow and the suite may not finish in its time limit."
+      } else {
+        Note "read root ${entry}: $count files and folders"
+      }
+    }
   }
 
   'install-upstream' {

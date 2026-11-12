@@ -22,6 +22,10 @@ assert(UPDATE_TARGETS[target], "Explicit DESKTOP_RELEASE_TARGET is required");
 const mac = target.endsWith("apple-darwin");
 const linux = target.endsWith("unknown-linux-gnu");
 const windows = target.endsWith("pc-windows-msvc");
+const platform = mac ? "macos" : linux ? "linux" : "windows";
+// Whether this policy distribution-signs this platform (Developer ID + notarization on macOS,
+// Authenticode on Windows); `macos-signed` does so for macOS only.
+const claims = distributionClaims(policy, platform);
 assert.equal(
   process.platform,
   mac ? "darwin" : linux ? "linux" : "win32",
@@ -70,7 +74,7 @@ const run = (command, args) => {
 if (mac) {
   const app = `apps/desktop/src-tauri/target/${target}/release/bundle/macos/SourceWeft.app`;
   run("codesign", ["--verify", "--deep", "--strict", app]);
-  if (policy === "signed") {
+  if (claims.distributionSigned) {
     run("spctl", ["--assess", "--type", "execute", app]);
     run("xcrun", ["stapler", "validate", app]);
   } else {
@@ -81,10 +85,24 @@ if (mac) {
     assert.match(
       identity.stderr,
       /Signature=adhoc/,
-      "Updater-signed macOS app must be ad-hoc signed",
+      "A macOS app without Developer ID signing must be ad-hoc signed",
     );
   }
-  run("hdiutil", ["verify", one(".dmg")]);
+  const image = one(".dmg");
+  run("hdiutil", ["verify", image]);
+  if (claims.notarized) {
+    // The disk image is the file a customer downloads, so it carries its own stapled ticket
+    // (notarize-macos-dmg.mjs) and must pass Gatekeeper's assessment for opened documents.
+    run("xcrun", ["stapler", "validate", image]);
+    run("spctl", [
+      "--assess",
+      "--type",
+      "open",
+      "--context",
+      "context:primary-signature",
+      image,
+    ]);
+  }
 } else if (linux) {
   const file = await open(one(".AppImage"), "r");
   try {
@@ -113,7 +131,7 @@ if (mac) {
     "-NoProfile",
     "-NonInteractive",
     "-Command",
-    policy === "signed"
+    claims.distributionSigned
       ? "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security; $s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'Valid'){throw 'Invalid Authenticode signature'}"
       : "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security; $s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'NotSigned'){throw 'Expected an installer without Authenticode signing'}",
   ]);
@@ -143,11 +161,11 @@ const common = {
   schemaVersion: 1,
   version,
   publicationPolicy: policy,
-  ...distributionClaims(policy, mac ? "macos" : linux ? "linux" : "windows"),
+  ...claims,
 };
 const installer = {
   ...common,
-  platform: mac ? "macos" : linux ? "linux" : "windows",
+  platform,
   arch: target.startsWith("aarch64") ? "arm64" : "x64",
   filename: installerName,
   // Unchanged for Linux (false): the manifest entry describes the AppImage, and the .deb that carries

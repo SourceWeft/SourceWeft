@@ -60,7 +60,7 @@ production flows.
 
 ## Sandbox runtime bundle (macOS and Linux)
 
-Signed and updater-signed releases (not `candidate`) also attach the local-execution
+Signed, macos-signed and updater-signed releases (not `candidate`) also attach the local-execution
 runtime for each supported platform, with its `.sig`, to the GitHub Release:
 `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`,
 `sourceweft-sandbox-aarch64-apple-darwin.tar.gz` and
@@ -70,9 +70,9 @@ verifies the minisign signature (the same updater key as the installers,
 `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`) with the public key embedded in the build before
 extracting and checking the manifest. On macOS the binaries inside the bundle are additionally
 code-signed before packing (Developer ID + hardened runtime + `allow-jit` entitlement in the
-`signed` policy, ad-hoc in `updater-signed`); the macOS x86_64 bundle cross-compiles on the
+`signed` and `macos-signed` policies, ad-hoc in `updater-signed`); the macOS x86_64 bundle cross-compiles on the
 arm64 runner as the installers do. The desktop package version must therefore match the tag
 (already enforced), and a release must not be re-tagged without re-publishing the bundles. They
-are not mirrored to `download.sourceweft.com` yet. Developer ID signing and notarization of the
-macOS bundle are unverified here (no Apple credentials). Details and the offline checks are in
+are not mirrored to `download.sourceweft.com` yet. The macOS bundle's binaries are Developer ID
+signed but not notarized (a bare binary cannot carry a stapled ticket). Details and the offline checks are in
 `scripts/ci/README.desktop-updates.md`.
