@@ -1098,8 +1098,8 @@ export function useConnectors(input: {
         indexingFrequencyMinutes: number | null;
         configJson?: Record<string, unknown>;
       },
-    ) => {
-      if (!workspaceId) return;
+    ): Promise<boolean> => {
+      if (!workspaceId) return false;
 
       setConnectorBusy(connector.id, true);
       try {
@@ -1109,10 +1109,12 @@ export function useConnectors(input: {
         if (connectorSettingsConnectorId === connector.id) {
           await refreshConnectorSettingsActivity(connector.id);
         }
+        return true;
       } catch (error) {
         toast.error(
           getErrorMessage(error, t("toasts.connectors.settingsSaveFailed")),
         );
+        return false;
       } finally {
         setConnectorBusy(connector.id, false);
       }

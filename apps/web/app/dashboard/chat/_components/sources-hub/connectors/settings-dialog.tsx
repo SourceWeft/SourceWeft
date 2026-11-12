@@ -125,10 +125,10 @@ export function ConnectorSettingsDialog({
   onCopyWebhook: (value: string) => void;
   onDisconnect: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
-  // Returns nothing for the general-settings form; the Google Drive files
-  // handler relies on the save surfacing failure as a resolved `false`. The
-  // current wiring resolves `void` (it toasts its own errors), so in practice
-  // the file handler always proceeds to sync — see commitGoogleDriveSelection.
+  // Resolves `true` when the save succeeded and `false` when it failed (the
+  // handler toasts its own errors). The general-settings form ignores the
+  // result; the Google Drive files handler awaits it so a failed save does not
+  // trigger a sync — see commitGoogleDriveSelection.
   onSaveSettings: (
     connector: ConnectorItem,
     input: {
@@ -137,7 +137,7 @@ export function ConnectorSettingsDialog({
       indexingFrequencyMinutes: number | null;
       configJson?: Record<string, unknown>;
     },
-  ) => void | Promise<boolean>;
+  ) => Promise<boolean>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleStatus: (connector: ConnectorItem) => void;
   open: boolean;

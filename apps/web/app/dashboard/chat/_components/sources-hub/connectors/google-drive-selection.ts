@@ -189,19 +189,17 @@ export function googleDriveFileState(input: {
 }
 
 /**
- * Save a new file selection and, only if the save did not report failure,
- * trigger a sync. Returns whether the selection was saved (so the caller can
- * record that the selection changed). `save` reports failure by resolving
- * `false`; any other resolution — including `undefined`/`void` — is treated as
- * success, matching a save handler that surfaces its own errors and returns
- * nothing.
+ * Save a new file selection and trigger a sync only if the save succeeded.
+ * Returns whether the selection was saved (so the caller can record that the
+ * selection changed). `save` resolves `true` on success and `false` on failure;
+ * on `false` the sync is skipped.
  */
 export async function commitGoogleDriveSelection(opts: {
-  save: () => void | boolean | Promise<void | boolean>;
+  save: () => Promise<boolean>;
   sync: () => void;
 }): Promise<boolean> {
-  const result = await opts.save();
-  if (result === false) {
+  const saved = await opts.save();
+  if (!saved) {
     return false;
   }
   opts.sync();

@@ -220,10 +220,10 @@ describe("googleDriveFileState", () => {
 });
 
 describe("commitGoogleDriveSelection", () => {
-  test("does not sync when the save reports failure", async () => {
+  test("does not sync when the save fails", async () => {
     const sync = vi.fn();
     const result = await commitGoogleDriveSelection({
-      save: () => false,
+      save: async () => false,
       sync,
     });
     expect(result).toBe(false);
@@ -232,22 +232,15 @@ describe("commitGoogleDriveSelection", () => {
 
   test("syncs after a successful save", async () => {
     const sync = vi.fn();
-    const result = await commitGoogleDriveSelection({ save: () => true, sync });
-    expect(result).toBe(true);
-    expect(sync).toHaveBeenCalledTimes(1);
-  });
-
-  test("treats a save that returns nothing as success", async () => {
-    const sync = vi.fn();
     const result = await commitGoogleDriveSelection({
-      save: () => undefined,
+      save: async () => true,
       sync,
     });
     expect(result).toBe(true);
     expect(sync).toHaveBeenCalledTimes(1);
   });
 
-  test("awaits an async save before syncing", async () => {
+  test("awaits the save before syncing", async () => {
     const order: string[] = [];
     const sync = vi.fn(() => {
       order.push("sync");
