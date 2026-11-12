@@ -7,6 +7,11 @@ export { builtinGoogleDriveConnectorCapabilityManifest } from "./manifest";
 export { toBackendGoogleDriveManifest } from "./backend-manifest";
 export { createConnectorAdapters, parseProjectNumber } from "./host-services";
 export {
+  createGoogleDriveConnectorAdapter,
+  GoogleDriveAdapterError,
+} from "./adapter";
+export type { GoogleDriveAdapterConfig } from "./adapter";
+export {
   GOOGLE_DRIVE_PICKER_MIME_TYPES,
   resolveDriveFileHandling,
   exportedFileName,
