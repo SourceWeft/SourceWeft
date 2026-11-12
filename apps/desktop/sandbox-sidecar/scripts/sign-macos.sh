@@ -36,9 +36,9 @@
 #      desktop app performs itself (no com.apple.quarantine xattr) does not trigger Gatekeeper,
 #      but notarization is still the requirement for any quarantined or manually distributed
 #      copy of the bundle.
-# Only the ad-hoc path (identity `-`) is exercised and verified here. The Developer ID branch
-# adds `--timestamp`, which needs network access to Apple's timestamp server; it was checked
-# only against a fake `codesign` that echoed its arguments, never against a real certificate.
+# The ad-hoc path (identity `-`) is exercised locally and in CI. The Developer ID branch adds
+# `--timestamp`, which needs network access to Apple's timestamp server; it has run with a real
+# certificate in a `macos-signed` release build (step 1 above). Step 2 is still not done.
 #
 # Failure handling: the binaries are signed one after the other, so a failure part-way through
 # (non-zero exit) can leave the bundle half-signed. The release job must treat any non-zero exit

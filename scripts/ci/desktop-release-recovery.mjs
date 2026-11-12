@@ -351,7 +351,9 @@ if (
     assert.equal(metadata.tag, tag);
     const config = validateReleaseConfig({ GITHUB_REF_NAME: tag }, metadata);
     assert(
-      ["signed", "updater-signed"].includes(config.desktopPolicy),
+      ["signed", "macos-signed", "updater-signed"].includes(
+        config.desktopPolicy,
+      ),
       "Recovery requires updater-signed artifacts",
     );
     const image = await verifyPublishedImage(repository, tag, sha);

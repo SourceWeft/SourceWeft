@@ -17,6 +17,9 @@ async function fixture(t, policy = "signed") {
   t.after(() => rm(dir, { recursive: true, force: true }));
   for (const [target, name] of Object.entries(UPDATE_TARGETS)) {
     const mac = target.endsWith("apple-darwin");
+    const distributionSigned =
+      (policy === "signed" && !name.startsWith("linux-")) ||
+      (policy === "macos-signed" && mac);
     const filename = `${name}${updateExtension(name)}`;
     const bytes = Buffer.from(`fixture-${target}`);
     await writeFile(join(dir, filename), bytes);
@@ -29,8 +32,8 @@ async function fixture(t, policy = "signed") {
         target,
         filename,
         publicationPolicy: policy,
-        distributionSigned: policy === "signed" && !name.startsWith("linux-"),
-        notarized: policy === "signed" && mac,
+        distributionSigned,
+        notarized: distributionSigned && mac,
         ...(await digest([bytes])),
       }),
     );
@@ -224,6 +227,158 @@ test("updater-signed never claims platform signing or notarization", async (t) =
   await assert.rejects(
     prepare(dir, undefined, "updater-signed"),
     /notarization/,
+  );
+});
+
+test("macos-signed update manifests claim signing and notarization for macOS only and reject mode mixing", async (t) => {
+  const dir = await fixture(t, "macos-signed");
+  let verified = 0;
+  const result = await prepare(
+    dir,
+    async () => {
+      verified++;
+    },
+    "macos-signed",
+  );
+  assert.equal(verified, 4);
+  assert.equal(Object.keys(result.manifest.platforms).length, 4);
+  await assert.rejects(prepare(dir), /policy mismatch/);
+  await assert.rejects(
+    prepare(dir, undefined, "updater-signed"),
+    /policy mismatch/,
+  );
+  const tamper = async (target, change, pattern) => {
+    const path = join(dir, `desktop-update-${target}.json`);
+    const original = await readFile(path, "utf8");
+    await writeFile(path, JSON.stringify({ ...JSON.parse(original), ...change }));
+    await assert.rejects(prepare(dir, undefined, "macos-signed"), pattern);
+    await writeFile(path, original);
+  };
+  await tamper(
+    "x86_64-pc-windows-msvc",
+    { distributionSigned: true },
+    /distribution-signing/,
+  );
+  await tamper(
+    "aarch64-apple-darwin",
+    { distributionSigned: false },
+    /distribution-signing/,
+  );
+  await tamper("x86_64-apple-darwin", { notarized: false }, /notarization/);
+  await tamper(
+    "x86_64-unknown-linux-gnu",
+    { notarized: true },
+    /notarization/,
+  );
+  await prepare(dir, undefined, "macos-signed");
+});
+
+test("explicit macos-signed mode requires Apple credentials on macOS targets only and no Windows signing inputs", () => {
+  const base = {
+    DESKTOP_PUBLICATION_POLICY: "macos-signed",
+    TAURI_UPDATER_PUBLIC_KEY: "public",
+    TAURI_SIGNING_PRIVATE_KEY: "private",
+  };
+  const apple = {
+    APPLE_CERTIFICATE: "certificate",
+    APPLE_CERTIFICATE_PASSWORD: "certificate-password",
+    APPLE_SIGNING_IDENTITY: "Developer ID Application: Example (TEAMID1234)",
+    APPLE_ID: "release@example.com",
+    APPLE_PASSWORD: "app-password",
+    APPLE_TEAM_ID: "TEAMID1234",
+  };
+  for (const target of Object.keys(UPDATE_TARGETS)) {
+    const env = { ...base, DESKTOP_RELEASE_TARGET: target };
+    for (const key of [
+      "TAURI_UPDATER_PUBLIC_KEY",
+      "TAURI_SIGNING_PRIVATE_KEY",
+    ])
+      assert.throws(
+        () => releaseConfig({ ...env, ...apple, [key]: "" }),
+        new RegExp(key),
+      );
+    // Windows signing inputs are never accepted, on any target.
+    for (const key of [
+      "WINDOWS_CERTIFICATE_THUMBPRINT",
+      "WINDOWS_TIMESTAMP_URL",
+    ])
+      assert.throws(
+        () => releaseConfig({ ...env, ...apple, [key]: "ambient" }),
+        /must be unset for macos-signed releases/,
+      );
+    if (target.endsWith("apple-darwin")) {
+      const value = releaseConfig({ ...env, ...apple });
+      assert.equal(
+        value.bundle.macOS.signingIdentity,
+        apple.APPLE_SIGNING_IDENTITY,
+      );
+      assert.equal(value.bundle.windows, undefined);
+      assert.equal(value.plugins.updater.pubkey, "public");
+      for (const secret of ["private", "certificate", "app-password"])
+        assert(!JSON.stringify(value).includes(secret));
+      // No silent ad-hoc downgrade: every Apple credential is required.
+      for (const key of Object.keys(apple))
+        assert.throws(
+          () => releaseConfig({ ...env, ...apple, [key]: "" }),
+          new RegExp(`${key} is required`),
+        );
+      assert.throws(() => releaseConfig(env), /APPLE_CERTIFICATE is required/);
+      assert.throws(
+        () =>
+          releaseConfig({
+            ...env,
+            ...apple,
+            APPLE_SIGNING_IDENTITY: "Apple Development: Example (TEAMID1234)",
+          }),
+        /Developer ID Application identity/,
+      );
+      assert.throws(
+        () => releaseConfig({ ...env, ...apple, APPLE_SIGNING_IDENTITY: "-" }),
+        /Developer ID Application identity/,
+      );
+    } else {
+      // Built exactly as in updater-signed: no platform certificate and no Apple credentials.
+      const value = releaseConfig(env);
+      assert.equal(value.bundle.createUpdaterArtifacts, true);
+      assert.equal(value.bundle.macOS, undefined);
+      assert.equal(value.bundle.windows, undefined);
+      assert.deepEqual(
+        value,
+        releaseConfig({ ...env, DESKTOP_PUBLICATION_POLICY: "updater-signed" }),
+      );
+      for (const key of Object.keys(apple))
+        assert.throws(
+          () => releaseConfig({ ...env, [key]: apple[key] }),
+          new RegExp(
+            `${key} must be unset for macos-signed releases on (windows|linux) targets`,
+          ),
+        );
+      // Empty values, as the workflow passes them to these legs, are accepted.
+      assert.deepEqual(
+        releaseConfig({
+          ...env,
+          APPLE_CERTIFICATE: "",
+          APPLE_ID: " ",
+          WINDOWS_TIMESTAMP_URL: "",
+        }),
+        value,
+      );
+    }
+  }
+  // The Windows arm64 sandbox bundle has no installer and needs no certificate in this mode.
+  const arm64 = { ...base, DESKTOP_RELEASE_TARGET: "aarch64-pc-windows-msvc" };
+  assert.throws(() => releaseConfig(arm64), /Unsupported release target/);
+  assert.equal(
+    releaseConfig(arm64, { bundleOnly: true }).bundle.windows,
+    undefined,
+  );
+  assert.throws(
+    () =>
+      releaseConfig(
+        { ...arm64, WINDOWS_CERTIFICATE_THUMBPRINT: "A".repeat(40) },
+        { bundleOnly: true },
+      ),
+    /must be unset for macos-signed releases/,
   );
 });
 

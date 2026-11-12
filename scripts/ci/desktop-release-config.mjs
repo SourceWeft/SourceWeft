@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { UPDATE_TARGETS } from "./desktop-update-manifest.mjs";
-import { updatePublicationPolicy } from "./desktop-publication-policy.mjs";
+import {
+  updatePublicationPolicy,
+  distributionClaims,
+} from "./desktop-publication-policy.mjs";
 
 /**
  * `bundleOnly` validates the signing inputs for a target that has a sandbox runtime bundle but
@@ -36,25 +39,36 @@ export function releaseConfig(env, { bundleOnly = false } = {}) {
       },
     },
   };
-  if (policy === "updater-signed") {
-    // Explicit mode, never a catch-and-retry fallback. Reject ambient platform
-    // signing inputs so the resulting distribution claims remain truthful.
+  const platform = target.endsWith("apple-darwin")
+    ? "macos"
+    : target.endsWith("windows-msvc")
+      ? "windows"
+      : "linux";
+  const { distributionSigned } = distributionClaims(policy, platform);
+  if (policy !== "signed") {
+    // Explicit modes, never a catch-and-retry fallback. Reject ambient signing inputs for
+    // every platform this policy does not sign, so the resulting distribution claims remain
+    // truthful: `updater-signed` signs nothing, `macos-signed` signs macOS targets only.
     for (const key of Object.keys(env)) {
-      if (
-        (key.startsWith("APPLE_") ||
-          key.startsWith("WINDOWS_CERTIFICATE") ||
-          key === "WINDOWS_TIMESTAMP_URL") &&
-        env[key]?.trim()
-      )
-        throw new Error(`${key} must be unset for updater-signed releases`);
+      const apple = key.startsWith("APPLE_");
+      const windows =
+        key.startsWith("WINDOWS_CERTIFICATE") ||
+        key === "WINDOWS_TIMESTAMP_URL";
+      if ((windows || (apple && !distributionSigned)) && env[key]?.trim())
+        throw new Error(
+          policy === "updater-signed"
+            ? `${key} must be unset for updater-signed releases`
+            : `${key} must be unset for macos-signed releases on ${platform} targets`,
+        );
     }
-    // Ad-hoc signing preserves macOS executable integrity (including arm64),
-    // but does not assert Developer ID identity or notarization.
-    if (target.endsWith("apple-darwin"))
-      config.bundle.macOS = { signingIdentity: "-" };
-    return config;
   }
-  if (target.endsWith("apple-darwin")) {
+  if (platform === "macos") {
+    if (!distributionSigned) {
+      // Ad-hoc signing preserves macOS executable integrity (including arm64),
+      // but does not assert Developer ID identity or notarization.
+      config.bundle.macOS = { signingIdentity: "-" };
+      return config;
+    }
     for (const key of [
       "APPLE_CERTIFICATE",
       "APPLE_CERTIFICATE_PASSWORD",
@@ -69,7 +83,7 @@ export function releaseConfig(env, { bundleOnly = false } = {}) {
       "macOS requires a Developer ID Application identity",
     );
     config.bundle.macOS = { signingIdentity: identity };
-  } else if (target.endsWith("windows-msvc")) {
+  } else if (platform === "windows" && distributionSigned) {
     const thumbprint = require("WINDOWS_CERTIFICATE_THUMBPRINT");
     assert(
       /^[a-fA-F0-9]{40}$/.test(thumbprint),
