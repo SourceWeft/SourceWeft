@@ -8,11 +8,13 @@
 /** Friendly client-side cap. The backend enforces the real limit (<= 500,
  * unique, pattern-checked); this only powers the "{count} / {limit}" header and
  * the limit warning. Defined here so `apps/web` never imports the Drive
- * capability package. */
+ * capability package. Keep in sync with GOOGLE_DRIVE_MAX_FILES in
+ * packages/builtin-connector-google-drive/src/contribution.ts. */
 export const GOOGLE_DRIVE_MAX_FILES = 500;
 
 /** Each selected Drive file becomes a source whose externalId is this prefix
- * followed by the Drive file id. */
+ * followed by the Drive file id. Keep in sync with the `file:` prefix in
+ * packages/builtin-connector-google-drive/src/adapter.ts. */
 export const GOOGLE_DRIVE_FILE_EXTERNAL_PREFIX = "file:";
 
 export function googleDriveExternalId(fileId: string): string {

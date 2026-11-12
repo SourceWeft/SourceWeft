@@ -497,6 +497,26 @@ test("skips an export over Google's limit", async () => {
   );
 });
 
+test("skips a text export larger than the client-side cap", async () => {
+  const item = driveItem(
+    { driveFileId: "filebigdoc02", driveMimeType: GOOGLE_DOC },
+    { title: "Huge" },
+  );
+  const gdrive = adapter(
+    async () =>
+      new Response("partial", {
+        status: 200,
+        headers: { "content-length": "30000000" },
+      }),
+  );
+  await assert.rejects(
+    gdrive.extract({ ...context, item }),
+    (error: unknown) =>
+      error instanceof ConnectorItemSkipError &&
+      error.reason === "export_too_large",
+  );
+});
+
 test("refuses a download over maxBytes", async () => {
   const item = driveItem(
     { driveFileId: "filebigpdf01", driveMimeType: "application/pdf" },

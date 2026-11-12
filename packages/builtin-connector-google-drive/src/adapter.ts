@@ -48,6 +48,8 @@ function toItem(file: DriveFile): ConnectorItem {
       ? Number(file.size)
       : null;
   return {
+    // Keep in sync with GOOGLE_DRIVE_FILE_EXTERNAL_PREFIX in
+    // apps/web/app/dashboard/chat/_components/sources-hub/connectors/google-drive-selection.ts.
     externalId: `file:${fileId}`,
     externalUri: typeof file.webViewLink === "string" ? file.webViewLink : null,
     title: typeof file.name === "string" ? file.name : "",

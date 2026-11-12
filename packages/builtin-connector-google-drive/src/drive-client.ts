@@ -1,13 +1,26 @@
 import { Buffer } from "node:buffer";
-import { ConnectorItemSkipError, type OAuthTokenSet } from "@sourceweft/contracts";
+import {
+  ConnectorItemSkipError,
+  type ConnectorItemSkipReason,
+  type OAuthTokenSet,
+} from "@sourceweft/contracts";
 
 // Drive's own token exchange and request wrapper are kept in this package on
 // purpose: the Gmail connector is under Google review and must not be touched,
 // so Drive carries its own copy rather than importing from it.
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+// Shares its character class with configSchema's fileIds item pattern in
+// contribution.ts; keep both in sync.
 const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/;
 const REQUEST_TIMEOUT_MS = 30000;
+/**
+ * Defensive client-side cap on a text export's body. Google's own export
+ * limit is 10 MB; this cap is intentionally looser so it never fires before
+ * the provider's own `exportSizeLimitExceeded` error does, while still
+ * bounding memory if that provider behavior ever changes.
+ */
+const GOOGLE_DRIVE_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
 
 export class GoogleDriveAdapterError extends Error {
   constructor(
@@ -99,19 +112,23 @@ async function isExportSizeLimitExceeded(response: Response): Promise<boolean> {
  * the declared `Content-Length` short-circuits, and the stream is abandoned the
  * moment the running total passes the cap.
  */
-async function readCapped(response: Response, maxBytes: number): Promise<Buffer> {
+async function readCapped(
+  response: Response,
+  maxBytes: number,
+  skipReason: ConnectorItemSkipReason = "too_large",
+): Promise<Buffer> {
   const declared = response.headers.get("content-length");
   if (declared !== null) {
     const length = Number(declared);
     if (Number.isFinite(length) && length > maxBytes) {
-      throw new ConnectorItemSkipError("too_large");
+      throw new ConnectorItemSkipError(skipReason);
     }
   }
   const body = response.body;
   if (!body) {
     const buffer = Buffer.from(await response.arrayBuffer());
     if (buffer.byteLength > maxBytes) {
-      throw new ConnectorItemSkipError("too_large");
+      throw new ConnectorItemSkipError(skipReason);
     }
     return buffer;
   }
@@ -129,7 +146,7 @@ async function readCapped(response: Response, maxBytes: number): Promise<Buffer>
       } catch {
         // Best effort: the cap is already enforced by throwing below.
       }
-      throw new ConnectorItemSkipError("too_large");
+      throw new ConnectorItemSkipError(skipReason);
     }
     chunks.push(Buffer.from(value));
   }
@@ -335,7 +352,14 @@ export function createDriveClient(options: DriveClientOptions) {
       const fileId = assertDriveFileId(id);
       const url = `${DRIVE_API}/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(exportMimeType)}`;
       const response = await request(url, token);
-      if (response.ok) return response.text();
+      if (response.ok) {
+        const buffer = await readCapped(
+          response,
+          GOOGLE_DRIVE_EXPORT_MAX_BYTES,
+          "export_too_large",
+        );
+        return buffer.toString("utf8");
+      }
       return throwExport(response);
     },
     async exportBytes(

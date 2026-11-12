@@ -3,7 +3,9 @@ import type { ConnectorContribution } from "@sourceweft/capability-contracts";
 export const GOOGLE_DRIVE_FILE_SCOPE =
   "https://www.googleapis.com/auth/drive.file";
 
-/** Server-enforced ceiling on how many Drive files one connector may select. */
+/** Server-enforced ceiling on how many Drive files one connector may select.
+ * Keep in sync with GOOGLE_DRIVE_MAX_FILES in
+ * apps/web/app/dashboard/chat/_components/sources-hub/connectors/google-drive-selection.ts. */
 export const GOOGLE_DRIVE_MAX_FILES = 500;
 
 export const googleDriveConnectorContribution = {
@@ -62,6 +64,7 @@ export const googleDriveConnectorContribution = {
         uniqueItems: true,
         items: {
           type: "string",
+          // Keep in sync with FILE_ID in drive-client.ts.
           pattern: "^[A-Za-z0-9_-]{10,200}$",
         },
       },
