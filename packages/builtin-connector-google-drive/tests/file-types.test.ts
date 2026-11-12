@@ -12,7 +12,7 @@ test("maps a Google Doc to a markdown export", () => {
     {
       kind: "export_text",
       exportMimeType: "text/markdown",
-      itemMimeType: "application/vnd.google-apps.document",
+      itemMimeType: "text/markdown",
       asMarkdown: true,
     },
   );
@@ -24,7 +24,7 @@ test("maps a Google Slides presentation to a plain-text export", () => {
     {
       kind: "export_text",
       exportMimeType: "text/plain",
-      itemMimeType: "application/vnd.google-apps.presentation",
+      itemMimeType: "text/plain",
       asMarkdown: false,
     },
   );
@@ -37,7 +37,8 @@ test("maps a Google Sheet to an xlsx file export", () => {
       kind: "export_file",
       exportMimeType:
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      itemMimeType: "application/vnd.google-apps.spreadsheet",
+      itemMimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       extension: "xlsx",
     },
   );

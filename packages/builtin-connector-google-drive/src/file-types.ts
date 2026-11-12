@@ -34,11 +34,18 @@ export const GOOGLE_DRIVE_PICKER_MIME_TYPES: readonly string[] = [
   ...DOWNLOAD_MIME_TYPES,
 ];
 
+/**
+ * How to extract a Drive file. `itemMimeType` is the MIME type of the content
+ * the platform will actually receive, so it is the type written onto the
+ * discovered `ConnectorItem`: the export MIME for Google-native files and the
+ * original stored MIME for a plain download. (The unsupported variant has no
+ * `itemMimeType`; callers fall back to the original Drive MIME there.)
+ */
 export type DriveFileHandling =
   | {
       kind: "export_text";
       exportMimeType: "text/markdown" | "text/plain";
-      itemMimeType: string;
+      itemMimeType: "text/markdown" | "text/plain";
       asMarkdown: boolean;
     }
   | {
@@ -58,7 +65,7 @@ export function resolveDriveFileHandling(
     return {
       kind: "export_text",
       exportMimeType: "text/markdown",
-      itemMimeType: driveMimeType,
+      itemMimeType: "text/markdown",
       asMarkdown: true,
     };
   }
@@ -66,7 +73,7 @@ export function resolveDriveFileHandling(
     return {
       kind: "export_text",
       exportMimeType: "text/plain",
-      itemMimeType: driveMimeType,
+      itemMimeType: "text/plain",
       asMarkdown: false,
     };
   }
@@ -74,7 +81,7 @@ export function resolveDriveFileHandling(
     return {
       kind: "export_file",
       exportMimeType: XLSX_EXPORT_MIME_TYPE,
-      itemMimeType: driveMimeType,
+      itemMimeType: XLSX_EXPORT_MIME_TYPE,
       extension: "xlsx",
     };
   }

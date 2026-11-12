@@ -18,7 +18,6 @@ import {
   GOOGLE_DRIVE_PICKER_MIME_TYPES,
   exportedFileName,
   resolveDriveFileHandling,
-  type DriveFileHandling,
 } from "./file-types";
 import {
   GoogleDriveAdapterError,
@@ -40,27 +39,6 @@ export type GoogleDriveAdapterConfig = {
   fetcher?: typeof fetch;
 };
 
-/**
- * The MIME type written onto the item (and onto a file descriptor): the type
- * the extracted content actually becomes. Google-native files are stored as
- * their export format, downloads keep their original type, and an unsupported
- * file keeps its original Drive type so the item still carries one.
- */
-function effectiveMimeType(
-  handling: DriveFileHandling,
-  driveMimeType: string,
-): string {
-  switch (handling.kind) {
-    case "export_text":
-    case "export_file":
-      return handling.exportMimeType;
-    case "download":
-      return handling.itemMimeType;
-    case "unsupported":
-      return driveMimeType;
-  }
-}
-
 function toItem(file: DriveFile): ConnectorItem {
   const fileId = assertDriveFileId(file.id);
   const driveMimeType = typeof file.mimeType === "string" ? file.mimeType : "";
@@ -73,7 +51,11 @@ function toItem(file: DriveFile): ConnectorItem {
     externalId: `file:${fileId}`,
     externalUri: typeof file.webViewLink === "string" ? file.webViewLink : null,
     title: typeof file.name === "string" ? file.name : "",
-    mimeType: effectiveMimeType(handling, driveMimeType),
+    // The MIME type of the content the platform receives: the handling's
+    // itemMimeType (export MIME for native files, original for downloads), or
+    // the original Drive MIME for an unsupported file that has no handling.
+    mimeType:
+      handling.kind === "unsupported" ? driveMimeType : handling.itemMimeType,
     sizeBytes: size !== null && Number.isFinite(size) ? size : null,
     externalUpdatedAt:
       typeof file.modifiedTime === "string"
