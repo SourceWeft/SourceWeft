@@ -281,11 +281,17 @@ export class ConnectorService {
       current.connectorType === "gmail" &&
       current.configJson.indexingEnabled === true &&
       nextConfig.indexingEnabled !== true;
-    validateObjectWithJsonSchema({
-      schema: manifest.configSchema,
-      value: nextConfig,
-      label: "configJson",
-    });
+    // Only validate when the caller actually supplies a config. A stricter
+    // validator (maxItems, uniqueItems, pattern, per-item schemas) must not
+    // block an unrelated update (rename, pause, disable, reschedule) of a
+    // connector whose stored config predates that stricter enforcement.
+    if (input.configJson !== undefined) {
+      validateObjectWithJsonSchema({
+        schema: manifest.configSchema,
+        value: nextConfig,
+        label: "configJson",
+      });
+    }
 
     const periodicIndexingEnabled =
       input.periodicIndexingEnabled ?? current.periodicIndexingEnabled;

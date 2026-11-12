@@ -44,12 +44,27 @@ const connector = {
   indexingFrequencyMinutes: null,
 };
 
+// Gmail's configSchema has always declared labelIds with maxItems: 20; it
+// is added here so F1's tests can exercise the stricter validator's
+// maxItems enforcement against a stored config (see
+// .superpowers/sdd/2026-11-12-google-drive-connector/final-review-pr2-fixes.md).
+const gmailConfigSchema = {
+  type: "object",
+  properties: {
+    labelIds: {
+      type: "array",
+      maxItems: 20,
+      items: { type: "string" },
+    },
+  },
+};
+
 function service() {
   return new ConnectorService({
     getManifest: () => ({
       type: "gmail",
       displayName: "Gmail",
-      configSchema: { type: "object" },
+      configSchema: gmailConfigSchema,
       sync: {
         supportsIncremental: true,
         defaultFrequencyMinutes: 360,
@@ -170,4 +185,89 @@ test("disabling Gmail indexing archives retained sources after the config change
     workspaceId: "workspace",
     connectorId: "connector",
   });
+});
+
+function labelIds(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `label_${index}`);
+}
+
+test("updates a connector without re-validating an untouched stored config", async () => {
+  vi.clearAllMocks();
+  const storedConnector = {
+    ...connector,
+    configJson: { liveSearchEnabled: true, indexingEnabled: false, labelIds: labelIds(21) },
+  };
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord
+    .mockResolvedValueOnce(storedConnector)
+    .mockResolvedValueOnce({ ...storedConnector, name: "Renamed" });
+  mocks.updateSourceConnectorRecord.mockResolvedValue({
+    ...storedConnector,
+    name: "Renamed",
+  });
+  mocks.getConnectorScheduleStatus.mockResolvedValue(null);
+
+  const result = await service().updateConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorId: "connector",
+    name: "Renamed",
+  });
+
+  assert.equal(result.connector.name, "Renamed");
+  assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+});
+
+test("rejects a config update that exceeds a declared array limit", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector);
+
+  await assert.rejects(
+    service().updateConnector({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "connector",
+      configJson: {
+        liveSearchEnabled: true,
+        indexingEnabled: false,
+        labelIds: labelIds(21),
+      },
+    }),
+    { code: "CONNECTOR_SCHEMA_VALIDATION_FAILED" },
+  );
+  assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+});
+
+test("accepts a config update within the declared limits", async () => {
+  vi.clearAllMocks();
+  const nextConfig = {
+    liveSearchEnabled: true,
+    indexingEnabled: false,
+    labelIds: labelIds(20),
+  };
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord
+    .mockResolvedValueOnce(connector)
+    .mockResolvedValueOnce({ ...connector, configJson: nextConfig });
+  mocks.updateSourceConnectorRecord.mockResolvedValue({
+    ...connector,
+    configJson: nextConfig,
+  });
+  mocks.getConnectorScheduleStatus.mockResolvedValue(null);
+
+  const result = await service().updateConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorId: "connector",
+    configJson: nextConfig,
+  });
+
+  assert.deepEqual(result.connector.configJson, nextConfig);
 });
