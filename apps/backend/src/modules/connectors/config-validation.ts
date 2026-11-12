@@ -8,6 +8,10 @@ type JsonSchemaObject = {
   additionalProperties?: unknown;
   enum?: unknown;
   anyOf?: unknown;
+  maxItems?: unknown;
+  uniqueItems?: unknown;
+  pattern?: unknown;
+  items?: unknown;
 };
 
 function validateValue(input: {
@@ -47,6 +51,58 @@ function validateValue(input: {
       "CONNECTOR_SCHEMA_VALIDATION_FAILED",
       `${input.path} must be ${type}`,
     );
+  }
+
+  if (type === "string" && typeof input.schema.pattern === "string") {
+    const pattern = new RegExp(input.schema.pattern);
+    if (!pattern.test(input.value as string)) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+        `${input.path} does not match the required pattern`,
+      );
+    }
+  }
+
+  if (type === "array") {
+    const items = input.value as unknown[];
+
+    if (
+      typeof input.schema.maxItems === "number" &&
+      items.length > input.schema.maxItems
+    ) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+        `${input.path} must have at most ${input.schema.maxItems} items`,
+      );
+    }
+
+    if (input.schema.uniqueItems === true) {
+      const seen = new Set<string>();
+      for (const item of items) {
+        const key = JSON.stringify(item);
+        if (seen.has(key)) {
+          throw new ConnectorError(
+            400,
+            "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+            `${input.path} must not contain duplicate items`,
+          );
+        }
+        seen.add(key);
+      }
+    }
+
+    if (isRecord(input.schema.items)) {
+      const itemSchema = input.schema.items as JsonSchemaObject;
+      items.forEach((item, index) => {
+        validateValue({
+          schema: itemSchema,
+          value: item,
+          path: `${input.path}[${index}]`,
+        });
+      });
+    }
   }
 }
 

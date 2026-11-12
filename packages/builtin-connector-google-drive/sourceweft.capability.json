@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/google-drive",
+  "kind": "connector",
+  "name": "Google Drive Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "google_drive",
+      "title": "Google Drive",
+      "auth": {
+        "kind": "oauth2",
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "scopes": ["https://www.googleapis.com/auth/drive.file"],
+        "authorizationParams": {
+          "access_type": "offline",
+          "prompt": "consent"
+        },
+        "sendScope": true
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 60,
+        "resources": [
+          {
+            "type": "google_drive_file",
+            "title": "Google Drive file",
+            "supportsDeleteDetection": true
+          }
+        ]
+      },
+      "actions": [
+        {
+          "id": "google_drive.picker.config",
+          "title": "Google Drive picker configuration",
+          "description": "Return the configuration the Google Drive file picker needs so the user can select files for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fileIds": {
+            "type": "array",
+            "maxItems": 500,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{10,200}$"
+            }
+          }
+        },
+        "default": { "fileIds": [] }
+      }
+    }
+  ]
+}

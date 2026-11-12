@@ -66,6 +66,7 @@
     "@sourceweft/billing": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-connector-gmail": "workspace:*",
+    "@sourceweft/builtin-connector-google-drive": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-feynman": "workspace:*",
