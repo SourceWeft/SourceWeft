@@ -48,7 +48,7 @@ export function GoogleDriveFiles({
   connector: ConnectorItem;
   latestSyncRun: ConnectorActivityItem | null;
   disabled: boolean;
-  onChangeFileIds: (fileIds: string[]) => void;
+  onChangeFileIds: (fileIds: string[]) => Promise<boolean>;
 }) {
   const t = useTranslations("dashboardSourcesHub");
   const displayLocale = useDisplayLocale();
@@ -61,9 +61,20 @@ export function GoogleDriveFiles({
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [isLoadingSources, setIsLoadingSources] = useState(true);
   const [pickerBusy, setPickerBusy] = useState(false);
+  // When this session last submitted an add or remove. Feeds the "unavailable"
+  // vs "waiting" decision so a just-added file is not reported as deleted while
+  // the activity list still shows the previous successful run. A timestamp, not
+  // sensitive; reset when the connector changes.
+  const [selectionChangedAt, setSelectionChangedAt] = useState<Date | null>(
+    null,
+  );
 
   const latestRunId = latestSyncRun?.id ?? null;
   const latestRunStatus = latestSyncRun?.status ?? null;
+
+  useEffect(() => {
+    setSelectionChangedAt(null);
+  }, [connectorId]);
 
   useEffect(() => {
     let active = true;
@@ -95,7 +106,13 @@ export function GoogleDriveFiles({
 
   const skippedItems = readConnectorSkippedItems(latestSyncRun?.resultJson);
   const latestRun = latestSyncRun
-    ? { status: latestSyncRun.status, skippedItems }
+    ? {
+        status: latestSyncRun.status,
+        // The activity item carries the run's start (`startedAt`); fall back to
+        // its creation time for a run that was recorded but not yet started.
+        startedAt: new Date(latestSyncRun.startedAt ?? latestSyncRun.createdAt),
+        skippedItems,
+      }
     : null;
 
   const handleAddFiles = useCallback(async () => {
@@ -122,7 +139,9 @@ export function GoogleDriveFiles({
       if (result.added === 0) {
         return;
       }
-      onChangeFileIds(result.fileIds);
+      if (await onChangeFileIds(result.fileIds)) {
+        setSelectionChangedAt(new Date());
+      }
     } catch (error) {
       const code = error instanceof HttpClientError ? error.code : undefined;
       toast.error(t(googleDrivePickerErrorKey(code)));
@@ -132,9 +151,11 @@ export function GoogleDriveFiles({
   }, [workspaceId, connectorId, connector.raw.configJson, onChangeFileIds, t]);
 
   const handleRemove = useCallback(
-    (fileId: string) => {
+    async (fileId: string) => {
       const current = parseGoogleDriveFileIds(connector.raw.configJson);
-      onChangeFileIds(removeGoogleDriveFile(current, fileId));
+      if (await onChangeFileIds(removeGoogleDriveFile(current, fileId))) {
+        setSelectionChangedAt(new Date());
+      }
     },
     [connector.raw.configJson, onChangeFileIds],
   );
@@ -189,7 +210,12 @@ export function GoogleDriveFiles({
             {fileIds.map((fileId) => {
               const source =
                 sourceByExternalId.get(googleDriveExternalId(fileId)) ?? null;
-              const state = googleDriveFileState({ fileId, source, latestRun });
+              const state = googleDriveFileState({
+                fileId,
+                source,
+                latestRun,
+                selectionChangedAt,
+              });
               const name = source?.title?.trim() || fileId;
               const removeLabel = t("connectors.googleDrive.remove", { name });
               const detail =
@@ -233,7 +259,7 @@ export function GoogleDriveFiles({
                   <Button
                     className="size-7 shrink-0"
                     disabled={disabled}
-                    onClick={() => handleRemove(fileId)}
+                    onClick={() => void handleRemove(fileId)}
                     size="icon-xs"
                     title={removeLabel}
                     type="button"

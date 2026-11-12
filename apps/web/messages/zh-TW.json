@@ -3216,7 +3216,7 @@
       },
       "googleDrive": {
         "filesTitle": "檔案",
-        "filesDescription": "選擇要索引的 Google Drive 檔案。每個檔案都會按連接器的計劃保持同步。",
+        "filesDescription": "選擇要索引的 Google Drive 檔案。每個檔案都會按連接器的同步排程保持同步。",
         "addFiles": "新增檔案",
         "remove": "移除 {name}",
         "count": "{count} / {limit}",
@@ -3239,8 +3239,8 @@
         "skipReason": {
           "unsupported_type": "不支援的檔案類型",
           "too_large": "檔案過大，無法索引",
-          "needs_ocr": "掃描件需要 OCR",
-          "export_too_large": "匯出的檔案過大",
+          "needs_ocr": "掃描版 PDF 暫不支援",
+          "export_too_large": "匯出超過 Google 的 10 MB 上限",
           "empty_content": "沒有可讀內容",
           "unreadable": "無法讀取檔案",
           "unknown": "因未知原因被跳過"

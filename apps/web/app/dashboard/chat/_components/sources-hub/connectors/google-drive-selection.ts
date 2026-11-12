@@ -110,6 +110,22 @@ export type GoogleDriveFileState =
   | { kind: "unavailable" }
   | { kind: "waiting" };
 
+/** True when a run that could have seen the current selection has run: the run
+ * started after the selection last changed in this session. When the selection
+ * was not changed in this session (`null`), any run qualifies. */
+function runCouldHaveSeenSelection(
+  runStartedAt: Date | null,
+  selectionChangedAt: Date | null,
+): boolean {
+  if (selectionChangedAt === null) {
+    return true;
+  }
+  if (runStartedAt === null) {
+    return false;
+  }
+  return runStartedAt.getTime() > selectionChangedAt.getTime();
+}
+
 /**
  * Decide the single state shown for one selected file, in priority order:
  *
@@ -119,21 +135,29 @@ export type GoogleDriveFileState =
  *  2. the active source's own state (`indexed` / `processing` / `failed`) when a
  *     non-archived source exists for this file.
  *  3. `unavailable` — no active source and not skipped, but the latest run has
- *     finished successfully, so reconciliation would have archived a source
- *     that was deleted in Drive or lost access.
- *  4. `waiting` — otherwise: no run yet, a run still in progress, or a run that
- *     did not finish successfully, so we cannot yet say the file is gone.
+ *     finished successfully AND started after the selection last changed in this
+ *     session, so reconciliation would have archived a source that was deleted
+ *     in Drive or lost access.
+ *  4. `waiting` — otherwise: no run yet, a run still in progress, a run that did
+ *     not finish successfully, or a run that started before a file was just
+ *     added, so we cannot yet say the file is gone.
  *
  * `source` is a source returned by `listSources` (archived sources are already
  * excluded upstream), or `null`/`undefined` when no active source matches.
+ * `selectionChangedAt` is when this browser session last submitted an add or a
+ * remove, or `null` when it has not. Known residual gap: a selection changed
+ * from another browser while a run was in flight can still read `unavailable`
+ * until the next sync.
  */
 export function googleDriveFileState(input: {
   fileId: string;
   source: { status: string } | null | undefined;
   latestRun: {
     status: string;
+    startedAt: Date | null;
     skippedItems: ReadonlyArray<{ externalId: string; reason: string }>;
   } | null;
+  selectionChangedAt: Date | null;
 }): GoogleDriveFileState {
   const externalId = googleDriveExternalId(input.fileId);
   const skipped = input.latestRun?.skippedItems.find(
@@ -151,8 +175,35 @@ export function googleDriveFileState(input: {
     }
     return { kind: "processing" };
   }
-  if (input.latestRun && input.latestRun.status === "succeeded") {
+  if (
+    input.latestRun &&
+    input.latestRun.status === "succeeded" &&
+    runCouldHaveSeenSelection(
+      input.latestRun.startedAt,
+      input.selectionChangedAt,
+    )
+  ) {
     return { kind: "unavailable" };
   }
   return { kind: "waiting" };
+}
+
+/**
+ * Save a new file selection and, only if the save did not report failure,
+ * trigger a sync. Returns whether the selection was saved (so the caller can
+ * record that the selection changed). `save` reports failure by resolving
+ * `false`; any other resolution — including `undefined`/`void` — is treated as
+ * success, matching a save handler that surfaces its own errors and returns
+ * nothing.
+ */
+export async function commitGoogleDriveSelection(opts: {
+  save: () => void | boolean | Promise<void | boolean>;
+  sync: () => void;
+}): Promise<boolean> {
+  const result = await opts.save();
+  if (result === false) {
+    return false;
+  }
+  opts.sync();
+  return true;
 }

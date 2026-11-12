@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { connectorItemSkipReasons } from "@sourceweft/contracts";
 import {
+  commitGoogleDriveSelection,
   GOOGLE_DRIVE_MAX_FILES,
   googleDriveExternalId,
   googleDriveFileState,
@@ -87,45 +88,53 @@ describe("GOOGLE_DRIVE_MAX_FILES", () => {
 
 describe("googleDriveFileState", () => {
   const externalId = googleDriveExternalId("abc");
+  const runStart = new Date("2026-11-13T10:00:00.000Z");
+  const beforeRun = new Date("2026-11-13T09:00:00.000Z");
+  const afterRun = new Date("2026-11-13T11:00:00.000Z");
+
+  function succeededRun(
+    skippedItems: Array<{ externalId: string; reason: string }> = [],
+  ) {
+    return { status: "succeeded", startedAt: runStart, skippedItems };
+  }
 
   test("reports a skipped file with its reason", () => {
-    const state = googleDriveFileState({
-      fileId: "abc",
-      source: null,
-      latestRun: {
-        status: "succeeded",
-        skippedItems: [{ externalId, reason: "too_large" }],
-      },
-    });
-    expect(state).toEqual({ kind: "skipped", reason: "too_large" });
+    expect(
+      googleDriveFileState({
+        fileId: "abc",
+        source: null,
+        latestRun: succeededRun([{ externalId, reason: "too_large" }]),
+        selectionChangedAt: null,
+      }),
+    ).toEqual({ kind: "skipped", reason: "too_large" });
   });
 
   test("skipped wins over a stale indexed source", () => {
-    const state = googleDriveFileState({
-      fileId: "abc",
-      source: { status: "indexed" },
-      latestRun: {
-        status: "succeeded",
-        skippedItems: [{ externalId, reason: "needs_ocr" }],
-      },
-    });
-    expect(state).toEqual({ kind: "skipped", reason: "needs_ocr" });
-  });
-
-  test("maps an active source's status to indexed, processing, or failed", () => {
-    const run = { status: "succeeded", skippedItems: [] };
     expect(
       googleDriveFileState({
         fileId: "abc",
         source: { status: "indexed" },
-        latestRun: run,
+        latestRun: succeededRun([{ externalId, reason: "needs_ocr" }]),
+        selectionChangedAt: null,
+      }),
+    ).toEqual({ kind: "skipped", reason: "needs_ocr" });
+  });
+
+  test("maps an active source's status to indexed, processing, or failed", () => {
+    expect(
+      googleDriveFileState({
+        fileId: "abc",
+        source: { status: "indexed" },
+        latestRun: succeededRun(),
+        selectionChangedAt: null,
       }).kind,
     ).toBe("indexed");
     expect(
       googleDriveFileState({
         fileId: "abc",
         source: { status: "failed" },
-        latestRun: run,
+        latestRun: succeededRun(),
+        selectionChangedAt: null,
       }).kind,
     ).toBe("failed");
     for (const status of ["created", "queued", "processing"]) {
@@ -133,19 +142,48 @@ describe("googleDriveFileState", () => {
         googleDriveFileState({
           fileId: "abc",
           source: { status },
-          latestRun: run,
+          latestRun: succeededRun(),
+          selectionChangedAt: null,
         }).kind,
       ).toBe("processing");
     }
   });
 
-  test("reports unavailable when a successful run left no active source", () => {
-    const state = googleDriveFileState({
-      fileId: "abc",
-      source: null,
-      latestRun: { status: "succeeded", skippedItems: [] },
-    });
-    expect(state.kind).toBe("unavailable");
+  test("shows unavailable for a file with no source when the selection was not changed in this session", () => {
+    expect(
+      googleDriveFileState({
+        fileId: "abc",
+        source: null,
+        latestRun: succeededRun(),
+        selectionChangedAt: null,
+      }).kind,
+    ).toBe("unavailable");
+  });
+
+  test("shows unavailable once a run that started after the change has succeeded", () => {
+    expect(
+      googleDriveFileState({
+        fileId: "abc",
+        source: null,
+        latestRun: { status: "succeeded", startedAt: afterRun, skippedItems: [] },
+        selectionChangedAt: runStart,
+      }).kind,
+    ).toBe("unavailable");
+  });
+
+  test("shows waiting, not unavailable, for a file added after the latest successful run started", () => {
+    expect(
+      googleDriveFileState({
+        fileId: "abc",
+        source: null,
+        latestRun: {
+          status: "succeeded",
+          startedAt: beforeRun,
+          skippedItems: [],
+        },
+        selectionChangedAt: runStart,
+      }).kind,
+    ).toBe("waiting");
   });
 
   test("run in progress shows waiting, not unavailable", () => {
@@ -154,7 +192,8 @@ describe("googleDriveFileState", () => {
         googleDriveFileState({
           fileId: "abc",
           source: null,
-          latestRun: { status, skippedItems: [] },
+          latestRun: { status, startedAt: null, skippedItems: [] },
+          selectionChangedAt: null,
         }).kind,
       ).toBe("waiting");
     }
@@ -166,14 +205,60 @@ describe("googleDriveFileState", () => {
         fileId: "abc",
         source: null,
         latestRun: null,
+        selectionChangedAt: null,
       }).kind,
     ).toBe("waiting");
     expect(
       googleDriveFileState({
         fileId: "abc",
         source: null,
-        latestRun: { status: "failed", skippedItems: [] },
+        latestRun: { status: "failed", startedAt: runStart, skippedItems: [] },
+        selectionChangedAt: null,
       }).kind,
     ).toBe("waiting");
+  });
+});
+
+describe("commitGoogleDriveSelection", () => {
+  test("does not sync when the save reports failure", async () => {
+    const sync = vi.fn();
+    const result = await commitGoogleDriveSelection({
+      save: () => false,
+      sync,
+    });
+    expect(result).toBe(false);
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  test("syncs after a successful save", async () => {
+    const sync = vi.fn();
+    const result = await commitGoogleDriveSelection({ save: () => true, sync });
+    expect(result).toBe(true);
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  test("treats a save that returns nothing as success", async () => {
+    const sync = vi.fn();
+    const result = await commitGoogleDriveSelection({
+      save: () => undefined,
+      sync,
+    });
+    expect(result).toBe(true);
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  test("awaits an async save before syncing", async () => {
+    const order: string[] = [];
+    const sync = vi.fn(() => {
+      order.push("sync");
+    });
+    await commitGoogleDriveSelection({
+      save: async () => {
+        order.push("save");
+        return true;
+      },
+      sync,
+    });
+    expect(order).toEqual(["save", "sync"]);
   });
 });

@@ -67,6 +67,7 @@ import {
   getConnectorReadinessFromConfig,
 } from "./components";
 import { GoogleDriveFiles } from "./google-drive-files";
+import { commitGoogleDriveSelection } from "./google-drive-selection";
 import type {
   ConnectorItem,
   ConnectorReadinessState,
@@ -124,6 +125,10 @@ export function ConnectorSettingsDialog({
   onCopyWebhook: (value: string) => void;
   onDisconnect: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
+  // Returns nothing for the general-settings form; the Google Drive files
+  // handler relies on the save surfacing failure as a resolved `false`. The
+  // current wiring resolves `void` (it toasts its own errors), so in practice
+  // the file handler always proceeds to sync — see commitGoogleDriveSelection.
   onSaveSettings: (
     connector: ConnectorItem,
     input: {
@@ -132,7 +137,7 @@ export function ConnectorSettingsDialog({
       indexingFrequencyMinutes: number | null;
       configJson?: Record<string, unknown>;
     },
-  ) => void;
+  ) => void | Promise<boolean>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -304,21 +309,26 @@ export function ConnectorSettingsDialog({
           : Number(frequencyValue)) !==
           connector.raw.indexingFrequencyMinutes));
 
-  function handleChangeGoogleDriveFiles(fileIds: string[]) {
+  function handleChangeGoogleDriveFiles(fileIds: string[]): Promise<boolean> {
     const currentConnector = connector;
     if (!currentConnector) {
-      return;
+      return Promise.resolve(false);
     }
-    // Only the file selection changes; keep the saved name and schedule, then
-    // sync so the backend reconciles added and removed files (an empty list
-    // archives the remaining sources).
-    onSaveSettings(currentConnector, {
-      name: currentConnector.name,
-      periodicIndexingEnabled: currentConnector.raw.periodicIndexingEnabled,
-      indexingFrequencyMinutes: currentConnector.raw.indexingFrequencyMinutes,
-      configJson: { fileIds },
+    // Only the file selection changes; keep the saved name and schedule. Save
+    // first and sync only if the save did not fail, so the backend reconciles
+    // added and removed files (an empty list archives the remaining sources)
+    // against a selection it has actually stored.
+    return commitGoogleDriveSelection({
+      save: () =>
+        onSaveSettings(currentConnector, {
+          name: currentConnector.name,
+          periodicIndexingEnabled: currentConnector.raw.periodicIndexingEnabled,
+          indexingFrequencyMinutes:
+            currentConnector.raw.indexingFrequencyMinutes,
+          configJson: { fileIds },
+        }),
+      sync: () => onSyncConnector(currentConnector),
     });
-    onSyncConnector(currentConnector);
   }
 
   function handleSaveSettings() {
@@ -344,7 +354,7 @@ export function ConnectorSettingsDialog({
         ? parsedCustomFrequency
         : Number(frequencyValue)
       : null;
-    onSaveSettings(currentConnector, {
+    void onSaveSettings(currentConnector, {
       name: settingsName.trim(),
       periodicIndexingEnabled,
       indexingFrequencyMinutes,

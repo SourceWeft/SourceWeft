@@ -3239,8 +3239,8 @@
         "skipReason": {
           "unsupported_type": "Unsupported file type",
           "too_large": "File is too large to index",
-          "needs_ocr": "Scanned file needs OCR",
-          "export_too_large": "Exported file is too large",
+          "needs_ocr": "Scanned PDFs are not supported yet",
+          "export_too_large": "Export exceeds Google's 10 MB limit",
           "empty_content": "No readable content",
           "unreadable": "File could not be read",
           "unknown": "Skipped for an unknown reason"

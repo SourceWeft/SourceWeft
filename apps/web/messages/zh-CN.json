@@ -3216,7 +3216,7 @@
       },
       "googleDrive": {
         "filesTitle": "文件",
-        "filesDescription": "选择要索引的 Google Drive 文件。每个文件都会按连接器的计划保持同步。",
+        "filesDescription": "选择要索引的 Google Drive 文件。每个文件都会按连接器的同步计划保持同步。",
         "addFiles": "添加文件",
         "remove": "移除 {name}",
         "count": "{count} / {limit}",
@@ -3239,8 +3239,8 @@
         "skipReason": {
           "unsupported_type": "不支持的文件类型",
           "too_large": "文件过大，无法索引",
-          "needs_ocr": "扫描件需要 OCR",
-          "export_too_large": "导出的文件过大",
+          "needs_ocr": "扫描版 PDF 暂不支持",
+          "export_too_large": "导出超过 Google 的 10 MB 上限",
           "empty_content": "没有可读内容",
           "unreadable": "无法读取文件",
           "unknown": "因未知原因被跳过"

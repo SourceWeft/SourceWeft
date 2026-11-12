@@ -167,3 +167,20 @@ test("rejects when gapi.load reports an error", async () => {
 
   await expect(openGoogleDrivePicker(session)).rejects.toThrow();
 });
+
+test("rejects when the picker library never finishes loading", async () => {
+  vi.useFakeTimers();
+  try {
+    // gapi is present, but `load` never calls back, so only the timeout
+    // backstop can settle the promise.
+    installGapi(() => {});
+    const { openGoogleDrivePicker } = await import("./google-drive-picker");
+
+    const promise = openGoogleDrivePicker(session);
+    const assertion = expect(promise).rejects.toThrow(/timeout/);
+    await vi.advanceTimersByTimeAsync(15000);
+    await assertion;
+  } finally {
+    vi.useRealTimers();
+  }
+});
