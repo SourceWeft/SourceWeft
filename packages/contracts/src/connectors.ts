@@ -559,6 +559,9 @@ export type ConnectorItem = {
   externalId: string;
   externalUri: string | null;
   title: string;
+  /** An adapter that returns file-shaped content must set `mimeType` on the
+   * discovered item, because an unchanged scan writes it straight to the source
+   * without re-extracting. */
   mimeType: string | null;
   sizeBytes: number | null;
   externalUpdatedAt: Date | null;
@@ -621,13 +624,77 @@ export type ConnectorActionResult = {
   resyncExternalIds?: string[];
 };
 
-export type ConnectorExtractedContent = {
+export type ConnectorExtractedFileDescriptor = {
+  /** `fileName` and `mimeType` drive classification: they decide the file kind
+   * and the parser branch before any bytes are downloaded, so an adapter must
+   * report the real name and type it discovered. */
+  fileName: string;
+  mimeType: string;
+  /** Known size in bytes, or `null` for "unknown, check after download" — the
+   * resolver re-checks the downloaded length against the cap when this is null. */
+  sizeBytes: number | null;
+  /** Must throw `ConnectorItemSkipError("too_large")` rather than truncate when
+   * the content exceeds `maxBytes`. */
+  download(input: { maxBytes: number }): Promise<Buffer>;
+};
+
+export type ConnectorExtractedText = {
   item: ConnectorItem;
   contentText: string;
   markdown?: string;
   parentExternalId?: string | null;
   directoryPath?: ConnectorDirectoryNode[];
 };
+
+export type ConnectorExtractedFile = {
+  item: ConnectorItem;
+  file: ConnectorExtractedFileDescriptor;
+  parentExternalId?: string | null;
+  directoryPath?: ConnectorDirectoryNode[];
+};
+
+export type ConnectorExtractedContent =
+  | ConnectorExtractedText
+  | ConnectorExtractedFile;
+
+export function isConnectorExtractedFile(
+  value: ConnectorExtractedContent,
+): value is ConnectorExtractedFile {
+  return (value as ConnectorExtractedFile).file !== undefined;
+}
+
+export const connectorItemSkipReasons = [
+  "unsupported_type",
+  "too_large",
+  "needs_ocr",
+  "export_too_large",
+  "empty_content",
+  "unreadable",
+] as const;
+
+export type ConnectorItemSkipReason = (typeof connectorItemSkipReasons)[number];
+
+export class ConnectorItemSkipError extends Error {
+  readonly code = "CONNECTOR_ITEM_SKIPPED";
+
+  constructor(readonly reason: ConnectorItemSkipReason) {
+    super(`Connector item skipped: ${reason}`);
+    this.name = "ConnectorItemSkipError";
+  }
+}
+
+export function isConnectorItemSkipError(
+  error: unknown,
+): error is ConnectorItemSkipError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "CONNECTOR_ITEM_SKIPPED" &&
+    connectorItemSkipReasons.includes(
+      (error as { reason?: unknown }).reason as ConnectorItemSkipReason,
+    )
+  );
+}
 
 export type OAuthCodeExchangeInput = {
   code: string;

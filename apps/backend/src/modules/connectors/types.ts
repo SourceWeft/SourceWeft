@@ -15,7 +15,11 @@ import type {
   ConnectorDiscoverInput,
   ConnectorExtractInput,
   ConnectorExtractedContent,
+  ConnectorExtractedFile,
+  ConnectorExtractedFileDescriptor,
+  ConnectorExtractedText,
   ConnectorItem,
+  ConnectorItemSkipReason,
   ConnectorManifest,
   ConnectorOAuthAccountStatus,
   ConnectorResourceSpec,
@@ -34,6 +38,12 @@ import type {
   OAuthRefreshInput,
   OAuthTokenSet,
 } from "@sourceweft/contracts";
+import {
+  ConnectorItemSkipError,
+  connectorItemSkipReasons,
+  isConnectorExtractedFile,
+  isConnectorItemSkipError,
+} from "@sourceweft/contracts";
 
 export type {
   ConnectorActionCapability,
@@ -48,7 +58,11 @@ export type {
   ConnectorDiscoverInput,
   ConnectorExtractInput,
   ConnectorExtractedContent,
+  ConnectorExtractedFile,
+  ConnectorExtractedFileDescriptor,
+  ConnectorExtractedText,
   ConnectorItem,
+  ConnectorItemSkipReason,
   ConnectorManifest,
   ConnectorOAuthAccountStatus,
   ConnectorResourceSpec,
@@ -66,6 +80,13 @@ export type {
   OAuthCodeExchangeInput,
   OAuthRefreshInput,
   OAuthTokenSet,
+};
+
+export {
+  ConnectorItemSkipError,
+  connectorItemSkipReasons,
+  isConnectorExtractedFile,
+  isConnectorItemSkipError,
 };
 
 // ---------------------------------------------------------------------------

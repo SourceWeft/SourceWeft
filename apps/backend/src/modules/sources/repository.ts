@@ -519,24 +519,36 @@ export async function findSourceRecordByExternalUri(input: {
   return row ? mapSource(row) : null;
 }
 
+/**
+ * Looks up a connector source by its external id. Archived rows are excluded by
+ * default, so most callers (webhook archive, deleted-id archiving, directory
+ * path resolution) see only live sources. The connector sync orchestrator opts
+ * in with `includeArchived` so it can reuse an archived row when the same
+ * external id is discovered again: the `(connectorId, externalId)` unique index
+ * is not limited by status, so a fresh insert would collide, and the archived
+ * row must be revived in place instead.
+ */
 export async function findSourceRecordByConnectorExternalId(input: {
   teamId: string;
   workspaceId: string;
   connectorId: string;
   externalId: string;
+  includeArchived?: boolean;
 }) {
+  const conditions = [
+    eq(sources.teamId, input.teamId),
+    eq(sources.workspaceId, input.workspaceId),
+    eq(sources.connectorId, input.connectorId),
+    eq(sources.externalId, input.externalId),
+  ];
+  if (!input.includeArchived) {
+    conditions.push(ne(sources.status, "archived"));
+  }
+
   const [row] = await db
     .select()
     .from(sources)
-    .where(
-      and(
-        eq(sources.teamId, input.teamId),
-        eq(sources.workspaceId, input.workspaceId),
-        eq(sources.connectorId, input.connectorId),
-        eq(sources.externalId, input.externalId),
-        ne(sources.status, "archived"),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
 
   return row ? mapSource(row) : null;

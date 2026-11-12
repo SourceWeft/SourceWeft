@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isConnectorExtractedFile } from "@sourceweft/contracts";
 import { createNotionConnectorAdapter } from "../src/adapter";
 import type { NotionAdapterRuntimeConfig } from "../src/adapter";
 
@@ -666,6 +667,7 @@ test("notion extract sanitizes file urls and records unsupported blocks", async 
         },
       });
 
+      assert(!isConnectorExtractedFile(result));
       assert.match(result.markdown ?? "", /Hello/);
       assert.match(result.markdown ?? "", /Notion image/);
       assert.doesNotMatch(result.markdown ?? "", /X-Amz-Signature/);
@@ -776,6 +778,7 @@ test("notion extract projects properties and hierarchy into markdown and metadat
         },
       });
 
+      assert(!isConnectorExtractedFile(result));
       const markdown = result.markdown ?? "";
       assert.doesNotMatch(markdown, /## Source/);
       assert.doesNotMatch(markdown, /## Notion Location/);

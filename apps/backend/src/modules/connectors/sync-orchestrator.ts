@@ -39,9 +39,13 @@ import {
 } from "./repository";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
+import { resolveExtractedFile } from "./extracted-file";
+import { isConnectorExtractedFile, isConnectorItemSkipError } from "./types";
 import type {
   ConnectorDirectoryNode,
+  ConnectorExtractedContent,
   ConnectorItem,
+  ConnectorItemSkipReason,
   ConnectorSyncBlock,
   ConnectorSyncReadinessResult,
   SourceConnectorRecord,
@@ -72,7 +76,8 @@ class ConnectorSyncBlocked extends Error {
 type UpsertItemResult =
   | { kind: "indexed" }
   | { kind: "unchanged" }
-  | { kind: "oversized"; requestedPages: number; cycleCapacity: number };
+  | { kind: "oversized"; requestedPages: number; cycleCapacity: number }
+  | { kind: "skipped"; reason: ConnectorItemSkipReason };
 
 export type ResolveConnectorBillingActor = (input: {
   teamId: string;
@@ -831,12 +836,14 @@ export class ConnectorSyncOrchestrator {
       let failedCount = 0;
       const itemFailures: Array<Record<string, unknown>> = [];
       const oversizedItems: Array<Record<string, unknown>> = [];
+      const skippedItems: Array<Record<string, unknown>> = [];
       // Only an untargeted run re-covers what an earlier run was blocked on, so
       // only it may clear the block; a webhook run for other items keeps it.
       const clearsSyncBlock = !input.targetExternalIds?.length;
       const runMetadata = () => ({
         ...(itemFailures.length ? { itemFailures } : {}),
         ...(oversizedItems.length ? { oversizedItems } : {}),
+        ...(skippedItems.length ? { skippedItems } : {}),
       });
 
       try {
@@ -995,6 +1002,16 @@ export class ConnectorSyncOrchestrator {
                 await incrementSyncRunCounts({
                   ...input,
                   metadataPatch: { oversizedItems: oversizedItems.slice(-20) },
+                });
+              } else if (result.kind === "skipped") {
+                skippedItems.push({
+                  externalId: item.externalId,
+                  title: item.title,
+                  reason: result.reason,
+                });
+                await incrementSyncRunCounts({
+                  ...input,
+                  metadataPatch: { skippedItems: skippedItems.slice(-20) },
                 });
               }
             } catch (error) {
@@ -1253,11 +1270,19 @@ export class ConnectorSyncOrchestrator {
     accessToken: string;
     item: ConnectorItem;
   }): Promise<UpsertItemResult> {
+    // Include archived rows: an item that was archived (skipped, deleted, or
+    // reconciled away) and is discovered again must reuse its row and be revived
+    // in place. The `(connectorId, externalId)` unique index is not limited by
+    // status, so treating the archived row as absent would make a fresh insert
+    // collide. A non-indexed (including archived) row never satisfies
+    // `shouldSkipExtract` and never takes the unchanged-hash shortcut, so a
+    // revived item is always re-extracted and re-indexed.
     const existing = await findSourceRecordByConnectorExternalId({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       connectorId: input.connectorId,
       externalId: input.item.externalId,
+      includeArchived: true,
     });
 
     if (existing && shouldSkipExtract({ existing, item: input.item })) {
@@ -1282,23 +1307,70 @@ export class ConnectorSyncOrchestrator {
     }
 
     const adapter = this.registry.getAdapter(input.connectorType);
-    const extracted = await adapter.extract({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      connectorId: input.connectorId,
-      connectorType: input.connectorType,
-      connectorName: input.connectorName,
-      config: input.config,
-      accessToken: input.accessToken,
-      item: input.item,
-    });
-    const contentText = extracted.markdown ?? extracted.contentText;
+    let extracted: ConnectorExtractedContent;
+    try {
+      extracted = await adapter.extract({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        connectorId: input.connectorId,
+        connectorType: input.connectorType,
+        connectorName: input.connectorName,
+        config: input.config,
+        accessToken: input.accessToken,
+        item: input.item,
+      });
+    } catch (error) {
+      // A declared skip is not a failure: the item is recorded on the run and
+      // discovery continues. Any other error stays an item failure (or a block)
+      // exactly as before.
+      if (isConnectorItemSkipError(error)) {
+        return this.finishSkippedItem({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          existing,
+          reason: error.reason,
+        });
+      }
+      throw error;
+    }
+
+    // A file-shaped item is downloaded and parsed into text (OCR always denied);
+    // a typed skip ends the item the same way a thrown skip does. Text-shaped
+    // items keep their existing path unchanged.
+    let contentText: string;
+    let sourceMimeType: string | null;
+    let parsedMetadata: Record<string, unknown> = {};
+    if (isConnectorExtractedFile(extracted)) {
+      const resolved = await resolveExtractedFile({
+        file: extracted.file,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        userId: input.billingUserId,
+        externalUri: extracted.item.externalUri,
+      });
+      if (resolved.kind === "skipped") {
+        return this.finishSkippedItem({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          existing,
+          reason: resolved.reason,
+        });
+      }
+      contentText = resolved.contentText;
+      sourceMimeType = resolved.mimeType;
+      parsedMetadata = resolved.parsedMetadata;
+    } else {
+      contentText = extracted.markdown ?? extracted.contentText;
+      sourceMimeType = extracted.item.mimeType;
+    }
+
     const contentHash =
       extracted.item.contentHash ?? computeContentHash(contentText);
     const title = normalizeSourceTitle(extracted.item.title);
     const metadata = {
       ...(existing?.metadata ?? {}),
       ...extracted.item.metadata,
+      ...parsedMetadata,
       connectorType: input.connectorType,
       parentExternalId: extracted.parentExternalId ?? null,
     };
@@ -1327,7 +1399,7 @@ export class ConnectorSyncOrchestrator {
         externalId: extracted.item.externalId,
         externalUri: extracted.item.externalUri,
         externalUpdatedAt: extracted.item.externalUpdatedAt,
-        mimeType: extracted.item.mimeType,
+        mimeType: sourceMimeType,
         sizeBytes: extracted.item.sizeBytes,
         contentHash,
         parentSourceId,
@@ -1340,7 +1412,7 @@ export class ConnectorSyncOrchestrator {
     // directory behind, and a replay of this page starts from a clean slate.
     // The estimate is the one indexing settles, computed from the same text.
     const pages = estimateIngestionPages({
-      mimeType: extracted.item.mimeType,
+      mimeType: sourceMimeType,
       metadata,
       contentText,
     });
@@ -1406,7 +1478,7 @@ export class ConnectorSyncOrchestrator {
           externalId: extracted.item.externalId,
           externalUri: extracted.item.externalUri,
           externalUpdatedAt: extracted.item.externalUpdatedAt,
-          mimeType: extracted.item.mimeType,
+          mimeType: sourceMimeType,
           sizeBytes: extracted.item.sizeBytes,
           contentHash,
           parentSourceId,
@@ -1426,7 +1498,7 @@ export class ConnectorSyncOrchestrator {
           externalId: extracted.item.externalId,
           externalUri: extracted.item.externalUri,
           externalUpdatedAt: extracted.item.externalUpdatedAt,
-          mimeType: extracted.item.mimeType,
+          mimeType: sourceMimeType,
           sizeBytes: extracted.item.sizeBytes,
           contentHash,
           metadata,
@@ -1475,6 +1547,37 @@ export class ConnectorSyncOrchestrator {
     if (pages !== null) input.budget.consumed(pages);
 
     return { kind: "indexed" };
+  }
+
+  /**
+   * A skipped item writes no source content. If an indexed source existed, its
+   * previously indexed text no longer matches the file (the file was emptied,
+   * grew past the cap, or became unreadable), so leaving it searchable would
+   * surface stale content. The source is archived immediately — the same
+   * repository operation and resulting state a deleted item (`deletedExternalIds`)
+   * or an `archive_source` webhook uses — rather than kept. This does not depend
+   * on a reconciling scan, so it applies on every kind of scan (full, incremental,
+   * targeted/backfill, webhook) and for every skip reason. A source that is
+   * already archived, or an item that was never indexed, is left untouched (no
+   * write). If the item later becomes indexable again, `upsertItem` finds the
+   * archived row (its lookup includes archived rows) and revives it in place
+   * through the ordinary extract/index path.
+   */
+  private async finishSkippedItem(input: {
+    teamId: string;
+    workspaceId: string;
+    existing: Awaited<ReturnType<typeof findSourceRecordByConnectorExternalId>>;
+    reason: ConnectorItemSkipReason;
+  }): Promise<UpsertItemResult> {
+    if (input.existing && input.existing.status !== "archived") {
+      await updateSourceRecord({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        sourceId: input.existing.id,
+        status: "archived",
+      });
+    }
+    return { kind: "skipped", reason: input.reason };
   }
 
   private async upsertDirectoryPath(input: {
