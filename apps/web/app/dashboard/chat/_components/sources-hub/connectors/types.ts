@@ -36,6 +36,9 @@ export type ConnectorCatalogItem = {
   description: string;
   capabilities: string[];
   postOAuthMode?: "auto_create" | "configure_required";
+  /** Hidden from the catalog until the backend reports the type as available.
+   * Set for connectors that depend on backend rollout registration. */
+  requiresBackendRegistration?: boolean;
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;

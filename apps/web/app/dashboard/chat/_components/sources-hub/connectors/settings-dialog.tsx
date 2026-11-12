@@ -66,6 +66,7 @@ import {
   getConnectorDisplayName,
   getConnectorReadinessFromConfig,
 } from "./components";
+import { GoogleDriveFiles } from "./google-drive-files";
 import type {
   ConnectorItem,
   ConnectorReadinessState,
@@ -152,6 +153,8 @@ export function ConnectorSettingsDialog({
       getConnectorReadinessFromConfig(connector.raw, t))
     : null;
   const latestActivity = activity[0] ?? null;
+  const latestSyncRun =
+    activity.find((item) => item.kind === "sync") ?? null;
   const latestSuccessfulSync = activity.find(
     (item) => item.kind === "sync" && item.status === "succeeded",
   );
@@ -252,7 +255,11 @@ export function ConnectorSettingsDialog({
   }
 
   const parsedCustomFrequency = Number(customFrequencyMinutes);
-  const minFrequency = connector.raw.connectorType === "gmail" ? 60 : 1;
+  const minFrequency =
+    connector.raw.connectorType === "gmail" ||
+    connector.raw.connectorType === "google_drive"
+      ? 60
+      : 1;
   const hasValidCustomFrequency =
     Number.isInteger(parsedCustomFrequency) &&
     parsedCustomFrequency >= minFrequency;
@@ -296,6 +303,23 @@ export function ConnectorSettingsDialog({
           ? parsedCustomFrequency
           : Number(frequencyValue)) !==
           connector.raw.indexingFrequencyMinutes));
+
+  function handleChangeGoogleDriveFiles(fileIds: string[]) {
+    const currentConnector = connector;
+    if (!currentConnector) {
+      return;
+    }
+    // Only the file selection changes; keep the saved name and schedule, then
+    // sync so the backend reconciles added and removed files (an empty list
+    // archives the remaining sources).
+    onSaveSettings(currentConnector, {
+      name: currentConnector.name,
+      periodicIndexingEnabled: currentConnector.raw.periodicIndexingEnabled,
+      indexingFrequencyMinutes: currentConnector.raw.indexingFrequencyMinutes,
+      configJson: { fileIds },
+    });
+    onSyncConnector(currentConnector);
+  }
 
   function handleSaveSettings() {
     const currentConnector = connector;
@@ -537,6 +561,14 @@ export function ConnectorSettingsDialog({
               </TabsContent>
 
               <TabsContent className="m-0 space-y-4" value="configuration">
+                {connectorType === "google_drive" ? (
+                  <GoogleDriveFiles
+                    connector={connector}
+                    disabled={isSavingSettings}
+                    latestSyncRun={latestSyncRun}
+                    onChangeFileIds={handleChangeGoogleDriveFiles}
+                  />
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border p-3">
                     <p className="text-xs font-medium text-foreground">

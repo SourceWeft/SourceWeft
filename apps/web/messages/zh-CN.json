@@ -3214,6 +3214,38 @@
         "scopeRequired": "启用索引前，请选择至少一个标签和起始日期。",
         "labelsLoadFailed": "无法加载 Gmail 标签。"
       },
+      "googleDrive": {
+        "filesTitle": "文件",
+        "filesDescription": "选择要索引的 Google Drive 文件。每个文件都会按连接器的计划保持同步。",
+        "addFiles": "添加文件",
+        "remove": "移除 {name}",
+        "count": "{count} / {limit}",
+        "empty": "尚未选择文件。添加文件以进行索引。",
+        "lastSynced": "{date} 已同步",
+        "limitReached": "最多可选择 {limit} 个文件。请先移除部分文件再添加。",
+        "pickerError": {
+          "reconnect": "你的 Google 账号需要重新连接。重新连接后再添加文件。",
+          "notFound": "此 Google Drive 连接器不可用。请刷新后重试。",
+          "generic": "无法打开 Google 文件选择器。请重试。"
+        },
+        "state": {
+          "skipped": "已跳过",
+          "indexed": "已索引",
+          "processing": "同步中",
+          "failed": "失败",
+          "waiting": "等待同步",
+          "unavailable": "已在 Drive 中删除或失去访问权限"
+        },
+        "skipReason": {
+          "unsupported_type": "不支持的文件类型",
+          "too_large": "文件过大，无法索引",
+          "needs_ocr": "扫描件需要 OCR",
+          "export_too_large": "导出的文件过大",
+          "empty_content": "没有可读内容",
+          "unreadable": "无法读取文件",
+          "unknown": "因未知原因被跳过"
+        }
+      },
       "settingsTab": {
         "overview": "概览",
         "configuration": "配置",

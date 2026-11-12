@@ -673,7 +673,11 @@ export function useConnectors(input: {
             return null;
           }
 
-          if (item.id !== "notion" && item.id !== "gmail") {
+          if (
+            item.id !== "notion" &&
+            item.id !== "gmail" &&
+            item.id !== "google_drive"
+          ) {
             toast.info(
               t("toasts.connectors.connectedConfigureNext", {
                 name: item.name,
@@ -683,6 +687,8 @@ export function useConnectors(input: {
             return null;
           }
 
+          const periodicIndexingEnabled =
+            item.id === "notion" || item.id === "google_drive";
           const created = await connectorsClient.create(workspaceId, {
             connectorType: item.id,
             name: account.displayName || item.name,
@@ -690,15 +696,34 @@ export function useConnectors(input: {
             configJson:
               item.id === "gmail"
                 ? gmailConfigForMode(options.gmailMode ?? "tools")
-                : { includePages: true },
-            periodicIndexingEnabled: item.id === "notion",
-            ...(item.id === "notion" ? { indexingFrequencyMinutes: 360 } : {}),
+                : item.id === "google_drive"
+                  ? { fileIds: [] }
+                  : { includePages: true },
+            periodicIndexingEnabled,
+            ...(periodicIndexingEnabled
+              ? { indexingFrequencyMinutes: 360 }
+              : {}),
           });
           trackConnectorConnected({
             connectorType: item.id,
             gmailMode:
               item.id === "gmail" ? (options.gmailMode ?? "tools") : undefined,
           });
+          if (item.id === "google_drive") {
+            // No files are selected yet, so there is nothing to sync; open
+            // settings so the admin can pick files from the Files section.
+            await refreshConnectors();
+            const mapped = mapConnectorToUi(
+              created.connector,
+              t,
+              displayLocale,
+            );
+            openConnectorSettings(mapped);
+            toast.success(
+              t("toasts.connectors.connectedFallback", { name: item.name }),
+            );
+            return mapped;
+          }
           if (item.id === "gmail") {
             await refreshConnectors();
             const mapped = mapConnectorToUi(

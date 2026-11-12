@@ -3214,6 +3214,38 @@
         "scopeRequired": "Choose at least one label and a start date before enabling indexing.",
         "labelsLoadFailed": "Could not load Gmail labels."
       },
+      "googleDrive": {
+        "filesTitle": "Files",
+        "filesDescription": "Pick Google Drive files to index. Each file is kept in sync on the connector's schedule.",
+        "addFiles": "Add files",
+        "remove": "Remove {name}",
+        "count": "{count} / {limit}",
+        "empty": "No files selected yet. Add files to index them.",
+        "lastSynced": "Synced {date}",
+        "limitReached": "You can select at most {limit} files. Remove some before adding more.",
+        "pickerError": {
+          "reconnect": "Your Google account needs reconnecting. Reconnect it, then add files again.",
+          "notFound": "This Google Drive connector is unavailable. Refresh and try again.",
+          "generic": "The Google file picker could not be opened. Try again."
+        },
+        "state": {
+          "skipped": "Skipped",
+          "indexed": "Indexed",
+          "processing": "Syncing",
+          "failed": "Failed",
+          "waiting": "Waiting for sync",
+          "unavailable": "Deleted in Drive or access was lost"
+        },
+        "skipReason": {
+          "unsupported_type": "Unsupported file type",
+          "too_large": "File is too large to index",
+          "needs_ocr": "Scanned file needs OCR",
+          "export_too_large": "Exported file is too large",
+          "empty_content": "No readable content",
+          "unreadable": "File could not be read",
+          "unknown": "Skipped for an unknown reason"
+        }
+      },
       "settingsTab": {
         "overview": "Overview",
         "configuration": "Configuration",
