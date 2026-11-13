@@ -95,7 +95,13 @@ export function googleDriveSkipReasonKey(reason: string): string {
 /** i18n key for the picker error shown when a session request or the picker
  * itself fails. Unknown and absent codes fall back to the generic key. */
 export function googleDrivePickerErrorKey(code: string | undefined): string {
-  if (code === "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE") {
+  // The account is marked unusable, its token refresh failed, or Google
+  // refused the stored token (access revoked in the Google account).
+  if (
+    code === "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE" ||
+    code === "CONNECTOR_REAUTH_REQUIRED" ||
+    code === "GOOGLE_DRIVE_REAUTH_REQUIRED"
+  ) {
     return "connectors.googleDrive.pickerError.reconnect";
   }
   if (code === "GOOGLE_DRIVE_CONNECTOR_NOT_FOUND") {

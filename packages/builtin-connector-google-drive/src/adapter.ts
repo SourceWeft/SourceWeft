@@ -244,6 +244,13 @@ export function createGoogleDriveConnectorAdapter(
       input: ConnectorActionInput,
     ): Promise<ConnectorActionResult> {
       if (input.actionType === "google_drive.picker.config") {
+        // Ask Google whether it still accepts this token before the browser
+        // gets it. After the user revokes access in their Google account, the
+        // stored token stays unexpired for up to an hour; handing it to the
+        // picker would show Google's bare 403 page with no way to close it. A
+        // refused token throws GOOGLE_DRIVE_REAUTH_REQUIRED, which the web app
+        // turns into the reconnect message.
+        await client.getAbout(input.accessToken);
         // Returns only the project number and the allowed types; no secret
         // and no access token ever leave through an action result. The picker
         // needs no API key: the access token and the project number suffice.

@@ -1,4 +1,4 @@
-import { ConnectorError } from "./errors";
+import { ConnectorError, toConnectorError } from "./errors";
 import type { ConnectorAdapter, SourceConnectorRecord } from "./types";
 import type { ConnectorOAuthService } from "./oauth-service";
 
@@ -73,17 +73,25 @@ export async function createGoogleDrivePickerSession(input: {
   });
 
   const adapter = deps.getAdapter("google_drive");
-  const actionResult = await adapter.executeAction({
-    teamId,
-    workspaceId,
-    connectorId: connector.id,
-    connectorType: "google_drive",
-    actionType: GOOGLE_DRIVE_PICKER_CONFIG_ACTION,
-    request: {},
-    config: connector.configJson,
-    accessToken,
-    idempotencyKey: GOOGLE_DRIVE_PICKER_CONFIG_ACTION,
-  });
+  // The adapter checks the token against Google here. Its errors are the
+  // package's own class; convert them so the API answers with their status and
+  // code (a refused token must reach the browser as a reauthorization error,
+  // not as a 500).
+  const actionResult = await adapter
+    .executeAction({
+      teamId,
+      workspaceId,
+      connectorId: connector.id,
+      connectorType: "google_drive",
+      actionType: GOOGLE_DRIVE_PICKER_CONFIG_ACTION,
+      request: {},
+      config: connector.configJson,
+      accessToken,
+      idempotencyKey: GOOGLE_DRIVE_PICKER_CONFIG_ACTION,
+    })
+    .catch((error: unknown) => {
+      throw toConnectorError(error);
+    });
 
   if (!isGoogleDrivePickerConfig(actionResult.result)) {
     throw new ConnectorError(

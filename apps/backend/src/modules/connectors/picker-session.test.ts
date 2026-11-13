@@ -172,6 +172,43 @@ test("passes through an account that needs reauthorization", async () => {
   );
 });
 
+test("reports a token Google refused with the adapter's own status and code", async () => {
+  // Capability packages throw their own error class, not ConnectorError.
+  class PackageError extends Error {
+    constructor(
+      readonly statusCode: number,
+      readonly code: string,
+      message: string,
+    ) {
+      super(message);
+    }
+  }
+  const d = deps({
+    executeAction: vi
+      .fn()
+      .mockRejectedValue(
+        new PackageError(
+          401,
+          "GOOGLE_DRIVE_REAUTH_REQUIRED",
+          "Google Drive request failed (401)",
+        ),
+      ),
+  });
+
+  await assert.rejects(
+    createGoogleDrivePickerSession({
+      connector: connector(),
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      deps: d,
+    }),
+    (error: unknown) =>
+      error instanceof ConnectorError &&
+      error.statusCode === 401 &&
+      error.code === "GOOGLE_DRIVE_REAUTH_REQUIRED",
+  );
+});
+
 test("rejects a null picker config from the adapter", async () => {
   const d = deps({
     executeAction: vi.fn().mockResolvedValue({ result: null }),

@@ -9,7 +9,10 @@ import {
   type ConnectorExtractedText,
   type ConnectorItem,
 } from "@sourceweft/contracts";
-import { createGoogleDriveConnectorAdapter } from "../src/adapter";
+import {
+  createGoogleDriveConnectorAdapter,
+  GoogleDriveAdapterError,
+} from "../src/adapter";
 import { GOOGLE_DRIVE_FILE_SCOPE } from "../src/contribution";
 
 const GOOGLE_DOC = "application/vnd.google-apps.document";
@@ -538,8 +541,13 @@ test("refuses a download over maxBytes", async () => {
 });
 
 test("returns picker config without secrets", async () => {
-  const gdrive = adapter(async () => {
-    throw new Error("No provider request is expected");
+  const requests: Array<{ url: string; authorization: string | null }> = [];
+  const gdrive = adapter(async (input, init) => {
+    requests.push({
+      url: String(input),
+      authorization: new Headers(init?.headers).get("authorization"),
+    });
+    return json({ user: { permissionId: "p1" } });
   });
   const result = await gdrive.executeAction({
     ...context,
@@ -554,6 +562,26 @@ test("returns picker config without secrets", async () => {
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes("client-secret"), false);
   assert.equal(serialized.includes("access-token"), false);
+  // The token is checked against Google once before the config is returned.
+  assert.equal(requests.length, 1);
+  assert.match(requests[0]?.url ?? "", /\/drive\/v3\/about\?/);
+  assert.equal(requests[0]?.authorization, `Bearer ${context.accessToken}`);
+});
+
+test("refuses the picker config when Google no longer accepts the token", async () => {
+  const gdrive = adapter(async () => json({ error: { code: 401 } }, 401));
+  await assert.rejects(
+    gdrive.executeAction({
+      ...context,
+      actionType: "google_drive.picker.config",
+      request: {},
+      idempotencyKey: "picker",
+    }),
+    (error: unknown) =>
+      error instanceof GoogleDriveAdapterError &&
+      error.statusCode === 401 &&
+      error.code === "GOOGLE_DRIVE_REAUTH_REQUIRED",
+  );
 });
 
 test("never puts the access token in an error message", async () => {

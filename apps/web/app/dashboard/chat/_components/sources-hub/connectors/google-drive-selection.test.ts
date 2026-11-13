@@ -74,6 +74,14 @@ test("tells the user to reconnect when the account is unavailable", () => {
   expect(
     googleDrivePickerErrorKey("CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE"),
   ).toMatch(/\.reconnect$/);
+  // Google refused the stored token (the user revoked access), or the refresh
+  // failed: both mean the account has to be connected again.
+  expect(googleDrivePickerErrorKey("GOOGLE_DRIVE_REAUTH_REQUIRED")).toMatch(
+    /\.reconnect$/,
+  );
+  expect(googleDrivePickerErrorKey("CONNECTOR_REAUTH_REQUIRED")).toMatch(
+    /\.reconnect$/,
+  );
   expect(googleDrivePickerErrorKey("GOOGLE_DRIVE_CONNECTOR_NOT_FOUND")).toMatch(
     /\.notFound$/,
   );
