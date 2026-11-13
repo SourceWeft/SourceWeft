@@ -48,6 +48,7 @@ import { compactText, getToolOutputContent } from "./message-assets";
 import {
   getResolvedToolConfirmationMessage,
   getToolCallDetailParts,
+  getToolCallQuery,
   isToolConfirmationResolved,
 } from "./reasoning-trace-state";
 import {
@@ -368,6 +369,7 @@ function GenericAssistantToolCard({
     toolStep,
     confirmationResolution,
   );
+  const query = getToolCallQuery(toolCall);
   const isRedactedSkillRead = isRedactedSkillInstructionRead(toolCall);
   const skillReadFileLabel = isRedactedSkillRead
     ? getSkillInstructionReadFileLabel(toolCall)
@@ -492,11 +494,24 @@ function GenericAssistantToolCard({
         </span>
         <span className={ASSISTANT_ACTIVITY_LABEL_CLASS}>
           <span
-            className="truncate text-[13px] text-foreground/80"
+            className={cn(
+              "text-[13px] text-foreground/80",
+              // With a query beside it the title keeps its width and the
+              // query is what gives way on a narrow row.
+              query ? "shrink-0" : "truncate",
+            )}
             title={title}
           >
             {title}
           </span>
+          {query ? (
+            <span
+              className="min-w-0 truncate text-[13px] text-muted-foreground/70"
+              title={query}
+            >
+              {query}
+            </span>
+          ) : null}
           {duration ? (
             <span className="shrink-0 text-muted-foreground/60 text-xs">
               {duration}

@@ -129,7 +129,9 @@ export function EmptyState({
               <div className="flex w-full flex-wrap items-start gap-2 pt-2">
                 {starterSuggestions.map((suggestion) => (
                   <Suggestion
-                    className="h-auto max-w-full rounded-full border-border/70 bg-background px-4 py-2 text-sm text-muted-foreground whitespace-normal hover:bg-muted hover:text-foreground"
+                    // A suggestion that wraps on a narrow screen stays flush left
+                    // like the single-line ones; the button default centres it.
+                    className="h-auto max-w-full justify-start rounded-full border-border/70 bg-background px-4 py-2 text-left text-sm text-muted-foreground whitespace-normal hover:bg-muted hover:text-foreground"
                     key={suggestion}
                     onClick={(content) => onSendMessage({ content })}
                     suggestion={suggestion}

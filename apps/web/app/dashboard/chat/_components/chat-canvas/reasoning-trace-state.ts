@@ -152,6 +152,32 @@ function getExecuteCommandDetail(toolCall: ToolCallRecord) {
   return `command: ${compactExecuteCommandForDisplay(command)}`;
 }
 
+const TOOL_QUERY_DISPLAY_MAX_CHARS = 240;
+
+/**
+ * The search terms a web query tool was called with, for display.
+ *
+ * The terms are the only thing that tells several parallel searches apart, and
+ * they are known from the moment the call starts, so the card can name what is
+ * being searched while it is still running.
+ */
+export function getToolCallQuery(toolCall: ToolCallRecord) {
+  if (!hasAgentToolCapability(toolCall.tool, "web_query")) {
+    return null;
+  }
+  const query = getRecordValue(toolCall.input, "query");
+  if (typeof query !== "string") {
+    return null;
+  }
+  const compact = query.replace(/\s+/g, " ").trim();
+  if (compact.length === 0) {
+    return null;
+  }
+  return compact.length <= TOOL_QUERY_DISPLAY_MAX_CHARS
+    ? compact
+    : `${compact.slice(0, TOOL_QUERY_DISPLAY_MAX_CHARS - 3).trimEnd()}...`;
+}
+
 function getToolHitCount(
   toolCall: ToolCallRecord,
   toolStep?: ThinkingStepRecord,
@@ -524,9 +550,11 @@ export function getToolCallDetailParts(
       confirmationResolution?.decision !== "approve");
   const approvalState = formatApprovalState(toolCall.approvalState);
   const executeCommandDetail = getExecuteCommandDetail(toolCall);
+  const query = getToolCallQuery(toolCall);
   return [
     `status: ${statusLabel}`,
     executeCommandDetail,
+    query ? `query: ${query}` : null,
     approvalState ? `approval: ${approvalState}` : null,
     toolCall.approvalConfirmationId
       ? `confirmation: ${toolCall.approvalConfirmationId}`
