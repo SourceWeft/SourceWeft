@@ -8,10 +8,56 @@
  * a URL, a log, or an error. A fresh session (and therefore a fresh token) is
  * requested by the caller on every "Add files" click; this module keeps nothing
  * about a session between calls except the fact that the API script was loaded.
+ *
+ * Layering: the Google script appends the picker to `document.body`, outside
+ * whatever opened it. When that opener is a modal dialog, three things would
+ * make the picker unusable, and each has its own remedy:
+ *   1. the dialog sets `pointer-events: none` on the body, which the picker
+ *      inherits (remedy: the `.picker-dialog` rule in `app/globals.css`);
+ *   2. a click in the picker counts as a click outside the dialog and would
+ *      dismiss it (remedy: the dialog ignores outside interactions for which
+ *      `isGoogleDrivePickerElement` is true);
+ *   3. the dialog's focus trap pulls focus back out of the picker, so its
+ *      search box cannot be typed in (remedy: `shieldPickerFocus` below).
  */
 
 const GOOGLE_API_SCRIPT_SRC = "https://apis.google.com/js/api.js";
 const PICKER_LOAD_TIMEOUT_MS = 15000;
+// Class names of the two nodes the Google script appends to `document.body`.
+// `app/globals.css` targets the same names; change both together.
+const PICKER_NODE_SELECTOR = ".picker-dialog, .picker-dialog-bg";
+
+/** True when `target` is the picker dialog, its backdrop, or a node inside one. */
+export function isGoogleDrivePickerElement(target: unknown): boolean {
+  return (
+    target instanceof Element && target.closest(PICKER_NODE_SELECTOR) !== null
+  );
+}
+
+/**
+ * While the picker is open, keep focus moves into (or out to) the picker from
+ * reaching page-level focus traps. A modal dialog's trap listens for `focusin`
+ * and `focusout` on the document and refocuses itself when focus lands outside
+ * it; stopping those two events in the capture phase, only when the picker is
+ * the node gaining focus, leaves every other focus move untouched. Returns the
+ * function that removes the shield.
+ */
+function shieldPickerFocus(): () => void {
+  const guard = (event: FocusEvent) => {
+    if (
+      isGoogleDrivePickerElement(event.target) ||
+      isGoogleDrivePickerElement(event.relatedTarget)
+    ) {
+      event.stopImmediatePropagation();
+    }
+  };
+  document.addEventListener("focusin", guard, true);
+  document.addEventListener("focusout", guard, true);
+  return () => {
+    document.removeEventListener("focusin", guard, true);
+    document.removeEventListener("focusout", guard, true);
+  };
+}
 
 export type GoogleDrivePickerSessionInput = {
   accessToken: string;
@@ -160,6 +206,7 @@ export async function openGoogleDrivePicker(
   }
 
   return new Promise<string[]>((resolve, reject) => {
+    const releaseFocusShield = shieldPickerFocus();
     try {
       const view = new picker.DocsView()
         .setIncludeFolders(false)
@@ -188,8 +235,10 @@ export async function openGoogleDrivePicker(
                   })
                   .filter((id) => id.length > 0)
               : [];
+            releaseFocusShield();
             resolve(ids);
           } else if (action === picker.Action.CANCEL) {
+            releaseFocusShield();
             resolve([]);
           }
         })
@@ -197,6 +246,7 @@ export async function openGoogleDrivePicker(
 
       built.setVisible(true);
     } catch (error: unknown) {
+      releaseFocusShield();
       reject(
         error instanceof Error ? error : new Error("google_picker_failed"),
       );

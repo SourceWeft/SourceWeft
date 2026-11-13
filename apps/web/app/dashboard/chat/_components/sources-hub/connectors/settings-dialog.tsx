@@ -67,6 +67,7 @@ import {
   getConnectorReadinessFromConfig,
 } from "./components";
 import { GoogleDriveFiles } from "./google-drive-files";
+import { isGoogleDrivePickerElement } from "./google-drive-picker";
 import { commitGoogleDriveSelection } from "./google-drive-selection";
 import type {
   ConnectorItem,
@@ -369,6 +370,13 @@ export function ConnectorSettingsDialog({
       <DialogContent
         className="grid h-[min(860px,calc(100svh-1rem))] w-[min(960px,calc(100vw-1rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
         constrainWidth={false}
+        // The Google Picker is appended to <body>, outside this dialog. Using
+        // it must not count as "interacting outside" and close the settings.
+        onInteractOutside={(event) => {
+          if (isGoogleDrivePickerElement(event.target)) {
+            event.preventDefault();
+          }
+        }}
       >
         <DialogHeader className="border-b px-4 py-3 pr-11 text-left sm:px-5 sm:py-4 sm:pr-12">
           <div className="flex min-w-0 items-start gap-3">

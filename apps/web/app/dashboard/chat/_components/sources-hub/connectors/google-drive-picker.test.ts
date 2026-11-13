@@ -184,3 +184,102 @@ test("rejects when the picker library never finishes loading", async () => {
     vi.useRealTimers();
   }
 });
+
+/** Adds the two top-level nodes the Google script appends to `document.body`. */
+function mountPickerNodes() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "picker-dialog-bg";
+  const dialog = document.createElement("div");
+  dialog.className = "picker picker-dialog";
+  const frame = document.createElement("iframe");
+  dialog.appendChild(frame);
+  document.body.append(backdrop, dialog);
+  return { backdrop, dialog, frame };
+}
+
+async function openStubbedPicker() {
+  installGapi((_name, config) => config.callback?.());
+  installGooglePickerStub();
+  const pickerModule = await import("./google-drive-picker");
+  const promise = pickerModule.openGoogleDrivePicker(session);
+  await flush();
+  return { pickerModule, promise };
+}
+
+test("recognises nodes that belong to the picker", async () => {
+  const { isGoogleDrivePickerElement } = await import("./google-drive-picker");
+  const { backdrop, dialog, frame } = mountPickerNodes();
+  const outside = document.createElement("button");
+  document.body.appendChild(outside);
+  try {
+    expect(isGoogleDrivePickerElement(frame)).toBe(true);
+    expect(isGoogleDrivePickerElement(dialog)).toBe(true);
+    expect(isGoogleDrivePickerElement(backdrop)).toBe(true);
+    expect(isGoogleDrivePickerElement(outside)).toBe(false);
+    expect(isGoogleDrivePickerElement(null)).toBe(false);
+    expect(isGoogleDrivePickerElement(document)).toBe(false);
+  } finally {
+    backdrop.remove();
+    dialog.remove();
+    outside.remove();
+  }
+});
+
+test("keeps focus moves into the picker away from page-level focus traps while it is open", async () => {
+  const { backdrop, dialog, frame } = mountPickerNodes();
+  const outside = document.createElement("button");
+  document.body.appendChild(outside);
+  // Stand-in for a modal dialog's focus trap: bubble-phase document listeners.
+  const trapFocusIn = vi.fn();
+  const trapFocusOut = vi.fn();
+  document.addEventListener("focusin", trapFocusIn);
+  document.addEventListener("focusout", trapFocusOut);
+  try {
+    const { promise } = await openStubbedPicker();
+
+    frame.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    outside.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: frame }),
+    );
+    expect(trapFocusIn).not.toHaveBeenCalled();
+    expect(trapFocusOut).not.toHaveBeenCalled();
+
+    // Focus moves that do not involve the picker still reach the trap.
+    outside.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    outside.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+    );
+    expect(trapFocusIn).toHaveBeenCalledTimes(1);
+    expect(trapFocusOut).toHaveBeenCalledTimes(1);
+
+    capturedCallback?.({ action: "cancel" });
+    await promise;
+  } finally {
+    document.removeEventListener("focusin", trapFocusIn);
+    document.removeEventListener("focusout", trapFocusOut);
+    backdrop.remove();
+    dialog.remove();
+    outside.remove();
+  }
+});
+
+test("stops shielding focus events once the picker closes", async () => {
+  const { backdrop, dialog, frame } = mountPickerNodes();
+  const trapFocusIn = vi.fn();
+  document.addEventListener("focusin", trapFocusIn);
+  try {
+    for (const action of ["cancel", "picked"]) {
+      trapFocusIn.mockClear();
+      const { promise } = await openStubbedPicker();
+      capturedCallback?.({ action, docs: [] });
+      await promise;
+
+      frame.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      expect(trapFocusIn).toHaveBeenCalledTimes(1);
+    }
+  } finally {
+    document.removeEventListener("focusin", trapFocusIn);
+    backdrop.remove();
+    dialog.remove();
+  }
+});
