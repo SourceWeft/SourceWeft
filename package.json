@@ -54,6 +54,7 @@
       "brace-expansion@5": "5.0.12",
       "shiki@4": "4.0.2",
       "@opentelemetry/propagator-jaeger": "^2.9.0",
+      "@opentelemetry/instrumentation-http": "^0.222.0",
       "tsup>esbuild": "^0.28.2",
       "bundle-require>esbuild": "^0.28.2",
       "@esbuild-kit/core-utils>esbuild": "^0.25.12",
