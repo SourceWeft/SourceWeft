@@ -172,7 +172,7 @@ struct RawPin {
     srt_win: std::collections::BTreeMap<String, String>,
 }
 
-/// The fork tag the pin was derived from (`v0.0.81-sourceweft.2`), from the pin text.
+/// The fork tag the pin was derived from (`v0.0.81-sourceweft.5`), from the pin text.
 #[cfg(test)]
 pub(crate) fn pinned_srt_win_tag_from(pin: &str) -> Result<String, String> {
     serde_json::from_str::<RawPin>(pin)
