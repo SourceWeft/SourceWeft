@@ -120,6 +120,38 @@ test("rejects a paused connector", async () => {
   assert.equal(d.getRuntimeTokenMock.mock.calls.length, 0);
 });
 
+test("rejects a disabled connector", async () => {
+  const d = deps({});
+
+  await assert.rejects(
+    createGoogleDrivePickerSession({
+      connector: connector({ status: "disabled" }),
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      deps: d,
+    }),
+    { statusCode: 404, code: "GOOGLE_DRIVE_CONNECTOR_NOT_FOUND" },
+  );
+  assert.equal(d.getRuntimeTokenMock.mock.calls.length, 0);
+});
+
+test("issues a session for a connector whose last sync failed", async () => {
+  const d = deps({});
+
+  const result = await createGoogleDrivePickerSession({
+    connector: connector({
+      status: "error",
+      lastError: "6 connector items failed; the page will be replayed",
+    }),
+    teamId: "team_1",
+    workspaceId: "workspace_1",
+    deps: d,
+  });
+
+  assert.equal(result.accessToken, "tok");
+  assert.equal(d.getRuntimeTokenMock.mock.calls.length, 1);
+});
+
 test("passes through an account that needs reauthorization", async () => {
   const d = deps({
     getRuntimeToken: vi.fn().mockRejectedValue(

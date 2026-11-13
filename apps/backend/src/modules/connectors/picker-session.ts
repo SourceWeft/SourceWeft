@@ -54,15 +54,18 @@ export async function createGoogleDrivePickerSession(input: {
 }): Promise<GoogleDrivePickerSession> {
   const { connector, teamId, workspaceId, deps } = input;
 
+  // `error` means the last sync failed; the connection itself still works, and
+  // the admin may need the picker to repair the selection. Sync accepts the
+  // same two statuses. `paused` and `disabled` connectors get no session.
   if (
     !connector ||
     connector.connectorType !== "google_drive" ||
-    connector.status !== "active"
+    (connector.status !== "active" && connector.status !== "error")
   ) {
     throw new ConnectorError(
       404,
       "GOOGLE_DRIVE_CONNECTOR_NOT_FOUND",
-      "Active Google Drive connector not found",
+      "Usable Google Drive connector not found",
     );
   }
 
