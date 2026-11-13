@@ -48,8 +48,8 @@ for (const app of [backend, web]) {
   verifyVersion(vitest, "@vitest/mocker", "4.1.12");
   verifyVersion(vitest, "vite", "8.3.5");
 }
-verifyVersion(backend, "hono", "4.13.13");
-verifyVersion(backend, "@hono/node-server", "2.1.3");
+verifyVersion(backend, "hono", "4.13.16");
+verifyVersion(backend, "@hono/node-server", "2.1.6");
 verifyVersion(
   backend,
   "@modelcontextprotocol/sdk",
