@@ -53,7 +53,7 @@ PUBLIC_API_BASE_URL=
 - 默认 `SOURCE_UPLOAD_MODE=proxy`：文件上传、预览和下载经过 API。直传模式需要浏览器可访问的 S3 地址及相应 CORS 配置。两种模式都要求私有桶。
 - 外部 PostgreSQL：设置完整的 `DATABASE_URL`，明确安排好外部数据库后再停止或覆盖内置 PostgreSQL 服务。默认部署中保持 `DATABASE_URL` 留空，由入口脚本对 `DB_*` 字段进行 URL 编码后生成连接串。`DB_*` 用于初始化新数据库；修改已有数据库密码时，还需要同步修改数据库角色密码。
 - OAuth、邮件、公开博客存储、OCR、沙箱和商业计费均为可选功能，配置项见 `.env.example`。Google One Tap 的公开参数使用 `PUBLIC_GOOGLE_ONE_TAP_*`，在运行时注入。
-- 网页搜索和抓取使用 `ANYCRAWL_API_KEY`。未配置时不阻塞普通模型聊天；显式调用网页工具会报告未配置 Provider，不会自动更换数据源。
+- 网页搜索和抓取可使用 AnyCrawl（`ANYCRAWL_API_KEY`）或 DeepSeek。设置 `WEB_PROVIDER=deepseek` 后使用 DeepSeek，密钥取 `DEEPSEEK_WEB_API_KEY`，为空时取 `DEEPSEEK_API_KEY`。仅有密钥不会选中任何 Provider；已选中的 Provider 缺少密钥时不会改用另一个。未配置时不阻塞普通模型聊天；显式调用网页工具会报告未配置 Provider，不会自动更换数据源。DeepSeek 搜索和抓取各按每千次成功请求 $0.75 计费，单账号限额为搜索 100 次/秒、抓取 25 次/秒，且没有浏览器渲染兜底，纯 JavaScript 页面可能返回空内容。
 
 ## 检查、停止与重启
 
