@@ -29,6 +29,8 @@ import {
   listConnectorActivityRecords,
 } from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
+import { createGoogleDrivePickerSession } from "../../../modules/connectors/picker-session";
+import { logger } from "../../../shared/logger";
 import {
   getSessionUserId,
   requireSession,
@@ -140,6 +142,48 @@ export function registerConnectorRoutes(app: Hono) {
     });
     return ApiResponse.success(c, result.result);
   });
+
+  app.post(
+    "/connectors/:connectorId/google-drive/picker-session",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) throw ApiError.unauthorized();
+      const workspaceId = requireRouteParam(c, "workspaceId");
+      const connectorId = requireRouteParam(c, "connectorId");
+      const { workspace } = await requireConnectorWorkspace({
+        workspaceId,
+        userId: getSessionUserId(session),
+        permission: "connector.manage",
+      });
+      const connector = await findSourceConnectorRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId,
+      });
+      await connectorAccessPolicy.requireConnection(
+        { connectorType: "google_drive", createdBy: connector?.createdBy },
+        getSessionUserId(session),
+      );
+      const result = await createGoogleDrivePickerSession({
+        connector,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        deps: {
+          getRuntimeToken: connectorOAuthService.getRuntimeToken.bind(
+            connectorOAuthService,
+          ),
+          getAdapter: (type) => connectorRegistry.getAdapter(type),
+        },
+      });
+      logger.info("google_drive_picker_session_issued", {
+        workspaceId: workspace.id,
+        connectorId,
+        userId: getSessionUserId(session),
+      });
+      c.header("Cache-Control", "no-store");
+      return ApiResponse.success(c, result);
+    },
+  );
 
   app.post("/connectors/oauth/:connectorType/start", async (c) => {
     const session = await requireSession(c);

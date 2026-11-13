@@ -16,6 +16,7 @@
   "dependencies": {
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-connector-gmail": "workspace:*",
+    "@sourceweft/builtin-connector-google-drive": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
     "@sourceweft/builtin-tool-generate-image": "workspace:*",

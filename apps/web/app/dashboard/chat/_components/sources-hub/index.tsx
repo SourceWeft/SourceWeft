@@ -1411,7 +1411,7 @@ export function SourcesHub({
           }
         }}
         onSaveSettings={(connector, input) =>
-          void handleSaveConnectorSettings(connector, input)
+          handleSaveConnectorSettings(connector, input)
         }
         onSyncConnector={(connector) => void handleSyncConnector(connector)}
         onToggleStatus={(connector) =>
