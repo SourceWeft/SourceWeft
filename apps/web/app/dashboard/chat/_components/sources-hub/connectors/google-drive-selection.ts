@@ -151,6 +151,28 @@ function runCouldHaveSeenSelection(
  * from another browser while a run was in flight can still read `unavailable`
  * until the next sync.
  */
+/**
+ * Name to show for a selected file. The connector config stores ids only, so the
+ * name comes from the file's source, or, for a file that was skipped and so has
+ * no source, from the title the sync recorded with the skip. The id is the last
+ * resort.
+ */
+export function googleDriveFileName(input: {
+  fileId: string;
+  source: { title?: string | null } | null | undefined;
+  skippedItems: ReadonlyArray<{ externalId: string; title?: string | null }>;
+}): string {
+  const sourceTitle = input.source?.title?.trim();
+  if (sourceTitle) {
+    return sourceTitle;
+  }
+  const externalId = googleDriveExternalId(input.fileId);
+  const skippedTitle = input.skippedItems
+    .find((entry) => entry.externalId === externalId)
+    ?.title?.trim();
+  return skippedTitle || input.fileId;
+}
+
 export function googleDriveFileState(input: {
   fileId: string;
   source: { status: string } | null | undefined;

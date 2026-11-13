@@ -4,6 +4,7 @@ import {
   commitGoogleDriveSelection,
   GOOGLE_DRIVE_MAX_FILES,
   googleDriveExternalId,
+  googleDriveFileName,
   googleDriveFileState,
   googleDrivePickerErrorKey,
   googleDriveSkipReasonKey,
@@ -216,6 +217,46 @@ describe("googleDriveFileState", () => {
         selectionChangedAt: null,
       }).kind,
     ).toBe("waiting");
+  });
+});
+
+describe("googleDriveFileName", () => {
+  const skippedItems = [
+    { externalId: "file:skipped-1", title: "Scanned contract.pdf" },
+    { externalId: "file:skipped-2", title: null },
+    { externalId: "file:skipped-3", title: "   " },
+  ];
+
+  test("uses the source title when the file has a source", () => {
+    expect(
+      googleDriveFileName({
+        fileId: "skipped-1",
+        source: { title: " Quarterly report " },
+        skippedItems,
+      }),
+    ).toBe("Quarterly report");
+  });
+
+  test("uses the title recorded with the skip when there is no source", () => {
+    expect(
+      googleDriveFileName({ fileId: "skipped-1", source: null, skippedItems }),
+    ).toBe("Scanned contract.pdf");
+  });
+
+  test("falls back to the file id when no title is known", () => {
+    expect(
+      googleDriveFileName({ fileId: "skipped-2", source: null, skippedItems }),
+    ).toBe("skipped-2");
+    expect(
+      googleDriveFileName({ fileId: "skipped-3", source: null, skippedItems }),
+    ).toBe("skipped-3");
+    expect(
+      googleDriveFileName({
+        fileId: "unknown",
+        source: { title: "" },
+        skippedItems,
+      }),
+    ).toBe("unknown");
   });
 });
 

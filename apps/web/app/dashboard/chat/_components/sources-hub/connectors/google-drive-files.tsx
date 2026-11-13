@@ -17,6 +17,7 @@ import { openGoogleDrivePicker } from "./google-drive-picker";
 import {
   GOOGLE_DRIVE_MAX_FILES,
   googleDriveExternalId,
+  googleDriveFileName,
   googleDriveFileState,
   googleDrivePickerErrorKey,
   googleDriveSkipReasonKey,
@@ -216,7 +217,11 @@ export function GoogleDriveFiles({
                 latestRun,
                 selectionChangedAt,
               });
-              const name = source?.title?.trim() || fileId;
+              const name = googleDriveFileName({
+                fileId,
+                source,
+                skippedItems,
+              });
               const removeLabel = t("connectors.googleDrive.remove", { name });
               const detail =
                 state.kind === "skipped"
