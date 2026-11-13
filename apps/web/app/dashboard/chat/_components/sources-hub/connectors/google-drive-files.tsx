@@ -1,6 +1,6 @@
 import { formatDisplayDate } from "@/lib/i18n/format";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { HardDrive, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale as useDisplayLocale, useTranslations } from "next-intl";
@@ -116,8 +116,16 @@ export function GoogleDriveFiles({
       }
     : null;
 
+  // Closes an open picker when this section unmounts, so the picker and its
+  // focus shield do not outlive the dialog that opened them. Holds only the
+  // abort handle, never the session or its token.
+  const pickerAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => pickerAbortRef.current?.abort(), []);
+
   const handleAddFiles = useCallback(async () => {
     setPickerBusy(true);
+    const pickerAbort = new AbortController();
+    pickerAbortRef.current = pickerAbort;
     try {
       // A fresh session (and token) is minted on every click; the token is only
       // ever passed into the picker as an argument, never stored.
@@ -125,7 +133,9 @@ export function GoogleDriveFiles({
         workspaceId,
         connectorId,
       );
-      const picked = await openGoogleDrivePicker(session);
+      const picked = await openGoogleDrivePicker(session, {
+        signal: pickerAbort.signal,
+      });
       if (picked.length === 0) {
         return;
       }

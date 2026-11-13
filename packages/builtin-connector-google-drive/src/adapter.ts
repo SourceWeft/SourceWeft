@@ -249,8 +249,9 @@ export function createGoogleDriveConnectorAdapter(
         // stored token stays unexpired for up to an hour; handing it to the
         // picker would show Google's bare 403 page with no way to close it. A
         // refused token throws GOOGLE_DRIVE_REAUTH_REQUIRED, which the web app
-        // turns into the reconnect message.
-        await client.getAbout(input.accessToken);
+        // turns into the reconnect message. Any other outcome of the check
+        // (timeout, 5xx) does not block the picker.
+        await client.assertTokenAccepted(input.accessToken);
         // Returns only the project number and the allowed types; no secret
         // and no access token ever leave through an action result. The picker
         // needs no API key: the access token and the project number suffice.

@@ -584,6 +584,33 @@ test("refuses the picker config when Google no longer accepts the token", async 
   );
 });
 
+test("still returns the picker config when the token check cannot reach Google", async () => {
+  // Only a token Google refuses blocks the picker. A timeout, a network error
+  // or a 5xx says nothing about the token, and the check is not retried: it
+  // runs on a click.
+  for (const failure of [
+    async () => {
+      throw new Error("network down");
+    },
+    async () => json({ error: { code: 503 } }, 503),
+    async () => json({ error: { code: 429 } }, 429),
+  ]) {
+    let calls = 0;
+    const gdrive = adapter(async () => {
+      calls += 1;
+      return failure();
+    });
+    const result = await gdrive.executeAction({
+      ...context,
+      actionType: "google_drive.picker.config",
+      request: {},
+      idempotencyKey: "picker",
+    });
+    assert.equal(result.result.appId, "123456789");
+    assert.equal(calls, 1);
+  }
+});
+
 test("never puts the access token in an error message", async () => {
   const gdrive = adapter(async () => json({ error: { code: 500 } }, 500));
   let captured: unknown;

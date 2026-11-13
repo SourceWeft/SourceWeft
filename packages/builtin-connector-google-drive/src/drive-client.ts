@@ -14,6 +14,8 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 // contribution.ts; keep both in sync.
 const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/;
 const REQUEST_TIMEOUT_MS = 30000;
+// The token check before a picker session runs on a click; keep it short.
+const TOKEN_CHECK_TIMEOUT_MS = 5000;
 /**
  * Defensive client-side cap on a text export's body. Google's own export
  * limit is 10 MB; this cap is intentionally looser so it never fires before
@@ -313,6 +315,30 @@ export function createDriveClient(options: DriveClientOptions) {
           refresh_token: refreshToken,
         }),
       );
+    },
+    /**
+     * Asks Google once whether it still accepts this token. This runs on a
+     * click (before a picker session is issued), so it waits a few seconds at
+     * most and is never retried, unlike the sync reads above. Only a refusal
+     * (401) throws: a timeout, a network error or a 5xx says nothing about the
+     * token, and the caller carries on as it would have without the check.
+     */
+    async assertTokenAccepted(token: string): Promise<void> {
+      let response: Response;
+      try {
+        response = await fetcher(
+          `${DRIVE_API}/about?fields=user(permissionId)`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(TOKEN_CHECK_TIMEOUT_MS),
+          },
+        );
+      } catch {
+        return;
+      }
+      if (response.status === 401) {
+        throw mapResponseError(response.status);
+      }
     },
     async getAbout(token: string): Promise<DriveAboutUser> {
       const about = await getJson<{ user?: DriveAboutUser }>(

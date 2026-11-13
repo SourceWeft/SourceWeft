@@ -8,6 +8,7 @@ type PickerCallback = (data: Record<string, unknown>) => void;
 
 let capturedCallback: PickerCallback | null = null;
 let capturedOAuthToken: string | null = null;
+let visibilityCalls: boolean[] = [];
 
 /** Minimal stand-in for `window.google.picker`, mirroring only the fields the
  * wrapper reads. The builder captures the callback and OAuth token so the test
@@ -48,7 +49,11 @@ function installGooglePickerStub() {
     }
     build() {
       capturedCallback = this.callback;
-      return { setVisible() {} };
+      return {
+        setVisible(visible: boolean) {
+          visibilityCalls.push(visible);
+        },
+      };
     }
   }
   (globalThis as Record<string, unknown>).google = {
@@ -86,6 +91,7 @@ beforeEach(() => {
   vi.resetModules();
   capturedCallback = null;
   capturedOAuthToken = null;
+  visibilityCalls = [];
   delete (globalThis as Record<string, unknown>).gapi;
   delete (globalThis as Record<string, unknown>).google;
   document.head
@@ -273,6 +279,35 @@ test("stops shielding focus events once the picker closes", async () => {
       frame.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
       expect(trapFocusIn).toHaveBeenCalledTimes(1);
     }
+  } finally {
+    document.removeEventListener("focusin", trapFocusIn);
+    backdrop.remove();
+    dialog.remove();
+  }
+});
+
+test("closes the picker and stops shielding focus when the caller aborts", async () => {
+  const { backdrop, dialog, frame } = mountPickerNodes();
+  const trapFocusIn = vi.fn();
+  document.addEventListener("focusin", trapFocusIn);
+  try {
+    installGapi((_name, config) => config.callback?.());
+    installGooglePickerStub();
+    const { openGoogleDrivePicker } = await import("./google-drive-picker");
+    const controller = new AbortController();
+    const promise = openGoogleDrivePicker(session, {
+      signal: controller.signal,
+    });
+    await flush();
+    expect(visibilityCalls).toEqual([true]);
+
+    // The opener goes away without the picker ever calling back.
+    controller.abort();
+    await expect(promise).resolves.toEqual([]);
+    expect(visibilityCalls).toEqual([true, false]);
+
+    frame.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(trapFocusIn).toHaveBeenCalledTimes(1);
   } finally {
     document.removeEventListener("focusin", trapFocusIn);
     backdrop.remove();

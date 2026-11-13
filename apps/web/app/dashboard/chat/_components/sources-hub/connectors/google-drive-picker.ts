@@ -41,6 +41,12 @@ export function isGoogleDrivePickerElement(target: unknown): boolean {
  * it; stopping those two events in the capture phase, only when the picker is
  * the node gaining focus, leaves every other focus move untouched. Returns the
  * function that removes the shield.
+ *
+ * Side effect to know about: React also listens for these events below the
+ * document, so while the picker is open an element in the dialog does not get
+ * `onBlur` when focus moves into the picker, nor `onFocus` when it comes back.
+ * Nothing in the settings dialog depends on that today (the picker opens from
+ * a button); a field that saves on blur would need another trigger.
  */
 function shieldPickerFocus(): () => void {
   const guard = (event: FocusEvent) => {
@@ -83,6 +89,13 @@ type DocsViewLike = {
 };
 
 type PickerLike = { setVisible: (visible: boolean) => void };
+
+export type OpenGoogleDrivePickerOptions = {
+  /** Abort when the opener goes away (for example its component unmounts). The
+   * picker is closed, the focus shield is removed and the call resolves with
+   * `[]`, so nothing is left behind if the picker never calls back. */
+  signal?: AbortSignal;
+};
 
 type PickerBuilderLike = {
   enableFeature: (feature: unknown) => PickerBuilderLike;
@@ -194,6 +207,7 @@ function loadPickerModule(): Promise<void> {
  */
 export async function openGoogleDrivePicker(
   session: GoogleDrivePickerSessionInput,
+  options: OpenGoogleDrivePickerOptions = {},
 ): Promise<string[]> {
   await loadGoogleApiScript();
   await loadPickerModule();
@@ -242,6 +256,21 @@ export async function openGoogleDrivePicker(
         .build();
 
       built.setVisible(true);
+
+      const closeOnAbort = () => {
+        releaseFocusShield();
+        try {
+          built.setVisible(false);
+        } catch {
+          // The picker is already gone; there is nothing left to hide.
+        }
+        resolve([]);
+      };
+      if (options.signal?.aborted) {
+        closeOnAbort();
+      } else {
+        options.signal?.addEventListener("abort", closeOnAbort, { once: true });
+      }
     } catch (error: unknown) {
       releaseFocusShield();
       reject(
