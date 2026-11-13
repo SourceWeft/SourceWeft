@@ -34,8 +34,9 @@ import {
   type IconDryRunCounts,
 } from "./icons/icon-dry-run";
 import { registryIcons, type IconTarget } from "./icons/registry-icons";
-import { mcpServerVersionId } from "./ingest/plan";
+import { mcpServerId, mcpServerVersionId } from "./ingest/plan";
 import {
+  findPreviousVersionToolListings,
   findStoredEndpointProbes,
   findStoredIconProvenance,
   upsertMarketMcp,
@@ -861,21 +862,37 @@ async function listRegistryEndpointTools(target: EndpointTarget) {
  * listing that fails keeps the stored one, at any age, and is retried on the
  * next sync. Endpoints that ask for a credential, or whose probe failed, are
  * not listed; a failed probe keeps the stored listing too.
+ *
+ * A version with no listing of its own falls back the same way on `carried`,
+ * the listing of the same endpoint stored on the server's previous version
+ * (#469). That one never counts as fresh: a new version is listed when it
+ * can be.
  */
 async function registryToolListings(
   targets: EndpointTarget[],
   probes: Map<RegistryEntry, AuthProbe>,
   stored: Map<string, StoredEndpointProbes>,
+  carried: Map<string, StoredEndpointProbes>,
   now: Date,
 ) {
   const listings = new Map<RegistryEntry, ToolsListing>();
   const pending: EndpointTarget[] = [];
-  for (const target of targets) {
-    const previous = storedToolsListing(
+  const storedListing = (target: EndpointTarget) => {
+    const own = storedToolsListing(
       stored.get(target.versionId),
       target.endpointUrl,
       now,
     );
+    if (own) return own;
+    const earlier = storedToolsListing(
+      carried.get(target.versionId),
+      target.endpointUrl,
+      now,
+    );
+    return earlier ? { ...earlier, fresh: false } : undefined;
+  };
+  for (const target of targets) {
+    const previous = storedListing(target);
     const probe = probes.get(target.entry);
     if (!probe) {
       if (previous) listings.set(target.entry, previous);
@@ -896,14 +913,11 @@ async function registryToolListings(
       });
     } catch (error) {
       failed += 1;
-      const previous = storedToolsListing(
-        stored.get(target.versionId),
-        target.endpointUrl,
-        now,
-      );
+      const previous = storedListing(target);
       if (previous) listings.set(target.entry, previous);
       logger.warn("Registry federation tool listing failed", {
         identifier: target.identifier,
+        keptStoredListing: Boolean(previous),
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -964,6 +978,14 @@ async function ingestRegistryEntries(
     targets,
     authProbes.probes,
     stored,
+    await findPreviousVersionToolListings(
+      targets
+        .filter((target) => !stored.get(target.versionId)?.toolsListing)
+        .map((target) => ({
+          serverId: mcpServerId(target.identifier),
+          versionId: target.versionId,
+        })),
+    ),
     now,
   );
   counters.toolsListed = toolListings.listed;

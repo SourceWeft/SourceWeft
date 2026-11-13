@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
   findStoredEndpointProbes: mocks.storedProbes,
+  findPreviousVersionToolListings: async () => new Map(),
   findStoredIconProvenance: mocks.storedIconProvenance,
 }));
 // No public storage: the favicon step (W3) is skipped, so nothing here

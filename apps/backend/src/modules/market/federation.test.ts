@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
         }
       >(),
   ),
+  previousListings: vi.fn(
+    async (_targets: { serverId: string; versionId: string }[]) =>
+      new Map<string, { toolsListing?: unknown; tools?: unknown }>(),
+  ),
   storedIconProvenance: vi.fn(
     async (_versionIds: string[]) =>
       new Map<
@@ -74,6 +78,7 @@ vi.mock("./icons/store", () => ({
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
   findStoredEndpointProbes: mocks.storedProbes,
+  findPreviousVersionToolListings: mocks.previousListings,
   findStoredIconProvenance: mocks.storedIconProvenance,
 }));
 vi.mock("../../shared/logger", () => ({
@@ -95,7 +100,7 @@ import {
   storedToolsListing,
   toolsListingRecord,
 } from "./federation";
-import { mcpServerVersionId } from "./ingest/plan";
+import { mcpServerId, mcpServerVersionId } from "./ingest/plan";
 
 function serverEntry(id: number) {
   return {
@@ -1604,6 +1609,131 @@ test("a failed listing keeps the stored tools and the run going", async () => {
   );
   // Still stale, so the next sync lists it again.
   assert.deepEqual(open.provenanceJson.toolsListing, record);
+});
+
+test("a new version whose listing fails keeps the previous version's tools", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  // Nothing is stored for 2.0.0 itself; 1.x listed the same endpoint.
+  const record = toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(3));
+  mocks.previousListings.mockResolvedValueOnce(
+    new Map([
+      [openVersionId, { toolsListing: record, tools: [listedTools[0]] }],
+    ]),
+  );
+  stubRegistryAndEndpoints([openEntry], () =>
+    // The probe's initialize is answered; the listing's is not JSON-RPC.
+    new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestTestRegistry();
+
+  assert.deepEqual(mocks.previousListings.mock.calls[0]?.[0], [
+    { serverId: mcpServerId("io.github.acme/open"), versionId: openVersionId },
+  ]);
+  assert.equal(result.toolsListFailed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(
+    input.manifest.tools.map((tool: { name: string }) => tool.name),
+    ["search"],
+  );
+  // The listing keeps its own time, so the next sync lists the endpoint again.
+  assert.deepEqual(input.provenanceJson.toolsListing, record);
+});
+
+test("a new version is listed afresh even when the previous version's listing is recent", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  mocks.previousListings.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(1)),
+          tools: [listedTools[0]],
+        },
+      ],
+    ]),
+  );
+  stubOpenMcpEndpoints([openEntry], listedTools);
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.toolsListed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.tools.length, listedTools.length);
+});
+
+test("the previous version's listing of another endpoint is not reused", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  mocks.previousListings.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          toolsListing: toolsListingRecord(
+            "https://old.test/mcp",
+            1,
+            daysAgo(3),
+          ),
+          tools: [listedTools[0]],
+        },
+      ],
+    ]),
+  );
+  stubRegistryAndEndpoints([openEntry], () =>
+    new Response("{}", { status: 200 }),
+  );
+
+  await ingestTestRegistry();
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools ?? [], []);
+  assert.equal(input.provenanceJson.toolsListing, undefined);
+});
+
+test("an endpoint that now asks for a credential is not given the previous version's tools", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  mocks.previousListings.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(3)),
+          tools: [listedTools[0]],
+        },
+      ],
+    ]),
+  );
+  stubRegistryAndEndpoints([openEntry], () =>
+    new Response(null, { status: 401 }),
+  );
+
+  await ingestTestRegistry();
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools ?? [], []);
+  assert.equal(input.provenanceJson.toolsListing, undefined);
+});
+
+test("a version with its own stored listing does not ask for the previous version's", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(40)),
+          tools: [listedTools[0]],
+        },
+      ],
+    ]),
+  );
+  stubRegistryAndEndpoints([openEntry], () =>
+    new Response("{}", { status: 200 }),
+  );
+
+  await ingestTestRegistry();
+
+  assert.deepEqual(mocks.previousListings.mock.calls[0]?.[0], []);
 });
 
 test("a stored listing is read back only for the same endpoint and with a valid time", () => {

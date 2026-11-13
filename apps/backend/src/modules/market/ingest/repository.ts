@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { MarketMcpManifest } from "@sourceweft/market-contracts";
 import {
   db,
@@ -207,6 +207,54 @@ export async function findStoredEndpointProbes(
             ] as const,
           ],
     ),
+  );
+}
+
+/**
+ * For each asked version, the tool listing federation stored on the most
+ * recently ingested other version of the same server that has one, keyed by
+ * the asked version's id. A new version has no listing of its own yet, so a
+ * failed first listing would otherwise leave it with no tools (#469).
+ */
+export async function findPreviousVersionToolListings(
+  targets: { serverId: string; versionId: string }[],
+): Promise<Map<string, Pick<StoredEndpointProbes, "toolsListing" | "tools">>> {
+  if (targets.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .selectDistinctOn([mcpServerVersions.serverId], {
+      serverId: mcpServerVersions.serverId,
+      toolsListing: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'toolsListing'`,
+      tools: sql<unknown>`${mcpServerVersions.manifestJson} -> 'tools'`,
+    })
+    .from(mcpServerVersions)
+    .where(
+      and(
+        inArray(mcpServerVersions.serverId, [
+          ...new Set(targets.map((target) => target.serverId)),
+        ]),
+        notInArray(
+          mcpServerVersions.id,
+          targets.map((target) => target.versionId),
+        ),
+        sql`${mcpServerVersions.provenanceJson} ? 'toolsListing'`,
+      ),
+    )
+    .orderBy(mcpServerVersions.serverId, desc(mcpServerVersions.createdAt));
+  const byServer = new Map(rows.map((row) => [row.serverId, row]));
+  return new Map(
+    targets.flatMap((target) => {
+      const row = byServer.get(target.serverId);
+      return row
+        ? [
+            [
+              target.versionId,
+              { toolsListing: row.toolsListing, tools: row.tools ?? undefined },
+            ] as const,
+          ]
+        : [];
+    }),
   );
 }
 
