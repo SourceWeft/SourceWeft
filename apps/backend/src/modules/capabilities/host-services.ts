@@ -216,7 +216,7 @@ export async function resolveCapabilityWebProvider(
       });
       continue;
     }
-    const provider = await factory({ env, ...input });
+    const provider = await factory({ env, logger, ...input });
     if (!provider) {
       continue;
     }
