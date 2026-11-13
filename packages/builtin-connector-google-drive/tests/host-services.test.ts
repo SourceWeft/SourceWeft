@@ -14,7 +14,6 @@ function environment(values: Record<string, string> = {}) {
 const CREDENTIALS = {
   GOOGLE_DRIVE_CLIENT_ID: "123456789-x.apps.googleusercontent.com",
   GOOGLE_DRIVE_CLIENT_SECRET: "secret",
-  GOOGLE_DRIVE_PICKER_API_KEY: "picker-key",
 };
 
 test("Google Drive capability stays unavailable until explicitly enabled", async () => {
@@ -53,17 +52,26 @@ test("Google Drive capability rejects malformed activation", () => {
   );
 });
 
-test("Google Drive capability requires all three credentials when enabled", () => {
+test("Google Drive capability requires both credentials when enabled", () => {
   assert.throws(
     () =>
       createConnectorAdapters({
         env: environment({
           GOOGLE_DRIVE_CONNECTOR_ENABLED: "true",
           GOOGLE_DRIVE_CLIENT_ID: CREDENTIALS.GOOGLE_DRIVE_CLIENT_ID,
+        }),
+      }),
+    /GOOGLE_DRIVE_CLIENT_SECRET/,
+  );
+  assert.throws(
+    () =>
+      createConnectorAdapters({
+        env: environment({
+          GOOGLE_DRIVE_CONNECTOR_ENABLED: "true",
           GOOGLE_DRIVE_CLIENT_SECRET: CREDENTIALS.GOOGLE_DRIVE_CLIENT_SECRET,
         }),
       }),
-    /GOOGLE_DRIVE_PICKER_API_KEY/,
+    /GOOGLE_DRIVE_CLIENT_ID/,
   );
 });
 
@@ -74,7 +82,6 @@ test("Google Drive capability rejects a client id without a project number", () 
         GOOGLE_DRIVE_CONNECTOR_ENABLED: "true",
         GOOGLE_DRIVE_CLIENT_ID: "abc.apps.googleusercontent.com",
         GOOGLE_DRIVE_CLIENT_SECRET: CREDENTIALS.GOOGLE_DRIVE_CLIENT_SECRET,
-        GOOGLE_DRIVE_PICKER_API_KEY: CREDENTIALS.GOOGLE_DRIVE_PICKER_API_KEY,
       }),
     }),
   );

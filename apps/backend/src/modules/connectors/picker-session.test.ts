@@ -40,7 +40,6 @@ function deps(options: {
     vi.fn().mockResolvedValue({
       result: {
         appId: "123",
-        developerKey: "key",
         mimeTypes: ["application/pdf"],
       },
     });
@@ -68,7 +67,6 @@ test("returns the token with the adapter's picker config", async () => {
   assert.deepEqual(result, {
     accessToken: "tok",
     appId: "123",
-    developerKey: "key",
     mimeTypes: ["application/pdf"],
   });
   assert.equal(
@@ -193,7 +191,7 @@ test("rejects a null picker config from the adapter", async () => {
 test("rejects a malformed picker config from the adapter", async () => {
   const d = deps({
     executeAction: vi.fn().mockResolvedValue({
-      result: { appId: "123", developerKey: "", mimeTypes: ["text/plain"] },
+      result: { appId: "", mimeTypes: ["text/plain"] },
     }),
   });
 

@@ -62,7 +62,6 @@ function shieldPickerFocus(): () => void {
 export type GoogleDrivePickerSessionInput = {
   accessToken: string;
   appId: string;
-  developerKey: string;
   mimeTypes: string[];
 };
 
@@ -89,7 +88,6 @@ type PickerBuilderLike = {
   enableFeature: (feature: unknown) => PickerBuilderLike;
   setAppId: (appId: string) => PickerBuilderLike;
   setOAuthToken: (token: string) => PickerBuilderLike;
-  setDeveloperKey: (key: string) => PickerBuilderLike;
   setOrigin: (origin: string) => PickerBuilderLike;
   addView: (view: unknown) => PickerBuilderLike;
   setCallback: (
@@ -218,7 +216,6 @@ export async function openGoogleDrivePicker(
         .enableFeature(picker.Feature.SUPPORT_DRIVES)
         .setAppId(session.appId)
         .setOAuthToken(session.accessToken)
-        .setDeveloperKey(session.developerKey)
         .setOrigin(window.location.origin)
         .addView(view)
         .setCallback((data) => {

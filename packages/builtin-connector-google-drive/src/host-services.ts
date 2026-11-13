@@ -42,11 +42,10 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
   }
   const clientId = env.get("GOOGLE_DRIVE_CLIENT_ID")?.trim() ?? "";
   const clientSecret = env.get("GOOGLE_DRIVE_CLIENT_SECRET")?.trim() ?? "";
-  const pickerApiKey = env.get("GOOGLE_DRIVE_PICKER_API_KEY")?.trim() ?? "";
-  if (!clientId || !clientSecret || !pickerApiKey) {
+  if (!clientId || !clientSecret) {
     throw new Error(
-      "Google Drive connector enabled without GOOGLE_DRIVE_CLIENT_ID, " +
-        "GOOGLE_DRIVE_CLIENT_SECRET, and GOOGLE_DRIVE_PICKER_API_KEY",
+      "Google Drive connector enabled without GOOGLE_DRIVE_CLIENT_ID and " +
+        "GOOGLE_DRIVE_CLIENT_SECRET",
     );
   }
   // Fail fast if the client id carries no project number; the adapter needs it
@@ -58,7 +57,6 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
         baseUrl: env.baseUrl,
         clientId,
         clientSecret,
-        pickerApiKey,
       }),
     ],
     agentToolDefs: [],

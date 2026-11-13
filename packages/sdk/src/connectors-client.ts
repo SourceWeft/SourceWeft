@@ -52,7 +52,6 @@ function query(params: Record<string, string | undefined>) {
 export type GoogleDrivePickerSession = {
   accessToken: string;
   appId: string;
-  developerKey: string;
   mimeTypes: string[];
 };
 

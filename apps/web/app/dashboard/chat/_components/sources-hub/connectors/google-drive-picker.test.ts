@@ -36,9 +36,6 @@ function installGooglePickerStub() {
       capturedOAuthToken = token;
       return this;
     }
-    setDeveloperKey() {
-      return this;
-    }
     setOrigin() {
       return this;
     }
@@ -82,7 +79,6 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const session = {
   accessToken: "ya29.secret-token",
   appId: "app-123",
-  developerKey: "dev-key",
   mimeTypes: ["application/pdf", "text/plain"],
 };
 

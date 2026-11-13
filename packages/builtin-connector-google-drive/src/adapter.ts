@@ -35,7 +35,6 @@ export type GoogleDriveAdapterConfig = {
   baseUrl: string;
   clientId: string;
   clientSecret: string;
-  pickerApiKey: string;
   fetcher?: typeof fetch;
 };
 
@@ -245,12 +244,12 @@ export function createGoogleDriveConnectorAdapter(
       input: ConnectorActionInput,
     ): Promise<ConnectorActionResult> {
       if (input.actionType === "google_drive.picker.config") {
-        // Returns only the browser key and the project number; no secret and
-        // no access token ever leave through an action result.
+        // Returns only the project number and the allowed types; no secret
+        // and no access token ever leave through an action result. The picker
+        // needs no API key: the access token and the project number suffice.
         return {
           result: {
             appId: parseProjectNumber(config.clientId),
-            developerKey: config.pickerApiKey,
             mimeTypes: [...GOOGLE_DRIVE_PICKER_MIME_TYPES],
           },
         };

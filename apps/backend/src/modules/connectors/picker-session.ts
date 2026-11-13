@@ -8,13 +8,11 @@ const GOOGLE_DRIVE_PICKER_CONFIG_ACTION = "google_drive.picker.config";
 export type GoogleDrivePickerSession = {
   accessToken: string;
   appId: string;
-  developerKey: string;
   mimeTypes: string[];
 };
 
 type GoogleDrivePickerConfig = {
   appId: string;
-  developerKey: string;
   mimeTypes: string[];
 };
 
@@ -28,8 +26,6 @@ function isGoogleDrivePickerConfig(
   return (
     typeof record.appId === "string" &&
     record.appId.length > 0 &&
-    typeof record.developerKey === "string" &&
-    record.developerKey.length > 0 &&
     Array.isArray(record.mimeTypes) &&
     record.mimeTypes.every((item) => typeof item === "string")
   );
@@ -100,7 +96,6 @@ export async function createGoogleDrivePickerSession(input: {
   return {
     accessToken,
     appId: actionResult.result.appId,
-    developerKey: actionResult.result.developerKey,
     mimeTypes: actionResult.result.mimeTypes,
   };
 }

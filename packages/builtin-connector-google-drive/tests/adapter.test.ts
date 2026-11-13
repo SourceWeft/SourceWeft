@@ -29,7 +29,6 @@ function adapter(fetcher: typeof fetch) {
     baseUrl: "https://sourceweft.example",
     clientId: "123456789-x.apps.googleusercontent.com",
     clientSecret: "client-secret",
-    pickerApiKey: "picker-key",
     fetcher,
   });
 }
@@ -549,7 +548,7 @@ test("returns picker config without secrets", async () => {
     idempotencyKey: "picker",
   });
   assert.equal(result.result.appId, "123456789");
-  assert.equal(result.result.developerKey, "picker-key");
+  assert.equal("developerKey" in result.result, false);
   assert.equal(Array.isArray(result.result.mimeTypes), true);
   assert.equal((result.result.mimeTypes as string[]).length > 0, true);
   const serialized = JSON.stringify(result);
