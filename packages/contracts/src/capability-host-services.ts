@@ -62,6 +62,13 @@ export type CreateHostWebProviderInput = {
    * it.
    */
   readonly fetchTimeoutMs?: number;
+  /**
+   * Lets a provider say why it returned null (for example an explicitly
+   * selected provider with no credential) without the host guessing.
+   */
+  readonly logger?: {
+    warn?(message: string, meta?: Record<string, unknown>): void;
+  };
 };
 
 export type CreateHostWebProvider = (input: CreateHostWebProviderInput) =>

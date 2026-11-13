@@ -98,8 +98,15 @@ into steps or used as a lifetime conversation limit.
 - OAuth, mail, public blog storage, OCR, sandbox and commercial billing are opt-in;
   their variables are documented in `.env.example`. Public Google One Tap settings
   use `PUBLIC_GOOGLE_ONE_TAP_*` and are injected at runtime.
-- Web search/fetch uses `ANYCRAWL_API_KEY`. Without it, ordinary model chat remains
-  available; explicit web-tool invocations report an unconfigured provider.
+- Web search/fetch uses AnyCrawl (`ANYCRAWL_API_KEY`) or DeepSeek. Set
+  `WEB_PROVIDER=deepseek` to use DeepSeek with `DEEPSEEK_WEB_API_KEY`, or
+  `DEEPSEEK_API_KEY` when that is empty. A key alone never selects a provider,
+  and a selected provider without its key never falls back to the other one.
+  Without a configured provider, ordinary model chat remains available;
+  explicit web-tool invocations report an unconfigured provider. DeepSeek
+  charges $0.75 per 1,000 successful search or fetch requests, limits an
+  account to 100 search and 25 fetch requests per second, and has no
+  browser-rendering fallback.
 
 ## Inspect, stop and restart
 

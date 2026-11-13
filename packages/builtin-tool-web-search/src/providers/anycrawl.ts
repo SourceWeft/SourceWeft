@@ -14,6 +14,13 @@ import type {
   WebSearchResultItem,
 } from "../types";
 import { validatePublicHttpUrl } from "../url-safety";
+import {
+  clamp,
+  compactWhitespace,
+  mapWithConcurrency,
+  truncateMarkdown,
+  wordCount,
+} from "./shared";
 
 const SEARCH_MARKDOWN_MAX_CHARS = 12_000;
 const SEARCH_LIMIT_MAX = 20;
@@ -26,29 +33,6 @@ const PLAYWRIGHT_FALLBACK_MIN_WORDS = 80;
 export type AnyCrawlWebProviderOptions = {
   fetchTimeoutMs?: number;
 };
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function compactWhitespace(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function wordCount(value: string) {
-  const compacted = compactWhitespace(value);
-  return compacted ? compacted.split(/\s+/).length : 0;
-}
-
-function truncateMarkdown(markdown: string, maxChars: number) {
-  if (markdown.length <= maxChars) {
-    return { markdown, truncated: false };
-  }
-  return {
-    markdown: markdown.slice(0, maxChars).trimEnd(),
-    truncated: true,
-  };
-}
 
 function normalizeSearchResult(result: SearchResult): WebSearchResultItem | null {
   if (!result.url) {
@@ -124,28 +108,6 @@ function normalizeFetchResult(url: string, result: ScrapeResult): WebFetchResult
 
 function shouldFallbackToPlaywright(result: WebFetchResultItem) {
   return Boolean(result.error) || result.wordCount < PLAYWRIGHT_FALLBACK_MIN_WORDS;
-}
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
-) {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await mapper(items[currentIndex] as T, currentIndex);
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  );
-  return results;
 }
 
 function createTimeoutError(timeoutMs: number) {

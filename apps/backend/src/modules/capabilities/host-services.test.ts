@@ -139,6 +139,21 @@ test("the web provider comes from the capability declaring the host service", as
   assert.equal(resolved, provider);
 });
 
+test("the web provider factory receives a logger to explain a null result", async () => {
+  let received: { logger?: { warn?: unknown } } | undefined;
+  await resolveCapabilityWebProvider(undefined, {
+    recordsProvider: async () => [webProviderRecord()],
+    loadModule: async () => ({
+      createHostWebProvider: (input: { logger?: { warn?: unknown } }) => {
+        received = input;
+        return null;
+      },
+    }),
+  });
+
+  assert.equal(typeof received?.logger?.warn, "function");
+});
+
 test("no declaring capability means no web provider, which is not an error", async () => {
   const resolved = await resolveCapabilityWebProvider(undefined, {
     recordsProvider: async () => [
