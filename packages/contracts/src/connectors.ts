@@ -696,6 +696,49 @@ export function isConnectorItemSkipError(
   );
 }
 
+/**
+ * One entry of a sync run's `metadataJson.skippedItems`, as written by the sync
+ * orchestrator. `reason` is kept as a plain string rather than the
+ * {@link connectorItemSkipReasons} enum so a reader stays forward-compatible:
+ * an unrecognised reason is preserved and the UI maps it to an "unknown"
+ * message instead of being dropped. `title` is the item title the run recorded,
+ * which may be absent for a malformed record and is then normalised to `null`.
+ */
+export const connectorSkippedItemSchema = z.object({
+  externalId: z.string().min(1),
+  title: z.string().nullable().catch(null),
+  reason: z.string().min(1),
+});
+
+export type ConnectorSkippedItem = z.infer<typeof connectorSkippedItemSchema>;
+
+/**
+ * Read the skipped items from unknown connector sync-run metadata, tolerating
+ * anything a future or faulty producer might write: a non-object, a missing or
+ * non-array `skippedItems`, and individual malformed entries are all handled by
+ * returning (or skipping to) nothing rather than throwing. Entries that lack an
+ * `externalId` or `reason` are dropped; entries with an unknown `reason` string
+ * are kept so the UI can surface them under its "unknown" message.
+ */
+export function readConnectorSkippedItems(
+  metadata: unknown,
+): ConnectorSkippedItem[] {
+  const container = z
+    .object({ skippedItems: z.array(z.unknown()) })
+    .safeParse(metadata);
+  if (!container.success) {
+    return [];
+  }
+  const items: ConnectorSkippedItem[] = [];
+  for (const entry of container.data.skippedItems) {
+    const parsed = connectorSkippedItemSchema.safeParse(entry);
+    if (parsed.success) {
+      items.push(parsed.data);
+    }
+  }
+  return items;
+}
+
 export type OAuthCodeExchangeInput = {
   code: string;
   redirectUri: string;

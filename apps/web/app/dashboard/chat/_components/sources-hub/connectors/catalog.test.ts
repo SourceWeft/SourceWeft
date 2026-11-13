@@ -5,16 +5,28 @@ import { getCatalogStatus } from "./components";
 
 test("catalog lists only implemented connectors", () => {
   expect(
-    connectorCatalogForAvailableTypes(["notion", "gmail"]).map(
-      (item) => item.id,
+    connectorCatalogForAvailableTypes(["notion", "gmail", "google_drive"]).map(
+      (i) => i.id,
     ),
-  ).toEqual(["notion", "gmail"]);
+  ).toEqual(["notion", "gmail", "google_drive"]);
 });
 
 test("Gmail stays hidden in the catalog until the backend registers it", () => {
   expect(
-    connectorCatalogForAvailableTypes(["notion"]).map((item) => item.id),
+    connectorCatalogForAvailableTypes(["notion"]).map((i) => i.id),
   ).toEqual(["notion"]);
+});
+
+test("Google Drive stays hidden until the backend registers it", () => {
+  expect(
+    connectorCatalogForAvailableTypes(["notion", "gmail"]).map((i) => i.id),
+  ).toEqual(["notion", "gmail"]);
+});
+
+test("Notion never depends on backend registration", () => {
+  expect(connectorCatalogForAvailableTypes([]).map((i) => i.id)).toEqual([
+    "notion",
+  ]);
 });
 
 describe("sync-block-status.test.ts", () => {

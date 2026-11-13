@@ -1,4 +1,4 @@
-import { FileText, Mail } from "lucide-react";
+import { FileText, HardDrive, Mail } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -27,20 +27,39 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
       "Search and read mail, optionally index it, and send reviewed messages.",
     capabilities: ["Search", "Optional indexing", "Approved sending"],
     postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
     icon: Mail,
     isIndexable: true,
     supportsActions: true,
     supportsPeriodicSync: true,
     supportsWebhook: false,
   },
+  {
+    id: "google_drive",
+    name: "Google Drive",
+    category: "Knowledge & Docs",
+    description:
+      "Pick Drive files to index and keep them in sync on a schedule.",
+    capabilities: ["Selected files", "Scheduled sync"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: HardDrive,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+  },
 ];
 
-// Gmail ships behind a backend rollout gate; hide it until the API registers it.
+// Some connectors ship behind a backend rollout gate; hide each until the API
+// registers its type as available.
 export function connectorCatalogForAvailableTypes(
   availableConnectorTypes: readonly string[],
 ): ConnectorCatalogItem[] {
   return connectorCatalog.filter(
-    (item) => item.id !== "gmail" || availableConnectorTypes.includes("gmail"),
+    (item) =>
+      !item.requiresBackendRegistration ||
+      availableConnectorTypes.includes(item.id),
   );
 }
 

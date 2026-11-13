@@ -515,3 +515,13 @@ html:lang(he) .font-brand {
     display: none;
   }
 }
+
+/* Google Picker (Drive connector). The Google script appends these two nodes to
+   <body>, outside the dialog that opens the picker. A modal dialog sets
+   `pointer-events: none` on <body>, which they would inherit and so ignore every
+   click. The class names are Google's; `google-drive-picker.ts` relies on the
+   same two names. */
+.picker-dialog,
+.picker-dialog-bg {
+  pointer-events: auto;
+}

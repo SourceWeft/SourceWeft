@@ -49,12 +49,24 @@ function query(params: Record<string, string | undefined>) {
   return search.size ? `?${search.toString()}` : "";
 }
 
+export type GoogleDrivePickerSession = {
+  accessToken: string;
+  appId: string;
+  mimeTypes: string[];
+};
+
 export class ConnectorsClient {
   listGmailLabels(workspaceId: string, connectorId: string) {
     return this.http.get<{
       labels: Array<{ id: string; name: string; type: string }>;
     }>(
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/gmail/labels`,
+    );
+  }
+
+  createGoogleDrivePickerSession(workspaceId: string, connectorId: string) {
+    return this.http.post<GoogleDrivePickerSession>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/google-drive/picker-session`,
     );
   }
   constructor(private readonly http: HttpClient) {}

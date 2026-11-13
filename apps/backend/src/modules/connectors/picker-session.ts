@@ -1,0 +1,109 @@
+import { ConnectorError, toConnectorError } from "./errors";
+import type { ConnectorAdapter, SourceConnectorRecord } from "./types";
+import type { ConnectorOAuthService } from "./oauth-service";
+
+/** The only action Google Drive's adapter exposes for this flow. */
+const GOOGLE_DRIVE_PICKER_CONFIG_ACTION = "google_drive.picker.config";
+
+export type GoogleDrivePickerSession = {
+  accessToken: string;
+  appId: string;
+  mimeTypes: string[];
+};
+
+type GoogleDrivePickerConfig = {
+  appId: string;
+  mimeTypes: string[];
+};
+
+function isGoogleDrivePickerConfig(
+  value: unknown,
+): value is GoogleDrivePickerConfig {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.appId === "string" &&
+    record.appId.length > 0 &&
+    Array.isArray(record.mimeTypes) &&
+    record.mimeTypes.every((item) => typeof item === "string")
+  );
+}
+
+/**
+ * Builds a short-lived Google Picker session: the runtime OAuth access token
+ * (a `drive.file` token) plus the adapter's non-secret picker configuration.
+ *
+ * This is a deliberate, bounded exception to "the UI never holds a provider
+ * token" — callers must only reach it for a workspace admin, and must never
+ * log or persist the returned `accessToken`.
+ */
+export async function createGoogleDrivePickerSession(input: {
+  connector: SourceConnectorRecord | null;
+  teamId: string;
+  workspaceId: string;
+  deps: {
+    getRuntimeToken: ConnectorOAuthService["getRuntimeToken"];
+    getAdapter: (type: string) => ConnectorAdapter;
+  };
+}): Promise<GoogleDrivePickerSession> {
+  const { connector, teamId, workspaceId, deps } = input;
+
+  // `error` means the last sync failed; the connection itself still works, and
+  // the admin may need the picker to repair the selection. Sync accepts the
+  // same two statuses. `paused` and `disabled` connectors get no session.
+  if (
+    !connector ||
+    connector.connectorType !== "google_drive" ||
+    (connector.status !== "active" && connector.status !== "error")
+  ) {
+    throw new ConnectorError(
+      404,
+      "GOOGLE_DRIVE_CONNECTOR_NOT_FOUND",
+      "Usable Google Drive connector not found",
+    );
+  }
+
+  const accessToken = await deps.getRuntimeToken({
+    teamId,
+    workspaceId,
+    accountId: connector.oauthAccountId,
+    connectorType: "google_drive",
+  });
+
+  const adapter = deps.getAdapter("google_drive");
+  // The adapter checks the token against Google here. Its errors are the
+  // package's own class; convert them so the API answers with their status and
+  // code (a refused token must reach the browser as a reauthorization error,
+  // not as a 500).
+  const actionResult = await adapter
+    .executeAction({
+      teamId,
+      workspaceId,
+      connectorId: connector.id,
+      connectorType: "google_drive",
+      actionType: GOOGLE_DRIVE_PICKER_CONFIG_ACTION,
+      request: {},
+      config: connector.configJson,
+      accessToken,
+      idempotencyKey: GOOGLE_DRIVE_PICKER_CONFIG_ACTION,
+    })
+    .catch((error: unknown) => {
+      throw toConnectorError(error);
+    });
+
+  if (!isGoogleDrivePickerConfig(actionResult.result)) {
+    throw new ConnectorError(
+      502,
+      "GOOGLE_DRIVE_PICKER_CONFIG_INVALID",
+      "Google Drive adapter returned a malformed picker configuration",
+    );
+  }
+
+  return {
+    accessToken,
+    appId: actionResult.result.appId,
+    mimeTypes: actionResult.result.mimeTypes,
+  };
+}

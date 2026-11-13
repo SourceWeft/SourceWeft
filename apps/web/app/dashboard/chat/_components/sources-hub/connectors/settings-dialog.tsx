@@ -66,6 +66,9 @@ import {
   getConnectorDisplayName,
   getConnectorReadinessFromConfig,
 } from "./components";
+import { GoogleDriveFiles } from "./google-drive-files";
+import { isGoogleDrivePickerElement } from "./google-drive-picker";
+import { commitGoogleDriveSelection } from "./google-drive-selection";
 import type {
   ConnectorItem,
   ConnectorReadinessState,
@@ -123,6 +126,10 @@ export function ConnectorSettingsDialog({
   onCopyWebhook: (value: string) => void;
   onDisconnect: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
+  // Resolves `true` when the save succeeded and `false` when it failed (the
+  // handler toasts its own errors). The general-settings form ignores the
+  // result; the Google Drive files handler awaits it so a failed save does not
+  // trigger a sync — see commitGoogleDriveSelection.
   onSaveSettings: (
     connector: ConnectorItem,
     input: {
@@ -131,7 +138,7 @@ export function ConnectorSettingsDialog({
       indexingFrequencyMinutes: number | null;
       configJson?: Record<string, unknown>;
     },
-  ) => void;
+  ) => Promise<boolean>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -152,6 +159,8 @@ export function ConnectorSettingsDialog({
       getConnectorReadinessFromConfig(connector.raw, t))
     : null;
   const latestActivity = activity[0] ?? null;
+  const latestSyncRun =
+    activity.find((item) => item.kind === "sync") ?? null;
   const latestSuccessfulSync = activity.find(
     (item) => item.kind === "sync" && item.status === "succeeded",
   );
@@ -252,7 +261,11 @@ export function ConnectorSettingsDialog({
   }
 
   const parsedCustomFrequency = Number(customFrequencyMinutes);
-  const minFrequency = connector.raw.connectorType === "gmail" ? 60 : 1;
+  const minFrequency =
+    connector.raw.connectorType === "gmail" ||
+    connector.raw.connectorType === "google_drive"
+      ? 60
+      : 1;
   const hasValidCustomFrequency =
     Number.isInteger(parsedCustomFrequency) &&
     parsedCustomFrequency >= minFrequency;
@@ -297,6 +310,28 @@ export function ConnectorSettingsDialog({
           : Number(frequencyValue)) !==
           connector.raw.indexingFrequencyMinutes));
 
+  function handleChangeGoogleDriveFiles(fileIds: string[]): Promise<boolean> {
+    const currentConnector = connector;
+    if (!currentConnector) {
+      return Promise.resolve(false);
+    }
+    // Only the file selection changes; keep the saved name and schedule. Save
+    // first and sync only if the save did not fail, so the backend reconciles
+    // added and removed files (an empty list archives the remaining sources)
+    // against a selection it has actually stored.
+    return commitGoogleDriveSelection({
+      save: () =>
+        onSaveSettings(currentConnector, {
+          name: currentConnector.name,
+          periodicIndexingEnabled: currentConnector.raw.periodicIndexingEnabled,
+          indexingFrequencyMinutes:
+            currentConnector.raw.indexingFrequencyMinutes,
+          configJson: { fileIds },
+        }),
+      sync: () => onSyncConnector(currentConnector),
+    });
+  }
+
   function handleSaveSettings() {
     const currentConnector = connector;
     if (!currentConnector) {
@@ -320,7 +355,7 @@ export function ConnectorSettingsDialog({
         ? parsedCustomFrequency
         : Number(frequencyValue)
       : null;
-    onSaveSettings(currentConnector, {
+    void onSaveSettings(currentConnector, {
       name: settingsName.trim(),
       periodicIndexingEnabled,
       indexingFrequencyMinutes,
@@ -335,6 +370,13 @@ export function ConnectorSettingsDialog({
       <DialogContent
         className="grid h-[min(860px,calc(100svh-1rem))] w-[min(960px,calc(100vw-1rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
         constrainWidth={false}
+        // The Google Picker is appended to <body>, outside this dialog. Using
+        // it must not count as "interacting outside" and close the settings.
+        onInteractOutside={(event) => {
+          if (isGoogleDrivePickerElement(event.target)) {
+            event.preventDefault();
+          }
+        }}
       >
         <DialogHeader className="border-b px-4 py-3 pr-11 text-left sm:px-5 sm:py-4 sm:pr-12">
           <div className="flex min-w-0 items-start gap-3">
@@ -537,6 +579,14 @@ export function ConnectorSettingsDialog({
               </TabsContent>
 
               <TabsContent className="m-0 space-y-4" value="configuration">
+                {connectorType === "google_drive" ? (
+                  <GoogleDriveFiles
+                    connector={connector}
+                    disabled={isSavingSettings}
+                    latestSyncRun={latestSyncRun}
+                    onChangeFileIds={handleChangeGoogleDriveFiles}
+                  />
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border p-3">
                     <p className="text-xs font-medium text-foreground">
