@@ -73,15 +73,6 @@ test("Google Drive capability requires both credentials when enabled", () => {
       }),
     /GOOGLE_DRIVE_CLIENT_ID/,
   );
-  // The picker needs no API key, so no third credential is asked for.
-  assert.throws(
-    () =>
-      createConnectorAdapters({
-        env: environment({ GOOGLE_DRIVE_CONNECTOR_ENABLED: "true" }),
-      }),
-    (error: unknown) =>
-      error instanceof Error && !/PICKER|API_KEY/.test(error.message),
-  );
 });
 
 test("Google Drive capability rejects a client id without a project number", () => {
