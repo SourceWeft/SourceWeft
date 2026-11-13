@@ -247,10 +247,17 @@ test("fetch times out per item", async () => {
   );
   const provider = new DeepSeekWebProvider("test-key", { fetchImpl, fetchTimeoutMs: 20 });
 
-  const result = await provider.fetch({ items: [{ url: "https://example.com/a" }] });
+  // AbortSignal.timeout timers are unref'd. A real request is kept alive by its
+  // socket; this fake has none, so on some Node versions the loop drains first.
+  const keepAlive = setInterval(() => {}, 1000);
+  try {
+    const result = await provider.fetch({ items: [{ url: "https://example.com/a" }] });
 
-  assert.equal(result.count, 0);
-  assert.match(result.results[0]?.error ?? "", /timed out/i);
+    assert.equal(result.count, 0);
+    assert.match(result.results[0]?.error ?? "", /timed out/i);
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
 
 test("fetch handles at most 5 items, all concurrently", async () => {
