@@ -7,7 +7,7 @@ import {
   type MarketMcpManifest,
 } from "@sourceweft/market-contracts";
 import { createRouteTestApp } from "../../test/hono";
-import { mcpServerVersionId } from "./ingest/plan";
+import { mcpServerId, mcpServerVersionId } from "./ingest/plan";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 
 const state = vi.hoisted(() => ({
@@ -297,6 +297,58 @@ describe("MCP catalog on the mcp_* tables", () => {
       ((await relisted.json()) as { item: { toolsCount: number } }).item
         .toolsCount,
     ).toBe(0);
+  });
+
+  test("a new version finds the tool listing of the server's previous version", async () => {
+    const tools = [
+      {
+        name: "search",
+        inputSchema: { type: "object" },
+        annotations: {},
+        risk: "unknown" as const,
+      },
+    ];
+    const toolsListing = {
+      endpointSha256: "b".repeat(64),
+      toolsCount: 1,
+      listedAt: "2026-11-01T00:00:00.000Z",
+    };
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    const first = manifest("bumped", { tools });
+    const second = { ...manifest("bumped"), version: "9.9.9" };
+    const other = manifest("never-listed");
+    await ingest.upsertMarketMcp({
+      ...federated,
+      manifest: first,
+      provenanceJson: { toolsListing },
+    });
+    await ingest.upsertMarketMcp({ ...federated, manifest: second });
+    await ingest.upsertMarketMcp({ ...federated, manifest: other });
+
+    const target = (entry: { identifier: string; version: string }) => ({
+      serverId: mcpServerId(entry.identifier),
+      versionId: mcpServerVersionId(entry.identifier, entry.version),
+    });
+    const found = await ingest.findPreviousVersionToolListings([
+      target(second),
+      target(other),
+      // Not ingested yet: the usual case for a brand-new version.
+      target({ identifier: first.identifier, version: "10.0.0" }),
+    ]);
+
+    expect(Object.fromEntries(found)).toEqual({
+      [target(second).versionId]: { toolsListing, tools },
+      [mcpServerVersionId(first.identifier, "10.0.0")]: { toolsListing, tools },
+    });
+    // A version is never its own previous version.
+    expect(
+      await ingest.findPreviousVersionToolListings([target(first)]),
+    ).toEqual(new Map());
   });
 
   test("a re-sync rewrites categories only while categories_set_by is auto", async () => {
