@@ -6,6 +6,7 @@ import {
   getResolvedToolConfirmationMessage,
   getToolApprovalDisplayLabel,
   getToolCallDetailParts,
+  getToolCallQuery,
   getReasoningTraceTitle,
   isToolConfirmationResolved,
   isReasoningTraceThinking,
@@ -427,6 +428,49 @@ test("execute tool details include display-safe command", () => {
   assert.equal(longCommandDetails[1]?.startsWith("command: node "), true);
   assert.equal(longCommandDetails[1]?.endsWith("..."), true);
   assert.ok((longCommandDetails[1]?.length ?? 0) <= 250);
+});
+
+test("web search details name the query while the search is still running", () => {
+  const runningSearch = {
+    id: "tool-search",
+    tool: "web_search",
+    input: { query: "  英伟达\n最新新闻  ", limit: 5 },
+    output: null,
+    latencyMs: null,
+    status: "running" as const,
+    error: null,
+    sequence: 1,
+  };
+  assert.equal(getToolCallQuery(runningSearch), "英伟达 最新新闻");
+  assert.deepEqual(getToolCallDetailParts(runningSearch), [
+    "status: running",
+    "query: 英伟达 最新新闻",
+  ]);
+
+  const longQuery = getToolCallQuery({
+    ...runningSearch,
+    input: { query: "nvidia ".repeat(80) },
+  });
+  assert.equal(longQuery?.endsWith("..."), true);
+  assert.ok((longQuery?.length ?? 0) <= 240);
+
+  // Arguments still streaming in, or a malformed call: no query to show.
+  for (const input of [{}, { query: "   " }, { query: 42 }]) {
+    assert.equal(getToolCallQuery({ ...runningSearch, input }), null);
+    assert.deepEqual(getToolCallDetailParts({ ...runningSearch, input }), [
+      "status: running",
+    ]);
+  }
+
+  // Only web query tools read `query` from their input.
+  assert.equal(
+    getToolCallQuery({
+      ...runningSearch,
+      tool: "execute",
+      input: { query: "英伟达", command: "ls" },
+    }),
+    null,
+  );
 });
 
 test("sandbox result-level failures render as error details", () => {
