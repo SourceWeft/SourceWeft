@@ -45,6 +45,44 @@ export const sourceDocumentStatusSchema = z.enum([
   "failed",
 ]);
 
+/** Shared with the source_guides table in @sourceweft/db. */
+export const sourceGuideStatusSchema = z.enum([
+  "pending",
+  "generating",
+  "ready",
+  "failed",
+]);
+
+export const sourceGuideTriggerSchema = z.enum(["auto", "manual"]);
+
+/** Why a guide is not ready; never a raw provider error. */
+export const sourceGuideErrorCodeSchema = z.enum([
+  "NO_PAYER",
+  "QUOTA",
+  "MODEL",
+  "EMPTY_SOURCE",
+]);
+
+export const sourceGuideContentSchema = z.object({
+  summary: z.string(),
+  topics: z.array(z.string()),
+  suggestedQuestions: z.array(z.string()),
+});
+
+export const sourceGuideSchema = z.object({
+  sourceId: z.string(),
+  status: sourceGuideStatusSchema,
+  content: sourceGuideContentSchema.nullable(),
+  errorCode: sourceGuideErrorCodeSchema.nullable(),
+  trigger: sourceGuideTriggerSchema,
+  /** The source content changed after this guide was generated. */
+  stale: z.boolean(),
+  updatedAt: z.string(),
+});
+
+export type SourceGuide = z.infer<typeof sourceGuideSchema>;
+export type SourceGuideContent = z.infer<typeof sourceGuideContentSchema>;
+
 export const retrievalCitationSchema = z.object({
   fileReference: fileReferenceSchema.optional(),
   citation: z.string().min(1),

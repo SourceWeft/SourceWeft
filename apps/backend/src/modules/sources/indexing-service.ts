@@ -1,4 +1,5 @@
 import { BillingError } from "@sourceweft/contracts/billing-runtime";
+import { requestAutoGuide } from "./guide-service";
 import type { ChunkSpec } from "../content/types";
 import type { ContentBillingPort } from "../content/billing-port";
 import { ContentError } from "../content/errors";
@@ -379,6 +380,15 @@ export class SourceIndexingService {
           parsedTokens,
           metadata: billingMetadata,
         }));
+
+      // The guide is optional and never affects this result; the request
+      // logs its own failure.
+      await requestAutoGuide({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        source: updatedSource,
+        initiatorUserId: input.userId,
+      });
 
       return {
         source: updatedSource,

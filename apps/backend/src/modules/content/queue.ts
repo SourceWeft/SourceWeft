@@ -15,6 +15,7 @@ export const SOURCE_PARSE_POLL_JOB = "source-parse-poll";
 export const CONNECTOR_SYNC_JOB = "connector-sync";
 export const THREAD_TITLE_GENERATE_JOB = "thread-title-generate";
 export const THREAD_CHAT_RUN_JOB = "thread-chat-run";
+export const SOURCE_GUIDE_GENERATE_JOB = "source-guide-generate";
 export const SOURCE_PARSE_JOB_ATTEMPTS = 2;
 export const DELIVERABLES_QUEUE_JOB_ATTEMPTS = 1;
 const SOURCE_PARSE_JOB_BACKOFF_MS = 5_000;
@@ -199,6 +200,34 @@ export async function enqueueThreadTitleGenerateJob(
     }
     throw error;
   }
+}
+
+export type SourceGuideGenerateJobPayload = {
+  teamId: string;
+  workspaceId: string;
+  sourceId: string;
+  /** The person who added the source or asked for the guide, if any. */
+  initiatorUserId: string | null;
+  trigger: "auto" | "manual";
+};
+
+export async function enqueueSourceGuideGenerateJob(
+  payload: SourceGuideGenerateJobPayload,
+  dedupeKey: string,
+) {
+  const jobId = `source-guide_${payload.sourceId}_${dedupeKey}`;
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return existing;
+  }
+  return jobsQueue.add(SOURCE_GUIDE_GENERATE_JOB, payload, {
+    jobId,
+    // A guide is optional; retry briefly, then leave it failed and retryable.
+    attempts: 2,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
 }
 
 const THREAD_CHAT_RUN_JOB_ID_PREFIX = `${THREAD_CHAT_RUN_JOB}_`;

@@ -512,6 +512,13 @@
       "when": 1794402011017,
       "tag": "0072_mcp_readme_overview_sha256",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794647931998,
+      "tag": "0073_source_guides_and_notes",
+      "breakpoints": true
     }
   ]
 }
