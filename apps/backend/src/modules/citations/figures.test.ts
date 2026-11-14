@@ -137,3 +137,28 @@ test("a claim without figures is covered, and a month name answers a month numbe
     true,
   );
 });
+
+test("an ordinal and a unit word are not figures", () => {
+  assertFigures("第二季度净销售额增长14%", [14]);
+  assertFigures("电池容量由60千瓦时提升至82千瓦时", [60, 82]);
+  assertFigures("第三次", []);
+  assertFigures("万一出现问题", []);
+  assertFigures("十万公里", [1e5]);
+});
+
+test("a quarter and a kilowatt-hour do not stop a claim from being covered", () => {
+  assert.equal(
+    figuresCovered(
+      "第二季度净销售额同比增长14%，达到78亿美元",
+      "Net sales rose 14% to $7.8 billion in the second quarter.",
+    ),
+    true,
+  );
+  assert.equal(
+    figuresCovered(
+      "电池容量由60千瓦时提升至82千瓦时",
+      "Battery capacity increased from 60 kWh to 82 kWh.",
+    ),
+    true,
+  );
+});

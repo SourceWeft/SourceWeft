@@ -1,4 +1,4 @@
-import { figuresCovered } from "./figures";
+import { extractFigures, figuresCovered } from "./figures";
 import type { CitationAnchor } from "./anchoring";
 
 /**
@@ -49,6 +49,9 @@ export function needsSemanticPass(claim: string, content: string) {
 export function segmentTextForEmbedding(text: string) {
   const clean = text
     .replace(/<[^>]+>/g, " ")
+    // A table row's pipes are layout; "Team | 25 | $49" reads as "Team, 25, $49".
+    .replace(/^\s*\|\s*|\s*\|\s*$/g, "")
+    .replace(/\s*\|\s*/g, ", ")
     .replace(/\s+/g, " ")
     .trim();
   return clean.length > SEGMENT_TEXT_MAX_CHARS
@@ -67,6 +70,28 @@ function cosine(a: readonly number[], b: readonly number[]) {
   }
   const denominator = Math.sqrt(normA * normB);
   return denominator === 0 ? 0 : dot / denominator;
+}
+
+const UP =
+  /\b(rose|rise[sn]?|rising|grew|grow[sn]?|growing|growth|increas(?:e[sd]?|ing)|improv(?:e[sd]?|ing)|gain(?:ed|s)?|surg(?:e[sd]?|ing)|climb(?:ed|s)?|expanded?)\b|增长|增加|上升|提高|提升|上涨|增至|升至|增多|扩大|改善/i;
+const DOWN =
+  /\b(fell|fall[sn]?|falling|drop(?:ped|s)?|declin(?:e[sd]?|ing)|decreas(?:e[sd]?|ing)|reduc(?:e[sd]?|ing)|shr[au]nk|shrink(?:s|ing)?|lower(?:ed)?|slump(?:ed|s)?)\b|下降|降低|减少|下跌|降至|减至|缩小|下滑|回落/i;
+
+/**
+ * The claim and the passage state the same figures but one says it went up
+ * and the other down. Meaning-based matching sees them as near twins, so this
+ * is checked by direction words in both languages. A sentence that mentions
+ * both directions, or neither, is not judged.
+ */
+export function directionsConflict(claim: string, passage: string) {
+  const direction = (text: string) => {
+    const up = UP.test(text);
+    const down = DOWN.test(text);
+    return up === down ? null : up ? "up" : "down";
+  };
+  const wanted = direction(claim);
+  const found = direction(passage);
+  return wanted !== null && found !== null && wanted !== found;
 }
 
 export type EmbeddedSegment = {
@@ -90,15 +115,31 @@ export function pickSemanticAnchor(input: {
       similarity: cosine(input.claimVector, segment.vector),
     }))
     .sort((a, b) => b.similarity - a.similarity);
-  const best = ranked[0]!;
-  const margin =
-    ranked.length > 1 ? best.similarity - ranked[1]!.similarity : Infinity;
-  if (
-    best.similarity < SEMANTIC_MIN_SIMILARITY ||
-    margin < SEMANTIC_MIN_MARGIN ||
-    !figuresCovered(input.claim, best.segment.text)
-  ) {
-    return null;
+  const similar = ranked.filter(
+    (item) => item.similarity >= SEMANTIC_MIN_SIMILARITY,
+  );
+  if (similar.length === 0) return null;
+  const stated = (item: (typeof ranked)[number]) =>
+    figuresCovered(input.claim, item.segment.text) &&
+    !directionsConflict(input.claim, item.segment.text);
+  // Two or more figures that only one sentence states identify it, even when
+  // sentences that read alike (the rows of a table) tie on meaning.
+  const figureCount = extractFigures(input.claim).length;
+
+  let best = similar[0]!;
+  if (stated(best)) {
+    const margin =
+      ranked.length > 1 ? best.similarity - ranked[1]!.similarity : Infinity;
+    if (
+      margin < SEMANTIC_MIN_MARGIN &&
+      !(figureCount >= 2 && similar.filter(stated).length === 1)
+    ) {
+      return null;
+    }
+  } else {
+    const candidates = figureCount >= 2 ? similar.filter(stated) : [];
+    if (candidates.length !== 1) return null;
+    best = candidates[0]!;
   }
   return {
     support: "strong",

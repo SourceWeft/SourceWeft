@@ -96,10 +96,9 @@ const DIGIT_MAGNITUDES = new Map<string, number>([
   ["trillion", 1e12],
   ["亿", 1e8],
   ["万", 1e4],
-  ["千", 1e3],
 ]);
 const DIGIT_NUMBER =
-  /(\d[\d,]*(?:\.\d+)?)\s*(billion|million|thousand|trillion|亿|万|千)?/gi;
+  /(\d[\d,]*(?:\.\d+)?)\s*(billion|million|thousand|trillion|亿|万)?/gi;
 
 function parseCjkNumeral(value: string) {
   let total = 0;
@@ -172,7 +171,14 @@ export function extractFigures(
       return " ";
     },
   );
+  // 第二季度 is "the second quarter": an ordinal is a position, not a quantity.
+  text = text.replace(/第[零〇一二两三四五六七八九十百千]+/g, " ");
   text = text.replace(CJK_NUMERAL, (run) => {
+    // Units alone are words, not numbers: 千瓦时 is "kilowatt-hour", not 1000.
+    // A run is a number when it starts with a digit character or 十 (万一, "in case", does not).
+    if (!/^[零〇一二两三四五六七八九十]/.test(run)) {
+      return " ";
+    }
     const value = parseCjkNumeral(run);
     // A lone 一 is "a", not a figure, and 零 on its own carries nothing.
     if (value > 1) values.push(value);

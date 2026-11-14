@@ -331,3 +331,21 @@ test("a very long source is capped and the other citations are still judged", as
   assert.ok(calls.flat().length <= 160);
   assert.equal(result.get("c2")?.support, "strong");
 });
+
+test("a passage with the same figures but the opposite direction is not support", () => {
+  const content = "Net sales rose 14% to $7.8 billion in the second quarter.";
+  assert.equal(
+    anchorClaimInContent({
+      claim: "Net sales fell 14% to $7.8 billion in the second quarter",
+      content,
+    })?.support,
+    "weak",
+  );
+  assert.equal(
+    anchorClaimInContent({
+      claim: "Net sales grew 14% to $7.8 billion in the second quarter",
+      content,
+    })?.support,
+    "strong",
+  );
+});

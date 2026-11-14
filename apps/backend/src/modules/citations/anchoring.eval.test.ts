@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { anchorClaimInContent } from "./anchoring";
+import {
+  CROSS_LANGUAGE_CASES,
+  UNSUPPORTED_CATEGORIES,
+  type CrossLanguageCategory,
+} from "./anchoring.cross-language-cases";
 
 /**
  * Offline evaluation set for Issue #472. Each case is a claim an answer made
@@ -369,3 +374,54 @@ test("anchoring meets its recorded baseline on the evaluation set", () => {
  * so a regression fails; raise them when the matcher improves.
  */
 const BASELINE = { supportedRecall: 0.95, unsupportedRejection: 0.85 };
+
+/**
+ * Cross-language cases (#516), word matching only. The by-meaning pass needs
+ * the real embedding model, so it is measured by
+ * `scripts/eval-citation-anchoring.ts`; this test guards the other half: the
+ * word matcher must not support a claim its chunk does not back, in any
+ * language pair. Recorded 2026-11-15 with the by-meaning pass on (real model,
+ * 58 cases): supported recall 7/30 -> 28/30, unsupported rejection 24/24,
+ * contradictions 4/4. The two remaining misses are a table row and a chunk
+ * that mixes both languages in one sentence.
+ */
+test("the word matcher does not support absent or contradicted cross-language claims", () => {
+  const byCategory = new Map<
+    CrossLanguageCategory,
+    { hits: number; total: number }
+  >();
+  const falseSupport: string[] = [];
+  for (const testCase of CROSS_LANGUAGE_CASES) {
+    const result = evaluate({ ...testCase, category: "unsupported" });
+    const entry = byCategory.get(testCase.category) ?? { hits: 0, total: 0 };
+    if (testCase.expect === null) {
+      entry.total += 1;
+      if (result.hit) entry.hits += 1;
+      else falseSupport.push(`[${testCase.category}] ${testCase.claim}`);
+      byCategory.set(testCase.category, entry);
+    }
+  }
+  console.info(
+    `cross-language rejection (word matcher): ${[...byCategory]
+      .map(([category, { hits, total }]) => `${category} ${hits}/${total}`)
+      .join(", ")}`,
+  );
+  for (const miss of falseSupport) console.info(`  false support ${miss}`);
+  for (const category of [
+    ...UNSUPPORTED_CATEGORIES,
+    "contradiction" as const,
+  ]) {
+    const entry = byCategory.get(category)!;
+    assert.equal(
+      entry.hits,
+      entry.total,
+      `${category} rejection ${entry.hits}/${entry.total}`,
+    );
+  }
+});
+
+test("the cross-language set covers both directions, tables and the unsupported kinds", () => {
+  assert.ok(CROSS_LANGUAGE_CASES.length >= 50);
+  const categories = new Set(CROSS_LANGUAGE_CASES.map((item) => item.category));
+  assert.equal(categories.size, 6);
+});

@@ -9,6 +9,7 @@
  */
 
 import {
+  directionsConflict,
   needsSemanticPass,
   pickSemanticAnchor,
   SEMANTIC_MAX_CHARS,
@@ -249,7 +250,10 @@ export function anchorClaimInContent(input: {
   if (
     !best ||
     best.score < STRONG_SCORE ||
-    missesAFigure(best.start, best.end)
+    missesAFigure(best.start, best.end) ||
+    // Same words and figures, opposite direction ("fell 14%" against "rose
+    // 14%"), is a contradiction, not support.
+    directionsConflict(input.claim, input.content.slice(best.start, best.end))
   ) {
     return {
       support: "weak",
@@ -360,7 +364,12 @@ async function applySemanticPass(input: {
     key: string;
     content: string;
     claims: Array<{ text: string; index: number }>;
-    segments: Array<{ start: number; end: number; text: string; index: number }>;
+    segments: Array<{
+      start: number;
+      end: number;
+      text: string;
+      index: number;
+    }>;
   };
   const texts: string[] = [];
   let characters = 0;
@@ -378,7 +387,9 @@ async function applySemanticPass(input: {
       .slice(0, SEMANTIC_MAX_SEGMENTS_PER_CHUNK)
       .map((segment) => ({
         ...segment,
-        text: segmentTextForEmbedding(content.slice(segment.start, segment.end)),
+        text: segmentTextForEmbedding(
+          content.slice(segment.start, segment.end),
+        ),
       }))
       .filter((segment) => segment.text.length > 0);
     if (segments.length === 0) continue;
@@ -410,7 +421,9 @@ async function applySemanticPass(input: {
   try {
     vectors = await input.embedTexts(texts);
     if (vectors.length !== texts.length) {
-      throw new Error("The embedding call returned the wrong number of vectors");
+      throw new Error(
+        "The embedding call returned the wrong number of vectors",
+      );
     }
   } catch (error) {
     input.onError?.(error);
