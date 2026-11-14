@@ -1,4 +1,5 @@
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
+import type { AsrAudioPreparer } from "./asr/types";
 import type { ModelCallObservation } from "./observation/types";
 import type { TargetHealthRegistry } from "./target-health";
 import type { StrictJsonSchemaSupportCache } from "./strict-json-schema-support";
@@ -892,6 +893,11 @@ export interface ModelGatewayConfig {
     metadata?: Record<string, unknown>;
   }) => Promise<CustomByokProviderConfig | null | undefined>;
   fetch?: typeof fetch;
+  /**
+   * Decodes and measures audio for ASR providers that cannot take a file as
+   * it is. Without it, such a transcription fails instead of being sent.
+   */
+  asrAudioPreparer?: AsrAudioPreparer;
   timeoutMs?: number;
   maxRetries?: number;
   defaultHeaders?: Record<string, string>;
@@ -987,6 +993,7 @@ export interface ResolvedModelGatewayConfig {
   providers: Record<string, ResolvedGatewayProviderConfig>;
   routes: Record<string, ResolvedModelRouteConfig>;
   fetch: typeof fetch;
+  asrAudioPreparer?: AsrAudioPreparer;
   timeoutMs: number;
   maxRetries: number;
   defaultHeaders: Record<string, string>;

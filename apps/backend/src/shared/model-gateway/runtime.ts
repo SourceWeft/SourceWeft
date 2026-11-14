@@ -33,6 +33,7 @@ import { resolveCustomByokProvider } from "./byok-provider-resolver";
 import { OPENROUTER_APP_TITLE } from "./attribution";
 import { createLlmFetch, llmEndpointPolicy } from "./network";
 import { createGatewayLogger } from "./gateway-logger";
+import { ffmpegAsrAudioPreparer } from "../asr-audio-preparer";
 
 type ActiveConfigVersionRow = typeof modelGatewayConfigVersions.$inferSelect;
 
@@ -513,6 +514,9 @@ export function buildRoutedModelGatewayConfig(
       options.beforeFetch?.();
       return policyFetch(...args);
     },
+    // Lets ASR providers with narrow limits (short PCM-only requests, size
+    // caps) receive audio they can take; see asr-audio-preparer.ts.
+    asrAudioPreparer: ffmpegAsrAudioPreparer,
     providers: Object.fromEntries(
       Object.entries(configInput.providers).map(([name, provider]) => [
         name,

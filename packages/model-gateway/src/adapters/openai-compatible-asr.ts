@@ -1,5 +1,6 @@
 import { buildProviderAuthHeaders } from "../auth-headers";
 import { createHttpGatewayError } from "../errors";
+import type { AsrLimits } from "../asr/types";
 import type { AsrTransport } from "./types";
 import {
   OPENAI_COMPATIBLE_ASR_AUDIO_FORMATS,
@@ -13,10 +14,29 @@ import {
 } from "./asr-utils";
 import { normalizeModelCallObservation } from "../observation/normalize";
 
+// OpenAI documents a 25 MB upload cap and no duration cap. Segment timestamps
+// (`verbose_json`) exist only on Whisper models; the newer transcribe models
+// return text. Their 20 minute cap is an assumption taken from user reports,
+// not from the documentation.
+const OPENAI_MAX_BYTES = 25_000_000;
+const NON_WHISPER_MAX_DURATION_SEC = 1_200;
+
 export class OpenAICompatibleAsrTransport implements AsrTransport {
   readonly kind: AsrTransport["kind"] = "openai-compatible";
 
   readonly supportedAudioFormats = OPENAI_COMPATIBLE_ASR_AUDIO_FORMATS;
+
+  limits(target: Parameters<AsrTransport["limits"]>[0]): AsrLimits {
+    const whisper = target.providerModel.toLowerCase().includes("whisper");
+    return {
+      acceptedFormats: this.supportedAudioFormats,
+      maxBytes: OPENAI_MAX_BYTES,
+      ...(whisper ? {} : { maxDurationSec: NON_WHISPER_MAX_DURATION_SEC }),
+      timestamps: whisper ? "segment" : "none",
+      chunkSec: 600,
+      maxConcurrent: 4,
+    };
+  }
 
   protected resolveBaseUrl(
     target: Parameters<AsrTransport["execute"]>[0]["target"],
