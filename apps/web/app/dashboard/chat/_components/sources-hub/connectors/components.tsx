@@ -282,10 +282,29 @@ export function getCatalogConnector(
   );
 }
 
+/**
+ * The account list holds active authorizations only, so a connector whose
+ * authorization is missing from it cannot run until it is authorized again.
+ */
+export function connectorNeedsReconnect(
+  connector: ConnectorItem | null,
+  accounts: ConnectorAccountItem[],
+) {
+  return Boolean(
+    connector?.raw.oauthAccountId &&
+    !accounts.some(
+      (account) =>
+        account.id === connector.raw.oauthAccountId &&
+        account.status === "active",
+    ),
+  );
+}
+
 function getOAuthConnectorStatus(
   input: {
     connector: ConnectorItem | null;
     hasActiveAccount: boolean;
+    needsReconnect: boolean;
     isBusy: boolean;
     item: ConnectorCatalogItem;
     readiness?: ConnectorReadinessState | null;
@@ -310,6 +329,13 @@ function getOAuthConnectorStatus(
         kind: "needs_setup",
         label: t("connectors.status.disabled"),
         detail: t("connectors.detail.disabled"),
+      };
+    }
+    if (input.needsReconnect) {
+      return {
+        kind: "error",
+        label: t("connectors.status.error"),
+        detail: t("connectors.detail.reauthRequired"),
       };
     }
     if (connector.status === "error" || connector.raw.lastError) {
@@ -402,6 +428,7 @@ export function getCatalogStatus(
     {
       connector,
       hasActiveAccount: hasActiveAccount && !connector,
+      needsReconnect: connectorNeedsReconnect(connector, input.accounts),
       isBusy: Boolean(
         input.connectorWaitingByType[input.item.id] ||
         (connector && input.connectorBusyById[connector.id]),
@@ -494,6 +521,7 @@ export const ConnectorCatalogCard = memoComponent(
     onConnectConnector,
     onCreateConnector,
     onDisconnect,
+    onReconnectConnector,
   }: {
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
@@ -503,18 +531,28 @@ export const ConnectorCatalogCard = memoComponent(
     onConnectConnector: (item: ConnectorCatalogItem) => void;
     onCreateConnector: (item: ConnectorCatalogItem) => void;
     onDisconnect: (connector: ConnectorItem) => void;
+    onReconnectConnector: (item: ConnectorCatalogItem) => void;
   }) {
     const t = useTranslations("dashboardSourcesHub");
     const isBusy = status.kind === "syncing";
+    // Authorizing again is safe for any connector that reports a problem, and
+    // it is the only fix when the provider no longer accepts the stored grant.
+    const canReconnect = Boolean(connector) && status.kind === "error";
     const cta = isBusy
       ? t("connectors.cta.connecting")
-      : connector
-        ? t("connectors.cta.connected")
-        : status.kind === "connected" && item.postOAuthMode !== "auto_create"
-          ? t("connectors.cta.configure")
-          : t("connectors.cta.connect");
+      : canReconnect
+        ? t("connectors.cta.reconnect")
+        : connector
+          ? t("connectors.cta.connected")
+          : status.kind === "connected" && item.postOAuthMode !== "auto_create"
+            ? t("connectors.cta.configure")
+            : t("connectors.cta.connect");
 
     function handleAction() {
+      if (canReconnect) {
+        onReconnectConnector(item);
+        return;
+      }
       if (connector) {
         return;
       }
@@ -620,11 +658,11 @@ export const ConnectorCatalogCard = memoComponent(
             ) : null}
             <Button
               className="shrink-0"
-              disabled={isBusy || Boolean(connector)}
+              disabled={isBusy || (Boolean(connector) && !canReconnect)}
               onClick={handleAction}
               size="xs"
               type="button"
-              variant={connector ? "outline" : "default"}
+              variant={connector && !canReconnect ? "outline" : "default"}
             >
               {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
               {cta}
@@ -640,6 +678,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
   connector,
   connectorBusyById,
   connectorReadinessById,
+  needsReconnect,
   webhookConfig,
   webhookEvents,
   onCopyWebhook,
@@ -652,6 +691,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
   connector: ConnectorItem;
   connectorBusyById: Record<string, boolean>;
   connectorReadinessById: Record<string, ConnectorReadinessState>;
+  needsReconnect: boolean;
   webhookConfig: ConnectorWebhookConfig | null;
   webhookEvents: ConnectorWebhookEventItem[];
   onCopyWebhook: (value: string) => void;
@@ -672,6 +712,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
     {
       connector,
       hasActiveAccount: true,
+      needsReconnect,
       isBusy,
       item: catalogItem ?? {
         id: connector.raw.connectorType,

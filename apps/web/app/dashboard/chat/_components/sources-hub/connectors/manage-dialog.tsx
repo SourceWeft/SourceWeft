@@ -42,6 +42,7 @@ import type { GmailUsageMode } from "./gmail-mode";
 import {
   ActiveConnectorCard,
   ConnectorCatalogCard,
+  connectorNeedsReconnect,
   getCatalogConnector,
   getCatalogStatus,
   getConnectorAccountLabel,
@@ -330,6 +331,7 @@ export function ManageConnectorsDialog({
                                 onConnectConnector={beginConnect}
                                 onCreateConnector={onCreateConnector}
                                 onDisconnect={onDisconnectConnector}
+                                onReconnectConnector={onConnectConnector}
                                 status={status}
                               />
                             );
@@ -357,6 +359,10 @@ export function ManageConnectorsDialog({
                         connectorBusyById={connectorBusyById}
                         connectorReadinessById={connectorReadinessById}
                         key={connector.id}
+                        needsReconnect={connectorNeedsReconnect(
+                          connector,
+                          accounts,
+                        )}
                         onBackToCatalog={() => setTab("all")}
                         onCopyWebhook={onCopyWebhook}
                         onDisconnect={onDisconnectConnector}

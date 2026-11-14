@@ -3099,6 +3099,7 @@
       "pauseShort": "Pause",
       "enableShort": "Enable",
       "disconnect": "Disconnect {name}",
+      "reconnect": "Reconnect {name}",
       "removeAria": "Remove {name}",
       "removeShort": "Remove",
       "syncNow": "Sync now",
@@ -3144,12 +3145,14 @@
         "connecting": "Connecting...",
         "connected": "Connected",
         "configure": "Configure",
-        "connect": "Connect"
+        "connect": "Connect",
+        "reconnect": "Reconnect"
       },
       "detail": {
         "syncing": "A connector operation is running.",
         "disabled": "Syncing is disabled. Enable this connector to resume.",
         "needsAttention": "Connector needs attention.",
+        "reauthRequired": "Authorization expired or was revoked. Reconnect to resume.",
         "paused": "Syncing is paused until you resume this connector.",
         "needsSetupWebhook": "Configure a public HTTPS webhook endpoint.",
         "lastSync": "Last sync {date}",
@@ -3480,6 +3483,8 @@
         "connectedConfigureNext": "{name} is connected. Configure syncing next.",
         "connectedConfigureDone": "{name} connected. Configure syncing next.",
         "connectedFallback": "{name} connected.",
+        "reconnected": "{name} reconnected.",
+        "reconnectWrongAccount": "That is a different {name} account. Reconnect with the account this connector already uses.",
         "syncAlreadyRunningNamed": "{name} sync is already running.",
         "enabledInitialSync": "{name} connector enabled. Initial sync queued.",
         "alreadyConnected": "{name} connector is already connected.",

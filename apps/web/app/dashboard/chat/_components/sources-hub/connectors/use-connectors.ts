@@ -596,12 +596,84 @@ export function useConnectors(input: {
       if (!workspaceId) {
         return null;
       }
-      const current = connectors.find(
+      let knownConnectors = connectors;
+      if (accountId) {
+        // An authorization just completed. After the provider redirects back
+        // this runs before the connector list has loaded, so read the list
+        // itself: deciding from the empty state would take an existing
+        // connector for a first connection.
+        try {
+          const fresh = await connectorsClient.list(workspaceId, {
+            includeDisabled: true,
+          });
+          knownConnectors = fresh.items.map((connector) =>
+            mapConnectorToUi(connector, t, displayLocale),
+          );
+        } catch (error) {
+          setConnectorWaiting(item.id, false);
+          toast.error(
+            getErrorMessage(
+              error,
+              t("toasts.connectors.authFailed", { name: item.name }),
+            ),
+          );
+          return null;
+        }
+      }
+      const current = knownConnectors.find(
         (connector) =>
           connector.raw.connectorType === item.id &&
           connector.status !== "disabled",
       );
       if (current) {
+        // The polling fallback passes silentMissingAccount; only a completed
+        // authorization the user is watching reports a reconnect.
+        const isReconnect = Boolean(accountId) && !options.silentMissingAccount;
+        if (isReconnect && current.raw.oauthAccountId === accountId) {
+          // Same provider account: the stored authorization was refreshed in
+          // place, so the connector, its settings and its content are intact.
+          try {
+            if (current.status === "error") {
+              await connectorsClient.update(workspaceId, current.id, {
+                status: "active",
+              });
+            }
+            clearConnectorReadiness(current.id);
+            await refreshConnectors();
+            toast.success(
+              t("toasts.connectors.reconnected", { name: item.name }),
+            );
+            return current;
+          } catch (error) {
+            toast.error(
+              getErrorMessage(error, t("toasts.connectors.updateFailed")),
+            );
+            return null;
+          } finally {
+            setConnectorWaiting(item.id, false);
+          }
+        }
+        if (
+          isReconnect &&
+          accountId &&
+          current.raw.oauthAccountId &&
+          item.id !== "gmail"
+        ) {
+          // A different provider account cannot take over this connector: its
+          // selection and indexed content belong to the original account. Drop
+          // the authorization that was just stored so it does not linger.
+          setConnectorWaiting(item.id, false);
+          toast.error(
+            t("toasts.connectors.reconnectWrongAccount", { name: item.name }),
+          );
+          try {
+            await connectorsClient.deleteAccount(workspaceId, accountId);
+          } catch {
+            // The authorization is unused either way; the refusal above stands.
+          }
+          await refreshConnectors();
+          return null;
+        }
         if (
           item.id === "gmail" &&
           accountId &&
@@ -628,6 +700,19 @@ export function useConnectors(input: {
                 t("toasts.connectors.authFailed", { name: item.name }),
               ),
             );
+            if (
+              error instanceof HttpClientError &&
+              error.code === "CONNECTOR_OAUTH_ACCOUNT_MISMATCH"
+            ) {
+              // Refused because it is a different provider account; drop the
+              // authorization that was just stored so it does not linger.
+              try {
+                await connectorsClient.deleteAccount(workspaceId, accountId);
+              } catch {
+                // The authorization is unused either way.
+              }
+              await refreshConnectors();
+            }
             return null;
           }
         }
@@ -814,6 +899,20 @@ export function useConnectors(input: {
       t,
       displayLocale,
     ],
+  );
+
+  const handleReconnectConnector = useCallback(
+    (connector: ConnectorItem) => {
+      const item = connectorCatalog.find(
+        (candidate) => candidate.id === connector.raw.connectorType,
+      );
+      if (!item) {
+        toast.error(t("toasts.connectors.settingsUnavailable"));
+        return;
+      }
+      handleConnectConnector(item);
+    },
+    [handleConnectConnector, t],
   );
 
   const handleCreateConnector = useCallback(
@@ -1202,6 +1301,7 @@ export function useConnectors(input: {
     handleOpenConnectorSettingsById,
     openManageConnectors,
     handleConnectConnector,
+    handleReconnectConnector,
     handleCreateConnector,
     handleCancelConnector,
     handleCopyWebhook,

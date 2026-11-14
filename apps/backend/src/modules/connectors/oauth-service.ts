@@ -14,11 +14,17 @@ import {
   createOAuthStateRecord,
   findOAuthAccountRecord,
   findOAuthStateRecord,
+  findReauthorizableOAuthAccountRecord,
+  reauthorizeOAuthAccountRecord,
   updateOAuthAccountStatusRecord,
   updateOAuthAccountTokenRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
-import type { ConnectorOAuthAccountSecretRecord, OAuthTokenSet } from "./types";
+import type {
+  ConnectorManifest,
+  ConnectorOAuthAccountSecretRecord,
+  OAuthTokenSet,
+} from "./types";
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
@@ -175,27 +181,13 @@ export class ConnectorOAuthService {
       }),
       scopes: manifest.auth.scopes,
     });
-    const scopes = normalizeScopes(tokenSet, manifest.auth.scopes);
-    const account = await createOAuthAccountRecord({
+    const account = await this.storeAuthorization({
       teamId: stateRow.teamId,
       workspaceId: stateRow.workspaceId,
+      userId: stateRow.userId,
       connectorType: input.connectorType,
-      providerAccountId: tokenSet.providerAccountId ?? null,
-      providerAccountEmail: tokenSet.providerAccountEmail ?? null,
-      displayName:
-        tokenSet.displayName ??
-        tokenSet.providerAccountEmail ??
-        `${manifest.displayName} account`,
-      scopes,
-      accessTokenEncrypted: await encryptTeamSecret(
-        tokenSet.accessToken,
-        stateRow.teamId,
-      ),
-      refreshTokenEncrypted: tokenSet.refreshToken
-        ? await encryptTeamSecret(tokenSet.refreshToken, stateRow.teamId)
-        : null,
-      expiresAt: tokenSet.expiresAt ?? null,
-      createdBy: stateRow.userId,
+      manifest,
+      tokenSet,
     });
 
     return {
@@ -239,33 +231,88 @@ export class ConnectorOAuthService {
       }),
       scopes: manifest.auth.scopes,
     });
-    const scopes = normalizeScopes(tokenSet, manifest.auth.scopes);
-    const account = await createOAuthAccountRecord({
+    const account = await this.storeAuthorization({
       teamId: stateRow.teamId,
       workspaceId: stateRow.workspaceId,
+      userId: stateRow.userId,
       connectorType: input.connectorType,
-      providerAccountId: tokenSet.providerAccountId ?? null,
-      providerAccountEmail: tokenSet.providerAccountEmail ?? null,
-      displayName:
-        tokenSet.displayName ??
-        tokenSet.providerAccountEmail ??
-        `${manifest.displayName} account`,
-      scopes,
-      accessTokenEncrypted: await encryptTeamSecret(
-        tokenSet.accessToken,
-        stateRow.teamId,
-      ),
-      refreshTokenEncrypted: tokenSet.refreshToken
-        ? await encryptTeamSecret(tokenSet.refreshToken, stateRow.teamId)
-        : null,
-      expiresAt: tokenSet.expiresAt ?? null,
-      createdBy: stateRow.userId,
+      manifest,
+      tokenSet,
     });
 
     return {
       account,
       redirectAfter: stateRow.redirectAfter,
     };
+  }
+
+  /**
+   * Persist a completed authorization. When the provider account already has
+   * a stored authorization in this workspace, its tokens are replaced in place
+   * so the connector that runs against it keeps working; authorizing again is
+   * how a connector whose grant was revoked or expired is reconnected.
+   */
+  private async storeAuthorization(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    connectorType: string;
+    manifest: ConnectorManifest;
+    tokenSet: OAuthTokenSet;
+  }) {
+    const { tokenSet } = input;
+    const scopes = normalizeScopes(tokenSet, input.manifest.auth.scopes);
+    const displayName =
+      tokenSet.displayName ??
+      tokenSet.providerAccountEmail ??
+      `${input.manifest.displayName} account`;
+    const accessTokenEncrypted = await encryptTeamSecret(
+      tokenSet.accessToken,
+      input.teamId,
+    );
+    const refreshTokenEncrypted = tokenSet.refreshToken
+      ? await encryptTeamSecret(tokenSet.refreshToken, input.teamId)
+      : null;
+    const expiresAt = tokenSet.expiresAt ?? null;
+
+    const stored = tokenSet.providerAccountId
+      ? await findReauthorizableOAuthAccountRecord({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorType: input.connectorType,
+          providerAccountId: tokenSet.providerAccountId,
+        })
+      : null;
+    if (stored) {
+      const reauthorized = await reauthorizeOAuthAccountRecord({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        accountId: stored.id,
+        providerAccountEmail: tokenSet.providerAccountEmail ?? null,
+        displayName,
+        scopes,
+        accessTokenEncrypted,
+        refreshTokenEncrypted: refreshTokenEncrypted ?? undefined,
+        expiresAt,
+      });
+      if (reauthorized) {
+        return reauthorized;
+      }
+    }
+
+    return createOAuthAccountRecord({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorType: input.connectorType,
+      providerAccountId: tokenSet.providerAccountId ?? null,
+      providerAccountEmail: tokenSet.providerAccountEmail ?? null,
+      displayName,
+      scopes,
+      accessTokenEncrypted,
+      refreshTokenEncrypted,
+      expiresAt,
+      createdBy: input.userId,
+    });
   }
 
   async getGlobalCallbackState(input: {

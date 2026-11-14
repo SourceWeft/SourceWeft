@@ -3,8 +3,8 @@
  * (encrypted tokens, scopes, status) that connectors run against.
  */
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
-import { connectorOAuthAccounts, db } from "@sourceweft/db";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { connectorOAuthAccounts, db, sourceConnectors } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapOAuthAccount, mapOAuthAccountWithSecret } from "../mappers";
 import type { ConnectorOAuthAccountStatus } from "../types";
@@ -96,6 +96,94 @@ export async function findOAuthAccountRecord(input: {
     .limit(1);
 
   return row ? mapOAuthAccountWithSecret(row) : null;
+}
+
+/**
+ * The stored authorization that a fresh authorization for the same provider
+ * account should replace, in any status. A provider account may have several
+ * rows from before authorizations were refreshed in place, so prefer the one a
+ * live connector runs against, then one a disabled connector holds, then the
+ * newest.
+ */
+export async function findReauthorizableOAuthAccountRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+  providerAccountId: string;
+}) {
+  const [row] = await db
+    .select({ account: connectorOAuthAccounts })
+    .from(connectorOAuthAccounts)
+    .leftJoin(
+      sourceConnectors,
+      and(
+        eq(sourceConnectors.oauthAccountId, connectorOAuthAccounts.id),
+        eq(sourceConnectors.teamId, connectorOAuthAccounts.teamId),
+        eq(sourceConnectors.workspaceId, connectorOAuthAccounts.workspaceId),
+      ),
+    )
+    .where(
+      and(
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+        eq(connectorOAuthAccounts.connectorType, input.connectorType),
+        eq(connectorOAuthAccounts.providerAccountId, input.providerAccountId),
+      ),
+    )
+    .orderBy(
+      sql`case when ${sourceConnectors.id} is null then 2 when ${sourceConnectors.status} = 'disabled' then 1 else 0 end`,
+      desc(connectorOAuthAccounts.createdAt),
+    )
+    .limit(1);
+
+  return row ? mapOAuthAccount(row.account) : null;
+}
+
+/**
+ * Replace a stored authorization's tokens after the provider account
+ * authorized again, and make it usable again. An omitted refresh token or
+ * email keeps the stored value: providers do not reissue them every time.
+ */
+export async function reauthorizeOAuthAccountRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  providerAccountEmail?: string | null;
+  displayName: string;
+  scopes: string[];
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted?: string;
+  expiresAt: Date | null;
+}) {
+  const updates: Partial<typeof connectorOAuthAccounts.$inferInsert> = {
+    displayName: input.displayName,
+    scopes: input.scopes,
+    accessTokenEncrypted: input.accessTokenEncrypted,
+    expiresAt: input.expiresAt,
+    status: "active",
+    lastError: null,
+    updatedAt: new Date(),
+  };
+  if (input.providerAccountEmail) {
+    updates.providerAccountEmail = input.providerAccountEmail;
+  }
+  if (input.refreshTokenEncrypted !== undefined) {
+    updates.refreshTokenEncrypted = input.refreshTokenEncrypted;
+  }
+
+  const [row] = await db
+    .update(connectorOAuthAccounts)
+    .set(updates)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.id, input.accountId),
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+
+  return row ? mapOAuthAccount(row) : null;
 }
 
 export async function listOAuthAccountRecordsByProviderAccount(input: {

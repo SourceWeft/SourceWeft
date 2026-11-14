@@ -461,6 +461,7 @@ export function SourcesHub({
     handleOpenConnectorSettingsById,
     openManageConnectors,
     handleConnectConnector,
+    handleReconnectConnector,
     handleCreateConnector,
     handleCancelConnector,
     handleCopyWebhook,
@@ -1410,6 +1411,7 @@ export function SourcesHub({
             setConnectorSettingsConnectorId(null);
           }
         }}
+        onReconnect={handleReconnectConnector}
         onSaveSettings={(connector, input) =>
           handleSaveConnectorSettings(connector, input)
         }

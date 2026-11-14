@@ -105,3 +105,79 @@ describe("sync-block-status.test.ts", () => {
     );
   });
 });
+
+describe("reconnect status", () => {
+  const t = ((key: string, values?: Record<string, unknown>) =>
+    values ? `${key} ${JSON.stringify(values)}` : key) as never;
+  const item = connectorCatalog.find((entry) => entry.id === "google_drive")!;
+
+  function statusFor(input: {
+    status?: "active" | "paused" | "disabled";
+    accountStatus?: "active" | null;
+  }) {
+    const status = input.status ?? "active";
+    return getCatalogStatus(
+      {
+        item,
+        connectors: [
+          {
+            id: "c1",
+            name: "Person",
+            status,
+            meta: "",
+            raw: {
+              id: "c1",
+              connectorType: "google_drive",
+              status,
+              configJson: {},
+              oauthAccountId: "acc-1",
+              lastError: null,
+              lastIndexedAt: null,
+            } as SourceConnector,
+          },
+        ],
+        accounts:
+          input.accountStatus === "active"
+            ? [
+                {
+                  id: "acc-1",
+                  connectorType: "google_drive",
+                  status: "active",
+                } as never,
+              ]
+            : [],
+        connectorBusyById: {},
+        connectorWaitingByType: {},
+        webhookConfigsById: {},
+        t,
+      },
+      "en",
+    );
+  }
+
+  test("a connector whose authorization is no longer active asks to be reconnected", () => {
+    expect(statusFor({ accountStatus: null })).toEqual({
+      kind: "error",
+      label: "connectors.status.error",
+      detail: "connectors.detail.reauthRequired",
+    });
+  });
+
+  test("a paused connector with a dead authorization still asks to be reconnected", () => {
+    expect(statusFor({ status: "paused", accountStatus: null }).detail).toBe(
+      "connectors.detail.reauthRequired",
+    );
+  });
+
+  test("a connector with an active authorization stays active", () => {
+    expect(statusFor({ accountStatus: "active" }).kind).toBe("active");
+  });
+
+  test("a disabled connector reads as disabled whatever its authorization", () => {
+    expect(statusFor({ status: "disabled", accountStatus: null })).toEqual({
+      kind: "needs_setup",
+      label: "connectors.status.disabled",
+      detail: "connectors.detail.disabled",
+    });
+  });
+});

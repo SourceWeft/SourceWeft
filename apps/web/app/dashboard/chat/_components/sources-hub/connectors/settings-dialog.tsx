@@ -111,6 +111,7 @@ export function ConnectorSettingsDialog({
   onCopyWebhook,
   onDisconnect,
   onOpenChange,
+  onReconnect,
   onSaveSettings,
   onSyncConnector,
   onToggleStatus,
@@ -126,6 +127,9 @@ export function ConnectorSettingsDialog({
   onCopyWebhook: (value: string) => void;
   onDisconnect: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
+  // Sends the admin back through the provider's authorization. The same
+  // provider account renews this connector in place.
+  onReconnect: (connector: ConnectorItem) => void;
   // Resolves `true` when the save succeeded and `false` when it failed (the
   // handler toasts its own errors). The general-settings form ignores the
   // result; the Google Drive files handler awaits it so a failed save does not
@@ -788,11 +792,29 @@ export function ConnectorSettingsDialog({
                           {providerName}
                         </dd>
                       </div>
-                      <div className="flex justify-between gap-3">
+                      <div className="flex items-center justify-between gap-3">
                         <dt>{t("connectors.config.connection")}</dt>
-                        <dd className="truncate text-foreground">
-                          {getConnectorAccountLabel(connector) ??
-                            t("connectors.config.defaultConnection")}
+                        <dd className="flex min-w-0 items-center gap-2 text-foreground">
+                          <span className="truncate">
+                            {getConnectorAccountLabel(connector) ??
+                              t("connectors.config.defaultConnection")}
+                          </span>
+                          {connector.raw.oauthAccountId &&
+                          connector.status !== "disabled" ? (
+                            <Button
+                              className="h-6 shrink-0 px-2 text-[11px]"
+                              disabled={isBusy}
+                              onClick={() => onReconnect(connector)}
+                              size="xs"
+                              title={t("connectors.reconnect", {
+                                name: providerName,
+                              })}
+                              type="button"
+                              variant="outline"
+                            >
+                              {t("connectors.cta.reconnect")}
+                            </Button>
+                          ) : null}
                         </dd>
                       </div>
                       <div className="flex justify-between gap-3">
