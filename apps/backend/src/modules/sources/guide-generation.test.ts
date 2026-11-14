@@ -10,7 +10,10 @@ test("only the start of a long source is sent, and the prompt says so", () => {
   const content = "a".repeat(GUIDE_MAX_INPUT_CHARS + 500);
   const prompt = buildGuidePrompt({ title: "Report", content });
   assert.ok(prompt.user.includes("only its beginning is shown"));
-  assert.equal(prompt.user.includes("a".repeat(GUIDE_MAX_INPUT_CHARS + 1)), false);
+  assert.equal(
+    prompt.user.includes("a".repeat(GUIDE_MAX_INPUT_CHARS + 1)),
+    false,
+  );
 });
 
 test("a short source is sent whole with no truncation note", () => {
@@ -29,7 +32,13 @@ test("a usable answer is trimmed and capped", () => {
   assert.equal(content.summary, "A summary.");
   assert.equal(content.topics.length, 8);
   assert.equal(content.topics[0], "topic 0");
-  assert.deepEqual(content.suggestedQuestions, ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?"]);
+  assert.deepEqual(content.suggestedQuestions, [
+    "Q1?",
+    "Q2?",
+    "Q3?",
+    "Q4?",
+    "Q5?",
+  ]);
 });
 
 test("an answer without a summary or questions is rejected", () => {

@@ -26,7 +26,8 @@ const GUIDE_SCHEMA = {
     },
     topics: {
       type: "array",
-      description: "The 3 to 8 main topics the source covers, as short phrases.",
+      description:
+        "The 3 to 8 main topics the source covers, as short phrases.",
       items: { type: "string" },
     },
     suggestedQuestions: {

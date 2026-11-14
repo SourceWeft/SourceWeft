@@ -18,14 +18,30 @@ test("sources a person adds directly are guided automatically", () => {
 
 test("connector-synced sources are never guided automatically", () => {
   assert.equal(
-    shouldAutoGenerateGuide({ ...source, ingestKind: "connector", connectorId: "c1" }),
+    shouldAutoGenerateGuide({
+      ...source,
+      ingestKind: "connector",
+      connectorId: "c1",
+    }),
     false,
   );
-  assert.equal(shouldAutoGenerateGuide({ ...source, connectorId: "c1" }), false);
+  assert.equal(
+    shouldAutoGenerateGuide({ ...source, connectorId: "c1" }),
+    false,
+  );
 });
 
 test("notes, artifacts and unfinished sources are not guided automatically", () => {
-  assert.equal(shouldAutoGenerateGuide({ ...source, ingestKind: "note" }), false);
-  assert.equal(shouldAutoGenerateGuide({ ...source, ingestKind: "artifact" }), false);
-  assert.equal(shouldAutoGenerateGuide({ ...source, status: "processing" }), false);
+  assert.equal(
+    shouldAutoGenerateGuide({ ...source, ingestKind: "note" }),
+    false,
+  );
+  assert.equal(
+    shouldAutoGenerateGuide({ ...source, ingestKind: "artifact" }),
+    false,
+  );
+  assert.equal(
+    shouldAutoGenerateGuide({ ...source, status: "processing" }),
+    false,
+  );
 });

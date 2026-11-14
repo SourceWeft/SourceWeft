@@ -8,7 +8,8 @@ function ports(overrides: Partial<GuidePayerPorts> = {}): GuidePayerPorts {
   return {
     resolveAccess: async () => access,
     resolveResponsibleUserId: async () => "owner-1",
-    resolveBillingOrganizationId: async (input) => input.workspaceOrganizationId,
+    resolveBillingOrganizationId: async (input) =>
+      input.workspaceOrganizationId,
     ...overrides,
   };
 }

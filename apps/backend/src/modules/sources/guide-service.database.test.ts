@@ -225,9 +225,7 @@ test("a guide made from older content reads as stale", async () => {
 });
 
 test("a deleted source's guide goes with it and a missing source is skipped", async () => {
-  await schema.db
-    .delete(schema.sources)
-    .where(eq(schema.sources.id, sourceId));
+  await schema.db.delete(schema.sources).where(eq(schema.sources.id, sourceId));
 
   const result = await run();
 

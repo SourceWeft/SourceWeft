@@ -21,7 +21,11 @@ import { requireContentSource } from "./guards";
 import { findSourceRecord } from "./repository";
 
 /** Source kinds a person adds directly; synced connector items are excluded. */
-const AUTO_GUIDE_INGEST_KINDS = new Set(["manual_upload", "web_url", "youtube"]);
+const AUTO_GUIDE_INGEST_KINDS = new Set([
+  "manual_upload",
+  "web_url",
+  "youtube",
+]);
 
 const defaultPayerPorts: GuidePayerPorts = {
   resolveAccess: (input) => workspaceService.resolveAccess(input),

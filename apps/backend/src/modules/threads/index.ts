@@ -36,6 +36,7 @@ export type { ChatThreadRunMode } from "./durable/types";
 
 // Thread
 export { findThreadRecord } from "./thread/repository";
+export { findMessageRecord } from "./message-repository";
 export {
   generateThreadTitle,
   applyGeneratedThreadTitle,

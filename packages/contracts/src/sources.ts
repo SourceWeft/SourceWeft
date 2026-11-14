@@ -83,6 +83,17 @@ export const sourceGuideSchema = z.object({
 export type SourceGuide = z.infer<typeof sourceGuideSchema>;
 export type SourceGuideContent = z.infer<typeof sourceGuideContentSchema>;
 
+export const savedAnswerNoteSchema = z.object({
+  noteId: z.string(),
+  /** The `note` source the answer is indexed as. */
+  sourceId: z.string(),
+  title: z.string(),
+  /** The message had already been saved; nothing new was created. */
+  alreadySaved: z.boolean(),
+});
+
+export type SavedAnswerNote = z.infer<typeof savedAnswerNoteSchema>;
+
 export const retrievalCitationSchema = z.object({
   fileReference: fileReferenceSchema.optional(),
   citation: z.string().min(1),
