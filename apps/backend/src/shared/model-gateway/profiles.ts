@@ -10,6 +10,7 @@ function emptyExtendedPricingFields(): Pick<
   | "output_cost_per_audio_token"
   | "input_cost_per_image"
   | "output_cost_per_image"
+  | "input_cost_per_character"
 > {
   return {
     input_cost_per_image_token: null,
@@ -18,6 +19,7 @@ function emptyExtendedPricingFields(): Pick<
     output_cost_per_audio_token: null,
     input_cost_per_image: null,
     output_cost_per_image: null,
+    input_cost_per_character: null,
   };
 }
 
@@ -36,21 +38,25 @@ export function buildProfilePricingConfigJson(
     pricing?.inputCostPerAudioToken !== undefined ||
     pricing?.outputCostPerAudioToken !== undefined ||
     pricing?.inputCostPerImage !== undefined ||
-    pricing?.outputCostPerImage !== undefined;
+    pricing?.outputCostPerImage !== undefined ||
+    pricing?.inputCostPerCharacter !== undefined;
 
   if (hasManualPrice) {
     const manualPricing: ModelPricing = {
       input_cost_per_token: pricing?.inputCostPerToken ?? null,
       output_cost_per_token: pricing?.outputCostPerToken ?? null,
       cache_read_input_token_cost: pricing?.cacheReadInputTokenCost ?? null,
-      cache_creation_input_token_cost: pricing?.cacheCreationInputTokenCost ?? null,
-      output_cost_per_reasoning_token: pricing?.outputCostPerReasoningToken ?? null,
+      cache_creation_input_token_cost:
+        pricing?.cacheCreationInputTokenCost ?? null,
+      output_cost_per_reasoning_token:
+        pricing?.outputCostPerReasoningToken ?? null,
       input_cost_per_image_token: pricing?.inputCostPerImageToken ?? null,
       output_cost_per_image_token: pricing?.outputCostPerImageToken ?? null,
       input_cost_per_audio_token: pricing?.inputCostPerAudioToken ?? null,
       output_cost_per_audio_token: pricing?.outputCostPerAudioToken ?? null,
       input_cost_per_image: pricing?.inputCostPerImage ?? null,
       output_cost_per_image: pricing?.outputCostPerImage ?? null,
+      input_cost_per_character: pricing?.inputCostPerCharacter ?? null,
       price_source: pricing?.source ?? "manual",
       litellm_key: pricing?.litellmKey ?? null,
       price_updated_at: now.toISOString(),

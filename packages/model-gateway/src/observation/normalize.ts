@@ -66,6 +66,7 @@ function finalizeUsage(
     "outputImageCount",
     "inputAudioTokens",
     "outputAudioTokens",
+    "inputCharacters",
   ] as const) {
     sanitizeTokenField(finalized, field, diagnostics);
   }
