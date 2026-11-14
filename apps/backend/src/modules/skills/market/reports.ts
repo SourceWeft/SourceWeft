@@ -340,7 +340,7 @@ export async function notifySkillReportAdmins(input: {
       input.details.length > NOTIFICATION_DETAILS_MAX_LENGTH
         ? `${input.details.slice(0, NOTIFICATION_DETAILS_MAX_LENGTH)}…`
         : input.details;
-    const queueUrl = `${config.auth.webBaseUrl}/dashboard/admin/market`;
+    const queueUrl = `${config.auth.webBaseUrl}/dashboard/admin/market/reports`;
     const subject = `[SourceWeft] Skill report (${input.reason}): ${target}`;
     const lines = [
       `A ${input.reason} report about ${target} (${input.skill.slug}) is waiting in the market admin queue.`,

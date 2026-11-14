@@ -3645,8 +3645,22 @@
   "dashboardAdmin": {
     "nav": {
       "label": "Admin sections",
-      "market": "Market",
-      "blog": "Blog"
+      "title": "Admin",
+      "groups": {
+        "market": "Market",
+        "content": "Content",
+        "system": "System"
+      },
+      "items": {
+        "mcpReview": "MCP review",
+        "skillReview": "Skill review",
+        "reports": "Reports",
+        "skills": "All skills",
+        "collections": "Collections",
+        "blog": "Blog",
+        "marketSettings": "Market settings"
+      },
+      "backToApp": "Back to app"
     },
     "checkingAccess": "Checking admin access…",
     "accessCheckFailed": "Could not check admin access. Please try again.",
@@ -5229,7 +5243,7 @@
       }
     },
     "nav": {
-      "marketAdmin": "Market admin"
+      "marketAdmin": "Admin"
     },
     "restore": {
       "button": "Restore to SourceWeft",

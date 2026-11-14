@@ -929,7 +929,7 @@ test("E18 a market admin reviews a flagged skill from the Skills tab", async ({
 
   await page.context().clearCookies();
   await page.context().addCookies(sessions.admin!.cookies);
-  await page.goto("/dashboard/admin/market?tab=skills");
+  await page.goto("/dashboard/admin/market/skill-review");
   const row = page.locator("li, article, tr, div").filter({
     has: page.getByText(pending.slug!, { exact: true }),
   });
