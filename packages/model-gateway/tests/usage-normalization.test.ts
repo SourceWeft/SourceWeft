@@ -277,6 +277,60 @@ test("DeepInfra provider adapter normalizes inference_status usage and cost", ()
   );
 });
 
+test("DeepInfra chat usage.estimated_cost is recorded as the provider's estimate", () => {
+  const observation = normalizeModelCallObservation({
+    modelAlias: "chat-default",
+    context: {
+      target: target("deepinfra"),
+      modality: "chat",
+      rawResponse: {
+        usage: {
+          prompt_tokens: 18929,
+          completion_tokens: 2,
+          total_tokens: 18931,
+          estimated_cost: 0.00006698104,
+          prompt_tokens_details: { cached_tokens: 18816 },
+          completion_tokens_details: { reasoning_tokens: 0 },
+        },
+      },
+    },
+  });
+
+  assert.equal(observation.cost?.effectiveUsd, 0.00006698104);
+  assert.equal(observation.cost?.inlineUsd, 0.00006698104);
+  assert.equal(observation.cost?.source, "provider_estimated");
+  assert.equal(observation.cost?.status, "estimated");
+  assert.equal(
+    observation.provenance.inlineCost,
+    "provider:deepinfra.usage.estimated_cost",
+  );
+  // Token counts still come from the protocol usage block.
+  assert.equal(observation.usage?.inputTokens, 18929);
+  assert.equal(observation.usage?.outputTokens, 2);
+  assert.equal(observation.usage?.cacheReadTokens, 18816);
+  assert.equal(
+    observation.provenance.usage,
+    "protocol:openai-compatible.raw_usage",
+  );
+});
+
+test("DeepInfra chat without estimated_cost leaves the cost to the price book", () => {
+  const observation = normalizeModelCallObservation({
+    modelAlias: "chat-default",
+    context: {
+      target: target("deepinfra"),
+      modality: "chat",
+      rawResponse: {
+        usage: { prompt_tokens: 30, completion_tokens: 14, total_tokens: 44 },
+      },
+    },
+  });
+
+  assert.equal(observation.cost, undefined);
+  assert.equal(observation.provenance.inlineCost, undefined);
+  assert.equal(observation.usage?.inputTokens, 30);
+});
+
 test("OrcaRouter provider adapter owns request headers, resolved model, and cost_usd", () => {
   const adapter = getProviderResponseAdapter("orcarouter");
   const requestPatch = adapter?.decorateRequest?.({
