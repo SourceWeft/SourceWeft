@@ -17,14 +17,33 @@ import {
   type NoteCitationInput,
 } from "./citation-rewrite";
 
-function noteTitle(content: string) {
+const TITLE_MAX_CHARS = 80;
+
+/** A short title from the answer's first line: its first sentence, or a word-boundary cut. */
+export function noteTitle(content: string) {
   const firstLine =
     content
       .split("\n")
       .map((line) => line.replace(/^[#>*\-\s]+/, "").trim())
       .find(Boolean) ?? "";
-  const title = firstLine.replace(/\[citation:[^\]]*\]/g, "").trim();
-  return normalizeContentTitle(title.slice(0, 80), "Saved answer");
+  const clean = firstLine
+    .replace(/\[citation:[^\]]*\]/g, "")
+    .replace(/\s+([，。,.;；!?！？])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentence = clean.match(/^.+?[.!?。！？](?=\s|$)/)?.[0] ?? clean;
+  if (sentence.length <= TITLE_MAX_CHARS) {
+    return normalizeContentTitle(
+      sentence.replace(/[.。]$/, ""),
+      "Saved answer",
+    );
+  }
+  const cut = sentence.slice(0, TITLE_MAX_CHARS);
+  const atWord = cut.lastIndexOf(" ");
+  const trimmed = (
+    atWord > TITLE_MAX_CHARS / 2 ? cut.slice(0, atWord) : cut
+  ).trimEnd();
+  return `${trimmed}…`;
 }
 
 function readMessageCitations(metadata: unknown): NoteCitationInput[] {

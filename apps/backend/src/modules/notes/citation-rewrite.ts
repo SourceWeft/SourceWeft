@@ -27,7 +27,8 @@ export type NoteReference = {
   passage: string | null;
 };
 
-const MARKER = /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
+const MARKER =
+  /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
 const CJK = /[㐀-䶿一-鿿]/;
 const PASSAGE_LIMIT = 280;
 

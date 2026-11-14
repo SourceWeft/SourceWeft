@@ -182,7 +182,7 @@ export function SourceGuideCard({
       ) : null}
 
       {guide?.content && expanded ? (
-        <div className="mt-2 max-h-60 space-y-3 overflow-auto pr-1">
+        <div className="mt-2 max-h-[45vh] space-y-3 overflow-auto pr-1">
           <p className="text-sm leading-6 text-foreground">
             {guide.content.summary}
           </p>
