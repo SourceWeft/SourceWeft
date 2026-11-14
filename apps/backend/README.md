@@ -57,6 +57,14 @@ Auth and workspace MVP notes:
   accepted. Neither is a secret. `/v1/auth/config` reports both to the app as
   `nativeSignIn`. Apple has no client secret here, so the browser redirect flow
   is not available for it.
+- Sign in with Apple also needs the Sign in with Apple key
+  (`AUTH_APPLE_TEAM_ID`, `AUTH_APPLE_KEY_ID`, `AUTH_APPLE_PRIVATE_KEY`); a bundle
+  id without it, or the key without a bundle id, fails configuration loading.
+  After each Apple sign-in the app posts its one-time authorization code to
+  `POST /v1/auth/apple/authorization-code`; the backend exchanges it for a
+  refresh token, kept encrypted on the user's `apple` row in `account`. Deleting
+  the account revokes that token at Apple first (App Store guideline 5.1.1(v)),
+  and any failure aborts the deletion with a retryable error.
 - Workspace APIs are exposed at `/v1/teams/:teamId/workspaces` and `/v1/context/*`.
 - Run `pnpm migrate` to apply Better Auth migrations followed by Drizzle business migrations.
 - Run `pnpm db:generate` after schema changes to generate new Drizzle migration files.

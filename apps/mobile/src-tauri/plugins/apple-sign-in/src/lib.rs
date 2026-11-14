@@ -1,8 +1,10 @@
 //! Sign in with Apple for the iOS app.
 //!
 //! One command, `sign_in`: it shows the system's Sign in with Apple sheet and returns the
-//! identity token Apple issued for this app. The page hands that token to the backend, which
-//! verifies it. On every other platform the command reports that it is unavailable.
+//! identity token Apple issued for this app, with the one-time authorization code. The page
+//! hands the token to the backend, which verifies it, and then the code, which the backend
+//! exchanges for the refresh token it revokes when the account is deleted. On every other
+//! platform the command reports that it is unavailable.
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -23,11 +25,14 @@ pub struct SignInRequest {
 }
 
 /// What the page gets back. Apple gives the name only the first time a person authorizes the
-/// app, so `given_name` and `family_name` are usually absent.
+/// app, so `given_name` and `family_name` are usually absent. `authorization_code` is a
+/// one-time code the backend exchanges for the refresh token it revokes when the account is
+/// deleted.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignInResponse {
     pub identity_token: String,
+    pub authorization_code: Option<String>,
     pub given_name: Option<String>,
     pub family_name: Option<String>,
 }
