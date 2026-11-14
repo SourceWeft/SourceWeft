@@ -137,10 +137,14 @@ export function createCatalogOverviewRepository<
     return (row as AnalysisRow | undefined) ?? null;
   }
 
-  /** Reserve before enqueue. A new forced request fences an older running worker. */
+  /**
+   * Reserve before enqueue. A replacing request (forced ones always replace)
+   * fences an older running worker; `force` is stored on the request.
+   */
   async function request(
     versionId: string,
     force: boolean,
+    replace: boolean = force,
   ): Promise<AnalysisRow | null> {
     const requestId = randomUUID();
     const rows = await db
@@ -160,7 +164,7 @@ export function createCatalogOverviewRepository<
           error: null,
           updatedAt: new Date(),
         },
-        ...(force ? {} : { setWhere: sql`false` }),
+        ...(replace ? {} : { setWhere: sql`false` }),
       })
       .returning();
     return (rows[0] as AnalysisRow | undefined) ?? null;

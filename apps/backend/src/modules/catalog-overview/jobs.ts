@@ -19,7 +19,28 @@ import type {
  * process dies between the reservation and the queue.
  */
 
-export type OverviewJobReason = "scheduled" | "regenerate";
+/**
+ * Why a version is queued. `scheduled`: it has no request yet. `refresh`: the
+ * scheduler replaces an analysed version's request (its input changed, or a
+ * failure is worth another try); the result cache still applies, so an input
+ * some other version already has an overview for is copied, not sent to the
+ * model. `regenerate`: an administrator asked for a new answer; the cache is
+ * skipped.
+ */
+export type OverviewJobReason = "scheduled" | "refresh" | "regenerate";
+
+/** Reserves the request a reason asks for: see `OverviewStore.request`. */
+function requestFor(
+  store: Pick<OverviewStore<unknown, unknown>, "request">,
+  versionId: string,
+  reason: OverviewJobReason,
+) {
+  return store.request(
+    versionId,
+    reason === "regenerate",
+    reason !== "scheduled",
+  );
+}
 
 /**
  * Every overview job's queue priority. BullMQ takes jobs with no priority
@@ -102,7 +123,7 @@ export function createOverviewJobs<
     const versionId = payload[spec.versionKey];
     const state = payload.requestId
       ? await store.read(versionId)
-      : await store.request(versionId, payload.reason === "regenerate");
+      : await requestFor(store, versionId, payload.reason);
     if (
       !state ||
       (payload.requestId &&
@@ -187,10 +208,7 @@ export function createOverviewJobs<
       throw new Error(`${spec.name} job has no ${spec.versionKey}`);
     }
     if (!payload.requestId) {
-      const state = await store.request(
-        versionId,
-        payload.reason === "regenerate",
-      );
+      const state = await requestFor(store, versionId, payload.reason);
       if (!state) return { status: "skipped", reason: "already-generated" };
       payload.requestId = state.requestId;
       await job.updateData(payload);

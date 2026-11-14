@@ -28,7 +28,8 @@ export const skillOverviewStore: OverviewStore<
   SkillAnalysisClassification
 > = {
   read: (versionId) => readSkillAnalysis(versionId),
-  request: (versionId, force) => requestSkillAnalysis(versionId, force),
+  request: (versionId, force, replace) =>
+    requestSkillAnalysis(versionId, force, replace),
   claim: (versionId, requestId) => claimSkillAnalysis(versionId, requestId),
   fail: (versionId, requestId, error, retry) =>
     failSkillAnalysis(versionId, requestId, error, retry),

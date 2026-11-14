@@ -104,8 +104,9 @@ export async function readSkillAnalysis(skillVersionId: string) {
 export async function requestSkillAnalysis(
   skillVersionId: string,
   force: boolean,
+  replace?: boolean,
 ) {
-  return repository.request(skillVersionId, force);
+  return repository.request(skillVersionId, force, replace);
 }
 
 export async function claimSkillAnalysis(
