@@ -1,5 +1,10 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import {
+  recordSsoProviderChangeAfterHook,
+  SSO_AUDIT_PATHS,
+  snapshotSsoProviderForAudit,
+} from "./audit";
 import { SSO_ERROR_CODES } from "./errors";
 import {
   assertSsoDomainAllowed,
@@ -39,6 +44,7 @@ import {
 
 const REGISTER_PATH = "/sso/register";
 const UPDATE_PATH = "/sso/update-provider";
+const DELETE_PATH = "/sso/delete-provider";
 const VERIFY_DOMAIN_PATH = "/sso/verify-domain";
 const SIGN_IN_PATH = "/sign-in/sso";
 const SSO_PROVIDER_MODEL = "ssoProvider";
@@ -198,7 +204,7 @@ async function handleUpdate(
 }
 
 async function handleVerifyDomain(
-  ctx: { body?: Record<string, unknown> },
+  ctx: { body?: Record<string, unknown>; context: object },
   adapter: GuardAdapter,
 ) {
   const providerId = asString(ctx.body?.providerId);
@@ -213,6 +219,11 @@ async function handleVerifyDomain(
   if (!current) {
     return;
   }
+  // Snapshot before the DNS check, regardless of outcome: the endpoint's own
+  // 204 success response carries no body, so the after-hook audit entry can
+  // only come from here. A rejection below throws out of this before-hook,
+  // which skips after-hooks entirely, so the snapshot is simply never read.
+  await snapshotSsoProviderForAudit(ctx, adapter, providerId);
   const organizationId = asString(current.organizationId);
   const domain = String(current.domain ?? "").toLowerCase();
   if (!domain) {
@@ -419,6 +430,29 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
           handler: createAuthMiddleware(async (ctx) => {
             const adapter = ctx.context.adapter as unknown as GuardAdapter;
             return handleSignInRouting(ctx, adapter);
+          }),
+        },
+        {
+          // The deleted row is gone by the time an after-hook could read it,
+          // so snapshot it here for the audit log (see ./audit.ts).
+          matcher: (context) => context.path === DELETE_PATH,
+          handler: createAuthMiddleware(async (ctx) => {
+            const providerId = asString(ctx.body?.providerId);
+            if (!providerId) {
+              return;
+            }
+            const adapter = ctx.context.adapter as unknown as GuardAdapter;
+            await snapshotSsoProviderForAudit(ctx, adapter, providerId);
+          }),
+        },
+      ],
+      after: [
+        {
+          matcher: (context) =>
+            !!context.path &&
+            (SSO_AUDIT_PATHS as readonly string[]).includes(context.path),
+          handler: createAuthMiddleware(async (ctx) => {
+            await recordSsoProviderChangeAfterHook(ctx);
           }),
         },
       ],
