@@ -497,6 +497,31 @@ test("loadGlobalModelGatewayConfig accepts a per-character price and it becomes 
   assert.equal(stored.input_cost_per_token, null);
 });
 
+test("loadGlobalModelGatewayConfig accepts a per-second price and it becomes the manual price", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    pricing: { inputCostPerSecond: 0.00000333 },
+  };
+
+  const loaded = await loadConfig(config);
+  const pricing = loaded?.chatProfiles[0]?.pricing;
+  assert.equal(pricing?.inputCostPerSecond, 0.00000333);
+
+  const stored = buildProfilePricingConfigJson(pricing, new Date(0));
+  assert.equal(stored.input_cost_per_second, 0.00000333);
+  assert.equal(stored.price_source, "manual");
+});
+
+test("loadGlobalModelGatewayConfig rejects a non-numeric per-second price", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    pricing: { inputCostPerSecond: "cheap" },
+  };
+  await assert.rejects(() => loadConfig(config), /inputCostPerSecond/);
+});
+
 test("loadGlobalModelGatewayConfig rejects a non-numeric per-character price", async () => {
   const config = baseConfig();
   config.chatProfiles[0] = {
@@ -524,6 +549,7 @@ test("loadGlobalModelGatewayConfig preserves litellm pricing presets", async () 
     inputCostPerCharacter: undefined,
     inputCostPerImage: undefined,
     inputCostPerImageToken: undefined,
+    inputCostPerSecond: undefined,
     inputCostPerToken: undefined,
     litellmKey: "openai/gpt-test",
     outputCostPerAudioToken: undefined,

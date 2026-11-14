@@ -63,7 +63,8 @@ test("asr.transcribe sends DeepInfra OpenAI-compatible multipart request", async
     "Bearer deepinfra-key",
   );
   assert.equal(
-    "Content-Type" in ((requests[0]?.init.headers as Record<string, string>) ?? {}),
+    "Content-Type" in
+      ((requests[0]?.init.headers as Record<string, string>) ?? {}),
     false,
   );
   assert.ok(requests[0]?.init.body instanceof FormData);
@@ -83,6 +84,8 @@ test("asr.transcribe sends DeepInfra OpenAI-compatible multipart request", async
     inputTokens: 11,
     outputTokens: 2,
     totalTokens: 13,
+    // Whisper is billed by duration, so the audio length is usage too.
+    inputAudioSeconds: 5,
   });
 });
 
@@ -149,7 +152,9 @@ test("openai-compatible ASR supports custom API key headers", async () => {
     modelRoutes: {
       "asr-default": {
         strategy: "priority",
-        targets: [{ provider: "openai-proxy", model: "whisper-large", priority: 1 }],
+        targets: [
+          { provider: "openai-proxy", model: "whisper-large", priority: 1 },
+        ],
       },
     },
   });
@@ -172,7 +177,8 @@ test("openai-compatible ASR supports custom API key headers", async () => {
     "proxy-token",
   );
   assert.equal(
-    (requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization,
+    (requests[0]?.init.headers as Record<string, string> | undefined)
+      ?.Authorization,
     undefined,
   );
 });

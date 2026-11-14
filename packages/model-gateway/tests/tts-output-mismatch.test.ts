@@ -134,3 +134,30 @@ test("unrecognized bytes and raw pcm requests are left alone", async () => {
     assert.equal(transcodes.length, 0);
   }
 });
+
+test("a provider that reports no usage is billed by the characters sent", async () => {
+  const { gateway } = build({ body: MP3_FRAME, contentType: "audio/mpeg" });
+  const result = await gateway.tts.speech({
+    model: "tts",
+    // 4 Chinese characters, a comma, 2 Latin letters and an emoji: 8.
+    input: "你好世界,ab😀",
+    responseFormat: "mp3",
+  });
+  assert.equal(result.usage?.inputCharacters, 8);
+  assert.equal(result.observation?.usage?.inputCharacters, 8);
+});
+
+test("the character count survives a format conversion", async () => {
+  const { gateway } = build({
+    body: WAV,
+    contentType: "audio/mpeg",
+    transcoder: true,
+  });
+  const result = await gateway.tts.speech({
+    model: "tts",
+    input: "Hello",
+    responseFormat: "mp3",
+  });
+  assert.equal(result.raw.convertedFrom, "wav");
+  assert.equal(result.usage?.inputCharacters, 5);
+});

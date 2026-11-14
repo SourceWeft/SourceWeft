@@ -11,6 +11,7 @@ function emptyExtendedPricingFields(): Pick<
   | "input_cost_per_image"
   | "output_cost_per_image"
   | "input_cost_per_character"
+  | "input_cost_per_second"
 > {
   return {
     input_cost_per_image_token: null,
@@ -20,6 +21,7 @@ function emptyExtendedPricingFields(): Pick<
     input_cost_per_image: null,
     output_cost_per_image: null,
     input_cost_per_character: null,
+    input_cost_per_second: null,
   };
 }
 
@@ -39,7 +41,8 @@ export function buildProfilePricingConfigJson(
     pricing?.outputCostPerAudioToken !== undefined ||
     pricing?.inputCostPerImage !== undefined ||
     pricing?.outputCostPerImage !== undefined ||
-    pricing?.inputCostPerCharacter !== undefined;
+    pricing?.inputCostPerCharacter !== undefined ||
+    pricing?.inputCostPerSecond !== undefined;
 
   if (hasManualPrice) {
     const manualPricing: ModelPricing = {
@@ -57,6 +60,7 @@ export function buildProfilePricingConfigJson(
       input_cost_per_image: pricing?.inputCostPerImage ?? null,
       output_cost_per_image: pricing?.outputCostPerImage ?? null,
       input_cost_per_character: pricing?.inputCostPerCharacter ?? null,
+      input_cost_per_second: pricing?.inputCostPerSecond ?? null,
       price_source: pricing?.source ?? "manual",
       litellm_key: pricing?.litellmKey ?? null,
       price_updated_at: now.toISOString(),

@@ -67,6 +67,7 @@ function finalizeUsage(
     "inputAudioTokens",
     "outputAudioTokens",
     "inputCharacters",
+    "inputAudioSeconds",
   ] as const) {
     sanitizeTokenField(finalized, field, diagnostics);
   }
