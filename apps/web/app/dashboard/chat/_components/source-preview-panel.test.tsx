@@ -7,10 +7,13 @@ import type { CitationRecord } from "./chat-canvas";
 
 const getSourceDocument = vi.hoisted(() => vi.fn());
 const getSource = vi.hoisted(() => vi.fn());
+const getSourceGuide = vi.hoisted(() => vi.fn());
+const push = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../../lib/sdk", () => ({
-  contentClient: { getSourceDocument, getSource },
+  contentClient: { getSourceDocument, getSource, getSourceGuide },
 }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@sourceweft/ui-web/components/ai-elements/message", () => ({
   MessageResponse: (props: { children?: ReactNode }) =>
     createElement("div", { "data-testid": "markdown" }, props.children),
@@ -76,12 +79,18 @@ beforeAll(() => {
     disconnect() {}
   } as unknown as typeof ResizeObserver;
   Element.prototype.scrollTo ??= () => {};
+  // jsdom has no CSS.escape; the panel's scroll-to-citation timers call it.
+  (globalThis as { CSS?: { escape(value: string): string } }).CSS ??= {
+    escape: (value: string) => value,
+  };
 });
 
 afterEach(async () => {
   await unmountAll();
   getSourceDocument.mockReset();
   getSource.mockReset();
+  getSourceGuide.mockReset();
+  push.mockReset();
 });
 
 async function open(record: CitationRecord) {
@@ -178,4 +187,49 @@ test("a span whose text no longer matches the chunk is not highlighted", async (
   );
 
   assert.equal(document.body.querySelector("[data-citation-passage]"), null);
+});
+
+test("asking a suggested question from the guide closes the preview", async () => {
+  window.matchMedia = ((query: string) => ({
+    matches: true,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  })) as unknown as typeof window.matchMedia;
+  getSource.mockResolvedValue(detail());
+  getSourceGuide.mockResolvedValue({
+    guide: {
+      sourceId: "source-1",
+      status: "ready",
+      content: {
+        summary: "Revenue grew in 2025.",
+        topics: ["Revenue"],
+        suggestedQuestions: ["What drove growth?"],
+      },
+      errorCode: null,
+      trigger: "auto",
+      stale: false,
+      updatedAt: "2026-11-14T00:00:00.000Z",
+    },
+  });
+  const onOpenChange = vi.fn();
+  await mountWithIntl(
+    createElement(SourcePreviewPanel, {
+      source: { id: "source-1", title: "Annual report" } as never,
+      open: true,
+      onOpenChange,
+      workspaceId: "workspace-1",
+    }),
+  );
+  await flush();
+  await flush();
+
+  const question = [...document.body.querySelectorAll("button")].find(
+    (button) => button.textContent?.includes("What drove growth?"),
+  );
+  assert.ok(question);
+  await click(question);
+
+  assert.equal(push.mock.calls.length, 1);
+  assert.deepEqual(onOpenChange.mock.calls.at(-1), [false]);
 });
