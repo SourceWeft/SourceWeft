@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { db, sourceGuides } from "@sourceweft/db";
 import type {
   SourceGuide,
@@ -88,4 +88,52 @@ export function toSourceGuide(
       row.contentHash !== currentContentHash,
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Guides that are waiting on something that may have changed (no credits, no
+ * one to charge) or whose job was lost mid-run. `updated_at` is the throttle:
+ * every attempt rewrites it, so a guide that is still blocked is not picked
+ * again until the interval has passed. Across all workspaces by design: this
+ * is the scheduler's sweep.
+ */
+export async function listResumableGuides(input: {
+  pausedBefore: Date;
+  generatingBefore: Date;
+  limit: number;
+}) {
+  return db
+    .select({
+      teamId: sourceGuides.teamId,
+      workspaceId: sourceGuides.workspaceId,
+      sourceId: sourceGuides.sourceId,
+      trigger: sourceGuides.trigger,
+      status: sourceGuides.status,
+      errorCode: sourceGuides.errorCode,
+      payerUserId: sourceGuides.payerUserId,
+      updatedAt: sourceGuides.updatedAt,
+    })
+    .from(sourceGuides)
+    .where(
+      or(
+        and(
+          eq(sourceGuides.status, "pending"),
+          inArray(sourceGuides.errorCode, ["QUOTA", "NO_PAYER"]),
+          lt(sourceGuides.updatedAt, input.pausedBefore),
+        ),
+        // Queued or running, but silent for too long: the job was lost.
+        and(
+          or(
+            eq(sourceGuides.status, "generating"),
+            and(
+              eq(sourceGuides.status, "pending"),
+              isNull(sourceGuides.errorCode),
+            ),
+          ),
+          lt(sourceGuides.updatedAt, input.generatingBefore),
+        ),
+      ),
+    )
+    .orderBy(asc(sourceGuides.updatedAt))
+    .limit(input.limit);
 }

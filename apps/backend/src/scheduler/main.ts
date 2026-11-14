@@ -10,6 +10,7 @@ import { opsAlertService } from "../modules/ops";
 import { durableChatRunService } from "../modules/threads";
 import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
+import { resumePausedGuides } from "../modules/sources/guide-service";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import {
   GITHUB_REGISTRY_INTERVAL_MS,
@@ -72,6 +73,8 @@ async function tick() {
     // Direct uploads have no request to fail when a client walks away, so the
     // reserved rows are reconciled here instead of in a catch block.
     jobs.push(contentSourceService.failStaleSourceUploads());
+    // Guides paused for credits or a payer, or whose job was lost, run again.
+    jobs.push(resumePausedGuides());
 
     if (jobs.length === 0) {
       return;

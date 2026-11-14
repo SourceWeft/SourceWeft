@@ -5,6 +5,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, test, vi } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 
 const generate = vi.hoisted(() => vi.fn());
+const enqueue = vi.hoisted(() => vi.fn());
+vi.mock("../content/queue", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../content/queue")>()),
+  enqueueSourceGuideGenerateJob: enqueue,
+}));
 vi.mock("./guide-generation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./guide-generation")>()),
   generateGuideContent: generate,
@@ -51,6 +56,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   [teamId, workspaceId, sourceId] = [randomUUID(), randomUUID(), randomUUID()];
   generate.mockReset();
+  enqueue.mockReset().mockResolvedValue({});
   await schema.db.insert(schema.workspaces).values({
     id: workspaceId,
     organizationId: teamId,
@@ -231,4 +237,90 @@ test("a deleted source's guide goes with it and a missing source is skipped", as
 
   assert.equal(result.status, "skipped");
   assert.equal(await guide(), undefined);
+});
+
+const MINUTE = 60_000;
+
+async function setGuide(
+  fields: Partial<typeof import("@sourceweft/db").sourceGuides.$inferInsert>,
+  ageMs: number,
+) {
+  await schema.db.insert(schema.sourceGuides).values({
+    id: randomUUID(),
+    teamId,
+    workspaceId,
+    sourceId,
+    trigger: "auto",
+    status: "pending",
+    updatedAt: new Date(Date.now() - ageMs),
+    ...fields,
+  });
+}
+
+test("a guide paused for credits is queued again once the interval has passed, for the same payer", async () => {
+  await setGuide(
+    { status: "pending", errorCode: "QUOTA", payerUserId: "uploader" },
+    20 * MINUTE,
+  );
+
+  const result = await service.resumePausedGuides();
+
+  assert.equal(result.queued, 1);
+  assert.equal(enqueue.mock.calls[0]?.[0].sourceId, sourceId);
+  assert.equal(enqueue.mock.calls[0]?.[0].initiatorUserId, "uploader");
+  const row = await guide();
+  assert.equal(row?.status, "pending");
+  assert.equal(row?.errorCode, "QUOTA");
+  assert.ok(Date.now() - row!.updatedAt.getTime() < 60_000);
+});
+
+test("a guide paused a moment ago is left alone, and a blocked one is not picked again at once", async () => {
+  await setGuide({ status: "pending", errorCode: "QUOTA" }, 2 * MINUTE);
+
+  assert.equal((await service.resumePausedGuides()).queued, 0);
+  assert.equal(enqueue.mock.calls.length, 0);
+
+  await schema.db
+    .update(schema.sourceGuides)
+    .set({ updatedAt: new Date(Date.now() - 20 * MINUTE) })
+    .where(eq(schema.sourceGuides.sourceId, sourceId));
+  assert.equal((await service.resumePausedGuides()).queued, 1);
+  assert.equal((await service.resumePausedGuides()).queued, 0);
+});
+
+test("a guide with nobody to charge is retried, and one whose job was lost is recovered", async () => {
+  await setGuide({ status: "pending", errorCode: "NO_PAYER" }, 20 * MINUTE);
+  assert.equal((await service.resumePausedGuides()).queued, 1);
+  assert.equal(enqueue.mock.calls[0]?.[0].initiatorUserId, null);
+
+  await schema.db
+    .update(schema.sourceGuides)
+    .set({
+      status: "generating",
+      errorCode: null,
+      updatedAt: new Date(Date.now() - 45 * MINUTE),
+    })
+    .where(eq(schema.sourceGuides.sourceId, sourceId));
+  assert.equal((await service.resumePausedGuides()).queued, 1);
+  assert.equal((await guide())?.errorCode, null);
+});
+
+test("ready, failed and recently running guides are never resumed", async () => {
+  await setGuide({ status: "failed", errorCode: "MODEL" }, 120 * MINUTE);
+  assert.equal((await service.resumePausedGuides()).queued, 0);
+
+  await schema.db
+    .update(schema.sourceGuides)
+    .set({ status: "generating", errorCode: null, updatedAt: new Date() })
+    .where(eq(schema.sourceGuides.sourceId, sourceId));
+  assert.equal((await service.resumePausedGuides()).queued, 0);
+});
+
+test("one source failing to queue does not stop the sweep", async () => {
+  await setGuide({ status: "pending", errorCode: "QUOTA" }, 20 * MINUTE);
+  enqueue.mockRejectedValueOnce(new Error("redis down"));
+
+  const result = await service.resumePausedGuides();
+
+  assert.equal(result.queued, 0);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp, Copy, Loader2, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ export function SourceGuideCard({
   workspaceId: string;
 }) {
   const t = useTranslations("dashboardSourcesHub");
+  const router = useRouter();
   const [guide, setGuide] = useState<SourceGuide | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [expanded, setExpanded] = useState(true);
@@ -93,6 +95,12 @@ export function SourceGuideCard({
     } catch {
       toast.error(t("sourceGuide.questionCopyFailed"));
     }
+  };
+
+  // Opens a new chat with this source selected and the question ready to send.
+  const askQuestion = (question: string) => {
+    const params = new URLSearchParams({ ask: question, ask_source: sourceId });
+    router.push(`/dashboard/chat?${params.toString()}`);
   };
 
   if (phase === "loading") return null;
@@ -206,16 +214,25 @@ export function SourceGuideCard({
             </div>
             <ul className="space-y-1">
               {guide.content.suggestedQuestions.map((question) => (
-                <li key={question}>
+                <li className="group flex items-start gap-1" key={question}>
                   <button
-                    className="group flex w-full items-start gap-2 rounded-lg px-2 py-1 text-left text-sm text-foreground hover:bg-muted/60"
-                    onClick={() => void copyQuestion(question)}
-                    title={t("sourceGuide.copyQuestion")}
+                    className="flex-1 rounded-lg px-2 py-1 text-left text-sm text-foreground hover:bg-muted/60"
+                    onClick={() => askQuestion(question)}
+                    title={t("sourceGuide.askQuestion")}
                     type="button"
                   >
-                    <span className="flex-1">{question}</span>
-                    <Copy className="mt-1 size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                    {question}
                   </button>
+                  <Button
+                    aria-label={t("sourceGuide.copyQuestion")}
+                    className="mt-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                    onClick={() => void copyQuestion(question)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Copy className="size-3.5" />
+                  </Button>
                 </li>
               ))}
             </ul>
