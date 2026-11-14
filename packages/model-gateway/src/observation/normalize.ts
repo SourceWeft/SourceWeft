@@ -45,7 +45,7 @@ function sanitizeTokenField(
   }
 }
 
-function finalizeUsage(
+export function finalizeUsage(
   usage: UsageInfo | undefined,
   diagnostics: ModelCallDiagnostic[],
 ) {
@@ -67,9 +67,18 @@ function finalizeUsage(
     "inputAudioTokens",
     "outputAudioTokens",
     "inputCharacters",
-    "inputAudioSeconds",
   ] as const) {
     sanitizeTokenField(finalized, field, diagnostics);
+  }
+  // A duration, not a count: any non-negative finite number is valid.
+  const seconds = finalized.inputAudioSeconds;
+  if (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0)) {
+    delete finalized.inputAudioSeconds;
+    diagnostics.push({
+      code: "INVALID_USAGE_FIELD",
+      field: "inputAudioSeconds",
+      message: `Discarded invalid inputAudioSeconds value '${String(seconds)}'`,
+    });
   }
 
   if (
