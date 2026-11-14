@@ -46,6 +46,15 @@ const ALLOWED_PREFIX = join("shared", "model-gateway") + sep;
  */
 const EXEMPTIONS: { file: string; reason: string }[] = [
   {
+    file: join("scripts", "smoke-deepseek-app-apis.ts"),
+    reason:
+      "Manual smoke tool, run by hand against an operator-supplied " +
+      "DEEPSEEK_API_KEY to verify DeepSeek TTS and ASR end to end (format " +
+      "conversion, chunking). It serves no user traffic and spends the " +
+      "operator's own balance on purpose; wrapping it in " +
+      "withBilledModelGateway would charge a billing scope for a probe.",
+  },
+  {
     file: join("scripts", "smoke-orcarouter-observation.ts"),
     reason:
       "Manual smoke tool, run by hand against an operator-supplied " +
