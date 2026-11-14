@@ -427,6 +427,40 @@ html:lang(he) .font-brand {
   color: rgb(244 244 245);
 }
 
+.blog-content .blog-table {
+  overflow-x: auto;
+}
+
+.blog-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.blog-content th,
+.blog-content td {
+  border-bottom: 1px solid rgb(212 212 216);
+  padding: 0.625rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.blog-content thead th {
+  border-bottom-width: 2px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.blog-content tbody th {
+  font-weight: 600;
+}
+
+.dark .blog-content th,
+.dark .blog-content td {
+  border-bottom-color: rgb(255 255 255 / 12%);
+}
+
 .blog-content hr {
   border: 0;
   border-top: 1px solid rgb(212 212 216);
