@@ -262,6 +262,9 @@ export default async function PublicMcpMarketPage({
   const itemListJsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
+    // The cards on this page are one slice; say how big the directory is so a
+    // crawler does not mistake the page size for the total.
+    ...(listView || facets.total <= 0 ? {} : { numberOfItems: facets.total }),
     itemListElement: uniqueItems(pageItems).map((item, index) => ({
       "@type": "ListItem",
       name: item.name,
