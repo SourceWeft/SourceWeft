@@ -10,6 +10,7 @@ import { DeepInfraEmbeddingsAdapter } from "./deepinfra-embeddings";
 import { DeepInfraImagesGenerationTransport } from "./deepinfra-images";
 import { DeepInfraRerankTransport } from "./deepinfra-rerank";
 import { DeepInfraTtsTransport } from "./deepinfra-tts";
+import { DeepSeekAsrTransport } from "./deepseek-asr";
 import { DeepSeekTtsTransport } from "./deepseek-tts";
 import { DeepSeekChatAdapter } from "./deepseek-chat";
 import { GeminiEmbeddingsAdapter } from "./gemini-embeddings";
@@ -55,6 +56,7 @@ const deepInfraRerank = new DeepInfraRerankTransport();
 const deepInfraAsr = new DeepInfraAsrTransport();
 const deepInfraTts = new DeepInfraTtsTransport();
 const deepSeekTts = new DeepSeekTtsTransport();
+const deepSeekAsr = new DeepSeekAsrTransport();
 const siliconflowCNChat = new SiliconflowCNChatAdapter();
 const siliconflowCNEmbeddings = new SiliconflowCNEmbeddingsAdapter();
 const siliconflowCNRerank = new SiliconflowCNRerankTransport();
@@ -96,6 +98,7 @@ const asrTransports = new Map<ProviderKind, AsrTransport>([
   ["openai-compatible", openAICompatibleAsr],
   ["deepinfra", deepInfraAsr],
   ["siliconflow-cn", siliconflowCNAsr],
+  ["deepseek", deepSeekAsr],
   ["openai", openAICompatibleAsr],
 ]);
 

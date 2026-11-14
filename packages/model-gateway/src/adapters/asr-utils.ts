@@ -93,6 +93,17 @@ function isExplicitMimeConflict(input: {
   );
 }
 
+/** The format a file claims to be, from its name or else its MIME type. */
+export function guessAsrAudioFormat(input: {
+  fileName: string;
+  mimeType?: string;
+}) {
+  return (
+    extensionFromFileName(input.fileName) ??
+    extensionsFromMimeType(input.mimeType)?.[0]
+  );
+}
+
 export function resolveAsrAudioFormat(input: {
   fileName: string;
   mimeType?: string;

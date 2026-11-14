@@ -77,6 +77,14 @@ export { createDeepInfraProvider } from "./providers/deepinfra";
 export { createSiliconflowCNProvider } from "./providers/siliconflow-cn";
 
 export type {
+  AsrAudioPreparer,
+  AsrAudioSource,
+  AsrLimits,
+  AsrSilence,
+  NormalizedAsrAudio,
+} from "./asr/types";
+
+export type {
   AsrAudioInput,
   AsrResponseFormat,
   AsrSegment,

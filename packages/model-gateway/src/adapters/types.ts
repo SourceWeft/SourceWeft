@@ -1,3 +1,4 @@
+import type { AsrLimits } from "../asr/types";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type {
@@ -62,7 +63,8 @@ export interface RerankTransport {
 
 export interface AsrTransport {
   readonly kind: ProviderKind;
-  readonly supportedAudioFormats: readonly string[];
+  /** What this provider takes in one request, for the given target. */
+  limits(target: ResolvedRequestTarget): AsrLimits;
 
   execute(input: {
     target: ResolvedRequestTarget;

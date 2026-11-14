@@ -95,6 +95,9 @@ COPY --from=pruner /app/out/pnpm-lock.yaml .
 RUN apk add --no-cache --virtual .runtime-build-deps make g++ python3 \
   && pnpm install --filter @sourceweft/backend... --frozen-lockfile --prod=false \
   && apk del .runtime-build-deps
+# ffmpeg decodes uploaded audio for ASR providers that only take short PCM
+# requests or have size caps (apps/backend/src/shared/asr-audio-preparer.ts).
+RUN apk add --no-cache ffmpeg
 RUN addgroup -S sourceweft \
   && adduser -S sourceweft -G sourceweft
 
