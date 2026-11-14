@@ -252,6 +252,9 @@ export default async function PublicSkillsMarketPage({
   const itemListJsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
+    // The cards on this page are one slice; say how big the directory is so a
+    // crawler does not mistake the page size for the total.
+    ...(listView || total <= 0 ? {} : { numberOfItems: total }),
     itemListElement: uniqueSkills(pageSkills).map((skill, index) => ({
       "@type": "ListItem",
       name: skill.displayName,

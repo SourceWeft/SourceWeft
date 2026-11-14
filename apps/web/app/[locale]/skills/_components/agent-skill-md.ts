@@ -288,13 +288,27 @@ export function llmsText(siteUrl: string): string {
   const site = siteUrl.replace(/\/+$/, "");
   return `# SourceWeft
 
-> SourceWeft is an AI notebook workspace. Its public skills directory indexes agent skills from GitHub repositories, pinned to the commit they were scanned at.
+> SourceWeft is an AI notebook workspace: chat with your files and sources, run agents, and connect tools through MCP. It also runs two public directories, one of MCP servers and one of agent skills indexed from GitHub repositories (pinned to the commit they were scanned at), each with install guides.
 
-## Skills
+## Product
+
+- [Home](${site}/): what SourceWeft does.
+- [Pricing](${site}/#pricing): Free, Pro and Team plans.
+- [Download](${site}/download): the desktop app.
+- [Changelog](${site}/changelog): what changed and when.
+- [About](${site}/about)
+
+## Directories
+
+The directory pages show one page of results at a time; each page states the directory's total size.
+
+- [MCP server directory](${site}/mcp): search MCP servers, with their tools, authentication and connect guides.
+- [Skills directory](${site}/skills): the directory for people.
+
+## For agents
 
 - [Installing skills with the SourceWeft CLI](${site}/skills/SKILL.md): how an agent searches, inspects and installs skills from the directory. Read this instead of scraping skill pages.
 - One skill's install guide: \`${site}/skills/<slug>/install.md\`, for the skill whose page is \`${site}/skills/<slug>\`.
 - One MCP server's connect guide: \`${site}/mcp/<identifier>/install.md\`, for the server whose page is \`${site}/mcp/<identifier>\` (the identifier URL-encoded, so its \`/\` is \`%2F\`).
-- [Skills directory](${site}/skills): the directory for people.
 `;
 }
