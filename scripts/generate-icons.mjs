@@ -48,6 +48,8 @@ const TARGETS = {
   docsApp: join(ROOT, "apps/docs/app"),
   extPublic: join(ROOT, "apps/extension/public"),
   tauriIcons: join(ROOT, "apps/desktop/src-tauri/icons"),
+  // The page the desktop main window shows while the web app loads.
+  tauriStartup: join(ROOT, "apps/desktop/startup-dist"),
   mobileIcons: join(ROOT, "apps/mobile/src-tauri/icons"),
   iosIcons: join(
     ROOT,
@@ -340,6 +342,7 @@ async function main() {
     await genPNG(sharp, 512, join(TARGETS.tauriIcons, "icon.png"));
     await genICO(sharp, join(TARGETS.tauriIcons, "icon.ico"));
     await genICNS(sharp, TARGETS.tauriIcons);
+    genSquareSVG(join(TARGETS.tauriStartup, "icon.svg"), BROWSER_ICON_OPTIONS.svgPath);
   }
 
   if (shouldGenerate("mobile")) {
