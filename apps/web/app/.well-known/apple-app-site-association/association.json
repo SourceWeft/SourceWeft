@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["PBML833M58.nicelab.sourceweft.mobile"],
+        "components": [{ "/": "/dashboard" }, { "/": "/dashboard/*" }]
+      }
+    ]
+  }
+}

@@ -20,23 +20,6 @@
 	<string>0.1.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>localhost</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSIncludesSubdomains</key>
-				<true/>
-			</dict>
-		</dict>
-	</dict>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>SourceWeft connects to your local development server while running debug builds.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -57,5 +40,17 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>CFBundleDisplayName</key>
+	<string>SourceWeft</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>SourceWeft uses the camera when you take a photo to attach to a chat or to use as a profile picture.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SourceWeft uses the microphone when you dictate a message with voice input.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>SourceWeft saves an image to your photo library when you choose to save it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>SourceWeft uses speech recognition to turn your voice input into text.</string>
 </dict>
 </plist>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>SourceWeft</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>SourceWeft uses the camera when you take a photo to attach to a chat or to use as a profile picture.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SourceWeft uses the microphone when you dictate a message with voice input.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>SourceWeft saves an image to your photo library when you choose to save it.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>SourceWeft uses speech recognition to turn your voice input into text.</string>
+</dict>
+</plist>

@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "iOS": {
+      "infoPlist": "Info.ios.dev.plist"
+    }
+  }
+}
