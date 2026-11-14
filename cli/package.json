@@ -11,6 +11,7 @@
     "cursor",
     "cli"
   ],
+  "homepage": "https://sourceweft.com/skills",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/SourceWeft/SourceWeft.git",
