@@ -9,6 +9,7 @@ import {
   listSourceStatusesRequestSchema,
   listSourceMentionsRequestSchema,
   reparseSourceRequestSchema,
+  sourceDiscoveryRequestSchema,
   retrySourceRequestSchema,
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";
@@ -16,6 +17,11 @@ import {
   getSourceGuide,
   requestManualGuide,
 } from "../../../modules/sources/guide-service";
+import {
+  discoverSources,
+  isSourceDiscoveryAvailable,
+} from "../../../modules/sources/discovery/service";
+import { billingRuntime as billingService } from "../../../billing-host/bindings";
 import {
   contentSourceService,
   sourceIndexingService,
@@ -303,6 +309,44 @@ export function registerSourceRoutes(app: Hono) {
       sourceId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
     });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/source-discovery", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    return ApiResponse.success(c, {
+      available: await isSourceDiscoveryAvailable(),
+    });
+  });
+
+  app.post("/source-discovery", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = sourceDiscoveryRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await discoverSources(
+      {
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        userId: getSessionUserId(session),
+        topic: parsed.data.topic,
+        requestId: crypto.randomUUID(),
+      },
+      { billing: billingService },
+    );
 
     return ApiResponse.success(c, result);
   });

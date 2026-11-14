@@ -45,3 +45,5 @@ export type {
   RoutedGatewayConfig,
   RuntimeModelGatewayProfile,
 } from "./types";
+
+export { completeStructuredWithDefaultChat } from "./default-chat-structured";
