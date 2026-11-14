@@ -2,16 +2,25 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronUp, Copy, Loader2, Sparkles } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Loader2,
+  PanelRightClose,
+  Sparkles,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { SourceGuide } from "@sourceweft/contracts/sources";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { contentClient } from "../../../../lib/sdk";
+import { BREAKPOINTS, useMediaQuery } from "../../../../lib/use-media-query";
 
 const POLL_INTERVAL_MS = 4_000;
 const MAX_POLLS = 40;
+const RAIL_PREFERENCE_KEY = "sourceweft:source-guide-expanded";
 
 type Phase = "loading" | "ready" | "error";
 
@@ -19,19 +28,28 @@ type Phase = "loading" | "ready" | "error";
  * The guide of one source: summary, main topics and suggested questions. A
  * guide that is waiting, failed or out of date says why and offers the one
  * action that moves it forward; generating it is charged to whoever asks.
+ *
+ * On a wide screen the guide is a rail beside the source, open unless the
+ * reader closed it; that choice is remembered. On a narrow screen, and in a
+ * view that needs the width (`collapsedByDefault`), it starts as one line and
+ * opens on request without changing the remembered choice.
  */
 export function SourceGuideCard({
   sourceId,
   workspaceId,
+  collapsedByDefault = false,
 }: {
   sourceId: string;
   workspaceId: string;
+  collapsedByDefault?: boolean;
 }) {
   const t = useTranslations("dashboardSourcesHub");
   const router = useRouter();
   const [guide, setGuide] = useState<SourceGuide | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
-  const [expanded, setExpanded] = useState(true);
+  const isWide = useMediaQuery(BREAKPOINTS.lg);
+  const [railPreference, setRailPreference] = useState(true);
+  const [openedHere, setOpenedHere] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [pollCount, setPollCount] = useState(0);
 
@@ -54,6 +72,30 @@ export function SourceGuideCard({
       cancelled = true;
     };
   }, [sourceId, workspaceId]);
+
+  useEffect(() => {
+    try {
+      setRailPreference(localStorage.getItem(RAIL_PREFERENCE_KEY) !== "false");
+    } catch {
+      /* Storage can be unavailable in a private WebView. */
+    }
+  }, []);
+
+  const followsPreference = isWide && !collapsedByDefault;
+  const expanded = followsPreference ? railPreference : openedHere;
+  const toggle = () => {
+    if (!followsPreference) {
+      setOpenedHere((value) => !value);
+      return;
+    }
+    const next = !railPreference;
+    setRailPreference(next);
+    try {
+      localStorage.setItem(RAIL_PREFERENCE_KEY, String(next));
+    } catch {
+      /* Keep the in-memory preference. */
+    }
+  };
 
   // Waiting on the worker: poll until it finishes, then stop.
   const inFlight =
@@ -142,13 +184,41 @@ export function SourceGuideCard({
     status = { text: t("sourceGuide.generating") };
   }
 
+  const toggleLabel = expanded
+    ? t("sourceGuide.collapse")
+    : t("sourceGuide.expand");
+
+  if (isWide && !expanded) {
+    return (
+      <section
+        aria-label={t("sourceGuide.title")}
+        className="flex shrink-0 justify-center border-l bg-muted/15 py-3 lg:order-last lg:w-11"
+        data-source-guide
+        data-state="collapsed"
+      >
+        <Button
+          aria-label={toggleLabel}
+          onClick={toggle}
+          size="icon-sm"
+          title={toggleLabel}
+          type="button"
+          variant="ghost"
+        >
+          <Sparkles className="size-4 text-primary" />
+        </Button>
+      </section>
+    );
+  }
+
   return (
     <section
-      className="shrink-0 border-b bg-muted/15 px-5 py-3 lg:px-8"
+      aria-label={t("sourceGuide.title")}
+      className="flex shrink-0 flex-col border-b bg-muted/15 px-5 py-3 lg:order-last lg:w-80 lg:border-b-0 lg:border-l lg:px-4"
       data-source-guide
+      data-state={expanded ? "expanded" : "collapsed"}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+      <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 text-sm font-medium text-foreground">
           <Sparkles className="size-4 text-primary" />
           {t("sourceGuide.title")}
           {inFlight && guide?.content ? (
@@ -158,17 +228,33 @@ export function SourceGuideCard({
             </span>
           ) : null}
         </div>
-        {guide?.content ? (
+        {guide?.content && !expanded ? (
+          <button
+            className="min-w-0 flex-1 truncate text-left text-sm text-muted-foreground hover:text-foreground"
+            data-source-guide-preview
+            onClick={toggle}
+            title={toggleLabel}
+            type="button"
+          >
+            {guide.content.summary}
+          </button>
+        ) : (
+          <span className="flex-1" />
+        )}
+        {isWide || guide?.content ? (
           <Button
-            aria-label={
-              expanded ? t("sourceGuide.collapse") : t("sourceGuide.expand")
-            }
-            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            aria-label={toggleLabel}
+            className="shrink-0"
+            onClick={toggle}
             size="icon-xs"
+            title={toggleLabel}
             type="button"
             variant="ghost"
           >
-            {expanded ? (
+            {isWide ? (
+              <PanelRightClose className="size-4" />
+            ) : expanded ? (
               <ChevronUp className="size-4" />
             ) : (
               <ChevronDown className="size-4" />
@@ -178,7 +264,7 @@ export function SourceGuideCard({
       </div>
 
       {status ? (
-        <div className="mt-2 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-muted-foreground">
           <span className="flex items-center gap-2">
             {guide && inFlight ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -190,24 +276,10 @@ export function SourceGuideCard({
       ) : null}
 
       {guide?.content && expanded ? (
-        <div className="mt-2 max-h-[45vh] space-y-3 overflow-auto pr-1">
-          <p className="text-sm leading-6 text-foreground">
+        <div className="mt-2 max-h-[40vh] space-y-3 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
+          <p className="text-sm leading-6 text-foreground lg:text-[13px] lg:leading-5">
             {guide.content.summary}
           </p>
-          {guide.content.topics.length > 0 ? (
-            <div>
-              <div className="mb-1 text-xs font-medium text-muted-foreground">
-                {t("sourceGuide.topics")}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {guide.content.topics.map((topic) => (
-                  <Badge key={topic} variant="secondary">
-                    {topic}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          ) : null}
           <div>
             <div className="mb-1 text-xs font-medium text-muted-foreground">
               {t("sourceGuide.questions")}
@@ -216,7 +288,7 @@ export function SourceGuideCard({
               {guide.content.suggestedQuestions.map((question) => (
                 <li className="group flex items-start gap-1" key={question}>
                   <button
-                    className="flex-1 rounded-lg px-2 py-1 text-left text-sm text-foreground hover:bg-muted/60"
+                    className="-ml-2 flex-1 rounded-lg px-2 py-1 text-left text-sm text-foreground hover:bg-muted/60"
                     onClick={() => askQuestion(question)}
                     title={t("sourceGuide.askQuestion")}
                     type="button"
@@ -237,8 +309,26 @@ export function SourceGuideCard({
               ))}
             </ul>
           </div>
+          {guide.content.topics.length > 0 ? (
+            <div>
+              <div className="mb-1 text-xs font-medium text-muted-foreground">
+                {t("sourceGuide.topics")}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {guide.content.topics.map((topic) => (
+                  <Badge
+                    className="h-auto max-w-full justify-start text-left whitespace-normal"
+                    key={topic}
+                    variant="secondary"
+                  >
+                    {topic}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {guide.stale ? (
-            <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-xs text-muted-foreground">
               <span>{t("sourceGuide.stale")}</span>
               {action(t("sourceGuide.regenerate"))}
             </div>
