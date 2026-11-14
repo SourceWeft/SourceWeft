@@ -3574,7 +3574,69 @@
       }
     }
   },
+  "dashboardBlogAdmin": {
+    "eyebrow": "博客 · 管理",
+    "heading": "博客文章",
+    "description": "导入 Markdown 文章，预览每个语言版本，并决定哪些公开。",
+    "refresh": "重新加载列表",
+    "search": "搜索文章",
+    "searchPlaceholder": "what-is-mcp",
+    "statusFilter": "按状态筛选",
+    "loading": "正在加载文章…",
+    "loadFailed": "无法加载文章，请重试。",
+    "empty": "还没有文章。导入 Markdown 文件来添加第一篇。",
+    "noMatches": "没有符合搜索条件的文章。",
+    "never": "尚未",
+    "previewFailed": "无法加载这篇文章，请重试。",
+    "statusFailed": "无法更改状态，请重试。",
+    "filter": {
+      "all": "全部状态",
+      "published": "已发布",
+      "draft": "草稿",
+      "archived": "已归档",
+      "hidden": "已隐藏"
+    },
+    "visibility": {
+      "published": "已发布",
+      "draft": "草稿",
+      "archived": "已归档",
+      "hidden": "已隐藏"
+    },
+    "source": {
+      "markdown": "Markdown 导入",
+      "notion": "Notion 同步"
+    },
+    "import": {
+      "button": "导入 Markdown",
+      "failed": "无法导入这些文件，请重试。",
+      "refused": "没有导入任何内容。请修正这些文件后重新上传。",
+      "done": "已导入 {count} 个文件：新增 {created} 个，更新 {updated} 个。",
+      "doneHint": "新文章在你发布之前都是草稿。更新的文章保持原来的状态。"
+    },
+    "detail": {
+      "label": "文章详情",
+      "viewLive": "在网站上查看",
+      "publish": "发布",
+      "unpublish": "取消发布",
+      "archive": "归档",
+      "status": "状态",
+      "address": "网址",
+      "published": "发布时间",
+      "imported": "上次导入",
+      "source": "来源",
+      "readingTime": "阅读时间",
+      "minutes": "约 {count} 分钟",
+      "excerpt": "摘要",
+      "preview": "预览",
+      "loadingPreview": "正在加载预览…"
+    }
+  },
   "dashboardAdmin": {
+    "nav": {
+      "label": "管理分区",
+      "market": "市场",
+      "blog": "博客"
+    },
     "checkingAccess": "正在检查管理权限…",
     "accessCheckFailed": "无法检查管理权限，请重试。",
     "retryAccessCheck": "重试",

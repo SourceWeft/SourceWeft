@@ -106,3 +106,16 @@ test("keeps content hidden on a check failure and retries on request", async () 
   expect(audit.getSkillMarketAdminMe).toHaveBeenCalledTimes(2);
   expect(container.textContent).toContain("Private admin content");
 });
+
+test("an admin sees the section navigation with the current section marked", async () => {
+  audit.getSkillMarketAdminMe.mockResolvedValue({ isMarketAdmin: true });
+  await render();
+  const links = [...container.querySelectorAll("nav a")];
+  expect(links.map((link) => link.textContent)).toEqual(["Market", "Blog"]);
+  expect(links.map((link) => link.getAttribute("href"))).toEqual([
+    "/dashboard/admin/market",
+    "/dashboard/admin/blog",
+  ]);
+  expect(links[0]?.getAttribute("aria-current")).toBe("page");
+  expect(links[1]?.getAttribute("aria-current")).toBeNull();
+});

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -8,6 +9,11 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 
 import { authClient } from "../../../lib/auth-client";
 import { getSkillMarketAdminMe } from "../../../lib/skill-market-audit";
+
+const ADMIN_SECTIONS = [
+  { key: "market", href: "/dashboard/admin/market" },
+  { key: "blog", href: "/dashboard/admin/blog" },
+] as const;
 
 type AccessState = {
   userId: string;
@@ -68,7 +74,37 @@ export default function AdminLayout({
     access?.userId === userId &&
     access?.pathname === pathname
   ) {
-    if (access.status === "allowed") return <>{children}</>;
+    if (access.status === "allowed") {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <nav
+            aria-label={t("nav.label")}
+            className="flex shrink-0 gap-1 border-b border-border px-6 py-2"
+          >
+            {ADMIN_SECTIONS.map((section) => (
+              <Button
+                asChild
+                key={section.href}
+                size="sm"
+                variant={
+                  pathname.startsWith(section.href) ? "secondary" : "ghost"
+                }
+              >
+                <Link
+                  aria-current={
+                    pathname.startsWith(section.href) ? "page" : undefined
+                  }
+                  href={section.href}
+                >
+                  {t(`nav.${section.key}`)}
+                </Link>
+              </Button>
+            ))}
+          </nav>
+          {children}
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
         <p className="text-sm text-destructive">{t("accessCheckFailed")}</p>

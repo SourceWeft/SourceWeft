@@ -15,6 +15,7 @@ export * from "./skills";
 export * from "./skill-claims";
 export * from "./mcp-claims";
 export * from "./skill-market-events";
+export * from "./blog-admin";
 export * from "./skill-reports";
 export * from "./skill-reviews";
 export * from "./skill-overviews";

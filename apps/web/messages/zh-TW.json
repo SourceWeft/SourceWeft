@@ -3574,7 +3574,69 @@
       }
     }
   },
+  "dashboardBlogAdmin": {
+    "eyebrow": "部落格 · 管理",
+    "heading": "部落格文章",
+    "description": "匯入 Markdown 文章，預覽每個語言版本，並決定哪些公開。",
+    "refresh": "重新載入列表",
+    "search": "搜尋文章",
+    "searchPlaceholder": "what-is-mcp",
+    "statusFilter": "按狀態篩選",
+    "loading": "正在載入文章…",
+    "loadFailed": "無法載入文章，請重試。",
+    "empty": "還沒有文章。匯入 Markdown 檔案來新增第一篇。",
+    "noMatches": "沒有符合搜尋條件的文章。",
+    "never": "尚未",
+    "previewFailed": "無法載入這篇文章，請重試。",
+    "statusFailed": "無法更改狀態，請重試。",
+    "filter": {
+      "all": "全部狀態",
+      "published": "已發布",
+      "draft": "草稿",
+      "archived": "已封存",
+      "hidden": "已隱藏"
+    },
+    "visibility": {
+      "published": "已發布",
+      "draft": "草稿",
+      "archived": "已封存",
+      "hidden": "已隱藏"
+    },
+    "source": {
+      "markdown": "Markdown 匯入",
+      "notion": "Notion 同步"
+    },
+    "import": {
+      "button": "匯入 Markdown",
+      "failed": "無法匯入這些檔案，請重試。",
+      "refused": "沒有匯入任何內容。請修正這些檔案後重新上傳。",
+      "done": "已匯入 {count} 個檔案：新增 {created} 個，更新 {updated} 個。",
+      "doneHint": "新文章在你發布之前都是草稿。更新的文章保持原來的狀態。"
+    },
+    "detail": {
+      "label": "文章詳細資訊",
+      "viewLive": "在網站上檢視",
+      "publish": "發布",
+      "unpublish": "取消發布",
+      "archive": "封存",
+      "status": "狀態",
+      "address": "網址",
+      "published": "發布時間",
+      "imported": "上次匯入",
+      "source": "來源",
+      "readingTime": "閱讀時間",
+      "minutes": "約 {count} 分鐘",
+      "excerpt": "摘要",
+      "preview": "預覽",
+      "loadingPreview": "正在載入預覽…"
+    }
+  },
   "dashboardAdmin": {
+    "nav": {
+      "label": "管理分區",
+      "market": "市場",
+      "blog": "部落格"
+    },
     "checkingAccess": "正在檢查管理權限…",
     "accessCheckFailed": "無法檢查管理權限，請重試。",
     "retryAccessCheck": "重試",

@@ -3574,7 +3574,69 @@
       }
     }
   },
+  "dashboardBlogAdmin": {
+    "eyebrow": "Blog · Admin",
+    "heading": "Blog articles",
+    "description": "Import Markdown articles, preview each language version, and decide which ones are public.",
+    "refresh": "Reload the list",
+    "search": "Search articles",
+    "searchPlaceholder": "what-is-mcp",
+    "statusFilter": "Filter by status",
+    "loading": "Loading articles…",
+    "loadFailed": "Could not load the articles. Try again.",
+    "empty": "No articles yet. Import Markdown files to add the first one.",
+    "noMatches": "No articles match this search.",
+    "never": "Not yet",
+    "previewFailed": "Could not load this article. Try again.",
+    "statusFailed": "Could not change the status. Try again.",
+    "filter": {
+      "all": "All statuses",
+      "published": "Published",
+      "draft": "Draft",
+      "archived": "Archived",
+      "hidden": "Hidden"
+    },
+    "visibility": {
+      "published": "Published",
+      "draft": "Draft",
+      "archived": "Archived",
+      "hidden": "Hidden"
+    },
+    "source": {
+      "markdown": "Markdown import",
+      "notion": "Notion sync"
+    },
+    "import": {
+      "button": "Import Markdown",
+      "failed": "Could not import the files. Try again.",
+      "refused": "Nothing was imported. Fix these files and upload them again.",
+      "done": "{count, plural, one {Imported # file} other {Imported # files}}: {created} new, {updated} updated.",
+      "doneHint": "New articles are drafts until you publish them. Updated articles keep their current status."
+    },
+    "detail": {
+      "label": "Article details",
+      "viewLive": "View on site",
+      "publish": "Publish",
+      "unpublish": "Unpublish",
+      "archive": "Archive",
+      "status": "Status",
+      "address": "Address",
+      "published": "Published",
+      "imported": "Last imported",
+      "source": "Source",
+      "readingTime": "Reading time",
+      "minutes": "{count, plural, one {About # minute} other {About # minutes}}",
+      "excerpt": "Excerpt",
+      "preview": "Preview",
+      "loadingPreview": "Loading preview…"
+    }
+  },
   "dashboardAdmin": {
+    "nav": {
+      "label": "Admin sections",
+      "market": "Market",
+      "blog": "Blog"
+    },
     "checkingAccess": "Checking admin access…",
     "accessCheckFailed": "Could not check admin access. Please try again.",
     "retryAccessCheck": "Try again",
