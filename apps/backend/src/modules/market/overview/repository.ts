@@ -305,10 +305,30 @@ export type McpOverviewCandidateRow = {
 };
 
 /**
+ * How long a new version of a server that already has an overview waits
+ * before its own is written (Issue #510). Upstream registries often publish
+ * several versions of a server within hours; waiting describes only the one
+ * that stays, and the catalog shows the previous version's overview
+ * meanwhile (`readMcpOverviews`). A server's first overview never waits.
+ */
+export const MCP_OVERVIEW_SETTLE_HOURS = 24;
+
+/** An earlier version of `v`'s server has overview rows. */
+const describedEarlier = sql`exists (
+  select 1 from ${mcpServerVersions} pv
+  join ${mcpServerVersionOverviews} po on po.mcp_server_version_id = pv.id
+  where pv.server_id = v.server_id
+    and pv.id <> v.id
+    and pv.created_at < v.created_at
+)`;
+
+/**
  * Eligible versions with a settled README that were never analysed (no
  * analysis row), most wanted first: servers some workspace installed, then
  * ones that run on the web, then the rest; newest in the catalog first within
- * each. `serverIds` narrows the search (tests stay within their own rows).
+ * each. A version of a server described before is left out until it is
+ * `MCP_OVERVIEW_SETTLE_HOURS` old. `serverIds` narrows the search (tests
+ * stay within their own rows).
  */
 export async function findNewMcpOverviewCandidates(input: {
   limit: number;
@@ -328,6 +348,10 @@ export async function findNewMcpOverviewCandidates(input: {
       and not exists (
         select 1 from ${mcpServerVersionAnalysis} a
         where a.mcp_server_version_id = v.id
+      )
+      and (
+        v.created_at <= now() - make_interval(hours => ${MCP_OVERVIEW_SETTLE_HOURS})
+        or not ${describedEarlier}
       )
       ${serverFilter(input.serverIds)}
     order by "installed" desc, "webExecutable" desc,
@@ -419,21 +443,92 @@ function candidateRow<T extends McpOverviewCandidateRow>(
 // ---------------------------------------------------------------------------
 
 /**
+ * Which version's overview each version shows: its own, or — while it has
+ * none yet and its analysis is not settled (no request, or one pending or
+ * running) — the newest earlier published version of the same server with a
+ * visible overview. A version whose analysis settled (failed, or rows an
+ * admin hid) shows its own state, never an older overview.
+ */
+async function shownOverviewVersions(
+  versionIds: readonly string[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(versionIds)];
+  const shown = new Map(ids.map((id) => [id, id]));
+  if (ids.length === 0) return shown;
+  const result = await db.execute<{ versionId: string; shownId: string }>(sql`
+    select v.id as "versionId", (
+      select pv.id from ${mcpServerVersions} pv
+      where pv.server_id = v.server_id
+        and pv.status = 'published'
+        and pv.created_at < v.created_at
+        and exists (
+          select 1 from ${mcpServerVersionOverviews} po
+          where po.mcp_server_version_id = pv.id and not po.hidden
+        )
+      order by pv.created_at desc
+      limit 1
+    ) as "shownId"
+    from ${mcpServerVersions} v
+    left join ${mcpServerVersionAnalysis} a on a.mcp_server_version_id = v.id
+    where v.id in (${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+      and (a.status is null or a.status in ('pending', 'running'))
+      and not exists (
+        select 1 from ${mcpServerVersionOverviews} o
+        where o.mcp_server_version_id = v.id
+      )
+  `);
+  for (const row of result.rows) {
+    if (row.shownId) shown.set(row.versionId, row.shownId);
+  }
+  return shown;
+}
+
+/** `read`'s entries under the versions that show them. */
+function underShownVersions<T>(
+  shown: Map<string, string>,
+  read: Map<string, T>,
+): Map<string, T> {
+  const result = new Map<string, T>();
+  for (const [versionId, shownId] of shown) {
+    const value = read.get(shownId);
+    if (value !== undefined) result.set(versionId, value);
+  }
+  return result;
+}
+
+/**
  * Each version's visible overview in `locale`, or in English when that one
- * is missing or hidden; versions with neither are absent from the map.
+ * is missing or hidden; versions with neither are absent from the map. A
+ * version still waiting for its own shows the previous one's
+ * (`shownOverviewVersions`).
  */
 export async function readMcpOverviews(input: {
   versionIds: readonly string[];
   locale: CatalogOverviewLocale;
 }): Promise<Map<string, CatalogOverviewRead>> {
-  return mcpOverviewRepository.readOverviews(input);
+  const shown = await shownOverviewVersions(input.versionIds);
+  const read = await mcpOverviewRepository.readOverviews({
+    versionIds: [...new Set(shown.values())],
+    locale: input.locale,
+  });
+  return underShownVersions(shown, read);
 }
 
-/** Actual visible translations, never the English fallback; one query per batch. */
+/**
+ * Actual visible translations, never the English fallback, of the overview
+ * each version shows; one query per batch.
+ */
 export async function readMcpOverviewLocales(
   versionIds: readonly string[],
 ): Promise<Map<string, CatalogOverviewLocale[]>> {
-  return mcpOverviewRepository.readOverviewLocales(versionIds);
+  const shown = await shownOverviewVersions(versionIds);
+  const read = await mcpOverviewRepository.readOverviewLocales([
+    ...new Set(shown.values()),
+  ]);
+  return underShownVersions(shown, read);
 }
 
 // ---------------------------------------------------------------------------
