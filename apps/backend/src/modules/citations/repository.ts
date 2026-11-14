@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { chunks, citations, db, sources, threads } from "@sourceweft/db";
 import { logger } from "../../shared/logger";
 import { anchorCitations, type CitationAnchor } from "./anchoring";
+import { serializeDiagnostics } from "./anchoring-diagnostics";
 
 async function loadChunkContents(input: {
   teamId: string;
@@ -65,6 +66,16 @@ export async function anchorAnswerCitations(input: {
       embedTexts: input.embedTexts,
       // The by-meaning pass only improves on the word matcher, so its failure
       // keeps the word-matched result and is logged, never raised.
+      // One line per answer, counts only: the numbers the by-meaning pass is
+      // calibrated and monitored with. It never carries claim or passage text.
+      onSummary: (summary) => {
+        if (summary.citations > 0) {
+          logger.info("citation.anchoring.summary", {
+            threadId: input.threadId,
+            ...summary,
+          });
+        }
+      },
       onSemanticError: (error) =>
         logger.warn(
           "Cross-language citation anchoring failed; keeping the word-matched result",
@@ -138,6 +149,9 @@ export async function createCitationRecords(input: {
             ? {
                 support: anchor.support,
                 supportScore: Number(anchor.score.toFixed(3)),
+                ...(anchor.diagnostics
+                  ? { anchoring: serializeDiagnostics(anchor.diagnostics) }
+                  : {}),
               }
             : {}),
           referenceKey: citation.referenceKey,

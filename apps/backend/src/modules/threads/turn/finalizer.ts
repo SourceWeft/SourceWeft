@@ -2,6 +2,7 @@ import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
 import { workspaceService } from "../../workspace";
 import {
   anchorAnswerCitations,
+  citationAnchoringScopeId,
   createCitationEmbedder,
   createCitationRecords,
   replaceCitationRecords,
@@ -208,7 +209,9 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       workspaceId: prepared.workspace.id,
       userId: prepared.userId,
       threadId: prepared.thread.id,
-      scopeId: `${input.assistantMessageId ?? prepared.userMessage.id}:citation-anchoring`,
+      scopeId: citationAnchoringScopeId(
+        input.assistantMessageId ?? prepared.userMessage.id,
+      ),
     }),
   });
   // The message metadata is what the chat UI reads, so the supporting

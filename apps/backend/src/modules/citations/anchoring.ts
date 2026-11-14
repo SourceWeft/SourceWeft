@@ -8,7 +8,13 @@
  * any markup it contains.
  */
 
+import type {
+  AnchorDiagnostics,
+  AnchoringSummary,
+  SemanticDiagnostics,
+} from "./anchoring-diagnostics";
 import {
+  anchoringScripts,
   directionsConflict,
   needsSemanticPass,
   pickSemanticAnchor,
@@ -27,6 +33,8 @@ export type CitationAnchor = {
   startChar: number | null;
   endChar: number | null;
   quoteText: string | null;
+  /** How the anchor was decided: numbers and enums only, never text. */
+  diagnostics?: AnchorDiagnostics;
 };
 
 /** Below this the claim carries too little signal to verify (e.g. "Yes"). */
@@ -201,6 +209,11 @@ export function anchorClaimInContent(input: {
 }): CitationAnchor | null {
   const claim = featureWeights(input.claim);
   const claimWeight = weighted(claim);
+  const diagnostics = (lexicalScore: number): AnchorDiagnostics => ({
+    method: "lexical",
+    scripts: anchoringScripts(input.claim, input.content),
+    lexicalScore,
+  });
   if (claimWeight < MIN_CLAIM_WEIGHT || !input.content) {
     return {
       support: "weak",
@@ -208,6 +221,7 @@ export function anchorClaimInContent(input: {
       startChar: null,
       endChar: null,
       quoteText: null,
+      diagnostics: diagnostics(0),
     };
   }
 
@@ -261,6 +275,7 @@ export function anchorClaimInContent(input: {
       startChar: null,
       endChar: null,
       quoteText: null,
+      diagnostics: diagnostics(best?.score ?? 0),
     };
   }
   return {
@@ -269,6 +284,7 @@ export function anchorClaimInContent(input: {
     startChar: best.start,
     endChar: best.end,
     quoteText: input.content.slice(best.start, best.end),
+    diagnostics: diagnostics(best.score),
   };
 }
 
@@ -298,6 +314,8 @@ export async function anchorCitations(input: {
   embedTexts?: (texts: string[]) => Promise<number[][]>;
   /** Told when the second pass fails; the word-matched anchors are kept. */
   onSemanticError?: (error: unknown) => void;
+  /** Receives the answer's counts once, for the structured log line. */
+  onSummary?: (summary: AnchoringSummary) => void;
 }) {
   const claims = extractCitedClaims(input.text);
   const used = input.citations.filter((citation) =>
@@ -333,16 +351,53 @@ export async function anchorCitations(input: {
     if (best) contents.set(citation.citation, content);
   }
 
-  if (input.embedTexts) {
-    await applySemanticPass({
-      anchors,
-      claims,
-      contents,
-      embedTexts: input.embedTexts,
-      onError: input.onSemanticError,
-    });
-  }
+  const lexicalStrong = [...anchors.values()].filter(
+    (anchor) => anchor.support === "strong",
+  ).length;
+  const semantic = input.embedTexts
+    ? await applySemanticPass({
+        anchors,
+        claims,
+        contents,
+        embedTexts: input.embedTexts,
+        onError: input.onSemanticError,
+      })
+    : emptySemanticSummary();
+  input.onSummary?.({
+    citations: anchors.size,
+    lexicalStrong,
+    ...semantic,
+  });
   return anchors;
+}
+
+function emptySemanticSummary() {
+  return {
+    sentToSemantic: 0,
+    semanticStrong: 0,
+    overBudget: 0,
+    embeddedTexts: 0,
+    embeddedCharacters: 0,
+    boundsHit: false,
+    embeddingMs: null,
+    embeddingFailed: false,
+  } satisfies Omit<AnchoringSummary, "citations" | "lexicalStrong">;
+}
+
+/** The anchor, still as the word matcher judged it, plus the by-meaning record. */
+function withSemanticRecord(
+  anchor: CitationAnchor,
+  semantic: SemanticDiagnostics,
+): CitationAnchor {
+  const base = anchor.diagnostics ?? {
+    method: "lexical" as const,
+    scripts: "same" as const,
+    lexicalScore: anchor.score,
+  };
+  return {
+    ...anchor,
+    diagnostics: { ...base, method: "semantic", semantic },
+  };
 }
 
 const SEMANTIC_MAX_CLAIMS_PER_CITATION = 3;
@@ -360,6 +415,8 @@ async function applySemanticPass(input: {
   embedTexts: (texts: string[]) => Promise<number[][]>;
   onError?: (error: unknown) => void;
 }) {
+  const summary: Omit<AnchoringSummary, "citations" | "lexicalStrong"> =
+    emptySemanticSummary();
   type Job = {
     key: string;
     content: string;
@@ -402,6 +459,17 @@ async function applySemanticPass(input: {
       texts.length + cost > SEMANTIC_MAX_TEXTS ||
       characters + size > SEMANTIC_MAX_CHARS
     ) {
+      summary.overBudget += 1;
+      summary.boundsHit = true;
+      input.anchors.set(
+        key,
+        withSemanticRecord(anchor, {
+          similarity: null,
+          margin: null,
+          segments: segments.length,
+          outcome: "over_budget",
+        }),
+      );
       continue;
     }
     characters += size;
@@ -415,19 +483,37 @@ async function applySemanticPass(input: {
       })),
     });
   }
-  if (jobs.length === 0) return;
+  if (jobs.length === 0) return summary;
 
+  summary.sentToSemantic = jobs.length;
+  summary.embeddedTexts = texts.length;
+  summary.embeddedCharacters = characters;
   let vectors: number[][];
+  const started = Date.now();
   try {
     vectors = await input.embedTexts(texts);
+    summary.embeddingMs = Date.now() - started;
     if (vectors.length !== texts.length) {
       throw new Error(
         "The embedding call returned the wrong number of vectors",
       );
     }
   } catch (error) {
+    summary.embeddingMs ??= Date.now() - started;
+    summary.embeddingFailed = true;
+    for (const job of jobs) {
+      input.anchors.set(
+        job.key,
+        withSemanticRecord(input.anchors.get(job.key)!, {
+          similarity: null,
+          margin: null,
+          segments: job.segments.length,
+          outcome: "embedding_failed",
+        }),
+      );
+    }
     input.onError?.(error);
-    return;
+    return summary;
   }
 
   for (const job of jobs) {
@@ -437,16 +523,45 @@ async function applySemanticPass(input: {
       text: segment.text,
       vector: vectors[segment.index]!,
     }));
-    let best: CitationAnchor | null = null;
-    for (const claim of job.claims) {
-      const anchor = pickSemanticAnchor({
+    const lexical = input.anchors.get(job.key)!;
+    const picked = job.claims.map((claim) =>
+      pickSemanticAnchor({
         claim: claim.text,
         claimVector: vectors[claim.index]!,
         content: job.content,
         segments,
-      });
-      if (anchor && (!best || anchor.score > best.score)) best = anchor;
+        lexicalScore: lexical.score,
+      }),
+    );
+    // The highest-scoring strong anchor replaces the word matcher's weak one.
+    let best: CitationAnchor | null = null;
+    for (const anchor of picked) {
+      if (
+        anchor.support === "strong" &&
+        (!best || anchor.score > best.score)
+      ) {
+        best = anchor;
+      }
     }
-    if (best) input.anchors.set(job.key, best);
+    if (best) {
+      input.anchors.set(job.key, best);
+      summary.semanticStrong += 1;
+      continue;
+    }
+    // Still weak: keep the word matcher's anchor and record the closest call.
+    let closest = picked[0]!;
+    for (const anchor of picked) {
+      if (
+        (anchor.diagnostics?.semantic?.similarity ?? -Infinity) >
+        (closest.diagnostics?.semantic?.similarity ?? -Infinity)
+      ) {
+        closest = anchor;
+      }
+    }
+    input.anchors.set(
+      job.key,
+      withSemanticRecord(lexical, closest.diagnostics!.semantic!),
+    );
   }
+  return summary;
 }
