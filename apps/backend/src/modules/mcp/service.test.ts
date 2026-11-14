@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   listMcpToolRuns: vi.fn(),
   listWorkspaceMcpInstalls: vi.fn(),
   logInfo: vi.fn(),
+  logWarn: vi.fn(),
   recordMemberObservedTools: vi.fn(),
   requireMcpWorkspace: vi.fn(),
   setWorkspaceMcpToolsEnabled: vi.fn(),
@@ -76,7 +77,7 @@ vi.mock("../../shared/logger", () => ({
   logger: {
     debug: vi.fn(),
     info: mocks.logInfo,
-    warn: vi.fn(),
+    warn: mocks.logWarn,
     error: vi.fn(),
   },
 }));
@@ -523,10 +524,63 @@ test("buildLangChainToolsForTurn fails the turn and closes clients when discover
   assert.equal(clientCloseMocks[1]?.mock.calls.length, 1);
 });
 
-test("buildLangChainToolsForTurn rejects unregistered tools exposed by a selected server", async () => {
+test("buildLangChainToolsForTurn leaves a tool the workspace has not registered unbound and runs the turn", async () => {
   resetMcpServiceMocks();
   const install = mcpInstall({ id: "mcp_install_1" });
   mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  const unregisteredInvoke = vi.fn(async () => "must not run");
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__github__read_repo" }),
+    originalTool({
+      name: "mcp__github__new_unregistered_tool",
+      invoke: unregisteredInvoke,
+    }),
+  ]);
+
+  const result = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  // Only the registered tool reaches the model; the new one has no approval
+  // gate and no stored risk, so it is not offered at all.
+  assert.deepEqual(
+    result.tools.map((tool) => tool.name),
+    ["mcp__github__read_repo"],
+  );
+  assert.deepEqual(Object.keys(result.interruptOn), []);
+  assert.equal(unregisteredInvoke.mock.calls.length, 0);
+  // The turn keeps its client open for the registered tool.
+  assert.equal(clientCloseMocks[0]?.mock.calls.length, 0);
+  assert.deepEqual(mocks.logWarn.mock.calls, [
+    [
+      "mcp.turn.unregistered_tools_skipped",
+      {
+        teamId: "team_1",
+        workspaceId: "workspac",
+        installId: "mcp_inst",
+        serverToolNames: ["new_unregistered_tool"],
+        skipped: 1,
+      },
+    ],
+  ]);
+  await result.close();
+});
+
+test("buildLangChainToolsForTurn still fails when a registered tool is no longer exposed", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({
+    id: "mcp_install_1",
+    tools: [
+      mcpTool({ id: "t_read", serverToolName: "read_repo" }),
+      mcpTool({
+        id: "t_search",
+        serverToolName: "search_repo",
+        normalizedToolName: "mcp__github__search_repo",
+      }),
+    ],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  // The server dropped search_repo and added a tool nobody registered.
   toolsByInstallId.set(install.id, [
     originalTool({ name: "mcp__github__read_repo" }),
     originalTool({ name: "mcp__github__new_unregistered_tool" }),
@@ -538,7 +592,9 @@ test("buildLangChainToolsForTurn rejects unregistered tools exposed by a selecte
         serviceInput({ installIds: [install.id] }),
       ),
     (error) =>
-      error instanceof McpError && error.code === "MCP_TOOL_DISCOVERY_MISMATCH",
+      error instanceof McpError &&
+      error.code === "MCP_TOOL_DISCOVERY_MISMATCH" &&
+      /did not expose every enabled tool/.test(error.message),
   );
   assert.equal(clientCloseMocks[0]?.mock.calls.length, 1);
 });

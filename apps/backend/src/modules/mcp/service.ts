@@ -236,6 +236,11 @@ const MCP_GET_TOOLS_TIMEOUT_MS =
 const MCP_INVOKE_TIMEOUT_MS =
   Number(process.env.MCP_INVOKE_TIMEOUT_MS) || 30_000;
 
+// Tool names come from the remote server, so the log line that reports
+// unregistered ones carries a bounded sample rather than whatever it sent.
+const MCP_UNREGISTERED_TOOL_LOG_LIMIT = 10;
+const MCP_UNREGISTERED_TOOL_NAME_LOG_CHARS = 80;
+
 async function withTimeout<T>(
   promise: Promise<T>,
   ms: number,
@@ -1554,6 +1559,7 @@ export class McpService {
         }
         clients.push(client);
         const discoveredToolIds = new Set<string>();
+        const unregisteredToolNames: string[] = [];
         for (const tool of installTools) {
           const serverToolName = stripLangChainMcpToolPrefix({
             serverKey: langChainMcpServerKey(install),
@@ -1566,13 +1572,13 @@ export class McpService {
           const storedTool = findInstallToolByLangChainName(install, tool.name);
           const liveInputSchema = discoveredMcpToolSchema(tool);
           const liveAnnotations = discoveredMcpToolAnnotations(tool);
+          // A server can start exposing a tool after the install was last
+          // tested. Nothing has registered it, so it has no stored risk and no
+          // enabled flag: leave it unbound instead of failing every turn that
+          // selects this install. An install test registers it.
           if (!storedTool) {
-            throw new McpError(
-              502,
-              "MCP_TOOL_DISCOVERY_MISMATCH",
-              `Selected MCP install '${install.name}' exposed an unregistered tool`,
-              { installId: install.id, serverToolName },
-            );
+            unregisteredToolNames.push(serverToolName);
+            continue;
           }
           const knownTool = {
             ...storedTool,
@@ -1641,6 +1647,19 @@ export class McpService {
           );
           boundToolNames.add(boundToolName);
           availableToolIds.add(knownTool.id);
+        }
+        if (unregisteredToolNames.length > 0) {
+          logger.warn("mcp.turn.unregistered_tools_skipped", {
+            teamId: shortId(workspace.organizationId),
+            workspaceId: shortId(workspace.id),
+            installId: shortId(install.id),
+            serverToolNames: unregisteredToolNames
+              .slice(0, MCP_UNREGISTERED_TOOL_LOG_LIMIT)
+              .map((name) =>
+                name.slice(0, MCP_UNREGISTERED_TOOL_NAME_LOG_CHARS),
+              ),
+            skipped: unregisteredToolNames.length,
+          });
         }
         const missingEnabledToolIds = install.tools
           .filter(
