@@ -7,7 +7,7 @@ import {
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import {
-  createMcpClient,
+  connectMcpClient,
   MCP_TRANSPORT_DEFAULTS,
 } from "../../shared/mcp-client";
 import { McpError } from "./errors";
@@ -137,20 +137,28 @@ export function createLangChainMcpClient(input: {
   async function connect(kind: "http" | "sse", url: string) {
     if (closed) throw new Error("MCP client is closed");
     requests.throwIfDenied();
-    const next = createMcpClient("sourceweft");
-    client = next;
     const options = {
       ...MCP_TRANSPORT_DEFAULTS,
       fetch: requests.fetch,
       requestInit: { headers: input.headers },
       ...(input.authProvider ? { authProvider: input.authProvider } : {}),
     };
-    try {
-      await next.connect(
+    // Closing while connecting closes whichever client is in flight.
+    const next = await connectMcpClient(
+      "sourceweft",
+      () =>
         kind === "http"
           ? new StreamableHTTPClientTransport(new URL(url), options)
           : new SSEClientTransport(new URL(url), options),
-      );
+      undefined,
+      (attempt) => {
+        client = attempt;
+      },
+    ).catch((error: unknown) => {
+      requests.throwIfDenied();
+      throw error;
+    });
+    try {
       const serverKey = langChainMcpServerKey(input.install);
       const tools = await loadMcpTools(serverKey, next, {
         throwOnLoadError: true,

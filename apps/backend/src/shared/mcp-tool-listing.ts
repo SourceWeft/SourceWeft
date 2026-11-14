@@ -1,9 +1,10 @@
 import {
+  type Client,
   SSEClientTransport,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { z } from "zod";
-import { createMcpClient, MCP_TRANSPORT_DEFAULTS } from "./mcp-client";
+import { connectMcpClient, MCP_TRANSPORT_DEFAULTS } from "./mcp-client";
 
 /**
  * A tool as an MCP endpoint lists it to an anonymous client, cut to the
@@ -173,7 +174,7 @@ function budgetedFetch(
 /**
  * The tools an MCP endpoint lists to a client that sends no credentials:
  * the protocol handshake (`server/discover` or `initialize`, see
- * `createMcpClient`), then `tools/list` page by page. Requests go through
+ * `connectMcpClient`), then `tools/list` page by page. Requests go through
  * `fetchImpl`, which the caller scopes to its endpoint policy. One time and
  * byte budget covers the whole listing; a failure of any request is thrown.
  */
@@ -191,16 +192,18 @@ export async function listMcpEndpointTools(
     ...MCP_TRANSPORT_DEFAULTS,
     fetch: budgetedFetch(fetchImpl, controller.signal),
   };
-  const client = createMcpClient("sourceweft-tool-listing");
   const requestOptions = {
     signal: controller.signal,
     timeout: MCP_TOOL_LISTING_LIMITS.timeoutMs,
   };
+  let client: Client | undefined;
   try {
-    await client.connect(
-      transport === "sse"
-        ? new SSEClientTransport(new URL(endpointUrl), options)
-        : new StreamableHTTPClientTransport(new URL(endpointUrl), options),
+    client = await connectMcpClient(
+      "sourceweft-tool-listing",
+      () =>
+        transport === "sse"
+          ? new SSEClientTransport(new URL(endpointUrl), options)
+          : new StreamableHTTPClientTransport(new URL(endpointUrl), options),
       requestOptions,
     );
     const raw: unknown[] = [];
@@ -218,6 +221,6 @@ export async function listMcpEndpointTools(
     return boundedMcpListedTools(raw);
   } finally {
     clearTimeout(timer);
-    await client.close().catch(() => {});
+    await client?.close().catch(() => {});
   }
 }

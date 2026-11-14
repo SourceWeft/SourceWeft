@@ -196,6 +196,8 @@ describe("langchain-client.transport", () => {
     mode: "http" | "sse" | "compat",
     token?: string,
     oauthRefresh = false,
+    // A status a legacy "http" endpoint answers `server/discover` with.
+    refuseProbe?: number,
   ) {
     const protocol = protocolServer();
     const seen: Array<{
@@ -284,6 +286,22 @@ describe("langchain-client.transport", () => {
         return;
       }
       const respond = async () => {
+        if (
+          mode === "http" &&
+          refuseProbe !== undefined &&
+          req.method === "POST"
+        ) {
+          let body = "";
+          for await (const part of req) body += part;
+          const parsed = JSON.parse(body) as { method?: string };
+          if (parsed.method === "server/discover") {
+            res.writeHead(refuseProbe);
+            res.end();
+            return;
+          }
+          await http.handleRequest(req, res, parsed);
+          return;
+        }
         if (mode === "http") {
           await http.handleRequest(req, res);
           return;
@@ -369,6 +387,28 @@ describe("langchain-client.transport", () => {
       }
       await client.close();
       await assert.rejects(client.getTools(), /closed/);
+    });
+  }
+
+  for (const status of [401, 403]) {
+    test(`a legacy endpoint that refuses the version probe with ${status} still loads its tools`, async () => {
+      const fixture = await httpFixture("http", undefined, false, status);
+      const client = createLangChainMcpClient({
+        install: install(`${fixture.origin}/mcp`, "streamable_http"),
+      });
+      clients.push(client);
+
+      const tools = await client.getTools();
+
+      assert.deepEqual(
+        tools.map((tool) => tool.name.split("__").at(-1)),
+        ["echo"],
+      );
+      const result = await tools[0]!.invoke({ value: "hello" });
+      assert.ok(JSON.stringify(result).includes("hello"));
+      assert.ok(
+        fixture.seen.every((request) => request.authorization === undefined),
+      );
     });
   }
 
