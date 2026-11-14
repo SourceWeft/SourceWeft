@@ -22,7 +22,9 @@ try {
   assert.deepEqual(thread.execution_target_json, { kind: "local", deviceId: host.deviceId });
   const binding = (await database.query("SELECT thread_id,device_id,local_workspace_id,workspace_path FROM local_thread_bindings WHERE thread_id=$1", [threadId])).rows[0];
   assert.equal(binding.device_id, host.deviceId);
-  assert(binding.workspace_path.startsWith(host.nativeData + "/task-workspaces/"));
+  // The host places the task folder in its visible location: <taskFolder>/<date>/<name>.
+  assert.match(binding.workspace_path.slice(host.taskFolder.length), /^\/\d{4}-\d{2}-\d{2}\/[\da-f]{8,32}$/);
+  assert(binding.workspace_path.startsWith(host.taskFolder + "/"));
   const file = join(binding.workspace_path, "browser-triggered.txt");
   assert.equal(await readFile(file, "utf8"), marker + "\n");
   const invocations = (await database.query<InvocationRow>("SELECT id,device_id,run_id,action,payload,status,result,error FROM local_tool_invocations WHERE thread_id=$1 ORDER BY created_at", [threadId])).rows;

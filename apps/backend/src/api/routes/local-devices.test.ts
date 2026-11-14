@@ -175,3 +175,28 @@ test.each([
     else expect(createNativeAccess).not.toHaveBeenCalled();
   },
 );
+
+test("the folder list returns each granted folder with its path on that computer", async () => {
+  const { db } = await import("@sourceweft/db");
+  const granted = [
+    { id: "grant", name: "project", path: "/Users/test/work/project" },
+  ];
+  const where = vi.fn(async () => granted);
+  const select = vi
+    .spyOn(db, "select")
+    .mockReturnValue({ from: () => ({ where }) } as never);
+  try {
+    const response = await app().request("/v1/local-devices/pc/folders");
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(await response.json())).toContain(
+      JSON.stringify({ folders: granted }).slice(1, -1),
+    );
+    expect(Object.keys(select.mock.calls[0]![0] as object)).toEqual([
+      "id",
+      "name",
+      "path",
+    ]);
+  } finally {
+    select.mockRestore();
+  }
+});

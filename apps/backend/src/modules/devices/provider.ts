@@ -26,6 +26,13 @@ import { resolveCommandNetworkPolicy } from "./network-approvals";
 import type { NetworkSkillInput } from "./network-skill-domains";
 
 /**
+ * Announced in a computer's capabilities when it places automatic task
+ * folders itself (`workspace.reserve`), in a visible location on that
+ * computer, instead of at a path the backend derives from the workspace ID.
+ */
+const RESERVE_ACTION = "workspace.reserve";
+
+/**
  * The environment the host last reported for the computer a local thread is
  * bound to, or null when the thread has no binding or the device row is gone.
  * Authorisation is not re-checked here: callers run it after
@@ -168,23 +175,49 @@ export async function localProviderForTurn(
     const device = await db.query.localDevices.findFirst({
       where: eq(localDevices.id, binding.deviceId),
     });
-    if (!device?.workspaceBase)
-      throw new ContentError(
-        409,
-        "LOCAL_HOST_UPGRADE_REQUIRED",
-        "Sign in on that computer to restore its working directory information.",
-      );
-    const reservedId = randomUUID();
-    const [saved] = await db
-      .update(localThreadBindings)
-      .set({
+    let reservation: { localWorkspaceId: string; workspacePath: string };
+    if (device?.capabilities?.includes(RESERVE_ACTION)) {
+      // The computer decides where the task folder goes (a visible location
+      // its owner can change) and records it. Nothing is created on disk
+      // until a tool acquires the directory. The computer returns the same
+      // answer for the same conversation, so concurrent turns agree.
+      const workspace = await dispatch(RESERVE_ACTION, {});
+      if (
+        typeof workspace.id !== "string" ||
+        typeof workspace.path !== "string" ||
+        !isDeviceAbsolutePath(workspace.path)
+      )
+        throw new ContentError(
+          409,
+          "LOCAL_WORKSPACE_MISMATCH",
+          "The computer returned an invalid working directory.",
+        );
+      reservation = {
+        localWorkspaceId: workspace.id,
+        workspacePath: workspace.path,
+      };
+    } else {
+      // A computer that does not announce the reserve action keeps its task
+      // folders in application storage, at a path derived from the ID.
+      if (!device?.workspaceBase)
+        throw new ContentError(
+          409,
+          "LOCAL_HOST_UPGRADE_REQUIRED",
+          "Sign in on that computer to restore its working directory information.",
+        );
+      const reservedId = randomUUID();
+      reservation = {
         localWorkspaceId: reservedId,
         workspacePath: joinDevicePath(
           device.workspaceBase,
           reservedId,
           "files",
         ),
-      })
+      };
+    }
+    const [saved] = await db
+      .update(localThreadBindings)
+      .set(reservation)
       .where(
         and(
           eq(localThreadBindings.threadId, context.threadId),
