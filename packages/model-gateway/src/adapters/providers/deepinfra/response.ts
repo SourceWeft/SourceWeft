@@ -9,18 +9,41 @@ import {
   isRecord,
 } from "../../../normalize/protocols/openai-compatible";
 
+/**
+ * Chat completions report what DeepInfra charges for the call as
+ * `usage.estimated_cost`; token counts stay with the protocol usage block.
+ */
+function normalizeDeepInfraChatCost(
+  context: ProviderResponseContext,
+): ModelCallObservationPatch | undefined {
+  const costUsd = finiteNumber(context.rawUsage?.estimated_cost);
+  if (costUsd === undefined) {
+    return undefined;
+  }
+
+  return {
+    cost: {
+      currency: "USD",
+      inlineUsd: costUsd,
+      effectiveUsd: costUsd,
+      source: "provider_estimated",
+      status: "estimated",
+    },
+    provenance: { inlineCost: "provider:deepinfra.usage.estimated_cost" },
+  };
+}
+
 function normalizeDeepInfraResponse(
   context: ProviderResponseContext,
   base: ModelCallObservation,
 ): ModelCallObservationPatch | undefined {
-  if (!isRecord(context.rawResponse)) {
-    return undefined;
-  }
-  const status = isRecord(context.rawResponse.inference_status)
-    ? context.rawResponse.inference_status
-    : undefined;
-  if (!status) {
-    return undefined;
+  const status =
+    isRecord(context.rawResponse) &&
+    isRecord(context.rawResponse.inference_status)
+      ? context.rawResponse.inference_status
+      : undefined;
+  if (!isRecord(context.rawResponse) || !status) {
+    return normalizeDeepInfraChatCost(context);
   }
 
   const inputTokens =
