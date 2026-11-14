@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { SourceConnector } from "@sourceweft/sdk";
+import { HttpClientError, type SourceConnector } from "@sourceweft/sdk";
 import { useConnectors } from "./use-connectors";
 import { flush, mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
@@ -20,6 +20,7 @@ const {
   sync,
   update,
   deleteConnector,
+  deleteAccount,
   create,
 } = vi.hoisted(() => ({
   list: vi.fn(),
@@ -31,6 +32,7 @@ const {
   sync: vi.fn(),
   update: vi.fn(),
   deleteConnector: vi.fn(),
+  deleteAccount: vi.fn(),
   create: vi.fn(),
 }));
 
@@ -53,6 +55,7 @@ vi.mock("../../../../../../lib/sdk", () => ({
     sync,
     update,
     delete: deleteConnector,
+    deleteAccount,
     create,
   },
 }));
@@ -151,6 +154,7 @@ beforeEach(() => {
     sync,
     update,
     deleteConnector,
+    deleteAccount,
     create,
     toastError,
     toastSuccess,
@@ -348,4 +352,191 @@ test("failed manifest refresh clears old Gmail eligibility", async () => {
     await api().refreshConnectors();
   });
   expect(api().availableConnectorTypes).toEqual([]);
+});
+
+// --- Reconnecting an existing connector -----------------------------------
+// The provider redirects back with the authorization's account id in the URL.
+// The hook handles it on mount, before its own connector list has loaded.
+
+function returnFromAuthorization(input: {
+  workspaceId: string;
+  connectorType: string;
+  accountId: string;
+}) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("connector_oauth", "success");
+  url.searchParams.set("workspace_id", input.workspaceId);
+  url.searchParams.set("connector_type", input.connectorType);
+  url.searchParams.set("account_id", input.accountId);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+}
+
+function driveConnector(overrides: Partial<SourceConnector> = {}) {
+  return fakeConnector({
+    id: "drive-1",
+    connectorType: "google_drive",
+    name: "Person",
+    oauthAccountId: "acc-1",
+    configJson: { fileIds: ["file-1"] },
+    ...overrides,
+  });
+}
+
+test("reconnecting with the same account keeps the connector and clears its error", async () => {
+  list.mockResolvedValue({
+    items: [driveConnector({ status: "error", lastError: "request failed" })],
+  });
+  update.mockResolvedValue({ connector: driveConnector() });
+  returnFromAuthorization({
+    workspaceId: "ws-reconnect",
+    connectorType: "google_drive",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-reconnect"));
+
+  expect(update).toHaveBeenCalledWith("ws-reconnect", "drive-1", {
+    status: "active",
+  });
+  expect(create).not.toHaveBeenCalled();
+  expect(deleteAccount).not.toHaveBeenCalled();
+  expect(toastSuccess).toHaveBeenCalledWith("Google Drive reconnected.");
+  expect(toastError).not.toHaveBeenCalled();
+  expect(window.location.search).not.toContain("connector_oauth");
+});
+
+test("reconnecting a connector that is not in error leaves its status alone", async () => {
+  list.mockResolvedValue({ items: [driveConnector({ status: "paused" })] });
+  returnFromAuthorization({
+    workspaceId: "ws-reconnect-paused",
+    connectorType: "google_drive",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-reconnect-paused"));
+
+  expect(update).not.toHaveBeenCalled();
+  expect(create).not.toHaveBeenCalled();
+  expect(toastSuccess).toHaveBeenCalledWith("Google Drive reconnected.");
+});
+
+test("reconnecting with a different account is refused and removes the unused authorization", async () => {
+  list.mockResolvedValue({ items: [driveConnector()] });
+  deleteAccount.mockResolvedValue({ deleted: true });
+  returnFromAuthorization({
+    workspaceId: "ws-reconnect-other",
+    connectorType: "google_drive",
+    accountId: "acc-2",
+  });
+
+  await mountHook(baseInput("ws-reconnect-other"));
+
+  expect(toastError).toHaveBeenCalledWith(
+    "That is a different Google Drive account. Reconnect with the account this connector already uses.",
+  );
+  expect(deleteAccount).toHaveBeenCalledWith("ws-reconnect-other", "acc-2");
+  expect(update).not.toHaveBeenCalled();
+  expect(create).not.toHaveBeenCalled();
+  expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+test("a Gmail reconnect refused for a different account removes the unused authorization", async () => {
+  list.mockResolvedValue({
+    items: [
+      fakeConnector({
+        id: "gmail-1",
+        connectorType: "gmail",
+        oauthAccountId: "acc-1",
+      }),
+    ],
+  });
+  update.mockRejectedValue(
+    new HttpClientError({
+      message: "Reconnect with the same provider account in this workspace",
+      status: 409,
+      statusText: "Conflict",
+      code: "CONNECTOR_OAUTH_ACCOUNT_MISMATCH",
+    }),
+  );
+  deleteAccount.mockResolvedValue({ deleted: true });
+  returnFromAuthorization({
+    workspaceId: "ws-gmail-other",
+    connectorType: "gmail",
+    accountId: "acc-2",
+  });
+
+  await mountHook(baseInput("ws-gmail-other"));
+
+  expect(update).toHaveBeenCalledWith("ws-gmail-other", "gmail-1", {
+    oauthAccountId: "acc-2",
+    status: "active",
+  });
+  expect(toastError).toHaveBeenCalledWith(
+    "Reconnect with the same provider account in this workspace",
+  );
+  expect(deleteAccount).toHaveBeenCalledWith("ws-gmail-other", "acc-2");
+});
+
+test("a first authorization still creates the connector", async () => {
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  create.mockResolvedValue({ connector: driveConnector() });
+  returnFromAuthorization({
+    workspaceId: "ws-first",
+    connectorType: "google_drive",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-first"));
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-first",
+    expect.objectContaining({
+      connectorType: "google_drive",
+      oauthAccountId: "acc-1",
+      configJson: { fileIds: [] },
+    }),
+  );
+  expect(update).not.toHaveBeenCalled();
+  expect(toastSuccess).toHaveBeenCalledWith("Google Drive connected.");
+});
+
+test("handleReconnectConnector starts authorization for the connector's provider", async () => {
+  list.mockResolvedValue({ items: [driveConnector()] });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
+  });
+  try {
+    await mountHook(baseInput("ws-start"));
+    act(() => {
+      api().handleReconnectConnector(api().connectors[0]!);
+    });
+
+    expect(assign).toHaveBeenCalledTimes(1);
+    const target = new URL(String(assign.mock.calls[0]![0]));
+    expect(target.pathname).toBe("/dashboard/connectors/oauth/start");
+    expect(target.searchParams.get("connector_type")).toBe("google_drive");
+    expect(target.searchParams.get("workspace_id")).toBe("ws-start");
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
 });

@@ -3099,6 +3099,7 @@
       "pauseShort": "暫停",
       "enableShort": "啟用",
       "disconnect": "中斷連接 {name}",
+      "reconnect": "重新連接 {name}",
       "removeAria": "移除 {name}",
       "removeShort": "移除",
       "syncNow": "立即同步",
@@ -3144,12 +3145,14 @@
         "connecting": "連接中…",
         "connected": "已連接",
         "configure": "設定",
-        "connect": "連接"
+        "connect": "連接",
+        "reconnect": "重新連接"
       },
       "detail": {
         "syncing": "連接器操作正在執行。",
         "disabled": "同步已停用。啟用此連接器以恢復。",
         "needsAttention": "連接器需要注意。",
+        "reauthRequired": "授權已過期或被撤銷。重新連接後即可恢復。",
         "paused": "同步已暫停，恢復此連接器後繼續。",
         "needsSetupWebhook": "設定一個公開的 HTTPS webhook 端點。",
         "lastSync": "上次同步 {date}",
@@ -3480,6 +3483,8 @@
         "connectedConfigureNext": "{name} 已連接。接下來設定同步。",
         "connectedConfigureDone": "{name} 已連接。接下來設定同步。",
         "connectedFallback": "{name} 已連接。",
+        "reconnected": "{name} 已重新連接。",
+        "reconnectWrongAccount": "這是另一個 {name} 帳號。請使用此連接器原來的帳號重新連接。",
         "syncAlreadyRunningNamed": "{name} 同步已在執行中。",
         "enabledInitialSync": "{name} 連接器已啟用。已加入首次同步佇列。",
         "alreadyConnected": "{name} 連接器已連接。",
