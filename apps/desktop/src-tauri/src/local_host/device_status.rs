@@ -21,6 +21,7 @@ const MAX_REASON_UTF16_UNITS: usize = 1000;
 pub const CAPABILITIES: &[&str] = &[
     "workspace.ensure",
     "workspace.check",
+    "workspace.reserve",
     "command.execute",
     "command.cancel",
     "file.list",

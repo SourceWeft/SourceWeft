@@ -31,6 +31,10 @@ fn main() {
             "choose_working_directory",
             "run_sandbox_privileged_setup",
             "install_sandbox_runtime",
+            "get_task_folder",
+            "choose_task_folder",
+            "reset_task_folder",
+            "reveal_local_directory",
         ]),
     ))
     .expect("failed to build Tauri application metadata");

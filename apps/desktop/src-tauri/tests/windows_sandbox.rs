@@ -691,6 +691,18 @@ fn host_without_setup() -> (tempfile::TempDir, LocalHost) {
     (app, host)
 }
 
+/// A host whose automatic task folders go to `task_folder` (as the desktop app puts them in
+/// `%USERPROFILE%\SourceWeft`), with the bundle installed and the sandbox set up.
+fn host_with_task_folder(task_folder: &Path) -> (tempfile::TempDir, LocalHost) {
+    arm_test();
+    let app = tempfile::tempdir().unwrap();
+    copy_bundle_into(&bundle_dir(app.path()));
+    let host = LocalHost::open_with_task_folder(app.path(), Some(task_folder)).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    ensure_installed(&host);
+    (app, host)
+}
+
 fn write_scripts(root: &Path) {
     for (name, body) in SCRIPTS {
         fs::write(root.join(name), body).unwrap();
@@ -1725,6 +1737,45 @@ fn a_node_script_in_a_workspace_under_the_profile_runs() {
     let automatic = new_workspace(&host, "auto-thread");
     let (result, _) = env_probe(&host, "auto", &automatic, shell);
     assert_eq!(result["exitCode"], 0, "a Node script in an automatic workspace must run ({shell:?}): {result}");
+}
+
+#[test]
+#[ignore = "requires the Windows sandbox bundle and an installed sandbox"]
+fn a_task_folder_in_the_visible_location_under_the_profile_runs_and_keeps_writes_to_itself() {
+    // Automatic task folders live in `%USERPROFILE%\SourceWeft\<date>\<name>`: three levels below
+    // the profile, each of which the sandbox account must be able to traverse (and nothing more).
+    let shell = active_shell();
+    let (_scratch, scratch) = profile_scratch("sw-task-");
+    let location = scratch.join("SourceWeft");
+    let (_app, host) = host_with_task_folder(&location);
+    let task = |thread: &str| {
+        let reserved = host.reserve_workspace("owner", thread, None).unwrap();
+        let workspace = host
+            .ensure_bound_workspace("owner", thread, Some(&reserved.id), None)
+            .unwrap();
+        write_scripts(&workspace.path);
+        workspace
+    };
+    let first = task("task-thread");
+    assert!(
+        first.path.starts_with(&location) && first.path.starts_with(profile_dir()),
+        "precondition: {:?} must be in the visible location inside the profile",
+        first.path
+    );
+    let (result, env) = env_probe(&host, "task", &first, shell);
+    assert_eq!(result["exitCode"], 0, "a Node script in a task folder must run ({shell:?}): {result}");
+    assert_eq!(norm(env["cwd"].as_str().unwrap_or_default()), norm(&wire(&first.path)), "{env}");
+    assert_eq!(fs::read_to_string(first.path.join("out.txt")).unwrap_or_default(), "hello", "{result}");
+
+    // Writes stay inside the command's own task folder (reads across kept roots are the known
+    // limit `shells_cannot_write_another_granted_workspace_but_can_read_it_known_limit` records).
+    let second = task("neighbour-thread");
+    let target = second.path.join("planted.txt");
+    let result = write_probe(&host, "task-cross-write", &first, shell, &target);
+    assert_write_denied(&result, &target, "another conversation's task folder");
+    let target = location.join("planted.txt");
+    let result = write_probe(&host, "task-location-write", &first, shell, &target);
+    assert_write_denied(&result, &target, "the task folder location");
 }
 
 #[test]

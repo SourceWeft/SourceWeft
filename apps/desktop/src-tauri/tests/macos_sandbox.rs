@@ -285,6 +285,66 @@ fn granted_home_hides_credential_directories() {
 
 #[test]
 #[ignore = "requires sandbox_apply and the sandbox bundle"]
+fn task_folder_in_the_visible_home_location_runs_and_is_isolated() {
+    // Automatic task folders live in `<home>/SourceWeft/<date>/<name>`: inside the home directory,
+    // which the sandbox denies as a whole. A command gets exactly its own task folder, not the
+    // location, not its neighbour's folder and not the rest of the home.
+    let scratch = tempfile::Builder::new()
+        .prefix("sw-task-")
+        .tempdir_in(home_dir())
+        .unwrap();
+    let location = scratch.path().canonicalize().unwrap().join("SourceWeft");
+    let (_app, host) = host_with_task_folder(&location);
+    let task = |thread: &str| {
+        let reserved = host.reserve_workspace("owner", thread, None).unwrap();
+        host.ensure_bound_workspace("owner", thread, Some(&reserved.id), None)
+            .unwrap()
+    };
+    let first = task("thread");
+    let second = task("other-thread");
+    assert!(
+        first.path.starts_with(&location) && second.path.starts_with(&location),
+        "precondition: both task folders must be in the visible location"
+    );
+    let secret = format!("sw-neighbour-{}", uuid::Uuid::new_v4().simple());
+    fs::write(second.path.join("secret.txt"), &secret).unwrap();
+    let home_secret = format!("sw-home-{}", uuid::Uuid::new_v4().simple());
+    fs::write(scratch.path().join("private.txt"), &home_secret).unwrap();
+
+    let own = execute(&host, "task-own", &first, "printf visible > out.txt && /bin/pwd");
+    assert_eq!(own["exitCode"], 0, "{own}");
+    assert_eq!(output(&own).trim(), first.path.to_str().unwrap(), "{own}");
+    assert_eq!(
+        fs::read_to_string(first.path.join("out.txt")).unwrap(),
+        "visible"
+    );
+
+    let planted = second.path.join("planted.txt");
+    let result = execute_denied(
+        &host,
+        "task-cross",
+        &first,
+        &format!(
+            "cat {}; cat {}; ls {}; printf x > {}",
+            quoted(&second.path.join("secret.txt")),
+            quoted(&scratch.path().canonicalize().unwrap().join("private.txt")),
+            quoted(&location),
+            quoted(&planted)
+        ),
+    );
+    let text = output(&result);
+    assert!(!text.contains(&secret), "read a neighbour's task folder: {result}");
+    assert!(!text.contains(&home_secret), "read the home directory: {result}");
+    assert!(
+        !text.contains(second.path.file_name().unwrap().to_str().unwrap()),
+        "listed the task folder location: {result}"
+    );
+    assert_ne!(result["exitCode"], 0, "{result}");
+    assert!(!planted.exists(), "wrote into a neighbour's task folder: {result}");
+}
+
+#[test]
+#[ignore = "requires sandbox_apply and the sandbox bundle"]
 fn tmp_symlink_workspace() {
     // A workspace whose real location is reached through macOS's firmlinks: `/tmp`→`/private/tmp`
     // (app data created under `/tmp`) and `/var`→`/private/var` (the default `$TMPDIR` app data,

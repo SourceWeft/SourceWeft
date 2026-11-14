@@ -554,7 +554,7 @@ fn both_v3_directory_schemas_upgrade_without_adopting_new_roots() {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            4
+            5
         );
         drop(db);
         // Reopening must not refresh the recorded inode of a replaced root.
@@ -621,6 +621,417 @@ fn draft_folder_reads_are_authorized_bounded_and_do_not_allocate_a_workspace() {
         "WORKSPACE_REPLACED"
     );
     fs::remove_dir_all(moved).unwrap();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Visible task folders: `workspace.reserve` decides `<location>/<date>/<name>` without creating
+// anything; the first `workspace.ensure` creates it. The location is `<home>/SourceWeft` unless
+// settings name another one.
+// ---------------------------------------------------------------------------------------------
+
+/// A host whose default task folder is `<temp>/home/SourceWeft` (not created).
+fn host_with_home(temp: &std::path::Path) -> (LocalHost, std::path::PathBuf) {
+    let home = temp.join("home");
+    fs::create_dir(&home).unwrap();
+    let location = canonical(&home).join("SourceWeft");
+    let host =
+        LocalHost::open_with_task_folder(&temp.join("app"), Some(&home.join("SourceWeft")))
+            .unwrap();
+    (host, location)
+}
+
+fn assert_dated_task_folder(path: &std::path::Path, location: &std::path::Path, id: &str) {
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let day = path.parent().unwrap();
+    let date = day.file_name().unwrap().to_str().unwrap();
+    assert_eq!(day.parent().unwrap(), location, "{path:?}");
+    let digits = |text: &str| text.chars().all(|c| c.is_ascii_digit());
+    let parts: Vec<&str> = date.split('-').collect();
+    assert!(
+        parts.len() == 3
+            && parts[0].len() == 4
+            && parts[1].len() == 2
+            && parts[2].len() == 2
+            && parts.iter().all(|part| digits(part)),
+        "not a date: {date}"
+    );
+    // The name is the start of the workspace ID: nothing from the account or conversation.
+    assert_eq!(name, &id.replace('-', "")[..8]);
+}
+
+#[test]
+fn reserving_decides_a_visible_task_folder_and_creates_nothing() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, location) = host_with_home(temp.path());
+    let reserved = host.reserve_workspace("owner", "thread", None).unwrap();
+    assert_dated_task_folder(&reserved.path, &location, &reserved.id);
+    assert!(!location.exists());
+    assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
+    // The same answer every time, with or without the ID, and across a restart.
+    let again = host
+        .reserve_workspace("owner", "thread", Some(&reserved.id))
+        .unwrap();
+    assert_eq!((again.id.as_str(), &again.path), (reserved.id.as_str(), &reserved.path));
+    assert_eq!(
+        host.reserve_workspace("owner", "thread", Some(&uuid::Uuid::new_v4().to_string()))
+            .unwrap_err()
+            .code,
+        "WORKSPACE_BINDING_IMMUTABLE"
+    );
+    // An availability check accepts the reservation and still creates nothing.
+    host.check_workspace("owner", "thread", Some(&reserved.id), None)
+        .unwrap();
+    assert!(!location.exists());
+    assert!(host.get_workspace("owner", "thread", &reserved.id).is_err());
+    drop(host);
+    let host = LocalHost::open_with_task_folder(
+        &temp.path().join("app"),
+        Some(&temp.path().join("home/SourceWeft")),
+    )
+    .unwrap();
+    assert_eq!(
+        host.reserve_workspace("owner", "thread", None).unwrap().path,
+        reserved.path
+    );
+
+    // The first real operation creates exactly that folder.
+    let ensured = host
+        .ensure_bound_workspace("owner", "thread", Some(&reserved.id), None)
+        .unwrap();
+    assert_eq!(ensured.path, reserved.path);
+    assert!(ensured.path.is_dir());
+    assert_eq!(fs::read_dir(&ensured.path).unwrap().count(), 0);
+    // The ownership marker stays in application storage; the visible folder holds task files only.
+    let allocation = host.workspace_base().join(&reserved.id);
+    assert!(allocation.join("owner.json").is_file());
+    assert!(!allocation.join("files").exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for dir in [&location, ensured.path.parent().unwrap(), ensured.path.as_path()] {
+            assert_eq!(fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+    }
+    fs::write(ensured.path.join("report.txt"), "visible").unwrap();
+    assert_eq!(
+        host.read_text("owner", "thread", &reserved.id, "report.txt")
+            .unwrap(),
+        "visible"
+    );
+    host.check_workspace("owner", "thread", Some(&reserved.id), None)
+        .unwrap();
+    assert_eq!(
+        host.get_workspace("owner", "thread", &reserved.id).unwrap().path,
+        reserved.path
+    );
+    // Another account or conversation gets its own folder.
+    let other = host.reserve_workspace("owner", "thread-2", None).unwrap();
+    assert_ne!(other.path, reserved.path);
+    assert!(host.get_workspace("other", "thread", &reserved.id).is_err());
+}
+
+#[test]
+fn the_reserve_action_reports_the_wire_path_through_the_dispatcher() {
+    use serde_json::json;
+    use sourceweft_desktop::local_host::execution::Executions;
+    let temp = tempfile::tempdir().unwrap();
+    let (host, location) = host_with_home(temp.path());
+    host.initialize_invocation_journal().unwrap();
+    let call = |action: &str, payload: serde_json::Value| {
+        host.dispatch(
+            &Executions::default(),
+            &uuid::Uuid::new_v4().to_string(),
+            "owner",
+            "thread",
+            action,
+            payload,
+        )
+    };
+    let reserved = call("workspace.reserve", json!({})).unwrap();
+    let id = reserved["id"].as_str().unwrap().to_owned();
+    let path = reserved["path"].as_str().unwrap().to_owned();
+    assert!(path.starts_with(&format!("{}/", wire(&location))), "{path}");
+    assert!(!path.contains('\\'), "{path}");
+    assert!(!location.exists());
+    assert_eq!(call("workspace.reserve", json!({})).unwrap(), reserved);
+    let ensured = call("workspace.ensure", json!({"workspaceId": id})).unwrap();
+    assert_eq!(ensured, reserved);
+    assert!(call("workspace.check", json!({"workspaceId": id})).is_ok());
+}
+
+#[test]
+fn a_host_without_a_task_folder_location_refuses_to_reserve_and_keeps_the_storage_layout() {
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(&temp.path().join("app")).unwrap();
+    assert_eq!(
+        host.reserve_workspace("owner", "thread", None).unwrap_err().code,
+        "TASK_FOLDER_UNAVAILABLE"
+    );
+    assert_eq!(host.task_folder().unwrap_err().code, "TASK_FOLDER_UNAVAILABLE");
+    // Nothing was recorded: a backend that derives the path still gets the storage layout.
+    let id = uuid::Uuid::new_v4().to_string();
+    let workspace = host
+        .ensure_bound_workspace("owner", "thread", Some(&id), None)
+        .unwrap();
+    assert_eq!(workspace.path, host.workspace_base().join(&id).join("files"));
+    // A conversation that already has such a folder keeps it when the action is used later.
+    assert_eq!(
+        host.reserve_workspace("owner", "thread", Some(&id)).unwrap().path,
+        workspace.path
+    );
+    // A location chosen in settings is enough for new conversations.
+    let chosen = temp.path().join("chosen");
+    fs::create_dir(&chosen).unwrap();
+    host.set_task_folder(&chosen).unwrap();
+    let reserved = host.reserve_workspace("owner", "thread-2", None).unwrap();
+    assert_dated_task_folder(&reserved.path, &canonical(&chosen), &reserved.id);
+}
+
+#[test]
+fn the_task_folder_location_is_changed_and_reset_without_moving_existing_folders() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, location) = host_with_home(temp.path());
+    let default = host.task_folder().unwrap();
+    assert_eq!(default.path, wire(&location));
+    assert_eq!(default.default_path.as_deref(), Some(wire(&location).as_str()));
+    assert!(default.is_default);
+    let first = host.reserve_workspace("owner", "first", None).unwrap();
+    let first = host
+        .ensure_bound_workspace("owner", "first", Some(&first.id), None)
+        .unwrap();
+    fs::write(first.path.join("kept.txt"), "kept").unwrap();
+
+    let chosen = temp.path().join("chosen place");
+    fs::create_dir(&chosen).unwrap();
+    let changed = host.set_task_folder(&chosen).unwrap();
+    assert_eq!(changed.path, wire(&canonical(&chosen)));
+    assert_eq!(changed.default_path, default.default_path);
+    assert!(!changed.is_default);
+    let second = host.reserve_workspace("owner", "second", None).unwrap();
+    assert_dated_task_folder(&second.path, &canonical(&chosen), &second.id);
+    let second = host
+        .ensure_bound_workspace("owner", "second", Some(&second.id), None)
+        .unwrap();
+    assert!(second.path.is_dir());
+    // The earlier conversation still uses its folder, in place.
+    assert_eq!(
+        host.get_workspace("owner", "first", &first.id).unwrap().path,
+        first.path
+    );
+    assert_eq!(
+        host.read_text("owner", "first", &first.id, "kept.txt").unwrap(),
+        "kept"
+    );
+    // The setting survives a restart.
+    drop(host);
+    let host = LocalHost::open_with_task_folder(
+        &temp.path().join("app"),
+        Some(&temp.path().join("home/SourceWeft")),
+    )
+    .unwrap();
+    assert_eq!(host.task_folder().unwrap(), changed);
+
+    // Application storage, a missing directory and a link are refused; the setting is unchanged.
+    assert_eq!(
+        host.set_task_folder(&host.workspace_base()).unwrap_err().code,
+        "DIRECTORY_DENIED"
+    );
+    assert!(host.set_task_folder(&temp.path().join("missing")).is_err());
+    let link = temp.path().join("link");
+    link_dir(&chosen, &link);
+    assert!(host.set_task_folder(&link).is_err());
+    assert_eq!(host.task_folder().unwrap(), changed);
+
+    assert_eq!(host.reset_task_folder().unwrap(), default);
+    let third = host.reserve_workspace("owner", "third", None).unwrap();
+    assert_dated_task_folder(&third.path, &location, &third.id);
+    assert_eq!(
+        host.get_workspace("owner", "second", &second.id).unwrap().path,
+        second.path
+    );
+}
+
+#[test]
+fn a_missing_chosen_location_is_reported_and_never_recreated() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, _) = host_with_home(temp.path());
+    let chosen = temp.path().join("external-drive");
+    fs::create_dir(&chosen).unwrap();
+    host.set_task_folder(&chosen).unwrap();
+    let reserved = host.reserve_workspace("owner", "thread", None).unwrap();
+    fs::remove_dir(&chosen).unwrap();
+    assert_eq!(
+        host.check_workspace("owner", "thread", Some(&reserved.id), None)
+            .unwrap_err()
+            .code,
+        "TASK_FOLDER_MISSING"
+    );
+    assert_eq!(
+        host.ensure_bound_workspace("owner", "thread", Some(&reserved.id), None)
+            .unwrap_err()
+            .code,
+        "TASK_FOLDER_MISSING"
+    );
+    assert!(!chosen.exists());
+    // Once the location is back, the same reservation completes.
+    fs::create_dir(&chosen).unwrap();
+    let ensured = host
+        .ensure_bound_workspace("owner", "thread", Some(&reserved.id), None)
+        .unwrap();
+    assert_eq!(ensured.path, reserved.path);
+}
+
+#[test]
+fn a_reserved_folder_that_already_holds_files_is_not_adopted() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, _) = host_with_home(temp.path());
+    let reserved = host.reserve_workspace("owner", "thread", None).unwrap();
+    fs::create_dir_all(&reserved.path).unwrap();
+    fs::write(reserved.path.join("someone-elses.txt"), "not ours").unwrap();
+    assert_eq!(
+        host.ensure_bound_workspace("owner", "thread", Some(&reserved.id), None)
+            .unwrap_err()
+            .code,
+        "WORKSPACE_OWNERSHIP_MISMATCH"
+    );
+    assert_eq!(
+        fs::read_to_string(reserved.path.join("someone-elses.txt")).unwrap(),
+        "not ours"
+    );
+    // The empty directory an interrupted attempt left behind is completed.
+    let interrupted = host.reserve_workspace("owner", "thread-2", None).unwrap();
+    fs::create_dir_all(&interrupted.path).unwrap();
+    let ensured = host
+        .ensure_bound_workspace("owner", "thread-2", Some(&interrupted.id), None)
+        .unwrap();
+    assert_eq!(ensured.path, interrupted.path);
+    // A name that is already taken on disk is not reserved: the next one is longer.
+    let id = uuid::Uuid::new_v4().to_string();
+    let short = reserved.path.parent().unwrap().join(&id.replace('-', "")[..8]);
+    fs::create_dir(&short).unwrap();
+    let longer = host.reserve_workspace("owner", "thread-3", Some(&id)).unwrap();
+    assert_eq!(
+        longer.path,
+        reserved.path.parent().unwrap().join(&id.replace('-', "")[..12])
+    );
+}
+
+#[test]
+fn a_replaced_task_folder_is_not_treated_as_the_original() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, _) = host_with_home(temp.path());
+    let reserved = host.reserve_workspace("owner", "thread", None).unwrap();
+    let workspace = host
+        .ensure_bound_workspace("owner", "thread", Some(&reserved.id), None)
+        .unwrap();
+    fs::rename(&workspace.path, workspace.path.with_extension("moved")).unwrap();
+    assert!(host.get_workspace("owner", "thread", &workspace.id).is_err());
+    assert!(host
+        .check_workspace("owner", "thread", Some(&workspace.id), None)
+        .is_err());
+    fs::create_dir(&workspace.path).unwrap();
+    assert_eq!(
+        host.get_workspace("owner", "thread", &workspace.id)
+            .unwrap_err()
+            .code,
+        "WORKSPACE_REPLACED"
+    );
+    assert!(host
+        .ensure_bound_workspace("owner", "thread", Some(&workspace.id), None)
+        .is_err());
+}
+
+#[test]
+fn a_conversation_with_a_chosen_directory_cannot_reserve_a_task_folder() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, location) = host_with_home(temp.path());
+    let selected = temp.path().join("selected");
+    fs::create_dir(&selected).unwrap();
+    let (grant, _) = host.grant_directory("owner", &selected).unwrap();
+    host.ensure_workspace_with_grant("owner", "thread", Some(&grant))
+        .unwrap();
+    assert_eq!(
+        host.reserve_workspace("owner", "thread", None).unwrap_err().code,
+        "LOCAL_WORKSPACE_IMMUTABLE"
+    );
+    // And a reserved conversation cannot be retargeted to a chosen directory.
+    let reserved = host.reserve_workspace("owner", "auto", None).unwrap();
+    assert!(host
+        .ensure_bound_workspace("owner", "auto", Some(&reserved.id), Some(&grant))
+        .is_err());
+    assert!(!location.exists());
+}
+
+#[test]
+fn only_directories_the_host_works_in_are_known() {
+    let temp = tempfile::tempdir().unwrap();
+    let (host, location) = host_with_home(temp.path());
+    let selected = temp.path().join("selected");
+    fs::create_dir(&selected).unwrap();
+    host.grant_directory("owner", &selected).unwrap();
+    let reserved = host.reserve_workspace("owner", "thread", None).unwrap();
+    let stored = host.ensure_workspace("owner", "stored").unwrap();
+    for known in [&location, &canonical(&selected), &reserved.path, &stored.path] {
+        assert!(host.is_known_directory(known).unwrap(), "{known:?}");
+    }
+    for unknown in [
+        temp.path().to_path_buf(),
+        canonical(temp.path()).join("home"),
+        reserved.path.parent().unwrap().to_path_buf(),
+        host.workspace_base(),
+        canonical(&selected).join("child"),
+    ] {
+        assert!(!host.is_known_directory(&unknown).unwrap(), "{unknown:?}");
+    }
+}
+
+#[test]
+fn a_v4_database_upgrades_and_keeps_its_stored_workspaces_in_place() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = temp.path().join("app");
+    let home = temp.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let host = LocalHost::open(&app).unwrap();
+    let before = host.ensure_workspace("owner", "thread").unwrap();
+    fs::write(before.path.join("existing.txt"), "preserved").unwrap();
+    drop(host);
+    // Back to what a v4 build wrote: no `root_path` column, no settings table.
+    let db_path = app.join("local-host/state.sqlite3");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE workspaces DROP COLUMN root_path; DROP TABLE host_settings; PRAGMA user_version=4;",
+    )
+    .unwrap();
+    drop(db);
+    let host = LocalHost::open_with_task_folder(&app, Some(&home.join("SourceWeft"))).unwrap();
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        5
+    );
+    drop(db);
+    // Nothing is moved: the conversation keeps its application-storage folder.
+    assert_eq!(
+        host.get_workspace("owner", "thread", &before.id).unwrap().path,
+        before.path
+    );
+    assert_eq!(
+        host.reserve_workspace("owner", "thread", None).unwrap().path,
+        before.path
+    );
+    assert_eq!(
+        host.read_text("owner", "thread", &before.id, "existing.txt")
+            .unwrap(),
+        "preserved"
+    );
+    assert!(!home.join("SourceWeft").exists());
+    // A database from a newer build is refused.
+    drop(host);
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute_batch("PRAGMA user_version=6;").unwrap();
+    drop(db);
+    assert!(LocalHost::open(&app).is_err());
 }
 
 // ---------------------------------------------------------------------------------------------

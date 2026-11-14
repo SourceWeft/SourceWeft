@@ -40,8 +40,13 @@ fn serve_real_local_host_for_browser_execution_e2e() {
     assert!(uuid::Uuid::parse_str(run_id).is_ok());
     let data = root.join("native-data");
     common::copy_bundle_into(&bundle_dir(&data));
-    let host = Arc::new(LocalHost::open(&data).unwrap());
+    // Automatic task folders go to the run's own visible location, as the desktop app puts
+    // them in the user's home directory.
+    let task_folder = root.join("task-folders");
+    let host = Arc::new(LocalHost::open_with_task_folder(&data, Some(&task_folder)).unwrap());
     let service = format!("nicelab.sourceweft.execution-e2e.{run_id}");
+    // The canonical spelling the host reports and stores.
+    let host_task_folder = host.task_folder().unwrap().path;
     let remote = remote_host::RemoteHost::new(host, service).unwrap();
     tauri::async_runtime::block_on(remote.enroll(ticket))
         .expect("Real enrollment/Keychain must work; no storage fallback");
@@ -60,6 +65,7 @@ fn serve_real_local_host_for_browser_execution_e2e() {
         root.join("host-ready.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "deviceId": device_id, "connected": true, "nativeData": data,
+            "taskFolder": host_task_folder,
             "kind": "production-rust-host-with-fixture-enrollment", "uiEnrollmentCovered": false
         }))
         .unwrap(),
@@ -105,7 +111,8 @@ fn serve_context_host_with_real_authentication() {
     assert!(uuid::Uuid::parse_str(&run).is_ok());
     let data = root.join(format!("host-{run}"));
     common::copy_bundle_into(&bundle_dir(&data));
-    let host = Arc::new(LocalHost::open(&data).unwrap());
+    let task_folder = root.join(format!("task-folders-{run}"));
+    let host = Arc::new(LocalHost::open_with_task_folder(&data, Some(&task_folder)).unwrap());
     let remote =
         remote_host::RemoteHost::new(host, format!("nicelab.sourceweft.context-e2e.{run}"))
             .unwrap();
