@@ -2,12 +2,12 @@ import "dotenv/config";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { DeepSeekWebProvider } from "@sourceweft/builtin-tool-web-search/providers/deepseek";
 // Manual smoke probe against an operator-supplied key; intentionally unbilled
 // (see the matching exemption in shared/model-gateway/architecture.test.ts).
 // eslint-disable-next-line @typescript-eslint/no-restricted-imports -- see above
 import { createModelGateway } from "@sourceweft/model-gateway";
 import sharp from "sharp";
+import { resolveCapabilityWebProvider } from "../modules/capabilities/host-services";
 import { createDeepSeekOcrProvider } from "../modules/sources/parsers/providers/deepseek-ocr-provider";
 import { ffmpegAsrAudioPreparer } from "../shared/asr-audio-preparer";
 import { probeAudioDurationSeconds } from "../shared/audio-duration";
@@ -92,7 +92,15 @@ async function save(name: string, bytes: Uint8Array) {
 }
 
 async function smokeWeb() {
-  const provider = new DeepSeekWebProvider(apiKey as string, { baseUrl });
+  // The product's own seam: the web capability builds the provider from the
+  // environment. Selecting DeepSeek here affects only this process.
+  process.env.WEB_PROVIDER = "deepseek";
+  const provider = await resolveCapabilityWebProvider();
+  check(provider, "no web provider was resolved");
+  check(
+    provider.name === "deepseek",
+    `expected the deepseek web provider, got ${provider.name}`,
+  );
   const search = await provider.search({ query: "DeepSeek API", limit: 3 });
   check(search.count > 0, "search returned no results");
   console.log(
