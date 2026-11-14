@@ -183,11 +183,17 @@ export default async function PublicMcpCategoryPage({
     !state.cursor &&
     state.trust === "all" &&
     state.runtime === "all";
+  // `facets.total` is the whole directory; this category's size is its own
+  // entry in the per-category counts.
+  const categoryTotal =
+    facets.counts[category.slug] ??
+    facets.counts[category.slug.toLowerCase()] ??
+    0;
   const examples = market.items.slice(0, 3).map((item) => item.name);
   const summary =
-    bare && facets.total > 0 && examples.length > 0
+    bare && categoryTotal > 0 && examples.length > 0
       ? t("summary", {
-          count: formatNumber(facets.total, locale),
+          count: formatNumber(categoryTotal, locale),
           examples: formatList(examples, locale),
           name: category.name,
         })
@@ -195,7 +201,7 @@ export default async function PublicMcpCategoryPage({
   const itemListJsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    ...(bare && facets.total > 0 ? { numberOfItems: facets.total } : {}),
+    ...(bare && categoryTotal > 0 ? { numberOfItems: categoryTotal } : {}),
     itemListElement: market.items.map((item, index) => ({
       "@type": "ListItem",
       name: item.name,
