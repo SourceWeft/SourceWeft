@@ -3412,6 +3412,8 @@
       "unknown": "未知",
       "noMarkdown": "没有可用的 Markdown 内容。",
       "citedSource": "被引用的来源",
+      "supportingPassage": "支撑原文",
+      "supportNotLocated": "未能定位支撑原文",
       "raw": "原始",
       "noRawChunk": "没有原始分块内容。",
       "noChunks": "此来源尚无已索引的分块。"

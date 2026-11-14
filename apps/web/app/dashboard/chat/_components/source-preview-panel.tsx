@@ -129,6 +129,26 @@ function formatTimestamp(
   });
 }
 
+/**
+ * The cited passage inside a chunk, or null when the stored offsets no longer
+ * fit the chunk text (so a stale span is never highlighted).
+ */
+function citedSpan(
+  citation: CitationRecord | null | undefined,
+  content: string,
+) {
+  if (
+    citation?.support !== "strong" ||
+    citation.startChar === undefined ||
+    citation.endChar === undefined ||
+    citation.endChar > content.length ||
+    citation.startChar >= citation.endChar
+  ) {
+    return null;
+  }
+  return { start: citation.startChar, end: citation.endChar };
+}
+
 function SourceMetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border bg-muted/20 px-3.5 py-3">
@@ -722,6 +742,11 @@ export function SourcePreviewPanel({
                   {detail.chunks.map((chunk, index) => {
                     const isCited = chunk.id === citation?.chunkId;
                     const isRawOpen = rawChunkIds.has(chunk.id);
+                    const span = isCited
+                      ? citedSpan(citation, chunk.content)
+                      : null;
+                    const supportNotLocated =
+                      isCited && citation?.support === "weak";
                     return (
                       <article
                         className={cn(
@@ -757,6 +782,11 @@ export function SourcePreviewPanel({
                                 {t("sourcePreview.citedSource")}
                               </span>
                             ) : null}
+                            {supportNotLocated ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                                {t("sourcePreview.supportNotLocated")}
+                              </span>
+                            ) : null}
                             <Button
                               aria-expanded={isRawOpen}
                               className="h-7 gap-1.5 px-2 text-xs"
@@ -770,10 +800,33 @@ export function SourcePreviewPanel({
                             </Button>
                           </div>
                         </div>
+                        {span ? (
+                          <div
+                            className="border-b bg-primary/10 px-4 py-3 lg:px-5"
+                            data-citation-passage
+                          >
+                            <div className="mb-1 text-xs font-medium text-primary">
+                              {t("sourcePreview.supportingPassage")}
+                            </div>
+                            <MessageResponse className="text-sm leading-7 text-foreground">
+                              {chunk.content.slice(span.start, span.end)}
+                            </MessageResponse>
+                          </div>
+                        ) : null}
                         <div className="px-4 py-4 lg:px-5">
                           {isRawOpen ? (
                             <pre className="max-h-96 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap break-words text-muted-foreground">
-                              {chunk.content || t("sourcePreview.noRawChunk")}
+                              {span ? (
+                                <>
+                                  {chunk.content.slice(0, span.start)}
+                                  <mark className="rounded bg-primary/20 px-0.5 text-foreground">
+                                    {chunk.content.slice(span.start, span.end)}
+                                  </mark>
+                                  {chunk.content.slice(span.end)}
+                                </>
+                              ) : (
+                                chunk.content || t("sourcePreview.noRawChunk")
+                              )}
                             </pre>
                           ) : (
                             <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">

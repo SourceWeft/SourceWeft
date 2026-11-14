@@ -32,6 +32,11 @@ export type AgentCitation = {
   origin: AgentCitationOrigin;
   externalUri?: string;
   path?: string;
+  /** Set when the final answer was checked against the cited content. */
+  support?: "strong" | "weak";
+  /** Supporting passage as offsets into the cited chunk's stored content. */
+  startChar?: number;
+  endChar?: number;
 };
 
 export type CitationRecordInput = {
@@ -48,7 +53,7 @@ export type CitationRecordInput = {
   content?: string;
 };
 
-function cleanCitationExcerpt(content: string) {
+export function cleanCitationExcerpt(content: string) {
   return content
     .replace(/<\/?(?:table|thead|tbody|tr|th|td)[^>]*>/gi, " ")
     .replace(/<[^>]+>/g, " ")

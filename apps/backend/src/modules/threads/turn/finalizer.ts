@@ -1,6 +1,10 @@
 import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
 import { workspaceService } from "../../workspace";
-import { createCitationRecords, replaceCitationRecords } from "../../citations";
+import {
+  anchorAnswerCitations,
+  createCitationRecords,
+  replaceCitationRecords,
+} from "../../citations";
 import {
   buildGatewayAuditMetadata,
   recordGatewayOperationEvent,
@@ -168,6 +172,51 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       : 0;
   const accumulatedDurationMs = existingDurationMs + input.latencyMs;
 
+  const assistantContent = input.assistantMessageId
+    ? appendAssistantContinuationContent({
+        existingContent: existingAssistantMessage?.content,
+        nextContent: input.assistantContent,
+      })
+    : input.assistantContent;
+  const citationRecords = input.citations.map((citation, index) => ({
+    citationKey: citation.citation,
+    referenceKey: citation.chunkId,
+    sourceId: citation.sourceId,
+    sourceTitle: citation.sourceTitle,
+    documentId: citation.documentId,
+    chunkId:
+      citation.externalUri || citation.fileReference ? null : citation.chunkId,
+    fileReference: citation.fileReference,
+    chunkNo: citation.chunkNo,
+    excerpt: citation.excerpt,
+    quoteText: citation.quoteText,
+    rank: index + 1,
+    score: citation.score,
+    externalUri: citation.externalUri,
+    content: citation.content,
+  }));
+  const anchors = await anchorAnswerCitations({
+    teamId: prepared.workspace.organizationId,
+    workspaceId: prepared.workspace.id,
+    threadId: prepared.thread.id,
+    answerText: assistantContent,
+    citations: citationRecords,
+  });
+  // The message metadata is what the chat UI reads, so the supporting
+  // passage travels with each used citation. Only the offsets are copied; the
+  // quote is read back from the cited content.
+  const anchoredCitations = input.citations.map((citation) => {
+    const anchor = anchors.get(citation.citation);
+    if (!anchor) return citation;
+    return {
+      ...citation,
+      support: anchor.support,
+      ...(anchor.support === "strong"
+        ? { startChar: anchor.startChar!, endChar: anchor.endChar! }
+        : {}),
+    };
+  });
+
   const nextAssistantMetadata = {
     ...(input.assistantMetadata ?? {}),
     threadRun: {
@@ -244,16 +293,10 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       embeddingProfileId: retrieval?.profile.id ?? null,
       vectorStrategy: retrieval?.planner.strategy ?? null,
       annIndexUsed: retrieval?.planner.annIndexUsed ?? null,
-      citations: input.citations,
+      citations: anchoredCitations,
       availableCitations: input.availableCitations ?? input.citations,
     },
   };
-  const assistantContent = input.assistantMessageId
-    ? appendAssistantContinuationContent({
-        existingContent: existingAssistantMessage?.content,
-        nextContent: input.assistantContent,
-      })
-    : input.assistantContent;
   const assistantMetadata = preserveAssistantMetadataForContinuation({
     existingMetadata: existingAssistantMessage?.metadata,
     nextMetadata: nextAssistantMetadata,
@@ -295,25 +338,8 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     workspaceId: prepared.workspace.id,
     threadId: prepared.thread.id,
     messageId: assistantMessage.id,
-    citations: input.citations.map((citation, index) => ({
-      citationKey: citation.citation,
-      referenceKey: citation.chunkId,
-      sourceId: citation.sourceId,
-      sourceTitle: citation.sourceTitle,
-      documentId: citation.documentId,
-      chunkId:
-        citation.externalUri || citation.fileReference
-          ? null
-          : citation.chunkId,
-      fileReference: citation.fileReference,
-      chunkNo: citation.chunkNo,
-      excerpt: citation.excerpt,
-      quoteText: citation.quoteText,
-      rank: index + 1,
-      score: citation.score,
-      externalUri: citation.externalUri,
-      content: citation.content,
-    })),
+    anchors,
+    citations: citationRecords,
   });
 
   return {

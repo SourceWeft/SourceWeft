@@ -18,6 +18,7 @@ vi.mock("../message-repository", () => ({
   }),
 }));
 vi.mock("../../citations", () => ({
+  anchorAnswerCitations: vi.fn(async () => new Map()),
   createCitationRecords: vi.fn(async () => undefined),
   replaceCitationRecords: vi.fn(async () => undefined),
 }));
@@ -42,6 +43,7 @@ vi.mock("../agent/middleware/context-compression", () => ({
   consumeSourceWeftContextCompressionReport: vi.fn(() => null),
 }));
 
+import { anchorAnswerCitations } from "../../citations";
 import { finalizeThreadTurn } from "./finalizer";
 import { tracePartFromReasoningSegment, upsertTracePart } from "./trace-parts";
 import type {
@@ -179,5 +181,72 @@ test("a continuation rewrite drops the legacy segment text of the existing row",
       Object.hasOwn(part, "text"),
     ),
     false,
+  );
+});
+
+test("the finalizer copies each used citation's supporting passage into the message metadata", async () => {
+  vi.mocked(anchorAnswerCitations).mockResolvedValueOnce(
+    new Map([
+      [
+        "c1",
+        {
+          support: "strong",
+          score: 1,
+          startChar: 12,
+          endChar: 40,
+          quoteText: "supporting passage",
+        },
+      ],
+      [
+        "c2",
+        {
+          support: "weak",
+          score: 0.1,
+          startChar: null,
+          endChar: null,
+          quoteText: null,
+        },
+      ],
+    ]),
+  );
+  const citation = (key: string) => ({
+    citation: key,
+    sourceId: "source-1",
+    sourceTitle: "Source",
+    documentId: "document-1",
+    chunkId: `chunk-${key}`,
+    score: 1,
+    excerpt: "excerpt",
+    quoteText: "excerpt",
+    origin: "search_sources",
+  });
+
+  await finalizeThreadTurn(
+    finalizeInput({
+      assistantContent: "A [citation:c1]. B [citation:c2]. C [citation:c3].",
+      citations: [citation("c1"), citation("c2"), citation("c3")] as never,
+    }),
+  );
+
+  const [metadata] = state.written;
+  const retrieval = metadata!.retrieval as {
+    citations: Record<string, unknown>[];
+  };
+  assert.deepEqual(
+    retrieval.citations.map((item) => [
+      item.citation,
+      item.support,
+      item.startChar,
+      item.endChar,
+    ]),
+    [
+      ["c1", "strong", 12, 40],
+      ["c2", "weak", undefined, undefined],
+      ["c3", undefined, undefined, undefined],
+    ],
+  );
+  assert.equal(
+    vi.mocked(anchorAnswerCitations).mock.calls.at(-1)?.[0].answerText,
+    "A [citation:c1]. B [citation:c2]. C [citation:c3].",
   );
 });

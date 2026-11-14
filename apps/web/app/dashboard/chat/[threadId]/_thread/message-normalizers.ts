@@ -545,6 +545,20 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       const excerpt = toNullableString(record.excerpt);
       const content = toNullableString(record.content) ?? undefined;
       const externalUri = toNullableString(record.externalUri) ?? undefined;
+      const support =
+        record.support === "strong" || record.support === "weak"
+          ? record.support
+          : undefined;
+      const startChar = toNullableNumber(record.startChar);
+      const endChar = toNullableNumber(record.endChar);
+      const hasSpan =
+        support === "strong" &&
+        startChar !== null &&
+        endChar !== null &&
+        Number.isInteger(startChar) &&
+        Number.isInteger(endChar) &&
+        startChar >= 0 &&
+        endChar > startChar;
       const parsedFile =
         record.fileReference === undefined
           ? null
@@ -583,6 +597,13 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       }
       if (content !== undefined) {
         citationRecord.content = content;
+      }
+      if (support !== undefined) {
+        citationRecord.support = support;
+      }
+      if (hasSpan) {
+        citationRecord.startChar = startChar;
+        citationRecord.endChar = endChar;
       }
 
       return citationRecord;
