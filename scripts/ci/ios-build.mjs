@@ -100,6 +100,29 @@ export const verifyAppBundle = (appPath, { signed }) => {
   return { bundleId, signed };
 };
 
+// Export options for `xcodebuild -exportArchive`. Manual signing names the
+// distribution identity and profile explicitly, so nothing is chosen by Xcode.
+export const exportOptionsPlist = ({ teamId, bundleId, identity, profile }) =>
+  [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0"><dict>',
+    "  <key>method</key><string>app-store-connect</string>",
+    `  <key>teamID</key><string>${teamId}</string>`,
+    "  <key>signingStyle</key><string>manual</string>",
+    `  <key>signingCertificate</key><string>${identity}</string>`,
+    "  <key>provisioningProfiles</key><dict>",
+    `    <key>${bundleId}</key><string>${profile}</string>`,
+    "  </dict>",
+    "  <key>uploadSymbols</key><true/>",
+    "</dict></plist>",
+    "",
+  ].join("\n");
+
+// Where the TestFlight archive and IPA are written, relative to the repo root.
+export const testflightBuildDir =
+  "apps/mobile/src-tauri/gen/apple/build/testflight";
+
 const subcommands = {
   "check-testflight-secrets"() {
     requireEnv(REQUIRED_TESTFLIGHT_SECRETS);
@@ -193,6 +216,21 @@ const subcommands = {
     );
     chmodSync(keyPath, 0o600);
     rmSync(profileTmp, { force: true });
+  },
+
+  "write-export-options"() {
+    requireEnv(["IOS_SIGNING_PROFILE_NAME", "IOS_SIGNING_IDENTITY"]);
+    const dir = resolve(root, testflightBuildDir);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "ExportOptions.plist"),
+      exportOptionsPlist({
+        teamId: TEAM_ID,
+        bundleId: BUNDLE_ID,
+        identity: process.env.IOS_SIGNING_IDENTITY,
+        profile: process.env.IOS_SIGNING_PROFILE_NAME,
+      }),
+    );
   },
 
   "verify-simulator-app"() {
