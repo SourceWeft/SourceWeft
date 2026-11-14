@@ -452,7 +452,15 @@ function HowItWorks() {
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
-function PricingSection({ authState }: { authState: LandingAuthState }) {
+export function PricingSection({
+  authState,
+  asPageHeading = false,
+}: {
+  authState: LandingAuthState;
+  /** On the dedicated /pricing page the heading is the page's h1. */
+  asPageHeading?: boolean;
+}) {
+  const Heading = asPageHeading ? "h1" : "h2";
   const t = useTranslations("landing.pricing");
   const tp = useTranslations("pricing");
   const state = useDeploymentCapabilities();
@@ -490,9 +498,9 @@ function PricingSection({ authState }: { authState: LandingAuthState }) {
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
             {t("eyebrow")}
           </p>
-          <h2 className="text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl dark:text-white">
+          <Heading className="text-3xl font-bold tracking-tight text-zinc-900 md:text-4xl dark:text-white">
             {t("heading")}
-          </h2>
+          </Heading>
           <p className="mt-3 text-zinc-500 dark:text-zinc-400">{t("intro")}</p>
         </div>
 

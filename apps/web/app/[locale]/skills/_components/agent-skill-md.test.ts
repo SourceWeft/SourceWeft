@@ -75,7 +75,7 @@ describe("llms.txt", () => {
     expect(text).toContain("`https://sourceweft.com/mcp/<identifier>/install.md`");
     expect(text).toContain("(https://sourceweft.com/skills)");
     expect(text).toContain("(https://sourceweft.com/mcp)");
-    expect(text).toContain("(https://sourceweft.com/#pricing)");
+    expect(text).toContain("(https://sourceweft.com/pricing)");
     expect(text).toContain("(https://sourceweft.com/download)");
   });
 });

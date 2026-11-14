@@ -193,6 +193,12 @@
       "intro": "免費起步。需要更多時再升級。絕無意外帳單。"
     }
   },
+  "pricingPage": {
+    "meta": {
+      "title": "SourceWeft 定價：免費版、Pro 和 Team 方案",
+      "description": "比較 SourceWeft 免費版、Pro 和 Team 方案：每月額度、頁數上限與功能，適用於 AI 筆記本工作區。"
+    }
+  },
   "about": {
     "meta": {
       "title": "關於 SourceWeft",
