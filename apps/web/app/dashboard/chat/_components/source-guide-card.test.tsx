@@ -7,10 +7,12 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 const getSourceGuide = vi.hoisted(() => vi.fn());
 const requestSourceGuide = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
+const push = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../../lib/sdk", () => ({
   contentClient: { getSourceGuide, requestSourceGuide },
 }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: toastError } }));
 
 import { SourceGuideCard } from "./source-guide-card";
@@ -34,6 +36,7 @@ beforeEach(() => {
   getSourceGuide.mockReset();
   requestSourceGuide.mockReset();
   toastError.mockReset();
+  push.mockReset();
 });
 afterEach(unmountAll);
 
@@ -135,4 +138,37 @@ test("the card stays out of the way when the guide cannot be loaded", async () =
   await mount();
 
   assert.equal(document.body.querySelector("[data-source-guide]"), null);
+});
+
+test("a suggested question opens a new chat with that source and the question", async () => {
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  await mount();
+
+  const question = buttonNamed("What drove growth?");
+  assert.ok(question);
+  await click(question);
+
+  assert.equal(push.mock.calls.length, 1);
+  const url = new URL(push.mock.calls[0]![0], "http://localhost");
+  assert.equal(url.pathname, "/dashboard/chat");
+  assert.equal(url.searchParams.get("ask"), "What drove growth?");
+  assert.equal(url.searchParams.get("ask_source"), "s1");
+});
+
+test("a suggested question can also be copied", async () => {
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  const writeText = vi.fn<(text: string) => Promise<void>>(
+    async () => undefined,
+  );
+  Object.assign(navigator, { clipboard: { writeText } });
+  await mount();
+
+  const copy = document.body.querySelector(
+    'button[aria-label="Copy question"]',
+  );
+  assert.ok(copy);
+  await click(copy as HTMLElement);
+
+  assert.equal(writeText.mock.calls[0]?.[0], "What drove growth?");
+  assert.equal(push.mock.calls.length, 0);
 });

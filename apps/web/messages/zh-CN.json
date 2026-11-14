@@ -3405,6 +3405,7 @@
       "topics": "主要主题",
       "questions": "建议问题",
       "copyQuestion": "复制问题",
+      "askQuestion": "在新对话中提问",
       "questionCopied": "已复制问题。",
       "questionCopyFailed": "无法复制问题。",
       "stale": "来源在生成指南后已发生变化。",

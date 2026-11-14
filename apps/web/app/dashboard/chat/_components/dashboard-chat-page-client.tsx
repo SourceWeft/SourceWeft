@@ -278,6 +278,8 @@ export function DashboardChatPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const mcpInstallIdFromQuery = searchParams.get("mcp_install_id");
+  const askFromQuery = searchParams.get("ask");
+  const askSourceFromQuery = searchParams.get("ask_source");
   const {
     adoptChat,
     bootstrapModelCatalog,
@@ -929,6 +931,48 @@ export function DashboardChatPageClient() {
     searchParams,
     setActiveMcpInstallIds,
     setActiveMcpToolIds,
+    workspaceId,
+  ]);
+
+  // A source guide's suggested question: select its source and put the
+  // question in the composer, ready to send. The query is applied once and
+  // removed so a reload does not repeat it.
+  const appliedAskRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workspaceId || !askFromQuery || !creationContext.ready) {
+      return;
+    }
+    const runKey = `${workspaceId}:${creationContext.key}:${askSourceFromQuery}:${askFromQuery}`;
+    if (appliedAskRef.current === runKey) {
+      return;
+    }
+    appliedAskRef.current = runKey;
+    if (askSourceFromQuery) {
+      void persistActiveSourceIds([
+        ...new Set([...activeSourceIds, askSourceFromQuery]),
+      ]);
+    }
+    setRecoveries((previous) => ({
+      ...previous,
+      [creationContext.key]: { text: askFromQuery, key: Date.now() },
+    }));
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("ask");
+    nextParams.delete("ask_source");
+    const nextQuery = nextParams.toString();
+    router.replace(
+      nextQuery ? `/dashboard/chat?${nextQuery}` : "/dashboard/chat",
+    );
+  }, [
+    activeSourceIds,
+    askFromQuery,
+    askSourceFromQuery,
+    creationContext.key,
+    creationContext.ready,
+    persistActiveSourceIds,
+    router,
+    searchParams,
     workspaceId,
   ]);
 

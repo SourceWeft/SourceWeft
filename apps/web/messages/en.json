@@ -3405,6 +3405,7 @@
       "topics": "Main topics",
       "questions": "Suggested questions",
       "copyQuestion": "Copy question",
+      "askQuestion": "Ask in a new chat",
       "questionCopied": "Question copied.",
       "questionCopyFailed": "Could not copy the question.",
       "stale": "The source changed after this guide was made.",

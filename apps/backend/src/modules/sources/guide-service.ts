@@ -14,6 +14,7 @@ import { generateGuideContent } from "./guide-generation";
 import { resolveGuidePayer, type GuidePayerPorts } from "./guide-payer";
 import {
   findGuideRecord,
+  listResumableGuides,
   toSourceGuide,
   upsertGuideRecord,
 } from "./guide-repository";
@@ -224,4 +225,57 @@ export async function processSourceGuideJob(
     await write("failed", { errorCode: "MODEL", payerUserId: payer.userId });
     return { status: "failed" as const };
   }
+}
+
+/** A paused guide is tried again this long after its last attempt. */
+export const GUIDE_RESUME_INTERVAL_MS = 15 * 60_000;
+/** A guide still `generating` after this long lost its job. */
+export const GUIDE_STUCK_AFTER_MS = 30 * 60_000;
+const GUIDE_RESUME_BATCH = 20;
+
+/**
+ * The scheduler's sweep: queue the guides that were waiting for credits or a
+ * payer, and the ones whose job was lost, again. The same person is charged as
+ * before (the recorded payer; a system run falls back to the workspace's
+ * responsible owner), so a blocked guide just waits for the next interval.
+ */
+export async function resumePausedGuides(now = new Date()) {
+  const rows = await listResumableGuides({
+    pausedBefore: new Date(now.getTime() - GUIDE_RESUME_INTERVAL_MS),
+    generatingBefore: new Date(now.getTime() - GUIDE_STUCK_AFTER_MS),
+    limit: GUIDE_RESUME_BATCH,
+  });
+  let queued = 0;
+  for (const row of rows) {
+    try {
+      // Rewriting the row moves `updated_at`, which both throttles the next
+      // sweep and makes this attempt's job id unique.
+      await upsertGuideRecord({
+        teamId: row.teamId,
+        workspaceId: row.workspaceId,
+        sourceId: row.sourceId,
+        status: "pending",
+        trigger: row.trigger,
+        errorCode: row.status === "generating" ? null : row.errorCode,
+      });
+      await enqueueSourceGuideGenerateJob(
+        {
+          teamId: row.teamId,
+          workspaceId: row.workspaceId,
+          sourceId: row.sourceId,
+          initiatorUserId: row.payerUserId,
+          trigger: row.trigger,
+        },
+        `resume_${now.getTime()}`,
+      );
+      queued += 1;
+    } catch (error) {
+      logger.warn("Could not resume a source guide", {
+        err: error,
+        sourceId: row.sourceId,
+      });
+    }
+  }
+  if (queued > 0) logger.info("Resumed paused source guides", { queued });
+  return { queued };
 }
