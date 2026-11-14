@@ -6,7 +6,11 @@ import { withIntl } from "@/test/react";
 
 vi.mock("./chat-work-context", () => ({
   WorkingFolderPicker: () =>
-    createElement("button", null, "Choose existing folder…"),
+    createElement(
+      "button",
+      { "data-testid": "working-folder-trigger" },
+      "Task folder",
+    ),
 }));
 vi.mock("./local-files-panel", () => ({
   LocalFilesBrowser: (props: {
@@ -39,9 +43,9 @@ const render = (context: DraftWorkContext) =>
   );
 test("unselected local draft explains lazy creation and offers a folder choice", () => {
   const html = render(local);
-  expect(html).toContain("Conversation folder");
+  expect(html).toContain("Task folder");
   expect(html).toContain("created automatically");
-  expect(html).toContain("Choose existing folder");
+  expect(html).toContain('data-testid="working-folder-trigger"');
   expect(html).not.toContain("<output");
 });
 test("selected local draft browses the authorized folder before a conversation exists", () => {
@@ -66,6 +70,6 @@ test("offline draft preserves the selected folder and disables browsing", () => 
 test("cloud drafts do not offer local directory controls", () => {
   const html = render({ ...local, target: { kind: "cloud" } });
   expect(html).toContain("Conversation cloud files");
-  expect(html).not.toContain("Choose existing folder");
+  expect(html).not.toContain("working-folder-trigger");
   expect(html).not.toContain("<output");
 });

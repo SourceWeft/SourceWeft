@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
-import { act, createElement, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { beforeEach, afterEach, test, vi } from "vitest";
 vi.mock("../../_components/dashboard-chat-state", () => ({
   useDashboardChatState: () => ({
@@ -16,9 +21,19 @@ const mocks = vi.hoisted(() => ({
   native: vi.fn(),
   isDesktop: vi.fn(),
   request: vi.fn(),
+  taskFolder: vi.fn(),
+  desktopInfo: vi.fn(),
+  reveal: vi.fn(),
+  chooseLocalFolder: vi.fn(),
 }));
 vi.mock("../../../../lib/desktop-bridge", () => ({
-  desktopBridge: { isAvailable: mocks.isDesktop },
+  desktopBridge: {
+    isAvailable: mocks.isDesktop,
+    getTaskFolder: mocks.taskFolder,
+    info: mocks.desktopInfo,
+    revealLocalDirectory: mocks.reveal,
+    chooseLocalFolder: mocks.chooseLocalFolder,
+  },
 }));
 vi.mock("../../../../lib/auth-client", () => ({
   authClient: {
@@ -37,17 +52,69 @@ vi.mock("../../../../lib/local-host-session", () => ({
 vi.mock("../../../../lib/local-execution", () => ({
   localRequest: mocks.request,
 }));
+// An opened Radix popover never settles under jsdom. This disclosure keeps the trigger and
+// everything inside the content real; placement and focus remain browser acceptance.
+vi.mock("@sourceweft/ui-web/components/ui/popover", async () => {
+  const React = await import("react");
+  type Disclosure = { open: boolean; toggle: () => void };
+  const Context = React.createContext<Disclosure>({
+    open: false,
+    toggle: () => {},
+  });
+  return {
+    Popover({
+      open,
+      onOpenChange,
+      children,
+    }: {
+      open?: boolean;
+      onOpenChange?: (open: boolean) => void;
+      children: ReactNode;
+    }) {
+      const [own, setOwn] = React.useState(false);
+      const shown = open ?? own;
+      const toggle = () => {
+        setOwn(!shown);
+        onOpenChange?.(!shown);
+      };
+      return React.createElement(
+        Context.Provider,
+        { value: { open: shown, toggle } },
+        children,
+      );
+    },
+    PopoverTrigger({
+      children,
+    }: {
+      children: ReactElement<{ onClick?: () => void }>;
+    }) {
+      const { toggle } = React.useContext(Context);
+      return React.cloneElement(children, { onClick: toggle });
+    },
+    PopoverContent({ children }: { children: ReactNode }) {
+      return React.useContext(Context).open
+        ? React.createElement("div", null, children)
+        : null;
+    },
+  };
+});
 import {
   useChatCreationContext,
   ChatWorkContext,
+  WorkingFolderPicker,
   type ChatCreationContext,
 } from "./chat-work-context";
 import {
+  button,
+  buttons,
+  click,
+  flush,
   mountWithIntl,
   type Mounted,
   unmountAll,
   withIntl,
 } from "@/test/react";
+
 
 let view: Mounted | null = null;
 let container: HTMLDivElement, context: ChatCreationContext;
@@ -86,6 +153,14 @@ beforeEach(() => {
   });
   mocks.push.mockClear();
   mocks.replace.mockClear();
+  mocks.taskFolder.mockReset().mockResolvedValue({
+    path: "/Users/me/SourceWeft",
+    defaultPath: "/Users/me/SourceWeft",
+    isDefault: true,
+  });
+  mocks.desktopInfo.mockReset().mockResolvedValue({ platform: "macos" });
+  mocks.reveal.mockReset().mockResolvedValue(undefined);
+  mocks.chooseLocalFolder.mockReset();
 });
 afterEach(async () => {
   await reset();
@@ -330,4 +405,275 @@ test("native discovery failure in cloud is reported without blocking cloud", asy
   assert.equal(context.ready, true);
   assert.equal(context.error, null);
   assert.equal(context.devicesError, "KEYCHAIN_DENIED");
+});
+
+const grantedFolders = [
+  { id: "g1", name: "proj", path: "/Users/me/work/proj" },
+  { id: "g2", name: "proj", path: "/Users/me/work/proj" },
+  { id: "g3", name: "notes", path: "/Users/me/notes" },
+];
+/** The slice of the creation context the folder picker reads. */
+function pickerCreation(
+  overrides: Partial<
+    Pick<ChatCreationContext, "target" | "nativeId" | "selectedDevice">
+  > = {},
+) {
+  return {
+    target: { kind: "local" as const, deviceId: "a" },
+    nativeId: "a",
+    selectedDevice: {
+      id: "a",
+      name: "Mac A",
+      online: true,
+      connected: true,
+      remoteEnabled: false,
+    },
+    setFolder: vi.fn(),
+    ...overrides,
+  };
+}
+const folderTrigger = () =>
+  container.querySelector<HTMLButtonElement>(
+    '[data-testid="working-folder-trigger"]',
+  )!;
+async function openFolderPicker() {
+  await click(folderTrigger());
+  await flush(4);
+}
+/** The text of every alert on the page: comparing nodes would dump the whole DOM on failure. */
+const alerts = () =>
+  [...document.querySelectorAll('[role="alert"]')]
+    .map((node) => node.textContent)
+    .join("\n");
+const folderEntries = () => [
+  ...document.querySelectorAll<HTMLButtonElement>(
+    '[data-testid="working-folder-list"] button',
+  ),
+];
+
+test("the folder trigger shows the automatic task folder, then the chosen folder", async () => {
+  mocks.request.mockResolvedValue({ folders: grantedFolders });
+  await render(
+    createElement(WorkingFolderPicker, { creation: pickerCreation() }),
+  );
+  await flush(4);
+  assert.equal(folderTrigger().textContent, "Task folder");
+  assert.equal(
+    folderTrigger().title,
+    "Will be created in /Users/me/SourceWeft",
+  );
+  await render(
+    createElement(WorkingFolderPicker, {
+      creation: pickerCreation({
+        target: { kind: "local", deviceId: "a", folderId: "g3" },
+      }),
+    }),
+  );
+  await flush(4);
+  assert.equal(folderTrigger().textContent, "notes");
+  assert.equal(folderTrigger().title, "/Users/me/notes");
+  assert.equal(document.body.textContent?.includes("Choose existing"), false);
+});
+
+test("a chosen folder that is no longer listed keeps a neutral trigger label", async () => {
+  mocks.request.mockResolvedValue({ folders: [] });
+  await render(
+    createElement(WorkingFolderPicker, {
+      creation: pickerCreation({
+        target: { kind: "local", deviceId: "a", folderId: "revoked" },
+      }),
+    }),
+  );
+  await flush(4);
+  assert.equal(folderTrigger().textContent, "Selected folder");
+  await openFolderPicker();
+  assert.equal(folderEntries().length, 0);
+  assert.equal(document.body.textContent?.includes("Folders"), false);
+});
+
+test("the folder list shows each directory once and keeps the selected grant", async () => {
+  mocks.request.mockResolvedValue({ folders: grantedFolders });
+  const creation = pickerCreation({
+    target: { kind: "local", deviceId: "a", folderId: "g2" },
+  });
+  await render(createElement(WorkingFolderPicker, { creation }));
+  await flush(4);
+  await openFolderPicker();
+  const entries = folderEntries();
+  assert.deepEqual(
+    entries.map((entry) => entry.textContent),
+    ["notes~", "proj~/work"],
+  );
+  assert.deepEqual(
+    entries.map((entry) => entry.getAttribute("aria-current")),
+    [null, "true"],
+  );
+  assert.equal(
+    entries[1]!.querySelector("[title]")?.getAttribute("title"),
+    "/Users/me/work/proj",
+  );
+  await click(entries[1]!);
+  assert.deepEqual(creation.setFolder.mock.calls, [["g2"]]);
+});
+
+test("the automatic choice is checked when no folder is chosen and selects the task folder", async () => {
+  mocks.request.mockResolvedValue({ folders: grantedFolders });
+  const creation = pickerCreation();
+  await render(createElement(WorkingFolderPicker, { creation }));
+  await flush(4);
+  await openFolderPicker();
+  assert.equal(folderEntries().length, 2);
+  assert.ok(
+    folderEntries().every((entry) => !entry.hasAttribute("aria-current")),
+  );
+  const automatic = [...document.querySelectorAll("button")].find((node) =>
+    node.textContent?.startsWith("New task folder"),
+  )!;
+  assert.equal(automatic.getAttribute("aria-current"), "true");
+  await click(automatic);
+  assert.deepEqual(creation.setFolder.mock.calls, [[""]]);
+});
+
+test("the task folder location is shown only for the computer the app runs on", async () => {
+  mocks.request.mockResolvedValue({ folders: [] });
+  await render(
+    createElement(WorkingFolderPicker, { creation: pickerCreation() }),
+  );
+  await flush(4);
+  await openFolderPicker();
+  assert.match(
+    document.body.textContent ?? "",
+    /New task folderWill be created in ~\/SourceWeft/,
+  );
+  assert.ok(button("Choose a different folder…"));
+  await reset();
+
+  mocks.taskFolder.mockClear();
+  await render(
+    createElement(WorkingFolderPicker, {
+      creation: pickerCreation({ nativeId: "another-computer" }),
+    }),
+  );
+  await flush(4);
+  assert.equal(folderTrigger().title, "Task folder");
+  await openFolderPicker();
+  assert.match(
+    document.body.textContent ?? "",
+    /New task folderCreated automatically on that computer/,
+  );
+  assert.equal(document.body.textContent?.includes("SourceWeft"), false);
+  assert.equal(mocks.taskFolder.mock.calls.length, 0);
+  assert.equal(buttons("Choose a different folder…").length, 0);
+});
+
+test("an app version without the task folder command shows no guessed location", async () => {
+  mocks.request.mockResolvedValue({ folders: [] });
+  mocks.taskFolder.mockRejectedValue(
+    new Error("Command get_task_folder not found"),
+  );
+  await render(
+    createElement(WorkingFolderPicker, { creation: pickerCreation() }),
+  );
+  await flush(4);
+  assert.equal(folderTrigger().title, "Task folder");
+  await openFolderPicker();
+  assert.match(
+    document.body.textContent ?? "",
+    /New task folderCreated automatically on that computer/,
+  );
+  assert.equal(alerts(), "");
+  assert.ok(button("Choose a different folder…"));
+});
+
+const selectedThread = {
+  availability: { ready: true, code: null, message: null },
+  executionTarget: { kind: "local", deviceId: "a", folderId: "picked-folder" },
+  workingDirectory: "/Users/example/Projects/selected-directory",
+  target: { deviceId: "a", name: "Mac A", online: true },
+};
+/** An existing conversation's header, as the chat page mounts it. */
+async function openConversationDetails(threadId: string, nativeId: string | null) {
+  await render(
+    createElement(ChatWorkContext, {
+      workspaceId: "w",
+      threadId,
+      creation: { nativeId, devices: [], error: null } as never,
+    }),
+  );
+  await click(
+    container.querySelector<HTMLButtonElement>(
+      '[aria-label="Conversation details"]',
+    )!,
+  );
+  await flush(4);
+}
+
+test("conversation details shorten the working directory and reveal it on this computer", async () => {
+  mocks.request.mockResolvedValue(selectedThread);
+  await openConversationDetails("details-native", "a");
+  const path = document.querySelector('[data-testid="working-directory-path"]');
+  assert.equal(path?.textContent, "~/Projects/selected-directory");
+  assert.equal(path?.getAttribute("title"), selectedThread.workingDirectory);
+  assert.ok(button("Copy path"));
+  assert.equal(buttons("Show in file manager").length, 0);
+  await click(button("Show in Finder"));
+  assert.deepEqual(mocks.reveal.mock.calls, [
+    [selectedThread.workingDirectory],
+  ]);
+  assert.equal(alerts(), "");
+});
+
+test("the file manager is named generically off macOS and a refusal is shown", async () => {
+  mocks.request.mockResolvedValue(selectedThread);
+  mocks.desktopInfo.mockResolvedValue({ platform: "windows" });
+  mocks.reveal.mockRejectedValue(
+    new Error("WORKSPACE_MISSING: The directory does not exist yet or was replaced."),
+  );
+  await openConversationDetails("details-windows", "a");
+  assert.equal(buttons("Show in Finder").length, 0);
+  await click(button("Show in file manager"));
+  await flush(2);
+  assert.match(
+    document.querySelector('[role="alert"]')?.textContent ?? "",
+    /WORKSPACE_MISSING/,
+  );
+});
+
+test("a conversation on another computer offers copying the path but no reveal action", async () => {
+  mocks.request.mockResolvedValue(selectedThread);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  try {
+    await openConversationDetails("details-remote", "another-computer");
+    assert.equal(buttons("Show in Finder").length, 0);
+    assert.equal(buttons("Show in file manager").length, 0);
+    assert.equal(mocks.desktopInfo.mock.calls.length, 0);
+    await click(button("Copy path"));
+    await flush(2);
+    assert.deepEqual(writeText.mock.calls, [
+      [selectedThread.workingDirectory],
+    ]);
+    assert.ok(button("Copied"));
+    assert.equal(buttons("Copy path").length, 0);
+  } finally {
+    Reflect.deleteProperty(navigator, "clipboard");
+  }
+});
+
+test("conversation details without a working directory offer no path actions", async () => {
+  mocks.request.mockResolvedValue({
+    executionTarget: { kind: "local", deviceId: "a" },
+    workingDirectory: null,
+    target: { deviceId: "a", name: "Mac A", online: true },
+  });
+  await openConversationDetails("details-pending", "a");
+  assert.match(
+    document.body.textContent ?? "",
+    /The working directory will be connected when first used\./,
+  );
+  assert.equal(buttons("Copy path").length, 0);
+  assert.equal(buttons("Show in Finder").length, 0);
 });

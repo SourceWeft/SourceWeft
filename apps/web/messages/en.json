@@ -1367,6 +1367,10 @@
       "remoteAccessTitle": "Allow access from other devices",
       "remoteAccessDescription": "Let your other devices use this computer with the same account. They can access task folders and authorized working directories. You can still work on this computer when remote access is off.",
       "turnOffRemoteAccess": "Turn off remote access",
+      "taskFolderTitle": "Default task folder",
+      "taskFolderDescription": "New conversations without a chosen folder create their folder here. Existing conversations keep their folder.",
+      "taskFolderChange": "Change…",
+      "taskFolderReset": "Reset to default",
       "workingDirectoriesTitle": "Working directories",
       "workingDirectoriesDescription": "Each conversation gets a separate task folder. Removing folder access stops further local operations for affected tasks and preserves the files.",
       "removeAccess": "Remove access",
@@ -1760,6 +1764,11 @@
       "computerOffline": "The computer is offline. Local tasks can continue when it reconnects.",
       "workingDirectory": "Working directory",
       "directoryConnectedWhenUsed": "The working directory will be connected when first used.",
+      "copyPath": "Copy path",
+      "pathCopied": "Copied",
+      "copyPathFailed": "Could not copy the path.",
+      "showInFinder": "Show in Finder",
+      "showInFileManager": "Show in file manager",
       "myComputers": "My computers",
       "loadingComputers": "Loading computers…",
       "couldNotLoadComputers": "Could not load computers: {error}",
@@ -1780,10 +1789,12 @@
     "folderPicker": {
       "folderUnavailable": "Folder unavailable",
       "defaultTaskFolder": "Default task folder",
-      "selectFolder": "Select folder…",
       "selectedFolderFallback": "Selected folder",
-      "chooseExistingFolder": "Choose existing folder…",
-      "useConversationFolder": "Use conversation folder"
+      "newTaskFolder": "New task folder",
+      "createdIn": "Will be created in {path}",
+      "createdAutomatically": "Created automatically on that computer",
+      "folders": "Folders",
+      "chooseDifferentFolder": "Choose a different folder…"
     },
     "local": {
       "historyPreserved": "History remains readable and drafts are preserved.",
@@ -2547,7 +2558,7 @@
       "offline": "This computer is offline. Your folder selection is preserved.",
       "connectToBrowse": "Connect to this computer to browse its files.",
       "workingDirectory": "Working directory",
-      "conversationFolder": "Conversation folder",
+      "conversationFolder": "Task folder",
       "autoFolderHint": "An independent folder will be created automatically on this computer when the conversation starts using files.",
       "authorizeHint": "To authorize another folder, open SW on this computer. You can select an already authorized folder here."
     }
