@@ -5,6 +5,7 @@ import {
   assertSsoDomainAllowed,
   isPublicEmailDomain,
   normalizeSsoDomain,
+  ssoDomainCandidates,
 } from "./policy";
 
 /** An error carrying the better-auth `APIError` body shape. */
@@ -52,9 +53,44 @@ test("assertSsoDomainAllowed rejects a public email domain", async () => {
   );
 });
 
-test("assertSsoDomainAllowed rejects a domain already owned by another organization", async () => {
+test("assertSsoDomainAllowed rejects a domain VERIFIED by another organization", async () => {
   const lookup = async () => [
-    { providerId: "p-b", organizationId: "org-b", domain: "acme.com" },
+    {
+      providerId: "p-b",
+      organizationId: "org-b",
+      domain: "acme.com",
+      domainVerified: true,
+    },
+  ];
+  await assert.rejects(
+    assertSsoDomainAllowed({ domain: "acme.com", organizationId: "org-a" }, lookup),
+    hasDomainNotAllowedCode,
+  );
+});
+
+test("assertSsoDomainAllowed allows a domain only UNVERIFIED-claimed by another organization", async () => {
+  const lookup = async () => [
+    {
+      providerId: "p-b",
+      organizationId: "org-b",
+      domain: "acme.com",
+      domainVerified: false,
+    },
+  ];
+  // An unverified squatter must not block the real owner from registering.
+  await assert.doesNotReject(
+    assertSsoDomainAllowed({ domain: "acme.com", organizationId: "org-a" }, lookup),
+  );
+});
+
+test("assertSsoDomainAllowed rejects a second provider for the same domain in the same organization", async () => {
+  const lookup = async () => [
+    {
+      providerId: "sibling",
+      organizationId: "org-a",
+      domain: "acme.com",
+      domainVerified: false,
+    },
   ];
   await assert.rejects(
     assertSsoDomainAllowed({ domain: "acme.com", organizationId: "org-a" }, lookup),
@@ -64,9 +100,14 @@ test("assertSsoDomainAllowed rejects a domain already owned by another organizat
 
 test("assertSsoDomainAllowed treats a parent and its subdomain as different domains (Review Focus 3)", async () => {
   const lookup = async () => [
-    { providerId: "p-b", organizationId: "org-b", domain: "mail.acme.com" },
+    {
+      providerId: "p-b",
+      organizationId: "org-b",
+      domain: "mail.acme.com",
+      domainVerified: true,
+    },
   ];
-  // The exact subdomain owned by another org is a conflict...
+  // The exact subdomain verified by another org is a conflict...
   await assert.rejects(
     assertSsoDomainAllowed(
       { domain: "mail.acme.com", organizationId: "org-a" },
@@ -80,10 +121,14 @@ test("assertSsoDomainAllowed treats a parent and its subdomain as different doma
   );
 });
 
-test("assertSsoDomainAllowed allows the same organization and the excluded provider to keep a domain", async () => {
+test("assertSsoDomainAllowed ignores the excluded provider when it is the row being updated", async () => {
   const lookup = async () => [
-    { providerId: "self", organizationId: "org-a", domain: "acme.com" },
-    { providerId: "sibling", organizationId: "org-a", domain: "acme.com" },
+    {
+      providerId: "self",
+      organizationId: "org-a",
+      domain: "acme.com",
+      domainVerified: true,
+    },
   ];
   await assert.doesNotReject(
     assertSsoDomainAllowed(
@@ -91,4 +136,19 @@ test("assertSsoDomainAllowed allows the same organization and the excluded provi
       lookup,
     ),
   );
+});
+
+test("ssoDomainCandidates walks parents up to the registrable domain", () => {
+  assert.deepEqual(ssoDomainCandidates("acme.com"), ["acme.com"]);
+  assert.deepEqual(ssoDomainCandidates("mail.acme.com"), [
+    "mail.acme.com",
+    "acme.com",
+  ]);
+  assert.deepEqual(ssoDomainCandidates("a.b.acme.com"), [
+    "a.b.acme.com",
+    "b.acme.com",
+    "acme.com",
+  ]);
+  // Never ascends into the public suffix.
+  assert.deepEqual(ssoDomainCandidates("gmail.com"), ["gmail.com"]);
 });

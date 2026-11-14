@@ -1,5 +1,6 @@
 import { domainToASCII } from "node:url";
 import { APIError } from "better-auth/api";
+import { parse as parseDomain } from "tldts";
 import { parseSourceweftOrganizationKind } from "../auth/organization-metadata";
 import { SSO_ERROR_CODES } from "./errors";
 import { PUBLIC_EMAIL_DOMAINS } from "./public-email-domains";
@@ -89,6 +90,7 @@ export type SsoProviderDomainRow = {
   providerId: string;
   organizationId: string | null;
   domain: string;
+  domainVerified: boolean;
 };
 
 /**
@@ -103,12 +105,17 @@ export type SsoProviderDomainLookup = (
 /**
  * Assert that `domain` may be registered or kept by `organizationId`.
  *
- * Rejects (with {@link SSO_ERROR_CODES.domainNotAllowed}) a public mailbox
- * domain, or a domain already registered by a *different* organization. Domain
- * identity is exact: `acme.com` and `mail.acme.com` are distinct, so claiming
- * one never conflicts with the other (plan Review Focus 3). Rows owned by the
- * same organization — and the provider named by `excludeProviderId`, i.e. the
- * row being updated — are not conflicts.
+ * Rejects (with {@link SSO_ERROR_CODES.domainNotAllowed}):
+ *  - a public mailbox domain;
+ *  - a domain that already has a provider in the *same* organization (sign-in
+ *    routes by domain, so one provider per domain per org);
+ *  - a domain owned by a *verified* provider of another organization.
+ *
+ * An *unverified* claim by another organization does **not** block: ownership
+ * is only established by verification, so an unverified squatter cannot stop the
+ * real owner from registering and verifying the domain. Domain identity is
+ * exact: `acme.com` and `mail.acme.com` are distinct (plan Review Focus 3). The
+ * provider named by `excludeProviderId` (the row being updated) is skipped.
  *
  * `domain` must already be normalized via {@link normalizeSsoDomain}.
  */
@@ -123,19 +130,54 @@ export async function assertSsoDomainAllowed(
   }
 
   const rows = await lookup(input.domain);
-  const conflict = rows.some(
-    (row) =>
-      row.domain === input.domain &&
-      row.organizationId !== null &&
-      row.organizationId !== input.organizationId &&
-      row.providerId !== input.excludeProviderId,
-  );
-
-  if (conflict) {
-    throw domainNotAllowed(
-      `"${input.domain}" is already registered to another organization.`,
-    );
+  for (const row of rows) {
+    if (row.domain !== input.domain) {
+      continue;
+    }
+    if (row.providerId === input.excludeProviderId) {
+      continue;
+    }
+    if (row.organizationId === null) {
+      continue;
+    }
+    if (row.organizationId === input.organizationId) {
+      throw domainNotAllowed(
+        `"${input.domain}" already has an SSO provider in this organization.`,
+      );
+    }
+    if (row.domainVerified) {
+      throw domainNotAllowed(
+        `"${input.domain}" is verified by another organization.`,
+      );
+    }
   }
+}
+
+/**
+ * The domain itself, then each parent domain up to (and including) the
+ * registrable domain, in nearest-first order. Used to route email-based SSO
+ * sign-in: an exact verified match is preferred, then the nearest verified
+ * parent. The walk stops at the registrable domain (`tldts`), so it never
+ * ascends into a public suffix (`com`, `co.uk`, `example`).
+ *
+ * `domain` must already be normalized via {@link normalizeSsoDomain}.
+ */
+export function ssoDomainCandidates(domain: string): string[] {
+  const candidates = [domain];
+  const registrable = parseDomain(domain).domain;
+  if (!registrable || registrable === domain) {
+    return candidates;
+  }
+  let current = domain;
+  while (current !== registrable && current.includes(".")) {
+    const parent = current.slice(current.indexOf(".") + 1);
+    if (!parent || parent === current) {
+      break;
+    }
+    candidates.push(parent);
+    current = parent;
+  }
+  return candidates;
 }
 
 /**

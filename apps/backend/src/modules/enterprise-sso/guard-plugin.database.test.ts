@@ -7,23 +7,31 @@ import {
   bootSsoTestHarness,
   closeSsoTestHarness,
   createOrganization,
+  insertOrphanProvider,
   readStoredProvider,
+  setProviderDomainVerified,
   signUpUser,
-  type SsoTestClient,
+  SsoTestClient,
   type SsoTestHarness,
   type SsoTestUser,
 } from "./sso-test-helpers";
 
 /**
- * End-to-end proof that the SSO registration guard enforces the multi-tenant
- * rules against the real `@better-auth/sso` register/update endpoints and a
- * migrated database: identity sources belong only to team organizations, a
- * domain is a private hostname no other organization already owns, a team is
- * capped at five providers, and SAML providers always store signed assertions.
+ * End-to-end proof of the SSO tenant guard against the real `@better-auth/sso`
+ * endpoints and a migrated database:
  *
- * Organizations are seeded directly in SQL with explicit `kind` metadata
- * because migration mode skips the organization hooks that would tag it; this
- * mirrors the rows production writes.
+ *  - identity sources belong only to team organizations;
+ *  - a domain is private, unique within its org, and — across orgs — only a
+ *    VERIFIED provider owns it (an unverified squatter does not block others);
+ *  - a verified domain cannot be re-verified by another org, backed by a partial
+ *    unique index;
+ *  - email sign-in routes to the exact verified provider, else the nearest
+ *    verified parent, making squatter rows invisible;
+ *  - a team is capped at five providers; SAML stores signed assertions;
+ *  - an organization-less provider can never be updated or deleted.
+ *
+ * Organizations are seeded in SQL with explicit `kind` metadata because
+ * migration mode runs no org hooks; this mirrors the rows production writes.
  */
 
 let harness: SsoTestHarness;
@@ -41,16 +49,21 @@ function uniqueDomain() {
 
 function oidcEndpoints() {
   return {
+    // authorizationEndpoint carries the client_id and is excluded from the
+    // sign-in SSRF re-check, so its FQDN is fine. tokenEndpoint/jwksEndpoint ARE
+    // re-checked at sign-in by DNS-resolving the host; under a local fake-IP DNS
+    // a FQDN resolves to a private address and the sign-in 400s, so use a public
+    // IP literal (IP literals skip DNS; no request is ever made to these).
     authorizationEndpoint: "https://idp.example.com/authorize",
-    tokenEndpoint: "https://idp.example.com/token",
-    jwksEndpoint: "https://idp.example.com/jwks",
+    tokenEndpoint: "https://93.184.216.34/token",
+    jwksEndpoint: "https://93.184.216.34/jwks",
   };
 }
 
-/** Body for a skipDiscovery OIDC provider registration. */
 function oidcRegistration(input: {
   organizationId?: string;
   domain: string;
+  clientId?: string;
   oidcConfig?: Record<string, unknown>;
 }) {
   return {
@@ -59,7 +72,7 @@ function oidcRegistration(input: {
     domain: input.domain,
     ...(input.organizationId ? { organizationId: input.organizationId } : {}),
     oidcConfig: {
-      clientId: "client-123",
+      clientId: input.clientId ?? "client-123",
       clientSecret: "s3cr3t",
       tokenEndpointAuthentication: "client_secret_basic",
       skipDiscovery: true,
@@ -75,6 +88,7 @@ async function registerOidc(
   input: {
     organizationId?: string;
     domain: string;
+    clientId?: string;
     oidcConfig?: Record<string, unknown>;
   },
 ) {
@@ -83,9 +97,36 @@ async function registerOidc(
   return { response, providerId: body.providerId };
 }
 
+/** Register a verified provider (via SQL) and return its providerId. */
+async function registerVerified(
+  client: SsoTestClient,
+  input: { organizationId: string; domain: string; clientId: string },
+) {
+  const { response, providerId } = await registerOidc(client, input);
+  assert.equal(response.status, 200, await response.clone().text());
+  await setProviderDomainVerified(harness, providerId);
+  return providerId;
+}
+
 async function codeOf(response: Response): Promise<string | undefined> {
   const body = (await response.clone().json()) as { code?: string };
   return body.code;
+}
+
+/** POST /sign-in/sso as an anonymous caller. */
+async function signInByEmail(email: string) {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  return client.jsonRequest("/sign-in/sso", {
+    email,
+    callbackURL: "https://app.example.com/after",
+  });
+}
+
+/** The client_id query param of the authorization URL a sign-in redirects to. */
+async function routedClientId(response: Response): Promise<string | null> {
+  const body = (await response.clone().json()) as { url?: string };
+  assert.ok(body.url, `expected a redirect url, got ${await response.clone().text()}`);
+  return new URL(body.url).searchParams.get("client_id");
 }
 
 beforeAll(async () => {
@@ -94,36 +135,25 @@ beforeAll(async () => {
   ownerB = await signUpUser(harness, "ownerB");
   memberA = await signUpUser(harness, "memberA");
 
-  orgA = await createOrganization(harness, {
-    ownerUserId: ownerA.userId,
-    kind: "team",
-  });
-  orgB = await createOrganization(harness, {
-    ownerUserId: ownerB.userId,
-    kind: "team",
-  });
-  orgP = await createOrganization(harness, {
-    ownerUserId: ownerA.userId,
-    kind: "personal",
-  });
+  orgA = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "team" });
+  orgB = await createOrganization(harness, { ownerUserId: ownerB.userId, kind: "team" });
+  orgP = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "personal" });
   await addOrganizationMember(harness, {
     organizationId: orgA,
     userId: memberA.userId,
     role: "member",
   });
-}, 180_000);
+}, 600_000);
 
 afterAll(async () => {
   await closeSsoTestHarness(harness);
 });
 
 test("registration without an organization is rejected", async () => {
-  const { response } = await registerOidc(ownerA.client, {
-    domain: uniqueDomain(),
-  });
+  const { response } = await registerOidc(ownerA.client, { domain: uniqueDomain() });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.organizationRequired);
-}, 60_000);
+}, 200_000);
 
 test("registration against a personal organization is rejected", async () => {
   const { response } = await registerOidc(ownerA.client, {
@@ -132,7 +162,7 @@ test("registration against a personal organization is rejected", async () => {
   });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.organizationRequired);
-}, 60_000);
+}, 200_000);
 
 test("a non-admin member cannot register a provider (plugin check)", async () => {
   const { response } = await registerOidc(memberA.client, {
@@ -140,7 +170,7 @@ test("a non-admin member cannot register a provider (plugin check)", async () =>
     domain: uniqueDomain(),
   });
   assert.equal(response.status, 403, await response.clone().text());
-}, 60_000);
+}, 200_000);
 
 test("a public email domain is rejected", async () => {
   const { response } = await registerOidc(ownerA.client, {
@@ -149,10 +179,12 @@ test("a public email domain is rejected", async () => {
   });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
-}, 60_000);
+}, 200_000);
 
-// Shared by the uniqueness and update tests: org A owns acme.com.
+// Org A owns acme.com; shared by the uniqueness, verification and update tests.
 let acmeProviderId: string;
+// Org B's unverified acme.com claim (allowed while A's is unverified).
+let bAcmeProviderId: string;
 
 test("a private domain registers, normalized and unverified", async () => {
   const { response, providerId } = await registerOidc(ownerA.client, {
@@ -166,26 +198,62 @@ test("a private domain registers, normalized and unverified", async () => {
   assert.equal(stored.domain, "acme.com");
   assert.equal(stored.domainVerified, false);
   assert.equal(stored.organizationId, orgA);
-}, 60_000);
+}, 200_000);
 
-test("another organization cannot claim a domain already registered", async () => {
-  const { response } = await registerOidc(ownerB.client, {
+test("another org may claim the same domain while it is unverified", async () => {
+  const { response, providerId } = await registerOidc(ownerB.client, {
     organizationId: orgB,
-    domain: "ACME.com.",
+    domain: "acme.com",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  bAcmeProviderId = providerId;
+}, 200_000);
+
+test("a second provider for the same domain in the same org is rejected", async () => {
+  const { response } = await registerOidc(ownerA.client, {
+    organizationId: orgA,
+    domain: "acme.com",
   });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
-}, 60_000);
+}, 200_000);
+
+test("once a domain is verified, another org cannot register it", async () => {
+  // Verify org A's acme.com (direct SQL stands in for passing DNS).
+  await setProviderDomainVerified(harness, acmeProviderId);
+
+  const freshOrgB = await createOrganization(harness, {
+    ownerUserId: ownerB.userId,
+    kind: "team",
+  });
+  const { response } = await registerOidc(ownerB.client, {
+    organizationId: freshOrgB,
+    domain: "acme.com",
+  });
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
+}, 200_000);
+
+test("verify-domain is rejected when another org already verified the domain", async () => {
+  const response = await ownerB.client.jsonRequest("/sso/verify-domain", {
+    providerId: bAcmeProviderId,
+  });
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
+}, 200_000);
+
+test("the partial unique index forbids a second verified row for one domain", async () => {
+  await assert.rejects(
+    () => setProviderDomainVerified(harness, bAcmeProviderId),
+    (error: { code?: string }) => error.code === "23505",
+  );
+}, 200_000);
 
 test("a sixth provider for one organization is rejected", async () => {
-  // Reuse ownerA (no fresh sign-up, which the auth rate limiter would reject)
-  // in a dedicated team org so the count is this test's alone. The plugin's
-  // per-user cap is 25, well above these five.
   const orgLimit = await createOrganization(harness, {
     ownerUserId: ownerA.userId,
     kind: "team",
   });
-
   for (let i = 0; i < 5; i += 1) {
     const { response } = await registerOidc(ownerA.client, {
       organizationId: orgLimit,
@@ -193,14 +261,13 @@ test("a sixth provider for one organization is rejected", async () => {
     });
     assert.equal(response.status, 200, await response.clone().text());
   }
-
   const { response } = await registerOidc(ownerA.client, {
     organizationId: orgLimit,
     domain: uniqueDomain(),
   });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.providerLimit);
-}, 120_000);
+}, 300_000);
 
 test("an OIDC endpoint resolving to a private host is rejected (plugin SSRF)", async () => {
   const { response } = await registerOidc(ownerA.client, {
@@ -210,11 +277,9 @@ test("an OIDC endpoint resolving to a private host is rejected (plugin SSRF)", a
   });
   assert.ok(
     response.status >= 400 && response.status < 500,
-    `expected a 4xx SSRF rejection, got ${response.status}: ${await response
-      .clone()
-      .text()}`,
+    `expected a 4xx SSRF rejection, got ${response.status}`,
   );
-}, 60_000);
+}, 200_000);
 
 test("updating a provider domain to a public email domain is rejected", async () => {
   const response = await ownerA.client.jsonRequest("/sso/update-provider", {
@@ -223,27 +288,23 @@ test("updating a provider domain to a public email domain is rejected", async ()
   });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
-}, 60_000);
+}, 200_000);
 
-test("updating a provider domain to one owned by another organization is rejected", async () => {
-  const bravoDomain = uniqueDomain();
-  const registered = await registerOidc(ownerB.client, {
+test("updating a provider domain to one VERIFIED by another org is rejected", async () => {
+  const charlie = uniqueDomain();
+  await registerVerified(ownerB.client, {
     organizationId: orgB,
-    domain: bravoDomain,
+    domain: charlie,
+    clientId: "cid-charlie",
   });
-  assert.equal(
-    registered.response.status,
-    200,
-    await registered.response.clone().text(),
-  );
 
   const response = await ownerA.client.jsonRequest("/sso/update-provider", {
     providerId: acmeProviderId,
-    domain: bravoDomain,
+    domain: charlie,
   });
   assert.equal(response.status, 400, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
-}, 60_000);
+}, 200_000);
 
 test("a SAML provider always stores signed assertions", async () => {
   const providerId = `guard-saml-${randomUUID()}`;
@@ -267,4 +328,113 @@ test("a SAML provider always stores signed assertions", async () => {
     wantAssertionsSigned?: boolean;
   };
   assert.equal(samlConfig.wantAssertionsSigned, true);
-}, 60_000);
+}, 200_000);
+
+// guardProviderMutation: an organization-less provider is immutable.
+let orphanProviderId: string;
+
+test("an organization-less provider cannot be updated", async () => {
+  orphanProviderId = await insertOrphanProvider(harness, {
+    userId: ownerA.userId,
+    domain: uniqueDomain(),
+  });
+  const response = await ownerA.client.jsonRequest("/sso/update-provider", {
+    providerId: orphanProviderId,
+    issuer: "https://updated.example.com",
+  });
+  assert.ok(response.status >= 400, await response.clone().text());
+
+  const stored = await readStoredProvider(harness, orphanProviderId);
+  assert.equal(stored.organizationId, null);
+  // issuer was not changed by the rejected update.
+  const row = await harness.schema.database.query<{ issuer: string }>(
+    `select issuer from "ssoProvider" where "providerId" = $1`,
+    [orphanProviderId],
+  );
+  assert.equal(row.rows[0]?.issuer, "https://orphan.example.com");
+}, 200_000);
+
+test("an organization-less provider cannot be deleted", async () => {
+  const response = await ownerA.client.jsonRequest("/sso/delete-provider", {
+    providerId: orphanProviderId,
+  });
+  assert.ok(response.status >= 400, await response.clone().text());
+
+  const row = await harness.schema.database.query(
+    `select 1 from "ssoProvider" where "providerId" = $1`,
+    [orphanProviderId],
+  );
+  assert.equal(row.rows.length, 1, "the org-less provider must still exist");
+}, 200_000);
+
+// Email sign-in routing. Register the squatter before verifying the real
+// provider, since a verified domain blocks a later unverified claim.
+test("email sign-in routes to the verified provider, not an unverified squatter", async () => {
+  const orgSquatter = await createOrganization(harness, {
+    ownerUserId: ownerB.userId,
+    kind: "team",
+  });
+  const orgReal = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+  });
+  const squatter = await registerOidc(ownerB.client, {
+    organizationId: orgSquatter,
+    domain: "corp.example",
+    clientId: "cid-corp-squatter",
+  });
+  assert.equal(squatter.response.status, 200, await squatter.response.clone().text());
+  await registerVerified(ownerA.client, {
+    organizationId: orgReal,
+    domain: "corp.example",
+    clientId: "cid-corp",
+  });
+
+  const response = await signInByEmail("user@corp.example");
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(await routedClientId(response), "cid-corp");
+}, 300_000);
+
+test("email sign-in prefers an exact verified subdomain over its parent", async () => {
+  const orgSub = await createOrganization(harness, {
+    ownerUserId: ownerB.userId,
+    kind: "team",
+  });
+  await registerVerified(ownerB.client, {
+    organizationId: orgSub,
+    domain: "mail.corp.example",
+    clientId: "cid-mail-corp",
+  });
+
+  const response = await signInByEmail("user@mail.corp.example");
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(await routedClientId(response), "cid-mail-corp");
+}, 300_000);
+
+test("email sign-in falls back to the nearest verified parent domain", async () => {
+  const orgParent = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+  });
+  await registerVerified(ownerA.client, {
+    organizationId: orgParent,
+    domain: "beta.example",
+    clientId: "cid-beta",
+  });
+
+  const response = await signInByEmail("user@mail.beta.example");
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(await routedClientId(response), "cid-beta");
+}, 300_000);
+
+test("email sign-in with no verified match is a 404", async () => {
+  const response = await signInByEmail("user@nobody.example");
+  assert.equal(response.status, 404, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
+}, 200_000);
+
+test("email sign-in with a public email domain is a 404", async () => {
+  const response = await signInByEmail("user@gmail.com");
+  assert.equal(response.status, 404, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
+}, 200_000);

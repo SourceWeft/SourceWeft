@@ -57,11 +57,27 @@ export async function closeSsoTestHarness(
 }
 
 /**
+ * Distinct client IP per {@link SsoTestClient}. better-auth rate-limits per
+ * `IP + path` (reading `x-forwarded-for` by default, falling back to a single
+ * `127.0.0.1` in test mode), and `/sign-in/*` has a built-in cap of 3 per 10s.
+ * Giving each client its own IP keeps unrelated test requests in separate
+ * buckets, which is also how real distinct clients are treated.
+ */
+let clientIpCounter = 0;
+function nextClientIp(): string {
+  clientIpCounter += 1;
+  const n = clientIpCounter;
+  return `10.${(n >> 16) & 255}.${(n >> 8) & 255}.${n & 255}`;
+}
+
+/**
  * A cookie-jar-backed HTTP client for one signed-in user. Each instance keeps
- * its own jar, so several users can act against the same auth handler.
+ * its own jar and its own client IP, so several users (and one-off anonymous
+ * callers) act against the same auth handler without sharing rate-limit buckets.
  */
 export class SsoTestClient {
   private readonly jar = new Map<string, string>();
+  private readonly ip = nextClientIp();
 
   constructor(
     private readonly auth: SourceweftAuth,
@@ -98,6 +114,7 @@ export class SsoTestClient {
 
   async request(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
+    headers.set("x-forwarded-for", this.ip);
     const cookie = this.cookieHeader();
     if (cookie) {
       headers.set("cookie", cookie);
@@ -189,6 +206,42 @@ export async function createOrganization(
     role: "owner",
   });
   return id;
+}
+
+/** Mark a provider's domain verified directly in SQL (bypassing DNS checks). */
+export async function setProviderDomainVerified(
+  harness: SsoTestHarness,
+  providerId: string,
+): Promise<void> {
+  await harness.schema.database.query(
+    `update "ssoProvider" set "domainVerified" = true where "providerId" = $1`,
+    [providerId],
+  );
+}
+
+/**
+ * Insert an organization-less `ssoProvider` row directly in SQL, owned by
+ * `userId`. Used to exercise the plugin's `guardProviderMutation`, which the
+ * normal registration path can never produce (it requires a team organization).
+ */
+export async function insertOrphanProvider(
+  harness: SsoTestHarness,
+  input: { userId: string; domain: string },
+): Promise<string> {
+  const providerId = `orphan-${randomUUID()}`;
+  await harness.schema.database.query(
+    `insert into "ssoProvider"
+       (id, "providerId", issuer, domain, "userId", "domainVerified", "organizationId")
+     values ($1, $2, $3, $4, $5, false, null)`,
+    [
+      randomUUID(),
+      providerId,
+      "https://orphan.example.com",
+      input.domain,
+      input.userId,
+    ],
+  );
+  return providerId;
 }
 
 /** Read the raw `ssoProvider` row straight from PostgreSQL (no adapter wrapper). */
