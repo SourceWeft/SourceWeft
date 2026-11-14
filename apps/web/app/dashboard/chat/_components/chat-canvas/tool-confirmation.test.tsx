@@ -153,6 +153,20 @@ test("Gmail send approval cannot proceed when exact message is unavailable", asy
   assert.equal(clickButton(element, "Reject").disabled, false);
 });
 
+test("MCP approval card shows the arguments of the pending call", async () => {
+  const item = createItem({
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+  });
+  item.confirmation.domain = "mcp";
+  item.toolCall.input = { query: "Node.js 24 LTS", limit: 8 };
+  const element = await render(item);
+  assert.match(element.textContent ?? "", /query: Node\.js 24 LTS/);
+  assert.match(element.textContent ?? "", /limit: 8/);
+});
+
 afterEach(unmountAll);
 
 test("the Always allow button is absent unless decisionOptions offers it", async () => {
