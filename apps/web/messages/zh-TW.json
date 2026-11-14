@@ -3448,6 +3448,30 @@
       },
       "add": "發現"
     },
+    "noteOrigin": {
+      "title": "已儲存的筆記",
+      "edit": "編輯",
+      "savedFrom": "儲存自",
+      "savedOn": "儲存於 {date}",
+      "editedOn": "編輯於 {date}",
+      "cited": "引用的來源",
+      "untitled": "無標題來源",
+      "sourceDeleted": "（已刪除）",
+      "showAll": "顯示全部 {count} 個",
+      "showLess": "收起"
+    },
+    "noteEditor": {
+      "label": "筆記內容",
+      "hint": "儲存會重新索引這條筆記，和其他來源一樣佔用入庫頁數。之前引用過它的回答仍保留當時引用的文字。",
+      "saved": "筆記已儲存。",
+      "saveFailed": "筆記的文字已儲存，但無法完成索引。",
+      "indexingFailed": "文字已儲存，但索引沒有完成。按一下儲存可重試。",
+      "conflict": "編輯期間這條筆記已被其他人修改。請重新載入檢視對方的版本；你在這裡的文字沒有儲存。",
+      "reload": "重新載入",
+      "cancel": "取消",
+      "save": "儲存",
+      "saving": "正在儲存並索引…"
+    },
     "sourcePreview": {
       "mode": {
         "preview": "預覽",

@@ -60,6 +60,7 @@ export function ThreadDialogs({
   onByokConfigured,
   onByokModelConfigOpenChange,
   onByokStateChange,
+  onOpenSource,
   onPreviewSourceOpenChange,
   onPreviewWorkfileOpenChange,
   onShortcutsOpenChange,
@@ -80,6 +81,7 @@ export function ThreadDialogs({
     models: ByokSavedModelItem[];
     providers: ByokProviderOption[];
   }) => void;
+  onOpenSource?: (source: { id: string; title: string }) => void;
   onPreviewSourceOpenChange: (open: boolean) => void;
   onPreviewWorkfileOpenChange: (open: boolean) => void;
   onShortcutsOpenChange: (open: boolean) => void;
@@ -127,6 +129,7 @@ export function ThreadDialogs({
       <SourcePreviewPanel
         citation={previewCitation}
         onOpenChange={onPreviewSourceOpenChange}
+        onOpenSource={onOpenSource}
         open={Boolean(previewCitation || previewSource)}
         source={previewSource}
         workspaceId={workspaceId}

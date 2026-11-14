@@ -3448,6 +3448,30 @@
       },
       "add": "Discover"
     },
+    "noteOrigin": {
+      "title": "Saved note",
+      "edit": "Edit",
+      "savedFrom": "Saved from",
+      "savedOn": "saved {date}",
+      "editedOn": "edited {date}",
+      "cited": "Sources it cited",
+      "untitled": "Untitled source",
+      "sourceDeleted": "(deleted)",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer"
+    },
+    "noteEditor": {
+      "label": "Note text",
+      "hint": "Saving indexes the note again, which uses ingestion pages like any source. Earlier answers that cited it keep the text they quoted.",
+      "saved": "Note saved.",
+      "saveFailed": "The note's text was saved but could not be indexed.",
+      "indexingFailed": "The text was saved, but indexing did not finish. Press Save to try again.",
+      "conflict": "This note was changed by someone else while you were editing. Reload it to see their version; your text here is not saved.",
+      "reload": "Reload note",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving and indexing…"
+    },
     "sourcePreview": {
       "mode": {
         "preview": "Preview",

@@ -3448,6 +3448,30 @@
       },
       "add": "发现"
     },
+    "noteOrigin": {
+      "title": "已保存的笔记",
+      "edit": "编辑",
+      "savedFrom": "保存自",
+      "savedOn": "保存于 {date}",
+      "editedOn": "编辑于 {date}",
+      "cited": "引用的来源",
+      "untitled": "无标题来源",
+      "sourceDeleted": "（已删除）",
+      "showAll": "显示全部 {count} 个",
+      "showLess": "收起"
+    },
+    "noteEditor": {
+      "label": "笔记正文",
+      "hint": "保存会重新索引这条笔记，和其他来源一样占用入库页数。之前引用过它的回答仍保留当时引用的文字。",
+      "saved": "笔记已保存。",
+      "saveFailed": "笔记的文字已保存，但无法完成索引。",
+      "indexingFailed": "文字已保存，但索引没有完成。点保存可重试。",
+      "conflict": "编辑期间这条笔记已被其他人修改。请重新加载查看对方的版本；你在这里的文字没有保存。",
+      "reload": "重新加载",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "正在保存并索引…"
+    },
     "sourcePreview": {
       "mode": {
         "preview": "预览",

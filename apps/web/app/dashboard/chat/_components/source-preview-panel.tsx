@@ -35,6 +35,8 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
 import { Preview } from "@sourceweft/preview/react";
+import { NoteEditor } from "./note-editor";
+import { NoteOriginCard } from "./note-origin-card";
 import { SourceGuideCard } from "./source-guide-card";
 import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./source-types";
@@ -165,12 +167,18 @@ function SourceMetaRow({ label, value }: { label: string; value: string }) {
 export function SourcePreviewPanel({
   citation,
   onOpenChange,
+  onOpenSource,
+  onSourceChanged,
   open,
   source,
   workspaceId,
 }: {
   citation?: CitationRecord | null;
   onOpenChange: (open: boolean) => void;
+  /** Open another source (a note's cited source) in this preview. */
+  onOpenSource?: (source: { id: string; title: string }) => void;
+  /** The previewed source changed on the server (a note was edited). */
+  onSourceChanged?: () => void;
   open: boolean;
   source?: SourceItem | null;
   workspaceId?: string | null;
@@ -185,6 +193,30 @@ export function SourcePreviewPanel({
   const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
   const [rawChunkIds, setRawChunkIds] = useState<Set<string>>(() => new Set());
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteReloadKey, setNoteReloadKey] = useState(0);
+
+  useEffect(() => {
+    setEditingNote(false);
+    setNoteReloadKey(0);
+  }, [open, source?.id]);
+
+  // After a note is edited, reload what is shown without dropping the editor.
+  useEffect(() => {
+    if (noteReloadKey === 0 || !open || !source || citation || !workspaceId) {
+      return;
+    }
+    let cancelled = false;
+    contentClient
+      .getSource(workspaceId, source.id)
+      .then((result) => {
+        if (!cancelled) setDetail(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [citation, noteReloadKey, open, source, workspaceId]);
 
   useEffect(() => {
     if (open) {
@@ -489,7 +521,41 @@ export function SourcePreviewPanel({
           ) : null}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {isExternalCitation && citation ? (
+            {!citation &&
+            source &&
+            workspaceId &&
+            detail?.source.sourceType === "note" ? (
+              <NoteOriginCard
+                onEdit={() => setEditingNote(true)}
+                onOpenSource={onOpenSource}
+                reloadKey={noteReloadKey}
+                sourceId={source.id}
+                workspaceId={workspaceId}
+              />
+            ) : null}
+            {editingNote && detail && source && workspaceId ? (
+              <ScrollArea className="min-h-0 flex-1">
+                <NoteEditor
+                  expectedUpdatedAt={detail.source.updatedAt}
+                  initialText={detail.source.contentText}
+                  onCancel={() => {
+                    setEditingNote(false);
+                    setNoteReloadKey((key) => key + 1);
+                  }}
+                  onChanged={() => {
+                    setNoteReloadKey((key) => key + 1);
+                    onSourceChanged?.();
+                  }}
+                  onSaved={() => {
+                    setEditingNote(false);
+                    setNoteReloadKey((key) => key + 1);
+                    onSourceChanged?.();
+                  }}
+                  sourceId={source.id}
+                  workspaceId={workspaceId}
+                />
+              </ScrollArea>
+            ) : isExternalCitation && citation ? (
               <ScrollArea className="min-h-0 flex-1">
                 <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
                   <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">

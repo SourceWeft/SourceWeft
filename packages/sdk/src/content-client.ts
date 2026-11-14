@@ -8,7 +8,11 @@ import type {
 } from "@sourceweft/contracts/artifact-records";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type {
+  ListSavedNotesResponse,
+  NoteOriginResponse,
   SavedAnswerNote,
+  UpdateNoteContentRequest,
+  UpdateNoteContentResponse,
   SourceDiscoveryAvailabilityResponse,
   SourceDiscoveryResponse,
   SourceGuideResponse,
@@ -625,6 +629,30 @@ export class ContentClient {
     return this.http.post<SourceDiscoveryResponse>(
       `/v1/workspaces/${encode(workspaceId)}/source-discovery`,
       { topic },
+    );
+  }
+
+  getNoteOrigin(workspaceId: string, sourceId: string) {
+    return this.http.get<NoteOriginResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/note`,
+    );
+  }
+
+  updateNoteContent(
+    workspaceId: string,
+    sourceId: string,
+    input: UpdateNoteContentRequest,
+  ) {
+    return this.http.put<UpdateNoteContentResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/note`,
+      input,
+    );
+  }
+
+  listSavedNotes(workspaceId: string, messageIds: string[]) {
+    return this.http.post<ListSavedNotesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/messages/notes`,
+      { messageIds },
     );
   }
 
