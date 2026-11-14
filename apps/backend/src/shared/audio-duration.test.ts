@@ -69,6 +69,20 @@ test("streamed WAV with a placeholder data size measures from actual bytes", asy
   assert.equal(duration, 5);
 });
 
+test("streamed WAV declaring the maximum size measures from actual bytes", async () => {
+  // DeepSeek TTS streams WAV with 0xFFFFFFFF in both size fields. The data
+  // chunk cannot hold more than the buffer does, so the declared size is
+  // ignored instead of being read as a 24 hour recording.
+  const buffer = buildWavBuffer({ sampleRate: 24_000, seconds: 7.2 });
+  buffer.writeUInt32LE(0xffffffff, 4);
+  buffer.writeUInt32LE(0xffffffff, 40);
+  const duration = await probeAudioDurationSeconds({
+    buffer,
+    mimeType: "audio/wav",
+  });
+  assert.equal(duration, 7.2);
+});
+
 test("measures MP3 duration by scanning frames", async () => {
   // 40 frames * 1152 samples / 44100 Hz ≈ 1.04s
   const buffer = buildMp3Buffer({ frames: 40 });
