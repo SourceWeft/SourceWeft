@@ -15,6 +15,7 @@ import { apiKey } from "@better-auth/api-key";
 import { billingOrganizationHooks } from "../../billing-host/bindings";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
+import { buildSsoPlugins } from "../enterprise-sso";
 import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
 import { database } from "@sourceweft/db";
@@ -712,6 +713,9 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           config.auth.extensionEnabled ? [config.auth.extensionClientId] : [],
         ),
       }),
+      // Registered outside the isRuntimeMode branching below so that
+      // `auth migrate` (mode: "migration") still creates its table.
+      ...buildSsoPlugins({ isRuntimeMode }),
       // Localizes better-auth error messages for the request locale. Registered
       // last so its `after` hook runs after every other plugin's and can
       // translate errors surfaced by any of them (design §16, D11).
