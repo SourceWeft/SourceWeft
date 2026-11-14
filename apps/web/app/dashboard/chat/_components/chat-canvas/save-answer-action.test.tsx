@@ -92,3 +92,50 @@ test("a failure is reported and the answer can be saved again", async () => {
   assert.equal(toastError.mock.calls.length, 1);
   assert.equal(button.getAttribute("aria-label"), "Save as note");
 });
+
+test("an already saved answer opens its note instead of saving again", async () => {
+  const onOpenNote = vi.fn();
+  const saved = { noteId: "n1", sourceId: "s1", title: "Revenue" };
+  await mountWithIntl(
+    createElement(SaveAnswerAction, {
+      messageId: "m1",
+      onOpenNote,
+      saved,
+      workspaceId: "w1",
+    }),
+  );
+  await flush();
+  const button = document.body.querySelector("button")!;
+  assert.equal(button.getAttribute("aria-label"), "Saved as note");
+
+  await click(button);
+  await flush();
+
+  assert.equal(saveAnswerAsNote.mock.calls.length, 0);
+  assert.deepEqual(onOpenNote.mock.calls[0]?.[0], saved);
+});
+
+test("a new save is reported so the saved state can be remembered", async () => {
+  saveAnswerAsNote.mockResolvedValue({
+    noteId: "n1",
+    sourceId: "s1",
+    title: "Revenue",
+    alreadySaved: false,
+  });
+  const onSaved = vi.fn();
+  await mountWithIntl(
+    createElement(SaveAnswerAction, {
+      messageId: "m1",
+      onSaved,
+      workspaceId: "w1",
+    }),
+  );
+  await flush();
+  await click(document.body.querySelector("button")!);
+  await flush();
+
+  assert.deepEqual(onSaved.mock.calls[0], [
+    "m1",
+    { noteId: "n1", sourceId: "s1", title: "Revenue" },
+  ]);
+});

@@ -7,21 +7,33 @@ import { toast } from "sonner";
 import { MessageAction } from "@sourceweft/ui-web/components/ai-elements/message";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../../lib/sdk";
+import type { SavedNoteRef } from "./use-saved-notes";
 
 type SaveState = "idle" | "saving" | "saved";
 
 /** Saves one assistant answer, with its citations, as a searchable note. */
 export function SaveAnswerAction({
   messageId,
+  onOpenNote,
+  onSaved,
+  saved,
   workspaceId,
 }: {
   messageId: string;
+  /** Open the saved note; set once the answer is known to be saved. */
+  onOpenNote?: (note: SavedNoteRef) => void;
+  onSaved?: (messageId: string, note: SavedNoteRef) => void;
+  saved?: SavedNoteRef;
   workspaceId: string;
 }) {
   const t = useTranslations("dashboardChatCanvas");
   const [state, setState] = useState<SaveState>("idle");
 
   const save = async () => {
+    if (saved) {
+      onOpenNote?.(saved);
+      return;
+    }
     if (state !== "idle") return;
     setState("saving");
     try {
@@ -30,6 +42,13 @@ export function SaveAnswerAction({
         messageId,
       );
       setState("saved");
+      if (result.sourceId) {
+        onSaved?.(messageId, {
+          noteId: result.noteId,
+          sourceId: result.sourceId,
+          title: result.title,
+        });
+      }
       toast.success(
         result.alreadySaved
           ? t("messageList.noteAlreadySaved")
@@ -45,10 +64,10 @@ export function SaveAnswerAction({
     }
   };
 
-  const label =
-    state === "saved"
-      ? t("messageList.noteSavedLabel")
-      : t("messageList.saveAsNote");
+  const isSaved = Boolean(saved) || state === "saved";
+  const label = isSaved
+    ? t("messageList.noteSavedLabel")
+    : t("messageList.saveAsNote");
   return (
     <MessageAction
       className="text-muted-foreground hover:text-foreground"
@@ -62,7 +81,7 @@ export function SaveAnswerAction({
     >
       {state === "saving" ? (
         <Loader2 className="size-3 animate-spin" />
-      ) : state === "saved" ? (
+      ) : isSaved ? (
         <BookmarkCheck className="size-3" />
       ) : (
         <BookmarkPlus className="size-3" />

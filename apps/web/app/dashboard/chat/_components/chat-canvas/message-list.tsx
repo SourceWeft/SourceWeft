@@ -29,6 +29,7 @@ import {
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { toast } from "sonner";
 import { SaveAnswerAction } from "./save-answer-action";
+import { type SavedNoteRef, useSavedNotes } from "./use-saved-notes";
 import {
   Conversation,
   ConversationContent,
@@ -69,7 +70,11 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { getAgentToolSlashCommand } from "@sourceweft/agent-tool-registry";
 import { RawImage } from "../../../../_components/raw-image";
 import { getActionIcon } from "../action-icons";
-import { expandSelectedSources, type SourceItem } from "../source-types";
+import {
+  expandSelectedSources,
+  minimalSourceItem,
+  type SourceItem,
+} from "../source-types";
 import { WebToolResults } from "../web-tool-results";
 import {
   getAttachedWebToolCallIds,
@@ -1215,6 +1220,9 @@ type MessageGroupItemProps = {
   onRefreshLatest?: MessageListProps["onRefreshLatest"];
   onRestartFromMessage?: MessageListProps["onRestartFromMessage"];
   onSourcePreview?: MessageListProps["onSourcePreview"];
+  onOpenNote?: (note: SavedNoteRef) => void;
+  onNoteSaved?: (messageId: string, note: SavedNoteRef) => void;
+  savedNotes?: Record<string, SavedNoteRef>;
   onWorkfileClick?: MessageListProps["onWorkfileClick"];
   resolvedConfirmations?: ToolConfirmationResolution[];
   selectedAssistantVersionForUser: MessageVersion | null;
@@ -1241,6 +1249,9 @@ const MessageGroupItem = memo(function MessageGroupItem({
   onCitationClick,
   onRefreshLatest,
   onRestartFromMessage,
+  onNoteSaved,
+  onOpenNote,
+  savedNotes,
   onSourcePreview,
   onWorkfileClick,
   resolvedConfirmations = [],
@@ -1461,6 +1472,9 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     messageText.trim().length > 0 ? (
                       <SaveAnswerAction
                         messageId={version.id}
+                        onOpenNote={onOpenNote}
+                        onSaved={onNoteSaved}
+                        saved={savedNotes?.[version.id]}
                         workspaceId={workspaceId}
                       />
                     ) : null}
@@ -1574,6 +1588,26 @@ function MessageListContent({
   workspaceId,
 }: MessageListProps) {
   const t = useTranslations("dashboardChatCanvas");
+  const assistantMessageIds = useMemo(
+    () =>
+      messageGroups
+        .filter((group) => group.role === "assistant")
+        .flatMap((group) => group.versions.map((version) => version.id)),
+    [messageGroups],
+  );
+  const { notes: savedNotes, markSaved } = useSavedNotes(
+    workspaceId,
+    assistantMessageIds,
+  );
+  const openSavedNote = useCallback(
+    (note: SavedNoteRef) =>
+      onSourcePreview?.({
+        ...minimalSourceItem({ id: note.sourceId, title: note.title }),
+        sourceType: "note",
+        type: "NOTE",
+      }),
+    [onSourcePreview],
+  );
   const sourceById = useMemo(
     () => new Map(allSources.map((source) => [source.id, source])),
     [allSources],
@@ -1754,9 +1788,12 @@ function MessageListContent({
                 onCitationClick={onCitationClick}
                 onRefreshLatest={onRefreshLatest}
                 onRestartFromMessage={onRestartFromMessage}
+                onNoteSaved={markSaved}
+                onOpenNote={openSavedNote}
                 onSourcePreview={onSourcePreview}
                 onWorkfileClick={onWorkfileClick}
                 resolvedConfirmations={resolvedConfirmations}
+                savedNotes={savedNotes}
                 selectedAssistantVersionForUser={
                   selectedAssistantVersionForUser
                 }
