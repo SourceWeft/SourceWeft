@@ -20,6 +20,7 @@ vi.mock("../../../lib/desktop-bridge", () => ({
 }));
 vi.mock("../../../lib/billing-edition/capabilities", () => ({
   useBillingAvailable: () => host.billing,
+  useTeamCreationAvailable: () => true,
 }));
 vi.mock("../../../lib/local-host-session", () => ({
   disconnectLocalHostSession: vi.fn(),

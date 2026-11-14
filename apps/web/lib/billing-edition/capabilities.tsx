@@ -5,12 +5,15 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
 import { setAnalyticsCatalog } from "../analytics/events";
+import { usePurchasesAllowed } from "../native-host";
 import { deploymentClient } from "../sdk";
+import { withoutPurchases } from "./purchase-policy";
 
 type State =
   | { status: "loading"; capabilities: null; error: null }
@@ -85,8 +88,19 @@ export function DeploymentCapabilitiesProvider({
   );
 }
 
+/**
+ * What this deployment offers, as far as the host this page is shown in
+ * allows. In a host where nothing may be sold (the iOS app) checkout and
+ * top-ups are reported as unavailable, so every surface that reads this hides
+ * its purchase controls without knowing about hosts.
+ */
 export function useDeploymentCapabilities() {
-  return useContext(Context);
+  const state = useContext(Context);
+  const purchasesAllowed = usePurchasesAllowed();
+  return useMemo(
+    () => (purchasesAllowed ? state : withoutPurchases(state)),
+    [state, purchasesAllowed],
+  );
 }
 export function useBillingAvailable() {
   const state = useDeploymentCapabilities();
@@ -96,4 +110,18 @@ export function useBillingAvailable() {
 export function useCheckoutAvailable() {
   const state = useDeploymentCapabilities();
   return state.status === "ready" && state.capabilities.billing.checkout;
+}
+
+/**
+ * Whether a team can be created here. Where teams are paid subscriptions,
+ * creating one is a purchase, so it needs a host that allows purchases. Where
+ * teams are free, it is always possible.
+ */
+export function useTeamCreationAvailable() {
+  const state = useDeploymentCapabilities();
+  const purchasesAllowed = usePurchasesAllowed();
+  return (
+    state.status === "ready" &&
+    (purchasesAllowed || !state.capabilities.billing.teamSubscriptions)
+  );
 }

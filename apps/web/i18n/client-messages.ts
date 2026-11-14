@@ -73,6 +73,7 @@ export const CLIENT_NAMESPACES = {
   ],
   /** `app/dashboard`: the signed-in workspace and chat. */
   dashboard: [
+    "aiDataConsent",
     "artifactShare.storage",
     "authPages.desktopLogin",
     "catalogBadge",
@@ -157,9 +158,10 @@ export function pickMessages(
       target = isTree(next) ? next : (target[key] = {});
     }
     const leaf = path[path.length - 1]!;
-    target[leaf] = isTree(source) && isTree(target[leaf])
-      ? mergeTrees(target[leaf] as MessageTree, source)
-      : source;
+    target[leaf] =
+      isTree(source) && isTree(target[leaf])
+        ? mergeTrees(target[leaf] as MessageTree, source)
+        : source;
   }
   return picked;
 }

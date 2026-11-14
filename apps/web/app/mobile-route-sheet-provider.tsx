@@ -15,8 +15,10 @@ import { detectNativeHostKind, nativeBridge } from "../lib/native-bridge";
 import {
   getMobileSheetTitle,
   isPrimaryMobileRoute,
+  isPurchaseRoute,
   resolveMobileRouteAction,
 } from "../lib/mobile-route-policy";
+import { usePurchasesAllowed } from "../lib/native-host";
 
 type SheetRoute = {
   title: string;
@@ -41,6 +43,7 @@ export function MobileRouteSheetProvider({
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileHost, setIsMobileHost] = useState(false);
+  const purchasesAllowed = usePurchasesAllowed();
   const [sheetRoute, setSheetRoute] = useState<SheetRoute | null>(null);
   const lastPrimaryPathRef = useRef("/auth/sign-in");
 
@@ -85,14 +88,17 @@ export function MobileRouteSheetProvider({
       return;
     }
 
-    const url = new URL(window.location.href);
-    setSheetRoute({
-      title: getMobileSheetTitle(url.pathname),
-      url: url.toString(),
-    });
+    // A page that sells a plan is not shown where nothing may be sold.
+    if (purchasesAllowed || !isPurchaseRoute(pathname)) {
+      const url = new URL(window.location.href);
+      setSheetRoute({
+        title: getMobileSheetTitle(url.pathname),
+        url: url.toString(),
+      });
+    }
 
     router.replace(lastPrimaryPathRef.current);
-  }, [isMobileHost, pathname, router]);
+  }, [isMobileHost, pathname, purchasesAllowed, router]);
 
   useEffect(() => {
     if (!isMobileHost) {
@@ -114,16 +120,19 @@ export function MobileRouteSheetProvider({
         return;
       }
 
-      const action = resolveMobileRouteAction({
-        altKey: event.altKey,
-        button: event.button,
-        ctrlKey: event.ctrlKey,
-        currentUrl: window.location.href,
-        download: anchor.hasAttribute("download"),
-        href: anchor.getAttribute("href"),
-        metaKey: event.metaKey,
-        shiftKey: event.shiftKey,
-      });
+      const action = resolveMobileRouteAction(
+        {
+          altKey: event.altKey,
+          button: event.button,
+          ctrlKey: event.ctrlKey,
+          currentUrl: window.location.href,
+          download: anchor.hasAttribute("download"),
+          href: anchor.getAttribute("href"),
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+        },
+        { purchasesAllowed },
+      );
 
       if (action.type === "allow" || action.type === "ignore") {
         return;
@@ -131,6 +140,10 @@ export function MobileRouteSheetProvider({
 
       event.preventDefault();
       event.stopPropagation();
+
+      if (action.type === "blocked") {
+        return;
+      }
 
       if (action.type === "external") {
         void openExternalUrl(action.url);
@@ -147,7 +160,7 @@ export function MobileRouteSheetProvider({
     return () => {
       document.removeEventListener("click", handleClick, true);
     };
-  }, [isMobileHost]);
+  }, [isMobileHost, purchasesAllowed]);
 
   return (
     <>

@@ -1,6 +1,10 @@
 "use client";
 import { disconnectLocalHostSession } from "../../../lib/local-host-session";
-import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
+import {
+  useBillingAvailable,
+  useTeamCreationAvailable,
+} from "../../../lib/billing-edition/capabilities";
+import { usePurchasesAllowed } from "../../../lib/native-host";
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
@@ -74,6 +78,8 @@ export function DashboardAccountMenu({
   const t = useTranslations("dashboardNav");
   const { isMobile } = useSidebar();
   const billingAvailable = useBillingAvailable();
+  const purchasesAllowed = usePurchasesAllowed();
+  const teamCreationAvailable = useTeamCreationAvailable();
   const { isDesktop } = useDesktopSettings();
   const authState = useAuthenticate(authClient);
   const sessionState = authState.data as
@@ -238,21 +244,25 @@ export function DashboardAccountMenu({
                       />
                     </DropdownMenuItem>
                   ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setTeamSwitcherOpen(false);
-                      openSettings("team");
-                    }}
-                    className="gap-2 p-2"
-                  >
-                    <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                      <Plus className="size-4" />
-                    </div>
-                    <div className="font-medium text-muted-foreground">
-                      {t("team.add")}
-                    </div>
-                  </DropdownMenuItem>
+                  {teamCreationAvailable ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setTeamSwitcherOpen(false);
+                          openSettings("team");
+                        }}
+                        className="gap-2 p-2"
+                      >
+                        <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                          <Plus className="size-4" />
+                        </div>
+                        <div className="font-medium text-muted-foreground">
+                          {t("team.add")}
+                        </div>
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuGroup>
@@ -266,10 +276,12 @@ export function DashboardAccountMenu({
                       <LayoutGrid />
                       {t("account.usage")}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => openSettings("billing")}>
-                      <CreditCard />
-                      {t("account.billing")}
-                    </DropdownMenuItem>
+                    {purchasesAllowed ? (
+                      <DropdownMenuItem onClick={() => openSettings("billing")}>
+                        <CreditCard />
+                        {t("account.billing")}
+                      </DropdownMenuItem>
+                    ) : null}
                   </>
                 ) : null}
               </DropdownMenuGroup>

@@ -12,3 +12,15 @@ test("commercial settings are unavailable until explicitly enabled by capabiliti
   for (const tab of ["account", "team", "approvals", "local"])
     expect(isSettingsTabAvailable(tab, false)).toBe(true);
 });
+
+test("where nothing may be sold, Usage stays and Billing goes", () => {
+  expect(isSettingsTabAvailable("usage", true, false)).toBe(true);
+  expect(resolveSettingsTab("usage", true, false)).toBe("usage");
+  expect(isSettingsTabAvailable("billing", true, false)).toBe(false);
+  expect(resolveSettingsTab("billing", true, false)).toBe("account");
+  // Without billing at all, the host makes no difference.
+  for (const tab of ["billing", "usage"])
+    expect(isSettingsTabAvailable(tab, false, false)).toBe(false);
+  for (const tab of ["account", "team", "approvals", "local"])
+    expect(isSettingsTabAvailable(tab, true, false)).toBe(true);
+});

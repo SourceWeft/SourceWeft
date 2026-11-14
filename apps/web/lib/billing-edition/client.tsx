@@ -1,7 +1,10 @@
 "use client";
 import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import { useDeploymentCapabilities } from "./capabilities";
+import {
+  useDeploymentCapabilities,
+  useTeamCreationAvailable,
+} from "./capabilities";
 import { TeamCheckoutDialog as CoreTeamDialog } from "./core-client";
 
 type Commercial = typeof import("./commercial-client");
@@ -74,6 +77,13 @@ export function BillingSuccessClient(
 export function BillingCheckoutClient(
   props: ComponentProps<Commercial["BillingCheckoutClient"]>,
 ) {
+  const t = useTranslations("dashboardSettings.billing");
+  const state = useDeploymentCapabilities();
+  // The checkout page starts a payment as soon as it mounts, so it must not
+  // mount where checkout is unavailable: a deployment without it, or a host
+  // that may not sell anything.
+  if (state.status === "ready" && !state.capabilities.billing.checkout)
+    return <p>{t("disabled")}</p>;
   return (
     <Gate>
       <Checkout {...props} />
@@ -108,8 +118,12 @@ export function TeamCheckoutDialog(
   props: ComponentProps<Commercial["TeamCheckoutDialog"]>,
 ) {
   const state = useDeploymentCapabilities();
+  const teamCreationAvailable = useTeamCreationAvailable();
   // Never treat a capability request failure as permission to create a free team.
   if (state.status !== "ready") return props.open ? <Gate>{null}</Gate> : null;
+  // A paid team cannot be bought in this host, and the free dialog below must
+  // never stand in for it.
+  if (!teamCreationAvailable) return null;
   if (!state.capabilities.billing.teamSubscriptions)
     return <CoreTeamDialog {...props} />;
   return (

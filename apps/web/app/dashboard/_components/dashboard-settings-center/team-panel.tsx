@@ -27,7 +27,10 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 import { authClient } from "../../../../lib/auth-client";
 import { TeamCheckoutDialog } from "../../../_components/team-checkout-dialog";
-import { useDeploymentCapabilities } from "../../../../lib/billing-edition/capabilities";
+import {
+  useDeploymentCapabilities,
+  useTeamCreationAvailable,
+} from "../../../../lib/billing-edition/capabilities";
 import {
   getPersonalOrganization,
   getVisibleTeamOrganizations,
@@ -224,6 +227,7 @@ export function TeamPanel({
       ) ?? [])
     : [];
   const deployment = useDeploymentCapabilities();
+  const teamCreationAvailable = useTeamCreationAvailable();
   const teamSeatPrices =
     deployment.status === "ready" &&
     deployment.capabilities.edition === "commercial"
@@ -245,15 +249,17 @@ export function TeamPanel({
           <p className="text-base font-semibold text-foreground">
             {t("team.title")}
           </p>
-          <Button
-            onClick={() => setCreateOpen(true)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {t("team.createTeam")}
-          </Button>
+          {teamCreationAvailable ? (
+            <Button
+              onClick={() => setCreateOpen(true)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("team.createTeam")}
+            </Button>
+          ) : null}
         </div>
 
         {/* Switcher trigger */}
@@ -453,15 +459,17 @@ export function TeamPanel({
             <p className="text-sm text-muted-foreground">
               {t("team.personalNoMembers")}
             </p>
-            <Button
-              onClick={() => setCreateOpen(true)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("team.createTeam")}
-            </Button>
+            {teamCreationAvailable ? (
+              <Button
+                onClick={() => setCreateOpen(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("team.createTeam")}
+              </Button>
+            ) : null}
           </div>
         </div>
       )}

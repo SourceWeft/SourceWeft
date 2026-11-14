@@ -230,6 +230,39 @@ Not done yet: revoking the person's Apple tokens when they delete their
 account, which Apple requires before an App Store release. It needs the
 authorization code exchange and a Sign in with Apple key.
 
+## What the iOS app does not sell, and what it asks first
+
+The page learns which app it runs in from the bridge: `window.__SOURCEWEFT_NATIVE__`
+carries `platform` (`ios` or `android`). `apps/web/lib/native-host.ts` reads it,
+also from inside the sheets the mobile app opens, and answers one question for
+the rest of the web app: may anything be sold here (`usePurchasesAllowed`).
+Nothing branches on the browser's user agent.
+
+In the iOS app the answer is no. The App Store allows digital purchases only
+through in-app purchase and forbids pointing people to another way to pay, so:
+
+- `useDeploymentCapabilities` reports checkout and top-ups as unavailable. Every
+  purchase control already hangs off those two flags, so the upgrade, manage
+  billing and top-up controls disappear without knowing about hosts.
+- The Billing settings tab is hidden; Usage stays, read-only.
+- `/dashboard/billing/checkout` does not start a payment.
+- Paid team creation is not offered, and the free team dialog never stands in
+  for it.
+- Links to the pricing page are not followed, not even into a sheet.
+
+A mobile app that has not said which platform it runs on is treated like the
+iOS app until it answers. Android, the desktop app and browsers are unchanged.
+When adding a purchase surface, read the capabilities or `usePurchasesAllowed`;
+do not add a second gate.
+
+Before the dashboard is shown, the iOS app asks the person to agree to their
+chat content being sent to third-party AI model providers
+(`app/dashboard/_components/ai-data-consent-gate.tsx`). The App Store requires
+that disclosure and explicit permission. Nothing behind the dialog is mounted
+until they agree; declining signs them out. The agreement is recorded per
+account in the device's storage only, so a reinstall or another device asks
+again. The Privacy Policy the dialog links to must name where the data goes.
+
 ## Native project setup
 
 ```sh

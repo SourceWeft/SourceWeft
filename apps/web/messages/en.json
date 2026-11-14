@@ -5997,5 +5997,14 @@
     "runStatusError": "Unable to check generation status. Please try again.",
     "stopError": "Unable to stop generation. Please try again.",
     "otherRun": "Another participant is generating this response."
+  },
+  "aiDataConsent": {
+    "title": "Your content and AI providers",
+    "what": "To answer you, SourceWeft sends the content you use in a chat to third-party AI model providers.",
+    "includes": "This includes your messages, the files and sources you add, and content from the tools and accounts you connect. It can contain personal data.",
+    "more": "Who these providers are and how the data is handled is described in the",
+    "privacyPolicy": "Privacy Policy",
+    "agree": "Agree and continue",
+    "decline": "Decline and sign out"
   }
 }
