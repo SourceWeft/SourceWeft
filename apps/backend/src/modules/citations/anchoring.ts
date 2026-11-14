@@ -536,10 +536,7 @@ async function applySemanticPass(input: {
     // The highest-scoring strong anchor replaces the word matcher's weak one.
     let best: CitationAnchor | null = null;
     for (const anchor of picked) {
-      if (
-        anchor.support === "strong" &&
-        (!best || anchor.score > best.score)
-      ) {
+      if (anchor.support === "strong" && (!best || anchor.score > best.score)) {
         best = anchor;
       }
     }

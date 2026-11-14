@@ -6,10 +6,7 @@ import {
   type AnchoringSummary,
   type SemanticOutcome,
 } from "./anchoring-diagnostics";
-import {
-  pickSemanticAnchor,
-  type EmbeddedSegment,
-} from "./semantic-anchoring";
+import { pickSemanticAnchor, type EmbeddedSegment } from "./semantic-anchoring";
 
 /**
  * #516: every anchor records how it was decided. The record holds numbers and
@@ -273,7 +270,10 @@ test("a citation the bounds leave out is recorded as over budget", async () => {
     contents,
     embedTexts: embedByTopic,
   });
-  assert.equal(anchors.get("c4")?.diagnostics?.semantic?.outcome, "over_budget");
+  assert.equal(
+    anchors.get("c4")?.diagnostics?.semantic?.outcome,
+    "over_budget",
+  );
   assert.equal(anchors.get("c4")?.diagnostics?.method, "semantic");
   assert.equal(anchors.get("c4")?.diagnostics?.semantic?.similarity, null);
   assert.notEqual(

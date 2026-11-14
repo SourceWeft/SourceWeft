@@ -52,6 +52,9 @@ dist/
 /docs/
 /.docs/
 
+# local evaluation data that may hold user content (citation anchoring labels)
+/.local-eval/
+
 # rust
 target/
 

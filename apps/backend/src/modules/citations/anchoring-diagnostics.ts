@@ -62,7 +62,7 @@ export const CITATION_ANCHORING_FEATURE = "citation-anchoring";
 export const citationAnchoringScopeId = (messageId: string) =>
   `${messageId}:${CITATION_ANCHORING_FEATURE}`;
 
-const round =(value: number) => Number(value.toFixed(4));
+const round = (value: number) => Number(value.toFixed(4));
 
 /** The stored shape: rounded, with no text. */
 export function serializeDiagnostics(diagnostics: AnchorDiagnostics) {
