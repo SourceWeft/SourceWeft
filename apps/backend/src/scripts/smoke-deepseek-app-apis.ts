@@ -112,10 +112,13 @@ async function smokeWeb() {
   });
   const page = fetched.results[0];
   check(page && !page.error, `fetch failed: ${page?.error ?? "no result"}`);
+  // The phrase is the page title; the body is prose (DeepSeek may prepend a
+  // translation), so only its presence is checked.
   check(
-    /example domain/i.test(page.markdown),
-    "fetched page text is unexpected",
+    /example domain/i.test(page.title ?? ""),
+    "fetched page title is unexpected",
   );
+  check(page.markdown.trim().length > 0, "fetched page has no text");
   console.log(`  fetch: "${page.title}", ${page.markdown.length} chars`);
 }
 
