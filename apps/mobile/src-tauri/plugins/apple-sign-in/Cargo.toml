@@ -1,0 +1,16 @@
+[package]
+name = "tauri-plugin-apple-sign-in"
+version = "0.1.0"
+description = "Sign in with Apple for the SourceWeft iOS app"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+links = "tauri-plugin-apple-sign-in"
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

@@ -3,14 +3,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  AlertCircle,
-  ArrowLeft,
-  CheckCircle2,
-  Loader2,
-} from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
+import {
+  Alert,
+  AlertDescription,
+} from "@sourceweft/ui-web/components/ui/alert";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { AppleIcon, GoogleIcon } from "../../_components/brand-icons";
@@ -22,9 +20,21 @@ import {
   trackSignUp,
 } from "../../../lib/analytics-events";
 import {
+  getMobileAppleSignInError,
+  signInWithMobileApple,
+} from "../../../lib/mobile-apple-auth";
+import {
   getMobileGoogleSignInError,
   signInWithMobileGoogle,
 } from "../../../lib/mobile-google-auth";
+import {
+  NO_MOBILE_SIGN_IN_METHODS,
+  fetchNativeSignInConfig,
+  resolveMobileSignInMethods,
+  type MobileSignInMethods,
+} from "../../../lib/mobile-sign-in-methods";
+import { nativeBridge } from "../../../lib/native-bridge";
+import { publicRuntimeConfig } from "../../../lib/public-runtime-config";
 
 type MobileAuthMode = "sign-in" | "sign-up";
 
@@ -76,7 +86,10 @@ function hasActiveSession(result: unknown) {
   const sessionResult = result as SessionResult | null;
   const data = sessionResult?.data;
   return Boolean(
-    data?.session || data?.user || sessionResult?.session || sessionResult?.user,
+    data?.session ||
+    data?.user ||
+    sessionResult?.session ||
+    sessionResult?.user,
   );
 }
 
@@ -92,7 +105,52 @@ export function MobileLoginView({ path }: { path: string }) {
   const [password, setPassword] = useState("");
   const [notice, setNotice] = useState<MobileAuthNotice | null>(null);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
+  const [isAppleSubmitting, setIsAppleSubmitting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Null until the platform, and on iOS the API's answer, are known; no
+  // sign-in button is shown before that, so none appears and then goes away.
+  const [signInMethods, setSignInMethods] =
+    useState<MobileSignInMethods | null>(null);
+  const formDisabled = isSubmitting || isGoogleSubmitting || isAppleSubmitting;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadSignInMethods() {
+      const googleMobileClientId =
+        publicRuntimeConfig().googleMobileClientId || "";
+      try {
+        const { platform } = await nativeBridge.info();
+        const nativeSignIn =
+          platform === "ios"
+            ? await fetchNativeSignInConfig(controller.signal)
+            : null;
+        if (!controller.signal.aborted) {
+          setSignInMethods(
+            resolveMobileSignInMethods({
+              platform,
+              nativeSignIn,
+              googleMobileClientId,
+            }),
+          );
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        // Without the platform or the API's answer there is nothing to offer
+        // safely; email sign-in below still works.
+        console.error("[mobile sign-in] failed to load sign-in methods", error);
+        setSignInMethods(NO_MOBILE_SIGN_IN_METHODS);
+      }
+    }
+
+    void loadSignInMethods();
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -141,7 +199,9 @@ export function MobileLoginView({ path }: { path: string }) {
     setNotice(null);
   }
 
-  async function completeAuthSuccess(source: MobileAuthMode | "google") {
+  async function completeAuthSuccess(
+    source: MobileAuthMode | "google" | "apple",
+  ) {
     const session = await authClient.getSession();
 
     if (hasActiveSession(session)) {
@@ -229,7 +289,8 @@ export function MobileLoginView({ path }: { path: string }) {
   }
 
   async function submitGoogleSignIn() {
-    if (isSubmitting || isGoogleSubmitting) {
+    const google = signInMethods?.google;
+    if (!google || formDisabled) {
       return;
     }
 
@@ -237,7 +298,7 @@ export function MobileLoginView({ path }: { path: string }) {
     setIsGoogleSubmitting(true);
 
     try {
-      await signInWithMobileGoogle();
+      await signInWithMobileGoogle(google.clientId);
       trackLogin("mobile_google");
       await completeAuthSuccess("google");
     } catch (caughtError) {
@@ -255,8 +316,37 @@ export function MobileLoginView({ path }: { path: string }) {
     }
   }
 
+  async function submitAppleSignIn() {
+    if (!signInMethods?.apple || formDisabled) {
+      return;
+    }
+
+    setNotice(null);
+    setIsAppleSubmitting(true);
+
+    try {
+      await signInWithMobileApple();
+      trackLogin("mobile_apple");
+      await completeAuthSuccess("apple");
+    } catch (caughtError) {
+      trackAuthError({
+        action: "login",
+        method: "mobile_apple",
+        surface: "mobile",
+      });
+      const message = getMobileAppleSignInError(caughtError);
+      if (message) {
+        setNotice({ message, variant: "error" });
+      }
+    } finally {
+      setIsAppleSubmitting(false);
+    }
+  }
+
   const isSignUp = mode === "sign-up";
-  const formDisabled = isSubmitting || isGoogleSubmitting;
+  const hasSocialSignIn = Boolean(
+    signInMethods?.google || signInMethods?.apple,
+  );
 
   return (
     <div className="flex h-[calc(100svh-2rem)] w-full max-w-md flex-col overflow-y-auto overscroll-contain px-1 [-webkit-overflow-scrolling:touch]">
@@ -274,41 +364,51 @@ export function MobileLoginView({ path }: { path: string }) {
             </h1>
           </div>
 
-          <div
-            className="space-y-2.5 [@media(max-height:680px)]:hidden"
-          >
-            <button
-              className="flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-sm transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={formDisabled}
-              onClick={() => void submitGoogleSignIn()}
-              type="button"
-            >
-              {isGoogleSubmitting ? (
-                <Loader2 className="size-5 animate-spin" />
-              ) : (
-                <GoogleIcon className="size-5" />
-              )}
-              {t("continueWithGoogle")}
-            </button>
+          {hasSocialSignIn && (
+            <>
+              <div className="space-y-2.5 [@media(max-height:680px)]:hidden">
+                {signInMethods?.google && (
+                  <button
+                    className="flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-sm transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={formDisabled}
+                    onClick={() => void submitGoogleSignIn()}
+                    type="button"
+                  >
+                    {isGoogleSubmitting ? (
+                      <Loader2 className="size-5 animate-spin" />
+                    ) : (
+                      <GoogleIcon className="size-5" />
+                    )}
+                    {t("continueWithGoogle")}
+                  </button>
+                )}
 
-            <button
-              className="flex h-12 w-full cursor-not-allowed items-center justify-center gap-2.5 rounded-full bg-foreground px-5 text-sm font-semibold text-background opacity-35 shadow-sm"
-              disabled
-              tabIndex={-1}
-              type="button"
-            >
-              <AppleIcon className="size-[18px]" />
-              {t("continueWithApple")}
-            </button>
-          </div>
+                {signInMethods?.apple && (
+                  <button
+                    className="flex h-12 w-full items-center justify-center gap-2.5 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-sm transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={formDisabled}
+                    onClick={() => void submitAppleSignIn()}
+                    type="button"
+                  >
+                    {isAppleSubmitting ? (
+                      <Loader2 className="size-5 animate-spin" />
+                    ) : (
+                      <AppleIcon className="size-[18px]" />
+                    )}
+                    {t("continueWithApple")}
+                  </button>
+                )}
+              </div>
 
-          <div className="my-5 flex items-center gap-5 [@media(max-height:760px)]:my-3 [@media(max-height:680px)]:hidden">
-            <div className="h-px flex-1 bg-border" />
-            <span className="text-xs font-semibold text-muted-foreground">
-              {t("or")}
-            </span>
-            <div className="h-px flex-1 bg-border" />
-          </div>
+              <div className="my-5 flex items-center gap-5 [@media(max-height:760px)]:my-3 [@media(max-height:680px)]:hidden">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs font-semibold text-muted-foreground">
+                  {t("or")}
+                </span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+            </>
+          )}
 
           <form
             className="space-y-2.5 [@media(max-height:760px)]:space-y-2"
@@ -358,11 +458,13 @@ export function MobileLoginView({ path }: { path: string }) {
             {notice && (
               <Alert
                 className="rounded-2xl"
-                variant={
-                  notice.variant === "error" ? "destructive" : "default"
-                }
+                variant={notice.variant === "error" ? "destructive" : "default"}
               >
-                {notice.variant === "error" ? <AlertCircle /> : <CheckCircle2 />}
+                {notice.variant === "error" ? (
+                  <AlertCircle />
+                ) : (
+                  <CheckCircle2 />
+                )}
                 <AlertDescription>{notice.message}</AlertDescription>
               </Alert>
             )}

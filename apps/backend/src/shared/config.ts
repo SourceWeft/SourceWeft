@@ -796,6 +796,12 @@ export const config = {
     googleOneTapClientId:
       process.env.AUTH_GOOGLE_ONE_TAP_CLIENT_ID?.trim() || "",
     googleMobileClientId: process.env.AUTH_GOOGLE_MOBILE_CLIENT_ID || "",
+    // The iOS app's own Google OAuth client; its ID tokens are accepted, and
+    // the id is handed to the app through /v1/auth/config.
+    googleIosClientId: process.env.AUTH_GOOGLE_IOS_CLIENT_ID?.trim() || "",
+    // Bundle id of the iOS app whose Sign in with Apple identity tokens are
+    // accepted. Empty leaves Sign in with Apple off.
+    appleAppBundleId: process.env.AUTH_APPLE_APP_BUNDLE_ID?.trim() || "",
     githubClientId: process.env.AUTH_GITHUB_CLIENT_ID || "",
     githubClientSecret: process.env.AUTH_GITHUB_CLIENT_SECRET || "",
     passkey: {

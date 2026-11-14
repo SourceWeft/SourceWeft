@@ -50,6 +50,13 @@ Auth and workspace MVP notes:
 - Google One Tap and native mobile sign-in use ID tokens. Configure
   `AUTH_GOOGLE_ONE_TAP_CLIENT_ID` and `AUTH_GOOGLE_MOBILE_CLIENT_ID` for those
   audiences; they do not choose the browser OAuth redirect client.
+- The iOS app signs in with its own Google OAuth client and with Sign in with
+  Apple. `AUTH_GOOGLE_IOS_CLIENT_ID` adds the iOS client as an accepted
+  ID-token audience (only while the Google web client is configured), and
+  `AUTH_APPLE_APP_BUNDLE_ID` names the app whose Apple identity tokens are
+  accepted. Neither is a secret. `/v1/auth/config` reports both to the app as
+  `nativeSignIn`. Apple has no client secret here, so the browser redirect flow
+  is not available for it.
 - Workspace APIs are exposed at `/v1/teams/:teamId/workspaces` and `/v1/context/*`.
 - Run `pnpm migrate` to apply Better Auth migrations followed by Drizzle business migrations.
 - Run `pnpm db:generate` after schema changes to generate new Drizzle migration files.

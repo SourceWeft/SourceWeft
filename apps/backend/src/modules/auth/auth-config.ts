@@ -28,6 +28,7 @@ import {
 } from "./auth-error-i18n";
 import { resolveMailLocale } from "./mail-locale";
 import { mailDeliveryConfigured } from "../mail/delivery";
+import { buildSocialProviders } from "./social-providers";
 import { createAuthMiddleware } from "better-auth/api";
 import { serializeAuthLogArgs } from "./auth-log-args";
 import {
@@ -52,43 +53,7 @@ function buildAcceptInvitationUrl(invitationId: string) {
   return url.toString();
 }
 
-const socialProviders: Record<string, unknown> = {};
-
-function uniqueGoogleClientIds() {
-  return Array.from(
-    new Set(
-      [
-        config.auth.googleSignInWebClientId,
-        config.auth.googleOneTapClientId,
-        config.auth.googleMobileClientId,
-      ].filter(Boolean),
-    ),
-  );
-}
-
-if (
-  config.auth.googleSignInWebClientId &&
-  config.auth.googleSignInWebClientSecret
-) {
-  const googleClientIds = uniqueGoogleClientIds();
-
-  socialProviders.google = {
-    clientId:
-      googleClientIds.length > 1
-        ? googleClientIds
-        : config.auth.googleSignInWebClientId,
-    clientSecret: config.auth.googleSignInWebClientSecret,
-    prompt: "select_account",
-  };
-}
-
-if (config.auth.githubClientId && config.auth.githubClientSecret) {
-  socialProviders.github = {
-    clientId: config.auth.githubClientId,
-    clientSecret: config.auth.githubClientSecret,
-    scope: ["read:user", "user:email"],
-  };
-}
+const socialProviders = buildSocialProviders(config.auth);
 
 type SoleOwnerOrganizationRow = {
   organization_id: string;

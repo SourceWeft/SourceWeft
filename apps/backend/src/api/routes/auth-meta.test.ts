@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { test } from "vitest";
 import { config } from "../../shared/config";
 import { mailDeliveryConfigured } from "../../modules/mail/delivery";
+import { nativeSignInConfig } from "../../modules/auth/social-providers";
 import { registerAuthMetaRoutes } from "./auth-meta";
 
 test("publishes the extension client resource with its OAuth contract", async () => {
@@ -17,6 +18,7 @@ test("publishes the extension client resource with its OAuth contract", async ()
     // The default mail provider delivers nothing, so nobody is made to wait
     // for a verification email; the auth views route on this.
     requireEmailVerification: mailDeliveryConfigured(),
+    nativeSignIn: nativeSignInConfig(config.auth),
     extension: {
       enabled: config.auth.extensionEnabled,
       clientId: config.auth.extensionClientId,

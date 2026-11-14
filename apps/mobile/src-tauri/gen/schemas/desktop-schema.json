@@ -369,6 +369,24 @@
           "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
         },
         {
+          "description": "Allows starting Sign in with Apple\n#### This default permission set includes:\n\n- `allow-sign-in`",
+          "type": "string",
+          "const": "apple-sign-in:default",
+          "markdownDescription": "Allows starting Sign in with Apple\n#### This default permission set includes:\n\n- `allow-sign-in`"
+        },
+        {
+          "description": "Enables the sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "apple-sign-in:allow-sign-in",
+          "markdownDescription": "Enables the sign_in command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the sign_in command without any pre-configured scope.",
+          "type": "string",
+          "const": "apple-sign-in:deny-sign-in",
+          "markdownDescription": "Denies the sign_in command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

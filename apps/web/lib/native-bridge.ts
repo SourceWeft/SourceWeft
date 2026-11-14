@@ -62,6 +62,13 @@ export type DeepLinkPayload = {
   url: string;
 };
 
+/** What the iOS app's Sign in with Apple plugin returns. */
+export type AppleSignInCredential = {
+  identityToken: string;
+  givenName?: string | null;
+  familyName?: string | null;
+};
+
 type NativeListener<TPayload> = (payload: TPayload) => void;
 
 function hasCapability(
@@ -194,5 +201,11 @@ export const nativeBridge = {
   },
   onDeepLink(handler: NativeListener<DeepLinkPayload>) {
     return listenNative("sourceweft:deep-link", handler);
+  },
+  /** Shows the system's Sign in with Apple sheet. iOS app only. */
+  signInWithApple(hashedNonce: string) {
+    return invokeNative<AppleSignInCredential>("plugin:apple-sign-in|sign_in", {
+      payload: { hashedNonce },
+    });
   },
 };
