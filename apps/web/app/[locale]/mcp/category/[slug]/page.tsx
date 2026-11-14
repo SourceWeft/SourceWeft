@@ -14,6 +14,7 @@ import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
 import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
+import { formatList, formatNumber } from "@sourceweft/i18n/format";
 import { JsonLd } from "../../../../_components/seo/json-ld";
 import {
   isIndexableListing,
@@ -175,9 +176,26 @@ export default async function PublicMcpCategoryPage({
       },
     ],
   };
+  // The bare category URL gets a factual summary from live data; searches,
+  // filters and paging are other views of the same page and do not.
+  const bare =
+    !state.query &&
+    !state.cursor &&
+    state.trust === "all" &&
+    state.runtime === "all";
+  const examples = market.items.slice(0, 3).map((item) => item.name);
+  const summary =
+    bare && facets.total > 0 && examples.length > 0
+      ? t("summary", {
+          count: formatNumber(facets.total, locale),
+          examples: formatList(examples, locale),
+          name: category.name,
+        })
+      : null;
   const itemListJsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
+    ...(bare && facets.total > 0 ? { numberOfItems: facets.total } : {}),
     itemListElement: market.items.map((item, index) => ({
       "@type": "ListItem",
       name: item.name,
@@ -218,6 +236,11 @@ export default async function PublicMcpCategoryPage({
             <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
               {description}
             </p>
+            {summary ? (
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                {summary}
+              </p>
+            ) : null}
           </div>
 
           <McpSearchForm

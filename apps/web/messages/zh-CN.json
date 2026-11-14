@@ -388,6 +388,7 @@
       "title": "{name} MCP 服务",
       "descriptionTemplate": "浏览公开的 {name} MCP 服务，含工具、传输、运行时与验证信息。",
       "bodyDescription": "面向 SourceWeft 及其他 MCP 客户端的公开 {name} MCP 服务。",
+      "summary": "共收录 {count} 个 {name} MCP 服务，包括 {examples}。",
       "resultsIn": "在 {category} 中“{query}”的搜索结果"
     },
     "badges": {
@@ -3944,6 +3945,7 @@
       "fallbackMetaTitle": "技能分类",
       "metaDescription": "浏览公开的 {name} 智能体技能，附带完整的 SKILL.md、文件、版本、许可证和来源。",
       "description": "可以添加到 SourceWeft 工作区的公开 {name} 智能体技能。",
+      "summary": "共收录 {count} 个 {name} 智能体技能，包括 {examples}。",
       "back": "返回技能目录"
     },
     "breadcrumb": {

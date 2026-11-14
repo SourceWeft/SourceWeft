@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   formatCurrency,
   formatDate,
+  formatList,
   formatNumber,
   formatRelativeTime,
 } from "../src/format";
@@ -44,4 +45,11 @@ test("formatDate renders without throwing for every locale", () => {
 test("formatRelativeTime speaks the locale", () => {
   assert.equal(formatRelativeTime(-1, "day", "en", { numeric: "auto" }), "yesterday");
   assert.ok(formatRelativeTime(-1, "day", "zh-CN", { numeric: "auto" }).length > 0);
+});
+
+test("formatList joins names in the locale's list grammar", () => {
+  assert.equal(formatList(["A", "B", "C"], "en"), "A, B, and C");
+  assert.equal(formatList(["A", "B"], "en"), "A and B");
+  assert.equal(formatList(["A"], "en"), "A");
+  assert.ok(formatList(["甲", "乙", "丙"], "zh-CN").includes("甲"));
 });

@@ -388,6 +388,7 @@
       "title": "{name} MCP 服務",
       "descriptionTemplate": "瀏覽公開的 {name} MCP 服務，含工具、傳輸、執行環境與驗證資訊。",
       "bodyDescription": "面向 SourceWeft 及其他 MCP 客戶端的公開 {name} MCP 服務。",
+      "summary": "共收錄 {count} 個 {name} MCP 服務，包括 {examples}。",
       "resultsIn": "在 {category} 中「{query}」的搜尋結果"
     },
     "badges": {
@@ -3944,6 +3945,7 @@
       "fallbackMetaTitle": "技能分類",
       "metaDescription": "瀏覽公開的 {name} 代理程式技能，附帶完整的 SKILL.md、檔案、版本、授權條款和來源。",
       "description": "可以新增到 SourceWeft 工作區的公開 {name} 代理程式技能。",
+      "summary": "共收錄 {count} 個 {name} 代理程式技能，包括 {examples}。",
       "back": "返回技能目錄"
     },
     "breadcrumb": {

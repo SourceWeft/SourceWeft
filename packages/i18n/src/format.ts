@@ -11,6 +11,7 @@ import { getLocaleMeta, type Locale } from "./locales";
 const dateTimeCache = new Map<string, Intl.DateTimeFormat>();
 const numberCache = new Map<string, Intl.NumberFormat>();
 const relativeTimeCache = new Map<string, Intl.RelativeTimeFormat>();
+const listCache = new Map<string, Intl.ListFormat>();
 
 function cacheKey(locale: Locale, options: unknown): string {
   return `${locale}\u0000${JSON.stringify(options ?? {})}`;
@@ -96,4 +97,19 @@ export function formatRelativeTime(
   options?: Intl.RelativeTimeFormatOptions,
 ): string {
   return relativeTimeFormatter(locale, options).format(value, unit);
+}
+
+/** "A, B and C" in the locale's own list grammar. */
+export function formatList(
+  items: readonly string[],
+  locale: Locale,
+  options?: Intl.ListFormatOptions,
+): string {
+  const key = cacheKey(locale, options);
+  let formatter = listCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.ListFormat(getLocaleMeta(locale).intlLocale, options);
+    listCache.set(key, formatter);
+  }
+  return formatter.format(items);
 }
