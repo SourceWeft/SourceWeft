@@ -8,7 +8,7 @@ import {
   Loader2,
   Search,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { SourceDiscoveryCandidate } from "@sourceweft/contracts/sources";
 import { HttpClientError } from "@sourceweft/sdk";
@@ -25,6 +25,13 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { contentClient } from "../../../../../../lib/sdk";
 import { importCandidates, type ImportOutcome } from "./import-candidates";
+import {
+  formatAgo,
+  formatClock,
+  formatWait,
+  parseRateLimit,
+  type RateLimitNotice,
+} from "./rate-limit-notice";
 
 type Phase = "search" | "searching" | "results" | "importing" | "done";
 
@@ -64,6 +71,7 @@ export function SourceDiscoveryDialog({
   workspaceId: string;
 }) {
   const t = useTranslations("dashboardSourcesHub");
+  const locale = useLocale();
   const [phase, setPhase] = useState<Phase>("search");
   const [topic, setTopic] = useState("");
   const [queries, setQueries] = useState<string[]>([]);
@@ -73,6 +81,22 @@ export function SourceDiscoveryDialog({
     () => new Map(),
   );
   const [error, setError] = useState<string | null>(null);
+  const [limit, setLimit] = useState<RateLimitNotice | null>(null);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  // While a limit is showing, count down and lift it by itself when it clears.
+  useEffect(() => {
+    if (!limit) return;
+    const tick = () => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= limit.until) setLimit(null);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [limit]);
 
   useEffect(() => {
     if (open) return;
@@ -83,7 +107,14 @@ export function SourceDiscoveryDialog({
     setSelected(new Set());
     setOutcomes(new Map());
     setError(null);
+    setLimit(null);
+    setCachedAt(null);
   }, [open]);
+
+  const secondsLeft = limit
+    ? Math.max(0, Math.ceil((limit.until - now) / 1000))
+    : 0;
+  const limited = limit !== null && secondsLeft > 0;
 
   const selectable = useMemo(
     () => candidates.filter((item) => item.existingSourceId === null),
@@ -99,16 +130,29 @@ export function SourceDiscoveryDialog({
       const result = await contentClient.discoverSources(workspaceId, value);
       setQueries(result.queries);
       setCandidates(result.candidates);
+      setCachedAt(result.cached ? result.cachedAt : null);
       setSelected(new Set());
+      setLimit(null);
       setPhase("results");
     } catch (caught) {
       setPhase("search");
+      const notice = parseRateLimit(caught, Date.now());
+      if (notice) {
+        // Not an error to dismiss: say which limit it was and when it clears,
+        // and leave the topic and any earlier results where they are.
+        setNow(Date.now());
+        setLimit(notice);
+        return;
+      }
       setError(
         caught instanceof HttpClientError && caught.status === 402
           ? t("discovery.errorCredits")
-          : caught instanceof HttpClientError && caught.status === 503
-            ? t("discovery.errorUnavailable")
-            : t("discovery.errorSearch"),
+          : caught instanceof HttpClientError &&
+              caught.code === "RATE_LIMIT_UNAVAILABLE"
+            ? t("discovery.errorBusy")
+            : caught instanceof HttpClientError && caught.status === 503
+              ? t("discovery.errorUnavailable")
+              : t("discovery.errorSearch"),
       );
     }
   };
@@ -198,7 +242,9 @@ export function SourceDiscoveryDialog({
                 value={topic}
               />
               <Button
-                disabled={phase === "searching" || topic.trim().length < 3}
+                disabled={
+                  phase === "searching" || limited || topic.trim().length < 3
+                }
                 type="submit"
               >
                 {phase === "searching" ? (
@@ -208,9 +254,38 @@ export function SourceDiscoveryDialog({
                 )}
                 {phase === "searching"
                   ? t("discovery.searching")
-                  : t("discovery.search")}
+                  : limited
+                    ? t("discovery.tryAgainIn", {
+                        wait: formatWait(secondsLeft, locale),
+                      })
+                    : t("discovery.search")}
               </Button>
             </div>
+            {limited && limit ? (
+              <div
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300"
+                data-rate-limit-notice
+                role="status"
+              >
+                {t(`discovery.rateLimit.${limit.scope}`, {
+                  wait: formatWait(secondsLeft, locale),
+                  time: formatClock(limit.until, locale),
+                })}
+                <span className="mt-1 block text-xs opacity-80">
+                  {t("discovery.rateLimitHint")}
+                </span>
+              </div>
+            ) : null}
+            {candidates.length > 0 ? (
+              <Button
+                onClick={() => setPhase("results")}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                {t("discovery.backToResults", { count: candidates.length })}
+              </Button>
+            ) : null}
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <p className="text-xs text-muted-foreground">
               {t("discovery.costNote")}
@@ -227,6 +302,14 @@ export function SourceDiscoveryDialog({
                   </Badge>
                 ))}
               </div>
+            ) : null}
+
+            {cachedAt ? (
+              <p className="text-xs text-muted-foreground" data-cached-note>
+                {t("discovery.cachedNote", {
+                  ago: formatAgo(cachedAt, now, locale),
+                })}
+              </p>
             ) : null}
 
             {candidates.length === 0 ? (

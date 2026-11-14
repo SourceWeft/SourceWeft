@@ -2,7 +2,9 @@
 
 import assert from "node:assert/strict";
 import { createElement } from "react";
+import { act } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
+import { HttpClientError } from "@sourceweft/sdk";
 
 const discoverSources = vi.hoisted(() => vi.fn());
 const getSourceDiscoveryAvailability = vi.hoisted(() => vi.fn());
@@ -26,6 +28,8 @@ import {
 import { click, flush, mountWithIntl, unmountAll } from "@/test/react";
 
 const RESULT = {
+  cached: false,
+  cachedAt: null,
   queries: ["solid state batteries", "battery commercialization"],
   candidates: [
     {
@@ -169,7 +173,6 @@ test("chosen pages are imported one source each and reported", async () => {
 });
 
 test("running out of credits is explained on the search step", async () => {
-  const { HttpClientError } = await import("@sourceweft/sdk");
   discoverSources.mockRejectedValue(
     new HttpClientError({
       message: "x",
@@ -210,4 +213,123 @@ test("discovery is offered only where a web provider exists", async () => {
   await mountWithIntl(createElement(Probe));
   await flush();
   assert.equal(seen.at(-1), false);
+});
+
+const limitedError = (details: Record<string, unknown>) =>
+  new HttpClientError({
+    message: "slow down",
+    status: 429,
+    statusText: "Too Many Requests",
+    code: "SOURCE_DISCOVERY_RATE_LIMITED",
+    details,
+  });
+
+test("a refused search says which limit it was, counts down, keeps the topic, and re-enables itself", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  try {
+    discoverSources.mockRejectedValue(
+      limitedError({ scope: "minute", retryAfterSeconds: 30 }),
+    );
+    await mountOpen();
+    await typeTopic("solid state batteries");
+    await click(buttonNamed("Find sources")!);
+    await flush();
+
+    const notice = document.body.querySelector("[data-rate-limit-notice]");
+    assert.ok(notice);
+    assert.ok(notice.textContent?.includes("You are searching quickly"));
+    assert.ok(text().includes("Try again in 30s"));
+    const input = document.body.querySelector("input") as HTMLInputElement;
+    assert.equal(input.value, "solid state batteries");
+    assert.equal(buttonNamed("Try again in")?.hasAttribute("disabled"), true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    assert.ok(text().includes("Try again in 20s"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(21_000);
+    });
+    assert.equal(document.body.querySelector("[data-rate-limit-notice]"), null);
+    assert.equal(buttonNamed("Find sources")?.hasAttribute("disabled"), false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("an hourly limit says when it clears", async () => {
+  discoverSources.mockRejectedValue(
+    limitedError({ scope: "hour", retryAfterSeconds: 1380 }),
+  );
+  await mountOpen();
+  await typeTopic("solid state batteries");
+  await click(buttonNamed("Find sources")!);
+  await flush();
+
+  const message =
+    document.body.querySelector("[data-rate-limit-notice]")?.textContent ?? "";
+  assert.ok(message.includes("hourly limit"));
+  assert.ok(message.includes("23m"));
+});
+
+test("a refused search leaves the earlier results one click away", async () => {
+  await mountOpen();
+  await search();
+  assert.ok(text().includes("Batteries explained"));
+  await click(buttonNamed("New search")!);
+
+  discoverSources.mockRejectedValue(
+    limitedError({ scope: "minute", retryAfterSeconds: 30 }),
+  );
+  await typeTopic("something else");
+  await click(buttonNamed("Find sources")!);
+  await flush();
+  assert.ok(document.body.querySelector("[data-rate-limit-notice]"));
+
+  await click(buttonNamed("Back to the last results")!);
+
+  assert.ok(text().includes("Batteries explained"));
+});
+
+test("results served from a recent search say so", async () => {
+  discoverSources.mockResolvedValue({
+    ...RESULT,
+    cached: true,
+    cachedAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+  });
+  await mountOpen();
+  await typeTopic("solid state batteries");
+  await click(buttonNamed("Find sources")!);
+  await flush();
+
+  const note = document.body.querySelector("[data-cached-note]");
+  assert.ok(note);
+  assert.ok(note.textContent?.includes("12 minutes ago"));
+  assert.ok(note.textContent?.includes("No new search was made"));
+});
+
+test("fresh results carry no cache note", async () => {
+  await mountOpen();
+  await search();
+
+  assert.equal(document.body.querySelector("[data-cached-note]"), null);
+});
+
+test("a limiter that is down is reported as a brief outage, not as a limit", async () => {
+  discoverSources.mockRejectedValue(
+    new HttpClientError({
+      message: "x",
+      status: 503,
+      statusText: "Service Unavailable",
+      code: "RATE_LIMIT_UNAVAILABLE",
+    }),
+  );
+  await mountOpen();
+  await typeTopic("solid state batteries");
+  await click(buttonNamed("Find sources")!);
+  await flush();
+
+  assert.ok(text().includes("unavailable for a moment"));
+  assert.equal(document.body.querySelector("[data-rate-limit-notice]"), null);
 });

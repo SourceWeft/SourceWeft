@@ -3435,6 +3435,17 @@
       "errorCredits": "You do not have enough credits to search for sources.",
       "errorUnavailable": "Web search is not available.",
       "errorSearch": "Could not search for sources. Try again in a moment.",
+      "errorBusy": "Finding sources is unavailable for a moment. Try again shortly.",
+      "tryAgainIn": "Try again in {wait}",
+      "rateLimitHint": "Searches you have already made can still be opened right away.",
+      "backToResults": "Back to the last results ({count})",
+      "cachedNote": "Showing results from {ago}. No new search was made.",
+      "rateLimit": {
+        "minute": "You are searching quickly. You can search again in {wait}.",
+        "hour": "You have reached the hourly limit for finding sources. It clears at {time} (in {wait}).",
+        "day": "You have reached today's limit for finding sources. It clears at {time} (in {wait}).",
+        "team": "Your team has reached its hourly limit for finding sources. It clears at {time} (in {wait})."
+      },
       "add": "Discover"
     },
     "sourcePreview": {

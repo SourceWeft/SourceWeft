@@ -115,7 +115,31 @@ export const sourceDiscoveryCandidateSchema = z.object({
 export const sourceDiscoveryResponseSchema = z.object({
   queries: z.array(z.string()),
   candidates: z.array(sourceDiscoveryCandidateSchema),
+  /** Served from a recent identical search, without new searches or model use. */
+  cached: z.boolean(),
+  /** When the oldest part of a cached answer was fetched, ISO 8601. */
+  cachedAt: z.string().nullable(),
 });
+
+/** Which limit refused a discovery request. */
+export const sourceDiscoveryRateLimitScopeSchema = z.enum([
+  "minute",
+  "hour",
+  "day",
+  "team",
+]);
+
+/** The details of a `SOURCE_DISCOVERY_RATE_LIMITED` (429) error. */
+export const sourceDiscoveryRateLimitDetailsSchema = z.object({
+  scope: sourceDiscoveryRateLimitScopeSchema,
+  retryAfterSeconds: z.number().int().positive(),
+  limit: z.number().int().positive(),
+  windowSeconds: z.number().int().positive(),
+});
+
+export type SourceDiscoveryRateLimitDetails = z.infer<
+  typeof sourceDiscoveryRateLimitDetailsSchema
+>;
 
 export const sourceDiscoveryAvailabilityResponseSchema = z.object({
   available: z.boolean(),
