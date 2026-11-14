@@ -33,15 +33,20 @@ type Phase = "loading" | "ready" | "error";
  * reader closed it; that choice is remembered. On a narrow screen, and in a
  * view that needs the width (`collapsedByDefault`), it starts as one line and
  * opens on request without changing the remembered choice.
+ *
+ * Asking a suggested question hands it to the chat page; `onAsk` lets the
+ * surface showing the guide get out of the way so the question is visible.
  */
 export function SourceGuideCard({
   sourceId,
   workspaceId,
   collapsedByDefault = false,
+  onAsk,
 }: {
   sourceId: string;
   workspaceId: string;
   collapsedByDefault?: boolean;
+  onAsk?: () => void;
 }) {
   const t = useTranslations("dashboardSourcesHub");
   const router = useRouter();
@@ -143,6 +148,7 @@ export function SourceGuideCard({
   const askQuestion = (question: string) => {
     const params = new URLSearchParams({ ask: question, ask_source: sourceId });
     router.push(`/dashboard/chat?${params.toString()}`);
+    onAsk?.();
   };
 
   if (phase === "loading") return null;

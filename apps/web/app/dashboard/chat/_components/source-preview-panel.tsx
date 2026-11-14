@@ -370,9 +370,11 @@ export function SourcePreviewPanel({
       >
         <DialogHeader className="relative overflow-hidden border-b bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.14),transparent_32%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.34))] px-5 py-4">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
-          <div className="flex min-w-0 items-start justify-between gap-4 pr-9">
-            <div className="min-w-0">
-              <DialogTitle className="truncate text-lg font-semibold">
+          {/* Narrow: title and details first, view switcher on its own row, so
+              the switcher never squeezes the title out. */}
+          <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4 md:pr-9">
+            <div className="min-w-0 pr-9 md:pr-0">
+              <DialogTitle className="truncate text-left text-lg font-semibold">
                 {title}
               </DialogTitle>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -483,6 +485,7 @@ export function SourcePreviewPanel({
           {!citation && source && workspaceId && detail ? (
             <SourceGuideCard
               collapsedByDefault={previewMode === "source-file"}
+              onAsk={() => onOpenChange(false)}
               sourceId={source.id}
               workspaceId={workspaceId}
             />

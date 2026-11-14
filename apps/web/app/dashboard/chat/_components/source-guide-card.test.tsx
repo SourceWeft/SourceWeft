@@ -53,7 +53,9 @@ beforeEach(() => {
 });
 afterEach(unmountAll);
 
-async function mount(props: { collapsedByDefault?: boolean } = {}) {
+async function mount(
+  props: { collapsedByDefault?: boolean; onAsk?: () => void } = {},
+) {
   await mountWithIntl(
     createElement(SourceGuideCard, {
       sourceId: "s1",
@@ -270,4 +272,24 @@ test("on a narrow screen a guide that needs an action still says so", async () =
   assert.ok(text().includes("No guide yet."));
   assert.ok(buttonNamed("Generate guide"));
   assert.equal(labelled("Expand guide"), null);
+});
+
+test("asking a suggested question tells the surface showing the guide, copying one does not", async () => {
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  Object.assign(navigator, {
+    clipboard: { writeText: async () => undefined },
+  });
+  const onAsk = vi.fn();
+  await mount({ onAsk });
+
+  const copy = labelled("Copy question");
+  assert.ok(copy);
+  await click(copy);
+  assert.equal(onAsk.mock.calls.length, 0);
+
+  const question = buttonNamed("What drove growth?");
+  assert.ok(question);
+  await click(question);
+  assert.equal(push.mock.calls.length, 1);
+  assert.equal(onAsk.mock.calls.length, 1);
 });
