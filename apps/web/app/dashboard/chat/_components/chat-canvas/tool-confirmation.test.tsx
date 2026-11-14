@@ -165,6 +165,33 @@ test("MCP approval card shows the arguments of the pending call", async () => {
   const element = await render(item);
   assert.match(element.textContent ?? "", /query: Node\.js 24 LTS/);
   assert.match(element.textContent ?? "", /limit: 8/);
+  // Short single-line arguments need no expand control.
+  assert.equal(element.querySelectorAll("details").length, 0);
+});
+
+test("MCP approval card can expand the complete code of a long argument", async () => {
+  const item = createItem({
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+  });
+  item.confirmation.domain = "mcp";
+  const code = [
+    "const monitor = await arcmira.monitors.create({",
+    `  query: "${"node ".repeat(40)}",`,
+    "});",
+    "return monitor.id; // final line",
+  ].join("\n");
+  item.toolCall.input = { code, intent: "create a monitor" };
+  const element = await render(item);
+  const details = [...element.querySelectorAll("details")];
+  assert.equal(details.length, 1);
+  assert.equal(
+    details[0]?.querySelector("summary")?.textContent,
+    `View full code (4 lines, ${code.length} characters)`,
+  );
+  assert.equal(details[0]?.querySelector("pre")?.textContent, code);
 });
 
 afterEach(unmountAll);

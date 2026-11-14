@@ -2126,6 +2126,7 @@
       "rememberFor": "记住时长",
       "rememberAria": "记住此审批的时长",
       "viewCommand": "查看命令（{lines} 行，{characters} 个字符）",
+      "viewArgument": "查看完整的 {name}（{lines} 行，{characters} 个字符）",
       "pending": "{count} 个待处理",
       "waitingForApproval": "正在等待审批",
       "endApprovalWait": "结束审批等待",
