@@ -193,6 +193,12 @@
       "intro": "Start free. Upgrade when you need more. No surprise bills."
     }
   },
+  "pricingPage": {
+    "meta": {
+      "title": "SourceWeft pricing: Free, Pro and Team plans",
+      "description": "Compare SourceWeft's Free, Pro and Team plans: monthly credits, page limits and features for the AI notebook workspace."
+    }
+  },
   "about": {
     "meta": {
       "title": "About SourceWeft",

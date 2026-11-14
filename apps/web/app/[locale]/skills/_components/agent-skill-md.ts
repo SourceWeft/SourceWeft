@@ -293,7 +293,7 @@ export function llmsText(siteUrl: string): string {
 ## Product
 
 - [Home](${site}/): what SourceWeft does.
-- [Pricing](${site}/#pricing): Free, Pro and Team plans.
+- [Pricing](${site}/pricing): Free, Pro and Team plans.
 - [Download](${site}/download): the desktop app.
 - [Changelog](${site}/changelog): what changed and when.
 - [About](${site}/about)

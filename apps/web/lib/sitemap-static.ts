@@ -5,6 +5,7 @@ import {
   listPublishedBlogPosts,
   listPublishedBlogSitemapEntries,
 } from "./blog-db";
+import { resolveDeploymentCapabilities } from "./billing-edition/capabilities-server";
 import {
   requirePublicMcpCounts,
   requirePublicMcpCategories,
@@ -32,6 +33,7 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
     mcpCategories,
     skillCategories,
     skillCollections,
+    capabilities,
   ] = await Promise.all([
     listPublishedBlogSitemapEntries(),
     listPublishedBlogPosts(),
@@ -39,7 +41,11 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
     requirePublicMcpCategories(DEFAULT_LOCALE),
     requirePublicSkillCategories(DEFAULT_LOCALE),
     requirePublicSkillCollections(),
+    resolveDeploymentCapabilities(),
   ]);
+  // /pricing exists only where checkout does (the page 404s otherwise).
+  const hasPricingPage =
+    capabilities?.edition === "commercial" && capabilities.billing.checkout;
 
   // Listing pages below the threshold render with noindex, so submitting them
   // here would contradict that signal.
@@ -89,6 +95,16 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.5,
       url: `${SITE_URL}/about`,
     },
+    ...(hasPricingPage
+      ? [
+          {
+            alternates: sitemapLocaleAlternates("/pricing"),
+            changeFrequency: "monthly" as const,
+            priority: 0.7,
+            url: `${SITE_URL}/pricing`,
+          },
+        ]
+      : []),
     {
       alternates: sitemapLocaleAlternates("/download"),
       changeFrequency: "weekly",

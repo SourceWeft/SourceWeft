@@ -3,6 +3,10 @@ const mocks = vi.hoisted(() => ({
   counts: vi.fn(),
   collections: vi.fn(),
   blogEntries: vi.fn(),
+  capabilities: vi.fn(),
+}));
+vi.mock("./billing-edition/capabilities-server", () => ({
+  resolveDeploymentCapabilities: mocks.capabilities,
 }));
 vi.mock("./blog-db", () => ({
   listPublishedBlogPosts: async () => [],
@@ -24,6 +28,7 @@ beforeEach(() => {
   mocks.counts.mockReset();
   mocks.collections.mockResolvedValue({ items: [] });
   mocks.blogEntries.mockResolvedValue([]);
+  mocks.capabilities.mockResolvedValue(null);
 });
 it("uses complete category counts including desktop-only details, matching the canonical category page", async () => {
   mocks.counts.mockResolvedValue({
@@ -58,4 +63,23 @@ it("leaves /blog out of the sitemap until an article is published", async () => 
   const withPost = await buildStaticSitemap();
   expect(withPost.some((e) => e.url === SITE_URL + "/blog")).toBe(true);
   expect(withPost.some((e) => e.url === SITE_URL + "/blog/hello")).toBe(true);
+});
+it("lists /pricing only when checkout is available", async () => {
+  mocks.counts.mockResolvedValue({ counts: {}, total: 0 });
+  const none = await buildStaticSitemap();
+  expect(none.some((e) => e.url === SITE_URL + "/pricing")).toBe(false);
+
+  mocks.capabilities.mockResolvedValue({
+    edition: "commercial",
+    billing: { checkout: false },
+  });
+  const noCheckout = await buildStaticSitemap();
+  expect(noCheckout.some((e) => e.url === SITE_URL + "/pricing")).toBe(false);
+
+  mocks.capabilities.mockResolvedValue({
+    edition: "commercial",
+    billing: { checkout: true },
+  });
+  const withCheckout = await buildStaticSitemap();
+  expect(withCheckout.some((e) => e.url === SITE_URL + "/pricing")).toBe(true);
 });
