@@ -1,5 +1,6 @@
 "use client";
 
+import { apiBaseUrl } from "./api-base-url";
 import { authClient } from "./auth-client";
 import { nativeBridge } from "./native-bridge";
 
@@ -74,7 +75,40 @@ export async function signInWithMobileApple() {
     throw new Error(resultError.message);
   }
 
+  try {
+    await keepAppleRefreshToken(credential.authorizationCode);
+  } catch {
+    // An Apple account whose token the server does not hold could not be
+    // deleted cleanly later, so a half-finished sign-in is undone.
+    await authClient.signOut().catch(() => undefined);
+    throw new Error(
+      "Sign in with Apple could not be completed. Try again or use email.",
+    );
+  }
+
   return result;
+}
+
+/**
+ * Hands the one-time authorization code from this sign-in to the API, which
+ * exchanges it for the refresh token it revokes when the account is deleted.
+ */
+async function keepAppleRefreshToken(code: string | null | undefined) {
+  if (!code) {
+    throw new Error("Apple did not return an authorization code.");
+  }
+  const response = await fetch(
+    `${apiBaseUrl}/v1/auth/apple/authorization-code`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Apple authorization request failed: ${response.status}`);
+  }
 }
 
 /** The message to show for a failed Apple sign-in, or null when the person cancelled it. */

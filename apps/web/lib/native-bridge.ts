@@ -67,6 +67,8 @@ export type DeepLinkPayload = {
 /** What the iOS app's Sign in with Apple plugin returns. */
 export type AppleSignInCredential = {
   identityToken: string;
+  /** One-time code the API exchanges for the refresh token it revokes on account deletion. */
+  authorizationCode?: string | null;
   givenName?: string | null;
   familyName?: string | null;
 };

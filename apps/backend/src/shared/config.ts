@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { createPrivateKey, type KeyObject } from "node:crypto";
 import { parseBooleanEnv as parseBoolean, parseStrictBooleanEnv } from "./env";
 import { parseAllowedInternalOrigins } from "./security/endpoint-policy";
 
@@ -259,6 +260,71 @@ function stripTrailingSlash(value: string) {
   return value.replace(/\/$/, "");
 }
 
+const APPLE_KEY_VARIABLES = [
+  "AUTH_APPLE_TEAM_ID",
+  "AUTH_APPLE_KEY_ID",
+  "AUTH_APPLE_PRIVATE_KEY",
+] as const;
+
+/**
+ * Sign in with Apple settings. The bundle id turns it on; the team id, key id
+ * and private key are the Sign in with Apple key the backend signs its
+ * client_secret with, which it needs to obtain a refresh token at sign-in and
+ * to revoke it when the account is deleted (App Store guideline 5.1.1(v)).
+ * Apple sign-in without revocation is not allowed, so a bundle id without the
+ * key, or key variables without a bundle id, fail configuration loading.
+ */
+function resolveAppleSignIn() {
+  const appBundleId = process.env.AUTH_APPLE_APP_BUNDLE_ID?.trim() || "";
+  const teamId = process.env.AUTH_APPLE_TEAM_ID?.trim() || "";
+  const keyId = process.env.AUTH_APPLE_KEY_ID?.trim() || "";
+  // Env editors often store a PEM on one line with literal "\n" sequences.
+  const privateKey = (process.env.AUTH_APPLE_PRIVATE_KEY ?? "")
+    .replace(/\\n/g, "\n")
+    .trim();
+  const values = {
+    AUTH_APPLE_TEAM_ID: teamId,
+    AUTH_APPLE_KEY_ID: keyId,
+    AUTH_APPLE_PRIVATE_KEY: privateKey,
+  };
+
+  if (!appBundleId) {
+    const set = APPLE_KEY_VARIABLES.filter((name) => values[name]);
+    if (set.length > 0) {
+      throw new Error(
+        `${set.join(", ")} set without AUTH_APPLE_APP_BUNDLE_ID. Set the bundle id to turn Sign in with Apple on, or remove these variables.`,
+      );
+    }
+    return { appBundleId, teamId, keyId, privateKey };
+  }
+
+  const missing = APPLE_KEY_VARIABLES.filter((name) => !values[name]);
+  if (missing.length > 0) {
+    throw new Error(
+      `AUTH_APPLE_APP_BUNDLE_ID is set but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Sign in with Apple needs the Sign in with Apple key to revoke tokens when an account is deleted.`,
+    );
+  }
+
+  let key: KeyObject;
+  try {
+    key = createPrivateKey(privateKey);
+  } catch {
+    throw new Error(
+      "AUTH_APPLE_PRIVATE_KEY is not a readable private key. Paste the whole .p8 file, including the BEGIN and END lines.",
+    );
+  }
+  if (
+    key.asymmetricKeyType !== "ec" ||
+    key.asymmetricKeyDetails?.namedCurve !== "prime256v1"
+  ) {
+    throw new Error(
+      "AUTH_APPLE_PRIVATE_KEY must be a Sign in with Apple key (an EC P-256 .p8 key).",
+    );
+  }
+
+  return { appBundleId, teamId, keyId, privateKey };
+}
+
 function parsePositiveInteger(value: string | undefined, fallback: number) {
   const parsed = parsePositiveNumber(value, fallback);
   return Number.isInteger(parsed) ? parsed : fallback;
@@ -455,6 +521,8 @@ if (
 }
 
 assertDocumentParsingMigration();
+
+const appleSignIn = resolveAppleSignIn();
 
 export const config = {
   apiHost: process.env.BACKEND_API_HOST || "0.0.0.0",
@@ -800,8 +868,12 @@ export const config = {
     // the id is handed to the app through /v1/auth/config.
     googleIosClientId: process.env.AUTH_GOOGLE_IOS_CLIENT_ID?.trim() || "",
     // Bundle id of the iOS app whose Sign in with Apple identity tokens are
-    // accepted. Empty leaves Sign in with Apple off.
-    appleAppBundleId: process.env.AUTH_APPLE_APP_BUNDLE_ID?.trim() || "",
+    // accepted. Empty leaves Sign in with Apple off. When it is set, the Sign
+    // in with Apple key (team id, key id, private key) must be set too.
+    appleAppBundleId: appleSignIn.appBundleId,
+    appleTeamId: appleSignIn.teamId,
+    appleKeyId: appleSignIn.keyId,
+    applePrivateKey: appleSignIn.privateKey,
     githubClientId: process.env.AUTH_GITHUB_CLIENT_ID || "",
     githubClientSecret: process.env.AUTH_GITHUB_CLIENT_SECRET || "",
     passkey: {

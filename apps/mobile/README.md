@@ -212,14 +212,28 @@ Backend:
 
 ```sh
 AUTH_APPLE_APP_BUNDLE_ID=nicelab.sourceweft.mobile
+AUTH_APPLE_TEAM_ID=PBML833M58
+AUTH_APPLE_KEY_ID=<key id>
+AUTH_APPLE_PRIVATE_KEY=<contents of the .p8 file>
 ```
 
 Apple Developer portal: the App ID needs the Sign In with Apple capability. The
 entitlement `com.apple.developer.applesignin` is in the tracked entitlements
-file.
+file. The key comes from Certificates, Identifiers & Profiles > Keys: create a
+key with Sign in with Apple enabled and the app's App ID as its primary App ID,
+note its key id, and download the .p8 (Apple offers it once).
 
-There is no client secret, so Apple sign-in exists in the iOS app only; the
-browser redirect flow is not configured and no web page offers it.
+Account deletion: Apple requires apps that offer Sign in with Apple to revoke
+the person's tokens when they delete their account. The plugin returns Apple's
+one-time authorization code with the identity token; after the session exists
+the page posts it to `/v1/auth/apple/authorization-code`, and the backend keeps
+the refresh token it gets for it. If that step fails the page signs out again,
+so no Apple account exists without a token to revoke. Deleting the account
+revokes the token before anything is erased.
+
+The key signs a client_secret only on the backend; Apple sign-in still exists
+in the iOS app only, the browser redirect flow is not configured and no web
+page offers it.
 
 Which buttons the sign-in view shows is decided in
 `apps/web/lib/mobile-sign-in-methods.ts`. On iOS, Google is shown only next to

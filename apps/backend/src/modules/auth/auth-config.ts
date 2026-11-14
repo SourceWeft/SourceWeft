@@ -203,6 +203,11 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           ? {
               async beforeDelete(user) {
                 await assertUserHardDeleteAllowed(user.id);
+                // Before any data is erased: a failed revocation must leave the
+                // account exactly as it was, so deleting can be retried.
+                const { revokeAppleTokensBeforeDelete } =
+                  await import("./apple-account-tokens");
+                await revokeAppleTokensBeforeDelete(user.id);
                 // Artifact page records carry the owner as plain text (the auth
                 // tables live outside the drizzle schema), so a viewer's own
                 // records and consents are erased here rather than by FK. This

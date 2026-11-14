@@ -62,6 +62,13 @@ class AppleSignInPlugin: Plugin, ASAuthorizationControllerDelegate,
     }
 
     var result: JsonObject = ["identityToken": identityToken]
+    // The backend exchanges this one-time code for the refresh token it needs
+    // to revoke the app's access when the account is deleted.
+    if let codeData = credential.authorizationCode,
+      let authorizationCode = String(data: codeData, encoding: .utf8)
+    {
+      result["authorizationCode"] = authorizationCode
+    }
     if let givenName = credential.fullName?.givenName, !givenName.isEmpty {
       result["givenName"] = givenName
     }

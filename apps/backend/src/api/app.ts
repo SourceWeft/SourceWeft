@@ -15,6 +15,7 @@ import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 import { performanceLoggingMiddleware } from "./middleware/performance-logging";
 import { securityHeadersMiddleware } from "./middleware/security-headers";
 import { workspaceRoleGuard } from "./middleware/workspace-role";
+import { registerAuthAppleRoutes } from "./routes/auth-apple";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
 import { registerContentRoutes } from "./routes/content";
@@ -87,6 +88,7 @@ export function createApp() {
   app.use("/v1/workspaces/:workspaceId/*", workspaceRoleGuard);
 
   registerAuthMetaRoutes(app);
+  registerAuthAppleRoutes(app);
   registerLocalDeviceRoutes(app);
   registerLocalNetworkRoutes(app);
   registerConnectorOAuthRoutes(app);
