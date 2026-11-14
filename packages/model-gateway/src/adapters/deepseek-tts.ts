@@ -118,6 +118,8 @@ export class DeepSeekTtsTransport implements TtsTransport {
         contentType.split(";")[0]?.trim() ||
         (format === "pcm" ? "audio/pcm" : "audio/wav"),
       raw: { billedUnits },
+      // DeepSeek reports no usage; the units it bills are what was sent.
+      usage: { inputCharacters: billedUnits },
       target,
       responseHeaders: response.headers,
       traceId: input.options?.traceId,

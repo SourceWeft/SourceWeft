@@ -164,6 +164,12 @@ export interface UsageInfo {
   imageQuality?: string;
   inputAudioTokens?: number;
   outputAudioTokens?: number;
+  /**
+   * Billed text units of a speech-synthesis request, for providers that price
+   * TTS per character and report no tokens. Counted the way the provider
+   * bills: DeepSeek counts a Chinese character as two.
+   */
+  inputCharacters?: number;
 }
 
 export interface ObserveSpan {

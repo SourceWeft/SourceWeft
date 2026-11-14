@@ -30,7 +30,11 @@ function price(overrides: Partial<ModelPricing>): ModelPricing {
   };
 }
 
-function cost(pricing: ModelPricing, usage: UsageInfo, observed?: ModelCallCost) {
+function cost(
+  pricing: ModelPricing,
+  usage: UsageInfo,
+  observed?: ModelCallCost,
+) {
   return computeProviderCostFromPricing({ pricing, usage, cost: observed });
 }
 
@@ -331,4 +335,35 @@ test("provider-scoped prices yield provider-specific costs", () => {
   );
   assert.equal(deepseek.providerCostUsd, 0.00087);
   assert.equal(orcarouter.providerCostUsd, 0.00112);
+});
+
+// TTS priced per billed character unit. DeepSeek's list price is $0.45 per
+// 10,000 units and a Chinese character counts as two: 200 Chinese characters
+// are 400 units. 400 · 0.000045 = 0.018
+test("tts: billed character units at a per-character price", () => {
+  const r = cost(price({ input_cost_per_character: 0.000045 }), {
+    inputCharacters: 400,
+  });
+  assert.equal(r.providerCostUsd, 0.018);
+  assert.equal(r.costSource, "price_book");
+  assert.deepEqual(r.missingPriceComponents, []);
+});
+
+test("tts: character usage with no per-character price is unknown, not free", () => {
+  const r = cost(price({ input_cost_per_token: 1e-6 }), {
+    inputCharacters: 400,
+  });
+  assert.equal(r.providerCostUsd, null);
+  assert.equal(r.costSource, "missing_price_components");
+  assert.deepEqual(r.missingPriceComponents, ["input_characters"]);
+});
+
+test("tts: a provider-reported total still wins over the per-character price", () => {
+  const r = cost(
+    price({ input_cost_per_character: 0.000045 }),
+    { inputCharacters: 400 },
+    reported(0.01),
+  );
+  assert.equal(r.providerCostUsd, 0.01);
+  assert.equal(r.costSource, "provider_actual");
 });

@@ -79,6 +79,8 @@ export type GlobalProfilePricingEntry = {
   outputCostPerAudioToken?: number | null;
   inputCostPerImage?: number | null;
   outputCostPerImage?: number | null;
+  /** Per billed text unit, for TTS priced by character. */
+  inputCostPerCharacter?: number | null;
 };
 
 /**
@@ -716,7 +718,10 @@ function asOptionalImageGenerationConfig(
       `Invalid global model gateway config field: ${requestField}.endpoint (expected "openai" or "native", received ${JSON.stringify(request.endpoint)})`,
     );
   }
-  if (request.sizing !== undefined && !isImageGenerationSizing(request.sizing)) {
+  if (
+    request.sizing !== undefined &&
+    !isImageGenerationSizing(request.sizing)
+  ) {
     throw new Error(
       `Invalid global model gateway config field: ${requestField}.sizing (expected "size", "dimensions" or "aspect_ratio", received ${JSON.stringify(request.sizing)})`,
     );
@@ -869,6 +874,7 @@ const PRICING_COST_FIELDS = [
   "outputCostPerAudioToken",
   "inputCostPerImage",
   "outputCostPerImage",
+  "inputCostPerCharacter",
 ] as const satisfies ReadonlyArray<keyof GlobalProfilePricingEntry>;
 
 /**
@@ -954,6 +960,10 @@ function parsePricingEntry(
   parsed.outputCostPerImage = asOptionalNullableNumber(
     record.outputCostPerImage,
     `${fieldName}.outputCostPerImage`,
+  );
+  parsed.inputCostPerCharacter = asOptionalNullableNumber(
+    record.inputCostPerCharacter,
+    `${fieldName}.inputCostPerCharacter`,
   );
 
   return parsed;

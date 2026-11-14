@@ -1,6 +1,10 @@
 import { createHttpGatewayError, ModelGatewayError } from "../errors";
 import { normalizeModelCallObservation } from "../observation/normalize";
-import type { ResolvedRequestTarget, TtsSpeechResult } from "../types";
+import type {
+  ResolvedRequestTarget,
+  TtsSpeechResult,
+  UsageInfo,
+} from "../types";
 
 const MIME_TYPE_BY_RESPONSE_FORMAT: Record<string, string> = {
   aac: "audio/aac",
@@ -71,6 +75,8 @@ export function buildTtsSpeechResult(input: {
   responseHeaders?: Headers;
   target: ResolvedRequestTarget;
   traceId?: string;
+  /** Usage the transport measured itself, for providers that report none. */
+  usage?: UsageInfo;
 }): TtsSpeechResult {
   if (input.audio.byteLength === 0) {
     throw new ModelGatewayError({
@@ -90,6 +96,9 @@ export function buildTtsSpeechResult(input: {
       responseHeaders: input.responseHeaders,
     },
   });
+  if (input.usage) {
+    observation.usage = { ...observation.usage, ...input.usage };
+  }
   return {
     model:
       typeof raw.model === "string" ? raw.model : input.target.providerModel,

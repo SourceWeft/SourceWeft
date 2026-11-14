@@ -1,3 +1,4 @@
+import { buildProfilePricingConfigJson } from "./profiles";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -479,6 +480,32 @@ test("loadGlobalModelGatewayConfig preserves explicit null pricing", async () =>
   assert.equal(loaded?.chatProfiles[0]?.pricing, null);
 });
 
+test("loadGlobalModelGatewayConfig accepts a per-character price and it becomes the manual price", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    pricing: { inputCostPerCharacter: 0.000045 },
+  };
+
+  const loaded = await loadConfig(config);
+  const pricing = loaded?.chatProfiles[0]?.pricing;
+  assert.equal(pricing?.inputCostPerCharacter, 0.000045);
+
+  const stored = buildProfilePricingConfigJson(pricing, new Date(0));
+  assert.equal(stored.input_cost_per_character, 0.000045);
+  assert.equal(stored.price_source, "manual");
+  assert.equal(stored.input_cost_per_token, null);
+});
+
+test("loadGlobalModelGatewayConfig rejects a non-numeric per-character price", async () => {
+  const config = baseConfig();
+  config.chatProfiles[0] = {
+    ...config.chatProfiles[0],
+    pricing: { inputCostPerCharacter: "cheap" },
+  };
+  await assert.rejects(() => loadConfig(config), /inputCostPerCharacter/);
+});
+
 test("loadGlobalModelGatewayConfig preserves litellm pricing presets", async () => {
   const config = baseConfig();
   config.chatProfiles[0] = {
@@ -494,6 +521,7 @@ test("loadGlobalModelGatewayConfig preserves litellm pricing presets", async () 
     cacheCreationInputTokenCost: undefined,
     cacheReadInputTokenCost: undefined,
     inputCostPerAudioToken: undefined,
+    inputCostPerCharacter: undefined,
     inputCostPerImage: undefined,
     inputCostPerImageToken: undefined,
     inputCostPerToken: undefined,

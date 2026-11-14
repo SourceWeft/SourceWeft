@@ -241,6 +241,9 @@ test("billed units are exposed in raw", async () => {
     input: "你好ab",
   });
   assert.equal(result.raw.billedUnits, 6);
+  // Billing reads usage, not raw: the units are reported as characters.
+  assert.equal(result.usage?.inputCharacters, 6);
+  assert.equal(result.observation?.usage?.inputCharacters, 6);
 });
 
 test("HTTP errors become gateway errors without leaking the key", async () => {
