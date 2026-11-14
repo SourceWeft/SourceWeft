@@ -11,6 +11,10 @@ const MIME_TYPE_BY_RESPONSE_FORMAT: Record<string, string> = {
   wav: "audio/wav",
 };
 
+export function ttsMimeTypeForFormat(format: string) {
+  return MIME_TYPE_BY_RESPONSE_FORMAT[format.toLowerCase()];
+}
+
 export function compactTtsBody(body: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(body).filter(([, value]) => value !== undefined),

@@ -44,6 +44,8 @@ function endpointUrl(baseUrl: string) {
 export class DeepSeekTtsTransport implements TtsTransport {
   readonly kind = "deepseek" as const;
 
+  readonly outputFormats = ["wav", "pcm"] as const;
+
   async execute(input: Parameters<TtsTransport["execute"]>[0]) {
     const { payload, target } = input;
     const provider = target.provider;

@@ -255,6 +255,7 @@ export function resolveModelGatewayConfig(
     routes,
     fetch: fetchFn,
     asrAudioPreparer: config.asrAudioPreparer,
+    ttsAudioTranscoder: config.ttsAudioTranscoder,
     timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
     defaultHeaders: {

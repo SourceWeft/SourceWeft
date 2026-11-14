@@ -82,8 +82,6 @@ test("a base URL that already ends in /v1 does not double the segment", async ()
 for (const [label, extra] of [
   ["speed", { speed: 1.2 }],
   ["instructions", { instructions: "whisper" }],
-  ["mp3 output", { responseFormat: "mp3" }],
-  ["opus output", { responseFormat: "opus" }],
 ] as const) {
   test(`unsupported ${label} fails instead of being ignored`, async () => {
     const { calls, gateway } = build(wav);
@@ -98,6 +96,125 @@ for (const [label, extra] of [
     assert.equal(calls.length, 0);
   });
 }
+
+test("without a transcoder, a format DeepSeek lacks fails before any request", async () => {
+  const { calls, gateway } = build(wav);
+  await assert.rejects(
+    () =>
+      gateway.tts.speech({
+        model: "tts-default",
+        input: "Hi",
+        responseFormat: "mp3",
+      }),
+    (error: { code?: string; message: string }) => {
+      assert.equal(error.code, "CONFIGURATION");
+      assert.match(error.message, /wav or pcm.*mp3.*ffmpeg/);
+      return true;
+    },
+  );
+  assert.equal(calls.length, 0);
+});
+
+function buildWithTranscoder(output: Uint8Array) {
+  const calls: Call[] = [];
+  const transcodes: Array<{
+    fromFormat: string;
+    toFormat: string;
+    size: number;
+  }> = [];
+  const gateway = createModelGateway({
+    fetch: async (url, init) => {
+      calls.push({
+        url: String(url),
+        init: init ?? {},
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return wav();
+    },
+    ttsAudioTranscoder: {
+      async transcode(input) {
+        transcodes.push({
+          fromFormat: input.fromFormat,
+          toFormat: input.toFormat,
+          size: input.audio.byteLength,
+        });
+        return output;
+      },
+    },
+    providers: {
+      deepseek: {
+        kind: "deepseek",
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "ds-key",
+      },
+      openrouter: {
+        kind: "openrouter",
+        baseUrl: "https://openrouter.ai/api/v1",
+        apiKey: "or-key",
+      },
+    },
+    modelRoutes: {
+      "tts-default": {
+        strategy: "priority",
+        targets: [{ provider: "deepseek", model: "deepseek-tts", priority: 1 }],
+      },
+      "tts-openrouter": {
+        strategy: "priority",
+        targets: [{ provider: "openrouter", model: "some/tts", priority: 1 }],
+      },
+    },
+  });
+  return { calls, gateway, transcodes };
+}
+
+test("mp3 from DeepSeek is synthesized as wav and converted by the transcoder", async () => {
+  const { calls, gateway, transcodes } = buildWithTranscoder(
+    new Uint8Array([9, 9, 9]),
+  );
+  const result = await gateway.tts.speech({
+    model: "tts-default",
+    input: "Hi",
+    responseFormat: "mp3",
+  });
+  assert.equal(calls[0]?.body.format, "wav");
+  assert.deepEqual(transcodes, [
+    { fromFormat: "wav", toFormat: "mp3", size: 4 },
+  ]);
+  assert.deepEqual([...new Uint8Array(result.audio)], [9, 9, 9]);
+  assert.equal(result.mimeType, "audio/mpeg");
+  assert.equal(result.raw.convertedFrom, "wav");
+  assert.equal(result.raw.convertedTo, "mp3");
+  assert.equal(result.raw.billedUnits, 2);
+});
+
+test("formats the provider has, or no format at all, are never converted", async () => {
+  const { gateway, transcodes } = buildWithTranscoder(new Uint8Array([9]));
+  await gateway.tts.speech({ model: "tts-default", input: "Hi" });
+  await gateway.tts.speech({
+    model: "tts-default",
+    input: "Hi",
+    responseFormat: "pcm",
+  });
+  await gateway.tts.speech({
+    model: "tts-openrouter",
+    input: "Hi",
+    responseFormat: "mp3",
+  });
+  assert.equal(transcodes.length, 0);
+});
+
+test("a conversion that yields nothing is an error, not empty audio", async () => {
+  const { gateway } = buildWithTranscoder(new Uint8Array());
+  await assert.rejects(
+    () =>
+      gateway.tts.speech({
+        model: "tts-default",
+        input: "Hi",
+        responseFormat: "mp3",
+      }),
+    /produced no audio/,
+  );
+});
 
 test("text over 10,000 billed units fails before any request; Chinese counts double", async () => {
   const { calls, gateway } = build(wav);
