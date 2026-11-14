@@ -6,10 +6,20 @@
  *   DOTENV_CONFIG_PATH=<env with a synced embedding profile> \
  *     pnpm exec tsx -r dotenv/config scripts/eval-citation-anchoring.ts
  *
+ * With `--labels [file]` it instead scores human-labelled real decisions
+ * (see `report-citation-anchoring.ts`) at the current thresholds and suggests
+ * a pair; that mode calls no model.
+ *
  * It calls the embedding provider (a few hundred short texts, well under a
  * cent). Run it when the thresholds or the matcher change and record the
  * result in the change that moved them.
  */
+import { resolve } from "node:path";
+import { parseArgs } from "node:util";
+import {
+  formatLabelEvaluation,
+  readLabelledCases,
+} from "../src/modules/citations/anchoring-labels";
 import {
   CROSS_LANGUAGE_CASES,
   SUPPORTED_CATEGORIES,
@@ -20,6 +30,27 @@ import {
 import { anchorCitations } from "../src/modules/citations/anchoring";
 import { prepareEmbeddingProfile } from "../src/shared/model-gateway/embedding-identity";
 import { getRawModelGatewayClient } from "../src/shared/model-gateway/internal/raw";
+
+// Labelled mode: precision and recall of the by-meaning thresholds on real,
+// human-labelled decisions (the held-out set), from the labelled file that
+// `report-citation-anchoring.ts --import-labels` builds. No model is called.
+const { values: cli } = parseArgs({
+  options: { labels: { type: "string" } },
+  strict: false,
+});
+if (cli.labels !== undefined) {
+  const file =
+    typeof cli.labels === "string" && cli.labels
+      ? resolve(cli.labels)
+      : resolve(
+          import.meta.dirname,
+          "../../../.local-eval/citation-anchoring-labelled.jsonl",
+        );
+  const { labelled, unlabelled } = await readLabelledCases(file);
+  if (unlabelled > 0) console.log(`${unlabelled} unlabelled case(s) ignored`);
+  console.log(formatLabelEvaluation(labelled));
+  process.exit(0);
+}
 
 const prepared = await prepareEmbeddingProfile();
 const profile = prepared.profile;

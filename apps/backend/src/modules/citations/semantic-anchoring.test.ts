@@ -33,6 +33,14 @@ test("embedded text has no markup and is bounded", () => {
   assert.ok(segmentTextForEmbedding("x".repeat(1000)).length <= 400);
 });
 
+// A refused match used to be `null`; it is now a weak anchor with no span.
+function assertUnlocated(anchor: ReturnType<typeof pickSemanticAnchor>) {
+  assert.equal(anchor.support, "weak");
+  assert.equal(anchor.startChar, null);
+  assert.equal(anchor.endChar, null);
+  assert.equal(anchor.quoteText, null);
+}
+
 const CONTENT = "First sentence. Second sentence. Third sentence.";
 const at = (text: string) => {
   const start = CONTENT.indexOf(text);
@@ -75,7 +83,7 @@ test("a best match that is not clearly ahead of the runner-up stays unlocated", 
       segment("Second sentence.", [0.88, 0.475]),
     ],
   });
-  assert.equal(anchor, null);
+  assertUnlocated(anchor);
 });
 
 test("a weak match stays unlocated", () => {
@@ -88,7 +96,7 @@ test("a weak match stays unlocated", () => {
       segment("Second sentence.", [0.1, 0.995]),
     ],
   });
-  assert.equal(anchor, null);
+  assertUnlocated(anchor);
 });
 
 test("a close sentence that states different figures stays unlocated", () => {
@@ -104,7 +112,7 @@ test("a close sentence that states different figures stays unlocated", () => {
       segment("Second sentence.", [0.1, 0.995]),
     ],
   });
-  assert.equal(anchor, null);
+  assertUnlocated(anchor);
 });
 
 test("a source with one sentence can still be matched, and one with none cannot", () => {
@@ -117,14 +125,13 @@ test("a source with one sentence can still be matched, and one with none cannot"
     })?.support,
     "strong",
   );
-  assert.equal(
+  assertUnlocated(
     pickSemanticAnchor({
       claim: "x",
       claimVector: [1, 0],
       content: CONTENT,
       segments: [],
     }),
-    null,
   );
 });
 
@@ -187,7 +194,7 @@ test("a close sentence that says the opposite direction stays unlocated", () => 
       segment("Second sentence.", [0.1, 0.995]),
     ],
   });
-  assert.equal(anchor, null);
+  assertUnlocated(anchor);
 });
 
 test("rows that read alike are told apart by figures only one of them states", () => {
@@ -217,16 +224,15 @@ test("rows that read alike stay unlocated when the figures do not single one out
       text: "Team, 25, $49 (annual)",
     },
   ];
-  assert.equal(
+  assertUnlocated(
     pickSemanticAnchor({
       claim: "团队版包含25个席位，售价49美元",
       claimVector: [1, 0],
       content: CONTENT,
       segments: rows,
     }),
-    null,
   );
-  assert.equal(
+  assertUnlocated(
     pickSemanticAnchor({
       claim: "团队版很受欢迎",
       claimVector: [1, 0],
@@ -236,6 +242,5 @@ test("rows that read alike stay unlocated when the figures do not single one out
         { ...segment("Second sentence.", [0.92, 0.39]), text: "Team" },
       ],
     }),
-    null,
   );
 });

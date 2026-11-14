@@ -1,4 +1,5 @@
 import { completeEmbeddingBatch } from "../../shared/model-gateway/index";
+import { CITATION_ANCHORING_FEATURE } from "./anchoring-diagnostics";
 import type { ContentBillingPort } from "../content/billing-port";
 
 /**
@@ -24,7 +25,7 @@ export function createCitationEmbedder(input: {
       actorUserId: input.userId,
       threadId: input.threadId,
       scopeId: input.scopeId,
-      feature: "citation-anchoring",
+      feature: CITATION_ANCHORING_FEATURE,
       idempotencyKey: `citation-anchoring:${input.scopeId}`,
       texts,
     });

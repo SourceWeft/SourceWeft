@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, beforeEach, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, test, vi } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 
 /**
@@ -284,4 +284,79 @@ test("does not load chunk content from another workspace", async () => {
     citations: records().slice(0, 1),
   });
   assert.equal(anchors.size, 0);
+});
+
+test("stores how each anchor was decided, as numbers and enums only", async () => {
+  await persist(ANSWER, "create");
+
+  const stored = await rows();
+  const strong = stored.get("c1")!.metadataJson.anchoring as Record<
+    string,
+    unknown
+  >;
+  assert.equal(strong.method, "lexical");
+  assert.equal(strong.scripts, "same");
+  assert.equal(typeof strong.lexicalScore, "number");
+  assert.equal(strong.semantic, undefined);
+  for (const row of stored.values()) {
+    const text = JSON.stringify(row.metadataJson.anchoring);
+    assert.equal(text.includes("Revenue"), false);
+    assert.equal(text.includes("buyback"), false);
+  }
+});
+
+test("a by-meaning decision and one summary log line are recorded without text", async () => {
+  const { logger } = await import("../../shared/logger");
+  const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+  try {
+    const citations = records().slice(0, 1);
+    const answerText = "营收增长23%，达到41亿美元 [citation:c1]。";
+    const anchors = await repository.anchorAnswerCitations({
+      teamId,
+      workspaceId,
+      threadId,
+      answerText,
+      citations,
+      embedTexts: async (texts) =>
+        texts.map((text) => (/营收|Revenue grew/.test(text) ? [1, 0] : [0, 1])),
+    });
+    await repository.createCitationRecords({
+      teamId,
+      workspaceId,
+      threadId,
+      messageId,
+      anchors,
+      citations,
+    });
+
+    const row = (await rows()).get("c1")!;
+    assert.equal(row.metadataJson.support, "strong");
+    const anchoring = row.metadataJson.anchoring as {
+      method: string;
+      scripts: string;
+      semantic: { outcome: string; similarity: number; segments: number };
+    };
+    assert.equal(anchoring.method, "semantic");
+    assert.equal(anchoring.scripts, "cjk>latin");
+    assert.equal(anchoring.semantic.outcome, "strong");
+    assert.ok(anchoring.semantic.similarity > 0.99);
+    assert.ok(anchoring.semantic.segments >= 1);
+
+    const lines = info.mock.calls.filter(
+      ([message]) => message === "citation.anchoring.summary",
+    );
+    assert.equal(lines.length, 1);
+    const meta = lines[0]![1] as Record<string, unknown>;
+    assert.equal(meta.citations, 1);
+    assert.equal(meta.lexicalStrong, 0);
+    assert.equal(meta.sentToSemantic, 1);
+    assert.equal(meta.semanticStrong, 1);
+    assert.equal(meta.boundsHit, false);
+    assert.equal(meta.embeddingFailed, false);
+    const logged = JSON.stringify(lines[0]);
+    assert.equal(logged.includes("营收"), false);
+    assert.equal(logged.includes("Revenue"), false);
+  } finally {
+    info.mockRestore();
+  }
 });
