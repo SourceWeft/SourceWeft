@@ -1,5 +1,6 @@
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import type { AsrAudioPreparer } from "./asr/types";
+import type { TtsAudioTranscoder } from "./tts/types";
 import type { ModelCallObservation } from "./observation/types";
 import type { TargetHealthRegistry } from "./target-health";
 import type { StrictJsonSchemaSupportCache } from "./strict-json-schema-support";
@@ -898,6 +899,12 @@ export interface ModelGatewayConfig {
    * it is. Without it, such a transcription fails instead of being sent.
    */
   asrAudioPreparer?: AsrAudioPreparer;
+  /**
+   * Converts synthesized speech when a TTS provider cannot output the
+   * requested format. Without it, such a request fails instead of returning
+   * a different format.
+   */
+  ttsAudioTranscoder?: TtsAudioTranscoder;
   timeoutMs?: number;
   maxRetries?: number;
   defaultHeaders?: Record<string, string>;
@@ -994,6 +1001,7 @@ export interface ResolvedModelGatewayConfig {
   routes: Record<string, ResolvedModelRouteConfig>;
   fetch: typeof fetch;
   asrAudioPreparer?: AsrAudioPreparer;
+  ttsAudioTranscoder?: TtsAudioTranscoder;
   timeoutMs: number;
   maxRetries: number;
   defaultHeaders: Record<string, string>;

@@ -76,6 +76,8 @@ export { createOpenAICompatibleProvider } from "./providers/openai-compatible";
 export { createDeepInfraProvider } from "./providers/deepinfra";
 export { createSiliconflowCNProvider } from "./providers/siliconflow-cn";
 
+export type { TtsAudioTranscoder } from "./tts/types";
+
 export type {
   AsrAudioPreparer,
   AsrAudioSource,

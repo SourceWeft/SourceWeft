@@ -154,7 +154,7 @@ describe.skipIf(!hasFfmpeg)("with a real ffmpeg", () => {
           audio: new TextEncoder().encode("not audio at all"),
           fileName: "fake.mp3",
         }),
-      /ffmpeg could not decode/,
+      /ffmpeg could not process/,
     );
   });
 

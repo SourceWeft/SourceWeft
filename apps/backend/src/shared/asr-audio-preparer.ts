@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
@@ -9,6 +8,7 @@ import type {
   NormalizedAsrAudio,
 } from "@sourceweft/model-gateway";
 import { probeAudioDurationSeconds } from "./audio-duration";
+import { ffmpegSemaphore, runFfmpeg } from "./ffmpeg";
 
 /**
  * ffmpeg-backed audio decoding for ASR providers that cannot take an upload
@@ -22,36 +22,12 @@ import { probeAudioDurationSeconds } from "./audio-duration";
  */
 const SAMPLE_RATE = 16_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-// Decoding is CPU-bound; ingestion workers must not stack up ffmpeg processes.
-const DEFAULT_MAX_CONCURRENT = 2;
 const SILENCE_FILTER = "silencedetect=noise=-35dB:d=0.4";
-const STDERR_TAIL_BYTES = 2_000;
 
 export type FfmpegAsrAudioPreparerOptions = {
   readonly ffmpegPath?: string;
   readonly timeoutMs?: number;
-  readonly maxConcurrent?: number;
 };
-
-class Semaphore {
-  private active = 0;
-  private readonly waiting: Array<() => void> = [];
-
-  constructor(private readonly limit: number) {}
-
-  async run<T>(task: () => Promise<T>): Promise<T> {
-    if (this.active >= this.limit) {
-      await new Promise<void>((resolve) => this.waiting.push(resolve));
-    }
-    this.active += 1;
-    try {
-      return await task();
-    } finally {
-      this.active -= 1;
-      this.waiting.shift()?.();
-    }
-  }
-}
 
 /** Reads `silence_start` / `silence_end` pairs out of ffmpeg's log. */
 export function parseSilenceLog(log: string): AsrSilence[] {
@@ -70,77 +46,11 @@ export function parseSilenceLog(log: string): AsrSilence[] {
   return silences;
 }
 
-function runFfmpeg(input: {
-  ffmpegPath: string;
-  args: string[];
-  timeoutMs: number;
-  signal?: AbortSignal;
-}): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(input.ffmpegPath, input.args, {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let silenceLog = "";
-    let tail = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      tail = (tail + chunk).slice(-STDERR_TAIL_BYTES);
-      for (const line of chunk.split("\n")) {
-        if (line.includes("silence_")) silenceLog += `${line}\n`;
-      }
-    });
-
-    let failure: Error | undefined;
-    const kill = (error: Error) => {
-      failure ??= error;
-      child.kill("SIGKILL");
-    };
-    const timer = setTimeout(
-      () =>
-        kill(new Error(`ffmpeg did not finish within ${input.timeoutMs}ms`)),
-      input.timeoutMs,
-    );
-    const onAbort = () => kill(new Error("Audio decoding was aborted"));
-    input.signal?.addEventListener("abort", onAbort, { once: true });
-    const finish = () => {
-      clearTimeout(timer);
-      input.signal?.removeEventListener("abort", onAbort);
-    };
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      finish();
-      reject(
-        error.code === "ENOENT"
-          ? new Error(
-              `ffmpeg is required to decode this audio but '${input.ffmpegPath}' was not found on PATH`,
-            )
-          : error,
-      );
-    });
-    child.on("close", (code) => {
-      finish();
-      if (failure) return reject(failure);
-      if (code !== 0) {
-        const detail = tail.trim().split("\n").slice(-3).join(" | ");
-        return reject(
-          new Error(
-            `ffmpeg could not decode the audio (exit ${code}): ${detail}`,
-          ),
-        );
-      }
-      resolve(silenceLog);
-    });
-  });
-}
-
 export function createFfmpegAsrAudioPreparer(
   options: FfmpegAsrAudioPreparerOptions = {},
 ): AsrAudioPreparer {
   const ffmpegPath = options.ffmpegPath ?? "ffmpeg";
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const semaphore = new Semaphore(
-    Math.max(1, options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT),
-  );
 
   return {
     async probeDurationSec(source: AsrAudioSource) {
@@ -169,11 +79,12 @@ export function createFfmpegAsrAudioPreparer(
         const pcmPath = join(dir, "audio.pcm");
         await writeFile(inputPath, source.audio);
 
-        const silenceLog = await semaphore.run(() =>
+        const silenceLog = await ffmpegSemaphore.run(() =>
           runFfmpeg({
             ffmpegPath,
             timeoutMs,
             signal,
+            keepLines: "silence_",
             args: [
               "-hide_banner",
               "-nostdin",
@@ -236,5 +147,4 @@ export function createFfmpegAsrAudioPreparer(
   };
 }
 
-/** Shared by every gateway client so the ffmpeg bound is process-wide. */
 export const ffmpegAsrAudioPreparer = createFfmpegAsrAudioPreparer();

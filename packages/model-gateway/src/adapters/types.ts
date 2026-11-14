@@ -77,6 +77,14 @@ export interface AsrTransport {
 export interface TtsTransport {
   readonly kind: ProviderKind;
 
+  /**
+   * Formats this provider can synthesize, most preferred first. Omitted when
+   * the provider takes the OpenAI-style `response_format` as given. A request
+   * for a format outside the list is synthesized in the first one and
+   * converted by the host's transcoder.
+   */
+  readonly outputFormats?: readonly string[];
+
   execute(input: {
     target: ResolvedRequestTarget;
     payload: TtsSpeechInput;
