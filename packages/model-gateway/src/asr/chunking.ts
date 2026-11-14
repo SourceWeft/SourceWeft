@@ -4,11 +4,16 @@ import type { AsrLimits, AsrSilence } from "./types";
 const BYTES_PER_SAMPLE = 2;
 const WAV_HEADER_BYTES = 44;
 /** A cut may move this far from its target to land in a silence. */
-export const ASR_SNAP_WINDOW_SEC = 5;
+export const ASR_SNAP_WINDOW_SEC = 10;
 
 export type AsrChunkSpan = {
   readonly startSec: number;
   readonly endSec: number;
+  /**
+   * False when the span ends on a cut that found no pause to land in, so it
+   * may end in the middle of a sentence or even a word.
+   */
+  readonly endsInSilence: boolean;
 };
 
 /**
@@ -32,8 +37,11 @@ export function resolveAsrChunkSec(limits: AsrLimits, sampleRate: number) {
 
 /**
  * Cut `durationSec` into consecutive spans of about `chunkSec`. Each cut moves
- * to the middle of the nearest silence within the snap window, so a word is
- * not split when a pause is close by; with no silence nearby it cuts on target.
+ * to the middle of the longest silence within the snap window: a sentence
+ * usually ends on a longer pause than the gap inside a phrase, so the longest
+ * one is the least likely to split a thought. Equal pauses go to the nearest.
+ * With no silence in the window the cut falls on the target and the span is
+ * marked as not ending in silence.
  */
 export function planAsrChunks(input: {
   durationSec: number;
@@ -42,27 +50,34 @@ export function planAsrChunks(input: {
 }): AsrChunkSpan[] {
   const { durationSec, chunkSec } = input;
   if (!(durationSec > 0)) return [];
-  const mids = input.silences
-    .map((silence) => (silence.startSec + silence.endSec) / 2)
-    .filter((mid) => mid > 0 && mid < durationSec);
+  const pauses = input.silences
+    .map((silence) => ({
+      mid: (silence.startSec + silence.endSec) / 2,
+      length: silence.endSec - silence.startSec,
+    }))
+    .filter((pause) => pause.mid > 0 && pause.mid < durationSec);
 
   const spans: AsrChunkSpan[] = [];
   let start = 0;
   while (durationSec - start > chunkSec + ASR_SNAP_WINDOW_SEC) {
     const target = start + chunkSec;
-    let cut = target;
-    let best = Number.POSITIVE_INFINITY;
-    for (const mid of mids) {
-      const distance = Math.abs(mid - target);
-      if (distance <= ASR_SNAP_WINDOW_SEC && distance < best) {
-        best = distance;
-        cut = mid;
+    let best: { mid: number; length: number; distance: number } | undefined;
+    for (const pause of pauses) {
+      const distance = Math.abs(pause.mid - target);
+      if (distance > ASR_SNAP_WINDOW_SEC || pause.mid <= start) continue;
+      if (
+        !best ||
+        pause.length > best.length ||
+        (pause.length === best.length && distance < best.distance)
+      ) {
+        best = { ...pause, distance };
       }
     }
-    spans.push({ startSec: start, endSec: cut });
+    const cut = best ? best.mid : target;
+    spans.push({ startSec: start, endSec: cut, endsInSilence: Boolean(best) });
     start = cut;
   }
-  spans.push({ startSec: start, endSec: durationSec });
+  spans.push({ startSec: start, endSec: durationSec, endsInSilence: true });
   return spans;
 }
 
@@ -125,9 +140,27 @@ function sumUsage(results: readonly AsrTranscribeResult[]) {
 }
 
 /**
+ * A chunk is transcribed as if it were a whole recording, so a model closes it
+ * with a full stop even when the cut fell mid-sentence. Where the cut found no
+ * pause that full stop was never spoken: drop it. Other punctuation is kept.
+ */
+function dropAddedFullStop(text: string) {
+  return /[^。.][。.]$/u.test(text) ? text.slice(0, -1) : text;
+}
+
+/** Latin text needs a space across a hard cut; CJK text does not. */
+function hardCutJoiner(before: string, after: string) {
+  return /[\p{Script=Latin}\d]$/u.test(before) &&
+    /^[\p{Script=Latin}\d]/u.test(after)
+    ? " "
+    : "";
+}
+
+/**
  * Merge per-chunk results into one transcript on the original timeline. A
  * provider's own segments are shifted by the chunk start; a provider without
- * timestamps contributes one segment per chunk.
+ * timestamps contributes one segment per chunk. Chunks cut on a pause are
+ * joined on a new line; chunks cut mid-speech are joined back into one run.
  */
 export function stitchAsrChunks(input: {
   spans: readonly AsrChunkSpan[];
@@ -140,11 +173,19 @@ export function stitchAsrChunks(input: {
   }
 
   const segments: AsrSegment[] = [];
-  const texts: string[] = [];
+  let joined = "";
+  // How the next non-empty chunk attaches to what came before.
+  let hardCutPending = false;
   input.results.forEach((result, index) => {
     const span = input.spans[index] as AsrChunkSpan;
-    const text = result.text.trim();
-    if (text) texts.push(text);
+    const trimmed = result.text.trim();
+    const text = span.endsInSilence ? trimmed : dropAddedFullStop(trimmed);
+    if (text) {
+      if (!joined) joined = text;
+      else if (hardCutPending) joined += hardCutJoiner(joined, text) + text;
+      else joined += `\n${text}`;
+      hardCutPending = !span.endsInSilence;
+    }
     if (result.segments && result.segments.length > 0) {
       for (const segment of result.segments) {
         segments.push({
@@ -161,7 +202,7 @@ export function stitchAsrChunks(input: {
   const usage = sumUsage(input.results);
   return {
     ...first,
-    text: texts.join("\n"),
+    text: joined,
     duration: input.durationSec,
     inputLengthMs: Math.round(input.durationSec * 1000),
     segments: segments.length > 0 ? segments : undefined,
