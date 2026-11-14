@@ -1,6 +1,7 @@
 # SourceWeft CLI
 
-Install skills from the SourceWeft marketplace onto a local coding agent.
+Install skills from the [SourceWeft marketplace](https://sourceweft.com/skills)
+onto a local coding agent.
 
 The marketplace only **indexes** skills: it records where each one lives (a
 GitHub repository, pinned to a commit) and what every file in it hashes to. The
