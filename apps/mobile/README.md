@@ -88,6 +88,77 @@ APPLE_DEVELOPMENT_TEAM=YOUR_TEAM_ID pnpm run ios
 If `project.yml` or the generated Xcode project captures your local Team ID,
 review that diff before committing a public branch.
 
+## iOS release configuration
+
+Release builds load `https://sourceweft.com`. `capabilities/production-web.json`
+lets that origin call the native commands on Android and iOS; without it the
+page gets the bridge object but every call is refused.
+
+The first release targets iPhone only (`TARGETED_DEVICE_FAMILY` is `1` in
+`project.yml` and the Xcode project). iPad support can be added later, but a
+released app cannot drop a device family.
+
+### Info.plist layers
+
+Tauri rewrites `gen/apple/sourceweft-mobile_iOS/Info.plist` on every iOS build
+and development run: it merges the files below into it, key by key at the top
+level, and saves the result.
+
+- `src-tauri/Info.ios.plist` is merged into every iOS build. It holds what a
+  release needs: the display name, the purpose strings for camera, microphone,
+  speech recognition and saving to the photo library, and the export-compliance
+  flag. Add a purpose string here before the web app starts using another
+  device capability; iOS ends the app when a capability is requested without
+  one.
+- `src-tauri/Info.ios.dev.plist` holds the keys only a development run needs:
+  the App Transport Security exceptions for the local HTTP dev server and the
+  local-network prompt text. Only the `ios` and `ios:sim` scripts merge it,
+  through `src-tauri/tauri.ios.dev.conf.json`.
+
+A development run therefore leaves the tracked `Info.plist` modified, with the
+development-only keys in it. Restore it before committing or building a release
+from the same checkout:
+
+```sh
+git restore apps/mobile/src-tauri/gen/apple/sourceweft-mobile_iOS/Info.plist
+```
+
+`scripts/ci/ios-release-config.test.mjs` fails while those keys are in the
+tracked file.
+
+### Universal links
+
+A link to `https://sourceweft.com/dashboard` or a page below it opens the app
+at that page. Four places must agree, and the same test checks them:
+
+- `src-tauri/tauri.ios.conf.json`: the deep-link host and path. The plugin
+  writes the host into the entitlements as `applinks:sourceweft.com`.
+- `apps/web/app/.well-known/apple-app-site-association`: the file the website
+  serves, naming the app (`<Team ID>.<bundle id>`) and the pages.
+- `src-tauri/src/lib.rs`, `universal_link_target`: the app opens only those
+  pages; any other deep link is handed to the page as an event.
+- The App ID in the Apple Developer portal must have the Associated Domains
+  capability, or signing fails.
+
+Sign-in pages are deliberately not associated, so a link from outside the app
+cannot drive its sign-in flow. iOS fetches the association file through Apple's
+CDN, so it must be reachable without a redirect or a bot challenge.
+
+`tauri.conf.json` still carries the placeholder deep-link host for Android;
+`tauri.ios.conf.json` replaces it for iOS only.
+
+### App Store export
+
+`ExportOptions.plist` stays `debugging`, which is what development needs. An
+App Store or TestFlight build passes the method on the command line, and Tauri
+merges it into a temporary copy:
+
+```sh
+pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect
+```
+
+Signing credentials and the TestFlight upload are not automated yet.
+
 ## Android packaging
 
 Android APK/AAB builds, pinned toolchains, signing inputs and CI verification are

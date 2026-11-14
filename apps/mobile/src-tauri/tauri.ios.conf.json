@@ -1,0 +1,13 @@
+{
+  "plugins": {
+    "deep-link": {
+      "mobile": [
+        {
+          "scheme": ["https"],
+          "host": "sourceweft.com",
+          "pathPrefix": ["/dashboard"]
+        }
+      ]
+    }
+  }
+}

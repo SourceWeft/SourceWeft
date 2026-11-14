@@ -10,8 +10,8 @@
     "android:build": "tauri android build",
     "android:verify": "node ../../scripts/ci/android-build.mjs verification",
     "android:release": "node ../../scripts/ci/android-build.mjs release",
-    "ios": "tauri ios dev",
-    "ios:sim": "tauri ios dev -c '{\"build\":{\"devUrl\":\"http://sw.localhost:3000\"}}'",
+    "ios": "tauri ios dev -c src-tauri/tauri.ios.dev.conf.json",
+    "ios:sim": "tauri ios dev -c src-tauri/tauri.ios.dev.conf.json -c '{\"build\":{\"devUrl\":\"http://sw.localhost:3000\"}}'",
     "ios:build": "tauri ios build",
     "check-types": "tsc --noEmit"
   },

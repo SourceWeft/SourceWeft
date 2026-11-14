@@ -164,10 +164,7 @@ fn is_app_web_url(app: &AppHandle, url: &Url) -> bool {
 }
 
 fn is_allowed_app_path(path: &str) -> bool {
-    path == DASHBOARD_ROOT
-        || path.starts_with("/dashboard/")
-        || path == "/auth"
-        || path.starts_with("/auth/")
+    is_dashboard_path(path) || path == "/auth" || path.starts_with("/auth/")
 }
 
 fn navigate_main_window(app: &AppHandle, path: &str) -> Result<(), String> {
@@ -289,11 +286,99 @@ fn setup_deep_links(app: &AppHandle) {
     let handle = app.clone();
     app.deep_link().on_open_url(move |event| {
         for url in event.urls() {
-            emit_deep_link(&handle, url.to_string());
+            open_deep_link(&handle, &url);
         }
     });
 }
 
+/// A universal link to the app's own dashboard opens that page in the main window. Every
+/// other deep link is handed to the page as an event.
+fn open_deep_link(app: &AppHandle, url: &Url) {
+    let target = resolve_app_url(app, HOME_PATH)
+        .ok()
+        .and_then(|base| universal_link_target(&base, url));
+    if let Some(target) = target {
+        let opened = app
+            .get_webview_window(MAIN_WINDOW_LABEL)
+            .is_some_and(|window| window.navigate(target).is_ok());
+        if opened {
+            return;
+        }
+    }
+    emit_deep_link(app, url.to_string());
+}
+
+/// The page a universal link opens: the link itself, when it is a dashboard page on the
+/// origin the app loads. The paths match the ones the website associates with the app
+/// (`/.well-known/apple-app-site-association`); sign-in pages are deliberately not among
+/// them, so a link from outside can never drive the app's sign-in flow.
+fn universal_link_target(base: &Url, url: &Url) -> Option<Url> {
+    let opens_dashboard = same_origin(url, base)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && is_dashboard_path(url.path());
+    opens_dashboard.then(|| url.clone())
+}
+
+fn is_dashboard_path(path: &str) -> bool {
+    path == DASHBOARD_ROOT || path.starts_with("/dashboard/")
+}
+
 fn emit_deep_link(app: &AppHandle, url: String) {
     let _ = app.emit(DEEP_LINK_EVENT, DeepLinkPayload { url });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn url(value: &str) -> Url {
+        Url::parse(value).expect("test URL")
+    }
+
+    #[test]
+    fn a_dashboard_link_on_the_app_origin_opens_that_page() {
+        let base = url("https://sourceweft.com/dashboard/chat");
+        for link in [
+            "https://sourceweft.com/dashboard",
+            "https://sourceweft.com/dashboard/chat/abc?tab=sources#top",
+            "https://sourceweft.com:443/dashboard/billing",
+        ] {
+            assert_eq!(universal_link_target(&base, &url(link)), Some(url(link)));
+        }
+    }
+
+    #[test]
+    fn other_links_are_not_opened_in_the_main_window() {
+        let base = url("https://sourceweft.com/dashboard/chat");
+        for link in [
+            // Not a dashboard page: sign-in, marketing and look-alike paths.
+            "https://sourceweft.com/auth/sign-in",
+            "https://sourceweft.com/",
+            "https://sourceweft.com/dashboardx",
+            "https://sourceweft.com/pricing/dashboard/",
+            // Not the origin the app loads.
+            "http://sourceweft.com/dashboard",
+            "https://sourceweft.com:8443/dashboard",
+            "https://www.sourceweft.com/dashboard",
+            "https://sourceweft.com.example.org/dashboard",
+            "https://user:secret@sourceweft.com/dashboard",
+            "https://user@sourceweft.com/dashboard",
+            // Custom-scheme deep links stay events for the page.
+            "sourceweft://auth/complete?code=1",
+            "sourceweft://dashboard",
+        ] {
+            assert_eq!(universal_link_target(&base, &url(link)), None, "{link}");
+        }
+    }
+
+    #[test]
+    fn the_webview_may_navigate_to_dashboard_and_sign_in_pages_only() {
+        for path in ["/dashboard", "/dashboard/chat", "/auth", "/auth/sign-in"] {
+            assert!(is_allowed_app_path(path), "{path}");
+        }
+        for path in ["/", "/dashboardx", "/authx", "/pricing", "/mcp/dashboard/"] {
+            assert!(!is_allowed_app_path(path), "{path}");
+        }
+    }
 }

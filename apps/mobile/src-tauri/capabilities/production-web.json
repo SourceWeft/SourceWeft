@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
-  "identifier": "android-production-web",
-  "description": "Native mobile commands for the production SourceWeft Android webview.",
-  "platforms": ["android"],
+  "identifier": "production-web",
+  "description": "Native mobile commands for the production SourceWeft web app loaded in the Android and iOS webviews.",
+  "platforms": ["android", "iOS"],
   "windows": ["main"],
   "remote": { "urls": ["https://sourceweft.com/*"] },
   "permissions": [
