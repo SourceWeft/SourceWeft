@@ -2,6 +2,7 @@ import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
 import { workspaceService } from "../../workspace";
 import {
   anchorAnswerCitations,
+  createCitationEmbedder,
   createCitationRecords,
   replaceCitationRecords,
 } from "../../citations";
@@ -201,6 +202,14 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     threadId: prepared.thread.id,
     answerText: assistantContent,
     citations: citationRecords,
+    embedTexts: createCitationEmbedder({
+      billing: input.billing,
+      teamId: billingTeamId,
+      workspaceId: prepared.workspace.id,
+      userId: prepared.userId,
+      threadId: prepared.thread.id,
+      scopeId: `${input.assistantMessageId ?? prepared.userMessage.id}:citation-anchoring`,
+    }),
   });
   // The message metadata is what the chat UI reads, so the supporting
   // passage travels with each used citation. Only the offsets are copied; the

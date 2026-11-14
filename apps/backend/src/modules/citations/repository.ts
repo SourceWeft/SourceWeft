@@ -43,6 +43,8 @@ export async function anchorAnswerCitations(input: {
     fileReference?: unknown;
     content?: string;
   }>;
+  /** Embeds texts for the by-meaning pass; see `semantic-anchoring`. */
+  embedTexts?: (texts: string[]) => Promise<number[][]>;
 }) {
   try {
     return await anchorCitations({
@@ -60,6 +62,17 @@ export async function anchorAnswerCitations(input: {
           workspaceId: input.workspaceId,
           chunkIds,
         }),
+      embedTexts: input.embedTexts,
+      // The by-meaning pass only improves on the word matcher, so its failure
+      // keeps the word-matched result and is logged, never raised.
+      onSemanticError: (error) =>
+        logger.warn(
+          "Cross-language citation anchoring failed; keeping the word-matched result",
+          {
+            err: error,
+            threadId: input.threadId,
+          },
+        ),
     });
   } catch (error) {
     logger.warn("Citation anchoring failed; storing citations without spans", {

@@ -47,3 +47,4 @@ export type {
 } from "./types";
 
 export { completeStructuredWithDefaultChat } from "./default-chat-structured";
+export { completeEmbeddingBatch } from "./embedding-batch";

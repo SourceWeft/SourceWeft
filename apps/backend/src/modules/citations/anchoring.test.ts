@@ -189,3 +189,163 @@ test("anchorClaimInContent reads spelled-out numbers as figures", () => {
     "weak",
   );
 });
+
+/**
+ * Second pass by meaning (#516). The fake embedder places a claim and a
+ * sentence on the same axis when the sentence's text contains the marker the
+ * claim names, so these tests exercise the plumbing and the bounds, not the
+ * model: the real model is measured by `scripts/eval-citation-anchoring.ts`.
+ */
+const EN_CHUNK =
+  "Overview of the company. Revenue grew 23% to $4.1 billion in fiscal 2025. Headcount stayed flat at 12,000 employees.";
+
+function fakeEmbedder() {
+  const calls: string[][] = [];
+  const embedTexts = async (texts: string[]) => {
+    calls.push(texts);
+    return texts.map((text) => {
+      if (/营收|Revenue grew/.test(text)) return [1, 0, 0];
+      if (/员工|Headcount/.test(text)) return [0, 1, 0];
+      return [0, 0, 1];
+    });
+  };
+  return { calls, embedTexts };
+}
+
+test("a Chinese claim over an English chunk is located by meaning when words cannot", async () => {
+  const { calls, embedTexts } = fakeEmbedder();
+  const result = await anchorCitations({
+    text: "2025财年营收增长23%，达到41亿美元 [citation:c1]。",
+    citations: [{ citation: "c1", chunkId: "chunk-1", content: undefined }],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts,
+  });
+
+  const anchor = result.get("c1");
+  assert.equal(anchor?.support, "strong");
+  assert.ok(
+    EN_CHUNK.slice(anchor!.startChar!, anchor!.endChar!).startsWith(
+      "Revenue grew 23%",
+    ),
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("a same-language claim never reaches the embedder", async () => {
+  const { calls, embedTexts } = fakeEmbedder();
+  const result = await anchorCitations({
+    text: "The company opened a new office in Singapore [citation:c1].",
+    citations: [{ citation: "c1", chunkId: "chunk-1", content: undefined }],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts,
+  });
+
+  assert.equal(result.get("c1")?.support, "weak");
+  assert.equal(calls.length, 0);
+});
+
+test("a citation the word matcher already supports is not sent to the embedder", async () => {
+  const { calls, embedTexts } = fakeEmbedder();
+  await anchorCitations({
+    text: "Revenue grew 23% to $4.1 billion [citation:c1]。营收增长23%，达到41亿美元 [citation:c2]。",
+    citations: [
+      { citation: "c1", chunkId: "chunk-1", content: undefined },
+      { citation: "c2", chunkId: "chunk-1", content: undefined },
+    ],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts,
+  });
+
+  const sentToEmbedder = calls.flat().join("|");
+  assert.equal(calls.length, 1);
+  assert.equal(sentToEmbedder.includes("营收增长23%"), true);
+});
+
+test("several cross-language citations share one embedding call", async () => {
+  const { calls, embedTexts } = fakeEmbedder();
+  const result = await anchorCitations({
+    text: "营收增长23% [citation:c1]。员工人数持平，保持在12000人 [citation:c2]。",
+    citations: [
+      { citation: "c1", chunkId: "chunk-1", content: undefined },
+      { citation: "c2", chunkId: "chunk-1", content: undefined },
+    ],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(result.get("c1")?.support, "strong");
+  assert.equal(result.get("c2")?.support, "strong");
+});
+
+test("a failing embedder leaves the word-matched result and reports the failure", async () => {
+  let reported: unknown;
+  const result = await anchorCitations({
+    text: "营收增长23% [citation:c1]。",
+    citations: [{ citation: "c1", chunkId: "chunk-1", content: undefined }],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts: async () => {
+      throw new Error("provider down");
+    },
+    onSemanticError: (error) => {
+      reported = error;
+    },
+  });
+
+  assert.equal(result.get("c1")?.support, "weak");
+  assert.match(String(reported), /provider down/);
+});
+
+test("a wrong-sized embedding answer is treated as a failure", async () => {
+  let reported: unknown;
+  const result = await anchorCitations({
+    text: "营收增长23% [citation:c1]。",
+    citations: [{ citation: "c1", chunkId: "chunk-1", content: undefined }],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts: async () => [[1, 0, 0]],
+    onSemanticError: (error) => {
+      reported = error;
+    },
+  });
+
+  assert.equal(result.get("c1")?.support, "weak");
+  assert.ok(reported);
+});
+
+test("a very long source is capped and the other citations are still judged", async () => {
+  const { calls, embedTexts } = fakeEmbedder();
+  const huge = Array.from(
+    { length: 400 },
+    (_, index) => `Filler sentence number ${index}.`,
+  ).join(" ");
+  const result = await anchorCitations({
+    text: "营收增长23% [citation:c1]。员工人数持平，保持在12000人 [citation:c2]。",
+    citations: [
+      { citation: "c1", chunkId: "chunk-huge", content: huge },
+      { citation: "c2", chunkId: "chunk-1", content: undefined },
+    ],
+    loadChunkContents: async () => new Map([["chunk-1", EN_CHUNK]]),
+    embedTexts,
+  });
+
+  assert.ok(calls.flat().length <= 160);
+  assert.equal(result.get("c2")?.support, "strong");
+});
+
+test("a passage with the same figures but the opposite direction is not support", () => {
+  const content = "Net sales rose 14% to $7.8 billion in the second quarter.";
+  assert.equal(
+    anchorClaimInContent({
+      claim: "Net sales fell 14% to $7.8 billion in the second quarter",
+      content,
+    })?.support,
+    "weak",
+  );
+  assert.equal(
+    anchorClaimInContent({
+      claim: "Net sales grew 14% to $7.8 billion in the second quarter",
+      content,
+    })?.support,
+    "strong",
+  );
+});

@@ -8,6 +8,16 @@
  * any markup it contains.
  */
 
+import {
+  directionsConflict,
+  needsSemanticPass,
+  pickSemanticAnchor,
+  SEMANTIC_MAX_CHARS,
+  SEMANTIC_MAX_SEGMENTS_PER_CHUNK,
+  SEMANTIC_MAX_TEXTS,
+  segmentTextForEmbedding,
+} from "./semantic-anchoring";
+
 export type CitationSupport = "strong" | "weak";
 
 export type CitationAnchor = {
@@ -141,7 +151,7 @@ function featureWeights(raw: string) {
   return features;
 }
 
-type Segment = { start: number; end: number };
+export type Segment = { start: number; end: number };
 
 function pushSegment(
   segments: Segment[],
@@ -165,7 +175,7 @@ function pushSegment(
   if (from < to) segments.push({ start: from, end: to });
 }
 
-function segmentContent(content: string) {
+export function segmentContent(content: string) {
   const segments: Segment[] = [];
   let start = 0;
   for (let index = 0; index < content.length; index += 1) {
@@ -240,7 +250,10 @@ export function anchorClaimInContent(input: {
   if (
     !best ||
     best.score < STRONG_SCORE ||
-    missesAFigure(best.start, best.end)
+    missesAFigure(best.start, best.end) ||
+    // Same words and figures, opposite direction ("fell 14%" against "rose
+    // 14%"), is a contradiction, not support.
+    directionsConflict(input.claim, input.content.slice(best.start, best.end))
   ) {
     return {
       support: "weak",
@@ -277,6 +290,14 @@ export async function anchorCitations(input: {
   text: string;
   citations: readonly AnchorableCitation[];
   loadChunkContents: (chunkIds: string[]) => Promise<Map<string, string>>;
+  /**
+   * Embeds texts with a multilingual model, one vector per text. When given,
+   * citations the word matcher judged weak, whose claim and source are in
+   * different scripts, get a second pass by meaning (see `semantic-anchoring`).
+   */
+  embedTexts?: (texts: string[]) => Promise<number[][]>;
+  /** Told when the second pass fails; the word-matched anchors are kept. */
+  onSemanticError?: (error: unknown) => void;
 }) {
   const claims = extractCitedClaims(input.text);
   const used = input.citations.filter((citation) =>
@@ -294,6 +315,7 @@ export async function anchorCitations(input: {
     : new Map<string, string>();
 
   const anchors = new Map<string, CitationAnchor>();
+  const contents = new Map<string, string>();
   for (const citation of used) {
     const content = citation.content || loaded.get(citation.chunkId);
     if (!content) continue;
@@ -308,6 +330,123 @@ export async function anchorCitations(input: {
       if (better) best = anchor;
     }
     if (best) anchors.set(citation.citation, best);
+    if (best) contents.set(citation.citation, content);
+  }
+
+  if (input.embedTexts) {
+    await applySemanticPass({
+      anchors,
+      claims,
+      contents,
+      embedTexts: input.embedTexts,
+      onError: input.onSemanticError,
+    });
   }
   return anchors;
+}
+
+const SEMANTIC_MAX_CLAIMS_PER_CITATION = 3;
+
+/**
+ * Re-judges, by meaning, the citations the word matcher called weak when the
+ * claim and the source are in different scripts. One batched embedding call
+ * for the whole answer, within fixed bounds; anything over the bounds, and
+ * any failure, leaves the citation as the word matcher judged it.
+ */
+async function applySemanticPass(input: {
+  anchors: Map<string, CitationAnchor>;
+  claims: Map<string, string[]>;
+  contents: Map<string, string>;
+  embedTexts: (texts: string[]) => Promise<number[][]>;
+  onError?: (error: unknown) => void;
+}) {
+  type Job = {
+    key: string;
+    content: string;
+    claims: Array<{ text: string; index: number }>;
+    segments: Array<{
+      start: number;
+      end: number;
+      text: string;
+      index: number;
+    }>;
+  };
+  const texts: string[] = [];
+  let characters = 0;
+  const jobs: Job[] = [];
+
+  for (const [key, anchor] of input.anchors) {
+    if (anchor.support !== "weak") continue;
+    const content = input.contents.get(key);
+    if (!content) continue;
+    const claims = (input.claims.get(key) ?? [])
+      .filter((claim) => needsSemanticPass(claim, content))
+      .slice(0, SEMANTIC_MAX_CLAIMS_PER_CITATION);
+    if (claims.length === 0) continue;
+    const segments = segmentContent(content)
+      .slice(0, SEMANTIC_MAX_SEGMENTS_PER_CHUNK)
+      .map((segment) => ({
+        ...segment,
+        text: segmentTextForEmbedding(
+          content.slice(segment.start, segment.end),
+        ),
+      }))
+      .filter((segment) => segment.text.length > 0);
+    if (segments.length === 0) continue;
+
+    const cost = claims.length + segments.length;
+    const size =
+      claims.reduce((sum, claim) => sum + claim.length, 0) +
+      segments.reduce((sum, segment) => sum + segment.text.length, 0);
+    if (
+      texts.length + cost > SEMANTIC_MAX_TEXTS ||
+      characters + size > SEMANTIC_MAX_CHARS
+    ) {
+      continue;
+    }
+    characters += size;
+    jobs.push({
+      key,
+      content,
+      claims: claims.map((text) => ({ text, index: texts.push(text) - 1 })),
+      segments: segments.map((segment) => ({
+        ...segment,
+        index: texts.push(segment.text) - 1,
+      })),
+    });
+  }
+  if (jobs.length === 0) return;
+
+  let vectors: number[][];
+  try {
+    vectors = await input.embedTexts(texts);
+    if (vectors.length !== texts.length) {
+      throw new Error(
+        "The embedding call returned the wrong number of vectors",
+      );
+    }
+  } catch (error) {
+    input.onError?.(error);
+    return;
+  }
+
+  for (const job of jobs) {
+    const segments = job.segments.map((segment) => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.text,
+      vector: vectors[segment.index]!,
+    }));
+    let best: CitationAnchor | null = null;
+    for (const claim of job.claims) {
+      const anchor = pickSemanticAnchor({
+        claim: claim.text,
+        claimVector: vectors[claim.index]!,
+        content: job.content,
+        segments,
+      });
+      if (anchor && (!best || anchor.score > best.score)) best = anchor;
+    }
+    if (best) input.anchors.set(job.key, best);
+  }
 }

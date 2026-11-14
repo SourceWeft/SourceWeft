@@ -19,6 +19,7 @@ vi.mock("../message-repository", () => ({
 }));
 vi.mock("../../citations", () => ({
   anchorAnswerCitations: vi.fn(async () => new Map()),
+  createCitationEmbedder: vi.fn(() => async () => []),
   createCitationRecords: vi.fn(async () => undefined),
   replaceCitationRecords: vi.fn(async () => undefined),
 }));
@@ -43,7 +44,7 @@ vi.mock("../agent/middleware/context-compression", () => ({
   consumeSourceWeftContextCompressionReport: vi.fn(() => null),
 }));
 
-import { anchorAnswerCitations } from "../../citations";
+import { anchorAnswerCitations, createCitationEmbedder } from "../../citations";
 import { finalizeThreadTurn } from "./finalizer";
 import { tracePartFromReasoningSegment, upsertTracePart } from "./trace-parts";
 import type {
@@ -262,4 +263,20 @@ test("the finalizer copies each used citation's supporting passage into the mess
     vi.mocked(anchorAnswerCitations).mock.calls.at(-1)?.[0].answerText,
     "A [citation:c1]. B [citation:c2]. C [citation:c3].",
   );
+});
+
+test("the finalizer lets anchoring embed cross-language claims, settled against the billing team", async () => {
+  vi.mocked(anchorAnswerCitations).mockClear();
+  vi.mocked(createCitationEmbedder).mockClear();
+
+  await finalizeThreadTurn(
+    finalizeInput({ assistantContent: "A [citation:c1]." }),
+  );
+
+  const call = vi.mocked(anchorAnswerCitations).mock.calls.at(-1)?.[0];
+  assert.equal(typeof call?.embedTexts, "function");
+  const embedder = vi.mocked(createCitationEmbedder).mock.calls.at(-1)?.[0];
+  assert.equal(embedder?.teamId, "team-1");
+  assert.equal(embedder?.userId, "user-1");
+  assert.equal(embedder?.workspaceId, "workspace-1");
 });
