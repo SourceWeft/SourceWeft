@@ -185,11 +185,11 @@ export function BlogAdmin() {
       const updated = await setBlogAdminPostStatus(selectedPost.id, next);
       setDetail(updated);
       setPosts((current) =>
-        (current ?? []).map((post) => {
-          if (post.id !== updated.id) return post;
-          const { contentHtml: _contentHtml, ...summary } = updated;
-          return summary;
-        }),
+        (current ?? []).map((post) =>
+          post.id === updated.id
+            ? { ...post, status: updated.status, syncEnabled: updated.syncEnabled, publishedAt: updated.publishedAt }
+            : post,
+        ),
       );
     } catch (caught) {
       setDetailError(errorMessage(caught, t("statusFailed")));
