@@ -74,6 +74,20 @@ const run = (command, args) => {
 if (mac) {
   const app = `apps/desktop/src-tauri/target/${target}/release/bundle/macos/SourceWeft.app`;
   run("codesign", ["--verify", "--deep", "--strict", app]);
+  // The app is signed with the hardened runtime, under which macOS refuses the microphone to
+  // an app that does not declare it. Voice input depends on it, so a build without the
+  // entitlement must not be published.
+  const entitlements = spawnSync(
+    "codesign",
+    ["--display", "--entitlements", "-", "--xml", app],
+    { encoding: "utf8" },
+  );
+  assert.equal(entitlements.status, 0, "Cannot read the app's entitlements");
+  assert.match(
+    entitlements.stdout,
+    /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/,
+    "The macOS app must be signed with the microphone entitlement",
+  );
   if (claims.distributionSigned) {
     run("spctl", ["--assess", "--type", "execute", app]);
     run("xcrun", ["stapler", "validate", app]);
