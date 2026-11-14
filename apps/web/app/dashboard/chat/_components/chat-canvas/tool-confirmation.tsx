@@ -34,6 +34,7 @@ import { compactText } from "./message-assets";
 import {
   confirmationTitle,
   gmailSendReview,
+  mcpArguments,
   requestDetailLines,
   sandboxExecuteCommandText,
 } from "./tool-confirmation-display";
@@ -188,6 +189,11 @@ function ToolConfirmationPanel({
   const toolCallInput = item.toolCall.input as
     Record<string, unknown> | undefined;
   const requestLines = requestDetailLines(confirmation, toolCallInput, t);
+  // A detail line shows at most one shortened line, so a long argument (the
+  // code an MCP write tool will run, say) gets its complete value here.
+  const expandableArguments = mcpArguments(confirmation, toolCallInput).filter(
+    (argument) => argument.expandable,
+  );
   const gmailReview = gmailSendReview(confirmation);
   const commandText = sandboxExecuteCommandText({
     confirmation,
@@ -339,6 +345,20 @@ function ToolConfirmationPanel({
                   ))}
                 </span>
               ) : null}
+              {expandableArguments.map((argument) => (
+                <details className="mt-1" key={argument.name}>
+                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                    {t("toolConfirmation.viewArgument", {
+                      name: argument.name,
+                      lines: argument.fullText.split("\n").length,
+                      characters: argument.fullText.length,
+                    })}
+                  </summary>
+                  <pre className="mt-1 max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs leading-5">
+                    {argument.fullText}
+                  </pre>
+                </details>
+              ))}
               {gmailReview ? (
                 <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 rounded-md border border-border bg-muted/30 p-2 text-xs">
                   <dt className="font-medium">From</dt>

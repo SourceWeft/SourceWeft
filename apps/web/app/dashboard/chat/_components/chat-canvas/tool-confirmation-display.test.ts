@@ -4,6 +4,7 @@ import { createTranslator } from "next-intl";
 import type { useTranslations } from "next-intl";
 import {
   confirmationTitle,
+  mcpArguments,
   requestDetailLines,
 } from "./tool-confirmation-display";
 import type { ToolConfirmationRequest } from "@sourceweft/sdk";
@@ -237,6 +238,44 @@ test("MCP approval shortens a long argument to one line", () => {
   assert.equal(codeLine.length, 160);
   assert.ok(codeLine.endsWith("…"));
   assert.ok(!codeLine.includes("\n"));
+});
+
+test("a long or multi-line MCP argument keeps its complete value to expand", () => {
+  const code = `const rows = await arcmira.search(${"'x', ".repeat(80)});\nreturn rows;`;
+  const [argument] = mcpArguments(mcpConfirmation(), { code });
+  assert.equal(argument?.expandable, true);
+  assert.equal(argument?.fullText, code);
+
+  const [shortScript] = mcpArguments(mcpConfirmation(), {
+    code: "const a = 1;\nreturn a;",
+  });
+  assert.equal(shortScript?.expandable, true);
+  assert.equal(shortScript?.fullText, "const a = 1;\nreturn a;");
+});
+
+test("a short single-line MCP argument is not expandable", () => {
+  assert.deepEqual(
+    mcpArguments(mcpConfirmation(), {
+      query: "Node.js 24 LTS",
+      filters: { podcasts: true },
+    }).map(({ name, expandable }) => ({ name, expandable })),
+    [
+      { name: "query", expandable: false },
+      { name: "filters", expandable: false },
+    ],
+  );
+});
+
+test("a long object argument expands to indented JSON", () => {
+  const filters = { channels: Array.from({ length: 30 }, (_, i) => `c${i}`) };
+  const [argument] = mcpArguments(mcpConfirmation(), { filters });
+  assert.equal(argument?.expandable, true);
+  assert.equal(argument?.text, JSON.stringify(filters));
+  assert.equal(argument?.fullText, JSON.stringify(filters, null, 2));
+});
+
+test("non-MCP approvals have no expandable arguments", () => {
+  assert.deepEqual(mcpArguments(confirmation(), { body: "x".repeat(400) }), []);
 });
 
 test("MCP approval falls back to the request arguments without tool input", () => {

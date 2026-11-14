@@ -2126,6 +2126,7 @@
       "rememberFor": "Remember for",
       "rememberAria": "How long to remember this approval",
       "viewCommand": "View command ({lines} lines, {characters} characters)",
+      "viewArgument": "View full {name} ({lines} lines, {characters} characters)",
       "pending": "{count} pending",
       "waitingForApproval": "Waiting for approval",
       "endApprovalWait": "End approval wait",

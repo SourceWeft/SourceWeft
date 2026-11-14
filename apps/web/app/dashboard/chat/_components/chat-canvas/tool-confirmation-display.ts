@@ -269,24 +269,37 @@ export function requestSummary(
   return summary;
 }
 
-function argumentValueText(value: unknown) {
+// Every detail line on the card is shortened to one line of this length.
+const DETAIL_LINE_CHARS = 160;
+
+function argumentValueText(value: unknown, indent?: number) {
   if (typeof value === "string") return value;
   if (value === undefined) return null;
   try {
-    return JSON.stringify(value) ?? String(value);
+    return JSON.stringify(value, null, indent) ?? String(value);
   } catch {
     return String(value);
   }
 }
 
+type McpArgument = {
+  name: string;
+  /** One-line value used in the detail line. */
+  text: string;
+  /** Complete value: strings as sent, other values as indented JSON. */
+  fullText: string;
+  /** The detail line cannot show the whole value. */
+  expandable: boolean;
+};
+
 // An MCP call is otherwise shown only by its tool's description, so the member
 // would approve without seeing what is sent to the server, and two calls of the
 // same tool would look identical. The public confirmation output drops
 // preview.requestJson, so the tool call's own input is the primary source.
-function mcpArgumentLines(
+export function mcpArguments(
   confirmation: ToolConfirmationDisplayInput,
   toolCallInput: Record<string, unknown> | undefined,
-) {
+): McpArgument[] {
   if (confirmation.domain !== "mcp") return [];
   const args =
     toolCallInput && Object.keys(toolCallInput).length > 0
@@ -297,7 +310,17 @@ function mcpArgumentLines(
         };
   return Object.entries(args).flatMap(([name, value]) => {
     const text = argumentValueText(value);
-    return text === null ? [] : [`${name}: ${text}`];
+    if (text === null) return [];
+    const multiline = typeof value === "string" && /\r|\n/.test(value);
+    return [
+      {
+        name,
+        text,
+        fullText: argumentValueText(value, 2) ?? text,
+        expandable:
+          multiline || `${name}: ${text}`.length > DETAIL_LINE_CHARS,
+      },
+    ];
   });
 }
 
@@ -314,7 +337,9 @@ export function requestDetailLines(
   if (sandboxLines) {
     const workingDirectoryPrefix = t(WORKING_DIRECTORY_PREFIX_KEY);
     return sandboxLines.map((line) =>
-      line.startsWith(workingDirectoryPrefix) ? line : compactText(line, 160),
+      line.startsWith(workingDirectoryPrefix)
+        ? line
+        : compactText(line, DETAIL_LINE_CHARS),
     );
   }
   const toolMetadata = confirmationToolMetadata(confirmation);
@@ -326,11 +351,13 @@ export function requestDetailLines(
           value: confirmation.preview.target.label,
         })
       : null,
-    ...mcpArgumentLines(confirmation, toolCallInput),
+    ...mcpArguments(confirmation, toolCallInput).map(
+      ({ name, text }) => `${name}: ${text}`,
+    ),
   ];
   const seen = new Set<string>();
   return lines
-    .map((line) => (line ? compactText(line, 160) : null))
+    .map((line) => (line ? compactText(line, DETAIL_LINE_CHARS) : null))
     .filter((line): line is string => {
       if (
         !line ||
