@@ -55,12 +55,11 @@ export type AnchoringSummary = {
 /**
  * The observability feature and trace-id suffix of the by-meaning pass's
  * embedding call. The gateway sink records the call as an `llm_generations`
- * row whose trace id is the scope id, and does not store `feature` on that
- * row, so the report finds these calls by the suffix.
+ * row whose trace id is the scope id the finalizer passes
+ * (`<messageId>:citation-anchoring`), and does not store `feature` on that
+ * row, so the report finds these calls by that suffix.
  */
 export const CITATION_ANCHORING_FEATURE = "citation-anchoring";
-export const citationAnchoringScopeId = (messageId: string) =>
-  `${messageId}:${CITATION_ANCHORING_FEATURE}`;
 
 const round = (value: number) => Number(value.toFixed(4));
 
