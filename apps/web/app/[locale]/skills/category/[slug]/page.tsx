@@ -1,3 +1,4 @@
+import { formatList, formatNumber } from "@sourceweft/i18n/format";
 import type { Locale } from "@sourceweft/i18n/locales";
 import type { Metadata } from "next";
 import { LocaleLink } from "../../../_components/locale-link";
@@ -178,9 +179,22 @@ export default async function PublicSkillCategoryPage({
       },
     ],
   };
+  // The bare category URL gets a factual summary from live data; searches,
+  // filters and paging are other views of the same page and do not.
+  const bare = !isSkillsNarrowed(state);
+  const examples = market.items.slice(0, 3).map((skill) => skill.displayName);
+  const summary =
+    bare && category.count > 0 && examples.length > 0
+      ? t("category.summary", {
+          count: formatNumber(category.count, locale),
+          examples: formatList(examples, locale),
+          name: category.name,
+        })
+      : null;
   const itemListJsonLd = {
     "@context": "https://schema.org",
     "@type": "ItemList",
+    ...(bare && category.count > 0 ? { numberOfItems: category.count } : {}),
     itemListElement: market.items.map((skill, index) => ({
       "@type": "ListItem",
       name: skill.displayName,
@@ -221,6 +235,11 @@ export default async function PublicSkillCategoryPage({
             <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
               {description}
             </p>
+            {summary ? (
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                {summary}
+              </p>
+            ) : null}
           </div>
 
           <SkillsSearchForm

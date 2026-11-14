@@ -388,6 +388,7 @@
       "title": "{name} MCP Servers",
       "descriptionTemplate": "Browse public {name} MCP servers with tools, transport, runtime, and verification details.",
       "bodyDescription": "Public {name} MCP servers available to SourceWeft and other MCP clients.",
+      "summary": "{count} {name} MCP servers, including {examples}.",
       "resultsIn": "Results for “{query}” in {category}"
     },
     "badges": {
@@ -3947,6 +3948,7 @@
       "fallbackMetaTitle": "Skill Category",
       "metaDescription": "Browse public {name} agent skills with their full SKILL.md, files, versions, license, and source.",
       "description": "Public {name} agent skills you can add to a SourceWeft workspace.",
+      "summary": "{count} {name} agent skills, including {examples}.",
       "back": "Back to skills directory"
     },
     "breadcrumb": {
