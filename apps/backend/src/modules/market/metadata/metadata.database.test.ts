@@ -181,6 +181,36 @@ describe("license, language and translated summaries", () => {
     expect(await candidateIdentifiers()).not.toContain(id);
   });
 
+  test("a version waiting for its overview is not translated while the page shows the previous one", async () => {
+    const id = `io.github.acme/${tag}-waiting`;
+    await upsert(manifest(id));
+    const first = plan.mcpServerVersionId(id, "1.0.0");
+    await data.db
+      .update(data.mcpServerVersions)
+      .set({ createdAt: new Date(NOW.getTime() - 3_600_000) })
+      .where(eq(data.mcpServerVersions.id, first));
+    await data.db
+      .insert(data.mcpServerVersionOverviews)
+      .values({
+        mcpServerVersionId: first,
+        locale: "en",
+        inputSha256: "x",
+        overview: { summary: "s", whatItDoes: "w", whenToUse: "u", requirements: "r", cautions: null, suggestedCategories: [] },
+        model: "m",
+      });
+
+    await upsert(manifest(id, { version: "2.0.0" }));
+    await settleReadme(id, "2.0.0");
+    expect(await candidateIdentifiers()).not.toContain(id);
+
+    // An overview an admin hid shows nothing, so the summary is translated.
+    await data.db
+      .update(data.mcpServerVersionOverviews)
+      .set({ hidden: true })
+      .where(eq(data.mcpServerVersionOverviews.mcpServerVersionId, first));
+    expect(await candidateIdentifiers()).toContain(id);
+  });
+
   test("federation's placeholder summary is never a candidate", async () => {
     const id = `io.github.acme/${tag}-placeholder`;
     await upsert(manifest(id, { summary: `MCP server ${id} from the MCP registry.` }));
