@@ -3,6 +3,7 @@ import { awaitWithSignal } from "../request-options";
 import { getTtsTransport } from "../adapters/registry";
 import { ModelGatewayError, normalizeGatewayError } from "../errors";
 import { ttsMimeTypeForFormat } from "../adapters/tts-utils";
+import { sniffTtsAudioFormat } from "../tts/sniff";
 import type {
   RequestOptions,
   ResolvedModelGatewayConfig,
@@ -10,6 +11,9 @@ import type {
   TtsSpeechInput,
   TtsSpeechResult,
 } from "../types";
+
+/** Requested formats a mismatch is converted to; raw pcm cannot be verified. */
+const CONVERTIBLE = new Set(["mp3", "opus", "flac", "wav", "aac"]);
 
 export async function runBridgeTtsSpeech(input: {
   config: ResolvedModelGatewayConfig;
@@ -51,22 +55,33 @@ export async function runBridgeTtsSpeech(input: {
         });
       }),
     );
-    if (!convertFrom || !transcoder || !requested) {
+    if (!requested) {
       return result;
     }
 
+    // What the audio really is. A provider can return another format than the
+    // one asked for, and label it wrongly, so the bytes decide where they can.
+    const audio = new Uint8Array(result.audio);
+    const actual = sniffTtsAudioFormat(audio) ?? convertFrom;
+    if (!actual || actual === requested || !CONVERTIBLE.has(requested)) {
+      return result;
+    }
+    if (!transcoder) {
+      // No conversion available: keep the audio, but say what it is.
+      return {
+        ...result,
+        mimeType: ttsMimeTypeForFormat(actual) ?? result.mimeType,
+      };
+    }
+
     const converted = await transcoder.transcode(
-      {
-        audio: new Uint8Array(result.audio),
-        fromFormat: convertFrom,
-        toFormat: requested,
-      },
+      { audio, fromFormat: actual, toFormat: requested },
       input.options?.signal,
     );
     if (converted.byteLength === 0) {
       throw new ModelGatewayError({
         code: "UPSTREAM",
-        message: `Converting TTS audio from ${convertFrom} to ${requested} produced no audio`,
+        message: `Converting TTS audio from ${actual} to ${requested} produced no audio`,
         retryable: false,
         provider: input.target.provider,
       });
@@ -80,7 +95,7 @@ export async function runBridgeTtsSpeech(input: {
       mimeType: ttsMimeTypeForFormat(requested) ?? result.mimeType,
       raw: {
         ...result.raw,
-        convertedFrom: convertFrom,
+        convertedFrom: actual,
         convertedTo: requested,
       },
     };
