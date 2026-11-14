@@ -1,0 +1,121 @@
+name: iOS package verification
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build an unsigned simulator verification app, or sign an App Store build and upload it to TestFlight
+        type: choice
+        options: [verification, testflight]
+        default: verification
+        required: true
+  pull_request:
+    paths:
+      - "apps/mobile/**"
+      - "scripts/ci/ios-*"
+      - ".github/workflows/ios-build.yml"
+      - "pnpm-lock.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "scripts/ci/ios-*"
+      - ".github/workflows/ios-build.yml"
+      - "pnpm-lock.yaml"
+permissions:
+  contents: read
+concurrency:
+  group: ios-build-${{ github.ref }}-${{ inputs.mode || 'verification' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # Pull requests and pushes: compile the iOS app for the simulator without
+  # signing. Holds no Apple credentials and runs no upload.
+  verify:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'verification'
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      RUSTUP_TOOLCHAIN: 1.94.1
+      CARGO_BUILD_JOBS: 2
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Test iOS release configuration
+        run: node --test scripts/ci/ios-release-config.test.mjs scripts/ci/ios-build.test.mjs
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-apple-ios-sim
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/mobile/src-tauri/target
+          key: ios-sim-${{ runner.os }}-1.94.1-${{ hashFiles('apps/mobile/src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked --manifest-path apps/mobile/src-tauri/Cargo.toml
+      - name: Build the simulator app without signing
+        run: pnpm --filter @sourceweft/mobile exec tauri ios build --target aarch64-sim --debug --ci
+      - name: Verify the built app bundle
+        run: node scripts/ci/ios-build.mjs verify-simulator-app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-${{ github.sha }}
+          path: apps/mobile/src-tauri/gen/apple/build/**/*.app
+          if-no-files-found: error
+          retention-days: 14
+
+  # Manual dispatch only. Signs the App Store build with the credentials of the
+  # `ios-testflight` environment and uploads it. There is no fallback to other
+  # certificates or profiles: a missing secret fails before anything is built.
+  testflight:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'testflight'
+    runs-on: macos-15
+    timeout-minutes: 120
+    environment: ios-testflight
+    env:
+      RUSTUP_TOOLCHAIN: 1.94.1
+      CARGO_BUILD_JOBS: 2
+      CARGO_TERM_COLOR: never
+      APPLE_DEVELOPMENT_TEAM: PBML833M58
+      IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+      IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required signing secrets
+        run: node scripts/ci/ios-build.mjs check-testflight-secrets
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Test iOS release configuration
+        run: node --test scripts/ci/ios-release-config.test.mjs scripts/ci/ios-build.test.mjs
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: aarch64-apple-ios
+      - name: Install signing identity and profile into a temporary keychain
+        run: node scripts/ci/ios-build.mjs install-signing
+      - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked --manifest-path apps/mobile/src-tauri/Cargo.toml
+      - name: Build and sign the App Store archive
+        run: pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --ci
+      - name: Verify the signed IPA
+        run: node scripts/ci/ios-build.mjs verify-ipa
+      - name: Upload to TestFlight
+        run: node scripts/ci/ios-build.mjs upload-testflight
+      - name: Remove signing material
+        if: always()
+        run: node scripts/ci/ios-build.mjs remove-signing
