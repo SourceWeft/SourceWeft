@@ -175,6 +175,11 @@ export async function syncNotionBlog(options: SyncNotionBlogOptions = {}) {
       locale: options.locale ?? null,
     });
     for (const row of existing) {
+      // A row published from a Markdown file was never in Notion; its own
+      // file decides whether it is public.
+      if (row.source === "markdown") {
+        continue;
+      }
       if (!seenIds.has(row.id)) {
         await markBlogPostHidden({ id: row.id });
         result.hidden += 1;
