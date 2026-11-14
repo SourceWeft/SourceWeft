@@ -3435,6 +3435,17 @@
       "errorCredits": "點數不足，無法查詢來源。",
       "errorUnavailable": "網頁搜尋不可用。",
       "errorSearch": "無法查詢來源，請稍後再試。",
+      "errorBusy": "暫時無法查詢來源，請稍後再試。",
+      "tryAgainIn": "{wait}後可再試",
+      "rateLimitHint": "之前搜尋過的內容仍可立即開啟。",
+      "backToResults": "返回上一次結果（{count}）",
+      "cachedNote": "顯示的是{ago}的結果，沒有發起新的搜尋。",
+      "rateLimit": {
+        "minute": "搜尋太頻繁了，{wait}後可再搜尋。",
+        "hour": "已達到每小時查詢來源的上限，將在 {time} 恢復（還需 {wait}）。",
+        "day": "已達到今天查詢來源的上限，將在 {time} 恢復（還需 {wait}）。",
+        "team": "你的團隊已達到每小時查詢來源的上限，將在 {time} 恢復（還需 {wait}）。"
+      },
       "add": "發現"
     },
     "sourcePreview": {

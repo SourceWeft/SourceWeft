@@ -3435,6 +3435,17 @@
       "errorCredits": "积分不足，无法查找来源。",
       "errorUnavailable": "网页搜索不可用。",
       "errorSearch": "无法查找来源，请稍后再试。",
+      "errorBusy": "暂时无法查找来源，请稍后再试。",
+      "tryAgainIn": "{wait}后可再试",
+      "rateLimitHint": "之前搜索过的内容仍可立即打开。",
+      "backToResults": "返回上一次结果（{count}）",
+      "cachedNote": "显示的是{ago}的结果，没有发起新的搜索。",
+      "rateLimit": {
+        "minute": "搜索太频繁了，{wait}后可再搜索。",
+        "hour": "已达到每小时查找来源的上限，将在 {time} 恢复（还需 {wait}）。",
+        "day": "已达到今天查找来源的上限，将在 {time} 恢复（还需 {wait}）。",
+        "team": "你的团队已达到每小时查找来源的上限，将在 {time} 恢复（还需 {wait}）。"
+      },
       "add": "发现"
     },
     "sourcePreview": {

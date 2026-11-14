@@ -21,6 +21,7 @@ import {
   discoverSources,
   isSourceDiscoveryAvailable,
 } from "../../../modules/sources/discovery/service";
+import { discoveryRateLimitedError } from "./source-discovery-errors";
 import { billingRuntime as billingService } from "../../../billing-host/bindings";
 import {
   contentSourceService,
@@ -348,7 +349,12 @@ export function registerSourceRoutes(app: Hono) {
       { billing: billingService },
     );
 
-    return ApiResponse.success(c, result);
+    if (result.kind === "limited") {
+      c.header("Retry-After", String(result.retryAfterSeconds));
+      throw discoveryRateLimitedError(result);
+    }
+    const { kind: _kind, ...response } = result;
+    return ApiResponse.success(c, response);
   });
 
   app.get("/sources/:id/guide", async (c) => {
