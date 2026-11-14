@@ -12,6 +12,7 @@ import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
 import { resumePausedGuides } from "../modules/sources/guide-service";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
+import { connectorAdaptersReady } from "../modules/connectors";
 import {
   GITHUB_REGISTRY_INTERVAL_MS,
   scheduleGithubRegistryEnrichment,
@@ -41,6 +42,9 @@ import { startServiceHeartbeat } from "../shared/service-heartbeat";
 validateBillingStartup();
 await syncGlobalModelGatewayConfigAtStartup();
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
+// Importing the connector module starts registration; await it so a malformed
+// connector setting stops this process too, as it does the api and worker.
+await connectorAdaptersReady();
 
 let tickInFlight = false;
 let tickStartedAt = 0;

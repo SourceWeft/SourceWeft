@@ -25,8 +25,10 @@ export function parseProjectNumber(clientId: string): string {
 
 export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
+  logger,
 }: {
   env: CapabilityHostEnvironment;
+  logger?: { warn?(message: string, meta?: Record<string, unknown>): void };
 }): CapabilityConnectorContribution => {
   const activation = env
     .get("GOOGLE_DRIVE_CONNECTOR_ENABLED")
@@ -42,15 +44,22 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
   }
   const clientId = env.get("GOOGLE_DRIVE_CLIENT_ID")?.trim() ?? "";
   const clientSecret = env.get("GOOGLE_DRIVE_CLIENT_SECRET")?.trim() ?? "";
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "Google Drive connector enabled without GOOGLE_DRIVE_CLIENT_ID and " +
-        "GOOGLE_DRIVE_CLIENT_SECRET",
-    );
+  // A client id that is present but carries no project number is malformed:
+  // fail fast, because the adapter needs it to answer the picker-config action.
+  if (clientId) parseProjectNumber(clientId);
+  // A missing credential is not malformed. The connector stays registered,
+  // refuses to connect, and says what is missing, so it never silently
+  // disappears from the catalog.
+  const missing = [
+    clientId ? null : "GOOGLE_DRIVE_CLIENT_ID",
+    clientSecret ? null : "GOOGLE_DRIVE_CLIENT_SECRET",
+  ].filter((name): name is string => name !== null);
+  if (missing.length > 0) {
+    logger?.warn?.("connector_not_configured", {
+      connectorType: "google_drive",
+      missing,
+    });
   }
-  // Fail fast if the client id carries no project number; the adapter needs it
-  // to answer the picker-config action.
-  parseProjectNumber(clientId);
   return {
     adapters: [
       createGoogleDriveConnectorAdapter({
