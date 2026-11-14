@@ -109,6 +109,7 @@ function citationSignature(citations: MessageRenderState["citations"]) {
         citation.support ?? "",
         citation.startChar ?? "",
         citation.endChar ?? "",
+        citation.spanText ?? "",
       ].join(":"),
     )
     .join("|");

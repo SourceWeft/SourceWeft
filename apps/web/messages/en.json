@@ -2185,6 +2185,7 @@
     "messageResponse": {
       "source": "Source",
       "citationTitle": "Citation {label}",
+      "citationUnverified": "Supporting passage not located in this source",
       "possibleEvidence": "Possible evidence",
       "untitledSource": "Untitled source",
       "moreCount": "+{count} more",

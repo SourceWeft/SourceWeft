@@ -892,7 +892,11 @@ class ContentThreadService {
         content: contentSnapshot,
         ...(support ? { support } : {}),
         ...(hasSpan
-          ? { startChar: citation.startChar!, endChar: citation.endChar! }
+          ? {
+              startChar: citation.startChar!,
+              endChar: citation.endChar!,
+              spanText: citation.quoteText ?? undefined,
+            }
           : {}),
       },
     };

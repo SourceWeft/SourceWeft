@@ -104,6 +104,7 @@ test("a strong citation shows the supporting passage above the chunk", async () 
       support: "strong",
       startChar: START,
       endChar: START + PASSAGE.length,
+      spanText: PASSAGE,
     }),
   );
 
@@ -121,6 +122,7 @@ test("the raw chunk view highlights exactly the supporting passage", async () =>
       support: "strong",
       startChar: START,
       endChar: START + PASSAGE.length,
+      spanText: PASSAGE,
     }),
   );
 
@@ -158,6 +160,20 @@ test("offsets that no longer fit the chunk are not highlighted", async () => {
       support: "strong",
       startChar: 10,
       endChar: CONTENT.length + 50,
+      spanText: PASSAGE,
+    }),
+  );
+
+  assert.equal(document.body.querySelector("[data-citation-passage]"), null);
+});
+
+test("a span whose text no longer matches the chunk is not highlighted", async () => {
+  await open(
+    citation({
+      support: "strong",
+      startChar: START,
+      endChar: START + PASSAGE.length,
+      spanText: "Revenue fell 5% in fiscal 2025.",
     }),
   );
 

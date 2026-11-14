@@ -231,6 +231,7 @@ test("the finalizer copies each used citation's supporting passage into the mess
   const [metadata] = state.written;
   const retrieval = metadata!.retrieval as {
     citations: Record<string, unknown>[];
+    availableCitations: Record<string, unknown>[];
   };
   assert.deepEqual(
     retrieval.citations.map((item) => [
@@ -243,6 +244,18 @@ test("the finalizer copies each used citation's supporting passage into the mess
       ["c1", "strong", 12, 40],
       ["c2", "weak", undefined, undefined],
       ["c3", undefined, undefined, undefined],
+    ],
+  );
+  assert.equal(retrieval.citations[0]?.spanText, "supporting passage");
+  assert.equal(retrieval.citations[1]?.spanText, undefined);
+  // The citations offered as possible evidence carry the same anchors, so a
+  // reader that looks a citation up there sees the passage too.
+  assert.deepEqual(
+    retrieval.availableCitations.map((item) => [item.citation, item.support]),
+    [
+      ["c1", "strong"],
+      ["c2", "weak"],
+      ["c3", undefined],
     ],
   );
   assert.equal(

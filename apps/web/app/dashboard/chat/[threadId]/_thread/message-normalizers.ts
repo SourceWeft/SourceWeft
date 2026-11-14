@@ -557,6 +557,7 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
         endChar !== null &&
         Number.isInteger(startChar) &&
         Number.isInteger(endChar) &&
+        typeof record.spanText === "string" &&
         startChar >= 0 &&
         endChar > startChar;
       const parsedFile =
@@ -604,6 +605,7 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       if (hasSpan) {
         citationRecord.startChar = startChar;
         citationRecord.endChar = endChar;
+        citationRecord.spanText = record.spanText as string;
       }
 
       return citationRecord;

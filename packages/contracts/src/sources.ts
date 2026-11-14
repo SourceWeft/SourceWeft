@@ -64,6 +64,8 @@ export const retrievalCitationSchema = z.object({
   /** Supporting passage as offsets into the cited chunk's stored content. */
   startChar: z.number().int().nonnegative().optional(),
   endChar: z.number().int().nonnegative().optional(),
+  /** The passage at those offsets; a reader checks it still matches the chunk. */
+  spanText: z.string().optional(),
 });
 
 export const retrievalResponseSchema = z.object({

@@ -142,7 +142,8 @@ function citedSpan(
     citation.startChar === undefined ||
     citation.endChar === undefined ||
     citation.endChar > content.length ||
-    citation.startChar >= citation.endChar
+    citation.startChar >= citation.endChar ||
+    content.slice(citation.startChar, citation.endChar) !== citation.spanText
   ) {
     return null;
   }

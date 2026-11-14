@@ -205,17 +205,25 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   // The message metadata is what the chat UI reads, so the supporting
   // passage travels with each used citation. Only the offsets are copied; the
   // quote is read back from the cited content.
-  const anchoredCitations = input.citations.map((citation) => {
+  const withAnchor = <T extends { citation: string }>(citation: T) => {
     const anchor = anchors.get(citation.citation);
     if (!anchor) return citation;
     return {
       ...citation,
       support: anchor.support,
       ...(anchor.support === "strong"
-        ? { startChar: anchor.startChar!, endChar: anchor.endChar! }
+        ? {
+            startChar: anchor.startChar!,
+            endChar: anchor.endChar!,
+            spanText: anchor.quoteText!,
+          }
         : {}),
     };
-  });
+  };
+  const anchoredCitations = input.citations.map(withAnchor);
+  const anchoredAvailableCitations = (
+    input.availableCitations ?? input.citations
+  ).map(withAnchor);
 
   const nextAssistantMetadata = {
     ...(input.assistantMetadata ?? {}),
@@ -294,7 +302,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       vectorStrategy: retrieval?.planner.strategy ?? null,
       annIndexUsed: retrieval?.planner.annIndexUsed ?? null,
       citations: anchoredCitations,
-      availableCitations: input.availableCitations ?? input.citations,
+      availableCitations: anchoredAvailableCitations,
     },
   };
   const assistantMetadata = preserveAssistantMetadataForContinuation({

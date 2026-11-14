@@ -2185,6 +2185,7 @@
     "messageResponse": {
       "source": "來源",
       "citationTitle": "引用 {label}",
+      "citationUnverified": "未能在該來源中定位支撐原文",
       "possibleEvidence": "可能的證據",
       "untitledSource": "未命名來源",
       "moreCount": "還有 {count} 個",

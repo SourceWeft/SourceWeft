@@ -36,6 +36,7 @@ export type AgentCitation = {
   support?: "strong" | "weak";
   /** Supporting passage as offsets into the cited chunk's stored content. */
   startChar?: number;
+  spanText?: string;
   endChar?: number;
 };
 

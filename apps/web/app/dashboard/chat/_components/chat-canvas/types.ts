@@ -226,6 +226,8 @@ export type CitationRecord = {
   /** Supporting passage as offsets into the cited chunk's content. */
   startChar?: number;
   endChar?: number;
+  /** The passage at the offsets, to detect a chunk that changed since. */
+  spanText?: string;
 };
 
 /**
