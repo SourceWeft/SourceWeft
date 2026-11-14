@@ -79,6 +79,7 @@ export const CLIENT_NAMESPACES = {
     "catalogBadge",
     "chatRecovery",
     "dashboardAdmin",
+    "dashboardBlogAdmin",
     "dashboardChat",
     "dashboardChatCanvas",
     "dashboardChatFiles",
