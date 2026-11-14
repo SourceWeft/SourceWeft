@@ -259,6 +259,19 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     } as unknown as Job<Record<string, unknown>>);
   }
 
+  /** Backdates a version past the settle delay for new versions. */
+  async function settled(versionId: string) {
+    await data.db
+      .update(data.mcpServerVersions)
+      .set({
+        createdAt: new Date(
+          Date.now() -
+            (repository.MCP_OVERVIEW_SETTLE_HOURS + 1) * 60 * 60 * 1000,
+        ),
+      })
+      .where(eq(data.mcpServerVersions.id, versionId));
+  }
+
   async function tick(after = "") {
     const rotation = { after };
     const result = await queue.enqueueMcpOverviews(undefined, rotation);
@@ -875,6 +888,77 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     expect(state.calls).toHaveLength(2);
   });
 
+  test("a new version of a described server waits, showing the previous overview meanwhile", async () => {
+    const first = await seed(genesis402RegistryServer);
+    await readmeFetched(first.versionId, genesisReadme);
+    expect(await tick()).toMatchObject({ queued: 1 });
+    await runJob(state.jobs[0]!);
+    const firstSummary = (await detail(first.identifier, "en")).aiOverview
+      ?.summary;
+    expect(firstSummary).toBeTruthy();
+
+    // A new version arrives: not queued yet, and the page keeps the first
+    // version's overview in every read.
+    const edited = `${genesisReadme.markdown}\n\n## Limits\n\nEvery paid call is capped by GENESIS402_MAX_USD.\n`;
+    const second = await seed(genesis402RegistryServer, { version: "2.0.0" });
+    await readmeFetched(second.versionId, {
+      markdown: edited,
+      sha256: createSha256(edited),
+    });
+    state.jobs.length = 0;
+    expect(await tick()).toMatchObject({ queued: 0 });
+    const waiting = await detail(first.identifier, "en");
+    expect(waiting.aiOverview?.summary).toBe(firstSummary);
+    expect(waiting.item.overviewLocales).toEqual(["en", "zh-CN", "zh-TW"]);
+    expect(
+      (
+        await repository.readMcpOverviews({
+          versionIds: [second.versionId],
+          locale: "en",
+        })
+      ).get(second.versionId)?.overview.summary,
+    ).toBe(firstSummary);
+
+    // Past the delay it is queued and then shows its own overview.
+    await settled(second.versionId);
+    expect(await tick()).toMatchObject({ queued: 1 });
+    expect(state.jobs[0]!.data).toMatchObject({
+      mcpServerVersionId: second.versionId,
+      reason: "scheduled",
+    });
+    state.answers.push(genesis402ModelAnswer({ summaryPrefix: "Second: " }));
+    expect(await runJob(state.jobs[0]!)).toMatchObject({
+      status: "generated",
+    });
+    expect((await detail(first.identifier, "en")).aiOverview?.summary).toMatch(
+      /^Second: /,
+    );
+  });
+
+  test("a new version whose overview failed shows none, and a first overview never waits", async () => {
+    const first = await seed(genesis402RegistryServer);
+    await readmeFetched(first.versionId, genesisReadme);
+    // No earlier overview: queued at once although the version is new.
+    expect(await tick()).toMatchObject({ queued: 1 });
+    await runJob(state.jobs[0]!);
+
+    const second = await seed(genesis402RegistryServer, { version: "2.0.0" });
+    await readmeFetched(second.versionId, genesisReadme);
+    await repository.mcpOverviewRepository.request(second.versionId, false);
+    const state2 = await repository.mcpOverviewRepository.read(
+      second.versionId,
+    );
+    await repository.mcpOverviewRepository.fail(
+      second.versionId,
+      state2!.requestId,
+      "model failed",
+      false,
+    );
+    const failed = await detail(first.identifier, "en");
+    expect(failed.aiOverview).toBeNull();
+    expect(failed.item.overviewLocales).toEqual([]);
+  });
+
   test("a stale overview whose new input another version already has is copied, not regenerated", async () => {
     const first = await seed(genesis402RegistryServer);
     await readmeFetched(first.versionId, genesisReadme);
@@ -883,8 +967,10 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
       status: "generated",
     });
 
-    // A new version, first published with a different README.
+    // A new version, first published with a different README, past the
+    // settle delay.
     const second = await seed(genesis402RegistryServer, { version: "2.0.0" });
+    await settled(second.versionId);
     const edited = `${genesisReadme.markdown}\n\n## Limits\n\nEvery paid call is capped by GENESIS402_MAX_USD.\n`;
     await readmeFetched(second.versionId, {
       markdown: edited,
