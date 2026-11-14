@@ -68,8 +68,9 @@ function plausibleOrNull(
 
 /**
  * Duration of a PCM WAV buffer, computed from the fmt chunk's byte rate and
- * the larger of the declared data size and the bytes actually present after
- * the data chunk header (streamed writers leave placeholder sizes).
+ * the bytes actually present after the data chunk header. The declared data
+ * size is not trusted: streamed writers leave placeholders, either too small
+ * or the maximum value.
  * Returns null when the buffer is not a parseable RIFF/WAVE file.
  */
 function wavDurationSeconds(buffer: Buffer): number | null {
@@ -97,7 +98,12 @@ function wavDurationSeconds(buffer: Buffer): number | null {
         return null;
       }
       const actualBytes = buffer.byteLength - bodyOffset;
-      const dataBytes = Math.max(declaredSize, actualBytes);
+      // A declared size larger than what is present is a streaming
+      // placeholder (0xFFFFFFFF), not audio that exists.
+      const dataBytes =
+        declaredSize > actualBytes
+          ? actualBytes
+          : Math.max(declaredSize, actualBytes);
       if (dataBytes <= 0) {
         return null;
       }
