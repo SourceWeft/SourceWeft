@@ -45,6 +45,8 @@ export function deriveStatusDetail(source: SourceRecord): SourceStatusDetail {
       : typeof metadata.error === "string"
         ? metadata.error
         : null;
+  const errorCode =
+    typeof source.error?.code === "string" ? source.error.code : null;
   const jobId = typeof metadata.jobId === "string" ? metadata.jobId : null;
 
   return {
@@ -54,6 +56,7 @@ export function deriveStatusDetail(source: SourceRecord): SourceStatusDetail {
     parsedPages,
     totalPages,
     error,
+    errorCode,
     jobId,
   };
 }

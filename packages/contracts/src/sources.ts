@@ -262,6 +262,7 @@ export const sourceStatusResponseSchema = z.object({
   parsedPages: z.number().int().nonnegative().nullable(),
   totalPages: z.number().int().nonnegative().nullable(),
   error: z.string().nullable(),
+  errorCode: z.string().nullable().optional(),
   jobId: z.string().nullable(),
 });
 
