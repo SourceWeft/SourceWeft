@@ -3414,6 +3414,29 @@
       "collapse": "收起指南",
       "expand": "展开指南"
     },
+    "discovery": {
+      "title": "发现来源",
+      "description": "描述一个主题，挑选值得添加的网页。你确认之前不会添加任何内容。",
+      "topicPlaceholder": "例如：固态电池商业化进展",
+      "search": "查找来源",
+      "searching": "搜索中…",
+      "costNote": "查找来源会消耗少量积分；导入网页会像其他来源一样占用入库页数。",
+      "searched": "已搜索：",
+      "empty": "没有找到网页，换个描述再试试。",
+      "alreadyAdded": "已添加",
+      "selectAll": "全选",
+      "selectNone": "取消全选",
+      "newSearch": "重新搜索",
+      "import": "导入 {count} 个网页",
+      "close": "关闭",
+      "notImportedQuota": "未导入：入库页数已用完。",
+      "summary": "已添加 {added} 个，失败 {failed} 个，未导入 {skipped} 个。",
+      "imported": "已添加 {count} 个网页",
+      "errorCredits": "积分不足，无法查找来源。",
+      "errorUnavailable": "网页搜索不可用。",
+      "errorSearch": "无法查找来源，请稍后再试。",
+      "add": "发现"
+    },
     "sourcePreview": {
       "mode": {
         "preview": "预览",

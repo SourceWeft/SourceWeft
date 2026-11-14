@@ -3414,6 +3414,29 @@
       "collapse": "收起指南",
       "expand": "展開指南"
     },
+    "discovery": {
+      "title": "發現來源",
+      "description": "描述一個主題，挑選值得新增的網頁。你確認之前不會新增任何內容。",
+      "topicPlaceholder": "例如：固態電池商業化進展",
+      "search": "查詢來源",
+      "searching": "搜尋中…",
+      "costNote": "查詢來源會消耗少量點數；匯入網頁會像其他來源一樣佔用入庫頁數。",
+      "searched": "已搜尋：",
+      "empty": "沒有找到網頁，換個描述再試試。",
+      "alreadyAdded": "已新增",
+      "selectAll": "全選",
+      "selectNone": "取消全選",
+      "newSearch": "重新搜尋",
+      "import": "匯入 {count} 個網頁",
+      "close": "關閉",
+      "notImportedQuota": "未匯入：入庫頁數已用完。",
+      "summary": "已新增 {added} 個，失敗 {failed} 個，未匯入 {skipped} 個。",
+      "imported": "已新增 {count} 個網頁",
+      "errorCredits": "點數不足，無法查詢來源。",
+      "errorUnavailable": "網頁搜尋不可用。",
+      "errorSearch": "無法查詢來源，請稍後再試。",
+      "add": "發現"
+    },
     "sourcePreview": {
       "mode": {
         "preview": "預覽",
