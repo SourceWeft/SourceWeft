@@ -14,10 +14,17 @@ type LegalPageProps = {
   title: string;
   description: string;
   sections: LegalSection[];
+  /** Date of the page's latest revision; each legal page keeps its own. */
+  lastUpdated?: string;
 };
 
-const LAST_UPDATED = "May 15, 2026";
-export function LegalPage({ title, description, sections }: LegalPageProps) {
+const DEFAULT_LAST_UPDATED = "May 15, 2026";
+export function LegalPage({
+  title,
+  description,
+  sections,
+  lastUpdated = DEFAULT_LAST_UPDATED,
+}: LegalPageProps) {
   const authState = useLandingAuthState();
 
   return (
@@ -29,7 +36,7 @@ export function LegalPage({ title, description, sections }: LegalPageProps) {
         <div className="mx-auto flex max-w-4xl flex-col px-6 pt-28 pb-14 sm:pt-32 sm:pb-18">
           <header className="border-b border-zinc-200 pb-8 dark:border-white/[0.08]">
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-              Last updated: {LAST_UPDATED}
+              Last updated: {lastUpdated}
             </p>
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-zinc-950 sm:text-5xl dark:text-white">
               {title}
