@@ -10,6 +10,7 @@ import {
   createSourceRecord,
   sourceIndexingService,
 } from "../sources";
+import { computeContentHash } from "../sources/content-hash";
 import { contentThreadService, findMessageRecord } from "../threads";
 import { requireContentWorkspace } from "../workspace/guards";
 import {
@@ -135,7 +136,10 @@ export async function saveAnswerAsNote(input: {
     teamId: workspace.organizationId,
     messageId: message.id,
   });
-  if (existing) return toResult(existing, true);
+  if (existing?.sourceId) return toResult(existing, true);
+  // A note whose source is gone cannot be opened; start over instead of
+  // handing back a note that points at nothing.
+  if (existing) await db.delete(notes).where(eq(notes.id, existing.id));
 
   const citations = readMessageCitations(message.metadata);
   const rewritten = rewriteCitationsForNote({
@@ -153,6 +157,7 @@ export async function saveAnswerAsNote(input: {
     ingestKind: "note",
     sourceType: "note",
     mimeType: "text/markdown",
+    contentHash: computeContentHash(rewritten.text),
   });
 
   try {
@@ -198,7 +203,7 @@ export async function saveAnswerAsNote(input: {
         title,
         contentText: rewritten.text,
         contentJson: { references: rewritten.references },
-        isEditable: false,
+        isEditable: true,
         createdBy: input.userId,
       });
       if (citedSourceIds.length > 0) {

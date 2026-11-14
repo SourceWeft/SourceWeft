@@ -763,6 +763,8 @@ export async function updateSourceRecordAndInvalidateDocuments(input: {
   sourceId: string;
   title?: string;
   contentText: string;
+  /** The new text's fingerprint, so anything keyed on it (a guide) sees the change. */
+  contentHash?: string | null;
   parentSourceId?: string | null;
   estimatedPages?: number | null;
   parsedTokens?: number | null;
@@ -777,6 +779,8 @@ export async function updateSourceRecordAndInvalidateDocuments(input: {
         indexedAt: null,
         updatedAt: new Date(),
       };
+
+    if (input.contentHash !== undefined) updates.contentHash = input.contentHash;
 
     if (input.title !== undefined) updates.title = input.title;
     if (input.parentSourceId !== undefined)

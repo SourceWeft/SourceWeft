@@ -18,6 +18,7 @@ import {
   updateThreadChatPreferencesRequestSchema,
   updateThreadModelSettingsRequestSchema,
   updateThreadVisibilityRequestSchema,
+  listSavedNotesRequestSchema,
 } from "@sourceweft/contracts";
 import {
   contentThreadService,
@@ -33,7 +34,7 @@ import type {
   ResumeThreadInput,
   StreamThreadEventInput,
 } from "../../../modules/threads";
-import { saveAnswerAsNote } from "../../../modules/notes";
+import { listSavedNotes, saveAnswerAsNote } from "../../../modules/notes";
 import { THREAD_TITLE_GENERATE_JOB } from "../../../modules/content/queue";
 import { presentJobState } from "../../../shared/job-status";
 import { jobsQueue } from "../../../shared/queue";
@@ -538,6 +539,29 @@ export function registerThreadRoutes(app: Hono) {
       messageId: requireRouteParam(c, "messageId"),
       rank,
       userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/messages/notes", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = listSavedNotesRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await listSavedNotes({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      messageIds: parsed.data.messageIds,
     });
 
     return ApiResponse.success(c, result);

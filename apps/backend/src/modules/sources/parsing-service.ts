@@ -3,7 +3,6 @@ import {
   resolveBillingPages,
   resolvePhysicalPageCount,
 } from "./billing-pages";
-import { createHash } from "node:crypto";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import type { ContentBillingPort } from "../content/billing-port";
@@ -51,10 +50,7 @@ import {
   buildSourceParseFailureError,
   buildSourceParseLogContext,
 } from "./parse-diagnostics";
-
-function computeContentHash(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}
+import { computeContentHash } from "./content-hash";
 
 function mergeStatusMetadata(
   source: SourceRecord,

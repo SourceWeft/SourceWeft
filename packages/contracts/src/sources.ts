@@ -155,6 +155,68 @@ export type SourceDiscoveryAvailabilityResponse = z.infer<
   typeof sourceDiscoveryAvailabilityResponseSchema
 >;
 
+export const noteOriginReferenceSchema = z.object({
+  number: z.number().int().positive(),
+  sourceTitle: z.string().nullable(),
+  sourceId: z.string().nullable(),
+  externalUri: z.string().nullable(),
+  /** What supported the claim when the answer was saved. */
+  passage: z.string().nullable(),
+  /** The cited source still exists in this workspace. */
+  sourceExists: z.boolean(),
+});
+
+export const noteOriginSchema = z.object({
+  noteId: z.string(),
+  /** The conversation the answer was saved from; absent when the viewer cannot read it. */
+  thread: z.object({ id: z.string(), title: z.string() }).nullable(),
+  messageId: z.string().nullable(),
+  savedAt: z.string(),
+  /** When the note's text was last edited, if it was. */
+  editedAt: z.string().nullable(),
+  references: z.array(noteOriginReferenceSchema),
+});
+
+export const noteOriginResponseSchema = z.object({
+  origin: noteOriginSchema.nullable(),
+});
+
+export const updateNoteContentRequestSchema = z.object({
+  contentText: z.string().trim().min(1).max(100_000),
+  /** The `updatedAt` of the note the edit started from; a different one means someone else edited it. */
+  expectedUpdatedAt: z.string().min(1),
+});
+
+export const updateNoteContentResponseSchema = z.object({
+  updatedAt: z.string(),
+});
+
+export const listSavedNotesRequestSchema = z.object({
+  messageIds: z.array(z.string().min(1)).min(1).max(200),
+});
+
+export const savedNoteEntrySchema = z.object({
+  noteId: z.string(),
+  sourceId: z.string(),
+  title: z.string(),
+});
+
+export const listSavedNotesResponseSchema = z.object({
+  /** Keyed by message id; only messages that have been saved appear. */
+  notes: z.record(z.string(), savedNoteEntrySchema),
+});
+
+export type NoteOrigin = z.infer<typeof noteOriginSchema>;
+export type NoteOriginResponse = z.infer<typeof noteOriginResponseSchema>;
+export type UpdateNoteContentRequest = z.infer<
+  typeof updateNoteContentRequestSchema
+>;
+export type UpdateNoteContentResponse = z.infer<
+  typeof updateNoteContentResponseSchema
+>;
+export type ListSavedNotesResponse = z.infer<typeof listSavedNotesResponseSchema>;
+export type SavedNoteEntry = z.infer<typeof savedNoteEntrySchema>;
+
 export const retrievalCitationSchema = z.object({
   fileReference: fileReferenceSchema.optional(),
   citation: z.string().min(1),
