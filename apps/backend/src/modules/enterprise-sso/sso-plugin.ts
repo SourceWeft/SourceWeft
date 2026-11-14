@@ -1,11 +1,13 @@
 import { sso } from "@better-auth/sso";
 import type { BetterAuthPlugin } from "better-auth";
+import { ssoSecretStoragePlugin } from "./secret-storage";
 
 /**
- * Registers the better-auth SSO plugin (OIDC + SAML) for team organizations.
+ * Registers the better-auth SSO plugin (OIDC + SAML) for team organizations,
+ * alongside {@link ssoSecretStoragePlugin}, which encrypts the OIDC
+ * clientSecret at rest.
  *
- * This only wires the plugin and its table (`ssoProvider`); guards, secret
- * encryption, and user provisioning are later tasks. `provisionUser` is
+ * Guards and user provisioning are later tasks; `provisionUser` is
  * deliberately not configured yet.
  *
  * `isRuntimeMode` is accepted (not yet used) for parity with the other
@@ -19,6 +21,11 @@ export function buildSsoPlugins({
   isRuntimeMode: boolean;
 }): BetterAuthPlugin[] {
   return [
+    // Seals the OIDC clientSecret in `ssoProvider.oidcConfig` at the adapter
+    // layer (better-auth databaseHooks don't cover plugin tables). Registered
+    // next to the SSO plugin so `auth migrate` still creates the table and so
+    // the wrap is applied in both runtime and migration modes.
+    ssoSecretStoragePlugin(),
     sso({
       // Identity sources only belong to `team` organizations; account
       // linking relies solely on a verified domain + matching email domain,
