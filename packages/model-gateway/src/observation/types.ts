@@ -88,6 +88,12 @@ export interface ProviderResponseContext {
   modality: ModelProfileModality;
   rawResponse?: unknown;
   rawUsage?: Record<string, unknown>;
+  /**
+   * The provider's usage object as read off the response stream
+   * (`ProviderResponseCapture.usage`). Used when the response itself no
+   * longer carries one.
+   */
+  capturedUsage?: Record<string, unknown>;
   sdkUsage?: unknown;
   responseMetadata?: Record<string, unknown>;
   responseHeaders?: Headers;

@@ -303,6 +303,7 @@ export async function runBridgeChatComplete(input: {
           }),
         responseMetadata,
         responseHeaders: responseCapture.headers,
+        capturedUsage: responseCapture.usage,
       },
     });
 
@@ -372,6 +373,7 @@ export async function* runBridgeChatStream(input: {
             }),
           responseMetadata,
           responseHeaders: responseCapture.headers,
+          capturedUsage: responseCapture.usage,
         },
       }),
     );
