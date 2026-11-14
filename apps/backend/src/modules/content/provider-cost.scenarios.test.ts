@@ -367,3 +367,39 @@ test("tts: a provider-reported total still wins over the per-character price", (
   assert.equal(r.providerCostUsd, 0.01);
   assert.equal(r.costSource, "provider_actual");
 });
+
+// ASR priced per second of audio. DeepInfra lists Whisper large-v3-turbo at
+// 0.000333 cents per second: one hour is 3600 · 0.00000333 = 0.011988
+test("asr: audio seconds at a per-second price", () => {
+  const r = cost(price({ input_cost_per_second: 0.00000333 }), {
+    inputAudioSeconds: 3600,
+  });
+  assert.equal(r.providerCostUsd, 0.011988);
+  assert.equal(r.costSource, "price_book");
+  assert.deepEqual(r.missingPriceComponents, []);
+});
+
+test("asr: fractional seconds are priced as they are, not floored", () => {
+  const r = cost(price({ input_cost_per_second: 0.01 }), {
+    inputAudioSeconds: 17.24,
+  });
+  assert.equal(r.providerCostUsd, 0.1724);
+});
+
+test("asr: audio seconds with no per-second price is unknown, not free", () => {
+  const r = cost(price({ input_cost_per_token: 0 }), {
+    inputAudioSeconds: 600,
+  });
+  assert.equal(r.providerCostUsd, null);
+  assert.equal(r.costSource, "missing_price_components");
+  assert.deepEqual(r.missingPriceComponents, ["input_audio_seconds"]);
+});
+
+test("tts: a zero per-character price is a known zero, not a missing price", () => {
+  const r = cost(price({ input_cost_per_character: 0 }), {
+    inputCharacters: 400,
+  });
+  assert.equal(r.providerCostUsd, 0);
+  assert.equal(r.costSource, "missing_or_zero_price");
+  assert.deepEqual(r.missingPriceComponents, []);
+});

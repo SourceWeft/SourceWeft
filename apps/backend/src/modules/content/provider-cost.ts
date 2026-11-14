@@ -126,6 +126,7 @@ function buildPricingSnapshot(pricing: ModelPricing): PricingSnapshot {
     input_cost_per_image: pricing.input_cost_per_image ?? null,
     output_cost_per_image: pricing.output_cost_per_image ?? null,
     input_cost_per_character: pricing.input_cost_per_character ?? null,
+    input_cost_per_second: pricing.input_cost_per_second ?? null,
     input_cost_per_pixel: pricing.input_cost_per_pixel ?? null,
     output_cost_per_pixel: pricing.output_cost_per_pixel ?? null,
     image_pricing_tiers: pricing.image_pricing_tiers ?? null,
@@ -262,6 +263,7 @@ const UNPRICED: ModelPricing = {
   input_cost_per_image: null,
   output_cost_per_image: null,
   input_cost_per_character: null,
+  input_cost_per_second: null,
   price_source: "unknown",
   litellm_key: null,
   price_updated_at: null,
@@ -330,12 +332,20 @@ export function computeProviderCostFromPricing(input: {
   const inputImageCount = clampCount(usage.inputImageCount);
   const outputImageCount = clampCount(usage.outputImageCount);
   const inputCharacters = clampCount(usage.inputCharacters);
+  // Seconds are not whole numbers, so they are not floored like counts.
+  const inputAudioSeconds =
+    usage.inputAudioSeconds !== undefined &&
+    Number.isFinite(usage.inputAudioSeconds) &&
+    usage.inputAudioSeconds > 0
+      ? usage.inputAudioSeconds
+      : 0;
   const hasBillableUsage =
     inputTokens > 0 ||
     outputTokens > 0 ||
     inputImageCount > 0 ||
     outputImageCount > 0 ||
     inputCharacters > 0 ||
+    inputAudioSeconds > 0 ||
     clampCount(usage.cacheReadTokens) > 0 ||
     clampCount(usage.cacheWriteTokens) > 0 ||
     clampCount(usage.inputImageTokens) > 0 ||
@@ -464,6 +474,13 @@ export function computeProviderCostFromPricing(input: {
     pricing: pricing,
     key: "input_cost_per_character",
     component: "input_characters",
+    missing,
+  });
+  providerCostUsd += addComponent({
+    amount: inputAudioSeconds,
+    pricing: pricing,
+    key: "input_cost_per_second",
+    component: "input_audio_seconds",
     missing,
   });
   providerCostUsd += addComponent({

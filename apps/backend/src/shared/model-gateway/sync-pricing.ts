@@ -114,6 +114,7 @@ const PRICING_VALUE_KEYS = [
   "input_cost_per_image",
   "output_cost_per_image",
   "input_cost_per_character",
+  "input_cost_per_second",
 ] as const satisfies ReadonlyArray<keyof ModelPricing>;
 
 type ModelPricingConfig = Partial<Omit<ModelPricing, "price_source">> & {

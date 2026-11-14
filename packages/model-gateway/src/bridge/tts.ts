@@ -15,7 +15,38 @@ import type {
 /** Requested formats a mismatch is converted to; raw pcm cannot be verified. */
 const CONVERTIBLE = new Set(["mp3", "opus", "flac", "wav", "aac"]);
 
+/**
+ * TTS providers bill by input characters and most report no usage, so the
+ * character count is the call's usage. A transport that counts in its own
+ * billing unit (DeepSeek counts a Chinese character as two) has already set it.
+ */
+function withTtsCharacters(
+  result: TtsSpeechResult,
+  text: string,
+): TtsSpeechResult {
+  if (result.usage?.inputCharacters !== undefined) {
+    return result;
+  }
+  const usage = { ...result.usage, inputCharacters: Array.from(text).length };
+  return {
+    ...result,
+    usage,
+    observation: result.observation
+      ? { ...result.observation, usage }
+      : undefined,
+  };
+}
+
 export async function runBridgeTtsSpeech(input: {
+  config: ResolvedModelGatewayConfig;
+  target: ResolvedRequestTarget;
+  payload: TtsSpeechInput;
+  options?: RequestOptions;
+}): Promise<TtsSpeechResult> {
+  return withTtsCharacters(await synthesizeSpeech(input), input.payload.input);
+}
+
+async function synthesizeSpeech(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
   payload: TtsSpeechInput;
