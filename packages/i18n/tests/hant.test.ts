@@ -17,6 +17,11 @@ test("repairs OpenCC's word-splitting slips", () => {
   assert.equal(toTaiwanTraditional("页上复制"), "頁上複製");
 });
 
+test("read-only stays 唯讀 after 有, where OpenCC reads 有只 as 有隻", () => {
+  assert.equal(toTaiwanTraditional("只读模式"), "唯讀模式");
+  assert.equal(toTaiwanTraditional("它有只读模式"), "它有唯讀模式");
+});
+
 test("the 覆制 repair is anchored on 上, not every 覆制 boundary", () => {
   // OpenCC gets these right on its own: 覆 belongs to the preceding word and
   // 制度 is the next one. A bare "覆制" glossary entry would rewrite them into
