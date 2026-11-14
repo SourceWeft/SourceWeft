@@ -3414,6 +3414,29 @@
       "collapse": "Collapse guide",
       "expand": "Expand guide"
     },
+    "discovery": {
+      "title": "Discover sources",
+      "description": "Describe a topic and pick the pages worth adding. Nothing is added until you choose.",
+      "topicPlaceholder": "e.g. solid-state battery commercialization",
+      "search": "Find sources",
+      "searching": "Searching…",
+      "costNote": "Finding sources uses a small amount of your credits. Importing pages uses ingestion pages, like any source.",
+      "searched": "Searched:",
+      "empty": "No pages found. Try describing the topic differently.",
+      "alreadyAdded": "Already added",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "newSearch": "New search",
+      "import": "Import {count, plural, one {# page} other {# pages}}",
+      "close": "Close",
+      "notImportedQuota": "Not imported: you have run out of ingestion pages.",
+      "summary": "{added} added, {failed} failed, {skipped} not imported.",
+      "imported": "{count, plural, one {# page added} other {# pages added}}",
+      "errorCredits": "You do not have enough credits to search for sources.",
+      "errorUnavailable": "Web search is not available.",
+      "errorSearch": "Could not search for sources. Try again in a moment.",
+      "add": "Discover"
+    },
     "sourcePreview": {
       "mode": {
         "preview": "Preview",

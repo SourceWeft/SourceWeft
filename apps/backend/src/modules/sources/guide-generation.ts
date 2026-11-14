@@ -2,10 +2,7 @@ import {
   sourceGuideContentSchema,
   type SourceGuideContent,
 } from "@sourceweft/contracts/sources";
-import {
-  requireDefaultModelGatewayProfile,
-  withBilledModelGateway,
-} from "../../shared/model-gateway/index";
+import { completeStructuredWithDefaultChat } from "../../shared/model-gateway/index";
 import type { ContentBillingPort } from "../content/billing-port";
 
 /**
@@ -74,8 +71,8 @@ export function parseGuideContent(value: unknown): SourceGuideContent | null {
 
 /**
  * Generates a guide with the deployment's default chat model, charged to
- * `payer`. It never substitutes another model: if the default profile is not
- * usable the call fails and the caller records it.
+ * `actorUserId`. It never substitutes another model: if the default profile is
+ * not usable the call fails and the caller records it.
  */
 export async function generateGuideContent(input: {
   billing: ContentBillingPort;
@@ -87,58 +84,31 @@ export async function generateGuideContent(input: {
   content: string;
   scopeId: string;
 }): Promise<SourceGuideContent> {
-  const profile = await requireDefaultModelGatewayProfile("chat");
   const prompt = buildGuidePrompt({
     title: input.title,
     content: input.content,
   });
-
-  const completion = await withBilledModelGateway(
-    {
-      billing: input.billing,
-      gatewayConfigId: profile.gatewayConfigId,
-      context: {
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        actorUserId: input.actorUserId,
-        feature: "chat",
-        intent: { mode: "billed" },
-        scopeKind: "worker-job",
-        scopeId: input.scopeId,
-      },
+  const output = await completeStructuredWithDefaultChat({
+    billing: input.billing,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    actorUserId: input.actorUserId,
+    scopeId: input.scopeId,
+    scopeKind: "worker-job",
+    operation: "source.guide",
+    referenceId: `source:${input.sourceId}:guide`,
+    idempotencyKey: `source-guide:${input.scopeId}`,
+    system: prompt.system,
+    user: prompt.user,
+    schema: {
+      name: "source_guide",
+      description: "A summary, main topics and suggested questions.",
+      schema: GUIDE_SCHEMA as unknown as Record<string, unknown>,
     },
-    (gateway) =>
-      gateway.chat.complete(
-        {
-          model: profile.modelAlias,
-          profileAlias: profile.profileAlias,
-          messages: [
-            { role: "system", content: prompt.system },
-            { role: "user", content: prompt.user },
-          ],
-          structuredOutput: {
-            name: "source_guide",
-            description: "A summary, main topics and suggested questions.",
-            schema: GUIDE_SCHEMA as unknown as Record<string, unknown>,
-          },
-          thinking: { mode: "off", enabled: false, includeReasoning: false },
-          maxTokens: GUIDE_MAX_OUTPUT_TOKENS,
-          temperature: 0.2,
-        },
-        {
-          traceId: input.scopeId,
-          operation: "source.guide",
-          modelKind: "chat",
-          gatewayConfigId: profile.gatewayConfigId,
-          profileAlias: profile.profileAlias,
-          modelAlias: profile.modelAlias,
-          referenceId: `source:${input.sourceId}:guide`,
-          idempotencyKey: `source-guide:${input.scopeId}`,
-        },
-      ),
-  );
+    maxTokens: GUIDE_MAX_OUTPUT_TOKENS,
+  });
 
-  const content = parseGuideContent(completion.structuredOutput);
+  const content = parseGuideContent(output);
   if (!content) {
     throw new Error("The model returned no usable source guide");
   }

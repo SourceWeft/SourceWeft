@@ -9,6 +9,8 @@ import type {
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type {
   SavedAnswerNote,
+  SourceDiscoveryAvailabilityResponse,
+  SourceDiscoveryResponse,
   SourceGuideResponse,
 } from "@sourceweft/contracts/sources";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
@@ -610,6 +612,19 @@ export class ContentClient {
   getSourceDocument(workspaceId: string, sourceId: string, documentId: string) {
     return this.http.get<GetSourceDocumentResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/documents/${encode(documentId)}`,
+    );
+  }
+
+  getSourceDiscoveryAvailability(workspaceId: string) {
+    return this.http.get<SourceDiscoveryAvailabilityResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/source-discovery`,
+    );
+  }
+
+  discoverSources(workspaceId: string, topic: string) {
+    return this.http.post<SourceDiscoveryResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/source-discovery`,
+      { topic },
     );
   }
 

@@ -7,9 +7,7 @@ function metadataString(
   key: string,
 ): string | null {
   const value = metadata[key];
-  return typeof value === "string" && value.trim().length > 0
-    ? value
-    : null;
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function externalUriHost(externalUri: string | null): string | null {
@@ -91,6 +89,11 @@ export function buildSourceParseFailureError(input: {
   if (isContentError(error)) {
     failure.code = error.code;
     failure.statusCode = error.statusCode;
+  } else if (error instanceof Error) {
+    // A billing refusal (e.g. PAGES_LIMIT_EXCEEDED) carries its own code; the
+    // UI needs it to tell "out of pages" from "this page could not be read".
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === "string") failure.code = code;
   }
 
   return failure;

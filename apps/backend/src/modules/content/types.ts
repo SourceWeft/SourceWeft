@@ -81,6 +81,8 @@ export type SourceStatusDetail = {
   parsedPages: number | null;
   totalPages: number | null;
   error: string | null;
+  /** Machine-readable reason for a failure, when the failure had one. */
+  errorCode?: string | null;
   jobId: string | null;
 };
 

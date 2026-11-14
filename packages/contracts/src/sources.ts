@@ -99,6 +99,38 @@ export const savedAnswerNoteSchema = z.object({
 
 export type SavedAnswerNote = z.infer<typeof savedAnswerNoteSchema>;
 
+export const sourceDiscoveryRequestSchema = z.object({
+  topic: z.string().trim().min(3).max(500),
+});
+
+export const sourceDiscoveryCandidateSchema = z.object({
+  url: z.string(),
+  title: z.string(),
+  snippet: z.string(),
+  domain: z.string(),
+  /** The workspace already has this page as a source. */
+  existingSourceId: z.string().nullable(),
+});
+
+export const sourceDiscoveryResponseSchema = z.object({
+  queries: z.array(z.string()),
+  candidates: z.array(sourceDiscoveryCandidateSchema),
+});
+
+export const sourceDiscoveryAvailabilityResponseSchema = z.object({
+  available: z.boolean(),
+});
+
+export type SourceDiscoveryCandidate = z.infer<
+  typeof sourceDiscoveryCandidateSchema
+>;
+export type SourceDiscoveryResponse = z.infer<
+  typeof sourceDiscoveryResponseSchema
+>;
+export type SourceDiscoveryAvailabilityResponse = z.infer<
+  typeof sourceDiscoveryAvailabilityResponseSchema
+>;
+
 export const retrievalCitationSchema = z.object({
   fileReference: fileReferenceSchema.optional(),
   citation: z.string().min(1),
@@ -230,6 +262,7 @@ export const sourceStatusResponseSchema = z.object({
   parsedPages: z.number().int().nonnegative().nullable(),
   totalPages: z.number().int().nonnegative().nullable(),
   error: z.string().nullable(),
+  errorCode: z.string().nullable().optional(),
   jobId: z.string().nullable(),
 });
 

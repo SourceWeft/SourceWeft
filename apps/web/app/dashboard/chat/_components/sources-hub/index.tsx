@@ -89,6 +89,10 @@ import {
 } from "./sources/dialogs";
 import { SourcesTab } from "./sources/tab";
 import { useAddSourceDialogState } from "./sources/use-add-source-dialog";
+import {
+  SourceDiscoveryDialog,
+  useSourceDiscoveryAvailable,
+} from "./discovery/source-discovery-dialog";
 import { useSources } from "./sources/use-sources";
 import {
   DeleteWorkfileDialog,
@@ -353,6 +357,8 @@ export function SourcesHub({
     Map<string, { knownSourceIds: Set<string> }>
   >(new Map());
   const addSourceDialog = useAddSourceDialogState();
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
+  const discoveryAvailable = useSourceDiscoveryAvailable(workspaceId);
   const {
     sources,
     refreshSources,
@@ -1052,6 +1058,18 @@ export function SourcesHub({
                     <Upload className="size-3.5" />
                     {t("sources.addSource")}
                   </Button>
+                  {discoveryAvailable ? (
+                    <Button
+                      disabled={!workspaceId}
+                      onClick={() => setDiscoveryOpen(true)}
+                      size="xs"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Search className="size-3.5" />
+                      {t("discovery.add")}
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
@@ -1427,6 +1445,15 @@ export function SourcesHub({
             : null
         }
       />
+
+      {workspaceId ? (
+        <SourceDiscoveryDialog
+          onImported={() => void refreshSources()}
+          onOpenChange={setDiscoveryOpen}
+          open={discoveryOpen}
+          workspaceId={workspaceId}
+        />
+      ) : null}
 
       <AddSourceDialog
         workspaceReady={Boolean(workspaceId)}
