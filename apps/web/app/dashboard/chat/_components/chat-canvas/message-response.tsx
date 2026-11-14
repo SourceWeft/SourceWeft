@@ -63,12 +63,16 @@ function CitationBadge({
   onCitationClick?: (citation: CitationRecord) => void;
 }) {
   const t = useTranslations("dashboardChatCanvas");
+  const unverified = citation?.support === "weak";
+  const title =
+    citation?.excerpt ?? t("messageResponse.citationTitle", { label });
   return (
     <button
       className={cn(
         "mx-0.5 inline-flex max-w-[14rem] cursor-pointer items-center justify-center rounded-full bg-primary/10 px-1.5 py-0.5 align-baseline text-[11px] font-medium leading-none text-primary transition-colors hover:bg-primary/15",
         !citation &&
           "cursor-default bg-muted text-muted-foreground hover:bg-muted",
+        unverified && "ring-1 ring-amber-500/60",
       )}
       disabled={!citation}
       onClick={() => {
@@ -76,7 +80,11 @@ function CitationBadge({
           onCitationClick?.(citation);
         }
       }}
-      title={citation?.excerpt ?? t("messageResponse.citationTitle", { label })}
+      title={
+        unverified
+          ? `${title}\n${t("messageResponse.citationUnverified")}`
+          : title
+      }
       type="button"
     >
       <span className="min-w-0 truncate">{label}</span>

@@ -56,6 +56,16 @@ export const retrievalCitationSchema = z.object({
   score: z.number(),
   excerpt: z.string(),
   externalUri: z.string().url().optional(),
+  /**
+   * Whether the answer's claim is backed by a passage of the cited content.
+   * Absent when the citation predates anchoring or could not be checked.
+   */
+  support: z.enum(["strong", "weak"]).optional(),
+  /** Supporting passage as offsets into the cited chunk's stored content. */
+  startChar: z.number().int().nonnegative().optional(),
+  endChar: z.number().int().nonnegative().optional(),
+  /** The passage at those offsets; a reader checks it still matches the chunk. */
+  spanText: z.string().optional(),
 });
 
 export const retrievalResponseSchema = z.object({

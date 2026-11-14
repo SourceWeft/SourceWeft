@@ -2191,6 +2191,7 @@
     "messageResponse": {
       "source": "來源",
       "citationTitle": "引用 {label}",
+      "citationUnverified": "未能在該來源中定位支撐原文",
       "possibleEvidence": "可能的證據",
       "untitledSource": "未命名來源",
       "moreCount": "還有 {count} 個",
@@ -3421,6 +3422,8 @@
       "unknown": "未知",
       "noMarkdown": "沒有可用的 Markdown 內容。",
       "citedSource": "被引用的來源",
+      "supportingPassage": "支撐原文",
+      "supportNotLocated": "未能定位支撐原文",
       "raw": "原始",
       "noRawChunk": "沒有原始區塊內容。",
       "noChunks": "此來源尚無已索引的區塊。"

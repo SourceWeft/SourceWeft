@@ -712,6 +712,25 @@ class ContentThreadStreamService {
         const { assistantMessage } = finalized;
         finalizedAssistantMessage = assistantMessage;
 
+        // Anchoring runs while the turn is finalized, so the citations the
+        // client received mid-stream carry no supporting passage yet. Send the
+        // stored ones so it can show the passage without a reload.
+        const storedRetrieval = toObjectRecord(assistantMessage.metadata)
+          ?.retrieval as
+          | { citations?: unknown; availableCitations?: unknown }
+          | undefined;
+        if (
+          Array.isArray(storedRetrieval?.citations) &&
+          storedRetrieval.citations.length > 0
+        ) {
+          yield toSseData({
+            type: "citations",
+            citations: storedRetrieval.citations,
+            availableCitations:
+              storedRetrieval.availableCitations ?? storedRetrieval.citations,
+          });
+        }
+
         yield toSseData({ type: "text-end", id: textId });
         yield toSseData({
           type: "assistant-message",

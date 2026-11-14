@@ -11,6 +11,7 @@ import { workspaceService } from "../workspace";
 import { canViewThread } from "../workspace/content-visibility";
 import { normalizeContentTitle } from "../../shared/strings";
 import { getMetadataNumber, getMetadataString } from "../sources/metadata";
+import { cleanCitationExcerpt } from "./agent/citation-registry";
 import { toObjectRecord } from "../../shared/records";
 import {
   createThreadRecord,
@@ -862,6 +863,12 @@ class ContentThreadService {
     const chunkNoSnapshot = getMetadataNumber(snapshot, "chunkNo");
     const excerptSnapshot = getMetadataString(snapshot, "excerpt");
     const contentSnapshot = getMetadataString(snapshot, "content");
+    const supportSnapshot = getMetadataString(snapshot, "support");
+    const support =
+      supportSnapshot === "strong" || supportSnapshot === "weak"
+        ? supportSnapshot
+        : undefined;
+    const hasSpan = citation.startChar !== null && citation.endChar !== null;
 
     return {
       citation: {
@@ -878,9 +885,19 @@ class ContentThreadService {
           `external:${citation.citationKey}`,
         chunkNo: chunkNoSnapshot,
         externalUri: citation.externalUri,
-        excerpt:
-          citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? "",
+        // An anchored quote is the raw passage, markup included.
+        excerpt: hasSpan
+          ? cleanCitationExcerpt(citation.quoteText ?? "")
+          : (citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? ""),
         content: contentSnapshot,
+        ...(support ? { support } : {}),
+        ...(hasSpan
+          ? {
+              startChar: citation.startChar!,
+              endChar: citation.endChar!,
+              spanText: citation.quoteText ?? undefined,
+            }
+          : {}),
       },
     };
   }

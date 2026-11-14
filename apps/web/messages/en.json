@@ -2191,6 +2191,7 @@
     "messageResponse": {
       "source": "Source",
       "citationTitle": "Citation {label}",
+      "citationUnverified": "Supporting passage not located in this source",
       "possibleEvidence": "Possible evidence",
       "untitledSource": "Untitled source",
       "moreCount": "+{count} more",
@@ -3421,6 +3422,8 @@
       "unknown": "Unknown",
       "noMarkdown": "No markdown content available.",
       "citedSource": "Cited source",
+      "supportingPassage": "Supporting passage",
+      "supportNotLocated": "Supporting passage not located",
       "raw": "Raw",
       "noRawChunk": "No raw chunk content.",
       "noChunks": "This source has no indexed chunks yet."

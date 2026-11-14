@@ -1140,6 +1140,84 @@ test("streamThreadEvents forwards citation snapshots before assistant message", 
   );
 });
 
+test("streamThreadEvents sends the stored supporting passages once the turn is finalized", async () => {
+  const citation = {
+    citation: "c1",
+    sourceId: "source-1",
+    sourceTitle: "invoice.pdf",
+    documentId: "document-1",
+    chunkId: "chunk-1",
+    chunkNo: 0,
+    score: 1,
+    excerpt: "Invoice total is 50.",
+    quoteText: "Invoice total is 50.",
+    origin: "read_file" as const,
+  };
+  const stored = [
+    {
+      ...citation,
+      support: "strong",
+      startChar: 0,
+      endChar: 20,
+      spanText: "Invoice total is 50.",
+    },
+  ];
+  const base = createTurnService({ title: null });
+  const finalized = (await base.finalizeThreadTurn({} as never)) as {
+    assistantMessage: Record<string, unknown>;
+  };
+  const turnService = {
+    ...base,
+    finalizeThreadTurn: async () => ({
+      ...finalized,
+      assistantMessage: {
+        ...finalized.assistantMessage,
+        metadata: {
+          retrieval: { citations: stored, availableCitations: stored },
+        },
+      },
+    }),
+  };
+
+  const service = new ContentThreadStreamService(
+    turnService as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield { type: "citations", citations: [citation] };
+      yield { type: "text-delta", delta: "Total is 50 [citation:c1]" };
+      yield { type: "done", outcome: { ...outcome, citations: [citation] } };
+    },
+    async () => null,
+    undefined,
+    createBillingPort(),
+  );
+
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "What is in this invoice?",
+  })) {
+    events.push(parseSseData(event));
+  }
+
+  const citationEvents = events.filter((event) => event.type === "citations");
+  assert.equal(citationEvents.length, 2);
+  const last = citationEvents[1]!;
+  assert.equal(
+    (last.citations as Array<Record<string, unknown>>)[0]?.spanText,
+    "Invoice total is 50.",
+  );
+  assert.equal((last.availableCitations as unknown[]).length, 1);
+  assert.equal(
+    events.indexOf(last) <
+      events.findIndex((event) => event.type === "assistant-message"),
+    true,
+  );
+});
+
 test("streamThreadEvents emits preflight thinking steps while preparing", async () => {
   const preflightSteps = [
     {
