@@ -5,6 +5,7 @@ import type { ProviderParseInput, ProviderParseOutcome } from "./types";
 const parsers = vi.hoisted(() => ({
   anydoc: vi.fn(),
   pdf2markdown: vi.fn(),
+  deepseek: vi.fn(),
   vision: vi.fn(),
 }));
 
@@ -21,6 +22,13 @@ vi.mock("./pdf2markdown-provider", () => ({
     supports: () => true,
     start: parsers.pdf2markdown,
   },
+}));
+vi.mock("./deepseek-ocr-provider", () => ({
+  createDeepSeekOcrProvider: () => ({
+    id: "deepseek",
+    supports: () => true,
+    start: parsers.deepseek,
+  }),
 }));
 vi.mock("./image-vision-provider", () => ({
   tryParseImageWithVision: parsers.vision,
@@ -120,6 +128,40 @@ test("AnyDoc needsOcr invokes the declared async backend and preserves task cont
     "anydoc",
   );
   assert.equal(outcome.diagnostics?.metadata?.actualTask, "ocr-task");
+});
+
+test("DOCUMENT_PARSE_OCR_PROVIDER=deepseek routes needsOcr to DeepSeek and never to pdf2markdown", async () => {
+  vi.stubEnv("DOCUMENT_PARSE_OCR_ENABLED", "true");
+  vi.stubEnv("DOCUMENT_PARSE_OCR_PROVIDER", "deepseek");
+  parsers.anydoc.mockRejectedValue(
+    Object.assign(new Error("OCR required"), { code: "needsOcr" }),
+  );
+  parsers.deepseek.mockResolvedValue(completed);
+  const { startDocumentParse } = await import("./document-parse-orchestrator");
+  const outcome = await startDocumentParse(input());
+  assert.equal(outcome.kind, "completed");
+  assert.equal(parsers.deepseek.mock.calls.length, 1);
+  assert.equal(parsers.pdf2markdown.mock.calls.length, 0);
+  assert.equal(
+    outcome.diagnostics?.metadata?.documentParseProviderResolved,
+    "deepseek",
+  );
+  assert.equal(
+    outcome.diagnostics?.metadata?.documentParseEntryEngine,
+    "anydoc",
+  );
+});
+
+test("a DeepSeek failure during OCR does not fall back to pdf2markdown", async () => {
+  vi.stubEnv("DOCUMENT_PARSE_OCR_ENABLED", "true");
+  vi.stubEnv("DOCUMENT_PARSE_OCR_PROVIDER", "deepseek");
+  parsers.anydoc.mockRejectedValue(
+    Object.assign(new Error("OCR required"), { code: "needsOcr" }),
+  );
+  parsers.deepseek.mockRejectedValue(new Error("DeepSeek OCR failed: 503"));
+  const { startDocumentParse } = await import("./document-parse-orchestrator");
+  await assert.rejects(startDocumentParse(input()), /DeepSeek OCR failed: 503/);
+  assert.equal(parsers.pdf2markdown.mock.calls.length, 0);
 });
 
 test("needsOcr cannot enable OCR through credentials or error text", async () => {

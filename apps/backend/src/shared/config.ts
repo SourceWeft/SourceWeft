@@ -625,9 +625,14 @@ export const config = {
     ocrEnabled: parseStrictBooleanEnv("DOCUMENT_PARSE_OCR_ENABLED", false),
     ocrProvider: parseDocumentOption(
       "DOCUMENT_PARSE_OCR_PROVIDER",
-      ["pdf2markdown"] as const,
+      ["pdf2markdown", "deepseek"] as const,
       "pdf2markdown",
     ),
+    // Only read when DOCUMENT_PARSE_OCR_PROVIDER=deepseek. A key alone never
+    // enables OCR; DEEPSEEK_ENABLED (the chat Provider switch) is not consulted.
+    deepseekOcr: {
+      apiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
+    },
     imageStrategy: parseDocumentOption(
       "DOCUMENT_PARSE_IMAGE_STRATEGY",
       ["vision", "ocr"] as const,
