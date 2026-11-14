@@ -174,7 +174,7 @@ export function SourceDiscoveryDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden sm:max-w-2xl">
+      <DialogContent className="flex max-h-[85vh] min-w-0 flex-col gap-3 overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("discovery.title")}</DialogTitle>
           <DialogDescription>{t("discovery.description")}</DialogDescription>
@@ -217,7 +217,7 @@ export function SourceDiscoveryDialog({
             </p>
           </form>
         ) : (
-          <div className="flex min-h-0 flex-col gap-3">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
             {queries.length > 0 ? (
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span>{t("discovery.searched")}</span>
@@ -234,7 +234,7 @@ export function SourceDiscoveryDialog({
                 {t("discovery.empty")}
               </p>
             ) : (
-              <ul className="min-h-0 flex-1 space-y-1 overflow-auto pr-1">
+              <ul className="min-h-0 min-w-0 flex-1 space-y-1 overflow-y-auto pr-1">
                 {candidates.map((item) => {
                   const outcome = outcomeOf(item.url);
                   const existing = item.existingSourceId !== null;
