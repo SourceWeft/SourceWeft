@@ -37,10 +37,9 @@ function citation(support?: "strong" | "weak"): CitationRecord {
 
 async function chip(support?: "strong" | "weak") {
   await mountWithIntl(
-    createElement(CitationAwareMessageResponse, {
-      citations: [citation(support)],
-      children: "Revenue grew [citation:c1].",
-    }),
+    <CitationAwareMessageResponse citations={[citation(support)]}>
+      {"Revenue grew [citation:c1]."}
+    </CitationAwareMessageResponse>,
   );
   const button = document.body.querySelector("button");
   console.log("HTML", document.body.innerHTML);
