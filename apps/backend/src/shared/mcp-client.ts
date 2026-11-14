@@ -1,4 +1,11 @@
-import { Client } from "@modelcontextprotocol/client";
+import {
+  Client,
+  SdkError,
+  SdkErrorCode,
+  SdkHttpError,
+  type RequestOptions,
+  type Transport,
+} from "@modelcontextprotocol/client";
 
 /**
  * An MCP client that speaks both protocol eras. `connect()` first probes the
@@ -13,6 +20,64 @@ export function createMcpClient(name: string) {
     { name, version: "1" },
     { versionNegotiation: { mode: "auto" } },
   );
+}
+
+/** The probe's 401 or 403, which `auto` negotiation treats as final. */
+function isAuthorizationRefusal(error: unknown) {
+  return (
+    SdkError.isInstance(error) &&
+    (error.code === SdkErrorCode.ClientHttpAuthentication ||
+      error.code === SdkErrorCode.ClientHttpForbidden)
+  );
+}
+
+/** A 401 or 403 from the legacy handshake, which reports it less precisely. */
+function isRefusedStatus(error: unknown) {
+  return (
+    SdkHttpError.isInstance(error) &&
+    (error.data?.status === 401 || error.data?.status === 403)
+  );
+}
+
+/**
+ * A client from `createMcpClient`, connected over a transport from
+ * `openTransport`. Some legacy servers refuse every method they do not know,
+ * `server/discover` included, with 401 or 403 while `initialize` stays open;
+ * `auto` negotiation does not fall back on a refused probe. So a 401/403 is
+ * followed by one legacy `initialize` connection on a fresh client and
+ * transport. A server that refuses that too fails with the probe's error, as
+ * it did before the fallback. `onClient` sees each client before it
+ * connects, so the caller can close it while the connection is in flight.
+ */
+export async function connectMcpClient(
+  name: string,
+  openTransport: () => Transport,
+  options?: RequestOptions,
+  onClient?: (client: Client) => void,
+): Promise<Client> {
+  const negotiated = createMcpClient(name);
+  onClient?.(negotiated);
+  let refusal: unknown;
+  try {
+    await negotiated.connect(openTransport(), options);
+    return negotiated;
+  } catch (error) {
+    await negotiated.close().catch(() => {});
+    if (!isAuthorizationRefusal(error)) throw error;
+    refusal = error;
+  }
+  const legacy = createMcpClient(name);
+  onClient?.(legacy);
+  try {
+    await legacy.connect(openTransport(), {
+      ...options,
+      prior: { kind: "legacy" },
+    });
+    return legacy;
+  } catch (error) {
+    await legacy.close().catch(() => {});
+    throw isRefusedStatus(error) ? refusal : error;
+  }
 }
 
 /**

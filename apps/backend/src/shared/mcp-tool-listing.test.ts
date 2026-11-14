@@ -17,13 +17,29 @@ type JsonRpc = { id?: number; method: string; params?: { cursor?: string } };
  * request through `answer`; `server/discover` is an unknown method to it,
  * notifications are accepted, and the optional GET stream is not offered.
  */
-function endpoint(answer: (message: JsonRpc) => unknown) {
+function endpoint(
+  answer: (message: JsonRpc) => unknown,
+  refuse: (message: JsonRpc) => number | undefined = () => undefined,
+) {
   const requests: Request[] = [];
   const fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
     const request = new Request(input as RequestInfo, init);
     requests.push(request.clone());
     if (request.method !== "POST") return new Response(null, { status: 405 });
     const message = (await request.json()) as JsonRpc;
+    const status = refuse(message);
+    if (status !== undefined) {
+      return new Response(null, {
+        status,
+        headers:
+          status === 401
+            ? {
+                "www-authenticate":
+                  'Bearer realm="OAuth", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp"',
+              }
+            : {},
+      });
+    }
     if (message.id === undefined) return new Response(null, { status: 202 });
     if (message.method === "server/discover") {
       return Response.json({
@@ -189,6 +205,83 @@ test("a malformed tool is dropped without failing the listing", async () => {
     tools.map((tool) => tool.name),
     ["ok", "loose"],
   );
+});
+
+async function postedMethods(requests: Request[]) {
+  return Promise.all(
+    requests
+      .filter((request) => request.method === "POST")
+      .map(async (request) => ((await request.json()) as JsonRpc).method),
+  );
+}
+
+for (const status of [401, 403]) {
+  test(`a probe refused with ${status} is followed by the legacy handshake`, async () => {
+    // As https://17track.usefulapi.io/mcp did on 2026-11-14: methods it does
+    // not know are refused, initialize and tools/list are open.
+    const { fetch, requests } = endpoint(
+      (message) =>
+        message.method === "initialize"
+          ? initializeResult()
+          : { tools: [{ name: "track", inputSchema: { type: "object" } }] },
+      (message) => (message.method === "server/discover" ? status : undefined),
+    );
+
+    const tools = await listMcpEndpointTools(
+      ENDPOINT,
+      "streamable_http",
+      fetch,
+    );
+
+    assert.deepEqual(
+      tools.map((tool) => tool.name),
+      ["track"],
+    );
+    assert.deepEqual(await postedMethods(requests), [
+      "server/discover",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+    ]);
+    for (const request of requests) {
+      assert.equal(request.headers.get("authorization"), null);
+    }
+  });
+
+  test(`an endpoint that refuses initialize with ${status} too still fails`, async () => {
+    const { fetch, requests } = endpoint(
+      () => ({}),
+      () => status,
+    );
+
+    await assert.rejects(
+      listMcpEndpointTools(ENDPOINT, "streamable_http", fetch),
+      (error: unknown) =>
+        (error as { code?: unknown }).code ===
+        (status === 401
+          ? "CLIENT_HTTP_AUTHENTICATION"
+          : "CLIENT_HTTP_FORBIDDEN"),
+    );
+    assert.deepEqual(await postedMethods(requests), [
+      "server/discover",
+      "initialize",
+    ]);
+  });
+}
+
+test("a probe answered with a server error does not fall back", async () => {
+  const { fetch, requests } = endpoint(
+    (message) =>
+      message.method === "initialize"
+        ? initializeResult()
+        : { tools: [{ name: "never", inputSchema: { type: "object" } }] },
+    (message) => (message.method === "server/discover" ? 503 : undefined),
+  );
+
+  await assert.rejects(
+    listMcpEndpointTools(ENDPOINT, "streamable_http", fetch),
+  );
+  assert.deepEqual(await postedMethods(requests), ["server/discover"]);
 });
 
 test("an endpoint that answers with an error fails the listing", async () => {
