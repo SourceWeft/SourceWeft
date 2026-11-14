@@ -17,6 +17,8 @@ export type NativeCapability =
 
 export type SourceWeftNativeBridge = {
   kind: NativeHostKind;
+  /** The operating system the app runs on. Absent in builds that predate it. */
+  platform?: string;
   capabilities: NativeCapability[];
   invoke: <TResult = unknown>(
     command: string,
@@ -84,6 +86,40 @@ export function getNativeBridge() {
   }
 
   return window.__SOURCEWEFT_NATIVE__;
+}
+
+/**
+ * The bridge of the app this page is shown in, whether the page is the app's
+ * own window or a same-origin frame inside it. The mobile app opens pages
+ * outside the dashboard in a sheet, which is such a frame, and the app injects
+ * the bridge into its top window only.
+ */
+export function findHostNativeBridge(
+  start: Window | undefined = typeof window === "undefined"
+    ? undefined
+    : window,
+): SourceWeftNativeBridge | undefined {
+  if (!start) {
+    return undefined;
+  }
+
+  let frame: Window = start;
+  for (let depth = 0; depth < 8; depth += 1) {
+    try {
+      const bridge = frame.__SOURCEWEFT_NATIVE__;
+      if (bridge) {
+        return bridge;
+      }
+    } catch {
+      // A cross-origin frame: nothing above it is ours to read.
+      return undefined;
+    }
+    if (frame.parent === frame) {
+      return undefined;
+    }
+    frame = frame.parent;
+  }
+  return undefined;
 }
 
 function getTauriInvoke() {

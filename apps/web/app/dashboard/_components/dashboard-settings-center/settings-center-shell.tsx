@@ -15,6 +15,7 @@ import {
 import { useDesktopSettings } from "./use-desktop-settings";
 import { LocalHostPanel } from "./local-host-panel";
 import { useBillingAvailable } from "../../../../lib/billing-edition/capabilities";
+import { usePurchasesAllowed } from "../../../../lib/native-host";
 import {
   isSettingsTabAvailable,
   resolveSettingsTab,
@@ -70,9 +71,14 @@ export function DashboardSettingsCenterModal({
 }) {
   const t = useTranslations("dashboardSettings");
   const billingAvailable = useBillingAvailable();
+  const purchasesAllowed = usePurchasesAllowed();
   const [requestedTab, setActiveTab] =
     React.useState<SettingsCenterTab>(initialTab);
-  const activeTab = resolveSettingsTab(requestedTab, billingAvailable);
+  const activeTab = resolveSettingsTab(
+    requestedTab,
+    billingAvailable,
+    purchasesAllowed,
+  );
   const [scope, setScope] = React.useState<BillingScope>(
     hasTeam ? "team" : "personal",
   );
@@ -141,7 +147,11 @@ export function DashboardSettingsCenterModal({
                 )}
                 {visibleMenuItems
                   .filter((item) =>
-                    isSettingsTabAvailable(item.key, billingAvailable),
+                    isSettingsTabAvailable(
+                      item.key,
+                      billingAvailable,
+                      purchasesAllowed,
+                    ),
                   )
                   .map((item) => {
                     const Icon = item.icon;

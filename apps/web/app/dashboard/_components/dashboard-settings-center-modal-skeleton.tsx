@@ -4,6 +4,7 @@ import { Fragment } from "react";
 import { useDesktopSettings } from "./dashboard-settings-center/use-desktop-settings";
 
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
+import { usePurchasesAllowed } from "../../../lib/native-host";
 import {
   isSettingsTabAvailable,
   resolveSettingsTab,
@@ -285,7 +286,12 @@ export function SettingsCenterPanelSkeleton({
   activeTab?: SettingsCenterTab;
 }) {
   const billingAvailable = useBillingAvailable();
-  const visibleTab = resolveSettingsTab(activeTab, billingAvailable);
+  const purchasesAllowed = usePurchasesAllowed();
+  const visibleTab = resolveSettingsTab(
+    activeTab,
+    billingAvailable,
+    purchasesAllowed,
+  );
   if (visibleTab === "team") {
     return <TeamPanelSkeleton />;
   }
@@ -311,6 +317,7 @@ export function DashboardSettingsCenterModalSkeleton({
   activeTab?: SettingsCenterTab;
 }) {
   const billingAvailable = useBillingAvailable();
+  const purchasesAllowed = usePurchasesAllowed();
   const { isDesktop, isLocalPc } = useDesktopSettings();
   const navItems: SettingsCenterTab[] = [
     "account",
@@ -348,7 +355,11 @@ export function DashboardSettingsCenterModalSkeleton({
                 )}
                 {navItems
                   .filter((item) =>
-                    isSettingsTabAvailable(item, billingAvailable),
+                    isSettingsTabAvailable(
+                      item,
+                      billingAvailable,
+                      purchasesAllowed,
+                    ),
                   )
                   .map((item) => (
                     <Fragment key={item}>
@@ -362,8 +373,11 @@ export function DashboardSettingsCenterModalSkeleton({
                         className={cx(
                           "flex h-8 items-center gap-2.5 rounded-md px-2.5",
                           item ===
-                            resolveSettingsTab(activeTab, billingAvailable) &&
-                            "bg-background shadow-sm",
+                            resolveSettingsTab(
+                              activeTab,
+                              billingAvailable,
+                              purchasesAllowed,
+                            ) && "bg-background shadow-sm",
                         )}
                         key={item}
                       >

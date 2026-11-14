@@ -49,8 +49,13 @@ struct DeepLinkPayload {
     url: String,
 }
 
-fn mobile_bridge_script() -> &'static str {
-    r#"
+/// The bridge the page finds on `window`. It names the platform so the page knows at once,
+/// without a round trip, which app it runs in: the iOS app, for one, may not sell anything.
+fn mobile_bridge_script() -> String {
+    MOBILE_BRIDGE_SCRIPT.replace("__SOURCEWEFT_PLATFORM__", std::env::consts::OS)
+}
+
+const MOBILE_BRIDGE_SCRIPT: &str = r#"
 (() => {
   if (window.__SOURCEWEFT_NATIVE__ && window.__SOURCEWEFT_MOBILE__) return;
 
@@ -79,6 +84,7 @@ fn mobile_bridge_script() -> &'static str {
 
   const nativeBridge = Object.freeze({
     kind: "mobile",
+    platform: "__SOURCEWEFT_PLATFORM__",
     capabilities: ["deepLink", "externalUrl", "hostInfo"],
     invoke,
     listen,
@@ -99,8 +105,7 @@ fn mobile_bridge_script() -> &'static str {
   });
 
 })();
-"#
-}
+"#;
 
 fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
     let mut window_config = app
@@ -371,6 +376,13 @@ mod tests {
         ] {
             assert_eq!(universal_link_target(&base, &url(link)), None, "{link}");
         }
+    }
+
+    #[test]
+    fn the_bridge_names_the_platform_it_runs_on() {
+        let script = mobile_bridge_script();
+        assert!(script.contains(&format!(r#"platform: "{}","#, std::env::consts::OS)));
+        assert!(!script.contains("__SOURCEWEFT_PLATFORM__"));
     }
 
     #[test]

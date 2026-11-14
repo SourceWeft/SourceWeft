@@ -19,6 +19,7 @@ import { DashboardPageNavigation } from "./_components/dashboard-page-navigation
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
 import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layout";
 import { authClient } from "../../lib/auth-client";
+import { AiDataConsentGate } from "./_components/ai-data-consent-gate";
 import { isEmbedMode } from "../../lib/thread-embed-params";
 import { useIsHydrated } from "../_components/auth/use-is-hydrated";
 
@@ -226,7 +227,9 @@ export function DashboardLayoutClient({
     redirecting ||
     (!hasSession && (!isPending || !hasConfirmedSession))
   ) {
-    return <DashboardShellRouteSkeleton pathname={pathname} embedMode={embedMode} />;
+    return (
+      <DashboardShellRouteSkeleton pathname={pathname} embedMode={embedMode} />
+    );
   }
 
   if (isAuxiliaryWindow) {
@@ -238,33 +241,37 @@ export function DashboardLayoutClient({
   }
 
   return (
-    <SidebarProvider className="!h-dvh !min-h-0 overflow-hidden overscroll-none">
-      <DashboardChatStateProvider>
-        <DashboardMobileNavProvider>
-          <DashboardWorkspaceLayout>
-            <ChatHubProvider key={data?.user?.id}>
-              {embedMode ? null : <DashboardSidebar />}
-              <main
-                className={
-                  embedMode
-                    ? "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
-                    : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
-                }
-              >
-                {embedMode ? (
-                  children
-                ) : (
-                  <>
-                    <DashboardPageNavigation />
-                    <DashboardMobileContent>{children}</DashboardMobileContent>
-                  </>
-                )}
-              </main>
-              {embedMode ? null : <DashboardMobileBottomNav />}
-            </ChatHubProvider>
-          </DashboardWorkspaceLayout>
-        </DashboardMobileNavProvider>
-      </DashboardChatStateProvider>
-    </SidebarProvider>
+    <AiDataConsentGate userId={data?.user?.id}>
+      <SidebarProvider className="!h-dvh !min-h-0 overflow-hidden overscroll-none">
+        <DashboardChatStateProvider>
+          <DashboardMobileNavProvider>
+            <DashboardWorkspaceLayout>
+              <ChatHubProvider key={data?.user?.id}>
+                {embedMode ? null : <DashboardSidebar />}
+                <main
+                  className={
+                    embedMode
+                      ? "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
+                      : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+                  }
+                >
+                  {embedMode ? (
+                    children
+                  ) : (
+                    <>
+                      <DashboardPageNavigation />
+                      <DashboardMobileContent>
+                        {children}
+                      </DashboardMobileContent>
+                    </>
+                  )}
+                </main>
+                {embedMode ? null : <DashboardMobileBottomNav />}
+              </ChatHubProvider>
+            </DashboardWorkspaceLayout>
+          </DashboardMobileNavProvider>
+        </DashboardChatStateProvider>
+      </SidebarProvider>
+    </AiDataConsentGate>
   );
 }

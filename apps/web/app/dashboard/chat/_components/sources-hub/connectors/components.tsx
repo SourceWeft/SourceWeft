@@ -23,6 +23,7 @@ import { useTranslations } from "next-intl";
 
 import type { ConnectorSyncBlock, SourceConnector } from "@sourceweft/sdk";
 import { useBillingAvailable } from "@/lib/billing-edition/capabilities";
+import { usePurchasesAllowed } from "@/lib/native-host";
 import {
   Alert,
   AlertDescription,
@@ -149,6 +150,7 @@ export function ConnectorSyncBlockAlert({
 }) {
   const t = useTranslations("dashboardSourcesHub");
   const billingAvailable = useBillingAvailable();
+  const purchasesAllowed = usePurchasesAllowed();
   return (
     <Alert
       className={cn(
@@ -159,7 +161,9 @@ export function ConnectorSyncBlockAlert({
       <CirclePause className="size-4" />
       <AlertDescription className="text-inherit">
         <span>{formatConnectorSyncBlock(block, t)}</span>
-        {block.reason === "PAGES_LIMIT_EXCEEDED" && billingAvailable ? (
+        {block.reason === "PAGES_LIMIT_EXCEEDED" &&
+        billingAvailable &&
+        purchasesAllowed ? (
           <Link
             className="font-medium underline underline-offset-2"
             href="/dashboard/billing"

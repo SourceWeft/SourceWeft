@@ -4,6 +4,7 @@ import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
+import { usePurchasesAllowed } from "../../../lib/native-host";
 import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
 import { useAuthenticate } from "@better-auth-ui/react";
 import {
@@ -66,6 +67,7 @@ function getInitials(name?: string, email?: string) {
 export function DashboardMobileMe() {
   const t = useTranslations("dashboardNav");
   const billingAvailable = useBillingAvailable();
+  const purchasesAllowed = usePurchasesAllowed();
   const authState = useAuthenticate(authClient);
   const sessionState = authState.data as
     | {
@@ -169,7 +171,11 @@ export function DashboardMobileMe() {
 
             {panelItems
               .filter((item) =>
-                isSettingsTabAvailable(item.key, billingAvailable),
+                isSettingsTabAvailable(
+                  item.key,
+                  billingAvailable,
+                  purchasesAllowed,
+                ),
               )
               .map((item) => {
                 const Icon = item.icon;

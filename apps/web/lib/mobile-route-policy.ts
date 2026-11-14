@@ -1,9 +1,13 @@
 "use client";
 
+import { stripLocalePrefix } from "@sourceweft/i18n/resolve";
+
 export type MobileRouteAction =
   | { type: "allow" }
   | { type: "sheet"; title: string; url: URL }
   | { type: "external"; url: URL }
+  /** The link is not followed at all. */
+  | { type: "blocked" }
   | { type: "ignore" };
 
 export type MobileRouteIntent = {
@@ -36,6 +40,15 @@ export function isPrimaryMobileRoute(pathname: string) {
   );
 }
 
+/**
+ * Pages whose purpose is selling a plan. Where purchases are not allowed (the
+ * iOS app) they are never opened, not even in a sheet.
+ */
+export function isPurchaseRoute(pathname: string) {
+  const { pathname: bare } = stripLocalePrefix(pathname);
+  return bare === "/pricing" || bare.startsWith("/pricing/");
+}
+
 function isHashOnlyNavigation(url: URL, currentUrl: URL) {
   return (
     url.origin === currentUrl.origin &&
@@ -49,10 +62,10 @@ function isHashOnlyNavigation(url: URL, currentUrl: URL) {
 function isModifiedClick(intent: MobileRouteIntent) {
   return Boolean(
     intent.altKey ||
-      intent.ctrlKey ||
-      intent.metaKey ||
-      intent.shiftKey ||
-      (typeof intent.button === "number" && intent.button !== 0),
+    intent.ctrlKey ||
+    intent.metaKey ||
+    intent.shiftKey ||
+    (typeof intent.button === "number" && intent.button !== 0),
   );
 }
 
@@ -99,6 +112,7 @@ export function getMobileSheetTitle(pathname: string) {
 
 export function resolveMobileRouteAction(
   intent: MobileRouteIntent,
+  options: { purchasesAllowed?: boolean } = {},
 ): MobileRouteAction {
   if (!intent.href || intent.download || isModifiedClick(intent)) {
     return { type: "ignore" };
@@ -127,6 +141,10 @@ export function resolveMobileRouteAction(
 
   if (isPrimaryMobileRoute(url.pathname)) {
     return { type: "allow" };
+  }
+
+  if (options.purchasesAllowed === false && isPurchaseRoute(url.pathname)) {
+    return { type: "blocked" };
   }
 
   return {
