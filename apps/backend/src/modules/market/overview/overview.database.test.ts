@@ -867,12 +867,55 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
       sha256: createSha256(edited),
     });
     expect(await tick()).toMatchObject({ queued: 1 });
-    expect(state.jobs[0]!.data).toMatchObject({ reason: "regenerate" });
+    expect(state.jobs[0]!.data).toMatchObject({ reason: "refresh" });
     await runJob(state.jobs[0]!);
     const after = (await overviewRows(genesis.versionId))[0]!.inputSha256;
     expect(after).not.toBe(before);
     expect(await tick()).toMatchObject({ queued: 0 });
     expect(state.calls).toHaveLength(2);
+  });
+
+  test("a stale overview whose new input another version already has is copied, not regenerated", async () => {
+    const first = await seed(genesis402RegistryServer);
+    await readmeFetched(first.versionId, genesisReadme);
+    expect(await tick()).toMatchObject({ queued: 1 });
+    expect(await runJob(state.jobs[0]!)).toMatchObject({
+      status: "generated",
+    });
+
+    // A new version, first published with a different README.
+    const second = await seed(genesis402RegistryServer, { version: "2.0.0" });
+    const edited = `${genesisReadme.markdown}\n\n## Limits\n\nEvery paid call is capped by GENESIS402_MAX_USD.\n`;
+    await readmeFetched(second.versionId, {
+      markdown: edited,
+      sha256: createSha256(edited),
+    });
+    state.jobs.length = 0;
+    expect(await tick()).toMatchObject({ queued: 1 });
+    state.answers.push(genesis402ModelAnswer({ summaryPrefix: "Edited: " }));
+    expect(await runJob(state.jobs[0]!)).toMatchObject({
+      status: "generated",
+    });
+    expect(state.calls).toHaveLength(2);
+
+    // Its README goes back to what the first version was described from:
+    // the scheduler refreshes it, and the first version's overview is copied.
+    await readmeFetched(second.versionId, genesisReadme);
+    state.jobs.length = 0;
+    expect(await tick()).toMatchObject({ queued: 1 });
+    expect(state.jobs[0]!.data).toMatchObject({
+      mcpServerVersionId: second.versionId,
+      reason: "refresh",
+    });
+    expect(await runJob(state.jobs[0]!)).toMatchObject({ status: "copied" });
+    expect(state.calls).toHaveLength(2);
+    const summaryOf = async (versionId: string) =>
+      (await overviewRows(versionId)).find((row) => row.locale === "en")
+        ?.overview.summary;
+    expect(await summaryOf(second.versionId)).toBe(
+      await summaryOf(first.versionId),
+    );
+    expect(await tick()).toMatchObject({ queued: 0 });
   });
 
   test("a README refresh that leaves the overview's excerpt as it was does not make it stale", async () => {

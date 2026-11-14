@@ -159,7 +159,7 @@ describe("the MCP overview tick", () => {
     assert.deepEqual(tick.enqueued, []);
   });
 
-  test("queues new versions as scheduled and analysed ones as forced, and moves the window", async () => {
+  test("queues new versions as scheduled and analysed ones as a refresh, and moves the window", async () => {
     const tick = deps();
     const state = { after: "" };
     assert.deepEqual(await enqueueMcpOverviews(tick, state), {
@@ -168,7 +168,7 @@ describe("the MCP overview tick", () => {
     });
     assert.deepEqual(tick.enqueued, [
       { mcpServerVersionId: "n1", mcpServerId: "s-n1", reason: "scheduled" },
-      { mcpServerVersionId: "a1", mcpServerId: "s-a1", reason: "regenerate" },
+      { mcpServerVersionId: "a1", mcpServerId: "s-a1", reason: "refresh" },
     ]);
     assert.equal(state.after, "a1");
   });

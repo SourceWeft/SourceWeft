@@ -94,10 +94,16 @@ export type InterruptedOverview = {
  */
 export interface OverviewStore<TSubject, TClassification> {
   read(versionId: string): Promise<OverviewAnalysisState | null>;
-  /** Reserve a request before enqueueing; a forced one fences older workers. */
+  /**
+   * Reserve a request before enqueueing. Without `replace` (default:
+   * `force`) an existing analysis is kept and null is returned; a replacing
+   * request takes its place and fences older workers. `force` is stored on
+   * the request and makes generation skip the result cache.
+   */
   request(
     versionId: string,
     force: boolean,
+    replace?: boolean,
   ): Promise<OverviewAnalysisState | null>;
   /** Mark the request running; null when it is stale or finished. */
   claim(

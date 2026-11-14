@@ -114,7 +114,7 @@ test("each request gets its own deduplicating job id with bounded retries", asyn
   };
   await jobs.enqueue(payload);
   await jobs.enqueue(payload);
-  expect(store.request).toHaveBeenCalledWith("v", true);
+  expect(store.request).toHaveBeenCalledWith("v", true, true);
   expect(queue.enqueue.mock.calls.map((call) => call[2].jobId)).toEqual([
     "thing-overview_v_one",
     "thing-overview_v_two",
@@ -176,6 +176,35 @@ test("a queue failure is recorded on the request, for good", async () => {
     expect.any(String),
     false,
   );
+});
+
+test("a refresh replaces the request without skipping the result cache", async () => {
+  store.request.mockResolvedValue({
+    requestId: "one",
+    status: "pending",
+    force: false,
+  });
+  for (const reason of ["scheduled", "refresh", "regenerate"] as const) {
+    await jobs.enqueue({ thingVersionId: "v", thingId: "t", reason });
+  }
+  expect(store.request.mock.calls).toEqual([
+    ["v", false, false],
+    ["v", false, true],
+    ["v", true, true],
+  ]);
+
+  // A job queued without a request reserves the same way when it runs.
+  store.request.mockClear();
+  const run = vi.fn(async (_input: { force: boolean }) => ({
+    status: "generated" as const,
+    model: "m",
+  }));
+  await jobs.process(
+    job({ thingVersionId: "v", thingId: "t", reason: "refresh" }),
+    run,
+  );
+  expect(store.request).toHaveBeenCalledWith("v", false, true);
+  expect(run.mock.calls[0]![0]).toMatchObject({ force: false });
 });
 
 test("recovery re-queues an interrupted request under its own id; a failed job fails it", async () => {
@@ -297,7 +326,7 @@ test("a job without a request reserves one and records it on the job", async () 
     reason: "scheduled",
   });
   await jobs.process(queued, run);
-  expect(store.request).toHaveBeenCalledWith("v", false);
+  expect(store.request).toHaveBeenCalledWith("v", false, false);
   expect(queued.updateData).toHaveBeenCalledWith(
     expect.objectContaining({ requestId: "fresh" }),
   );

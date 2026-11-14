@@ -106,8 +106,10 @@ const defaultFindDeps: FindMcpOverviewCandidatesDeps = {
  *   version a candidate on the next tick).
  * - Analysed, from one window of a rotating check: a published overview
  *   whose input fingerprint is no longer the version's, or a failure worth
- *   another try (`needsMcpOverviewRetry`). These are forced: the request that
- *   produced the current state has to be replaced.
+ *   another try (`needsMcpOverviewRetry`). These are queued as a `refresh`:
+ *   the request that produced the current state is replaced, but an input
+ *   another version already has an overview for is copied from it rather
+ *   than sent to the model again.
  */
 export async function findMcpOverviewCandidates(
   input: {
@@ -206,7 +208,7 @@ export async function enqueueMcpOverviews(
             mcpServerVersionId: candidate.versionId,
             mcpServerId: candidate.serverId,
             reason: candidate.attempted
-              ? ("regenerate" as const)
+              ? ("refresh" as const)
               : ("scheduled" as const),
           },
         }));

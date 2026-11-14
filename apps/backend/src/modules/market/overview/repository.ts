@@ -203,8 +203,8 @@ export const mcpOverviewStore: OverviewStore<
   McpAnalysisClassification
 > = {
   read: (versionId) => mcpOverviewRepository.read(versionId),
-  request: (versionId, force) =>
-    mcpOverviewRepository.request(versionId, force),
+  request: (versionId, force, replace) =>
+    mcpOverviewRepository.request(versionId, force, replace),
   claim: (versionId, requestId) =>
     mcpOverviewRepository.claim(versionId, requestId),
   fail: (versionId, requestId, error, retry) =>

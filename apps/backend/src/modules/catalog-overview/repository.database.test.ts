@@ -230,8 +230,11 @@ describe("catalog overview repository (real PostgreSQL)", () => {
       status: "pending",
       error: null,
     });
-    // A request is reserved again only when forced.
+    // A request is reserved again only when forced or replacing.
     expect(await repo.request(f.versionId, false)).toBeNull();
+    const refresh = await repo.request(f.versionId, false, true);
+    expect(refresh).toMatchObject({ status: "pending", force: false });
+    expect(refresh!.requestId).not.toBe(newer!.requestId);
   });
 
   test("an ineligible version is failed under lock and nothing is written", async () => {
