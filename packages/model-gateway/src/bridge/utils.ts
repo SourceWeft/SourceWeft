@@ -566,6 +566,7 @@ function createObservedLangChainChatModel(input: {
           }),
         responseMetadata,
         responseHeaders: responseCapture.headers,
+        capturedUsage: responseCapture.usage,
       },
     });
     observation.traceId = generation.start.traceId;
@@ -764,6 +765,7 @@ async function* observeStream(input: {
             }),
           responseMetadata,
           responseHeaders: input.responseCapture.headers,
+          capturedUsage: input.responseCapture.usage,
         },
       }),
     );

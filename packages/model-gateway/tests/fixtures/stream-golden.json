@@ -1146,7 +1146,8 @@
           "usage": {
             "inputTokens": 12,
             "outputTokens": 7,
-            "totalTokens": 19
+            "totalTokens": 19,
+            "reasoningTokens": 3
           },
           "reasoningText": "Let me think.",
           "output": {
@@ -2073,7 +2074,8 @@
           "usage": {
             "inputTokens": 12,
             "outputTokens": 7,
-            "totalTokens": 19
+            "totalTokens": 19,
+            "reasoningTokens": 3
           },
           "output": {
             "finishReason": "tool_use",
@@ -2718,7 +2720,8 @@
           "usage": {
             "inputTokens": 12,
             "outputTokens": 7,
-            "totalTokens": 19
+            "totalTokens": 19,
+            "reasoningTokens": 3
           },
           "output": {
             "finishReason": "stop",

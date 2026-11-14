@@ -156,7 +156,8 @@ export function normalizeModelCallObservation(input: {
   context: Omit<ProviderResponseContext, "rawUsage">;
   modelAlias: string;
 }): ModelCallObservation {
-  const rawUsage = extractRawUsage(input.context.rawResponse);
+  const rawUsage =
+    extractRawUsage(input.context.rawResponse) ?? input.context.capturedUsage;
   const protocolUsage =
     normalizeOpenAICompatibleUsage(rawUsage) ??
     normalizedSdkUsage(input.context.sdkUsage);
