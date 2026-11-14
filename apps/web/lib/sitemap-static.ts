@@ -111,12 +111,17 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.3,
       url: `${SITE_URL}/terms`,
     },
-    {
-      alternates: sitemapLocaleAlternates("/blog"),
-      changeFrequency: "weekly",
-      priority: 0.6,
-      url: `${SITE_URL}/blog`,
-    },
+    // An empty listing is a thin page; submit /blog once it has articles.
+    ...(blogPosts.length > 0
+      ? [
+          {
+            alternates: sitemapLocaleAlternates("/blog"),
+            changeFrequency: "weekly" as const,
+            priority: 0.6,
+            url: `${SITE_URL}/blog`,
+          },
+        ]
+      : []),
     {
       alternates: sitemapLocaleAlternates("/mcp"),
       changeFrequency: "daily",
