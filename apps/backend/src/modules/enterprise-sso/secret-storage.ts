@@ -3,6 +3,7 @@ import type {
   DBTransactionAdapter,
   Where,
 } from "better-auth";
+import { parseSecretPayload } from "../../shared/secrets";
 import { decryptTeamSecret, encryptTeamSecret } from "../../shared/team-secrets";
 
 /**
@@ -30,6 +31,10 @@ export const SEALED_SECRET_PREFIX = "swenc:";
 
 const SSO_PROVIDER_MODEL = "ssoProvider";
 
+// team-secrets seals with its `v2` envelope payload (`encryptTeamSecret`), so a
+// sealed clientSecret is `swenc:` + a well-formed `v2:iv:tag:ct` payload.
+const TEAM_SECRET_ENVELOPE_PREFIX = "v2";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -38,6 +43,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function clientSecretOf(config: Record<string, unknown>): string | null {
   const secret = config.clientSecret;
   return typeof secret === "string" && secret.length > 0 ? secret : null;
+}
+
+/**
+ * Whether a clientSecret value is one we actually sealed: the `swenc:` prefix
+ * followed by a structurally valid team-secrets envelope payload. A plaintext
+ * secret that merely starts with `swenc:` (e.g. `"swenc:not-a-real-payload"`)
+ * fails the payload parse and is therefore treated as plaintext, so it gets
+ * sealed rather than mistaken for existing ciphertext.
+ */
+function isSealedClientSecret(value: string): boolean {
+  if (!value.startsWith(SEALED_SECRET_PREFIX)) {
+    return false;
+  }
+  try {
+    parseSecretPayload(
+      value.slice(SEALED_SECRET_PREFIX.length),
+      TEAM_SECRET_ENVELOPE_PREFIX,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Drop the `clientSecret` field from an OIDC config JSON string, if present. */
+function stripOidcClientSecret(oidcConfigJson: string): string {
+  const parsed = JSON.parse(oidcConfigJson) as unknown;
+  if (!isRecord(parsed) || !("clientSecret" in parsed)) {
+    return oidcConfigJson;
+  }
+  const { clientSecret: _clientSecret, ...rest } = parsed;
+  return JSON.stringify(rest);
 }
 
 /**
@@ -58,7 +95,7 @@ export async function sealOidcConfig(
     return oidcConfigJson;
   }
   const clientSecret = clientSecretOf(parsed);
-  if (!clientSecret || clientSecret.startsWith(SEALED_SECRET_PREFIX)) {
+  if (!clientSecret || isSealedClientSecret(clientSecret)) {
     return oidcConfigJson;
   }
   const sealed = `${SEALED_SECRET_PREFIX}${await encryptTeamSecret(
@@ -87,10 +124,7 @@ export async function openOidcConfig(
     return oidcConfigJson;
   }
   const clientSecret = parsed.clientSecret;
-  if (
-    typeof clientSecret !== "string" ||
-    !clientSecret.startsWith(SEALED_SECRET_PREFIX)
-  ) {
+  if (typeof clientSecret !== "string" || !isSealedClientSecret(clientSecret)) {
     return oidcConfigJson;
   }
   const opened = await decryptTeamSecret(
@@ -115,7 +149,7 @@ function hasUnsealedSecret(oidcConfigJson: unknown): boolean {
     return false;
   }
   const clientSecret = clientSecretOf(parsed);
-  return Boolean(clientSecret && !clientSecret.startsWith(SEALED_SECRET_PREFIX));
+  return Boolean(clientSecret && !isSealedClientSecret(clientSecret));
 }
 
 type AdapterRow = Record<string, unknown>;
@@ -185,21 +219,34 @@ function wrapAdapter<T extends DBTransactionAdapter>(adapter: T): T {
             data: AdapterRow;
             select?: string[];
           }) => {
-            if (
-              args.model !== SSO_PROVIDER_MODEL ||
-              typeof args.data.oidcConfig !== "string" ||
-              !args.data.oidcConfig
-            ) {
+            if (args.model !== SSO_PROVIDER_MODEL) {
               return base.create(args);
             }
-            const oidcConfig = await sealOidcConfig(
-              args.data.oidcConfig,
-              organizationIdOf(args.data),
-            );
-            return base.create({
-              ...args,
-              data: { ...args.data, oidcConfig },
-            });
+            let data = args.data;
+            if (typeof data.oidcConfig === "string" && data.oidcConfig) {
+              data = {
+                ...data,
+                oidcConfig: await sealOidcConfig(
+                  data.oidcConfig,
+                  organizationIdOf(data),
+                ),
+              };
+            }
+            const created = await base.create({ ...args, data });
+            // The create return surfaces only in the register HTTP response (the
+            // plugin reads the stored secret back via findOne, never from this
+            // return), and the client secret must never be returned by the API —
+            // so drop it from the echoed row.
+            if (
+              typeof created.oidcConfig === "string" &&
+              created.oidcConfig
+            ) {
+              return {
+                ...created,
+                oidcConfig: stripOidcClientSecret(created.oidcConfig),
+              };
+            }
+            return created;
           };
         case "update":
           return async (args: {

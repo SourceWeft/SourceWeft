@@ -211,6 +211,63 @@ test("get and list responses expose neither the plaintext secret nor the ciphert
   );
 }, 60_000);
 
+test("register and update responses never include the client secret", async () => {
+  const organizationId = await createOrganization();
+  const providerId = `oidc-secret-${randomUUID()}`;
+
+  const registerResponse = await jsonRequest("/sso/register", {
+    providerId,
+    issuer: "https://idp.example.com",
+    domain: `${randomUUID().slice(0, 8)}.example.com`,
+    organizationId,
+    oidcConfig: {
+      clientId: "client-123",
+      clientSecret: PLAIN_SECRET,
+      tokenEndpointAuthentication: "client_secret_basic",
+      skipDiscovery: true,
+      scopes: ["openid", "email"],
+      ...oidcEndpoints(),
+    },
+  });
+  assert.equal(
+    registerResponse.status,
+    200,
+    await registerResponse.clone().text(),
+  );
+  const registerText = await registerResponse.clone().text();
+  assert.ok(!registerText.includes(PLAIN_SECRET), "register leaked plaintext");
+  assert.ok(
+    !registerText.includes(secretStorage.SEALED_SECRET_PREFIX),
+    "register leaked ciphertext",
+  );
+  const registerBody = (await registerResponse.json()) as {
+    oidcConfig?: Record<string, unknown>;
+  };
+  assert.ok(
+    registerBody.oidcConfig && !("clientSecret" in registerBody.oidcConfig),
+    "register oidcConfig must have no clientSecret key",
+  );
+
+  const updateResponse = await jsonRequest("/sso/update-provider", {
+    providerId,
+    oidcConfig: { scopes: ["openid"] },
+  });
+  assert.equal(updateResponse.status, 200, await updateResponse.clone().text());
+  const updateText = await updateResponse.clone().text();
+  assert.ok(!updateText.includes(PLAIN_SECRET), "update leaked plaintext");
+  assert.ok(
+    !updateText.includes(secretStorage.SEALED_SECRET_PREFIX),
+    "update leaked ciphertext",
+  );
+  const updateBody = (await updateResponse.json()) as {
+    oidcConfig?: Record<string, unknown>;
+  };
+  assert.ok(
+    updateBody.oidcConfig && !("clientSecret" in updateBody.oidcConfig),
+    "update oidcConfig must have no clientSecret key",
+  );
+}, 60_000);
+
 test("updating only scopes keeps the secret sealed and decryptable (Review Focus 5)", async () => {
   const organizationId = await createOrganization();
   const providerId = await registerProvider(organizationId, PLAIN_SECRET);
