@@ -199,6 +199,10 @@ async function renderBlock(block: NotionBlock, context: RenderContext) {
     };
   }
 
+  if (block.type === "table") {
+    return renderTable(block);
+  }
+
   if (block.type === "toggle") {
     const children = await renderChildBlocks(block, context);
     return {
@@ -213,6 +217,68 @@ async function renderBlock(block: NotionBlock, context: RenderContext) {
   }
 
   return { html: "", text: "" };
+}
+
+type TablePayload = {
+  has_column_header?: boolean;
+  has_row_header?: boolean;
+};
+
+type TableRowPayload = { cells?: NotionRichText[][] };
+
+/**
+ * A Notion table is a `table` block whose children are `table_row` blocks, each
+ * holding one rich-text array per cell. The wrapper lets a wide table scroll
+ * sideways on a narrow screen instead of widening the article.
+ */
+async function renderTable(block: NotionBlock) {
+  const table = (block.table ?? {}) as TablePayload;
+  const rows = (block.has_children ? await listBlockChildren(block.id) : [])
+    .filter((row) => row.type === "table_row")
+    .map((row) => ((row.table_row ?? {}) as TableRowPayload).cells ?? []);
+  if (rows.length === 0) {
+    return { html: "", text: "" };
+  }
+
+  const renderRow = (cells: NotionRichText[][], header: boolean) =>
+    `<tr>${cells
+      .map((cell, column) => {
+        const content = renderRichText(cell);
+        if (header) {
+          return `<th scope="col">${content}</th>`;
+        }
+        return table.has_row_header && column === 0
+          ? `<th scope="row">${content}</th>`
+          : `<td>${content}</td>`;
+      })
+      .join("")}</tr>`;
+
+  const [first, ...rest] = rows;
+  const headRows = table.has_column_header && first ? [first] : [];
+  const bodyRows = table.has_column_header ? rest : rows;
+  const head =
+    headRows.length > 0
+      ? `<thead>${headRows.map((cells) => renderRow(cells, true)).join("")}</thead>`
+      : "";
+  const body =
+    bodyRows.length > 0
+      ? `<tbody>${bodyRows.map((cells) => renderRow(cells, false)).join("")}</tbody>`
+      : "";
+
+  return {
+    html: `<div class="blog-table"><table>${head}${body}</table></div>`,
+    text: compactText(
+      rows
+        .map((cells) =>
+          cells
+            .map((cell) => richTextToPlainText(cell).trim())
+            .filter(Boolean)
+            .join(" | "),
+        )
+        .filter(Boolean)
+        .join("\n"),
+    ),
+  };
 }
 
 async function renderListItem(block: NotionBlock, context: RenderContext) {
