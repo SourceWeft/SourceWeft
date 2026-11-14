@@ -37,6 +37,9 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.94.1
       CARGO_BUILD_JOBS: 2
       CARGO_TERM_COLOR: never
+      # Tauri refuses to configure an iOS build without a team, even for the
+      # simulator. The team ID is public, not a credential.
+      APPLE_DEVELOPMENT_TEAM: PBML833M58
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
