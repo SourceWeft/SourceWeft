@@ -7,6 +7,12 @@ import type { UploadedBlogAsset } from "./public-storage";
 export type BlogPostStatus = "draft" | "published" | "archived";
 export type BlogAssetKind = "cover" | "og_image" | "content_image" | "file";
 
+/**
+ * `metadata_json.source` on a row written from a Markdown file. Rows without it
+ * come from Notion.
+ */
+export const BLOG_SOURCE_MARKDOWN = "markdown";
+
 export type BlogPostUpsertInput = {
   id: string;
   articleId: string;
@@ -262,13 +268,22 @@ export async function listBlogPostIdentities(input: {
       id: blogPosts.id,
       articleId: blogPosts.articleId,
       locale: blogPosts.locale,
+      metadataJson: blogPosts.metadataJson,
     })
     .from(blogPosts);
 
   const rows =
     conditions.length > 0 ? await query.where(and(...conditions)) : await query;
 
-  return rows;
+  return rows.map((row) => ({
+    id: row.id,
+    articleId: row.articleId,
+    locale: row.locale,
+    source:
+      row.metadataJson?.source === BLOG_SOURCE_MARKDOWN
+        ? ("markdown" as const)
+        : ("notion" as const),
+  }));
 }
 
 export async function pruneBlogAssets(input: {
