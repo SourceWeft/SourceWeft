@@ -164,3 +164,18 @@ test("/download is localized: the bare path rewrites onto /en and /en/download c
     "http://localhost:3000/download",
   );
 });
+
+test("/pricing is localized: the bare path rewrites onto /en and /en/pricing canonicalizes", () => {
+  const bare = proxy(req("/pricing"));
+  assert.equal(bare.status, 200);
+  assert.equal(
+    bare.headers.get("x-middleware-rewrite"),
+    "http://localhost:3000/en/pricing",
+  );
+  const prefixed = proxy(req("/en/pricing"));
+  assert.equal(prefixed.status, 308);
+  assert.equal(
+    prefixed.headers.get("location"),
+    "http://localhost:3000/pricing",
+  );
+});
