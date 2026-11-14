@@ -10,6 +10,7 @@ import { DeepInfraEmbeddingsAdapter } from "./deepinfra-embeddings";
 import { DeepInfraImagesGenerationTransport } from "./deepinfra-images";
 import { DeepInfraRerankTransport } from "./deepinfra-rerank";
 import { DeepInfraTtsTransport } from "./deepinfra-tts";
+import { DeepSeekTtsTransport } from "./deepseek-tts";
 import { DeepSeekChatAdapter } from "./deepseek-chat";
 import { GeminiEmbeddingsAdapter } from "./gemini-embeddings";
 import { GeminiChatAdapter } from "./gemini-chat";
@@ -53,6 +54,7 @@ const deepInfraEmbeddings = new DeepInfraEmbeddingsAdapter();
 const deepInfraRerank = new DeepInfraRerankTransport();
 const deepInfraAsr = new DeepInfraAsrTransport();
 const deepInfraTts = new DeepInfraTtsTransport();
+const deepSeekTts = new DeepSeekTtsTransport();
 const siliconflowCNChat = new SiliconflowCNChatAdapter();
 const siliconflowCNEmbeddings = new SiliconflowCNEmbeddingsAdapter();
 const siliconflowCNRerank = new SiliconflowCNRerankTransport();
@@ -102,6 +104,7 @@ const ttsTransports = new Map<ProviderKind, TtsTransport>([
   ["openai", openAICompatibleTts],
   ["openrouter", openRouterTts],
   ["deepinfra", deepInfraTts],
+  ["deepseek", deepSeekTts],
 ]);
 
 const imageGenerationTransports = new Map<
