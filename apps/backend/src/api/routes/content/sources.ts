@@ -13,6 +13,10 @@ import {
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";
 import {
+  getSourceGuide,
+  requestManualGuide,
+} from "../../../modules/sources/guide-service";
+import {
   contentSourceService,
   sourceIndexingService,
   sourceParsingService,
@@ -301,6 +305,36 @@ export function registerSourceRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/sources/:id/guide", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const guide = await getSourceGuide({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, { guide });
+  });
+
+  app.post("/sources/:id/guide", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const guide = await requestManualGuide({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, { guide });
   });
 
   app.get("/sources/:id/documents/:documentId", async (c) => {

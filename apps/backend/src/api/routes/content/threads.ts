@@ -33,6 +33,7 @@ import type {
   ResumeThreadInput,
   StreamThreadEventInput,
 } from "../../../modules/threads";
+import { saveAnswerAsNote } from "../../../modules/notes";
 import { THREAD_TITLE_GENERATE_JOB } from "../../../modules/content/queue";
 import { presentJobState } from "../../../shared/job-status";
 import { jobsQueue } from "../../../shared/queue";
@@ -536,6 +537,21 @@ export function registerThreadRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       messageId: requireRouteParam(c, "messageId"),
       rank,
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/messages/:messageId/note", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await saveAnswerAsNote({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      messageId: requireRouteParam(c, "messageId"),
       userId: getSessionUserId(session),
     });
 

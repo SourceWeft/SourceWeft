@@ -9,6 +9,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { emptyJsonObject } from "./shared";
 import { workspaces } from "./identity-workspace";
@@ -29,6 +30,10 @@ export const notes = pgTable(
       onDelete: "set null",
     }),
     sourceMessageId: text("source_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    /** The `note` source this note is indexed as, once saved. */
+    sourceId: text("source_id").references(() => sources.id, {
       onDelete: "set null",
     }),
     noteType: text("note_type").$type<NoteType>().notNull().default("manual"),
@@ -61,6 +66,9 @@ export const notes = pgTable(
       table.workspaceId,
       desc(table.updatedAt),
     ),
+    uniqueIndex("notes_source_message_uq")
+      .on(table.sourceMessageId)
+      .where(sql`${table.noteType} = 'saved_response'`),
     index("notes_thread_updated_idx").on(table.threadId, desc(table.updatedAt)),
   ],
 );

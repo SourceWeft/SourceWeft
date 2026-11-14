@@ -35,6 +35,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
 import { Preview } from "@sourceweft/preview/react";
+import { SourceGuideCard } from "./source-guide-card";
 import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./source-types";
 
@@ -477,6 +478,10 @@ export function SourcePreviewPanel({
             </div>
           </div>
         </DialogHeader>
+
+        {!citation && source && workspaceId && detail ? (
+          <SourceGuideCard sourceId={source.id} workspaceId={workspaceId} />
+        ) : null}
 
         {isExternalCitation && citation ? (
           <ScrollArea className="min-h-0 flex-1">

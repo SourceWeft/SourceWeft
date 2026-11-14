@@ -2253,6 +2253,12 @@
       "messageFailed": "訊息傳送失敗",
       "modelError": "模型錯誤",
       "toastCopied": "訊息已複製。",
+      "saveAsNote": "儲存為筆記",
+      "noteSavedLabel": "已儲存為筆記",
+      "noteSaved": "已儲存為筆記：{title}",
+      "noteAlreadySaved": "這條回答已儲存為筆記。",
+      "noteSaveFailed": "無法將回答儲存為筆記。",
+      "noteSaveQuota": "入庫頁數不足，無法儲存此筆記。",
       "toastCopyFailed": "無法複製該訊息。",
       "loadEarlier": "載入更早的訊息",
       "olderHidden": "已隱藏 {count} 組較早的訊息，以保持該長對話的回應速度。",
@@ -3383,6 +3389,28 @@
         "syncRunId": "關聯同步",
         "triggerType": "觸發方式"
       }
+    },
+    "sourceGuide": {
+      "title": "指南",
+      "none": "還沒有指南。",
+      "generate": "產生指南",
+      "generating": "正在產生指南…",
+      "updating": "更新中…",
+      "failed": "無法產生指南。",
+      "retry": "重試",
+      "emptySource": "該來源沒有可概括的文字。",
+      "quota": "已暫停：點數不足，無法產生此指南。",
+      "noPayer": "沒有可為此指南付費的帳戶。點選產生將使用你自己的點數。",
+      "topics": "主要主題",
+      "questions": "建議問題",
+      "copyQuestion": "複製問題",
+      "questionCopied": "已複製問題。",
+      "questionCopyFailed": "無法複製問題。",
+      "stale": "來源在產生指南後已發生變化。",
+      "regenerate": "重新產生",
+      "requestFailed": "無法開始產生指南。",
+      "collapse": "收起指南",
+      "expand": "展開指南"
     },
     "sourcePreview": {
       "mode": {

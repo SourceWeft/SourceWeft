@@ -1034,3 +1034,34 @@ export async function isOrganizationMember(input: {
   const membership = await findOrganizationMembership(input);
   return Boolean(membership);
 }
+
+export async function findWorkspaceCreatorUserId(input: {
+  workspaceId: string;
+  organizationId: string;
+}) {
+  const [row] = await db
+    .select({ createdBy: workspaces.createdBy })
+    .from(workspaces)
+    .where(
+      and(
+        eq(workspaces.id, input.workspaceId),
+        eq(workspaces.organizationId, input.organizationId),
+      ),
+    )
+    .limit(1);
+  return row?.createdBy ?? null;
+}
+
+/** The earliest-joined member holding the owner role, or null. */
+export async function findOrganizationOwnerUserId(organizationId: string) {
+  const members = await listOrganizationMemberships(organizationId);
+  const owners = members
+    .filter((member) =>
+      member.role
+        .split(",")
+        .map((part) => part.trim())
+        .includes("owner"),
+    )
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return owners[0]?.userId ?? null;
+}

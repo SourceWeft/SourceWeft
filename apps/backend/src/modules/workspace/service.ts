@@ -8,6 +8,8 @@ import {
   ensureUserWorkspaceInOrganizationRecord,
   findOrganizationById,
   findOrganizationMembership,
+  findOrganizationOwnerUserId,
+  findWorkspaceCreatorUserId,
   findPersonalOrganizationMembershipByUser,
   findWorkspaceByIdForMember,
   findWorkspaceByIdInOrganization,
@@ -635,6 +637,28 @@ export class WorkspaceService {
     userId: string;
   }) {
     return findOrganizationMembership(input);
+  }
+
+  /**
+   * The person a system-initiated charge in this workspace belongs to: the
+   * workspace's creator while they are still a member of the owning team,
+   * otherwise a team owner. Null when neither exists.
+   */
+  async resolveResponsibleUserId(input: {
+    workspaceId: string;
+    organizationId: string;
+  }) {
+    const creator = await findWorkspaceCreatorUserId(input);
+    if (
+      creator &&
+      (await isOrganizationMember({
+        organizationId: input.organizationId,
+        userId: creator,
+      }))
+    ) {
+      return creator;
+    }
+    return findOrganizationOwnerUserId(input.organizationId);
   }
 
   async isOrganizationAdmin(input: { organizationId: string; userId: string }) {
