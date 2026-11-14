@@ -11,11 +11,24 @@ import { connectorRegistry } from "./registry";
  * import time and awaited by each process entrypoint before it serves traffic;
  * `connectorAdaptersReady()` is the seam anything else (a test, a script) uses
  * to wait.
+ *
+ * A failure rejects, so the entrypoint awaiting it refuses to start. A
+ * malformed connector setting must stop startup and name the variable, never
+ * leave the process serving with an empty connector list. A connector that is
+ * only missing a credential does not throw: its capability still returns it and
+ * reports what is missing. A failed attempt is not cached, so a later call
+ * tries again.
  */
 let registration: Promise<void> | null = null;
 
 export function registerBuiltinConnectorAdapters(): Promise<void> {
-  registration ??= register();
+  registration ??= register().catch((error: unknown) => {
+    registration = null;
+    logger.error("connector_adapter_registration_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  });
   return registration;
 }
 
@@ -25,20 +38,10 @@ export function connectorAdaptersReady(): Promise<void> {
 }
 
 async function register(): Promise<void> {
-  try {
-    const { adapters, agentToolDefs } =
-      await collectCapabilityConnectorContributions();
-    for (const adapter of adapters) {
-      connectorRegistry.register(adapter);
-    }
-    registerAgentTools(agentToolDefs);
-  } catch (error) {
-    // A failure here must not take the process down at import time: the
-    // symptom is connectors being unavailable, which the registry already
-    // reports per request.
-    registration = null;
-    logger.error("connector_adapter_registration_failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+  const { adapters, agentToolDefs } =
+    await collectCapabilityConnectorContributions();
+  for (const adapter of adapters) {
+    connectorRegistry.register(adapter);
   }
+  registerAgentTools(agentToolDefs);
 }

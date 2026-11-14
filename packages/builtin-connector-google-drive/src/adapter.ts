@@ -149,8 +149,12 @@ export function createGoogleDriveConnectorAdapter(
   return {
     capabilityId: "sourceweft/google-drive",
     getManifest() {
+      // Without both credentials the manifest carries no client id, so the
+      // platform refuses to start authorization (CONNECTOR_OAUTH_CONFIG_MISSING)
+      // instead of sending the user to Google for a code it cannot exchange.
       return toBackendGoogleDriveManifest({
-        clientId: config.clientId,
+        clientId:
+          config.clientId && config.clientSecret ? config.clientId : "",
         redirectUri,
       });
     },

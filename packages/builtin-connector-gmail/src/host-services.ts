@@ -8,8 +8,10 @@ import { gmailAgentToolDefs } from "./agent-tool-defs";
 
 export const createConnectorAdapters: CreateConnectorAdapters = ({
   env,
+  logger,
 }: {
   env: CapabilityHostEnvironment;
+  logger?: { warn?(message: string, meta?: Record<string, unknown>): void };
 }): CapabilityConnectorContribution => {
   const activation = env.get("GMAIL_CONNECTOR_ENABLED")?.trim().toLowerCase();
   if (!activation || activation === "false" || activation === "0") {
@@ -20,10 +22,18 @@ export const createConnectorAdapters: CreateConnectorAdapters = ({
   }
   const clientId = env.get("GMAIL_CLIENT_ID")?.trim() ?? "";
   const clientSecret = env.get("GMAIL_CLIENT_SECRET")?.trim() ?? "";
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "Gmail connector enabled without GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET",
-    );
+  // A missing credential is not malformed. The connector stays registered,
+  // refuses to connect, and says what is missing, so it never silently
+  // disappears from the catalog.
+  const missing = [
+    clientId ? null : "GMAIL_CLIENT_ID",
+    clientSecret ? null : "GMAIL_CLIENT_SECRET",
+  ].filter((name): name is string => name !== null);
+  if (missing.length > 0) {
+    logger?.warn?.("connector_not_configured", {
+      connectorType: "gmail",
+      missing,
+    });
   }
   return {
     adapters: [

@@ -19,17 +19,61 @@ test("Gmail capability stays unavailable until explicitly enabled", async () => 
   assert.equal(missingFlag.agentToolDefs.length, 0);
 });
 
-test("Gmail capability requires both credentials when enabled", async () => {
-  assert.throws(
-    () =>
-      createConnectorAdapters({
-        env: environment({
-          GMAIL_CONNECTOR_ENABLED: "true",
-          GMAIL_CLIENT_ID: "id",
-        }),
-      }),
-    /GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET/,
+function recordingLogger() {
+  const warnings: Array<{ message: string; meta?: Record<string, unknown> }> =
+    [];
+  return {
+    warnings,
+    logger: {
+      warn(message: string, meta?: Record<string, unknown>) {
+        warnings.push({ message, meta });
+      },
+    },
+  };
+}
+
+test("Gmail capability stays registered, warns, and offers no client id when a credential is missing", async () => {
+  for (const [values, missing] of [
+    [{ GMAIL_CLIENT_ID: "id" }, ["GMAIL_CLIENT_SECRET"]],
+    [{ GMAIL_CLIENT_SECRET: "secret" }, ["GMAIL_CLIENT_ID"]],
+    [{}, ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET"]],
+  ] as const) {
+    const { warnings, logger } = recordingLogger();
+    const result = await createConnectorAdapters({
+      env: environment({ GMAIL_CONNECTOR_ENABLED: "true", ...values }),
+      logger,
+    });
+    assert.equal(result.adapters.length, 1);
+    const manifest = result.adapters[0]!.getManifest();
+    assert.equal(manifest.type, "gmail");
+    // An empty client id makes the platform refuse authorization with
+    // CONNECTOR_OAUTH_CONFIG_MISSING before the user is sent to Google.
+    assert.equal(manifest.auth.authorizationParams?.client_id, "");
+    assert.deepEqual(warnings, [
+      {
+        message: "connector_not_configured",
+        meta: { connectorType: "gmail", missing: [...missing] },
+      },
+    ]);
+  }
+});
+
+test("Gmail capability does not warn when switched off or fully configured", async () => {
+  const { warnings, logger } = recordingLogger();
+  await createConnectorAdapters({ env: environment({}), logger });
+  const configured = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "1",
+      GMAIL_CLIENT_ID: "id",
+      GMAIL_CLIENT_SECRET: "secret",
+    }),
+    logger,
+  });
+  assert.equal(
+    configured.adapters[0]?.getManifest().auth.authorizationParams?.client_id,
+    "id",
   );
+  assert.deepEqual(warnings, []);
 });
 
 test("Gmail capability rejects malformed activation", () => {
