@@ -3,7 +3,11 @@ export type ParsingConfig = {
   readonly parserVersion: string;
 };
 
-export type DocumentParseProviderId = "anydoc" | "pdf2markdown" | "vision";
+export type DocumentParseProviderId =
+  | "anydoc"
+  | "pdf2markdown"
+  | "deepseek"
+  | "vision";
 
 export type DocumentParseStrategy = "explicit";
 

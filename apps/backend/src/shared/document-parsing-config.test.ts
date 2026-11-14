@@ -81,6 +81,20 @@ test("an explicit image OCR policy and provider normalize case and whitespace", 
   assert.equal(config.documentParsing.ocrEnabled, true);
 });
 
+test("DeepSeek OCR is selected only by DOCUMENT_PARSE_OCR_PROVIDER, never by its key", async () => {
+  vi.stubEnv("DEEPSEEK_API_KEY", " deepseek-test-key ");
+  const keyOnly = (await import("./config")).config.documentParsing;
+  assert.equal(keyOnly.ocrProvider, "pdf2markdown");
+  assert.equal(keyOnly.ocrEnabled, false);
+  assert.equal(keyOnly.deepseekOcr.apiKey, "deepseek-test-key");
+
+  vi.resetModules();
+  vi.stubEnv("DOCUMENT_PARSE_OCR_PROVIDER", " DeepSeek ");
+  const selected = (await import("./config")).config.documentParsing;
+  assert.equal(selected.ocrProvider, "deepseek");
+  assert.equal(selected.ocrEnabled, false);
+});
+
 test("Docker and backend examples agree on explicit migration and OCR defaults", () => {
   const backend = readFileSync(
     new URL("../../.env.example", import.meta.url),
