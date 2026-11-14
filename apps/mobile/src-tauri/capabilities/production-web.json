@@ -7,6 +7,7 @@
   "remote": { "urls": ["https://sourceweft.com/*"] },
   "permissions": [
     "core:default",
+    "apple-sign-in:default",
     "google-auth:default",
     "allow-mobile-info",
     "allow-open-external-url"

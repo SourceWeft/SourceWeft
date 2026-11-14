@@ -158,3 +158,27 @@ test("the first release targets iPhone only, in the project spec and the Xcode p
   ].map(([, family]) => family);
   assert.deepEqual(families, ["1", "1"]);
 });
+
+test("Sign in with Apple is permitted to the page and entitled in the app", () => {
+  for (const name of ["main.json", "production-web.json"])
+    assert(
+      json(resolve(tauri, "capabilities", name)).permissions.includes(
+        "apple-sign-in:default",
+      ),
+      name,
+    );
+  assert.match(
+    read(
+      resolve(
+        apple,
+        "sourceweft-mobile_iOS/sourceweft-mobile_iOS.entitlements",
+      ),
+    ),
+    /<key>com\.apple\.developer\.applesignin<\/key>\s*<array>\s*<string>Default<\/string>\s*<\/array>/,
+  );
+  // The plugin is part of this repository, not a third-party crate.
+  assert.match(
+    read(resolve(tauri, "Cargo.toml")),
+    /^tauri-plugin-apple-sign-in = \{ path = "plugins\/apple-sign-in" \}$/m,
+  );
+});

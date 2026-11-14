@@ -1,7 +1,5 @@
 "use client";
 
-import { publicRuntimeConfig } from "./public-runtime-config";
-
 import { authClient } from "./auth-client";
 
 type GoogleAuthModule = {
@@ -16,10 +14,6 @@ type GoogleAuthModule = {
     refreshToken?: string;
   }>;
 };
-
-function resolveMobileGoogleClientId() {
-  return publicRuntimeConfig().googleMobileClientId || "";
-}
 
 function isCancelledGoogleSignIn(error: unknown) {
   const message =
@@ -36,8 +30,12 @@ async function loadGoogleAuthModule() {
   return import("@choochmeque/tauri-plugin-google-auth-api") as Promise<GoogleAuthModule>;
 }
 
-export async function signInWithMobileGoogle() {
-  const clientId = resolveMobileGoogleClientId();
+/**
+ * Signs in with the native Google flow. `clientId` is the OAuth client of the
+ * platform the app runs on: the iOS app has its own, Android uses the one this
+ * web build was configured with.
+ */
+export async function signInWithMobileGoogle(clientId: string) {
   if (!clientId) {
     throw new Error("Google sign-in is not configured for this mobile build.");
   }

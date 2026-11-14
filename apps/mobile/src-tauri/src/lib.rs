@@ -2,6 +2,7 @@
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_apple_sign_in::init())
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![mobile_info, open_external_url])

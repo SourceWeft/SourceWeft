@@ -169,28 +169,68 @@ its signing or manifest configuration.
 ## Google Sign-In
 
 Mobile Google sign-in uses `tauri-plugin-google-auth` to collect Google tokens
-with the native SDK, then passes the returned ID token to Better Auth so
-SourceWeft keeps using the existing cookie/session layer.
+with the native flow, then passes the returned ID token to Better Auth so
+SourceWeft keeps using the existing cookie/session layer. Each platform signs in
+with its own Google OAuth client, and the backend must accept each one as a
+token audience.
 
-Configure the shared web runtime with:
-
-```sh
-NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-```
-
-The backend must accept the same token audience:
+Android: create an Android OAuth client for package `nicelab.sourceweft.mobile`
+plus SHA-1, and a Web OAuth client. The app signs in with the Web client id,
+which the shared web runtime provides and the backend accepts:
 
 ```sh
-AUTH_GOOGLE_MOBILE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+AUTH_GOOGLE_MOBILE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
 ```
 
-Platform setup still needs to be applied after generating native projects:
+iOS: create an OAuth client of type iOS for bundle id
+`nicelab.sourceweft.mobile`. Only the backend is configured; it accepts the
+client and hands its id to the app through `/v1/auth/config`:
 
-- iOS: create an iOS OAuth client for bundle id `nicelab.sourceweft.mobile` and
-  add the reversed client id to `Info.plist` `CFBundleURLTypes`.
-- Android native flow: create both an Android OAuth client for package
-  `nicelab.sourceweft.mobile` plus SHA-1, and a Web OAuth client; pass the Web
-  client id as `NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID`.
+```sh
+AUTH_GOOGLE_IOS_CLIENT_ID=your-ios-client-id.apps.googleusercontent.com
+```
+
+The iOS flow runs in the system's web authentication session, which receives
+the callback itself, so no URL scheme is registered in `Info.plist`. (The
+deep-link plugin removes `CFBundleURLTypes` on every build anyway.)
+
+Both variables only take effect while the Google web client
+(`AUTH_GOOGLE_SIGNIN_WEB_CLIENT_ID` and its secret) is configured.
+
+## Sign in with Apple
+
+The iOS app offers Sign in with Apple through the in-repo plugin
+`src-tauri/plugins/apple-sign-in`. It shows the system sheet and returns the
+identity token Apple issues for this app; the page sends that token to Better
+Auth, which verifies it against Apple's keys with the bundle id as the
+audience. The page generates a random nonce for every attempt, gives Apple its
+SHA-256, and gives the backend the nonce itself, so a token issued for another
+request is refused.
+
+Backend:
+
+```sh
+AUTH_APPLE_APP_BUNDLE_ID=nicelab.sourceweft.mobile
+```
+
+Apple Developer portal: the App ID needs the Sign In with Apple capability. The
+entitlement `com.apple.developer.applesignin` is in the tracked entitlements
+file.
+
+There is no client secret, so Apple sign-in exists in the iOS app only; the
+browser redirect flow is not configured and no web page offers it.
+
+Which buttons the sign-in view shows is decided in
+`apps/web/lib/mobile-sign-in-methods.ts`. On iOS, Google is shown only next to
+Sign in with Apple: the App Store requires an app that offers a third-party
+sign-in to offer Sign in with Apple as well.
+
+Not done yet: revoking the person's Apple tokens when they delete their
+account, which Apple requires before an App Store release. It needs the
+authorization code exchange and a Sign in with Apple key.
+
+## Native project setup
 
 ```sh
 pnpm --filter @sourceweft/mobile tauri android init

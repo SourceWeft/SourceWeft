@@ -3617,6 +3617,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-apple-sign-in",
  "tauri-plugin-deep-link",
  "tauri-plugin-google-auth",
  "tauri-plugin-opener",
@@ -3926,6 +3927,16 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-apple-sign-in"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
