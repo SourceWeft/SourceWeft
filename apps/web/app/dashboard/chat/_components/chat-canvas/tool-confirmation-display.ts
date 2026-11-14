@@ -8,7 +8,8 @@ type Translate = ReturnType<typeof useTranslations>;
 type ToolConfirmationDisplayInput = Pick<
   ToolConfirmationRequest,
   "action" | "preview" | "editableArgs"
->;
+> &
+  Partial<Pick<ToolConfirmationRequest, "domain">>;
 
 export function gmailSendReview(confirmation: ToolConfirmationDisplayInput) {
   if (confirmation.action.type !== "gmail.message.send") return null;
@@ -268,6 +269,38 @@ export function requestSummary(
   return summary;
 }
 
+function argumentValueText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value === undefined) return null;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+// An MCP call is otherwise shown only by its tool's description, so the member
+// would approve without seeing what is sent to the server, and two calls of the
+// same tool would look identical. The public confirmation output drops
+// preview.requestJson, so the tool call's own input is the primary source.
+function mcpArgumentLines(
+  confirmation: ToolConfirmationDisplayInput,
+  toolCallInput: Record<string, unknown> | undefined,
+) {
+  if (confirmation.domain !== "mcp") return [];
+  const args =
+    toolCallInput && Object.keys(toolCallInput).length > 0
+      ? toolCallInput
+      : {
+          ...record(confirmation.preview.requestJson),
+          ...record(confirmation.editableArgs?.value),
+        };
+  return Object.entries(args).flatMap(([name, value]) => {
+    const text = argumentValueText(value);
+    return text === null ? [] : [`${name}: ${text}`];
+  });
+}
+
 export function requestDetailLines(
   confirmation: ToolConfirmationDisplayInput,
   toolCallInput: Record<string, unknown> | undefined,
@@ -293,6 +326,7 @@ export function requestDetailLines(
           value: confirmation.preview.target.label,
         })
       : null,
+    ...mcpArgumentLines(confirmation, toolCallInput),
   ];
   const seen = new Set<string>();
   return lines
