@@ -90,6 +90,10 @@ jobs:
       IOS_DIST_CERT_P12_BASE64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
       IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
       IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      # Read by the Tauri CLI to sign the archive (same credentials as above).
+      IOS_CERTIFICATE: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+      IOS_MOBILE_PROVISION: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
@@ -113,34 +117,12 @@ jobs:
         run: node scripts/ci/ios-build.mjs install-signing
       - run: pnpm install --frozen-lockfile
       - run: cargo fetch --locked --manifest-path apps/mobile/src-tauri/Cargo.toml
-      # `tauri ios build` does not forward extra arguments to xcodebuild, so the
-      # signing overrides were dropped and xcodebuild fell back to automatic
-      # signing (run 43621002166). Archive and export with xcodebuild directly.
-      - name: Write the App Store export options
-        env:
-          IOS_SIGNING_PROFILE_NAME: SourceWeft iOS App Store
-          IOS_SIGNING_IDENTITY: iPhone Distribution
-        run: node scripts/ci/ios-build.mjs write-export-options
+      # Tauri's build phase reads its options from the `tauri ios build` process
+      # that starts it, so the archive must run through the Tauri CLI. The CLI
+      # applies manual signing from IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD and
+      # IOS_MOBILE_PROVISION (the Xcode project and export options follow).
       - name: Build and sign the App Store archive
-        env:
-          IOS_SIGNING_PROFILE_NAME: SourceWeft iOS App Store
-          IOS_SIGNING_IDENTITY: iPhone Distribution
-        run: |
-          cd apps/mobile
-          pnpm exec xcodebuild archive \
-            -project src-tauri/gen/apple/sourceweft-mobile.xcodeproj \
-            -scheme sourceweft-mobile_iOS \
-            -configuration release \
-            -destination 'generic/platform=iOS' \
-            -archivePath src-tauri/gen/apple/build/testflight/SourceWeft.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            "DEVELOPMENT_TEAM=$APPLE_DEVELOPMENT_TEAM" \
-            "CODE_SIGN_IDENTITY=$IOS_SIGNING_IDENTITY" \
-            "PROVISIONING_PROFILE_SPECIFIER=$IOS_SIGNING_PROFILE_NAME"
-          pnpm exec xcodebuild -exportArchive \
-            -archivePath src-tauri/gen/apple/build/testflight/SourceWeft.xcarchive \
-            -exportPath src-tauri/gen/apple/build/testflight/export \
-            -exportOptionsPlist src-tauri/gen/apple/build/testflight/ExportOptions.plist
+        run: pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --ci
       - name: Verify the signed IPA
         run: node scripts/ci/ios-build.mjs verify-ipa
       - name: Upload to TestFlight
