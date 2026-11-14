@@ -14,5 +14,5 @@
     "Production logs now report privacy-safe chat, authentication, billing, and installation activity, including worker metrics."
   ],
   "githubPrerelease": false,
-  "desktopPublicationPolicy": "updater-signed"
+  "desktopPublicationPolicy": "macos-signed"
 }

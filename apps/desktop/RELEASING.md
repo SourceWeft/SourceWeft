@@ -58,6 +58,17 @@ this service supports the packaged native protocol, sign-in/deep links, local
 files and permission prompts. An installer build alone does not verify those
 production flows.
 
+## macOS entitlements
+
+The macOS app is signed with the hardened runtime in every policy. Under it macOS refuses a
+protected resource to an app that does not declare it, whatever the user has allowed in System
+Settings. `apps/desktop/src-tauri/Entitlements.plist` declares the microphone
+(`com.apple.security.device.audio-input`), which voice input in the web view needs; the
+matching purpose string is in `Info.plist`. Screen capture needs no entitlement. Before the
+web app starts using another protected resource (camera, location, contacts), add its
+entitlement and purpose string together. `prepare-desktop-release.mjs` fails a macOS build
+whose app does not carry the microphone entitlement.
+
 ## Sandbox runtime bundle (macOS and Linux)
 
 Signed, macos-signed and updater-signed releases (not `candidate`) also attach the local-execution
