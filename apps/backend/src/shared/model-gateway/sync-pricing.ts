@@ -295,6 +295,8 @@ function pricingConfigFromInfo(
     output_cost_per_audio_token: normalizePriceNumber(p?.audioOutputPerToken),
     input_cost_per_image: normalizePriceNumber(p?.inputPerImage),
     output_cost_per_image: normalizePriceNumber(p?.outputPerImage),
+    input_cost_per_character: normalizePriceNumber(p?.inputPerCharacter),
+    input_cost_per_second: normalizePriceNumber(p?.inputPerSecond),
     ...(p?.imageTiers && p.imageTiers.length > 0
       ? { image_pricing_tiers: p.imageTiers }
       : {}),
@@ -322,6 +324,18 @@ function buildSyncUpdatesFromInfo(input: {
   };
 }
 
+/**
+ * The provider bucket to price a route from. A provider with its own price
+ * list is filed under its kind, whatever the deployment named the gateway.
+ */
+function catalogProviderHint(
+  providers: Record<string, { kind: string }>,
+  providerName: string | undefined,
+): string | undefined {
+  const kind = providerName ? providers[providerName]?.kind : undefined;
+  return kind && modelCatalog.hasProviderCatalog(kind) ? kind : providerName;
+}
+
 export async function syncModelPricing(): Promise<void> {
   const routed = await loadRoutedGatewayConfig();
   if (
@@ -329,6 +343,20 @@ export async function syncModelPricing(): Promise<void> {
     !Object.values(routed.providers).some((provider) => provider.globalReady)
   )
     return;
+  // A provider's own price list (DeepInfra's speech prices) is fetched only for
+  // a provider this deployment has ready, so nobody else depends on it.
+  let providerCatalogAdded = false;
+  for (const provider of Object.values(routed.providers)) {
+    if (
+      provider.globalReady &&
+      modelCatalog.requireProviderCatalog(provider.kind)
+    ) {
+      providerCatalogAdded = true;
+    }
+  }
+  if (providerCatalogAdded && modelCatalog.isReady()) {
+    await modelCatalog.refresh();
+  }
   const primaryRouteTargetByKindAndAlias =
     await loadPrimaryRouteTargetByKindAndAlias(routed.versionId);
 
@@ -395,7 +423,10 @@ export async function syncModelPricing(): Promise<void> {
     const info = modelCatalog.resolve(target, {
       // Serving provider from the primary route, so a shared model id is priced
       // from that provider's bucket, not an arbitrary same-id entry.
-      provider: primaryRouteTarget?.targetProviderName,
+      provider: catalogProviderHint(
+        routed.providers,
+        primaryRouteTarget?.targetProviderName,
+      ),
     });
 
     await db.transaction(async (tx) => {
@@ -462,6 +493,8 @@ export async function syncModelPricing(): Promise<void> {
             output_cost_per_audio_token: null,
             input_cost_per_image: null,
             output_cost_per_image: null,
+            input_cost_per_character: null,
+            input_cost_per_second: null,
             price_source: "unknown",
             litellm_key: null,
             price_updated_at: now.toISOString(),

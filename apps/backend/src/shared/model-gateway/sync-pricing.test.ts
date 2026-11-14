@@ -141,3 +141,69 @@ test("externally managed pricing with explicit LiteLLM key can sync capabilities
   assert.deepEqual(merged.supportedParameters, ["tools", "tool_choice"]);
   assert.equal(merged.supports_function_calling, true);
 });
+
+test("speech prices from the catalog become the per-character and per-second price fields", () => {
+  const base = {
+    reasoning: false,
+    reasoningEfforts: [],
+    toolCall: false,
+    structuredOutput: false,
+    vision: false,
+    sources: ["deepinfra"],
+  };
+  const tts = syncPricing.testExports.pricingConfigFromInfo(
+    {
+      ...base,
+      id: "xiaomimimo/mimo-v2.5-tts",
+      modality: "tts",
+      pricing: { inputPerCharacter: 0 },
+    },
+    new Date(0),
+  );
+  // A free model keeps an explicit zero, so its cost is a known zero.
+  assert.equal(tts.input_cost_per_character, 0);
+  assert.equal(tts.input_cost_per_second, null);
+  assert.equal(tts.price_source, "registry");
+
+  const asr = syncPricing.testExports.pricingConfigFromInfo(
+    {
+      ...base,
+      id: "openai/whisper-large-v3-turbo",
+      pricing: { inputPerSecond: 0.00000333 },
+    },
+    new Date(0),
+  );
+  assert.equal(asr.input_cost_per_second, 0.00000333);
+  assert.equal(asr.input_cost_per_character, null);
+});
+
+test("a declared catalog price is auto-managed, so a synced speech price replaces it", () => {
+  // What `"pricing": { "litellmKey": "..." }` stores before the first sync.
+  const declared = {
+    input_cost_per_token: null,
+    price_source: "litellm",
+    litellm_key: "deepinfra/openai/whisper-large-v3-turbo",
+  };
+  assert.equal(
+    syncPricing.testExports.isExternallyManagedPricing(declared),
+    false,
+  );
+  const merged = syncPricing.mergeModelPricingSyncConfig({
+    existingConfigJson: declared,
+    updates: syncPricing.testExports.pricingConfigFromInfo(
+      {
+        id: "openai/whisper-large-v3-turbo",
+        reasoning: false,
+        reasoningEfforts: [],
+        toolCall: false,
+        structuredOutput: false,
+        vision: false,
+        pricing: { inputPerSecond: 0.00000333 },
+        sources: ["deepinfra"],
+      },
+      new Date(0),
+    ),
+  });
+  assert.equal(merged.input_cost_per_second, 0.00000333);
+  assert.equal(merged.price_source, "registry");
+});

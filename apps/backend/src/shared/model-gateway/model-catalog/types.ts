@@ -43,6 +43,9 @@ export interface ModelPricingInfo {
   // Flat per-image price (LiteLLM input/output_cost_per_image), the untiered default.
   inputPerImage?: number | null;
   outputPerImage?: number | null;
+  // Speech: synthesis billed per input character, recognition per second of audio.
+  inputPerCharacter?: number | null;
+  inputPerSecond?: number | null;
   // dall-e / imagen / flux: per-image or per-pixel, tiered by quality + size.
   imageTiers?: ImagePricingTier[];
 }
