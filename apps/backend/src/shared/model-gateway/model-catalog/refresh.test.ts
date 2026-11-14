@@ -137,3 +137,84 @@ test("an invalid configured override fails without echoing pasted contents", asy
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+function speechRegistry(
+  load: () => Promise<ReturnType<typeof emptyModelInfo>[]>,
+) {
+  return new ModelCatalogRegistry({
+    litellm: async () => [],
+    modelsDev: async () => [
+      {
+        ...emptyModelInfo("openai/whisper-large-v3-turbo"),
+        provider: "deepinfra",
+        pricing: { inputPerToken: 9 },
+      },
+    ],
+    overrides: () => new Map(),
+    providerCatalogs: { deepinfra: load },
+  });
+}
+
+test("a provider's own price list is not fetched until that provider is in use", async () => {
+  const load = vi.fn(async () => []);
+  const registry = speechRegistry(load);
+  await registry.refresh();
+  assert.equal(load.mock.calls.length, 0);
+
+  assert.equal(registry.requireProviderCatalog("deepinfra"), true);
+  assert.equal(registry.requireProviderCatalog("deepinfra"), false);
+  await registry.refresh();
+  assert.equal(load.mock.calls.length, 1);
+  // A provider with no price list of its own changes nothing.
+  assert.equal(registry.requireProviderCatalog("openrouter"), false);
+});
+
+test("the provider's own price wins over the community sources in its bucket", async () => {
+  const registry = speechRegistry(async () => [
+    {
+      ...emptyModelInfo("openai/whisper-large-v3-turbo"),
+      provider: "deepinfra",
+      pricing: { inputPerSecond: 0.00000333 },
+      sources: ["deepinfra"],
+    },
+  ]);
+  registry.requireProviderCatalog("deepinfra");
+  await registry.refresh();
+  const info = registry.resolve("openai/whisper-large-v3-turbo", {
+    provider: "deepinfra",
+  });
+  assert.equal(info?.pricing?.inputPerSecond, 0.00000333);
+  assert.ok(info?.sources.includes("deepinfra"));
+});
+
+test("once required, a failing provider price list fails the refresh and keeps the previous prices", async () => {
+  let price = 0.00000333;
+  let fail = false;
+  const registry = speechRegistry(async () => {
+    if (fail) throw new Error("DeepInfra model list unavailable");
+    return [
+      {
+        ...emptyModelInfo("openai/whisper-large-v3-turbo"),
+        provider: "deepinfra",
+        pricing: { inputPerSecond: price },
+      },
+    ];
+  });
+  registry.requireProviderCatalog("deepinfra");
+  await registry.refresh();
+  fail = true;
+  price = 1;
+  await assert.rejects(registry.refresh(), /DeepInfra model list unavailable/);
+  assert.equal(
+    registry.resolve("openai/whisper-large-v3-turbo", { provider: "deepinfra" })
+      ?.pricing?.inputPerSecond,
+    0.00000333,
+  );
+  fail = false;
+  await registry.refresh();
+  assert.equal(
+    registry.resolve("openai/whisper-large-v3-turbo", { provider: "deepinfra" })
+      ?.pricing?.inputPerSecond,
+    1,
+  );
+});

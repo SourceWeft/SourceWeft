@@ -1,4 +1,5 @@
 import { logger } from "../../logger";
+import { loadDeepInfraSpeechModels } from "./sources/deepinfra";
 import { loadLiteLLMModels } from "./sources/litellm";
 import { loadModelsDevModels } from "./sources/models-dev";
 import { loadModelOverrides } from "./sources/overrides";
@@ -43,12 +44,18 @@ export interface ModelCatalogSources {
   litellm: () => Promise<NormalizedModelInfo[]>;
   modelsDev: () => Promise<NormalizedModelInfo[]>;
   overrides: () => Map<string, ModelInfoOverride>;
+  /**
+   * A provider's own price list, keyed by canonical provider key. Loaded only
+   * once that provider is required, see `requireProviderCatalog`.
+   */
+  providerCatalogs?: Record<string, () => Promise<NormalizedModelInfo[]>>;
 }
 
 const DEFAULT_SOURCES: ModelCatalogSources = {
   litellm: loadLiteLLMModels,
   modelsDev: loadModelsDevModels,
   overrides: loadModelOverrides,
+  providerCatalogs: { deepinfra: () => loadDeepInfraSpeechModels() },
 };
 
 /**
@@ -57,8 +64,10 @@ const DEFAULT_SOURCES: ModelCatalogSources = {
  *
  * Preload, never fetch on resolve: call {@link refresh} at startup / active
  * sync; {@link resolve} only reads the in-memory indexes. Merge precedence
- * (lowest → highest): LiteLLM < models.dev < overrides. Both remote sources
- * are required when this registry is loaded; failure never changes that policy.
+ * (lowest → highest): LiteLLM < models.dev < a provider's own price list <
+ * overrides. Both remote sources are required when this registry is loaded;
+ * failure never changes that policy. A provider's own list joins them, with the
+ * same policy, once a caller says the deployment uses that provider.
  */
 export class ModelCatalogRegistry {
   // Global (provider-agnostic) union — every source, every provider merged.
@@ -74,6 +83,7 @@ export class ModelCatalogRegistry {
   private ready = false;
   private inflight: Promise<void> | null = null;
   private autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly requiredProviderCatalogs = new Set<string>();
 
   constructor(
     private readonly sources: ModelCatalogSources = DEFAULT_SOURCES,
@@ -81,6 +91,32 @@ export class ModelCatalogRegistry {
 
   isReady() {
     return this.ready;
+  }
+
+  /**
+   * Make a provider's own price list part of every refresh from now on. It is
+   * not fetched for deployments that do not use the provider, so they gain no
+   * dependency on its endpoint; once required it is as mandatory as the other
+   * sources, and a failure keeps the previous prices. Returns true when this
+   * call newly required a list, in which case the caller should refresh.
+   */
+  requireProviderCatalog(provider: string): boolean {
+    const key = canonicalProviderKey(provider);
+    if (
+      !key ||
+      !this.sources.providerCatalogs?.[key] ||
+      this.requiredProviderCatalogs.has(key)
+    ) {
+      return false;
+    }
+    this.requiredProviderCatalogs.add(key);
+    return true;
+  }
+
+  /** Whether this provider's own price list is part of the catalog. */
+  hasProviderCatalog(provider: string): boolean {
+    const key = canonicalProviderKey(provider);
+    return key !== undefined && this.requiredProviderCatalogs.has(key);
   }
 
   /**
@@ -125,17 +161,28 @@ export class ModelCatalogRegistry {
 
   private async doRefresh(): Promise<void> {
     // LiteLLM first (lowest precedence), models.dev second (primary, wins).
-    const [litellm, modelsDev] = await Promise.all([
+    const providerKeys = [...this.requiredProviderCatalogs];
+    const [litellm, modelsDev, ...providerLists] = await Promise.all([
       this.sources.litellm(),
       this.sources.modelsDev(),
+      ...providerKeys.map((key) =>
+        (
+          this.sources.providerCatalogs as Record<
+            string,
+            () => Promise<NormalizedModelInfo[]>
+          >
+        )[key]!(),
+      ),
     ]);
+    // Last, so the provider's own figure wins inside its bucket.
+    const providerOwned = providerLists.flat();
     const global = emptyIndex();
     const litellmIndex = emptyIndex();
     const byProvider = new Map<string, ModelIndex>();
     for (const info of litellm) {
       indexEntry(litellmIndex, info);
     }
-    for (const info of [...litellm, ...modelsDev]) {
+    for (const info of [...litellm, ...modelsDev, ...providerOwned]) {
       indexEntry(global, info);
       const provider = canonicalProviderKey(info.provider);
       if (provider) {
@@ -159,6 +206,7 @@ export class ModelCatalogRegistry {
       providers: byProvider.size,
       litellm: litellm.length,
       modelsDev: modelsDev.length,
+      providerOwned: providerOwned.length,
       overrides: this.overrides.size,
     });
   }
