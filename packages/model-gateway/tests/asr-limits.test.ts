@@ -87,7 +87,13 @@ const request = (fileName: string, bytes = 10) => ({
 });
 
 test("deepseek: every input is decoded and cut into chunks that fit 120 s", async () => {
-  const { preparer, state } = fakePreparer({ durationSec: 250 });
+  const { preparer, state } = fakePreparer({
+    durationSec: 250,
+    silences: [
+      { startSec: 99.5, endSec: 100.5 },
+      { startSec: 199.5, endSec: 200.5 },
+    ],
+  });
   const { calls, gateway } = build({
     kind: "deepseek",
     model: "deepseek-asr",

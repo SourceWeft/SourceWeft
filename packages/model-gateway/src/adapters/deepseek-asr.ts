@@ -10,7 +10,8 @@ import type { AsrTransport } from "./types";
  *
  * One request takes at most 120 s and 8 MiB of 16-bit PCM WAV (or Ogg Opus)
  * and returns plain text, with no timestamps. The limits below make the
- * gateway decode every input to PCM WAV and cut it into ~100 s chunks, so the
+ * gateway decode every input to PCM WAV and cut it into chunks of about 100 s
+ * (up to 110 s when a cut moves to a pause), so the
  * transport itself only ever sees a chunk that fits.
  */
 const LIMITS: AsrLimits = {
