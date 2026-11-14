@@ -80,6 +80,11 @@ export const sourceGuideSchema = z.object({
   updatedAt: z.string(),
 });
 
+export const sourceGuideResponseSchema = z.object({
+  guide: sourceGuideSchema.nullable(),
+});
+
+export type SourceGuideResponse = z.infer<typeof sourceGuideResponseSchema>;
 export type SourceGuide = z.infer<typeof sourceGuideSchema>;
 export type SourceGuideContent = z.infer<typeof sourceGuideContentSchema>;
 

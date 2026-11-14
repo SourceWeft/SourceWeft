@@ -7,6 +7,10 @@ import type {
   ArtifactSharedCollectionsResponse,
 } from "@sourceweft/contracts/artifact-records";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
+import type {
+  SavedAnswerNote,
+  SourceGuideResponse,
+} from "@sourceweft/contracts/sources";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
   MarketMcpLocale,
@@ -606,6 +610,26 @@ export class ContentClient {
   getSourceDocument(workspaceId: string, sourceId: string, documentId: string) {
     return this.http.get<GetSourceDocumentResponse>(
       `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/documents/${encode(documentId)}`,
+    );
+  }
+
+  getSourceGuide(workspaceId: string, sourceId: string) {
+    return this.http.get<SourceGuideResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/guide`,
+    );
+  }
+
+  requestSourceGuide(workspaceId: string, sourceId: string) {
+    return this.http.post<SourceGuideResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/${encode(sourceId)}/guide`,
+      {},
+    );
+  }
+
+  saveAnswerAsNote(workspaceId: string, messageId: string) {
+    return this.http.post<SavedAnswerNote>(
+      `/v1/workspaces/${encode(workspaceId)}/messages/${encode(messageId)}/note`,
+      {},
     );
   }
 

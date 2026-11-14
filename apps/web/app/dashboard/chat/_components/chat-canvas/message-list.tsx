@@ -28,6 +28,7 @@ import {
 } from "@sourceweft/ui-web/components/ai-elements/task";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { toast } from "sonner";
+import { SaveAnswerAction } from "./save-answer-action";
 import {
   Conversation,
   ConversationContent,
@@ -1453,6 +1454,16 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     >
                       <Copy className="size-3" />
                     </MessageAction>
+
+                    {isAssistant &&
+                    workspaceId &&
+                    !isStreaming &&
+                    messageText.trim().length > 0 ? (
+                      <SaveAnswerAction
+                        messageId={version.id}
+                        workspaceId={workspaceId}
+                      />
+                    ) : null}
 
                     {!isAssistant &&
                     isLatestUserGroup &&

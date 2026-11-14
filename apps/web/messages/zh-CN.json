@@ -2253,6 +2253,12 @@
       "messageFailed": "消息发送失败",
       "modelError": "模型错误",
       "toastCopied": "消息已复制。",
+      "saveAsNote": "保存为笔记",
+      "noteSavedLabel": "已保存为笔记",
+      "noteSaved": "已保存为笔记：{title}",
+      "noteAlreadySaved": "这条回答已保存为笔记。",
+      "noteSaveFailed": "无法将回答保存为笔记。",
+      "noteSaveQuota": "入库页数不足，无法保存此笔记。",
       "toastCopyFailed": "无法复制该消息。",
       "loadEarlier": "加载更早的消息",
       "olderHidden": "已隐藏 {count} 组较早的消息，以保持该长会话的响应速度。",
@@ -3383,6 +3389,28 @@
         "syncRunId": "关联同步",
         "triggerType": "触发方式"
       }
+    },
+    "sourceGuide": {
+      "title": "指南",
+      "none": "还没有指南。",
+      "generate": "生成指南",
+      "generating": "正在生成指南…",
+      "updating": "更新中…",
+      "failed": "无法生成指南。",
+      "retry": "重试",
+      "emptySource": "该来源没有可概括的文本。",
+      "quota": "已暂停：积分不足，无法生成此指南。",
+      "noPayer": "没有可为此指南付费的账户。点击生成将使用你自己的积分。",
+      "topics": "主要主题",
+      "questions": "建议问题",
+      "copyQuestion": "复制问题",
+      "questionCopied": "已复制问题。",
+      "questionCopyFailed": "无法复制问题。",
+      "stale": "来源在生成指南后已发生变化。",
+      "regenerate": "重新生成",
+      "requestFailed": "无法开始生成指南。",
+      "collapse": "收起指南",
+      "expand": "展开指南"
     },
     "sourcePreview": {
       "mode": {

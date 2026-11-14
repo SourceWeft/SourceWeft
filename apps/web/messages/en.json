@@ -2253,6 +2253,12 @@
       "messageFailed": "Message failed",
       "modelError": "Model error",
       "toastCopied": "Message copied.",
+      "saveAsNote": "Save as note",
+      "noteSavedLabel": "Saved as note",
+      "noteSaved": "Saved as note: {title}",
+      "noteAlreadySaved": "This answer is already saved as a note.",
+      "noteSaveFailed": "Could not save the answer as a note.",
+      "noteSaveQuota": "Not enough ingestion pages to save this note.",
       "toastCopyFailed": "Couldn't copy the message.",
       "loadEarlier": "Load earlier messages",
       "olderHidden": "{count} older message groups hidden to keep this long thread responsive.",
@@ -3383,6 +3389,28 @@
         "syncRunId": "Linked sync",
         "triggerType": "Trigger"
       }
+    },
+    "sourceGuide": {
+      "title": "Guide",
+      "none": "No guide yet.",
+      "generate": "Generate guide",
+      "generating": "Generating the guide…",
+      "updating": "Updating…",
+      "failed": "The guide could not be generated.",
+      "retry": "Try again",
+      "emptySource": "This source has no text to summarize.",
+      "quota": "Paused: there are not enough credits to generate this guide.",
+      "noPayer": "No account is available to pay for this guide. Generate it to use your own credits.",
+      "topics": "Main topics",
+      "questions": "Suggested questions",
+      "copyQuestion": "Copy question",
+      "questionCopied": "Question copied.",
+      "questionCopyFailed": "Could not copy the question.",
+      "stale": "The source changed after this guide was made.",
+      "regenerate": "Regenerate",
+      "requestFailed": "Could not start the guide.",
+      "collapse": "Collapse guide",
+      "expand": "Expand guide"
     },
     "sourcePreview": {
       "mode": {
