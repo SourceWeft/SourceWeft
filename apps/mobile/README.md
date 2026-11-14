@@ -157,7 +157,30 @@ merges it into a temporary copy:
 pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect
 ```
 
-Signing credentials and the TestFlight upload are not automated yet.
+### CI and TestFlight
+
+`.github/workflows/ios-build.yml` has two jobs:
+
+- **Pull requests and pushes to `main`** that touch the mobile app build the app
+  for the iOS simulator without signing, and upload the `.app` as an artifact.
+  No Apple credential is read.
+- **Manual dispatch with `mode: testflight`** runs in the `ios-testflight`
+  environment, signs an App Store build and uploads it to TestFlight with
+  `xcrun altool`. It needs these environment secrets; a missing one stops the
+  run before anything is signed:
+
+  - `IOS_DIST_CERT_P12_BASE64` and `IOS_DIST_CERT_PASSWORD`: the Apple
+    Distribution certificate, exported as a `.p12` and base64-encoded.
+  - `IOS_PROVISIONING_PROFILE_BASE64`: the App Store provisioning profile for
+    `nicelab.sourceweft.mobile`, base64-encoded.
+  - `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` and
+    `APP_STORE_CONNECT_PRIVATE_KEY_BASE64`: an App Store Connect API key, with
+    the `.p8` base64-encoded.
+
+The helper `scripts/ci/ios-build.mjs` checks the bundle identifier, team,
+development-only keys and export-compliance flag of each app it verifies. It
+uses only the credentials above and never falls back to another certificate,
+profile or key.
 
 ## Android packaging
 
