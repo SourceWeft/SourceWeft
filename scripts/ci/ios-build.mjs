@@ -151,22 +151,25 @@ const subcommands = {
       profileTmp,
       Buffer.from(process.env.IOS_PROVISIONING_PROFILE_BASE64, "base64"),
     );
-    const plist = run("security", ["cms", "-D", "-i", profileTmp]);
-    const uuid = run("plutil", ["-extract", "UUID", "raw", "-o", "-", "-"], {
-      input: plist,
-    });
-    const appId = run(
-      "plutil",
-      [
-        "-extract",
-        "Entitlements.application-identifier",
-        "raw",
-        "-o",
-        "-",
-        "-",
-      ],
-      { input: plist },
-    );
+    const plistTmp = join(work, "sourceweft-ios-profile.plist");
+    writeFileSync(plistTmp, run("security", ["cms", "-D", "-i", profileTmp]));
+    const uuid = run("plutil", [
+      "-extract",
+      "UUID",
+      "raw",
+      "-o",
+      "-",
+      plistTmp,
+    ]);
+    const appId = run("plutil", [
+      "-extract",
+      "Entitlements.application-identifier",
+      "raw",
+      "-o",
+      "-",
+      plistTmp,
+    ]);
+    rmSync(plistTmp, { force: true });
     if (appId !== `${TEAM_ID}.${BUNDLE_ID}`) {
       throw new Error(
         `Provisioning profile is for ${appId}, expected ${TEAM_ID}.${BUNDLE_ID}`,
