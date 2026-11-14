@@ -37,6 +37,10 @@ export {
   upsertBlogAsset,
   markBlogPostHidden,
   listBlogPostIdentities,
+  listBlogPostsForAdmin,
+  getBlogPostForAdmin,
+  getBlogPostStates,
+  setBlogPostStatus,
   pruneBlogAssets,
 } from "./repository";
 export type { BlogPostStatus, BlogAssetKind, BlogPostUpsertInput } from "./repository";
@@ -45,8 +49,15 @@ export type { SyncNotionBlogOptions, SyncNotionBlogResult } from "./sync";
 export { renderMarkdownContent, UnsupportedMarkdownError } from "./markdown-renderer";
 export { parseMarkdownPost, validateMarkdownPosts } from "./markdown-source";
 export type { ParsedMarkdownPost } from "./markdown-source";
-export { importMarkdownBlog } from "./import-markdown";
+export {
+  importMarkdownBlog,
+  MarkdownImportError,
+  prepareMarkdownPosts,
+  writeMarkdownPosts,
+} from "./import-markdown";
 export type {
   ImportMarkdownBlogOptions,
   ImportMarkdownBlogResult,
+  MarkdownFile,
+  PreparedMarkdownPost,
 } from "./import-markdown";

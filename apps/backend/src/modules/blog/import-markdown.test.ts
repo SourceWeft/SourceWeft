@@ -9,6 +9,7 @@ vi.mock("./repository", () => ({
   BLOG_SOURCE_MARKDOWN: "markdown",
   buildBlogPostId: (articleId: string, locale: string) =>
     `post_${articleId}_${locale}`,
+  getBlogPostStates: async () => new Map(),
   upsertBlogPost: mocks.upsert,
 }));
 

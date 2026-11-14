@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { blogAssets, blogPosts, db } from "@sourceweft/db";
 import type { BlogLocale } from "./locales";
 import type { UploadedBlogAsset } from "./public-storage";
@@ -279,10 +279,7 @@ export async function listBlogPostIdentities(input: {
     id: row.id,
     articleId: row.articleId,
     locale: row.locale,
-    source:
-      row.metadataJson?.source === BLOG_SOURCE_MARKDOWN
-        ? ("markdown" as const)
-        : ("notion" as const),
+    source: sourceOf(row.metadataJson),
   }));
 }
 
@@ -305,3 +302,112 @@ export async function pruneBlogAssets(input: {
     );
 }
 
+
+function sourceOf(metadataJson: Record<string, unknown> | null | undefined) {
+  return metadataJson?.source === BLOG_SOURCE_MARKDOWN
+    ? ("markdown" as const)
+    : ("notion" as const);
+}
+
+const adminSummaryColumns = {
+  id: blogPosts.id,
+  articleId: blogPosts.articleId,
+  locale: blogPosts.locale,
+  slug: blogPosts.slug,
+  status: blogPosts.status,
+  syncEnabled: blogPosts.syncEnabled,
+  title: blogPosts.title,
+  excerpt: blogPosts.excerpt,
+  category: blogPosts.category,
+  tags: blogPosts.tags,
+  readingTimeMinutes: blogPosts.readingTimeMinutes,
+  publishedAt: blogPosts.publishedAt,
+  syncedAt: blogPosts.syncedAt,
+  metadataJson: blogPosts.metadataJson,
+};
+
+function toAdminSummary<
+  Row extends { metadataJson: Record<string, unknown> },
+>(row: Row) {
+  const { metadataJson, ...rest } = row;
+  return { ...rest, source: sourceOf(metadataJson) };
+}
+
+/** Every post, whatever its status, for the admin's list. */
+export async function listBlogPostsForAdmin() {
+  const rows = await db
+    .select(adminSummaryColumns)
+    .from(blogPosts)
+    .orderBy(desc(blogPosts.syncedAt), blogPosts.articleId, blogPosts.locale);
+  return rows.map(toAdminSummary);
+}
+
+/** One post with its rendered body, for the admin's preview. */
+export async function getBlogPostForAdmin(id: string) {
+  const [row] = await db
+    .select({ ...adminSummaryColumns, contentHtml: blogPosts.contentHtml })
+    .from(blogPosts)
+    .where(eq(blogPosts.id, id))
+    .limit(1);
+  if (!row) {
+    return null;
+  }
+  const { contentHtml, ...summary } = row;
+  return { ...toAdminSummary(summary), contentHtml };
+}
+
+/** The status and publish date of the posts that exist among `ids`. */
+export async function getBlogPostStates(ids: string[]) {
+  const states = new Map<
+    string,
+    { status: BlogPostStatus; publishedAt: Date | null }
+  >();
+  if (ids.length === 0) {
+    return states;
+  }
+  const rows = await db
+    .select({
+      id: blogPosts.id,
+      status: blogPosts.status,
+      publishedAt: blogPosts.publishedAt,
+    })
+    .from(blogPosts)
+    .where(inArray(blogPosts.id, ids));
+  for (const row of rows) {
+    states.set(row.id, { status: row.status, publishedAt: row.publishedAt });
+  }
+  return states;
+}
+
+/**
+ * Publish, unpublish or archive a post. Publishing makes it visible whatever
+ * source it came from and dates it now when it has no publish date yet.
+ */
+export async function setBlogPostStatus(input: {
+  id: string;
+  status: BlogPostStatus;
+}) {
+  const [current] = await db
+    .select({ publishedAt: blogPosts.publishedAt })
+    .from(blogPosts)
+    .where(eq(blogPosts.id, input.id))
+    .limit(1);
+  if (!current) {
+    return null;
+  }
+
+  await db
+    .update(blogPosts)
+    .set(
+      input.status === "published"
+        ? {
+            status: "published",
+            syncEnabled: true,
+            publishedAt: current.publishedAt ?? new Date(),
+          }
+        : { status: input.status },
+    )
+    .where(eq(blogPosts.id, input.id));
+
+  return getBlogPostForAdmin(input.id);
+}
