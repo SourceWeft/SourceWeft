@@ -159,6 +159,12 @@ async function createOrganization(): Promise<string> {
   assert.equal(response.status, 200, await response.clone().text());
   const body = (await response.json()) as { id: string };
   assert.ok(body.id);
+  // Migration mode skips the organization hooks that tag `kind`, so stamp the
+  // team metadata the SSO guard now requires (production writes it on create).
+  await schema.database.query(
+    `update organization set metadata = $1 where id = $2`,
+    [JSON.stringify({ sourceweft: { kind: "team" } }), body.id],
+  );
   return body.id;
 }
 

@@ -1,5 +1,6 @@
 import { sso } from "@better-auth/sso";
 import type { BetterAuthPlugin } from "better-auth";
+import { sourceweftSsoGuard } from "./guard-plugin";
 import { ssoSecretStoragePlugin } from "./secret-storage";
 
 /**
@@ -40,6 +41,18 @@ export function buildSsoPlugins({
       organizationProvisioning: {
         disabled: true,
       },
+      // Backstop the before-hook guard: a provider that somehow lost its
+      // organization (e.g. a legacy or defaultSSO row) can never be updated or
+      // deleted. Registration already requires a team organization, so every
+      // provider the guard admits is organization-bound. The plugin wraps any
+      // throw here into its stable conflict response.
+      guardProviderMutation: ({ provider }) => {
+        if (provider.organizationId === null) {
+          throw new Error(
+            "SSO providers must belong to a team organization.",
+          );
+        }
+      },
       // Upstream IdP profile changes (e.g. a role attribute change) should
       // apply on every sign-in, not just first registration.
       provisionUserOnEveryLogin: true,
@@ -73,5 +86,9 @@ export function buildSsoPlugins({
         },
       },
     }),
+    // Enforces the SourceWeft multi-tenant rules (team-only organizations,
+    // private/unique domains, per-organization provider cap, signed SAML
+    // assertions) on `/sso/register` and `/sso/update-provider`.
+    sourceweftSsoGuard(),
   ];
 }
