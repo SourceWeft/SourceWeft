@@ -288,40 +288,53 @@ async function handleSignInRouting(
   });
 }
 
-/** Whether an error is the verified-domain unique-index violation. */
-function isVerifiedDomainUniqueViolation(error: unknown): boolean {
-  const err = error as {
-    code?: string;
-    constraint?: string;
-    detail?: string;
-    message?: string;
-    cause?: unknown;
-  };
-  const pg = (err?.cause ?? err) as {
-    code?: string;
-    constraint?: string;
-    detail?: string;
-    message?: string;
-  };
-  if (pg?.code !== "23505" && err?.code !== "23505") {
+/**
+ * Whether an error is the verified-domain unique-index violation
+ * ({@link VERIFIED_DOMAIN_UNIQUE_INDEX}). The PostgreSQL unique violation
+ * surfaces through the better-auth kysely adapter; its fields (`code`,
+ * `constraint`, `detail`, `message`) may sit on the error itself or on its
+ * `cause`, so both layers are inspected. A non-object / non-Error value, a
+ * different SQLSTATE, or a 23505 for another constraint all return false.
+ */
+export function isVerifiedDomainUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
     return false;
   }
-  const haystack = `${pg?.constraint ?? ""} ${pg?.detail ?? ""} ${pg?.message ?? ""} ${err?.message ?? ""}`;
-  return haystack.includes(VERIFIED_DOMAIN_UNIQUE_INDEX);
+  const layers = [error, (error as { cause?: unknown }).cause].filter(
+    (layer): layer is Record<string, unknown> =>
+      typeof layer === "object" && layer !== null,
+  );
+  if (!layers.some((layer) => layer.code === "23505")) {
+    return false;
+  }
+  return layers.some((layer) =>
+    `${layer.constraint ?? ""} ${layer.detail ?? ""} ${layer.message ?? ""}`.includes(
+      VERIFIED_DOMAIN_UNIQUE_INDEX,
+    ),
+  );
 }
+
+type TransactionRunner = <R>(callback: (trx: object) => Promise<R>) => Promise<R>;
 
 /**
  * Wrap the adapter so that a unique-index violation from setting a provider's
- * `domainVerified` (the only path that sets it true is `incrementOne` in the
- * plugin's `completeDomainVerification`) surfaces as a clean
- * {@link SSO_ERROR_CODES.domainNotAllowed} instead of a 500. This is the
- * race-safe backstop for two concurrent verifications of the same domain.
+ * `domainVerified` surfaces as a clean {@link SSO_ERROR_CODES.domainNotAllowed}
+ * instead of a 500 — the race-safe backstop for two concurrent verifications of
+ * the same domain.
+ *
+ * The only write that sets `domainVerified` true is `incrementOne` in the
+ * plugin's `completeDomainVerification`, which in `@better-auth/sso@1.7.7` runs
+ * OUTSIDE a transaction (it is called with `ctx.context.adapter` directly, not a
+ * transaction adapter). The `transaction` method is re-wrapped anyway — mirroring
+ * {@link ../secret-storage}'s adapter wrapper — so the mapping still applies if a
+ * future plugin version moves verification inside `adapter.transaction(...)`.
  */
-function wrapAdapterForVerifiedDomainUniqueness<T extends object>(
+export function wrapAdapterForVerifiedDomainUniqueness<T extends object>(
   adapter: T,
 ): T {
   const base = adapter as {
     incrementOne?: (args: { model?: string }) => Promise<unknown>;
+    transaction?: TransactionRunner;
   };
   if (typeof base.incrementOne !== "function") {
     return adapter;
@@ -337,13 +350,32 @@ function wrapAdapterForVerifiedDomainUniqueness<T extends object>(
               args?.model === SSO_PROVIDER_MODEL &&
               isVerifiedDomainUniqueViolation(error)
             ) {
-              throw domainNotAllowed(
+              const rejection = domainNotAllowed(
                 "This domain is already verified by another organization.",
               );
+              // Keep the originating DB error for diagnostics/tests without
+              // leaking it in the serialized response body: a non-enumerable
+              // `cause` is skipped by JSON.stringify.
+              Object.defineProperty(rejection, "cause", {
+                value: error,
+                enumerable: false,
+                configurable: true,
+              });
+              throw rejection;
             }
             throw error;
           }
         };
+      }
+      if (property === "transaction") {
+        const runTransaction = base.transaction;
+        if (typeof runTransaction !== "function") {
+          return Reflect.get(target, property, receiver);
+        }
+        return <R>(callback: (trx: object) => Promise<R>): Promise<R> =>
+          runTransaction((trx) =>
+            callback(wrapAdapterForVerifiedDomainUniqueness(trx)),
+          );
       }
       return Reflect.get(target, property, receiver);
     },

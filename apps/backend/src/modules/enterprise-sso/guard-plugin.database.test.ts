@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { APIError, isAPIError } from "better-auth/api";
 import { afterAll, beforeAll, test } from "vitest";
 import { SSO_ERROR_CODES } from "./errors";
+import { VERIFIED_DOMAIN_UNIQUE_INDEX } from "./guard-plugin";
 import {
   addOrganizationMember,
   bootSsoTestHarness,
@@ -247,6 +249,80 @@ test("the partial unique index forbids a second verified row for one domain", as
     () => setProviderDomainVerified(harness, bAcmeProviderId),
     (error: { code?: string }) => error.code === "23505",
   );
+}, 200_000);
+
+test("a verified-domain conflict surfaces as a clean 400 through the wrapped adapter", async () => {
+  // Two unverified providers for one domain in different orgs, then verify one.
+  const domain = uniqueDomain();
+  const orgOwner = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+  });
+  const orgOther = await createOrganization(harness, {
+    ownerUserId: ownerB.userId,
+    kind: "team",
+  });
+  const owned = await registerOidc(ownerA.client, { organizationId: orgOwner, domain });
+  assert.equal(owned.response.status, 200, await owned.response.clone().text());
+  const other = await registerOidc(ownerB.client, { organizationId: orgOther, domain });
+  assert.equal(other.response.status, 200, await other.response.clone().text());
+  await setProviderDomainVerified(harness, owned.providerId);
+
+  const idRow = await harness.schema.database.query<{ id: string }>(
+    `select id from "ssoProvider" where "providerId" = $1`,
+    [other.providerId],
+  );
+  const otherId = idRow.rows[0]?.id;
+  assert.ok(otherId);
+
+  // The adapter the plugin actually uses: secret-storage- then guard-wrapped.
+  const adapter = (await harness.auth.$context).adapter as unknown as {
+    incrementOne: (args: unknown) => Promise<unknown>;
+    transaction: <R>(
+      cb: (trx: { incrementOne: (args: unknown) => Promise<unknown> }) => Promise<R>,
+    ) => Promise<R>;
+  };
+  // The exact call the plugin's completeDomainVerification makes.
+  const increment = {
+    model: "ssoProvider",
+    where: [
+      { field: "id", value: otherId },
+      { field: "domain", value: domain },
+    ],
+    increment: {},
+    set: { domainVerified: true },
+  };
+
+  // Direct (non-transaction) path — proves the real error shape triggers the map.
+  const direct = await adapter.incrementOne(increment).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  assert.ok(isAPIError(direct), `expected an APIError, got ${String(direct)}`);
+  assert.equal((direct as APIError).statusCode, 400);
+  assert.equal((direct as APIError).body?.code, SSO_ERROR_CODES.domainNotAllowed);
+  // Pin the real surfaced DB error (a PostgreSQL unique violation) that the
+  // mapping keys off, so the unit test's fixture stays faithful to it.
+  const cause = (direct as { cause?: { code?: string; constraint?: string } })
+    .cause;
+  assert.equal(cause?.code, "23505");
+  assert.equal(cause?.constraint, VERIFIED_DOMAIN_UNIQUE_INDEX);
+
+  // Same violation inside a transaction maps identically (the wrapper re-wraps
+  // the transaction adapter).
+  const inTx = await adapter
+    .transaction((trx) => trx.incrementOne(increment))
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(isAPIError(inTx), `expected an APIError from the tx path, got ${String(inTx)}`);
+  assert.equal((inTx as APIError).statusCode, 400);
+  assert.equal((inTx as APIError).body?.code, SSO_ERROR_CODES.domainNotAllowed);
+
+  // The second row is still unverified after both rejected attempts.
+  const after = await readStoredProvider(harness, other.providerId);
+  assert.equal(after.domainVerified, false);
 }, 200_000);
 
 test("a sixth provider for one organization is rejected", async () => {
