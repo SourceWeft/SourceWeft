@@ -35,11 +35,11 @@ const ssoErrorMessagesZhCN: TranslationDictionary = {
   [SSO_ERROR_CODES.invalidAttributeMapping]:
     "该属性映射使用了保留的字段名，请换一个字段名。",
   [SSO_ERROR_CODES.invalidProviderId]:
-    "身份源 ID 需为 3–47 个小写字母、数字或连字符。",
+    "身份源 ID 需为 3–47 个小写字母、数字或连字符，且不能与内置登录方式同名。",
   [SSO_ERROR_CODES.organizationRequired]: "单点登录只能为团队配置。",
   [SSO_ERROR_CODES.providerLimit]: "该团队的身份源数量已达上限（5 个）。",
   [SSO_ERROR_CODES.providerIdentityLocked]:
-    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新创建。",
+    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新配置。",
   [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
     "身份源返回的 SAML 响应使用了不支持的签名设置。请联系管理员改用 SHA-256 签名，并发送未加密的断言。",
 };
@@ -47,10 +47,13 @@ const ssoErrorMessagesZhCN: TranslationDictionary = {
 /**
  * Traditional Chinese (Taiwan) counterpart of {@link ssoErrorMessagesZhCN},
  * generated from it via `@sourceweft/i18n/hant`'s `toTaiwanTraditional`
- * (OpenCC `twp` + the shared `packages/i18n/glossary/zh-TW.json`) and then
- * reviewed by hand. Do not hand-edit: regenerate from `ssoErrorMessagesZhCN`
- * and fix any wrong/inconsistent rendering through the glossary instead (see
- * the header comment on `zhTW` below).
+ * (OpenCC `twp` + the shared `packages/i18n/glossary/zh-TW.json`). Every entry
+ * is exactly the generator's output — never hand-edited. The glossary cannot
+ * rescue a bad rendering (its entries apply as sequential replacements, so e.g.
+ * `新建→新增` still fires inside a longer word); reword the zh-CN source instead
+ * so the generator yields acceptable Traditional. A unit test in
+ * `auth-error-i18n.test.ts` asserts this table equals `toTaiwanTraditional`
+ * applied to every zh-CN entry, so any drift fails CI.
  */
 const ssoErrorMessagesZhTW: TranslationDictionary = {
   [SSO_ERROR_CODES.providerNotFound]: "該電子郵件未設定企業單一登入。",
@@ -67,15 +70,13 @@ const ssoErrorMessagesZhTW: TranslationDictionary = {
   [SSO_ERROR_CODES.invalidAttributeMapping]:
     "該屬性對映使用了保留的欄位名，請換一個欄位名。",
   [SSO_ERROR_CODES.invalidProviderId]:
-    "身分提供者 ID 需為 3–47 個小寫字母、數字或連字元。",
+    "身分提供者 ID 需為 3–47 個小寫字母、數字或連字元，且不能與內建登入方式同名。",
   [SSO_ERROR_CODES.organizationRequired]: "單一登入只能為團隊設定。",
   [SSO_ERROR_CODES.providerLimit]: "該團隊的身分提供者數量已達上限（5 個）。",
-  // `重新建立` hand-corrected from the generator's `重新增立` (the glossary's
-  // `新建→新增` rule mis-matches the `新建` inside `重新建立`); reported upstream.
   [SSO_ERROR_CODES.providerIdentityLocked]:
-    "已有成員使用該身分提供者登入後，這些設定不能再修改。如需修改，請先刪除該身分提供者，再重新建立。",
+    "已有成員使用該身分提供者登入後，這些設定不能再修改。如需修改，請先刪除該身分提供者，再重新設定。",
   [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
-    "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，並傳送未加密的斷言。",
+    "身分提供者回傳的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，並傳送未加密的斷言。",
 };
 
 // Traditional Chinese error messages. The official @better-auth/i18n plugin

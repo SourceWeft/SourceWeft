@@ -73,7 +73,7 @@ export const SSO_ERROR_MESSAGES_EN: Record<SsoErrorCode, string> = {
   [SSO_ERROR_CODES.invalidAttributeMapping]:
     "This attribute mapping uses a name that is reserved. Choose a different field name.",
   [SSO_ERROR_CODES.invalidProviderId]:
-    "Provider IDs use 3–47 lowercase letters, digits and hyphens.",
+    "Provider IDs use 3–47 lowercase letters, digits and hyphens, and can't be the name of a built-in sign-in method.",
   [SSO_ERROR_CODES.organizationRequired]:
     "Single sign-on can only be set up for a team.",
   [SSO_ERROR_CODES.providerLimit]:

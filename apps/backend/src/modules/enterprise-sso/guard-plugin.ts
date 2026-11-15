@@ -275,6 +275,38 @@ function withRoleExtraField(
 }
 
 /**
+ * Strip the namespaced role claim ({@link SSO_ROLE_CLAIM_KEY}) from a config's
+ * `mapping.extraFields` — used when a provider's role attribute is cleared (or
+ * was never set), so the stored mapping stops copying a role claim. Other
+ * extra-field mappings are preserved; `email`/`name` are defaulted so the strict
+ * mapping schema still validates.
+ */
+function withoutRoleExtraField(
+  providerConfig: Record<string, unknown>,
+  kind: "oidc" | "saml",
+): Record<string, unknown> {
+  const existing = asMapping(providerConfig.mapping);
+  const extraFields = { ...asMapping(existing.extraFields) };
+  delete extraFields[SSO_ROLE_CLAIM_KEY];
+  const mapping: Record<string, unknown> = {
+    ...existing,
+    email: typeof existing.email === "string" ? existing.email : EMAIL_MAPPING_DEFAULT,
+    name:
+      typeof existing.name === "string"
+        ? existing.name
+        : kind === "saml"
+          ? SAML_NAME_MAPPING_DEFAULT
+          : OIDC_NAME_MAPPING_DEFAULT,
+  };
+  if (Object.keys(extraFields).length > 0) {
+    mapping.extraFields = extraFields;
+  } else {
+    delete mapping.extraFields;
+  }
+  return { ...providerConfig, mapping };
+}
+
+/**
  * When an update body carries a provider config but no `mapping`, seed the
  * mapping from the STORED config's mapping before the role claim is injected. The
  * plugin merges a provider config's mapping whole (`updates.mapping ??
@@ -456,8 +488,6 @@ async function handleRegister(ctx: GuardHandlerCtx, adapter: GuardAdapter) {
 async function handleUpdate(ctx: GuardHandlerCtx, adapter: GuardAdapter) {
   const body = ctx.body as Record<string, unknown>;
   const userFields = resolvedUserFieldNames(ctx.context?.options);
-  assertSafeExtraFields(body.oidcConfig, userFields);
-  assertSafeExtraFields(body.samlConfig, userFields);
   const providerId = asString(body.providerId);
   const nextBody: Record<string, unknown> = { ...body };
 
@@ -483,51 +513,79 @@ async function handleUpdate(ctx: GuardHandlerCtx, adapter: GuardAdapter) {
     nextBody.domain = domain;
   }
 
-  // Keep the role claim in the mapping when the attribute is (re)set. The update
-  // body may carry only the attribute, so merge into the body's config when it
-  // sends one, else into a mapping-only patch over the provider's current config
-  // (the plugin's mergeOIDCConfig/mergeSAMLConfig preserves the rest).
-  const roleAttribute = roleAttributeFromBody(body);
-  if (roleAttribute && providerId) {
+  // Keep the stored `roleAttribute` column and the mapping's `ssoRoleClaim` in
+  // sync so they never drift. The attribute name lives in the column (what the
+  // plugin reads to decide `roleManaged`); the mapping carries
+  // `extraFields.ssoRoleClaim = <that name>` so the IdP's claim reaches
+  // `userInfo`. We touch the config whenever the update body changes the role
+  // attribute OR sends a config (whose `mapping`, if present, would otherwise
+  // replace the stored one whole and drop the claim).
+  const hasRoleAttributeInBody = Object.prototype.hasOwnProperty.call(
+    body,
+    "roleAttribute",
+  );
+  const bodyRoleAttribute = roleAttributeFromBody(body); // throws on invalid
+  const bodyHasOidc = Boolean(body.oidcConfig && typeof body.oidcConfig === "object");
+  const bodyHasSaml = Boolean(body.samlConfig && typeof body.samlConfig === "object");
+
+  if (providerId && (hasRoleAttributeInBody || bodyHasOidc || bodyHasSaml)) {
     const current = await adapter.findOne({
       model: SSO_PROVIDER_MODEL,
       where: [{ field: "providerId", value: providerId }],
       // organizationId is required so the secret-storage adapter wrapper can
       // resolve the team key when it decrypts the stored config on read.
-      select: ["organizationId", "oidcConfig", "samlConfig"],
+      select: ["organizationId", "oidcConfig", "samlConfig", "roleAttribute"],
     });
-    if (body.oidcConfig && typeof body.oidcConfig === "object") {
-      nextBody.oidcConfig = withRoleExtraField(
+    // An explicit body value — a new name, or a clear (null/empty → null) — wins;
+    // otherwise the stored column is preserved, so a mapping-only edit keeps the
+    // role claim instead of dropping it.
+    const effectiveRoleAttribute = hasRoleAttributeInBody
+      ? bodyRoleAttribute
+      : asString(current?.roleAttribute);
+
+    const applyClaim = (
+      config: Record<string, unknown>,
+      kind: "oidc" | "saml",
+    ): Record<string, unknown> =>
+      effectiveRoleAttribute
+        ? withRoleExtraField(config, effectiveRoleAttribute, kind)
+        : withoutRoleExtraField(config, kind);
+
+    if (bodyHasOidc) {
+      nextBody.oidcConfig = applyClaim(
         seedMappingFromStored(
           body.oidcConfig as Record<string, unknown>,
           current?.oidcConfig,
         ),
-        roleAttribute,
         "oidc",
       );
-    } else if (body.samlConfig && typeof body.samlConfig === "object") {
-      nextBody.samlConfig = withRoleExtraField(
+    } else if (bodyHasSaml) {
+      nextBody.samlConfig = applyClaim(
         seedMappingFromStored(
           body.samlConfig as Record<string, unknown>,
           current?.samlConfig,
         ),
-        roleAttribute,
         "saml",
       );
     } else if (current?.oidcConfig) {
-      nextBody.oidcConfig = withRoleExtraField(
+      // roleAttribute-only update (set or clear): patch the stored mapping.
+      nextBody.oidcConfig = applyClaim(
         { mapping: storedConfigMapping(current.oidcConfig) },
-        roleAttribute,
         "oidc",
       );
     } else if (current?.samlConfig) {
-      nextBody.samlConfig = withRoleExtraField(
+      nextBody.samlConfig = applyClaim(
         { mapping: storedConfigMapping(current.samlConfig) },
-        roleAttribute,
         "saml",
       );
     }
   }
+
+  // Validate the FINAL mapping the guard will send (body merged with what it
+  // seeds from the stored row), not just the body's own, so a user-field
+  // extra-field cannot slip in through the stored mapping either.
+  assertSafeExtraFields(nextBody.oidcConfig, userFields);
+  assertSafeExtraFields(nextBody.samlConfig, userFields);
 
   return { context: { body: withSignedAssertions(nextBody) } };
 }
