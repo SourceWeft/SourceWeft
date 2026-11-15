@@ -162,6 +162,14 @@ const FILE_EXEMPTIONS: readonly {
       "Type-imports AgentSandboxRuntimeForTurn from @sourceweft/builtin-tool-sandbox to type the turn input. That package is infrastructure, so this would pass anywhere else in the host; it is called out only because capability-tools is an INFRASTRUCTURE_STRICT_DIRECTORIES entry. Pre-dates that module; the sandbox runtime is threaded through turn assembly, which is not this refactor's to move.",
   },
   {
+    file: "modules/study/engine.ts",
+    // TODO(capability-boundary): reach the engine through the static module
+    // table in @sourceweft/agent-tool-registry once the study package is
+    // registered there (with its artifact view handlers).
+    reason:
+      "Re-exports the study generation engine from @sourceweft/builtin-tool-study/engine for modules/study. The engine is pure logic behind ports this module implements (model calls, anchoring, checkpoints); the generation job is a host queue job, not a deliverable pipeline, so no entry factory exists to load it by. One file, so the coupling is in one place.",
+  },
+  {
     file: "shared/sandbox-assets/catalog.ts",
     reason:
       "The runtime-asset catalog (docs/architecture/sandbox-runtime-assets.md, A3): a feature declares its asset spec beside the dependency pin that makes the version correct — chrome-headless-shell's version and sha live next to the @remotion/renderer pin in the video package — and this file only assembles the lookup table. Importing the spec value is the price of keeping spec and pin adjacent; moving it into contracts would separate them, and the catalog stays a plain data table either way.",
