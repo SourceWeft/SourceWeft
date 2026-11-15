@@ -13,9 +13,11 @@ const REQUEST_TIMEOUT_MS = 30000;
 /** Fixed page size for `search_v2`/`search/continue_v2`; the interface takes
  * no limit argument, so this is the whole dial (see global constraints). */
 const SEARCH_MAX_RESULTS = 50;
-// Shares its character class with configSchema's item pattern in
-// contribution.ts; keep both in sync.
+// Derived from the single pattern contribution.ts also uses for configSchema.
 const ITEM_ID = new RegExp(DROPBOX_ITEM_ID_PATTERN);
+/** Cap for a `.paper` export's markdown body, same constant style as
+ * Drive's `GOOGLE_DRIVE_EXPORT_MAX_BYTES`. */
+const DROPBOX_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
 
 export class DropboxAdapterError extends Error {
   constructor(
@@ -114,6 +116,21 @@ function mapStatus(status: number): DropboxAdapterError {
   if (status === 429) return requestFailed(status, 429, "DROPBOX_RATE_LIMITED");
   if (status >= 500) return requestFailed(status, 503, "DROPBOX_UNAVAILABLE");
   return requestFailed(status, status, "DROPBOX_REQUEST_FAILED");
+}
+
+/** Maps a non-`not_found` 409 from discovery (`getMetadata`/`listFolder`)
+ * to a message naming the cause, using only the error_summary's first path
+ * segment (e.g. `restricted_content`, `locked`) — never a body or token. */
+function discoveryRequestFailed(summary: string | null): DropboxAdapterError {
+  if (summary) {
+    const tag = summary.split("/")[0];
+    return new DropboxAdapterError(
+      409,
+      "DROPBOX_REQUEST_FAILED",
+      `Dropbox refused to read a selected item (${tag}). Remove it from the selection or try again later.`,
+    );
+  }
+  return requestFailed(409, 409, "DROPBOX_REQUEST_FAILED");
 }
 
 /** Reads a 409 body's `error_summary`, tolerating a non-JSON body (treated
@@ -359,6 +376,7 @@ export function createDropboxClient(options: DropboxClientOptions) {
       if (response.status === 409) {
         const summary = await errorSummaryOf(response);
         if (summary?.startsWith("path/not_found")) return null;
+        throw discoveryRequestFailed(summary);
       }
       throw mapStatus(response.status);
     },
@@ -387,6 +405,7 @@ export function createDropboxClient(options: DropboxClientOptions) {
         if (summary?.startsWith("path/not_found") || summary?.startsWith("path/not_folder")) {
           return null;
         }
+        throw discoveryRequestFailed(summary);
       }
       throw mapStatus(response.status);
     },
@@ -417,7 +436,14 @@ export function createDropboxClient(options: DropboxClientOptions) {
       const response = await postRpc(
         "/2/files/search_v2",
         token,
-        { query, options: { max_results: SEARCH_MAX_RESULTS } },
+        {
+          query,
+          options: {
+            filename_only: true,
+            file_status: "active",
+            max_results: SEARCH_MAX_RESULTS,
+          },
+        },
         pathRoot,
       );
       if (response.ok) return toSearchListing(await response.json());
@@ -465,7 +491,17 @@ export function createDropboxClient(options: DropboxClientOptions) {
         { path: itemId, export_format: "markdown" },
         pathRoot,
       );
-      if (response.ok) return response.text();
+      if (response.ok) {
+        try {
+          const buffer = await readCapped(response, DROPBOX_EXPORT_MAX_BYTES);
+          return buffer.toString("utf8");
+        } catch (error) {
+          if (error instanceof ConnectorItemSkipError && error.reason === "too_large") {
+            throw new ConnectorItemSkipError("export_too_large");
+          }
+          throw error;
+        }
+      }
       throw await contentError(response);
     },
   };

@@ -44,14 +44,16 @@ const BROWSE_LIST_LIMIT = 200;
 const INVALID_REQUEST_MESSAGE = "Invalid Dropbox request";
 /** `dropbox.describe`'s own cap on how many ids one call may request. */
 const DESCRIBE_MAX_IDS = 100;
+/** `dropbox.describe`'s concurrency cap on `getMetadata` calls, so up to 100
+ * requested ids never fire 100 concurrent Dropbox requests at once. */
+const DESCRIBE_CONCURRENCY = 8;
 /** A request cursor is opaque to this adapter; only its size is bounded
  * (matches the `cursor` field's `maxLength` in contribution.ts). */
 const CURSOR_MAX_LENGTH = 4096;
 /** Past this many unique ids, discovery stops counting precisely and the cap
  * message reports "more than 20,000" instead of an exact count (R6). */
 const COUNT_CEILING = 20000;
-// Shares its character class with the selection item id pattern in
-// contribution.ts; keep both in sync.
+// Derived from the single pattern contribution.ts also uses for configSchema.
 const SELECTION_ITEM_ID = new RegExp(DROPBOX_ITEM_ID_PATTERN);
 
 export type DropboxAdapterConfig = {
@@ -157,6 +159,30 @@ function parseDescribeRequest(request: Record<string, unknown>): { ids: string[]
   return { ids };
 }
 
+/** Runs `fn` over `items` with at most `limit` calls in flight at once,
+ * returning results in the same order as `items` regardless of which
+ * finishes first. Used to bound `dropbox.describe`'s concurrent
+ * `getMetadata` calls. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return results;
+}
+
 /** Maps one listing entry to a browse/search row, or `null` for an entry
  * this adapter cannot surface (no id, or Dropbox's `deleted` tag, which
  * `search_v2`/`list_folder` should not return but a future API change
@@ -192,7 +218,7 @@ function toBrowseEntries(entries: DropboxEntry[]): DropboxBrowseEntry[] {
 }
 
 /** Reads `handling`/`pathRoot`/`dropboxFileId` back out of the metadata
- * Task 3's `toItem` wrote onto a discovered `ConnectorItem` (R3). An
+ * `toItem` (below) wrote onto a discovered `ConnectorItem` (R3). An
  * unrecognized `handling.kind` (e.g. corrupted or future-versioned metadata)
  * is treated the same as `"unsupported"` rather than failing the extraction
  * outright. */
@@ -269,8 +295,8 @@ function externalUriFor(pathDisplay: string, name: string): string {
 
 /**
  * Builds the discovered `ConnectorItem` for one Dropbox file entry (spec 3.5,
- * R3). `metadata` carries everything `extract` will need (Task 4) so it never
- * has to look the file up again: `handling` and `pathRoot` in particular.
+ * R3). `metadata` carries everything `extract` will need so it never has to
+ * look the file up again: `handling` and `pathRoot` in particular.
  */
 function toItem(
   entry: DropboxEntry,
@@ -556,8 +582,10 @@ export function createDropboxConnectorAdapter(
     const { ids } = parseDescribeRequest(input.request);
     const account = await client.getCurrentAccount(input.accessToken);
     const pathRoot = pathRootFor(account);
-    const items = await Promise.all(
-      ids.map(async (id): Promise<DropboxDescribeItem> => {
+    const items = await mapWithConcurrency(
+      ids,
+      DESCRIBE_CONCURRENCY,
+      async (id): Promise<DropboxDescribeItem> => {
         const entry = await client.getMetadata(input.accessToken, pathRoot, id);
         if (!entry || entry[".tag"] === "deleted") {
           return { id, kind: null, name: null, pathDisplay: null, pathLower: null, exists: false };
@@ -570,7 +598,7 @@ export function createDropboxConnectorAdapter(
           pathLower: entry.path_lower ?? null,
           exists: true,
         };
-      }),
+      },
     );
     return { items };
   }

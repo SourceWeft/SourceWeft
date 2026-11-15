@@ -288,7 +288,14 @@ test("search returns entries and cursor", async () => {
     hasMore: false,
   });
   const searchCall = calls.find((call) => call.url.endsWith("/2/files/search_v2"));
-  assert.equal((searchCall?.body as { query: string }).query, "annual report");
+  assert.deepEqual(searchCall?.body, {
+    query: "annual report",
+    options: {
+      filename_only: true,
+      file_status: "active",
+      max_results: 50,
+    },
+  });
 });
 
 test("search continues with a cursor", async () => {
@@ -353,6 +360,28 @@ test("describe marks missing ids exists:false", async () => {
       exists: true,
     },
   ]);
+});
+
+test("describe caps concurrent getMetadata calls at 8", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const { fetcher } = router({
+    getMetadata: async (call) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      // Hold every call open long enough for every available worker to
+      // start before any of them resolves, so a concurrency cap above 8
+      // would show up as more than 8 simultaneously in flight.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight--;
+      const path = (call.body as { path: string }).path;
+      return json(fileEntry({ id: path, name: "Keep.pdf", path_display: "/Keep.pdf" }));
+    },
+  });
+  const dbx = adapter(fetcher);
+  const ids = Array.from({ length: 24 }, (_, i) => `id:concur${String(i).padStart(4, "0")}`);
+  await dbx.executeAction(actionInput("dropbox.describe", { ids }));
+  assert.equal(maxInFlight, 8);
 });
 
 test("describe rejects 101 ids", async () => {

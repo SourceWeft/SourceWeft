@@ -295,9 +295,14 @@ test("selected file and folder index, then a deletion is archived", async () => 
     );
     assert.equal((error as { code?: unknown }).code, run3.errorCode);
     const rowsAfterCapFailure = await t.sourceRows();
+    // sourceRows() gives no ordering guarantee, so sort both sides by id
+    // before comparing positionally.
+    const byId = (
+      row: { id: string; status: string },
+    ): { id: string; status: string } => ({ id: row.id, status: row.status });
     assert.deepEqual(
-      rowsAfterCapFailure.map((row) => ({ id: row.id, status: row.status })),
-      rowsBeforeCapFailure.map((row) => ({ id: row.id, status: row.status })),
+      rowsAfterCapFailure.map(byId).sort((a, b) => a.id.localeCompare(b.id)),
+      rowsBeforeCapFailure.map(byId).sort((a, b) => a.id.localeCompare(b.id)),
     );
   } finally {
     vi.unstubAllEnvs();

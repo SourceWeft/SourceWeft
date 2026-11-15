@@ -285,6 +285,31 @@ test("download not_found maps to 404 DROPBOX_NOT_FOUND", async () => {
   });
 });
 
+test("export reads the body through the capped reader", async () => {
+  const client = dropbox(async () => new Response("# Hello\n", { status: 200 }));
+
+  const markdown = await client.exportPaperMarkdown(
+    "access-token",
+    null,
+    "id:paperdoc002",
+  );
+  assert.equal(markdown, "# Hello\n");
+});
+
+test("export over the 20 MB cap skips export_too_large", async () => {
+  const bigBody = Buffer.alloc(20 * 1024 * 1024 + 1, 65);
+  const client = dropbox(async () => new Response(bigBody, { status: 200 }));
+
+  await assert.rejects(
+    client.exportPaperMarkdown("access-token", null, "id:paperdoc003"),
+    (error) => {
+      assert.ok(isConnectorItemSkipError(error));
+      assert.equal((error as { reason: string }).reason, "export_too_large");
+      return true;
+    },
+  );
+});
+
 test("download over maxBytes skips too_large", async () => {
   const bigBody = Buffer.alloc(2048, 65);
   const client = dropbox(async () => new Response(bigBody, { status: 200 }));

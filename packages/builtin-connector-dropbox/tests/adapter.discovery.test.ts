@@ -102,22 +102,32 @@ async function collectItems(
   return items;
 }
 
-test("manifest client_id is empty without a secret", () => {
-  const noSecret = adapter(async () => json({}));
+test("manifest client_id is empty without both credentials", () => {
+  const bothCredentials = adapter(async () => json({}));
   const withSecret = createDropboxConnectorAdapter({
     baseUrl: "https://sourceweft.example",
     clientId: "app-key",
     clientSecret: "app-secret",
     fetcher: async () => json({}),
   });
-  assert.equal(noSecret.getManifest().auth.authorizationParams?.client_id, "app-key");
-  const reallyNoSecret = createDropboxConnectorAdapter({
+  assert.equal(
+    bothCredentials.getManifest().auth.authorizationParams?.client_id,
+    "app-key",
+  );
+  const missingSecret = createDropboxConnectorAdapter({
     baseUrl: "https://sourceweft.example",
     clientId: "app-key",
     clientSecret: "",
     fetcher: async () => json({}),
   });
-  assert.equal(reallyNoSecret.getManifest().auth.authorizationParams?.client_id, "");
+  assert.equal(missingSecret.getManifest().auth.authorizationParams?.client_id, "");
+  const missingClientId = createDropboxConnectorAdapter({
+    baseUrl: "https://sourceweft.example",
+    clientId: "",
+    clientSecret: "app-secret",
+    fetcher: async () => json({}),
+  });
+  assert.equal(missingClientId.getManifest().auth.authorizationParams?.client_id, "");
   assert.equal(withSecret.getManifest().auth.authorizationParams?.client_id, "app-key");
 });
 
@@ -379,6 +389,54 @@ test("missing file and missing folder are omitted and the run still completes", 
   assert.equal(items[0]?.externalId, "file:id:keptfile0001");
   assert.equal(pages[pages.length - 1]?.complete, true);
   assert.equal(pages[pages.length - 1]?.reconcileMissing, true);
+});
+
+test("a non-not_found 409 from get_metadata names the cause and fails the run", async () => {
+  const { fetcher } = router({
+    getMetadata: () => json({ error_summary: "restricted_content/..." }, 409),
+  });
+  const dbx = adapter(fetcher);
+  const pages: ConnectorDiscoveryPage[] = [];
+  await assert.rejects(
+    (async () => {
+      for await (const page of dbx.discoverPages!({
+        ...context,
+        config: { items: [{ id: "id:restrictedfile1", kind: "file" }] },
+      })) {
+        pages.push(page);
+      }
+    })(),
+    (error: unknown) =>
+      error instanceof DropboxAdapterError &&
+      error.code === "DROPBOX_REQUEST_FAILED" &&
+      error.message ===
+        "Dropbox refused to read a selected item (restricted_content). Remove it from the selection or try again later.",
+  );
+  assert.equal(pages.length, 0);
+});
+
+test("a non-not_found/not_folder 409 from list_folder names the cause and fails the run", async () => {
+  const { fetcher } = router({
+    listFolder: () => json({ error_summary: "locked/..." }, 409),
+  });
+  const dbx = adapter(fetcher);
+  const pages: ConnectorDiscoveryPage[] = [];
+  await assert.rejects(
+    (async () => {
+      for await (const page of dbx.discoverPages!({
+        ...context,
+        config: { items: [{ id: "id:lockedfolder1", kind: "folder" }] },
+      })) {
+        pages.push(page);
+      }
+    })(),
+    (error: unknown) =>
+      error instanceof DropboxAdapterError &&
+      error.code === "DROPBOX_REQUEST_FAILED" &&
+      error.message ===
+        "Dropbox refused to read a selected item (locked). Remove it from the selection or try again later.",
+  );
+  assert.equal(pages.length, 0);
 });
 
 for (const failure of [

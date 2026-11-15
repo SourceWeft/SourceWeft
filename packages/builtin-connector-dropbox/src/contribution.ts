@@ -9,8 +9,8 @@ export const DROPBOX_SCOPES = [
 ] as const;
 
 /** Server-enforced ceiling on how many Dropbox files or folders one
- * connector may select. Keep in sync with any client-side selection limit
- * once the web UI lands (Task 10). */
+ * connector may select. Keep in sync with the client-side selection limit
+ * in apps/web/.../dropbox-selection.ts. */
 export const DROPBOX_MAX_SELECTED_ITEMS = 500;
 
 /** Discovery cap: past this many unique supported files, a run fails with
