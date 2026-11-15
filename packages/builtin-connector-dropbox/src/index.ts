@@ -7,6 +7,7 @@ export {
 } from "./contribution";
 export { builtinDropboxConnectorCapabilityManifest } from "./manifest";
 export { toBackendDropboxManifest } from "./backend-manifest";
+export { createConnectorAdapters } from "./host-services";
 export {
   resolveDropboxFileHandling,
   isDropboxFileSupported,
