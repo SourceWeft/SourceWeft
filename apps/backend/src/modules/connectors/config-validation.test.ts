@@ -215,3 +215,100 @@ test("rejects unknown config keys", () => {
       error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
   );
 });
+
+test("existing Drive fileIds config still validates", () => {
+  assert.doesNotThrow(() =>
+    validateObjectWithJsonSchema({
+      label: "configJson",
+      schema: driveConfigSchema,
+      value: { fileIds: ["1AbCdEfGhIjKlMnOp", "2AbCdEfGhIjKlMnOp"] },
+    }),
+  );
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: driveConfigSchema,
+        value: { fileIds: ["1AbCdEfGhIjKlMnOp", "1AbCdEfGhIjKlMnOp"] },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+});
+
+// Shaped exactly like the Dropbox connector's configSchema (global
+// constraints: `{ items: [{ id: "id:…", kind: "file" | "folder" }] }`,
+// maxItems 500, item id pattern `^id:[A-Za-z0-9_-]{1,200}$`). Inlined for the
+// same reason the Drive schema above is: this host test exercises the
+// validator's generic recursion, not the capability package, and must not
+// import it (src/architecture-capability-imports.test.ts). This is the first
+// contribution schema whose array `items` are themselves `type: "object"`, so
+// it closes the gap this task fixes: nested object constraints
+// (`required`/`additionalProperties`/`properties`) were only enforced at the
+// top level before this task.
+const dropboxConfigSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    items: {
+      type: "array",
+      maxItems: 500,
+      items: {
+        type: "object",
+        required: ["id", "kind"],
+        additionalProperties: false,
+        properties: {
+          id: { type: "string", pattern: "^id:[A-Za-z0-9_-]{1,200}$" },
+          kind: { type: "string", enum: ["file", "folder"] },
+        },
+      },
+    },
+  },
+};
+
+test("nested item objects enforce required and additionalProperties", () => {
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: dropboxConfigSchema,
+        value: { items: [{ id: "id:abc" }] },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: dropboxConfigSchema,
+        value: { items: [{ id: "id:abc", kind: "file", extra: "nope" }] },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: dropboxConfigSchema,
+        value: { items: [{ id: "id:abc", kind: "dir" }] },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+
+  assert.doesNotThrow(() =>
+    validateObjectWithJsonSchema({
+      label: "configJson",
+      schema: dropboxConfigSchema,
+      value: { items: [{ id: "id:abc", kind: "file" }] },
+    }),
+  );
+});
