@@ -255,6 +255,129 @@ test("a SAML provider can never submit a samlConfig without an entryPoint", asyn
   assert(document.body.textContent?.includes("orgFieldRequired"));
 });
 
+const SAML_PROVIDER = {
+  providerId: "acme-com-saml",
+  type: "saml",
+  issuer:
+    "https://api.test/api/auth/sso/saml2/sp/metadata?providerId=acme-com-saml",
+  domain: "acme.com",
+  domainVerified: true,
+  // A stored entry point that differs from SAML_METADATA's, so a paste-on-edit
+  // registers as a real change.
+  samlConfig: { entryPoint: "https://old-idp.acme.com/sso" },
+  roleAttribute: null,
+  adminRoleValue: null,
+};
+
+async function editSaml() {
+  const mounted = await renderEdit(SAML_PROVIDER);
+  await flush();
+  return mounted;
+}
+
+test("editing a SAML provider and changing only the domain sends no samlConfig", async () => {
+  await editSaml();
+
+  assert(field("sso-provider-id")!.disabled, "providerId stays immutable");
+  // cert / entity id are blank (never returned) but the edit is not blocked.
+  typeInto(field("sso-domain")!, "acme.io");
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.updateProvider.mock.calls.length, 1);
+  const payload = state.updateProvider.mock.calls[0]?.[0] as Record<
+    string,
+    unknown
+  >;
+  assert.equal(payload.providerId, "acme-com-saml");
+  assert.equal(payload.domain, "acme.io");
+  assert(!("samlConfig" in payload), "nothing stored is resent");
+});
+
+test("editing only the role attribute of a SAML provider sends no samlConfig", async () => {
+  await editSaml();
+
+  typeInto(field("sso-role-attribute")!, "groups");
+  button("orgSave").click();
+  await flush(3);
+
+  const payload = state.updateProvider.mock.calls[0]?.[0] as Record<
+    string,
+    unknown
+  >;
+  assert.equal(payload.roleAttribute, "groups");
+  assert(!("samlConfig" in payload));
+});
+
+test("changing only the SAML entry point sends entryPoint and not cert or entity id", async () => {
+  await editSaml();
+
+  typeInto(field("sso-entry-point")!, "https://idp.acme.com/sso2");
+  button("orgSave").click();
+  await flush(3);
+
+  const payload = state.updateProvider.mock.calls[0]?.[0] as Record<
+    string,
+    unknown
+  >;
+  const saml = payload.samlConfig as Record<string, unknown>;
+  assert.equal(saml.entryPoint, "https://idp.acme.com/sso2");
+  assert(!("cert" in saml));
+  assert(!("idpMetadata" in saml));
+});
+
+test("entering only a new certificate on edit sends cert and nothing else", async () => {
+  await editSaml();
+
+  typeInto(field("sso-cert")!, "NEWSIGNINGCERT==");
+  button("orgSave").click();
+  await flush(3);
+
+  const payload = state.updateProvider.mock.calls[0]?.[0] as Record<
+    string,
+    unknown
+  >;
+  const saml = payload.samlConfig as Record<string, unknown>;
+  assert.equal(saml.cert, "NEWSIGNINGCERT==");
+  assert(!("entryPoint" in saml), "the unchanged entry point is not resent");
+  assert(!("idpMetadata" in saml));
+});
+
+test("an invalid entry point URL blocks a SAML edit", async () => {
+  await editSaml();
+
+  typeInto(field("sso-entry-point")!, "not-a-url");
+  button("orgSave").click();
+  await flush();
+
+  assert.equal(state.updateProvider.mock.calls.length, 0);
+  assert(document.body.textContent?.includes("orgEntryPointInvalid"));
+});
+
+test("pasting metadata while editing fills the fields and sends the filled values", async () => {
+  await editSaml();
+
+  typeInto(field("sso-metadata")!, SAML_METADATA);
+  await flush();
+  assert.equal(field("sso-idp-entity-id")!.value, "https://idp.acme.com/entity");
+
+  button("orgSave").click();
+  await flush(3);
+
+  const payload = state.updateProvider.mock.calls[0]?.[0] as Record<
+    string,
+    unknown
+  >;
+  const saml = payload.samlConfig as {
+    entryPoint?: unknown;
+    cert?: unknown;
+    idpMetadata?: { entityID?: unknown };
+  };
+  assert.equal(saml.entryPoint, "https://idp.acme.com/sso");
+  assert.equal(saml.cert, "ACMESIGNINGCERT==");
+  assert.equal(saml.idpMetadata?.entityID, "https://idp.acme.com/entity");
+});
+
 test("a SAML provider with neither endpoint config nor metadata does not submit", async () => {
   await renderCreate();
   await flush();

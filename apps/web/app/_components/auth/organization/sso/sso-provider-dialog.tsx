@@ -186,29 +186,37 @@ export function SsoProviderDialog({
       return
     }
     setMetadataError(null)
-    const notices: string[] = []
+
+    // A value that was read fills its field and clears its message; a value that
+    // could not be read gets a message on its own field (not just under the
+    // metadata box) and is left for manual entry.
+    const nextFieldErrors: Record<string, string> = {}
     if (result.value.entryPoint) {
       setEntryPoint(result.value.entryPoint)
-      setFieldErrors((current) => ({ ...current, entryPoint: "" }))
+      nextFieldErrors.entryPoint = ""
     } else {
-      notices.push(localization.orgMetadataNoEntryPoint)
+      nextFieldErrors.entryPoint = localization.orgMetadataNoEntryPoint
     }
     if (result.value.entityId) {
       setIdpEntityId(result.value.entityId)
-      setFieldErrors((current) => ({ ...current, idpEntityId: "" }))
+      nextFieldErrors.idpEntityId = ""
     } else {
-      notices.push(localization.orgMetadataNoEntityId)
+      nextFieldErrors.idpEntityId = localization.orgMetadataNoEntityId
     }
     if (result.value.signingCert) {
       setCert(result.value.signingCert)
-      setFieldErrors((current) => ({ ...current, cert: "" }))
+      nextFieldErrors.cert = ""
     } else {
-      notices.push(localization.orgMetadataNoCert)
+      nextFieldErrors.cert = localization.orgMetadataNoCert
     }
-    if (result.value.multipleSigningCerts) {
-      notices.push(localization.orgMetadataMultipleCerts)
-    }
-    setMetadataNotices(notices)
+    setFieldErrors((current) => ({ ...current, ...nextFieldErrors }))
+
+    // The multiple-certificate advisory stays by the metadata box.
+    setMetadataNotices(
+      result.value.multipleSigningCerts
+        ? [localization.orgMetadataMultipleCerts]
+        : []
+    )
   }
 
   function validate(): {
@@ -232,24 +240,31 @@ export function SsoProviderDialog({
         }
       }
     } else {
-      const hasEntry = entryPoint.trim().length > 0
-      const hasCert = cert.trim().length > 0
-      const hasEntity = idpEntityId.trim().length > 0
-      if (!hasEntry && !hasCert && !hasEntity) {
-        // Nothing provided at all — one clear prompt instead of three.
+      const entry = entryPoint.trim()
+      const certVal = cert.trim()
+      const entity = idpEntityId.trim()
+      if (!isEdit && !entry && !certVal && !entity) {
+        // Create with nothing provided — one clear prompt instead of three.
         formLevel = localization.orgSamlNeedsConfig
       } else {
-        // SAML submit is blocked until all three explicit fields are present,
-        // regardless of whether they were typed or filled from metadata.
-        if (!isHttpUrl(entryPoint.trim())) {
-          errors.entryPoint = localization.orgFieldRequired
+        // One rule set for both modes: on create all three explicit fields are
+        // required; on edit a blank field keeps the stored value (the backend
+        // never returns cert/entity ID), so only the values the admin actually
+        // provided are validated and sent. A present entryPoint must be a valid
+        // URL in either mode.
+        if (!entry) {
+          if (!isEdit) errors.entryPoint = localization.orgFieldRequired
+        } else if (!isHttpUrl(entry)) {
+          errors.entryPoint = localization.orgEntryPointInvalid
         }
-        if (!hasCert) {
-          errors.cert = localization.orgFieldRequired
-        } else if (!looksLikeCertificate(cert)) {
+        if (!certVal) {
+          if (!isEdit) errors.cert = localization.orgFieldRequired
+        } else if (!looksLikeCertificate(certVal)) {
           errors.cert = localization.orgCertificateInvalid
         }
-        if (!hasEntity) errors.idpEntityId = localization.orgFieldRequired
+        if (!entity && !isEdit) {
+          errors.idpEntityId = localization.orgFieldRequired
+        }
       }
     }
 
@@ -593,6 +608,11 @@ export function SsoProviderDialog({
                     aria-invalid={Boolean(fieldErrors.idpEntityId)}
                     onChange={(event) => setIdpEntityId(event.target.value)}
                   />
+                  {isEdit && (
+                    <FieldDescription>
+                      {localization.orgSamlKeepHint}
+                    </FieldDescription>
+                  )}
                   {fieldErrors.idpEntityId && (
                     <FieldError
                       errors={[{ message: fieldErrors.idpEntityId }]}
@@ -613,7 +633,9 @@ export function SsoProviderDialog({
                     onChange={(event) => setCert(event.target.value)}
                   />
                   <FieldDescription>
-                    {localization.orgCertificateHint}
+                    {isEdit
+                      ? localization.orgSamlKeepHint
+                      : localization.orgCertificateHint}
                   </FieldDescription>
                   {fieldErrors.cert && (
                     <FieldError errors={[{ message: fieldErrors.cert }]} />

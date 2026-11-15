@@ -75,6 +75,7 @@ export type SsoLocalization = {
   orgCertificateHint: string
   orgSamlMetadata: string
   orgSamlMetadataHint: string
+  orgSamlKeepHint: string
   orgRoleAttribute: string
   orgRoleAttributeHint: string
   orgAdminRoleValue: string
@@ -86,6 +87,7 @@ export type SsoLocalization = {
   orgUpdateSuccess: string
   orgFieldRequired: string
   orgProviderIdInvalid: string
+  orgEntryPointInvalid: string
   orgCertificateInvalid: string
   orgMetadataTooLarge: string
   orgMetadataParseError: string
@@ -190,6 +192,7 @@ const ssoLocalization: SsoLocalization = {
   orgSamlMetadata: "Auto-fill from IdP metadata XML",
   orgSamlMetadataHint:
     "Paste the IdP metadata XML to fill the fields above. The metadata itself is not stored.",
+  orgSamlKeepHint: "Leave blank to keep the current value.",
   orgRoleAttribute: "Role attribute (optional)",
   orgRoleAttributeHint:
     "Claim or attribute that carries the member's role. Members are only ever made admin or member, never owner.",
@@ -205,6 +208,7 @@ const ssoLocalization: SsoLocalization = {
   orgFieldRequired: "This field is required.",
   orgProviderIdInvalid:
     "Use 3–64 lowercase letters, digits or hyphens.",
+  orgEntryPointInvalid: "Enter a valid sign-on URL.",
   orgCertificateInvalid: "Enter a PEM certificate or a base64 value.",
   orgMetadataTooLarge: "The metadata XML is too large (max 100 KB).",
   orgMetadataParseError:
