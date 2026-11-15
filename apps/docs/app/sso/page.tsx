@@ -165,6 +165,33 @@ export default function SsoPage() {
               ],
             ]}
           />
+          <div id="saml-signing" className="scroll-mt-8" />
+          <Note title="SAML signing requirements">
+            <p>
+              SourceWeft accepts a SAML response only when its assertion is{" "}
+              <strong>signed</strong> (the assertion element itself, not only the
+              response envelope) and <strong>unencrypted</strong>, using an
+              accepted algorithm:
+            </p>
+            <ul className="flex list-disc flex-col gap-1 pl-6">
+              <li>
+                Signature algorithm: <Code>RSA-SHA256</Code> or{" "}
+                <Code>RSA-SHA512</Code>.
+              </li>
+              <li>
+                Digest algorithm: <Code>SHA-256</Code> or <Code>SHA-512</Code>.
+              </li>
+            </ul>
+            <p>
+              Anything else is refused — see{" "}
+              <a href="#limitations" className="underline">
+                what is not supported
+              </a>{" "}
+              for the full list of rejected algorithms and XML constructs. A
+              refused response sends the member to the sign-in error page with
+              code <Code>SSO_SAML_ALGORITHM_NOT_ALLOWED</Code>.
+            </p>
+          </Note>
         </SubSection>
 
         <SubSection id="sp-values" title="2. Give your identity provider the SourceWeft details">
@@ -282,53 +309,61 @@ export default function SsoPage() {
             NameID, not one that changes between sign-ins.
           </li>
           <li>
-            For SAML, the response must be signed with{" "}
-            <strong>SHA-256 or stronger</strong> (RSA or ECDSA; RSA-PSS and SHA-1
-            are refused), the <strong>assertion itself must be signed</strong>{" "}
-            (not only the response envelope), and the assertion must be{" "}
-            <strong>unencrypted</strong>. SourceWeft always requires signed
-            assertions for a provider you register here.
+            For SAML, the <strong>assertion itself must be signed</strong> (not
+            only the response envelope), <strong>unencrypted</strong>, and signed
+            with an accepted algorithm: the signature must be{" "}
+            <Code>RSA-SHA256</Code> or <Code>RSA-SHA512</Code> and the digest{" "}
+            <Code>SHA-256</Code> or <Code>SHA-512</Code>. See{" "}
+            <a href="#saml-signing" className="underline">
+              SAML signing requirements
+            </a>
+            . SourceWeft always requires signed assertions for a provider you
+            register here.
           </li>
         </BulletList>
         <DataTable
-          head={["Identity provider", "Notes"]}
+          head={["Identity provider", "What to configure"]}
           rows={[
             [
               "Okta",
               <>
-                Works as an OIDC app integration or a SAML app. For SAML, set
-                the Single sign-on URL to the ACS URL and the Audience URI to the
-                SP entity ID, and have Okta send the user&rsquo;s email and a
-                persistent NameID. Sign the assertion with SHA-256.
+                Create an OIDC app integration, or a SAML app. For SAML, set the
+                single sign-on / ACS URL to the ACS URL and the audience to the
+                SP entity ID; have it send the member&rsquo;s email and a
+                persistent NameID; sign the assertion; set the signature
+                algorithm to <Code>RSA-SHA256</Code> and leave assertion
+                encryption off.
               </>,
             ],
             [
               "Microsoft Entra ID",
               <>
-                Register an app for OIDC, or a non-gallery enterprise
-                application for SAML. For SAML, the Reply URL is the ACS URL and
-                the Identifier (Entity ID) is the SP entity ID. Entra signs with
-                SHA-256 by default; leave assertion encryption off.
+                Register an application for OIDC, or set up SAML-based sign-on.
+                For SAML, set the reply (ACS) URL to the ACS URL and the
+                identifier (entity ID) to the SP entity ID; set the signing
+                algorithm to <Code>RSA-SHA256</Code>; sign the assertion; and
+                leave assertion encryption off.
               </>,
             ],
             [
               "Google Workspace",
               <>
-                Use a SAML app. Set the ACS URL and the Entity ID to the values
-                from the panel, and map the primary email to the{" "}
-                <Code>email</Code> attribute. Google signs assertions with
-                SHA-256 and does not encrypt them.
+                Add a custom SAML app. Set the ACS URL and the entity ID to the
+                values from the panel; map the member&rsquo;s primary email to
+                the <Code>email</Code> attribute; set the signing algorithm to{" "}
+                <Code>RSA-SHA256</Code>; sign the assertion; and do not turn on
+                assertion encryption.
               </>,
             ],
             [
               "Keycloak",
               <>
                 Create an OIDC client (confidential, with a client secret) or a
-                SAML client. For OIDC the Valid Redirect URI is the redirect URI;
-                for SAML the Valid Redirect URI / Master SAML Processing URL is
-                the ACS URL and the client ID is the SP entity ID. Turn on{" "}
-                <em>Sign assertions</em> and leave <em>Encrypt assertions</em>{" "}
-                off, with a SHA-256 signature.
+                SAML client. For OIDC set the valid redirect URI to the redirect
+                URI; for SAML set the valid redirect / ACS URL to the ACS URL and
+                the client ID to the SP entity ID. For SAML, turn on sign
+                assertions, leave encrypt assertions off, and set the signature
+                algorithm to <Code>RSA-SHA256</Code>.
               </>,
             ],
           ]}
@@ -398,9 +433,9 @@ export default function SsoPage() {
           </li>
           <li>
             <strong>A team seat is used.</strong> The first sign-in takes a seat,
-            like an invitation. With no seats left the sign-in is refused and the
-            member is told to ask an administrator for a seat; nothing is left
-            half-created.
+            like an invitation. With no seats left the sign-in is rolled back —
+            no account is created and no session is left behind — and the member
+            is told to ask an administrator for a seat.
           </li>
           <li>
             <strong>Subdomains are trusted.</strong> A provider verified for{" "}
@@ -414,77 +449,172 @@ export default function SsoPage() {
 
       <Section id="troubleshooting" title="Troubleshooting">
         <p>
-          A failed sign-in lands on an error page that carries one of these
-          codes. Most point at a setup step to finish or fix.
+          SSO errors show up in one of two places. A problem saving a provider
+          is shown inline in the Add / Edit dialog (or the verification panel) as
+          a message — the admin sees the message, not the code. A problem while a
+          member signs in is shown either on the <Code>/auth/sso</Code> form, or
+          on the sign-in error page at{" "}
+          <Code>/auth/error?error=&lt;CODE&gt;</Code>, which shows both the
+          message and the code. The English messages are quoted below.
         </p>
-        <DataTable
-          head={["Code", "What it means", "What to do"]}
-          rows={[
-            [
-              <Code key="c">SSO_PROVIDER_NOT_FOUND</Code>,
-              "No single sign-on is set up for this email address.",
-              "Check the member is using an address on a domain you registered, and that a provider exists for it.",
-            ],
-            [
-              <Code key="c">SSO_DOMAIN_NOT_VERIFIED</Code>,
-              "The domain has not been verified yet.",
-              <>
-                Finish{" "}
-                <a href="#verify-domain" className="underline">
-                  domain verification
-                </a>
-                : add the TXT record and choose Verify.
-              </>,
-            ],
-            [
-              <Code key="c">SSO_DOMAIN_NOT_ALLOWED</Code>,
-              "This domain cannot be used for single sign-on.",
-              "It is a public mailbox provider, or another team has already verified it. Use a domain your team controls.",
-            ],
-            [
-              <Code key="c">SSO_ACCOUNT_LINK_DENIED</Code>,
-              "This sign-in cannot be linked to an existing account.",
-              "The identity provider returned an email outside the verified domain. Make sure it sends the member's work email on the verified domain.",
-            ],
-            [
-              <Code key="c">SSO_SEAT_LIMIT</Code>,
-              "Your team has no seats left.",
-              "Add seats to the team, then try again.",
-            ],
-            [
-              <Code key="c">SSO_PROVISIONING_FAILED</Code>,
-              "We couldn't add you to your team.",
-              "A temporary problem adding the member. Try again; if it persists, contact support.",
-            ],
-            [
-              <Code key="c">SSO_INVALID_ROLE_ATTRIBUTE</Code>,
-              "This role attribute name can't be used.",
-              <>
-                Seen when saving a provider. Choose a different{" "}
-                <a href="#roles" className="underline">
-                  role attribute
-                </a>{" "}
-                name — it may not be a reserved field such as <Code>email</Code>{" "}
-                or <Code>name</Code>.
-              </>,
-            ],
-            [
-              <Code key="c">SSO_ORGANIZATION_REQUIRED</Code>,
-              "Single sign-on can only be set up for a team.",
-              "Set it up from a team, not a personal organization.",
-            ],
-            [
-              <Code key="c">SSO_PROVIDER_LIMIT</Code>,
-              "This team has reached the limit of 5 identity providers.",
-              "Remove a provider you no longer use before adding another.",
-            ],
-            [
-              <Code key="c">SSO_SAML_ALGORITHM_NOT_ALLOWED</Code>,
-              "The SAML response uses signature settings that aren't supported.",
-              "Set the identity provider to sign with SHA-256 (not SHA-1 or RSA-PSS) and to send unencrypted assertions.",
-            ],
-          ]}
-        />
+
+        <SubSection id="ts-setup" title="When setting up a provider">
+          <p>
+            Returned when an owner or admin saves a provider or verifies a
+            domain, and shown inline in the dialog.
+          </p>
+          <DataTable
+            head={["Code / message", "Cause", "What to do"]}
+            rows={[
+              [
+                <>
+                  <Code key="c">SSO_DOMAIN_NOT_ALLOWED</Code>
+                  <br />
+                  &ldquo;This domain cannot be used for single sign-on.&rdquo;
+                </>,
+                <>
+                  The domain is a public mailbox provider, is not a valid host
+                  name, is already used by another provider in your own team, or
+                  has been verified by another team.
+                </>,
+                "Use a valid domain your team controls, and only once per team.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_PROVIDER_LIMIT</Code>
+                  <br />
+                  &ldquo;This team has reached the limit of 5 identity
+                  providers.&rdquo;
+                </>,
+                "The team already has five providers.",
+                "Remove a provider you no longer use before adding another.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_INVALID_ROLE_ATTRIBUTE</Code>
+                  <br />
+                  &ldquo;This role attribute name can&rsquo;t be used. Choose a
+                  different attribute.&rdquo;
+                </>,
+                <>
+                  The role attribute is a reserved field (<Code>id</Code>,{" "}
+                  <Code>email</Code>, <Code>emailVerified</Code>,{" "}
+                  <Code>name</Code> or <Code>image</Code>) or is too long.
+                </>,
+                <>
+                  Choose a different{" "}
+                  <a href="#roles" className="underline">
+                    role attribute
+                  </a>{" "}
+                  name.
+                </>,
+              ],
+              [
+                <>
+                  <Code key="c">SSO_ORGANIZATION_REQUIRED</Code>
+                  <br />
+                  &ldquo;Single sign-on can only be set up for a team.&rdquo;
+                </>,
+                "You are not in a team organization.",
+                "Set it up from a team, not a personal organization.",
+              ],
+            ]}
+          />
+        </SubSection>
+
+        <SubSection id="ts-signin" title="When signing in">
+          <p>
+            Shown to a member during sign-in: the first two on the{" "}
+            <Code>/auth/sso</Code> form, the rest on the error page at{" "}
+            <Code>/auth/error?error=&lt;CODE&gt;</Code>.
+          </p>
+          <DataTable
+            head={["Code / message", "Cause", "What to do"]}
+            rows={[
+              [
+                <>
+                  <Code key="c">SSO_PROVIDER_NOT_FOUND</Code>
+                  <br />
+                  &ldquo;No single sign-on is set up for this email
+                  address.&rdquo;
+                </>,
+                "The email&rsquo;s domain has no verified provider.",
+                "Check the address is on a domain you registered and verified.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_DOMAIN_NOT_VERIFIED</Code>
+                  <br />
+                  &ldquo;This domain has not been verified yet. Ask your
+                  administrator to finish setup.&rdquo;
+                </>,
+                "The provider exists but its domain is not verified.",
+                <>
+                  Finish{" "}
+                  <a href="#verify-domain" className="underline">
+                    domain verification
+                  </a>
+                  .
+                </>,
+              ],
+              [
+                <>
+                  <Code key="c">SSO_ACCOUNT_LINK_DENIED</Code>
+                  <br />
+                  &ldquo;This sign-in cannot be linked to an existing account.
+                  Contact your administrator.&rdquo;
+                </>,
+                "The identity provider returned an email outside the verified domain (or no email).",
+                "Make the IdP send the member&rsquo;s work email on the verified domain.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_SEAT_LIMIT</Code>
+                  <br />
+                  &ldquo;Your team has no seats left. Ask your administrator to
+                  add seats.&rdquo;
+                </>,
+                "The team has no free seat for the new member.",
+                "Add seats to the team, then try again.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_PROVISIONING_FAILED</Code>
+                  <br />
+                  &ldquo;We couldn&rsquo;t add you to your team. Try again, or
+                  contact your administrator.&rdquo;
+                </>,
+                "Adding the member failed for a reason other than seats.",
+                "Try again; if it persists, contact support.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_ORGANIZATION_REQUIRED</Code>
+                  <br />
+                  &ldquo;Single sign-on can only be set up for a team.&rdquo;
+                </>,
+                "The provider&rsquo;s team is no longer a team organization.",
+                "Restore the team, or remove the provider.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_SAML_ALGORITHM_NOT_ALLOWED</Code>
+                  <br />
+                  &ldquo;Your identity provider&rsquo;s SAML response uses
+                  signature settings that aren&rsquo;t supported&hellip;&rdquo;
+                </>,
+                <>
+                  The SAML response&rsquo;s signature or digest algorithm is
+                  outside the accepted set, or it contains an unsupported
+                  construct (an XML comment, CDATA section, processing
+                  instruction or DOCTYPE, an encrypted assertion, or XML that is
+                  not well-formed).
+                </>,
+                "Set the IdP&rsquo;s SAML signature algorithm to RSA-SHA256 and the digest to SHA-256, and turn off assertion encryption.",
+              ],
+            ]}
+          />
+        </SubSection>
       </Section>
 
       <Section id="security" title="Security">
@@ -525,7 +655,18 @@ export default function SsoPage() {
           <li>SAML Single Logout (SLO).</li>
           <li>IdP-initiated SAML sign-in (start the sign-in from SourceWeft).</li>
           <li>LDAP or Active Directory direct bind.</li>
-          <li>RSA-PSS SAML signatures and encrypted SAML assertions.</li>
+          <li>
+            SAML responses signed with anything other than{" "}
+            <Code>RSA-SHA256</Code> or <Code>RSA-SHA512</Code> (with an{" "}
+            <Code>SHA-256</Code> or <Code>SHA-512</Code> digest). SHA-1,{" "}
+            <Code>RSA-SHA384</Code> and <Code>SHA-384</Code> digests, ECDSA, HMAC
+            and RSA-PSS signatures are all refused.
+          </li>
+          <li>
+            Encrypted SAML assertions, and SAML responses that contain an XML
+            comment, a CDATA section, a processing instruction or a DOCTYPE, or
+            that are not well-formed XML.
+          </li>
           <li>
             OIDC identity providers that are not reachable from SourceWeft&rsquo;s
             servers (private or internal addresses are refused). Use SAML for an
