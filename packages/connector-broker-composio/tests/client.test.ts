@@ -375,3 +375,167 @@ test("works with a logger object that has no info/error methods", async () => {
 
   await assert.doesNotReject(() => broker.getConnectedAccount("ca_abc123"));
 });
+
+test("a quota-exhausted body on a non-402 status still maps to COMPOSIO_QUOTA via the body heuristic", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 400,
+    json: { message: "Quota exhausted for this project" },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.getConnectedAccount("ca_abc123"),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_QUOTA" satisfies ComposioBrokerErrorCode);
+      assert.equal(err.status, 400);
+      return true;
+    },
+  );
+});
+
+test("createLink throws COMPOSIO_REQUEST_FAILED when the session answer has no session_id, and never sends the link request", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (call.url.endsWith("/tool_router/session")) {
+      return { status: 200, json: {} };
+    }
+    throw new Error(`unexpected second request to ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () =>
+      broker.createLink({
+        toolkit: "gmail",
+        ownerRef: "org_1:user_1",
+        callbackUrl: "https://app.example.com/callback",
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /session_id/);
+      return true;
+    },
+  );
+  assert.equal(calls.length, 1, "the link request must never be sent without a session_id");
+});
+
+test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no connected_account_id", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (call.url.endsWith("/tool_router/session")) {
+      return { status: 200, json: { session_id: "sess_1" } };
+    }
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) {
+      return {
+        status: 200,
+        json: { redirect_url: "https://connect.composio.dev/link/ln_abc123" },
+      };
+    }
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () =>
+      broker.createLink({
+        toolkit: "gmail",
+        ownerRef: "org_1:user_1",
+        callbackUrl: "https://app.example.com/callback",
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /connected_account_id/);
+      return true;
+    },
+  );
+});
+
+test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no redirect_url", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (call.url.endsWith("/tool_router/session")) {
+      return { status: 200, json: { session_id: "sess_1" } };
+    }
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) {
+      return {
+        status: 200,
+        json: { connected_account_id: "ca_abc123" },
+      };
+    }
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () =>
+      broker.createLink({
+        toolkit: "gmail",
+        ownerRef: "org_1:user_1",
+        callbackUrl: "https://app.example.com/callback",
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /redirect_url/);
+      return true;
+    },
+  );
+});
+
+test("getConnectedAccount throws COMPOSIO_REQUEST_FAILED when the answer has no status", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 200,
+    json: { id: "ca_abc123", toolkit: { slug: "gmail" } },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.getConnectedAccount("ca_abc123"),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /status/);
+      return true;
+    },
+  );
+});
+
+test("getConnectedAccount throws COMPOSIO_REQUEST_FAILED when the answer has no toolkit.slug", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 200,
+    json: { id: "ca_abc123", status: "ACTIVE" },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.getConnectedAccount("ca_abc123"),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /toolkit/);
+      return true;
+    },
+  );
+});
+
+test("ids interpolated into a path are percent-encoded", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 200,
+    json: { id: "ca abc/123", status: "ACTIVE", toolkit: { slug: "gmail" } },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await broker.getConnectedAccount("ca abc/123");
+
+  assert.equal(
+    calls[0]?.url.endsWith("/connected_accounts/ca%20abc%2F123"),
+    true,
+  );
+});

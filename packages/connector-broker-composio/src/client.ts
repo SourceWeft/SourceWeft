@@ -171,6 +171,23 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
     return status >= 200 && status < 300;
   }
 
+  // A 2xx Composio answer that is missing a field this method must return is
+  // a malformed/unexpected response, not a value we can silently coerce to
+  // "undefined" or an empty string: surface it as a clear client-side
+  // failure instead of building a request with "undefined" in it or
+  // returning a result typed as a string that is actually missing. Only the
+  // field name is included in the message, never the response body.
+  function requireField<T>(value: T | undefined | null, fieldName: string, status: number): T {
+    if (value === undefined || value === null) {
+      throw new ComposioBrokerError(
+        "COMPOSIO_REQUEST_FAILED",
+        status,
+        `Composio response is missing required field: ${fieldName}`,
+      );
+    }
+    return value;
+  }
+
   return {
     async createLink(input) {
       const sessionResult = await send({
@@ -187,13 +204,13 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
         throwForStatus("create_link_session", input.toolkit, sessionResult.status, sessionResult.text);
       }
       const sessionBody = sessionResult.json as { session_id?: string } | undefined;
-      const sessionId = sessionBody?.session_id;
+      const sessionId = requireField(sessionBody?.session_id, "session_id", sessionResult.status);
 
       const linkResult = await send({
         operation: "create_link",
         toolkit: input.toolkit,
         method: "POST",
-        path: `/tool_router/session/${sessionId}/link`,
+        path: `/tool_router/session/${encodeURIComponent(sessionId)}/link`,
         body: {
           toolkit: input.toolkit,
           callback_url: input.callbackUrl,
@@ -205,17 +222,20 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
       const linkBody = linkResult.json as
         | { redirect_url?: string; connected_account_id?: string }
         | undefined;
-      return {
-        authorizationUrl: linkBody?.redirect_url ?? "",
-        connectedAccountId: linkBody?.connected_account_id ?? "",
-      };
+      const connectedAccountId = requireField(
+        linkBody?.connected_account_id,
+        "connected_account_id",
+        linkResult.status,
+      );
+      const authorizationUrl = requireField(linkBody?.redirect_url, "redirect_url", linkResult.status);
+      return { authorizationUrl, connectedAccountId };
     },
 
     async getConnectedAccount(id) {
       const result = await send({
         operation: "get_connected_account",
         method: "GET",
-        path: `/connected_accounts/${id}`,
+        path: `/connected_accounts/${encodeURIComponent(id)}`,
       });
       if (!isSuccess(result.status)) {
         throwForStatus("get_connected_account", undefined, result.status, result.text);
@@ -223,10 +243,12 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
       const body = result.json as
         | { id?: string; status?: string; toolkit?: { slug?: string } }
         | undefined;
+      const status = requireField(body?.status, "status", result.status);
+      const toolkit = requireField(body?.toolkit?.slug, "toolkit.slug", result.status);
       return {
         id: body?.id ?? id,
-        status: body?.status ?? "",
-        toolkit: body?.toolkit?.slug ?? "",
+        status,
+        toolkit,
       };
     },
 
@@ -234,7 +256,7 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
       const result = await send({
         operation: "delete_connected_account",
         method: "DELETE",
-        path: `/connected_accounts/${id}`,
+        path: `/connected_accounts/${encodeURIComponent(id)}`,
       });
       if (result.status === 404) {
         return;
