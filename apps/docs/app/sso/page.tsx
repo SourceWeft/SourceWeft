@@ -53,8 +53,8 @@ export default function SsoPage() {
           the domain, and from then on anyone with an address on that domain can
           sign in with it. Only a team <strong>owner</strong> or{" "}
           <strong>admin</strong> can set it up — in the team&rsquo;s settings,
-          under the <Code>Single sign-on</Code> tab. It is not available for
-          personal organizations.
+          under the <Code>Single sign-on</Code> tab. Single sign-on is a team
+          feature; in a personal workspace the tab only shows a short notice.
         </p>
       </header>
 
@@ -85,11 +85,12 @@ export default function SsoPage() {
         <BulletList>
           <li>
             <strong>Who can configure it:</strong> a team owner or admin. Other
-            members do not see the settings.
+            members see the tab, but it shows only a short notice instead of the
+            settings.
           </li>
           <li>
-            <strong>Where it works:</strong> teams only. The option does not
-            appear for a personal organization.
+            <strong>Where it works:</strong> teams only. In a personal workspace
+            the tab shows a short notice rather than the settings.
           </li>
           <li>
             <strong>How members reach it:</strong> the{" "}
@@ -110,13 +111,18 @@ export default function SsoPage() {
           <li>
             <strong>Control of your email domain&rsquo;s DNS.</strong> You prove
             you own the domain by adding a TXT record to it, so you need access
-            to wherever its DNS is hosted.
+            to wherever its DNS is hosted. It must be a domain only your
+            organization controls: a shared public suffix such as{" "}
+            <Code>github.io</Code> or <Code>co.uk</Code>, where anyone can add
+            records, cannot be used.
           </li>
           <li>
             <strong>A free seat for every member who will sign in.</strong> Each
             member&rsquo;s first SSO sign-in takes one of your team&rsquo;s
-            seats, the same as inviting them. If the team is full, the sign-in
-            is refused until a seat is free.
+            seats, the same as inviting them. If the team is full, that first
+            sign-in is refused — the person&rsquo;s SourceWeft account is created
+            but they are not added to the team; once a seat is free, their next
+            SSO sign-in adds them.
           </li>
           <li>
             <strong>For OIDC, a provider reachable from the internet.</strong>{" "}
@@ -136,7 +142,7 @@ export default function SsoPage() {
             <Code>Single sign-on</Code> tab and choose{" "}
             <Code>Add identity provider</Code>. Pick the sign-in protocol and
             fill in the fields for it. You also give the provider a{" "}
-            <Code>Provider ID</Code> (3–64 lowercase letters, digits or hyphens)
+            <Code>Provider ID</Code> (3–47 lowercase letters, digits or hyphens)
             and the <Code>Email domain</Code> it serves. A team can have up to
             five providers.
           </p>
@@ -196,12 +202,13 @@ export default function SsoPage() {
 
         <SubSection id="sp-values" title="2. Give your identity provider the SourceWeft details">
           <p>
-            The dialog shows a <Code>Service provider details</Code> panel with
-            the URLs your identity provider needs. Enter the ones that match
-            your protocol. <Code>&lt;apiBaseUrl&gt;</Code> is the SourceWeft API
-            origin and <Code>&lt;providerId&gt;</Code> is the provider ID you
-            chose; the OIDC redirect URI is the same for every provider, while
-            the SAML URLs carry the provider ID.
+            The <Code>Service provider details</Code> panel shows the URLs your
+            identity provider needs, already filled in with your API origin and
+            provider ID and ready to copy — the panel shows only the rows for the
+            provider&rsquo;s protocol. The shapes below are only for reference
+            (<Code>&lt;apiBaseUrl&gt;</Code> is the API origin and{" "}
+            <Code>&lt;providerId&gt;</Code> the provider ID); copy the complete
+            values from the panel rather than typing them.
           </p>
           <DataTable
             head={["Value", "URL", "Give it to the IdP as"]}
@@ -258,6 +265,11 @@ export default function SsoPage() {
             verification does not sign anyone out, but keeping it lets a
             re-verification succeed later.
           </p>
+          <p>
+            The verification value is valid for 7 days. If it expires before you
+            verify, reopen the panel to request a fresh value and add the new TXT
+            record.
+          </p>
         </SubSection>
 
         <SubSection id="test" title="4. Test the sign-in">
@@ -275,10 +287,39 @@ export default function SsoPage() {
 
         <SubSection id="share" title="5. Share the direct sign-in link">
           <p>
-            The panel also shows a <Code>Direct sign-in link</Code> of the form{" "}
-            <Code>&lt;webOrigin&gt;/auth/sso?org=&lt;slug&gt;</Code>. Share it
+            When your team has exactly one verified provider, the{" "}
+            <Code>Single sign-on</Code> tab shows a single{" "}
+            <Code>Direct sign-in link</Code> at the top, ready to copy. Share it
             with your members so they land straight on the SSO screen for your
             team.
+          </p>
+          <p>
+            With more than one verified provider the tab does not show a direct
+            link, because a single link cannot tell which provider to use.
+            Members sign in with the <Code>Sign in with SSO</Code> button and
+            enter their work email, and SourceWeft picks the right provider from
+            the email&rsquo;s domain. Until a provider&rsquo;s domain is verified,
+            there is nothing to share yet.
+          </p>
+        </SubSection>
+
+        <SubSection id="change-later" title="Changing a provider later">
+          <p>
+            You can always change the OIDC <Code>Client secret</Code>, the{" "}
+            <Code>Email domain</Code> (you verify the new one again),{" "}
+            <Code>Scopes</Code> and the role mapping.
+          </p>
+          <p>
+            The provider&rsquo;s <strong>identity</strong> is locked once a member
+            has signed in through it: for OIDC the <Code>Issuer URL</Code> and{" "}
+            <Code>Client ID</Code>, and for SAML the <Code>IdP sign-on URL</Code>,{" "}
+            <Code>IdP signing certificate</Code> and{" "}
+            <Code>IdP entity ID / issuer</Code>. Trying to change one of these is
+            refused with <Code>SSO_PROVIDER_IDENTITY_LOCKED</Code>. To change an
+            identity field (for example to rotate a SAML certificate), delete the
+            provider and add it again, then verify the domain again. Your
+            members&rsquo; accounts are kept and re-link automatically on their
+            next sign-in, because the domain is still verified.
           </p>
         </SubSection>
       </Section>
@@ -425,17 +466,25 @@ export default function SsoPage() {
             to your team.
           </li>
           <li>
-            <strong>An existing account is linked.</strong> If someone already
-            has a SourceWeft account with that email, their SSO sign-in links to
-            it — but only when the email is on the provider&rsquo;s{" "}
-            <em>verified</em> domain. An identity provider that returns an email
-            outside the verified domain can never take over an existing account.
+            <strong>An existing, email-verified account is linked.</strong> If
+            someone already has a SourceWeft account with that email, their SSO
+            sign-in links to it — but only when the email is on the
+            provider&rsquo;s <em>verified</em> domain and{" "}
+            <strong>that account&rsquo;s email has already been verified</strong>.
+            An account whose email address was never verified is not linked: the
+            person verifies their email first (or, if they never created that
+            account themselves, an administrator contacts support). An identity
+            provider that returns an email outside the verified domain can never
+            take over an existing account.
           </li>
           <li>
             <strong>A team seat is used.</strong> The first sign-in takes a seat,
-            like an invitation. With no seats left the sign-in is rolled back —
-            no account is created and no session is left behind — and the member
-            is told to ask an administrator for a seat.
+            like an invitation. With no seats left the sign-in is refused: the
+            person&rsquo;s SourceWeft account is created (email-verified and
+            linked to your identity provider, with their own personal workspace)
+            but they are <em>not</em> added to the team, and no session is left
+            behind. No account is deleted. Once a seat is free, their next SSO
+            sign-in adds them to the team.
           </li>
           <li>
             <strong>Subdomains are trusted.</strong> A provider verified for{" "}
@@ -443,6 +492,12 @@ export default function SsoPage() {
             <Code>user@mail.acme.com</Code> — unless you register a separate,
             verified provider for the exact subdomain, which then takes
             precedence for that subdomain.
+          </li>
+          <li>
+            <strong>Removing a member does not block SSO.</strong> This release
+            does not enforce SSO membership, so someone you remove from the team
+            is added again the next time they sign in with SSO. To stop their
+            access, remove it at your identity provider.
           </li>
         </BulletList>
       </Section>
@@ -473,11 +528,54 @@ export default function SsoPage() {
                   &ldquo;This domain cannot be used for single sign-on.&rdquo;
                 </>,
                 <>
-                  The domain is a public mailbox provider, is not a valid host
-                  name, is already used by another provider in your own team, or
-                  has been verified by another team.
+                  The domain is a public mailbox provider, a shared public
+                  suffix such as <Code>github.io</Code> where anyone can create
+                  records, is not a valid host name, is already used by another
+                  provider in your own team, or has been verified by another
+                  team.
                 </>,
                 "Use a valid domain your team controls, and only once per team.",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_INVALID_PROVIDER_ID</Code>
+                  <br />
+                  &ldquo;Provider IDs use 3–47 lowercase letters, digits and
+                  hyphens.&rdquo;
+                </>,
+                "The provider ID is empty, too long, or has characters other than lowercase letters, digits and hyphens.",
+                "Use a shorter, simpler provider ID (3–47 lowercase letters, digits or hyphens).",
+              ],
+              [
+                <>
+                  <Code key="c">SSO_PROVIDER_IDENTITY_LOCKED</Code>
+                  <br />
+                  &ldquo;These settings can&rsquo;t be changed after members have
+                  signed in with this provider.&rdquo;
+                </>,
+                <>
+                  You tried to change a locked identity field (issuer, OIDC
+                  client ID, or the SAML sign-on URL, certificate or entity ID)
+                  after a member had already signed in through the provider.
+                </>,
+                <>
+                  Delete the provider and add it again, then verify the domain
+                  again (see{" "}
+                  <a href="#change-later" className="underline">
+                    changing a provider later
+                  </a>
+                  ). Client secret, domain, scopes and role mapping can be
+                  changed at any time.
+                </>,
+              ],
+              [
+                <>
+                  <Code key="c">DOMAIN_VERIFICATION_FAILED</Code>
+                  <br />
+                  &ldquo;We couldn&rsquo;t find the TXT record yet.&rdquo;
+                </>,
+                "The TXT record is not visible to SourceWeft yet — usually DNS has not finished propagating, or the record name or value does not match the panel.",
+                "Confirm the record name and value match the panel exactly, wait a few minutes for DNS to propagate, then verify again.",
               ],
               [
                 <>
@@ -538,7 +636,7 @@ export default function SsoPage() {
                   &ldquo;No single sign-on is set up for this email
                   address.&rdquo;
                 </>,
-                "The email&rsquo;s domain has no verified provider.",
+                "The email's domain has no verified provider.",
                 "Check the address is on a domain you registered and verified.",
               ],
               [
@@ -564,8 +662,18 @@ export default function SsoPage() {
                   &ldquo;This sign-in cannot be linked to an existing account.
                   Contact your administrator.&rdquo;
                 </>,
-                "The identity provider returned an email outside the verified domain (or no email).",
-                "Make the IdP send the member&rsquo;s work email on the verified domain.",
+                <>
+                  The identity provider returned an email outside the verified
+                  domain or no email, or the member already has a SourceWeft
+                  account whose email address was never verified (an unverified
+                  account is never linked).
+                </>,
+                <>
+                  Make the IdP send the member&rsquo;s work email on the verified
+                  domain. If they have an unverified SourceWeft account, they
+                  verify its email first — or, if they never created that account
+                  themselves, contact support.
+                </>,
               ],
               [
                 <>
@@ -574,8 +682,12 @@ export default function SsoPage() {
                   &ldquo;Your team has no seats left. Ask your administrator to
                   add seats.&rdquo;
                 </>,
-                "The team has no free seat for the new member.",
-                "Add seats to the team, then try again.",
+                <>
+                  The team has no free seat. The person&rsquo;s SourceWeft
+                  account is created but they are not added to the team, and no
+                  session is left behind.
+                </>,
+                "Free up or add a seat; their next SSO sign-in adds them to the team — they do not sign up again.",
               ],
               [
                 <>
@@ -593,7 +705,7 @@ export default function SsoPage() {
                   <br />
                   &ldquo;Single sign-on can only be set up for a team.&rdquo;
                 </>,
-                "The provider&rsquo;s team is no longer a team organization.",
+                "The provider's team is no longer a team organization.",
                 "Restore the team, or remove the provider.",
               ],
               [
@@ -610,7 +722,7 @@ export default function SsoPage() {
                   instruction or DOCTYPE, an encrypted assertion, or XML that is
                   not well-formed).
                 </>,
-                "Set the IdP&rsquo;s SAML signature algorithm to RSA-SHA256 and the digest to SHA-256, and turn off assertion encryption.",
+                "Set the IdP's SAML signature algorithm to RSA-SHA256 and the digest to SHA-256, and turn off assertion encryption.",
               ],
             ]}
           />
