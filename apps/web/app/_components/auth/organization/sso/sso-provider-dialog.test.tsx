@@ -35,6 +35,7 @@ vi.mock("@better-auth-ui/react", () => ({
 
 import {
   SsoProviderDialog,
+  suggestProviderId,
   type SsoProviderSummary
 } from "./sso-provider-dialog";
 import { button, flush, mount, typeInto, unmountAll } from "@/test/react";
@@ -51,7 +52,6 @@ function renderCreate() {
       open: true,
       onOpenChange: state.onOpenChange,
       organizationId: "org1",
-      organizationSlug: "acme",
       onSaved: state.onSaved,
     }),
   );
@@ -63,7 +63,6 @@ function renderEdit(provider: Record<string, unknown>) {
       open: true,
       onOpenChange: state.onOpenChange,
       organizationId: "org1",
-      organizationSlug: "acme",
       onSaved: state.onSaved,
       provider: provider as unknown as SsoProviderSummary,
     }),
@@ -148,7 +147,7 @@ test("editing with an empty client secret omits clientSecret from the update", a
   await flush();
 
   // Change something harmless so the update is meaningful, leave the secret blank.
-  typeInto(field("sso-role-attribute")!, "groups");
+  typeInto(field("sso-domain")!, "acme.io");
   button("orgSave").click();
   await flush(3);
 
@@ -294,10 +293,12 @@ test("editing a SAML provider and changing only the domain sends no samlConfig",
   assert(!("samlConfig" in payload), "nothing stored is resent");
 });
 
-test("editing only the role attribute of a SAML provider sends no samlConfig", async () => {
+test("editing the role mapping of a SAML provider sends no samlConfig", async () => {
   await editSaml();
 
+  // Role mapping must be set as a pair (attribute + admin value).
   typeInto(field("sso-role-attribute")!, "groups");
+  typeInto(field("sso-admin-role-value")!, "sw-admins");
   button("orgSave").click();
   await flush(3);
 
@@ -306,6 +307,7 @@ test("editing only the role attribute of a SAML provider sends no samlConfig", a
     unknown
   >;
   assert.equal(payload.roleAttribute, "groups");
+  assert.equal(payload.adminRoleValue, "sw-admins");
   assert(!("samlConfig" in payload));
 });
 
@@ -420,4 +422,204 @@ test("a 429 shows the localized rate-limit message instead of the raw body", asy
 
   assert(document.body.textContent?.includes("orgRateLimited"));
   assert(!document.body.textContent?.includes("Too many requests"));
+});
+
+// W5 — provider IDs over 47 characters can never be DNS-verified.
+test("suggestProviderId never exceeds 47 characters, even from a long domain", () => {
+  const longDomain = `${"a".repeat(60)}.example.com`;
+  const id = suggestProviderId(longDomain, "oidc");
+  assert(id.length <= 47, `expected <= 47 chars, got ${id.length}`);
+  assert(id.endsWith("-oidc"), "keeps the protocol suffix");
+  assert(!/-$/.test(id.slice(0, -5)), "no trailing hyphen before the suffix");
+  assert(/^[a-z0-9-]{3,47}$/.test(id), "matches the allowed provider-id pattern");
+});
+
+test("a provider id longer than 47 characters is rejected client-side", async () => {
+  await renderCreate();
+  await flush();
+
+  typeInto(field("sso-domain")!, "acme.com");
+  // Type an over-long id by hand (marks the field as touched so it is kept).
+  typeInto(field("sso-provider-id")!, "a".repeat(48));
+  fillOidc();
+  // fillOidc re-typed the domain; re-assert the long id.
+  typeInto(field("sso-provider-id")!, "a".repeat(48));
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.register.mock.calls.length, 0);
+  assert(document.body.textContent?.includes("orgProviderIdInvalid"));
+});
+
+// W4 — role mapping must be filled as a pair.
+test("a role attribute without an admin value does not submit", async () => {
+  await renderCreate();
+  await flush();
+
+  fillOidc();
+  typeInto(field("sso-role-attribute")!, "groups");
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.register.mock.calls.length, 0);
+  assert(document.body.textContent?.includes("orgRoleMappingIncomplete"));
+});
+
+test("an admin value without a role attribute does not submit", async () => {
+  await renderCreate();
+  await flush();
+
+  fillOidc();
+  typeInto(field("sso-admin-role-value")!, "sw-admins");
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.register.mock.calls.length, 0);
+  assert(document.body.textContent?.includes("orgRoleMappingIncomplete"));
+});
+
+test("both role mapping fields together submit successfully", async () => {
+  await renderCreate();
+  await flush();
+
+  fillOidc();
+  typeInto(field("sso-role-attribute")!, "groups");
+  typeInto(field("sso-admin-role-value")!, "sw-admins");
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.register.mock.calls.length, 1);
+  const payload = state.register.mock.calls[0]?.[0] as Record<string, unknown>;
+  assert.equal(payload.roleAttribute, "groups");
+  assert.equal(payload.adminRoleValue, "sw-admins");
+});
+
+// W6 — client-side issuer validation.
+test("an OIDC issuer that is not an http(s) URL does not submit", async () => {
+  await renderCreate();
+  await flush();
+
+  typeInto(field("sso-domain")!, "acme.com");
+  typeInto(field("sso-issuer")!, "not-a-url");
+  typeInto(field("sso-client-id")!, "client-xyz");
+  typeInto(field("sso-client-secret")!, "s3cret");
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.register.mock.calls.length, 0);
+  assert(document.body.textContent?.includes("orgIssuerInvalid"));
+});
+
+// W6 — an edit that changes nothing closes without a request.
+test("saving an edit with no changes closes the dialog without a request", async () => {
+  await renderEdit({
+    providerId: "acme-com-oidc",
+    type: "oidc",
+    issuer: "https://idp.acme.com",
+    domain: "acme.com",
+    domainVerified: true,
+    oidcConfig: { clientIdLastFour: "4321", pkce: true, scopes: ["openid"] },
+    roleAttribute: null,
+    adminRoleValue: null,
+  });
+  await flush();
+
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.updateProvider.mock.calls.length, 0, "no request is sent");
+  assert.deepEqual(
+    state.onOpenChange.mock.calls.at(-1),
+    [false],
+    "the dialog is closed",
+  );
+});
+
+// W6 — a discovery / SSRF error is shown under the issuer field.
+test("a private-host discovery error is shown under the issuer field", async () => {
+  state.register.mockResolvedValue({
+    error: {
+      code: "discovery_private_host",
+      message: "The host 10.0.0.1 is not publicly routable",
+    },
+  });
+  await renderCreate();
+  await flush();
+
+  fillOidc();
+  button("orgSave").click();
+  await flush(3);
+
+  assert(document.body.textContent?.includes("orgIssuerUnreachable"));
+  assert(
+    !document.body.textContent?.includes("not publicly routable"),
+    "the raw English plugin message is never shown",
+  );
+});
+
+// W6 — a duplicate providerId is routed to the provider-id field, localized.
+test("a duplicate providerId shows a localized message on the provider-id field", async () => {
+  state.register.mockResolvedValue({
+    error: { message: "SSO provider with this providerId already exists" },
+  });
+  await renderCreate();
+  await flush();
+
+  fillOidc();
+  button("orgSave").click();
+  await flush(3);
+
+  assert(document.body.textContent?.includes("orgProviderIdTaken"));
+  assert(!document.body.textContent?.includes("already exists"));
+});
+
+// W3 — the identity-lock 409 is shown at form level and the dialog stays open.
+test("a 409 identity-lock keeps the dialog open with a form-level message", async () => {
+  state.updateProvider.mockResolvedValue({
+    error: {
+      status: 409,
+      code: "SSO_PROVIDER_IDENTITY_LOCKED",
+      message: "身份源身份字段已锁定。",
+    },
+  });
+  await renderEdit({
+    providerId: "acme-com-oidc",
+    type: "oidc",
+    issuer: "https://idp.acme.com",
+    domain: "acme.com",
+    domainVerified: true,
+    oidcConfig: { clientIdLastFour: "4321", pkce: true, scopes: ["openid"] },
+    roleAttribute: null,
+    adminRoleValue: null,
+  });
+  await flush();
+
+  typeInto(field("sso-issuer")!, "https://new-idp.acme.com");
+  button("orgSave").click();
+  await flush(3);
+
+  assert.equal(state.updateProvider.mock.calls.length, 1);
+  assert(document.body.textContent?.includes("身份源身份字段已锁定。"));
+  assert(
+    !state.onOpenChange.mock.calls.some((call) => call[0] === false),
+    "the dialog is not closed",
+  );
+  // The admin's input is kept.
+  assert.equal(field("sso-issuer")!.value, "https://new-idp.acme.com");
+});
+
+test("the edit dialog shows the identity-lock hint near the identity fields", async () => {
+  await renderEdit({
+    providerId: "acme-com-oidc",
+    type: "oidc",
+    issuer: "https://idp.acme.com",
+    domain: "acme.com",
+    domainVerified: true,
+    oidcConfig: { clientIdLastFour: "4321", pkce: true, scopes: ["openid"] },
+    roleAttribute: null,
+    adminRoleValue: null,
+  });
+  await flush();
+
+  assert(document.body.textContent?.includes("orgIdentityLockedHint"));
 });

@@ -24,7 +24,6 @@ import { SsoServiceProviderInfo } from "./sso-service-provider-info"
 
 export type SsoProviderListProps = {
   providers: SsoProviderSummary[]
-  organizationSlug: string
   onEdit: (provider: SsoProviderSummary) => void
   /** Refresh the list after a delete or a successful verification. */
   onChanged: () => void
@@ -38,7 +37,6 @@ export type SsoProviderListProps = {
  */
 export function SsoProviderList({
   providers,
-  organizationSlug,
   onEdit,
   onChanged
 }: SsoProviderListProps) {
@@ -150,7 +148,7 @@ export function SsoProviderList({
                           {expanded && (
                             <SsoServiceProviderInfo
                               providerId={provider.providerId}
-                              organizationSlug={organizationSlug}
+                              protocol={provider.type === "saml" ? "saml" : "oidc"}
                             />
                           )}
                         </div>

@@ -2,16 +2,16 @@
 
 import type { SsoAuthClient } from "@better-auth-ui/core/plugins/sso"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
-import { AlertCircle, Check, Copy } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { AlertCircle } from "lucide-react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert"
 import { Button } from "@sourceweft/ui-web/components/ui/button"
-import { Label } from "@sourceweft/ui-web/components/ui/label"
 import { Spinner } from "@sourceweft/ui-web/components/ui/spinner"
 import { ssoPlugin } from "@/lib/auth/sso-plugin"
 
+import { CopyableValue } from "./copyable-value"
 import { ssoErrorMessage } from "./sso-errors"
 
 /**
@@ -31,38 +31,30 @@ export type SsoDomainVerificationProps = {
   onVerified: () => void
 }
 
-function CopyField({ label, value }: { label: string; value: string }) {
-  const { localization } = useAuthPlugin(ssoPlugin)
-  const [copied, setCopied] = useState(false)
-
-  async function copy() {
-    try {
-      await navigator.clipboard?.writeText(value)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard may be unavailable; the value is on screen to copy manually.
-    }
-  }
-
+/**
+ * Renders the domain-verification description with the domain inlined at its
+ * placeholder, so word order stays correct in every language rather than
+ * concatenating the domain onto the end of a sentence.
+ */
+function DescriptionWithDomain({
+  template,
+  domain
+}: {
+  template: string
+  domain: string
+}) {
+  const parts = template.split("{domain}")
   return (
-    <div className="flex flex-col gap-1.5">
-      <Label className="text-muted-foreground text-xs">{label}</Label>
-      <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 overflow-x-auto rounded border bg-background px-2 py-1.5 font-mono text-xs whitespace-nowrap">
-          {value}
-        </code>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={copy}
-          aria-label={copied ? localization.orgCopied : localization.orgCopy}
-        >
-          {copied ? <Check /> : <Copy />}
-        </Button>
-      </div>
-    </div>
+    <p className="text-muted-foreground text-xs">
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {part}
+          {index < parts.length - 1 && (
+            <span className="font-mono">{domain}</span>
+          )}
+        </Fragment>
+      ))}
+    </p>
   )
 }
 
@@ -70,7 +62,10 @@ function CopyField({ label, value }: { label: string; value: string }) {
  * Domain-ownership verification for a pending provider: requests a DNS TXT
  * challenge, shows the record to add, and verifies it. A provider cannot be used
  * for sign-in until its domain is verified. The backend's already-localized
- * message is shown on failure (the auth client sends `x-sw-locale`).
+ * message is shown on failure (the auth client sends `x-sw-locale`); the
+ * plugin's own English errors are mapped to localized copy by `ssoErrorMessage`.
+ * `DOMAIN_VERIFIED` means someone already verified it, so it is treated as
+ * success.
  */
 export function SsoDomainVerification({
   providerId,
@@ -94,10 +89,15 @@ export function SsoDomainVerification({
         providerId
       })
       if (result?.error) {
+        // The domain was already verified elsewhere — treat as success.
+        if (result.error.code === "DOMAIN_VERIFIED") {
+          onVerified()
+          return
+        }
         setErrorMessage(
           ssoErrorMessage(
             result.error,
-            localization.orgRateLimited,
+            localization,
             coreLocalization.errors.generic
           )
         )
@@ -109,7 +109,7 @@ export function SsoDomainVerification({
     } finally {
       setIsRequesting(false)
     }
-  }, [authClient, providerId, coreLocalization, localization.orgRateLimited])
+  }, [authClient, providerId, coreLocalization, localization, onVerified])
 
   useEffect(() => {
     if (requestedRef.current) return
@@ -123,11 +123,11 @@ export function SsoDomainVerification({
     setErrorMessage(null)
     try {
       const result = await authClient.sso.verifyDomain({ providerId })
-      if (result?.error) {
+      if (result?.error && result.error.code !== "DOMAIN_VERIFIED") {
         setErrorMessage(
           ssoErrorMessage(
             result.error,
-            localization.orgRateLimited,
+            localization,
             coreLocalization.errors.generic
           )
         )
@@ -145,15 +145,15 @@ export function SsoDomainVerification({
   const recordHost = `_${TXT_RECORD_PREFIX}-${providerId}`
 
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-dashed p-3">
+    <section className="flex min-w-0 flex-col gap-3 rounded-md border border-dashed p-3">
       <div className="flex flex-col gap-0.5">
         <h4 className="text-sm font-medium">
           {localization.orgDomainVerification}
         </h4>
-        <p className="text-muted-foreground text-xs">
-          {localization.orgDomainVerificationDescription}{" "}
-          <span className="font-mono">{domain}</span>
-        </p>
+        <DescriptionWithDomain
+          template={localization.orgDomainVerificationDescription}
+          domain={domain}
+        />
       </div>
 
       {errorMessage && (
@@ -169,8 +169,8 @@ export function SsoDomainVerification({
         </div>
       ) : token ? (
         <>
-          <CopyField label={localization.orgTxtRecordHost} value={recordHost} />
-          <CopyField label={localization.orgTxtRecordValue} value={token} />
+          <CopyableValue label={localization.orgTxtRecordHost} value={recordHost} />
+          <CopyableValue label={localization.orgTxtRecordValue} value={token} />
           <p className="text-muted-foreground text-xs">
             {localization.orgDnsPropagationNote}
           </p>

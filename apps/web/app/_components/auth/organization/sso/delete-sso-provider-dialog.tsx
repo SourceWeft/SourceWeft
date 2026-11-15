@@ -56,7 +56,7 @@ export function DeleteSsoProviderDialog({
         toast.error(
           ssoErrorMessage(
             result.error,
-            localization.orgRateLimited,
+            localization,
             coreLocalization.errors.generic
           )
         )

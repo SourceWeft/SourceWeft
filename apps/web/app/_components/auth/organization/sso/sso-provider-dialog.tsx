@@ -3,7 +3,7 @@
 import type { SsoAuthClient } from "@better-auth-ui/core/plugins/sso"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
 import { AlertCircle } from "lucide-react"
-import { type FormEvent, useMemo, useRef, useState } from "react"
+import { type FormEvent, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert"
@@ -25,14 +25,22 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input"
 import { Spinner } from "@sourceweft/ui-web/components/ui/spinner"
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea"
-import { apiBaseUrl } from "@/lib/api-base-url"
 import { ssoPlugin } from "@/lib/auth/sso-plugin"
-import { cn } from "@sourceweft/ui-web/lib/utils"
 
 import { parseIdpMetadata } from "./parse-idp-metadata"
-import { SsoServiceProviderInfo } from "./sso-service-provider-info"
+import {
+  SSO_DISCOVERY_CODES,
+  ssoErrorMessage,
+  type SsoClientError
+} from "./sso-errors"
+import {
+  SsoServiceProviderInfo,
+  buildServiceProviderUrls
+} from "./sso-service-provider-info"
 
-const PROVIDER_ID_PATTERN = /^[a-z0-9-]{3,64}$/
+const PROVIDER_ID_PATTERN = /^[a-z0-9-]{3,47}$/
+/** Longest providerId the DNS TXT label (`_sourceweft-sso-<id>`) stays ≤ 63. */
+const MAX_PROVIDER_ID_LENGTH = 47
 const DEFAULT_SCOPES = "openid email profile"
 
 type Protocol = "oidc" | "saml"
@@ -43,6 +51,7 @@ export type SsoProviderSummary = {
   type: string
   issuer: string
   domain: string
+  organizationId?: string | null
   domainVerified: boolean
   oidcConfig?: { clientIdLastFour?: string; scopes?: string[] } | null
   samlConfig?: { entryPoint?: string } | null
@@ -54,21 +63,31 @@ export type SsoProviderDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   organizationId: string
-  organizationSlug: string
   /** When set the dialog edits this provider; otherwise it registers a new one. */
   provider?: SsoProviderSummary
   /** Called after a successful register/update so the caller can refresh. */
   onSaved: () => void
 }
 
-/** Derive a stable providerId suggestion from the domain and protocol. */
+/**
+ * Derive a stable providerId suggestion from the domain and protocol. The
+ * domain part is truncated so the final id never exceeds the DNS limit
+ * (`MAX_PROVIDER_ID_LENGTH`), keeping the protocol suffix and dropping any
+ * trailing hyphen left by truncation.
+ */
 export function suggestProviderId(domain: string, protocol: Protocol) {
-  const slug = domain
+  const suffix = `-${protocol}`
+  const maxSlug = MAX_PROVIDER_ID_LENGTH - suffix.length
+  let slug = domain
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-  return slug ? `${slug}-${protocol}` : ""
+  if (!slug) return ""
+  if (slug.length > maxSlug) {
+    slug = slug.slice(0, maxSlug).replace(/-+$/g, "")
+  }
+  return slug ? `${slug}${suffix}` : ""
 }
 
 function parseScopes(value: string) {
@@ -101,21 +120,25 @@ function isHttpUrl(value: string) {
  * We deliberately do NOT send the raw metadata: the plugin ignores entryPoint
  * and cert when `idpMetadata.metadata` is present, which would silently discard
  * any edits the admin made to the parsed values. Secrets are never prefilled: on
- * edit, a blank secret/client id/cert means "leave unchanged". The backend's
- * already-localized error message is surfaced (domain errors under the domain
- * field; 429 as a localized rate-limit notice).
+ * edit, a blank secret/client id/cert means "leave unchanged".
+ *
+ * Identity fields (issuer, OIDC client id, SAML sign-on URL / certificate /
+ * entity ID) cannot be changed once a member has signed in; editing them then
+ * fails with a 409 the dialog surfaces at form level while staying open. Plugin
+ * errors are English, so they are mapped to localized copy and routed to the
+ * relevant field (domain, provider id, issuer).
  */
 export function SsoProviderDialog({
   open,
   onOpenChange,
   organizationId,
-  organizationSlug,
   provider,
   onSaved
 }: SsoProviderDialogProps) {
   const { authClient, localization: coreLocalization } = useAuth<SsoAuthClient>()
   const { localization } = useAuthPlugin(ssoPlugin)
   const isEdit = Boolean(provider)
+  const generic = coreLocalization.errors.generic
 
   const [protocol, setProtocol] = useState<Protocol>(
     (provider?.type as Protocol) ?? "oidc"
@@ -156,14 +179,6 @@ export function SsoProviderDialog({
     if (isEdit || providerIdTouched.current) return
     setProviderId(suggestProviderId(nextDomain, nextProtocol))
   }
-
-  const samlEntityId = useMemo(
-    () =>
-      `${apiBaseUrl}/api/auth/sso/saml2/sp/metadata?providerId=${encodeURIComponent(
-        providerId || "provider"
-      )}`,
-    [providerId]
-  )
 
   // Paste-to-fill: parse the IdP metadata XML in the browser and populate the
   // explicit SAML fields. Nothing is submitted from here — the admin reviews and
@@ -232,7 +247,11 @@ export function SsoProviderDialog({
     if (!domain.trim()) errors.domain = localization.orgFieldRequired
 
     if (protocol === "oidc") {
-      if (!issuer.trim()) errors.issuer = localization.orgFieldRequired
+      if (!issuer.trim()) {
+        errors.issuer = localization.orgFieldRequired
+      } else if (!isHttpUrl(issuer.trim())) {
+        errors.issuer = localization.orgIssuerInvalid
+      }
       if (!isEdit) {
         if (!clientId.trim()) errors.clientId = localization.orgFieldRequired
         if (!clientSecret.trim()) {
@@ -268,6 +287,16 @@ export function SsoProviderDialog({
       }
     }
 
+    // Role mapping must be both filled or both empty; flag whichever is empty.
+    const hasRole = Boolean(roleAttribute.trim())
+    const hasAdmin = Boolean(adminRoleValue.trim())
+    if (hasRole !== hasAdmin) {
+      if (!hasRole) errors.roleAttribute = localization.orgRoleMappingIncomplete
+      if (!hasAdmin) {
+        errors.adminRoleValue = localization.orgRoleMappingIncomplete
+      }
+    }
+
     return { errors, formLevel }
   }
 
@@ -292,7 +321,7 @@ export function SsoProviderDialog({
           scopes: parseScopes(scopes)
         }
       } else {
-        body.issuer = samlEntityId
+        body.issuer = buildServiceProviderUrls(providerId.trim(), "", "").samlEntityId
         body.samlConfig = {
           entryPoint: entryPoint.trim(),
           cert: cert.trim(),
@@ -344,6 +373,51 @@ export function SsoProviderDialog({
     return body
   }
 
+  // Map a plugin/backend error onto the dialog: a localized field message where
+  // the cause points at one field, otherwise a form-level message. The dialog
+  // stays open and keeps the admin's input in every error case.
+  function showMutationError(error: NonNullable<SsoClientError>) {
+    if (error.status === 429) {
+      setFormError(localization.orgRateLimited)
+      return
+    }
+    const code = error.code ?? ""
+    const message = error.message ?? ""
+    const routeField = (field: string, value: string) =>
+      setFieldErrors((current) => ({ ...current, [field]: value }))
+
+    if (code === "SSO_DOMAIN_NOT_ALLOWED") {
+      routeField("domain", message || generic)
+      return
+    }
+    if (code === "SSO_INVALID_PROVIDER_ID") {
+      routeField("providerId", message || localization.orgProviderIdInvalid)
+      return
+    }
+    if (SSO_DISCOVERY_CODES.has(code)) {
+      routeField("issuer", localization.orgIssuerUnreachable)
+      return
+    }
+    if (code === "SSO_PROVIDER_IDENTITY_LOCKED") {
+      setFormError(message || localization.orgIdentityLocked)
+      return
+    }
+    // Plugin-native (uncoded, English) errors matched by message.
+    if (/already exists/i.test(message)) {
+      routeField("providerId", localization.orgProviderIdTaken)
+      return
+    }
+    if (/reserved/i.test(message)) {
+      routeField("providerId", localization.orgProviderIdReserved)
+      return
+    }
+    if (error.status === 409 && /identity fields/i.test(message)) {
+      setFormError(localization.orgIdentityLocked)
+      return
+    }
+    setFormError(ssoErrorMessage(error, localization, generic))
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (isSubmitting) return
@@ -353,24 +427,25 @@ export function SsoProviderDialog({
     setFormError(formLevel)
     if (Object.keys(errors).length > 0 || formLevel) return
 
+    const body = buildBody()
+    // An edit that changed nothing closes the dialog without a request (the
+    // plugin would otherwise reject an empty update).
+    if (isEdit) {
+      const changed = Object.keys(body).filter((key) => key !== "providerId")
+      if (changed.length === 0) {
+        onOpenChange(false)
+        return
+      }
+    }
+
     setIsSubmitting(true)
     try {
-      const body = buildBody()
       const result = isEdit
         ? await authClient.sso.updateProvider(body)
         : await authClient.sso.register(body)
 
       if (result?.error) {
-        if (result.error.status === 429) {
-          setFormError(localization.orgRateLimited)
-          return
-        }
-        const message = result.error.message || coreLocalization.errors.generic
-        if (result.error.code === "SSO_DOMAIN_NOT_ALLOWED") {
-          setFieldErrors((current) => ({ ...current, domain: message }))
-        } else {
-          setFormError(message)
-        }
+        showMutationError(result.error)
         return
       }
 
@@ -380,11 +455,14 @@ export function SsoProviderDialog({
       onSaved()
       onOpenChange(false)
     } catch {
-      setFormError(coreLocalization.errors.generic)
+      setFormError(generic)
     } finally {
       setIsSubmitting(false)
     }
   }
+
+  const describedBy = (field: string) =>
+    fieldErrors[field] ? `sso-${field}-error` : undefined
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -414,6 +492,7 @@ export function SsoProviderDialog({
               id="sso-domain"
               value={domain}
               aria-invalid={Boolean(fieldErrors.domain)}
+              aria-describedby={describedBy("domain")}
               onChange={(event) => {
                 setDomain(event.target.value)
                 syncProviderId(event.target.value, protocol)
@@ -425,7 +504,10 @@ export function SsoProviderDialog({
               </FieldDescription>
             )}
             {fieldErrors.domain && (
-              <FieldError errors={[{ message: fieldErrors.domain }]} />
+              <FieldError
+                id="sso-domain-error"
+                errors={[{ message: fieldErrors.domain }]}
+              />
             )}
           </Field>
 
@@ -438,6 +520,7 @@ export function SsoProviderDialog({
               value={providerId}
               disabled={isEdit}
               aria-invalid={Boolean(fieldErrors.providerId)}
+              aria-describedby={describedBy("providerId")}
               onChange={(event) => {
                 providerIdTouched.current = true
                 setProviderId(event.target.value)
@@ -449,7 +532,10 @@ export function SsoProviderDialog({
                 : localization.orgProviderIdHint}
             </FieldDescription>
             {fieldErrors.providerId && (
-              <FieldError errors={[{ message: fieldErrors.providerId }]} />
+              <FieldError
+                id="sso-providerId-error"
+                errors={[{ message: fieldErrors.providerId }]}
+              />
             )}
           </Field>
 
@@ -457,31 +543,39 @@ export function SsoProviderDialog({
             <span className="text-sm font-medium" id="sso-protocol-label">
               {localization.orgProtocol}
             </span>
-            <div
-              role="tablist"
-              aria-labelledby="sso-protocol-label"
-              className={cn("grid grid-cols-2 gap-2", isEdit && "hidden")}
-            >
-              {(["oidc", "saml"] as const).map((value) => (
-                <Button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  id={`sso-tab-${value}`}
-                  aria-selected={protocol === value}
-                  aria-controls={`sso-panel-${value}`}
-                  variant={protocol === value ? "default" : "outline"}
-                  onClick={() => {
-                    setProtocol(value)
-                    syncProviderId(domain, value)
-                  }}
-                >
-                  {value === "oidc"
-                    ? localization.orgProtocolOidc
-                    : localization.orgProtocolSaml}
-                </Button>
-              ))}
-            </div>
+            {isEdit ? (
+              <p className="text-sm" aria-labelledby="sso-protocol-label">
+                {protocol === "oidc"
+                  ? localization.orgProtocolOidc
+                  : localization.orgProtocolSaml}
+              </p>
+            ) : (
+              <div
+                role="tablist"
+                aria-labelledby="sso-protocol-label"
+                className="grid grid-cols-2 gap-2"
+              >
+                {(["oidc", "saml"] as const).map((value) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    id={`sso-tab-${value}`}
+                    aria-selected={protocol === value}
+                    aria-controls={`sso-panel-${value}`}
+                    variant={protocol === value ? "default" : "outline"}
+                    onClick={() => {
+                      setProtocol(value)
+                      syncProviderId(domain, value)
+                    }}
+                  >
+                    {value === "oidc"
+                      ? localization.orgProtocolOidc
+                      : localization.orgProtocolSaml}
+                  </Button>
+                ))}
+              </div>
+            )}
 
             {protocol === "oidc" ? (
               <div
@@ -490,6 +584,11 @@ export function SsoProviderDialog({
                 aria-labelledby="sso-tab-oidc"
                 className="flex flex-col gap-5"
               >
+                {isEdit && (
+                  <p className="text-muted-foreground text-xs">
+                    {localization.orgIdentityLockedHint}
+                  </p>
+                )}
                 <Field data-invalid={Boolean(fieldErrors.issuer)}>
                   <FieldLabel htmlFor="sso-issuer">
                     {localization.orgIssuer}
@@ -499,11 +598,15 @@ export function SsoProviderDialog({
                     value={issuer}
                     placeholder="https://idp.example.com"
                     aria-invalid={Boolean(fieldErrors.issuer)}
+                    aria-describedby={describedBy("issuer")}
                     onChange={(event) => setIssuer(event.target.value)}
                   />
                   <FieldDescription>{localization.orgIssuerHint}</FieldDescription>
                   {fieldErrors.issuer && (
-                    <FieldError errors={[{ message: fieldErrors.issuer }]} />
+                    <FieldError
+                      id="sso-issuer-error"
+                      errors={[{ message: fieldErrors.issuer }]}
+                    />
                   )}
                 </Field>
 
@@ -521,6 +624,7 @@ export function SsoProviderDialog({
                         : undefined
                     }
                     aria-invalid={Boolean(fieldErrors.clientId)}
+                    aria-describedby={describedBy("clientId")}
                     onChange={(event) => setClientId(event.target.value)}
                   />
                   {isEdit && (
@@ -529,7 +633,10 @@ export function SsoProviderDialog({
                     </FieldDescription>
                   )}
                   {fieldErrors.clientId && (
-                    <FieldError errors={[{ message: fieldErrors.clientId }]} />
+                    <FieldError
+                      id="sso-clientId-error"
+                      errors={[{ message: fieldErrors.clientId }]}
+                    />
                   )}
                 </Field>
 
@@ -540,9 +647,10 @@ export function SsoProviderDialog({
                   <Input
                     id="sso-client-secret"
                     type="password"
-                    autoComplete="off"
+                    autoComplete="new-password"
                     value={clientSecret}
                     aria-invalid={Boolean(fieldErrors.clientSecret)}
+                    aria-describedby={describedBy("clientSecret")}
                     onChange={(event) => setClientSecret(event.target.value)}
                   />
                   {isEdit && (
@@ -552,6 +660,7 @@ export function SsoProviderDialog({
                   )}
                   {fieldErrors.clientSecret && (
                     <FieldError
+                      id="sso-clientSecret-error"
                       errors={[{ message: fieldErrors.clientSecret }]}
                     />
                   )}
@@ -578,6 +687,11 @@ export function SsoProviderDialog({
                 aria-labelledby="sso-tab-saml"
                 className="flex flex-col gap-5"
               >
+                {isEdit && (
+                  <p className="text-muted-foreground text-xs">
+                    {localization.orgIdentityLockedHint}
+                  </p>
+                )}
                 <FieldDescription>
                   {localization.orgSamlConfigHint}
                 </FieldDescription>
@@ -591,10 +705,14 @@ export function SsoProviderDialog({
                     value={entryPoint}
                     placeholder="https://idp.example.com/sso"
                     aria-invalid={Boolean(fieldErrors.entryPoint)}
+                    aria-describedby={describedBy("entryPoint")}
                     onChange={(event) => setEntryPoint(event.target.value)}
                   />
                   {fieldErrors.entryPoint && (
-                    <FieldError errors={[{ message: fieldErrors.entryPoint }]} />
+                    <FieldError
+                      id="sso-entryPoint-error"
+                      errors={[{ message: fieldErrors.entryPoint }]}
+                    />
                   )}
                 </Field>
 
@@ -606,6 +724,7 @@ export function SsoProviderDialog({
                     id="sso-idp-entity-id"
                     value={idpEntityId}
                     aria-invalid={Boolean(fieldErrors.idpEntityId)}
+                    aria-describedby={describedBy("idpEntityId")}
                     onChange={(event) => setIdpEntityId(event.target.value)}
                   />
                   {isEdit && (
@@ -615,6 +734,7 @@ export function SsoProviderDialog({
                   )}
                   {fieldErrors.idpEntityId && (
                     <FieldError
+                      id="sso-idpEntityId-error"
                       errors={[{ message: fieldErrors.idpEntityId }]}
                     />
                   )}
@@ -630,6 +750,7 @@ export function SsoProviderDialog({
                     value={cert}
                     className="font-mono text-xs"
                     aria-invalid={Boolean(fieldErrors.cert)}
+                    aria-describedby={describedBy("cert")}
                     onChange={(event) => setCert(event.target.value)}
                   />
                   <FieldDescription>
@@ -638,7 +759,10 @@ export function SsoProviderDialog({
                       : localization.orgCertificateHint}
                   </FieldDescription>
                   {fieldErrors.cert && (
-                    <FieldError errors={[{ message: fieldErrors.cert }]} />
+                    <FieldError
+                      id="sso-cert-error"
+                      errors={[{ message: fieldErrors.cert }]}
+                    />
                   )}
                 </Field>
 
@@ -680,38 +804,51 @@ export function SsoProviderDialog({
             )}
           </div>
 
-          <Field>
+          <Field data-invalid={Boolean(fieldErrors.roleAttribute)}>
             <FieldLabel htmlFor="sso-role-attribute">
               {localization.orgRoleAttribute}
             </FieldLabel>
             <Input
               id="sso-role-attribute"
               value={roleAttribute}
+              aria-invalid={Boolean(fieldErrors.roleAttribute)}
+              aria-describedby={describedBy("roleAttribute")}
               onChange={(event) => setRoleAttribute(event.target.value)}
             />
             <FieldDescription>
               {localization.orgRoleAttributeHint}
             </FieldDescription>
+            {fieldErrors.roleAttribute && (
+              <FieldError
+                id="sso-roleAttribute-error"
+                errors={[{ message: fieldErrors.roleAttribute }]}
+              />
+            )}
           </Field>
 
-          <Field>
+          <Field data-invalid={Boolean(fieldErrors.adminRoleValue)}>
             <FieldLabel htmlFor="sso-admin-role-value">
               {localization.orgAdminRoleValue}
             </FieldLabel>
             <Input
               id="sso-admin-role-value"
               value={adminRoleValue}
+              aria-invalid={Boolean(fieldErrors.adminRoleValue)}
+              aria-describedby={describedBy("adminRoleValue")}
               onChange={(event) => setAdminRoleValue(event.target.value)}
             />
             <FieldDescription>
               {localization.orgAdminRoleValueHint}
             </FieldDescription>
+            {fieldErrors.adminRoleValue && (
+              <FieldError
+                id="sso-adminRoleValue-error"
+                errors={[{ message: fieldErrors.adminRoleValue }]}
+              />
+            )}
           </Field>
 
-          <SsoServiceProviderInfo
-            providerId={providerId}
-            organizationSlug={organizationSlug}
-          />
+          <SsoServiceProviderInfo providerId={providerId} protocol={protocol} />
 
           <DialogFooter className="pt-2">
             <Button
