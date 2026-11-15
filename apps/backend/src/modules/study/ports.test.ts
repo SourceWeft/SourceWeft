@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { expect, test, vi } from "vitest";
 import { BillingAdmissionError } from "../../shared/model-gateway/index";
 import { createStudyAnchorPort } from "./anchor-port";
-import { StudyGenerationError } from "./engine";
+import { StudyGenerationError } from "@sourceweft/contracts/study-capability";
 import { compareStudyFreshness } from "./freshness";
 import { createStudyModelPort, describeStudyModel } from "./model-port";
 import { resolveStudyPayer } from "./payer";

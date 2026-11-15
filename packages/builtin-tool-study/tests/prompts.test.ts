@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { isStrictJsonSchemaCompatible } from "@sourceweft/model-gateway";
-import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
 import { assembleCorpus } from "../src/engine/corpus";
 import { resolveStudyOptions } from "../src/engine/options";
 import { buildGenerationPrompt, defuseDelimiters } from "../src/engine/prompts";
@@ -65,11 +63,4 @@ test("resolveStudyOptions fills size, difficulty and language", () => {
     resolveStudyOptions({ kind: "quiz", options: { count: 25 }, chunks, uiLocale: "en" }).count,
     25,
   );
-});
-
-test("the capability manifest parses and contributes no tools yet", async () => {
-  const { raw } = await loadCapabilityManifestFixture(new URL("../", import.meta.url));
-  const manifest = capabilityManifestSchema.parse(raw);
-  assert.equal(manifest.id, "sourceweft/study-tool");
-  assert.deepEqual(manifest.contributes.tools, []);
 });

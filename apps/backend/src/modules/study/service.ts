@@ -13,18 +13,15 @@ import {
   type StudyCorpus,
   type StudySourceSnapshot,
 } from "./corpus-loader";
-import {
-  estimateTokens,
-  generateStudyContent,
-  resolveStudyOptions,
-  SINGLE_PASS_MAX_INPUT_TOKENS,
-  STUDY_JOB_TIMEOUT_MS,
-  type StudyAnchorPort,
-  type StudyCheckpointStore,
-  type StudyContentResult,
-  type StudyModelPort,
-  type StudyProgress,
-} from "./engine";
+import type {
+  StudyAnchorPort,
+  StudyCheckpointStore,
+  StudyContentResult,
+  StudyGenerationMembers,
+  StudyModelPort,
+  StudyProgress,
+} from "@sourceweft/contracts/study-capability";
+import { loadStudyGeneration } from "./capability";
 import { createStudyModelPort, describeStudyModel } from "./model-port";
 import { resolveStudyPayer } from "./payer";
 
@@ -50,6 +47,8 @@ export type StudyGenerationRequest = {
 
 export type StudyGenerationDeps = {
   billing: ContentBillingPort;
+  /** The engine; loaded from the study capability when omitted. */
+  generation?: StudyGenerationMembers;
   payerPorts?: GuidePayerPorts;
   loadCorpus?: typeof loadStudyCorpus;
   describeModel?: () => Promise<{ modelAlias: string }>;
@@ -77,12 +76,8 @@ function rootLabelOf(sources: readonly StudySourceSnapshot[]) {
   return sources.length > 1 ? `${first} +${sources.length - 1}` : first;
 }
 
-function corpusMode(corpus: StudyCorpus) {
-  const tokens = corpus.chunks.reduce(
-    (sum, chunk) => sum + estimateTokens(chunk.text),
-    0,
-  );
-  return tokens <= SINGLE_PASS_MAX_INPUT_TOKENS ? "single" : "mapreduce";
+function corpusMode(corpus: StudyCorpus, generation: StudyGenerationMembers) {
+  return generation.measureCorpus(corpus.chunks).mode;
 }
 
 /**
@@ -112,7 +107,8 @@ export async function runStudyGeneration(
     sourceIds: request.sourceIds,
   });
 
-  const options = resolveStudyOptions({
+  const generation = deps.generation ?? (await loadStudyGeneration());
+  const options = generation.resolveStudyOptions({
     kind: request.kind,
     ...(request.options ? { options: request.options } : {}),
     chunks: corpus.chunks,
@@ -151,11 +147,11 @@ export async function runStudyGeneration(
           }),
       });
 
-  const budget = AbortSignal.timeout(STUDY_JOB_TIMEOUT_MS[corpusMode(corpus)]);
+  const budget = AbortSignal.timeout(generation.limits.jobTimeoutMs[corpusMode(corpus, generation)]);
   const signal = deps.signal ? AbortSignal.any([deps.signal, budget]) : budget;
 
   const focus = request.options?.focus?.trim();
-  const result = await generateStudyContent(
+  const result = await generation.generateStudyContent(
     {
       model,
       anchor,

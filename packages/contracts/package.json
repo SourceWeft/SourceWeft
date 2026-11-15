@@ -28,6 +28,7 @@
     "./api-response": "./src/api-response.ts",
     "./sources": "./src/sources.ts",
     "./study": "./src/study.ts",
+    "./study-capability": "./src/study-capability.ts",
     "./artifacts": "./src/artifacts.ts",
     "./messages": "./src/messages.ts",
     "./thread-message-compaction": "./src/thread-message-compaction.ts",

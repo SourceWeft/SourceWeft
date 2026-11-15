@@ -4,7 +4,7 @@ import {
   type GuidePayer,
   type GuidePayerPorts,
 } from "../sources/guide-payer";
-import { StudyGenerationError } from "./engine";
+import { StudyGenerationError } from "@sourceweft/contracts/study-capability";
 
 /**
  * The person who asked for a study artifact pays for it, always. Someone who

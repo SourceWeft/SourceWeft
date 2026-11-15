@@ -4,7 +4,10 @@ import {
   requireDefaultModelGatewayProfile,
 } from "../../shared/model-gateway/index";
 import type { ContentBillingPort } from "../content/billing-port";
-import { StudyGenerationError, type StudyModelPort } from "./engine";
+import {
+  StudyGenerationError,
+  type StudyModelPort,
+} from "@sourceweft/contracts/study-capability";
 
 /**
  * The deployment's default chat model, or `MODEL_UNAVAILABLE`. Never another

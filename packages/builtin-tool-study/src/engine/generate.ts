@@ -60,6 +60,7 @@ import {
   type GroupResult,
   type QuizCandidate,
   type StudyAnchorPort,
+  type GenerateStudyDeps,
   type StudyCheckpoint,
   type StudyCheckpointStore,
   type StudyContentResult,
@@ -78,13 +79,7 @@ import {
   StudyIdAllocator,
 } from "./validate";
 
-export type GenerateStudyDeps = {
-  model: StudyModelPort;
-  anchor: StudyAnchorPort;
-  onProgress?(progress: StudyProgress): void | Promise<void>;
-  checkpoint?: StudyCheckpointStore;
-  signal?: AbortSignal;
-};
+export type { GenerateStudyDeps };
 
 /** Billing keys: one per group and one per verified item, bound to the version. */
 export function generationIdempotencyKey(input: {
@@ -187,7 +182,8 @@ export async function generateStudyContent(
   const loaded = await deps.checkpoint?.load();
   const checkpoint: StudyCheckpoint =
     loaded && loaded.versionNo === input.versionNo
-      ? loaded
+      ? // Written by this engine; the host stores it as opaque JSON.
+        (loaded as StudyCheckpoint)
       : { versionNo: input.versionNo, groups: {}, verified: {} };
   for (const result of Object.values(checkpoint.groups)) {
     for (const id of groupItemIds(result)) ids.markUsed(id);

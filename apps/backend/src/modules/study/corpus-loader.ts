@@ -1,7 +1,10 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { chunks, db, documents, sources } from "@sourceweft/db";
 import { currentDocumentCondition } from "../sources/current-document-condition";
-import { StudyGenerationError, type CorpusChunkInput } from "./engine";
+import {
+  StudyGenerationError,
+  type StudyCorpusChunk,
+} from "@sourceweft/contracts/study-capability";
 
 /** What a version was generated from, kept for staleness and attribution. */
 export type StudySourceSnapshot = {
@@ -13,7 +16,7 @@ export type StudySourceSnapshot = {
 };
 
 export type StudyCorpus = {
-  chunks: CorpusChunkInput[];
+  chunks: StudyCorpusChunk[];
   sources: StudySourceSnapshot[];
 };
 

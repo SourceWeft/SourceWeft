@@ -10,7 +10,7 @@ let schema: typeof import("@sourceweft/db");
 let loader: typeof import("./corpus-loader");
 let repository: typeof import("./repository");
 let freshness: typeof import("./freshness");
-let engine: typeof import("./engine");
+let engine: typeof import("@sourceweft/contracts/study-capability");
 const originalDatabaseUrl = process.env.DATABASE_URL;
 
 let teamId: string;
@@ -24,7 +24,7 @@ beforeAll(async () => {
   loader = await import("./corpus-loader");
   repository = await import("./repository");
   freshness = await import("./freshness");
-  engine = await import("./engine");
+  engine = await import("@sourceweft/contracts/study-capability");
 }, 120_000);
 
 beforeEach(async () => {

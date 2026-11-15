@@ -3,10 +3,10 @@ import { studyContentSchema } from "@sourceweft/contracts/study";
 import { expect, test, vi } from "vitest";
 import {
   StudyGenerationError,
-  type CorpusChunkInput,
+  type StudyCorpusChunk as CorpusChunkInput,
   type StudyAnchorPort,
   type StudyModelPort,
-} from "./engine";
+} from "@sourceweft/contracts/study-capability";
 import { runStudyGeneration, type StudyGenerationRequest } from "./service";
 
 const chunks: CorpusChunkInput[] = Array.from({ length: 6 }, (_, index) => ({

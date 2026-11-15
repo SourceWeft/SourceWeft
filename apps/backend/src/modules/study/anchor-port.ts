@@ -1,5 +1,8 @@
 import { anchorCitations, type AnchorableCitation } from "../citations/anchoring";
-import type { StudyAnchorPort, StudyAnchorResult } from "./engine";
+import type {
+  StudyAnchorPort,
+  StudyAnchorResult,
+} from "@sourceweft/contracts/study-capability";
 
 const MARKER_LIKE = /\[[^\]]*citation:[^\]]*\]/g;
 

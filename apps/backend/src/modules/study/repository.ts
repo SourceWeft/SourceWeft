@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { artifactSources, artifacts, db } from "@sourceweft/db";
 import type {
-  StudyCheckpoint,
+  StudyCheckpointData,
   StudyCheckpointStore,
   StudyProgress,
-} from "./engine";
+} from "@sourceweft/contracts/study-capability";
 import type { StudySourceSnapshot } from "./corpus-loader";
 
 type ArtifactScope = {
@@ -49,9 +49,9 @@ async function readStudyPayloadKey(
   return row?.value ?? null;
 }
 
-function isCheckpoint(value: unknown): value is StudyCheckpoint {
+function isCheckpoint(value: unknown): value is StudyCheckpointData {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<StudyCheckpoint>;
+  const candidate = value as Partial<StudyCheckpointData>;
   return (
     typeof candidate.versionNo === "number" &&
     typeof candidate.groups === "object" &&
