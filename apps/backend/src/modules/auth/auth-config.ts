@@ -338,6 +338,26 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           window: 60,
           max: 10,
         },
+        // better-auth matches a custom rule's key against the request path
+        // with the `/api/auth` base path already stripped (confirmed against
+        // better-auth@1.7.7's `resolveRateLimitConfig`/`normalizePathname`),
+        // so these three are keyed without it — unlike the (pre-existing,
+        // and as a result never-matching) `/api/auth/...` keys above. Without
+        // its own rule, `/sign-in/sso` would fall under the built-in
+        // `/sign-in/*` special rule (3 per 10s), too tight for a page that
+        // retries IdP discovery.
+        "/sign-in/sso": {
+          window: 60,
+          max: 10,
+        },
+        "/sso/register": {
+          window: 60,
+          max: 10,
+        },
+        "/sso/verify-domain": {
+          window: 60,
+          max: 6,
+        },
       },
     },
     plugins: [

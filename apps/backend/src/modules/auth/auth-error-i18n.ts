@@ -1,12 +1,82 @@
 import { locales, type TranslationDictionary } from "@better-auth/i18n";
 import type { GenericEndpointContext } from "@better-auth/core";
 import { isLocale, type Locale } from "@sourceweft/i18n";
+import { SSO_ERROR_CODES } from "../enterprise-sso/errors";
 
 // The web layer conveys the active locale (design §16) on every auth request via
 // the `x-sw-locale` header and the `sw_locale` cookie; the browser also always
 // sends `Accept-Language`.
 export const AUTH_LOCALE_HEADER = "x-sw-locale";
 export const AUTH_LOCALE_COOKIE = "sw_locale";
+
+/**
+ * Our own enterprise-SSO error messages (design §16 / task 7), keyed by
+ * {@link SSO_ERROR_CODES} value so they merge into the plugin's own
+ * translation tables below. English is also the fallback `message` thrown in
+ * code (see errors.ts call sites), so the untranslated and `en`-translated
+ * text agree.
+ */
+const ssoErrorMessagesEn: TranslationDictionary = {
+  [SSO_ERROR_CODES.providerNotFound]:
+    "No single sign-on is set up for this email address.",
+  [SSO_ERROR_CODES.domainNotVerified]:
+    "This domain has not been verified yet. Ask your administrator to finish setup.",
+  [SSO_ERROR_CODES.domainNotAllowed]:
+    "This domain cannot be used for single sign-on.",
+  [SSO_ERROR_CODES.accountLinkDenied]:
+    "This sign-in cannot be linked to an existing account. Contact your administrator.",
+  [SSO_ERROR_CODES.seatLimit]:
+    "Your team has no seats left. Ask your administrator to add seats.",
+  [SSO_ERROR_CODES.provisioningFailed]:
+    "We couldn't add you to your team. Try again, or contact your administrator.",
+  [SSO_ERROR_CODES.invalidRoleAttribute]:
+    "This role attribute name can't be used. Choose a different attribute.",
+  [SSO_ERROR_CODES.organizationRequired]:
+    "Single sign-on can only be set up for a team.",
+  [SSO_ERROR_CODES.providerLimit]:
+    "This team has reached the limit of 5 identity providers.",
+};
+
+/** Simplified Chinese counterpart of {@link ssoErrorMessagesEn}. */
+const ssoErrorMessagesZhCN: TranslationDictionary = {
+  [SSO_ERROR_CODES.providerNotFound]: "该邮箱未配置企业单点登录。",
+  [SSO_ERROR_CODES.domainNotVerified]:
+    "该域名尚未完成验证，请联系管理员完成配置。",
+  [SSO_ERROR_CODES.domainNotAllowed]: "该域名不能用于单点登录。",
+  [SSO_ERROR_CODES.accountLinkDenied]:
+    "无法将此登录关联到已有账号，请联系管理员。",
+  [SSO_ERROR_CODES.seatLimit]: "团队席位已满，请联系管理员增加席位。",
+  [SSO_ERROR_CODES.provisioningFailed]:
+    "无法将你加入团队，请重试或联系管理员。",
+  [SSO_ERROR_CODES.invalidRoleAttribute]:
+    "该角色属性名不可用，请换一个属性。",
+  [SSO_ERROR_CODES.organizationRequired]: "单点登录只能为团队配置。",
+  [SSO_ERROR_CODES.providerLimit]: "该团队的身份源数量已达上限（5 个）。",
+};
+
+/**
+ * Traditional Chinese (Taiwan) counterpart of {@link ssoErrorMessagesZhCN},
+ * generated from it via `@sourceweft/i18n/hant`'s `toTaiwanTraditional`
+ * (OpenCC `twp` + the shared `packages/i18n/glossary/zh-TW.json`) and then
+ * reviewed by hand. Do not hand-edit: regenerate from `ssoErrorMessagesZhCN`
+ * and fix any wrong/inconsistent rendering through the glossary instead (see
+ * the header comment on `zhTW` below).
+ */
+const ssoErrorMessagesZhTW: TranslationDictionary = {
+  [SSO_ERROR_CODES.providerNotFound]: "該電子郵件未設定企業單一登入。",
+  [SSO_ERROR_CODES.domainNotVerified]:
+    "該網域尚未完成驗證，請聯絡管理員完成設定。",
+  [SSO_ERROR_CODES.domainNotAllowed]: "該網域不能用於單一登入。",
+  [SSO_ERROR_CODES.accountLinkDenied]:
+    "無法將此登入關聯到已有帳號，請聯絡管理員。",
+  [SSO_ERROR_CODES.seatLimit]: "團隊席位已滿，請聯絡管理員增加席位。",
+  [SSO_ERROR_CODES.provisioningFailed]:
+    "無法將你加入團隊，請重試或聯絡管理員。",
+  [SSO_ERROR_CODES.invalidRoleAttribute]:
+    "該角色屬性名不可用，請換一個屬性。",
+  [SSO_ERROR_CODES.organizationRequired]: "單一登入只能為團隊設定。",
+  [SSO_ERROR_CODES.providerLimit]: "該團隊的身分提供者數量已達上限（5 個）。",
+};
 
 // Traditional Chinese error messages. The official @better-auth/i18n plugin
 // ships Simplified Chinese only (`locales.zh`, 34 error codes) and no
@@ -15,7 +85,9 @@ export const AUTH_LOCALE_COOKIE = "sw_locale";
 // glossary — the exact pipeline the web catalogs use
 // (apps/web/scripts/i18n-hant.mjs, design §8 D7 / §16). Regenerate this table
 // from `locales.zh` whenever the plugin's Simplified pack changes; do not
-// hand-edit individual entries.
+// hand-edit individual entries. The nine enterprise-SSO codes (task 7) are
+// spread in from `ssoErrorMessagesZhTW`, generated from
+// `ssoErrorMessagesZhCN` the same way.
 const zhTW: TranslationDictionary = {
   USER_NOT_FOUND: "使用者未找到",
   FAILED_TO_CREATE_USER: "建立使用者失敗",
@@ -51,6 +123,7 @@ const zhTW: TranslationDictionary = {
   VALIDATION_ERROR: "驗證錯誤",
   MISSING_FIELD: "此欄位為必填項",
   PASSWORD_ALREADY_SET: "使用者已設定密碼",
+  ...ssoErrorMessagesZhTW,
 };
 
 /**
@@ -63,9 +136,9 @@ const zhTW: TranslationDictionary = {
  * full app locale and are what distinguish "zh-TW" (Traditional).
  */
 export const authErrorTranslations = {
-  en: locales.en,
-  zh: locales.zh,
-  "zh-CN": locales.zh,
+  en: { ...locales.en, ...ssoErrorMessagesEn },
+  zh: { ...locales.zh, ...ssoErrorMessagesZhCN },
+  "zh-CN": { ...locales.zh, ...ssoErrorMessagesZhCN },
   "zh-TW": zhTW,
 };
 

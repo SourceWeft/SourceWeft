@@ -1,5 +1,7 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import { authErrorTranslations } from "../auth/auth-error-i18n";
+import { resolveMailLocale } from "../auth/mail-locale";
 import {
   recordSsoProviderChangeAfterHook,
   SSO_AUDIT_PATHS,
@@ -177,9 +179,7 @@ function roleAttributeFromBody(body: Record<string, unknown>): string | null {
     throw new APIError("BAD_REQUEST", {
       code: SSO_ERROR_CODES.invalidRoleAttribute,
       message:
-        result.reason === "reserved"
-          ? `"${raw.trim()}" is a reserved profile-mapping key and cannot be used as a role attribute.`
-          : "The role attribute is too long.",
+        "This role attribute name can't be used. Choose a different attribute.",
     });
   }
   return result.value;
@@ -276,7 +276,7 @@ async function handleRegister(
   if (!organizationId) {
     throw new APIError("BAD_REQUEST", {
       code: SSO_ERROR_CODES.organizationRequired,
-      message: "An SSO provider must be registered to a team organization.",
+      message: "Single sign-on can only be set up for a team.",
     });
   }
   await assertTeamOrganization(organizationId);
@@ -289,7 +289,7 @@ async function handleRegister(
   if (existing.length >= MAX_PROVIDERS_PER_ORGANIZATION) {
     throw new APIError("BAD_REQUEST", {
       code: SSO_ERROR_CODES.providerLimit,
-      message: `An organization may have at most ${MAX_PROVIDERS_PER_ORGANIZATION} SSO providers.`,
+      message: "This team has reached the limit of 5 identity providers.",
     });
   }
 
@@ -411,9 +411,7 @@ async function handleVerifyDomain(
       row.organizationId !== organizationId,
   );
   if (conflict) {
-    throw domainNotAllowed(
-      `"${domain}" is already verified by another organization.`,
-    );
+    throw domainNotAllowed("This domain cannot be used for single sign-on.");
   }
 }
 
@@ -440,7 +438,7 @@ async function handleSignInRouting(
   } catch {
     throw new APIError("NOT_FOUND", {
       code: SSO_ERROR_CODES.providerNotFound,
-      message: "No verified SSO provider matches this email domain.",
+      message: "No single sign-on is set up for this email address.",
     });
   }
 
@@ -468,8 +466,99 @@ async function handleSignInRouting(
 
   throw new APIError("NOT_FOUND", {
     code: SSO_ERROR_CODES.providerNotFound,
-    message: "No verified SSO provider matches this email domain.",
+    message: "No single sign-on is set up for this email address.",
   });
+}
+
+/**
+ * The official plugin's own messages for `/sign-in/sso`, thrown deep inside
+ * its handler (not reachable through a `matcher`/before-hook) when the caller
+ * names a `providerId` or `organizationSlug` directly: a missing provider id
+ * ("No provider found for the issuer") or one whose domain never verified
+ * ("Provider domain has not been verified"). `handleSignInRouting` above
+ * already covers every other case (an email/domain lookup that resolves or
+ * 404s), so these two are the only paths left where the plugin's own
+ * unmapped text could reach a caller.
+ */
+const PLUGIN_SIGN_IN_PROVIDER_NOT_FOUND_MESSAGE = "No provider found for the issuer";
+const PLUGIN_SIGN_IN_DOMAIN_NOT_VERIFIED_MESSAGE =
+  "Provider domain has not been verified";
+
+/** The narrow after-hook context this guard reads/replaces `context.returned` on. */
+type AfterHookCtx = {
+  path?: string;
+  context: { returned?: unknown };
+};
+
+/**
+ * `/sign-in/sso` after-hook: maps the plugin's own validation errors (above)
+ * onto {@link SSO_ERROR_CODES}, so the i18n plugin (registered last) can
+ * localize them like every other SSO error.
+ *
+ * An after-hook replaces the response by *throwing* the new `APIError` —
+ * mirroring `@better-auth/i18n`'s own after-hook, the proven way to do this
+ * — which `dispatchAuthEndpoint`'s `runAfterHooks` catches and installs as
+ * `context.returned`. Confirmed against better-auth@1.7.7: an after-hook
+ * cannot change the HTTP *status* this way — the status returned to the
+ * caller is fixed from the *first* thrown error, before any after-hook
+ * runs — only the body's `code`/`message`. That is harmless here: the
+ * plugin's own statuses (404 for a missing provider, 401 for an unverified
+ * domain) already match what the rest of this guard uses for the same codes
+ * (`SSO_PROVIDER_NOT_FOUND` is a 404 in {@link handleSignInRouting} too).
+ */
+function mapSignInSsoPluginError(ctx: AfterHookCtx): void {
+  const returned = ctx.context.returned;
+  if (!(returned instanceof APIError)) {
+    return;
+  }
+  if (returned.message === PLUGIN_SIGN_IN_PROVIDER_NOT_FOUND_MESSAGE) {
+    throw new APIError("NOT_FOUND", {
+      code: SSO_ERROR_CODES.providerNotFound,
+      message: "No single sign-on is set up for this email address.",
+    });
+  }
+  if (returned.message === PLUGIN_SIGN_IN_DOMAIN_NOT_VERIFIED_MESSAGE) {
+    throw new APIError("UNAUTHORIZED", {
+      code: SSO_ERROR_CODES.domainNotVerified,
+      message:
+        "This domain has not been verified yet. Ask your administrator to finish setup.",
+    });
+  }
+}
+
+/**
+ * Runs a before-hook body, re-throwing any `APIError` it raises with a
+ * localized `message` for the same `code`.
+ *
+ * better-auth's `i18n` plugin (registered last, see auth-config.ts) only
+ * ever localizes an error thrown from *inside* an endpoint handler: its
+ * after-hook reads `ctx.context.returned`, which `dispatchAuthEndpoint` only
+ * populates from the handler's own `.catch`. A before-hook's throw (where
+ * every validation in this guard lives — `handleRegister`, `handleUpdate`,
+ * `handleVerifyDomain`, `handleSignInRouting`, and the policy helpers they
+ * call) escapes `dispatchAuthEndpoint` before any after-hook gets a chance to
+ * run (confirmed against better-auth@1.7.7's `runBeforeHooks`, which only
+ * logs and re-throws). So a before-hook must localize its own errors; this
+ * reuses the same request-signal locale resolution the mail service already
+ * uses (design §16.7) instead of inventing a second one.
+ */
+async function withLocalizedGuardErrors<T>(
+  headers: Headers | null | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof APIError && typeof error.body?.code === "string") {
+      const code = error.body.code;
+      const locale = await resolveMailLocale({ headers });
+      const translated = authErrorTranslations[locale]?.[code];
+      if (translated) {
+        throw new APIError(error.status, { code, message: translated });
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -535,7 +624,7 @@ export function wrapAdapterForVerifiedDomainUniqueness<T extends object>(
               isVerifiedDomainUniqueViolation(error)
             ) {
               const rejection = domainNotAllowed(
-                "This domain is already verified by another organization.",
+                "This domain cannot be used for single sign-on.",
               );
               // Keep the originating DB error for diagnostics/tests without
               // leaking it in the serialized response body: a non-enumerable
@@ -612,29 +701,35 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
         {
           matcher: (context) =>
             context.path === REGISTER_PATH || context.path === UPDATE_PATH,
-          handler: createAuthMiddleware(async (ctx) => {
-            if (!ctx.body) {
-              return;
-            }
-            const adapter = ctx.context.adapter as unknown as GuardAdapter;
-            return ctx.path === REGISTER_PATH
-              ? handleRegister(ctx, adapter)
-              : handleUpdate(ctx, adapter);
-          }),
+          handler: createAuthMiddleware(async (ctx) =>
+            withLocalizedGuardErrors(ctx.headers, async () => {
+              if (!ctx.body) {
+                return;
+              }
+              const adapter = ctx.context.adapter as unknown as GuardAdapter;
+              return ctx.path === REGISTER_PATH
+                ? handleRegister(ctx, adapter)
+                : handleUpdate(ctx, adapter);
+            }),
+          ),
         },
         {
           matcher: (context) => context.path === VERIFY_DOMAIN_PATH,
-          handler: createAuthMiddleware(async (ctx) => {
-            const adapter = ctx.context.adapter as unknown as GuardAdapter;
-            return handleVerifyDomain(ctx, adapter);
-          }),
+          handler: createAuthMiddleware(async (ctx) =>
+            withLocalizedGuardErrors(ctx.headers, async () => {
+              const adapter = ctx.context.adapter as unknown as GuardAdapter;
+              return handleVerifyDomain(ctx, adapter);
+            }),
+          ),
         },
         {
           matcher: (context) => context.path === SIGN_IN_PATH,
-          handler: createAuthMiddleware(async (ctx) => {
-            const adapter = ctx.context.adapter as unknown as GuardAdapter;
-            return handleSignInRouting(ctx, adapter);
-          }),
+          handler: createAuthMiddleware(async (ctx) =>
+            withLocalizedGuardErrors(ctx.headers, async () => {
+              const adapter = ctx.context.adapter as unknown as GuardAdapter;
+              return handleSignInRouting(ctx, adapter);
+            }),
+          ),
         },
         {
           // The deleted row is gone by the time an after-hook could read it,
@@ -658,6 +753,10 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
           handler: createAuthMiddleware(async (ctx) => {
             await recordSsoProviderChangeAfterHook(ctx);
           }),
+        },
+        {
+          matcher: (context) => context.path === SIGN_IN_PATH,
+          handler: createAuthMiddleware(async (ctx) => mapSignInSsoPluginError(ctx)),
         },
       ],
     },

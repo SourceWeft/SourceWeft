@@ -65,12 +65,12 @@ export function normalizeSsoDomain(input: string): string {
     .replace(/\.+$/, "");
 
   if (!stripped || !DOMAIN_INPUT_PATTERN.test(stripped)) {
-    throw domainNotAllowed(`"${input}" is not a valid SSO domain.`);
+    throw domainNotAllowed("This domain cannot be used for single sign-on.");
   }
 
   const ascii = domainToASCII(stripped);
   if (!ascii || !ASCII_HOSTNAME_PATTERN.test(ascii)) {
-    throw domainNotAllowed(`"${input}" is not a valid SSO domain.`);
+    throw domainNotAllowed("This domain cannot be used for single sign-on.");
   }
 
   return ascii;
@@ -124,9 +124,7 @@ export async function assertSsoDomainAllowed(
   lookup: SsoProviderDomainLookup,
 ): Promise<void> {
   if (isPublicEmailDomain(input.domain)) {
-    throw domainNotAllowed(
-      `"${input.domain}" is a public email domain and cannot be used for SSO.`,
-    );
+    throw domainNotAllowed("This domain cannot be used for single sign-on.");
   }
 
   const rows = await lookup(input.domain);
@@ -141,14 +139,10 @@ export async function assertSsoDomainAllowed(
       continue;
     }
     if (row.organizationId === input.organizationId) {
-      throw domainNotAllowed(
-        `"${input.domain}" already has an SSO provider in this organization.`,
-      );
+      throw domainNotAllowed("This domain cannot be used for single sign-on.");
     }
     if (row.domainVerified) {
-      throw domainNotAllowed(
-        `"${input.domain}" is verified by another organization.`,
-      );
+      throw domainNotAllowed("This domain cannot be used for single sign-on.");
     }
   }
 }
@@ -198,8 +192,6 @@ export async function assertTeamOrganization(
     !organization ||
     parseSourceweftOrganizationKind(organization.metadata) !== "team"
   ) {
-    throw organizationRequired(
-      "An SSO provider must belong to a team organization.",
-    );
+    throw organizationRequired("Single sign-on can only be set up for a team.");
   }
 }

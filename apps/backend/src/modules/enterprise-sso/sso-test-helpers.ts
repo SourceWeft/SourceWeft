@@ -103,13 +103,28 @@ function nextClientIp(): string {
  * callers) act against the same auth handler without sharing rate-limit buckets.
  */
 export class SsoTestClient {
-  private readonly jar = new Map<string, string>();
+  private readonly jar: Map<string, string>;
   private readonly ip = nextClientIp();
 
   constructor(
     private readonly auth: SourceweftAuth,
     private readonly baseUrl: string,
-  ) {}
+    sharedJar?: Map<string, string>,
+  ) {
+    this.jar = sharedJar ?? new Map();
+  }
+
+  /**
+   * A sibling client that shares this one's cookie jar — so it is the same
+   * signed-in session — but gets its own client IP and therefore its own
+   * rate-limit bucket. Use this when one test-authenticated user issues many
+   * requests against a per-IP-rate-limited path (e.g. `/sso/register`, capped
+   * at 10/60s) across many assertions in a suite; a real distinct session
+   * making one or two such calls would not trigger that limit either.
+   */
+  withFreshIp(): SsoTestClient {
+    return new SsoTestClient(this.auth, this.baseUrl, this.jar);
+  }
 
   /** Capture Set-Cookie into the jar; replay as a Cookie header. */
   private captureCookies(response: Response) {

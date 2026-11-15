@@ -95,7 +95,10 @@ async function registerOidc(
   },
 ) {
   const body = oidcRegistration(input);
-  const response = await client.jsonRequest("/sso/register", body);
+  // A fresh IP per call: this suite reuses one admin client across many
+  // registrations, which would otherwise exhaust `/sso/register`'s per-IP
+  // rate limit (task 7) well before any test's own assertions are reached.
+  const response = await client.withFreshIp().jsonRequest("/sso/register", body);
   return { response, providerId: body.providerId };
 }
 
@@ -384,7 +387,7 @@ test("updating a provider domain to one VERIFIED by another org is rejected", as
 
 test("a SAML provider always stores signed assertions", async () => {
   const providerId = `guard-saml-${randomUUID()}`;
-  const response = await ownerA.client.jsonRequest("/sso/register", {
+  const response = await ownerA.client.withFreshIp().jsonRequest("/sso/register", {
     providerId,
     issuer: "https://idp.example.com/saml",
     domain: uniqueDomain(),
