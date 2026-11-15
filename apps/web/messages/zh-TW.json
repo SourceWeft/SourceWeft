@@ -1347,7 +1347,7 @@
       "setup": {
         "title": "設定本機執行",
         "installingInProgress": "正在安裝沙箱執行環境…",
-        "downloadRuntimeDescription": "本機執行會在沙箱中執行命令，這需要 SourceWeft 沙箱執行環境。它會從目前應用版本對應的 SourceWeft 官方發布下載，並在安裝任何內容之前驗證其簽名。在你點選「安裝」之前不會下載任何內容。",
+        "downloadRuntimeDescription": "本機執行會在沙箱中執行命令，這需要 SourceWeft 沙箱執行環境。應用會從目前應用版本對應的 SourceWeft 官方發布自動下載它，並在安裝之前驗證其簽名。如果未能完成，請點選「安裝」重試。",
         "install": "安裝沙箱執行環境",
         "installing": "正在安裝…",
         "updateAppDescription": "此應用與其沙箱執行環境不符。請更新 SourceWeft（設定 → 關於 → 軟體更新），然後重新檢查。",
@@ -1367,6 +1367,10 @@
       "remoteAccessTitle": "允許其他裝置存取",
       "remoteAccessDescription": "讓使用同一帳戶的其他裝置存取這臺電腦。它們可以存取任務資料夾和已授權的工作目錄。即使關閉遠端存取，你仍可在這臺電腦上繼續工作。",
       "turnOffRemoteAccess": "關閉遠端存取",
+      "taskFolderTitle": "預設任務資料夾",
+      "taskFolderDescription": "未選擇資料夾的新對話會在這裡建立自己的資料夾。現有對話繼續使用原來的資料夾。",
+      "taskFolderChange": "更改…",
+      "taskFolderReset": "恢復預設位置",
       "workingDirectoriesTitle": "工作目錄",
       "workingDirectoriesDescription": "每個對話都會獲得獨立的任務資料夾。移除資料夾存取權限會停止受影響任務的後續本機操作，並保留其中的檔案。",
       "removeAccess": "移除存取權限",
@@ -1760,10 +1764,25 @@
       "computerOffline": "電腦已離線。重新連接後本機任務可繼續。",
       "workingDirectory": "工作目錄",
       "directoryConnectedWhenUsed": "工作目錄將在首次使用時連接。",
+      "copyPath": "複製路徑",
+      "pathCopied": "已複製",
+      "copyPathFailed": "無法複製路徑。",
+      "showInFinder": "在 Finder 中顯示",
+      "showInFileManager": "在檔案管理員中顯示",
       "myComputers": "我的電腦",
       "loadingComputers": "正在載入電腦…",
       "couldNotLoadComputers": "無法載入電腦：{error}",
       "thisComputer": "這臺電腦",
+      "needsSetup": "需要設定",
+      "notSupported": "不支援",
+      "setupInstallRuntime": "需要先安裝沙箱執行環境。開啟設定即可安裝。",
+      "setupAppUpdate": "需要先更新 SourceWeft。開啟設定檢視詳細資訊。",
+      "setupOther": "一次性設定尚未完成。開啟設定即可完成。",
+      "preparing": "正在準備…",
+      "setupFailed": "設定失敗",
+      "setupFailedDetail": "無法安裝沙箱執行環境：{error}",
+      "setupInstalling": "正在安裝沙箱執行環境…",
+      "notSupportedDetail": "這臺電腦不支援本機執行",
       "connectComputerEllipsis": "連接電腦…",
       "filesDescription": "此對話工作目錄中的檔案。",
       "connectComputerTitle": "連接電腦",
@@ -1780,10 +1799,12 @@
     "folderPicker": {
       "folderUnavailable": "資料夾不可用",
       "defaultTaskFolder": "預設任務資料夾",
-      "selectFolder": "選擇資料夾…",
       "selectedFolderFallback": "已選擇的資料夾",
-      "chooseExistingFolder": "選擇已有資料夾…",
-      "useConversationFolder": "使用對話所在資料夾"
+      "newTaskFolder": "新增任務資料夾",
+      "createdIn": "將在 {path} 中建立",
+      "createdAutomatically": "將在那臺電腦上自動建立",
+      "folders": "資料夾",
+      "chooseDifferentFolder": "選擇其他資料夾…"
     },
     "local": {
       "historyPreserved": "歷史記錄仍可檢視，草稿會被保留。",
@@ -2547,7 +2568,7 @@
       "offline": "這臺電腦目前離線。你選擇的資料夾會被保留。",
       "connectToBrowse": "連接到這臺電腦以瀏覽其中的檔案。",
       "workingDirectory": "工作目錄",
-      "conversationFolder": "對話資料夾",
+      "conversationFolder": "任務資料夾",
       "autoFolderHint": "當對話開始使用檔案時，系統會在這臺電腦上自動建立一個獨立的資料夾。",
       "authorizeHint": "要授權其他資料夾，請在這臺電腦上開啟 SW。你也可以在此選擇一個已授權的資料夾。"
     }
@@ -3435,7 +3456,42 @@
       "errorCredits": "點數不足，無法查詢來源。",
       "errorUnavailable": "網頁搜尋不可用。",
       "errorSearch": "無法查詢來源，請稍後再試。",
+      "errorBusy": "暫時無法查詢來源，請稍後再試。",
+      "tryAgainIn": "{wait}後可再試",
+      "rateLimitHint": "之前搜尋過的內容仍可立即開啟。",
+      "backToResults": "返回上一次結果（{count}）",
+      "cachedNote": "顯示的是{ago}的結果，沒有發起新的搜尋。",
+      "rateLimit": {
+        "minute": "搜尋太頻繁了，{wait}後可再搜尋。",
+        "hour": "已達到每小時查詢來源的上限，將在 {time} 恢復（還需 {wait}）。",
+        "day": "已達到今天查詢來源的上限，將在 {time} 恢復（還需 {wait}）。",
+        "team": "你的團隊已達到每小時查詢來源的上限，將在 {time} 恢復（還需 {wait}）。"
+      },
       "add": "發現"
+    },
+    "noteOrigin": {
+      "title": "已儲存的筆記",
+      "edit": "編輯",
+      "savedFrom": "儲存自",
+      "savedOn": "儲存於 {date}",
+      "editedOn": "編輯於 {date}",
+      "cited": "引用的來源",
+      "untitled": "無標題來源",
+      "sourceDeleted": "（已刪除）",
+      "showAll": "顯示全部 {count} 個",
+      "showLess": "收起"
+    },
+    "noteEditor": {
+      "label": "筆記內容",
+      "hint": "儲存會重新索引這條筆記，和其他來源一樣佔用入庫頁數。之前引用過它的回答仍保留當時引用的文字。",
+      "saved": "筆記已儲存。",
+      "saveFailed": "筆記的文字已儲存，但無法完成索引。",
+      "indexingFailed": "文字已儲存，但索引沒有完成。按一下儲存可重試。",
+      "conflict": "編輯期間這條筆記已被其他人修改。請重新載入檢視對方的版本；你在這裡的文字沒有儲存。",
+      "reload": "重新載入",
+      "cancel": "取消",
+      "save": "儲存",
+      "saving": "正在儲存並索引…"
     },
     "sourcePreview": {
       "mode": {
@@ -3575,7 +3631,6 @@
     }
   },
   "dashboardBlogAdmin": {
-    "eyebrow": "部落格 · 管理",
     "heading": "部落格文章",
     "description": "匯入 Markdown 文章，預覽每個語言版本，並決定哪些公開。",
     "refresh": "重新載入列表",
@@ -3628,14 +3683,40 @@
       "minutes": "約 {count} 分鐘",
       "excerpt": "摘要",
       "preview": "預覽",
-      "loadingPreview": "正在載入預覽…"
+      "loadingPreview": "正在載入預覽…",
+      "back": "全部文章",
+      "languages": "語言版本",
+      "notFound": "沒有 ID 為 {articleId} 的文章。"
+    },
+    "count": "共 {total} 篇，顯示 {shown} 篇",
+    "columns": {
+      "article": "文章",
+      "category": "分類",
+      "languages": "語言版本",
+      "imported": "上次匯入"
     }
   },
   "dashboardAdmin": {
     "nav": {
       "label": "管理分區",
-      "market": "市場",
-      "blog": "部落格"
+      "title": "管理中心",
+      "groups": {
+        "market": "市場",
+        "content": "內容",
+        "system": "系統"
+      },
+      "items": {
+        "overview": "概覽",
+        "mcpReview": "MCP 審核",
+        "skillReview": "技能審核",
+        "reports": "檢舉",
+        "skills": "全部技能",
+        "collections": "合集",
+        "blog": "部落格",
+        "marketSettings": "市場設定"
+      },
+      "backToApp": "返回應用",
+      "pending": "{count} 項待處理"
     },
     "checkingAccess": "正在檢查管理權限…",
     "accessCheckFailed": "無法檢查管理權限，請重試。",
@@ -3667,7 +3748,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "內部/後設資料位址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。",
+    "overview": {
+      "title": "概覽",
+      "description": "各分區裡等待處理的事項。",
+      "refresh": "重新載入數量",
+      "retry": "重試",
+      "loading": "正在載入數量…",
+      "loadFailed": "無法載入數量，各分區仍可正常使用。",
+      "summary": "{count, plural, =0 {沒有等待處理的事項。} other {有 # 項等待處理。}}",
+      "queues": "待辦佇列",
+      "content": "內容",
+      "hints": {
+        "mcpReview": "被標記的 MCP 提交",
+        "skillReview": "{review} 個新提交 · {listing} 個上架決定",
+        "reports": "未處理的檢舉"
+      },
+      "blogDrafts": "{count} 個草稿版本",
+      "blogPublished": "{count} 個已發布版本"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -4649,8 +4748,6 @@
       "noLicense": "無授權條款",
       "capabilityPromptOnly": "僅含指令",
       "capabilityExecutable": "包含腳本",
-      "readSkillMd": "閱讀 SKILL.md",
-      "hideSkillMd": "隱藏 SKILL.md",
       "loadingSkillMd": "正在載入 SKILL.md…",
       "skillMdFailed": "載入 SKILL.md 失敗。",
       "skillMdMissing": "此版本沒有 SKILL.md 文字。",
@@ -4658,7 +4755,11 @@
       "reasonPlaceholder": "將與決定一併記錄",
       "publish": "核准並發布",
       "reject": "拒絕",
-      "footnote": "技能審核與 MCP 市場使用相同的管理員允許清單。"
+      "footnote": "技能審核與 MCP 市場使用相同的管理員允許清單。",
+      "flagCount": "{count, plural, =0 {無標記} other {# 個標記}}",
+      "loadMore": "載入更多",
+      "loadMoreFailed": "無法載入佇列的更多內容。",
+      "shownOf": "已顯示 {shown} / {total}"
     },
     "ownerListing": {
       "label": "允許在公開市場上架",
@@ -5218,7 +5319,7 @@
       }
     },
     "nav": {
-      "marketAdmin": "市場管理"
+      "marketAdmin": "管理中心"
     },
     "restore": {
       "button": "恢復上架到 SourceWeft",
@@ -5586,7 +5687,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本嗎？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：開啟「設定 → 這臺電腦」並安裝沙箱執行環境（帶簽名的下載，只有在你點選「安裝」後才會開始）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 10 和 11（64 位）在一次性設定後也可使用本機裝置執行：應用會彈出一次標準的 Windows 管理員授權提示，用來安裝沙箱輔助程式和一個受限的沙箱帳戶。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：應用開啟後會自動下載帶簽名的沙箱執行環境（「設定 → 這臺電腦」會顯示進度，並可重試）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 10 和 11（64 位）在一次性設定後也可使用本機裝置執行：應用會彈出一次標準的 Windows 管理員授權提示，用來安裝沙箱輔助程式和一個受限的沙箱帳戶。"
         }
       }
     }

@@ -35,6 +35,8 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
 import { Preview } from "@sourceweft/preview/react";
+import { NoteEditor } from "./note-editor";
+import { NoteOriginCard } from "./note-origin-card";
 import { SourceGuideCard } from "./source-guide-card";
 import type { CitationRecord } from "./chat-canvas";
 import type { SourceItem } from "./source-types";
@@ -164,13 +166,26 @@ function SourceMetaRow({ label, value }: { label: string; value: string }) {
 
 export function SourcePreviewPanel({
   citation,
+  onAskQuestion,
   onOpenChange,
+  onOpenSource,
+  onSourceChanged,
   open,
   source,
   workspaceId,
 }: {
   citation?: CitationRecord | null;
+  /**
+   * A suggested question from the guide was sent to the message box. The
+   * preview closes itself; this lets the surface that opened it get out of the
+   * way too (the Hub drawer on a narrow screen).
+   */
+  onAskQuestion?: () => void;
   onOpenChange: (open: boolean) => void;
+  /** Open another source (a note's cited source) in this preview. */
+  onOpenSource?: (source: { id: string; title: string }) => void;
+  /** The previewed source changed on the server (a note was edited). */
+  onSourceChanged?: () => void;
   open: boolean;
   source?: SourceItem | null;
   workspaceId?: string | null;
@@ -185,6 +200,30 @@ export function SourcePreviewPanel({
   const [previewMode, setPreviewMode] = useState<PreviewMode>("preview");
   const [rawChunkIds, setRawChunkIds] = useState<Set<string>>(() => new Set());
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteReloadKey, setNoteReloadKey] = useState(0);
+
+  useEffect(() => {
+    setEditingNote(false);
+    setNoteReloadKey(0);
+  }, [open, source?.id]);
+
+  // After a note is edited, reload what is shown without dropping the editor.
+  useEffect(() => {
+    if (noteReloadKey === 0 || !open || !source || citation || !workspaceId) {
+      return;
+    }
+    let cancelled = false;
+    contentClient
+      .getSource(workspaceId, source.id)
+      .then((result) => {
+        if (!cancelled) setDetail(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [citation, noteReloadKey, open, source, workspaceId]);
 
   useEffect(() => {
     if (open) {
@@ -370,9 +409,11 @@ export function SourcePreviewPanel({
       >
         <DialogHeader className="relative overflow-hidden border-b bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.14),transparent_32%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.34))] px-5 py-4">
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
-          <div className="flex min-w-0 items-start justify-between gap-4 pr-9">
-            <div className="min-w-0">
-              <DialogTitle className="truncate text-lg font-semibold">
+          {/* Narrow: title and details first, view switcher on its own row, so
+              the switcher never squeezes the title out. */}
+          <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4 md:pr-9">
+            <div className="min-w-0 pr-9 md:pr-0">
+              <DialogTitle className="truncate text-left text-lg font-semibold">
                 {title}
               </DialogTitle>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -479,382 +520,436 @@ export function SourcePreviewPanel({
           </div>
         </DialogHeader>
 
-        {!citation && source && workspaceId && detail ? (
-          <SourceGuideCard sourceId={source.id} workspaceId={workspaceId} />
-        ) : null}
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          {!citation && source && workspaceId && detail ? (
+            <SourceGuideCard
+              collapsedByDefault={previewMode === "source-file"}
+              onAsk={() => {
+                onOpenChange(false);
+                onAskQuestion?.();
+              }}
+              sourceId={source.id}
+              workspaceId={workspaceId}
+            />
+          ) : null}
 
-        {isExternalCitation && citation ? (
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
-              <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
-                <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
-                  <ExternalLink className="size-4" />
-                  {t("sourcePreview.webCitation")}
-                </div>
-                {t("sourcePreview.webCitationNote")}
-              </div>
-
-              <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
-                <div className="flex items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-foreground">
-                      {citation.sourceTitle?.trim() || citation.externalUri}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {!citation &&
+            source &&
+            workspaceId &&
+            detail?.source.sourceType === "note" ? (
+              <NoteOriginCard
+                onEdit={() => setEditingNote(true)}
+                onOpenSource={onOpenSource}
+                reloadKey={noteReloadKey}
+                sourceId={source.id}
+                workspaceId={workspaceId}
+              />
+            ) : null}
+            {editingNote && detail && source && workspaceId ? (
+              <ScrollArea className="min-h-0 flex-1">
+                <NoteEditor
+                  expectedUpdatedAt={detail.source.updatedAt}
+                  initialText={detail.source.contentText}
+                  onCancel={() => {
+                    setEditingNote(false);
+                    setNoteReloadKey((key) => key + 1);
+                  }}
+                  onChanged={() => {
+                    setNoteReloadKey((key) => key + 1);
+                    onSourceChanged?.();
+                  }}
+                  onSaved={() => {
+                    setEditingNote(false);
+                    setNoteReloadKey((key) => key + 1);
+                    onSourceChanged?.();
+                  }}
+                  sourceId={source.id}
+                  workspaceId={workspaceId}
+                />
+              </ScrollArea>
+            ) : isExternalCitation && citation ? (
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
+                  <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
+                    <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                      <ExternalLink className="size-4" />
+                      {t("sourcePreview.webCitation")}
                     </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {citation.externalUri}
-                    </div>
+                    {t("sourcePreview.webCitationNote")}
                   </div>
-                  <Button
-                    className="shrink-0 gap-1.5"
-                    onClick={() =>
-                      window.open(
-                        citation.externalUri,
-                        "_blank",
-                        "noopener,noreferrer",
-                      )
-                    }
-                    size="xs"
-                    type="button"
-                    variant="outline"
-                  >
-                    <ExternalLink className="size-3.5" />
-                    {t("sourcePreview.open")}
-                  </Button>
-                </div>
-                <div className="px-4 py-4 lg:px-5">
-                  <MessageResponse className="text-sm leading-7 text-foreground">
-                    {citation.content ||
-                      citation.excerpt ||
-                      t("sourcePreview.noContentSaved")}
-                  </MessageResponse>
-                </div>
-              </article>
-            </div>
-          </ScrollArea>
-        ) : isLoading ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            <Loader2 className="mr-2 size-4 animate-spin" />
-            {t("sourcePreview.loading")}
-          </div>
-        ) : isDeletedCitation && citation ? (
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
-              <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
-                <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
-                  <FileText className="size-4" />
-                  {t("sourcePreview.sourceUnavailable")}
-                </div>
-                {t("sourcePreview.sourceUnavailableNote")}
-              </div>
 
-              <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
-                <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                      <Hash className="size-3.5" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">
-                        {citation.sourceTitle?.trim() ||
-                          t("sourcePreview.deletedSourceFallback")}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {typeof citation.chunkNo === "number"
-                          ? t("sourcePreview.chunkLabel", {
-                              number: citation.chunkNo + 1,
-                            })
-                          : t("sourcePreview.citedChunk")}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                    <Sparkles className="size-3.5" />
-                    {t("sourcePreview.preservedCitation")}
-                  </span>
-                </div>
-                <div className="px-4 py-4 lg:px-5">
-                  <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                    {citation.excerpt || t("sourcePreview.noExcerptSaved")}
-                  </MessageResponse>
-                </div>
-              </article>
-            </div>
-          </ScrollArea>
-        ) : error ? (
-          <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive">
-            {error}
-          </div>
-        ) : detail ? (
-          previewMode === "source-file" ? (
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 py-6 lg:px-8">
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-                  <section className="overflow-hidden rounded-[28px] border border-border/70 bg-[linear-gradient(160deg,hsl(var(--background)),hsl(var(--muted)/0.18))] shadow-[0_20px_60px_-32px_hsl(var(--foreground)/0.35)]">
-                    {sourceDownloadUrl ? (
-                      <div className="flex justify-end border-b border-border/70 bg-background/80 px-5 py-3 backdrop-blur">
-                        <Button
-                          asChild
-                          className="gap-1.5 rounded-xl"
-                          size="sm"
-                          variant="outline"
-                        >
-                          <a
-                            href={sourceDownloadUrl}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            <Download className="size-3.5" />
-                            {t("sourcePreview.download")}
-                          </a>
-                        </Button>
-                      </div>
-                    ) : null}
-
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.10),transparent_42%)]" />
-                      {sourcePreviewUrl || sourceDownloadUrl ? (
-                        <div className="h-[72vh]">
-                          <Preview
-                            source={{
-                              name: title,
-                              mimeType: sourceMimeType,
-                              url: (sourcePreviewUrl || sourceDownloadUrl)!,
-                            }}
-                          />
+                  <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
+                    <div className="flex items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-foreground">
+                          {citation.sourceTitle?.trim() || citation.externalUri}
                         </div>
-                      ) : isTextSourceMimeType(sourceMimeType) ? (
-                        <div className="h-[72vh]">
-                          <Preview
-                            source={{
-                              name: title,
-                              mimeType: sourceMimeType,
-                              text: sourceFileContent,
-                            }}
-                          />
+                        <div className="truncate text-xs text-muted-foreground">
+                          {citation.externalUri}
                         </div>
-                      ) : (
-                        <p className="p-6">{t("sourcePreview.noSourceFile")}</p>
-                      )}
-                    </div>
-                  </section>
-
-                  <aside className="space-y-4">
-                    <div className="overflow-hidden rounded-[24px] border border-border/70 bg-background/92 shadow-[0_18px_60px_-40px_hsl(var(--foreground)/0.45)] backdrop-blur">
-                      <div className="border-b border-border/70 px-4 py-3">
-                        <div className="text-sm font-semibold text-foreground">
-                          {t("sourcePreview.fileDetails")}
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          {t("sourcePreview.fileDetailsNote")}
-                        </p>
                       </div>
-                      <div className="space-y-3 px-4 py-4">
-                        <SourceMetaRow
-                          label={t("sourcePreview.metaName")}
-                          value={title}
-                        />
-                        <SourceMetaRow
-                          label={t("sourcePreview.metaType")}
-                          value={sourceTypeLabel}
-                        />
-                        <SourceMetaRow
-                          label={t("sourcePreview.metaFormat")}
-                          value={sourceMimeType ?? t("sourcePreview.unknown")}
-                        />
-                        {sourceSize ? (
-                          <SourceMetaRow
-                            label={t("sourcePreview.metaSize")}
-                            value={sourceSize}
-                          />
-                        ) : null}
-                        {sourceUpdatedAt ? (
-                          <SourceMetaRow
-                            label={t("sourcePreview.metaUpdated")}
-                            value={sourceUpdatedAt}
-                          />
-                        ) : null}
-                        <SourceMetaRow
-                          label={t("sourcePreview.metaIndexedChunks")}
-                          value={String(detail.chunks.length)}
-                        />
-                      </div>
-                    </div>
-                  </aside>
-                </div>
-              </div>
-            </ScrollArea>
-          ) : previewMode === "raw" ? (
-            <ScrollArea className="min-h-0 flex-1">
-              <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
-                {rawMarkdown || t("sourcePreview.noMarkdown")}
-              </pre>
-            </ScrollArea>
-          ) : previewMode === "preview" ? (
-            <ScrollArea className="min-h-0 flex-1">
-              <article className="mx-auto min-h-full max-w-4xl px-5 py-6 lg:px-8">
-                <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                  {rawMarkdown || t("sourcePreview.noMarkdown")}
-                </MessageResponse>
-              </article>
-            </ScrollArea>
-          ) : (
-            <div className="flex min-h-0 flex-1 overflow-hidden">
-              {detail.chunks.length > 1 ? (
-                <aside className="hidden w-16 shrink-0 border-r bg-muted/15 p-2 lg:block">
-                  <ScrollArea className="h-full">
-                    <div className="flex flex-col gap-1.5">
-                      {detail.chunks.map((chunk, index) => {
-                        const isCited = chunk.id === citation?.chunkId;
-                        return (
-                          <button
-                            className={cn(
-                              "relative mx-auto flex h-9 w-10 items-center justify-center rounded-lg text-xs font-semibold transition-colors",
-                              isCited
-                                ? "bg-primary text-primary-foreground shadow-sm"
-                                : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-                            )}
-                            key={chunk.id}
-                            onClick={() => {
-                              const target =
-                                scrollRootRef.current?.querySelector(
-                                  `[data-source-chunk-id="${CSS.escape(chunk.id)}"]`,
-                                ) as HTMLElement | null;
-                              target?.scrollIntoView({
-                                behavior: "smooth",
-                                block: "center",
-                              });
-                            }}
-                            title={t("sourcePreview.chunkLabel", {
-                              number: index + 1,
-                            })}
-                            type="button"
-                          >
-                            {index + 1}
-                            {isCited ? (
-                              <span className="absolute -right-1 -top-1 rounded-full bg-primary ring-2 ring-background">
-                                <Sparkles className="size-3 text-primary-foreground" />
-                              </span>
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                </aside>
-              ) : null}
-
-              <ScrollArea className="min-w-0 flex-1" ref={scrollRootRef}>
-                <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
-                  {detail.chunks.map((chunk, index) => {
-                    const isCited = chunk.id === citation?.chunkId;
-                    const isRawOpen = rawChunkIds.has(chunk.id);
-                    const span = isCited
-                      ? citedSpan(citation, chunk.content)
-                      : null;
-                    const supportNotLocated =
-                      isCited && citation?.support === "weak";
-                    return (
-                      <article
-                        className={cn(
-                          "overflow-hidden rounded-2xl border bg-background shadow-xs transition-colors",
-                          isCited &&
-                            "border-primary/50 bg-primary/5 shadow-md shadow-primary/10",
-                        )}
-                        data-source-chunk-id={chunk.id}
-                        key={chunk.id}
+                      <Button
+                        className="shrink-0 gap-1.5"
+                        onClick={() =>
+                          window.open(
+                            citation.externalUri,
+                            "_blank",
+                            "noopener,noreferrer",
+                          )
+                        }
+                        size="xs"
+                        type="button"
+                        variant="outline"
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <span
-                              className={cn(
-                                "inline-flex h-7 min-w-7 items-center justify-center rounded-full text-xs font-semibold",
-                                isCited
-                                  ? "bg-primary text-primary-foreground"
-                                  : "bg-muted text-muted-foreground",
-                              )}
-                            >
-                              {index + 1}
-                            </span>
-                            <span className="text-sm font-medium text-foreground">
-                              {t("sourcePreview.chunkLabel", {
-                                number: index + 1,
-                              })}
-                            </span>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            {isCited ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                                <Sparkles className="size-3.5" />
-                                {t("sourcePreview.citedSource")}
-                              </span>
-                            ) : null}
-                            {supportNotLocated ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-400">
-                                {t("sourcePreview.supportNotLocated")}
-                              </span>
-                            ) : null}
-                            <Button
-                              aria-expanded={isRawOpen}
-                              className="h-7 gap-1.5 px-2 text-xs"
-                              onClick={() => toggleRawChunk(chunk.id)}
-                              size="xs"
-                              type="button"
-                              variant={isRawOpen ? "secondary" : "ghost"}
-                            >
-                              <Code2 className="size-3.5" />
-                              {t("sourcePreview.raw")}
-                            </Button>
-                          </div>
-                        </div>
-                        {span ? (
-                          <div
-                            className="border-b bg-primary/10 px-4 py-3 lg:px-5"
-                            data-citation-passage
-                          >
-                            <div className="mb-1 text-xs font-medium text-primary">
-                              {t("sourcePreview.supportingPassage")}
-                            </div>
-                            <MessageResponse className="text-sm leading-7 text-foreground">
-                              {chunk.content.slice(span.start, span.end)}
-                            </MessageResponse>
-                          </div>
-                        ) : null}
-                        <div className="px-4 py-4 lg:px-5">
-                          {isRawOpen ? (
-                            <pre className="max-h-96 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap break-words text-muted-foreground">
-                              {span ? (
-                                <>
-                                  {chunk.content.slice(0, span.start)}
-                                  <mark className="rounded bg-primary/20 px-0.5 text-foreground">
-                                    {chunk.content.slice(span.start, span.end)}
-                                  </mark>
-                                  {chunk.content.slice(span.end)}
-                                </>
-                              ) : (
-                                chunk.content || t("sourcePreview.noRawChunk")
-                              )}
-                            </pre>
-                          ) : (
-                            <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                              {chunk.content}
-                            </MessageResponse>
-                          )}
-                        </div>
-                      </article>
-                    );
-                  })}
-
-                  {detail.chunks.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
-                      <FileText className="mx-auto mb-2 size-5" />
-                      {t("sourcePreview.noChunks")}
+                        <ExternalLink className="size-3.5" />
+                        {t("sourcePreview.open")}
+                      </Button>
                     </div>
-                  ) : null}
+                    <div className="px-4 py-4 lg:px-5">
+                      <MessageResponse className="text-sm leading-7 text-foreground">
+                        {citation.content ||
+                          citation.excerpt ||
+                          t("sourcePreview.noContentSaved")}
+                      </MessageResponse>
+                    </div>
+                  </article>
                 </div>
               </ScrollArea>
-            </div>
-          )
-        ) : null}
+            ) : isLoading ? (
+              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                <Loader2 className="mr-2 size-4 animate-spin" />
+                {t("sourcePreview.loading")}
+              </div>
+            ) : isDeletedCitation && citation ? (
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="mx-auto flex min-h-full max-w-4xl flex-col justify-center space-y-4 px-5 py-6 lg:px-8">
+                  <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-4 text-sm text-muted-foreground">
+                    <div className="mb-2 flex items-center gap-2 font-medium text-foreground">
+                      <FileText className="size-4" />
+                      {t("sourcePreview.sourceUnavailable")}
+                    </div>
+                    {t("sourcePreview.sourceUnavailableNote")}
+                  </div>
+
+                  <article className="overflow-hidden rounded-2xl border bg-background shadow-xs">
+                    <div className="flex items-center justify-between border-b bg-muted/25 px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+                          <Hash className="size-3.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-foreground">
+                            {citation.sourceTitle?.trim() ||
+                              t("sourcePreview.deletedSourceFallback")}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {typeof citation.chunkNo === "number"
+                              ? t("sourcePreview.chunkLabel", {
+                                  number: citation.chunkNo + 1,
+                                })
+                              : t("sourcePreview.citedChunk")}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                        <Sparkles className="size-3.5" />
+                        {t("sourcePreview.preservedCitation")}
+                      </span>
+                    </div>
+                    <div className="px-4 py-4 lg:px-5">
+                      <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                        {citation.excerpt || t("sourcePreview.noExcerptSaved")}
+                      </MessageResponse>
+                    </div>
+                  </article>
+                </div>
+              </ScrollArea>
+            ) : error ? (
+              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-destructive">
+                {error}
+              </div>
+            ) : detail ? (
+              previewMode === "source-file" ? (
+                <ScrollArea className="min-h-0 flex-1">
+                  <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5 py-6 lg:px-8">
+                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+                      <section className="overflow-hidden rounded-[28px] border border-border/70 bg-[linear-gradient(160deg,hsl(var(--background)),hsl(var(--muted)/0.18))] shadow-[0_20px_60px_-32px_hsl(var(--foreground)/0.35)]">
+                        {sourceDownloadUrl ? (
+                          <div className="flex justify-end border-b border-border/70 bg-background/80 px-5 py-3 backdrop-blur">
+                            <Button
+                              asChild
+                              className="gap-1.5 rounded-xl"
+                              size="sm"
+                              variant="outline"
+                            >
+                              <a
+                                href={sourceDownloadUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                <Download className="size-3.5" />
+                                {t("sourcePreview.download")}
+                              </a>
+                            </Button>
+                          </div>
+                        ) : null}
+
+                        <div className="relative">
+                          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.10),transparent_42%)]" />
+                          {sourcePreviewUrl || sourceDownloadUrl ? (
+                            <div className="h-[72vh]">
+                              <Preview
+                                source={{
+                                  name: title,
+                                  mimeType: sourceMimeType,
+                                  url: (sourcePreviewUrl || sourceDownloadUrl)!,
+                                }}
+                              />
+                            </div>
+                          ) : isTextSourceMimeType(sourceMimeType) ? (
+                            <div className="h-[72vh]">
+                              <Preview
+                                source={{
+                                  name: title,
+                                  mimeType: sourceMimeType,
+                                  text: sourceFileContent,
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <p className="p-6">
+                              {t("sourcePreview.noSourceFile")}
+                            </p>
+                          )}
+                        </div>
+                      </section>
+
+                      <aside className="space-y-4">
+                        <div className="overflow-hidden rounded-[24px] border border-border/70 bg-background/92 shadow-[0_18px_60px_-40px_hsl(var(--foreground)/0.45)] backdrop-blur">
+                          <div className="border-b border-border/70 px-4 py-3">
+                            <div className="text-sm font-semibold text-foreground">
+                              {t("sourcePreview.fileDetails")}
+                            </div>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {t("sourcePreview.fileDetailsNote")}
+                            </p>
+                          </div>
+                          <div className="space-y-3 px-4 py-4">
+                            <SourceMetaRow
+                              label={t("sourcePreview.metaName")}
+                              value={title}
+                            />
+                            <SourceMetaRow
+                              label={t("sourcePreview.metaType")}
+                              value={sourceTypeLabel}
+                            />
+                            <SourceMetaRow
+                              label={t("sourcePreview.metaFormat")}
+                              value={
+                                sourceMimeType ?? t("sourcePreview.unknown")
+                              }
+                            />
+                            {sourceSize ? (
+                              <SourceMetaRow
+                                label={t("sourcePreview.metaSize")}
+                                value={sourceSize}
+                              />
+                            ) : null}
+                            {sourceUpdatedAt ? (
+                              <SourceMetaRow
+                                label={t("sourcePreview.metaUpdated")}
+                                value={sourceUpdatedAt}
+                              />
+                            ) : null}
+                            <SourceMetaRow
+                              label={t("sourcePreview.metaIndexedChunks")}
+                              value={String(detail.chunks.length)}
+                            />
+                          </div>
+                        </div>
+                      </aside>
+                    </div>
+                  </div>
+                </ScrollArea>
+              ) : previewMode === "raw" ? (
+                <ScrollArea className="min-h-0 flex-1">
+                  <pre className="mx-auto min-h-full max-w-5xl whitespace-pre-wrap break-words px-5 py-6 font-mono text-xs leading-6 text-foreground lg:px-8">
+                    {rawMarkdown || t("sourcePreview.noMarkdown")}
+                  </pre>
+                </ScrollArea>
+              ) : previewMode === "preview" ? (
+                <ScrollArea className="min-h-0 flex-1">
+                  <article className="mx-auto min-h-full max-w-4xl px-5 py-6 lg:px-8">
+                    <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                      {rawMarkdown || t("sourcePreview.noMarkdown")}
+                    </MessageResponse>
+                  </article>
+                </ScrollArea>
+              ) : (
+                <div className="flex min-h-0 flex-1 overflow-hidden">
+                  {detail.chunks.length > 1 ? (
+                    <aside className="hidden w-16 shrink-0 border-r bg-muted/15 p-2 lg:block">
+                      <ScrollArea className="h-full">
+                        <div className="flex flex-col gap-1.5">
+                          {detail.chunks.map((chunk, index) => {
+                            const isCited = chunk.id === citation?.chunkId;
+                            return (
+                              <button
+                                className={cn(
+                                  "relative mx-auto flex h-9 w-10 items-center justify-center rounded-lg text-xs font-semibold transition-colors",
+                                  isCited
+                                    ? "bg-primary text-primary-foreground shadow-sm"
+                                    : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                                )}
+                                key={chunk.id}
+                                onClick={() => {
+                                  const target =
+                                    scrollRootRef.current?.querySelector(
+                                      `[data-source-chunk-id="${CSS.escape(chunk.id)}"]`,
+                                    ) as HTMLElement | null;
+                                  target?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "center",
+                                  });
+                                }}
+                                title={t("sourcePreview.chunkLabel", {
+                                  number: index + 1,
+                                })}
+                                type="button"
+                              >
+                                {index + 1}
+                                {isCited ? (
+                                  <span className="absolute -right-1 -top-1 rounded-full bg-primary ring-2 ring-background">
+                                    <Sparkles className="size-3 text-primary-foreground" />
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </ScrollArea>
+                    </aside>
+                  ) : null}
+
+                  <ScrollArea className="min-w-0 flex-1" ref={scrollRootRef}>
+                    <div className="mx-auto max-w-4xl space-y-4 px-5 py-6 lg:px-8">
+                      {detail.chunks.map((chunk, index) => {
+                        const isCited = chunk.id === citation?.chunkId;
+                        const isRawOpen = rawChunkIds.has(chunk.id);
+                        const span = isCited
+                          ? citedSpan(citation, chunk.content)
+                          : null;
+                        const supportNotLocated =
+                          isCited && citation?.support === "weak";
+                        return (
+                          <article
+                            className={cn(
+                              "overflow-hidden rounded-2xl border bg-background shadow-xs transition-colors",
+                              isCited &&
+                                "border-primary/50 bg-primary/5 shadow-md shadow-primary/10",
+                            )}
+                            data-source-chunk-id={chunk.id}
+                            key={chunk.id}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
+                              <div className="flex min-w-0 items-center gap-2.5">
+                                <span
+                                  className={cn(
+                                    "inline-flex h-7 min-w-7 items-center justify-center rounded-full text-xs font-semibold",
+                                    isCited
+                                      ? "bg-primary text-primary-foreground"
+                                      : "bg-muted text-muted-foreground",
+                                  )}
+                                >
+                                  {index + 1}
+                                </span>
+                                <span className="text-sm font-medium text-foreground">
+                                  {t("sourcePreview.chunkLabel", {
+                                    number: index + 1,
+                                  })}
+                                </span>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                {isCited ? (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                                    <Sparkles className="size-3.5" />
+                                    {t("sourcePreview.citedSource")}
+                                  </span>
+                                ) : null}
+                                {supportNotLocated ? (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                                    {t("sourcePreview.supportNotLocated")}
+                                  </span>
+                                ) : null}
+                                <Button
+                                  aria-expanded={isRawOpen}
+                                  className="h-7 gap-1.5 px-2 text-xs"
+                                  onClick={() => toggleRawChunk(chunk.id)}
+                                  size="xs"
+                                  type="button"
+                                  variant={isRawOpen ? "secondary" : "ghost"}
+                                >
+                                  <Code2 className="size-3.5" />
+                                  {t("sourcePreview.raw")}
+                                </Button>
+                              </div>
+                            </div>
+                            {span ? (
+                              <div
+                                className="border-b bg-primary/10 px-4 py-3 lg:px-5"
+                                data-citation-passage
+                              >
+                                <div className="mb-1 text-xs font-medium text-primary">
+                                  {t("sourcePreview.supportingPassage")}
+                                </div>
+                                <MessageResponse className="text-sm leading-7 text-foreground">
+                                  {chunk.content.slice(span.start, span.end)}
+                                </MessageResponse>
+                              </div>
+                            ) : null}
+                            <div className="px-4 py-4 lg:px-5">
+                              {isRawOpen ? (
+                                <pre className="max-h-96 overflow-auto font-mono text-xs leading-5 whitespace-pre-wrap break-words text-muted-foreground">
+                                  {span ? (
+                                    <>
+                                      {chunk.content.slice(0, span.start)}
+                                      <mark className="rounded bg-primary/20 px-0.5 text-foreground">
+                                        {chunk.content.slice(
+                                          span.start,
+                                          span.end,
+                                        )}
+                                      </mark>
+                                      {chunk.content.slice(span.end)}
+                                    </>
+                                  ) : (
+                                    chunk.content ||
+                                    t("sourcePreview.noRawChunk")
+                                  )}
+                                </pre>
+                              ) : (
+                                <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                                  {chunk.content}
+                                </MessageResponse>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+
+                      {detail.chunks.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed bg-muted/20 px-5 py-10 text-center text-sm text-muted-foreground">
+                          <FileText className="mx-auto mb-2 size-5" />
+                          {t("sourcePreview.noChunks")}
+                        </div>
+                      ) : null}
+                    </div>
+                  </ScrollArea>
+                </div>
+              )
+            ) : null}
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

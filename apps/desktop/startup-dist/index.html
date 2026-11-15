@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>SourceWeft</title>
+    <style>
+      /* Colours mirror the web app's light and dark tokens (apps/web/app/globals.css), so
+         the window does not change colour when the web app takes over. They are written
+         as hex because the oldest supported WebKit does not know oklch(). */
+      :root {
+        --background: #ffffff;
+        --foreground: #0a0a0a;
+        --muted-foreground: #737373;
+        --border: #e5e5e5;
+        --track: #e5e5e5;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #171717;
+          --foreground: #fafafa;
+          --muted-foreground: #a1a1a1;
+          --border: rgba(255, 255, 255, 0.16);
+          --track: rgba(255, 255, 255, 0.12);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: var(--background);
+        color: var(--foreground);
+        font:
+          14px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "PingFang SC",
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+        cursor: default;
+      }
+
+      /* The macOS window has no title bar of its own; this strip lets it be moved. It sits
+         above `main`, which fills the window and would otherwise take the pointer. */
+      .drag {
+        position: fixed;
+        z-index: 1;
+        inset: 0 0 auto 0;
+        height: 48px;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        height: 100%;
+        padding: 0 24px;
+        text-align: center;
+      }
+
+      .mark {
+        width: 64px;
+        height: 64px;
+        border: 1px solid var(--border);
+        border-radius: 27.5%;
+      }
+
+      .progress {
+        position: relative;
+        width: 120px;
+        height: 2px;
+        margin-top: 28px;
+        overflow: hidden;
+        border-radius: 1px;
+        background: var(--track);
+      }
+
+      .progress::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 40%;
+        border-radius: 1px;
+        background: var(--foreground);
+        animation: slide 1.2s ease-in-out infinite;
+      }
+
+      .progress[hidden] {
+        display: block;
+        visibility: hidden;
+      }
+
+      @keyframes slide {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(250%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .progress::after {
+          width: 100%;
+          animation: none;
+          opacity: 0.4;
+        }
+      }
+
+      /* Reserves its height while hidden, so the mark does not jump when the notice appears. */
+      /* Placed below the centred mark and progress bar (94px tall together), outside the
+         flow, so they do not move when the notice appears. */
+      .notice {
+        position: absolute;
+        top: calc(50% + 71px);
+        right: 24px;
+        left: 24px;
+      }
+
+      .notice p {
+        margin: 0;
+      }
+
+      .hint {
+        color: var(--muted-foreground);
+      }
+
+      button {
+        margin-top: 16px;
+        padding: 6px 14px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--track);
+      }
+
+      button:focus-visible {
+        outline: 2px solid var(--foreground);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="drag" data-tauri-drag-region></div>
+    <main>
+      <img class="mark" src="icon.svg" alt="" width="64" height="64" />
+      <div
+        class="progress"
+        id="progress"
+        role="progressbar"
+        aria-label="SourceWeft"
+      ></div>
+      <div class="notice" id="notice" role="status" hidden>
+        <p id="message"></p>
+        <p class="hint" id="hint"></p>
+        <button id="retry" type="button"></button>
+      </div>
+    </main>
+    <script src="startup.js"></script>
+  </body>
+</html>

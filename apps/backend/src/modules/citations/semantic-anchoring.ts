@@ -1,5 +1,9 @@
 import { extractFigures, figuresCovered } from "./figures";
 import type { CitationAnchor } from "./anchoring";
+import type {
+  AnchoringScripts,
+  SemanticDiagnostics,
+} from "./anchoring-diagnostics";
 
 /**
  * Second pass for citations the word matcher cannot judge: a claim and a
@@ -43,6 +47,15 @@ export function needsSemanticPass(claim: string, content: string) {
     contentScript !== "other" &&
     claimScript !== contentScript
   );
+}
+
+/** Which way a claim and its source differ in script, for the decision record. */
+export function anchoringScripts(
+  claim: string,
+  content: string,
+): AnchoringScripts {
+  if (!needsSemanticPass(claim, content)) return "same";
+  return scriptOf(claim) === "cjk" ? "cjk>latin" : "latin>cjk";
 }
 
 /** What is embedded for a stretch of source text: markup removed, whitespace collapsed, bounded. */
@@ -102,24 +115,74 @@ export type EmbeddedSegment = {
   vector: readonly number[];
 };
 
+/**
+ * Judges one claim against the embedded sentences of a source. It always
+ * returns an anchor: strong when a sentence qualifies, otherwise weak, with
+ * `diagnostics.semantic.outcome` saying which rule refused it.
+ */
 export function pickSemanticAnchor(input: {
   claim: string;
   claimVector: readonly number[];
   content: string;
   segments: readonly EmbeddedSegment[];
-}): CitationAnchor | null {
-  if (input.segments.length === 0) return null;
+  /** The word matcher's score for the same claim, recorded with the decision. */
+  lexicalScore?: number;
+}): CitationAnchor {
+  const lexicalScore = input.lexicalScore ?? 0;
+  const scripts = anchoringScripts(input.claim, input.content);
+  const finish = (
+    semantic: SemanticDiagnostics,
+    strong: EmbeddedSegment | null,
+  ): CitationAnchor => ({
+    support: strong ? "strong" : "weak",
+    score: strong ? (semantic.similarity ?? 0) : lexicalScore,
+    startChar: strong ? strong.start : null,
+    endChar: strong ? strong.end : null,
+    quoteText: strong ? input.content.slice(strong.start, strong.end) : null,
+    diagnostics: { method: "semantic", scripts, lexicalScore, semantic },
+  });
+
+  if (input.segments.length === 0) {
+    return finish(
+      {
+        similarity: null,
+        margin: null,
+        segments: 0,
+        outcome: "below_similarity",
+      },
+      null,
+    );
+  }
   const ranked = input.segments
     .map((segment) => ({
       segment,
       similarity: cosine(input.claimVector, segment.vector),
     }))
     .sort((a, b) => b.similarity - a.similarity);
+  type Ranked = (typeof ranked)[number];
+  // Lead over the best of the other sentences; null for a single sentence.
+  const marginOf = (item: Ranked) => {
+    const others = ranked.filter((other) => other !== item);
+    return others.length === 0
+      ? null
+      : item.similarity - Math.max(...others.map((other) => other.similarity));
+  };
+  const refused = (outcome: SemanticDiagnostics["outcome"]) =>
+    finish(
+      {
+        similarity: ranked[0]!.similarity,
+        margin: marginOf(ranked[0]!),
+        segments: ranked.length,
+        outcome,
+      },
+      null,
+    );
+
   const similar = ranked.filter(
     (item) => item.similarity >= SEMANTIC_MIN_SIMILARITY,
   );
-  if (similar.length === 0) return null;
-  const stated = (item: (typeof ranked)[number]) =>
+  if (similar.length === 0) return refused("below_similarity");
+  const stated = (item: Ranked) =>
     figuresCovered(input.claim, item.segment.text) &&
     !directionsConflict(input.claim, item.segment.text);
   // Two or more figures that only one sentence states identify it, even when
@@ -134,18 +197,26 @@ export function pickSemanticAnchor(input: {
       margin < SEMANTIC_MIN_MARGIN &&
       !(figureCount >= 2 && similar.filter(stated).length === 1)
     ) {
-      return null;
+      return refused("below_margin");
     }
   } else {
     const candidates = figureCount >= 2 ? similar.filter(stated) : [];
-    if (candidates.length !== 1) return null;
+    if (candidates.length !== 1) {
+      return refused(
+        figuresCovered(input.claim, best.segment.text)
+          ? "direction_conflict"
+          : "figures_missing",
+      );
+    }
     best = candidates[0]!;
   }
-  return {
-    support: "strong",
-    score: best.similarity,
-    startChar: best.segment.start,
-    endChar: best.segment.end,
-    quoteText: input.content.slice(best.segment.start, best.segment.end),
-  };
+  return finish(
+    {
+      similarity: best.similarity,
+      margin: marginOf(best),
+      segments: ranked.length,
+      outcome: "strong",
+    },
+    best.segment,
+  );
 }

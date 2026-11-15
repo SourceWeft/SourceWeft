@@ -306,7 +306,8 @@ diagnostics. Credentials, workfiles and chat content are never included.
 ## Sandbox runtime bundle (macOS, Linux and Windows)
 
 Local device execution needs the sandbox runtime. It is not part of the installer: the app
-downloads it only after the user clicks Install in the app. The file set is per platform:
+downloads it by itself when the signed-in app opens without a usable runtime (Install in
+Settings → This computer retries a failed download). The file set is per platform:
 
 - Linux x86_64: `srt-sidecar`, `rg`, `apply-seccomp`, `srt-proxy-agent.jar`.
 - macOS (`aarch64-apple-darwin`, `x86_64-apple-darwin`): `srt-sidecar`, `rg`,
@@ -414,8 +415,8 @@ update-manifest entry, and in-app updates apply to the AppImage only. The `.deb`
 bubblewrap at `/opt/sourceweft/libexec/bwrap` plus a scoped AppArmor profile; removed on
 package removal). The AppImage runs the same script through `pkexec` when the user asks the
 app to. Linux ARM64 is not supported. Local device execution on Linux x64 additionally
-needs the signed sandbox runtime described above, which the app downloads when the user
-clicks Install. User-facing setup is documented in `apps/desktop/LINUX_SANDBOX.md`.
+needs the signed sandbox runtime described above, which the app downloads by itself when it
+opens. User-facing setup is documented in `apps/desktop/LINUX_SANDBOX.md`.
 
 The verification and signed workflows use Ubuntu 22.04, install WebKitGTK 4.1,
 GTK/AppIndicator and AppImage dependencies via `install-desktop-linux-deps.sh`,

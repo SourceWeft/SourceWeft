@@ -214,6 +214,9 @@ importers:
       '@sourceweft/builtin-tool-sandbox':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-sandbox
+      '@sourceweft/builtin-tool-study':
+        specifier: workspace:*
+        version: link:../../packages/builtin-tool-study
       '@sourceweft/builtin-tool-video-presentation':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-video-presentation
@@ -604,6 +607,9 @@ importers:
       '@sourceweft/builtin-tool-publish-artifact':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-publish-artifact
+      '@sourceweft/builtin-tool-study':
+        specifier: workspace:*
+        version: link:../../packages/builtin-tool-study
       '@sourceweft/builtin-tool-video-presentation':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-video-presentation
@@ -940,6 +946,9 @@ importers:
       '@sourceweft/builtin-tool-sandbox':
         specifier: workspace:*
         version: link:../builtin-tool-sandbox
+      '@sourceweft/builtin-tool-study':
+        specifier: workspace:*
+        version: link:../builtin-tool-study
       '@sourceweft/builtin-tool-video-presentation':
         specifier: workspace:*
         version: link:../builtin-tool-video-presentation
@@ -1390,6 +1399,40 @@ importers:
       typescript:
         specifier: 5.9.2
         version: 5.9.2
+
+  packages/builtin-tool-study:
+    dependencies:
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sourceweft/ui-web':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.8)
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@sourceweft/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
 
   packages/builtin-tool-video-presentation:
     dependencies:

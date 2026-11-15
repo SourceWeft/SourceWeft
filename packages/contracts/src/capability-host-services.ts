@@ -42,8 +42,19 @@ export type CapabilityConnectorContribution = {
   readonly agentToolDefs: readonly AgentToolDefinitionShape[];
 };
 
+/**
+ * Builds a capability's connector contribution.
+ *
+ * Configuration follows the host-wide rule: a malformed value throws (the host
+ * refuses to start), while a connector that is switched on but missing a
+ * credential is still returned and reports what is missing through `logger`;
+ * it refuses to connect until the credential is set.
+ */
 export type CreateConnectorAdapters = (input: {
   readonly env: CapabilityHostEnvironment;
+  readonly logger?: {
+    warn?(message: string, meta?: Record<string, unknown>): void;
+  };
 }) =>
   | CapabilityConnectorContribution
   | Promise<CapabilityConnectorContribution>;

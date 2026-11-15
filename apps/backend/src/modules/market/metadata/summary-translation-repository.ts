@@ -80,6 +80,29 @@ export async function findSummaryTranslationCandidates(input: {
         select 1 from ${mcpServerVersionOverviews} o
         where o.mcp_server_version_id = v.id and o.hidden = false
       )
+      and not (
+        -- Waiting out the overview settle delay: the page shows the previous
+        -- version's overview, which already speaks the visitor's language.
+        not exists (
+          select 1 from ${mcpServerVersionOverviews} o
+          where o.mcp_server_version_id = v.id
+        )
+        and not exists (
+          select 1 from mcp_server_version_analysis a
+          where a.mcp_server_version_id = v.id
+            and a.status not in ('pending', 'running')
+        )
+        and exists (
+          select 1 from ${mcpServerVersions} pv
+          where pv.server_id = v.server_id
+            and pv.status = 'published'
+            and pv.created_at < v.created_at
+            and exists (
+              select 1 from ${mcpServerVersionOverviews} po
+              where po.mcp_server_version_id = pv.id and not po.hidden
+            )
+        )
+      )
       and char_length(btrim(s.summary)) >= ${MCP_SUMMARY_TRANSLATION_MIN_SOURCE_CHARS}
       and s.summary !~ '^MCP server \\S+ from the MCP registry\\.?$'
       and (

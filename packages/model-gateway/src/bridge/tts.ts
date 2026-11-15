@@ -15,7 +15,61 @@ import type {
 /** Requested formats a mismatch is converted to; raw pcm cannot be verified. */
 const CONVERTIBLE = new Set(["mp3", "opus", "flac", "wav", "aac"]);
 
+/**
+ * TTS providers bill by input characters and most report no usage, so the
+ * character count is the call's usage. A transport that counts in its own
+ * billing unit (DeepSeek counts a Chinese character as two) has already set it.
+ */
+function withTtsCharacters(
+  result: TtsSpeechResult,
+  text: string,
+): TtsSpeechResult {
+  if (result.usage?.inputCharacters !== undefined) {
+    return result;
+  }
+  const usage = { ...result.usage, inputCharacters: Array.from(text).length };
+  return {
+    ...result,
+    usage,
+    observation: result.observation
+      ? { ...result.observation, usage }
+      : undefined,
+  };
+}
+
+/** Reason code on the error raised for a voice the target does not have. */
+export const TTS_UNSUPPORTED_VOICE_REASON = "unsupported_voice";
+
+function assertVoiceIsAvailable(
+  voices: readonly string[] | undefined,
+  input: { target: ResolvedRequestTarget; payload: TtsSpeechInput },
+) {
+  const voice = input.payload.voice?.trim();
+  if (!voice || !voices || voices.includes(voice)) {
+    return;
+  }
+  throw new ModelGatewayError({
+    code: "BAD_REQUEST",
+    message: `Voice '${voice.slice(0, 60)}' is not available for ${input.target.providerModel}. Available voices: ${voices.join(", ")}. Leave the voice out to use the default.`,
+    retryable: false,
+    provider: input.target.provider,
+    metadata: {
+      reason: TTS_UNSUPPORTED_VOICE_REASON,
+      supportedVoices: [...voices],
+    },
+  });
+}
+
 export async function runBridgeTtsSpeech(input: {
+  config: ResolvedModelGatewayConfig;
+  target: ResolvedRequestTarget;
+  payload: TtsSpeechInput;
+  options?: RequestOptions;
+}): Promise<TtsSpeechResult> {
+  return withTtsCharacters(await synthesizeSpeech(input), input.payload.input);
+}
+
+async function synthesizeSpeech(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
   payload: TtsSpeechInput;
@@ -23,6 +77,7 @@ export async function runBridgeTtsSpeech(input: {
 }): Promise<TtsSpeechResult> {
   try {
     const transport = getTtsTransport(input.target.providerKind);
+    assertVoiceIsAvailable(transport.voices?.(input.target), input);
     const requested = input.payload.responseFormat?.trim().toLowerCase();
     const native = transport.outputFormats;
     // Only an explicit request for a format the provider lacks is converted;

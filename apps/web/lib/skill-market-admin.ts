@@ -54,10 +54,21 @@ export function reviewDecisionBody(reason?: string): { reason?: string } {
   return trimmed ? { reason: trimmed.slice(0, 1000) } : {};
 }
 
-export function listSkillReviewQueue(): Promise<{
+/**
+ * One page of the review queue, newest first. `cursor` is the `nextCursor` of
+ * the page before; `total` counts the whole queue. Both are absent from an
+ * older API, which answered with everything at once.
+ */
+export function listSkillReviewQueue(cursor?: string): Promise<{
   items: SkillReviewSubmission[];
+  nextCursor?: string | null;
+  total?: number;
 }> {
-  return http.get(`${ADMIN_BASE}/submissions`);
+  return http.get(
+    cursor
+      ? `${ADMIN_BASE}/submissions?cursor=${encodeURIComponent(cursor)}`
+      : `${ADMIN_BASE}/submissions`,
+  );
 }
 
 /**
@@ -66,7 +77,10 @@ export function listSkillReviewQueue(): Promise<{
  * scripts (`reason`). `reason`, `visibility` and `changes` are absent from an
  * older API, which only had the first kind.
  */
-export type SkillListingQueueEntry = Omit<SkillReviewSubmission, "ingestion"> & {
+export type SkillListingQueueEntry = Omit<
+  SkillReviewSubmission,
+  "ingestion"
+> & {
   reason?: SkillListingQueueReason;
   visibility?: "public" | "restricted";
   changes?: SkillVersionChangelog | null;

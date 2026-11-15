@@ -170,6 +170,11 @@ export interface UsageInfo {
    * bills: DeepSeek counts a Chinese character as two.
    */
   inputCharacters?: number;
+  /**
+   * Seconds of audio a speech-recognition request transcribed, for providers
+   * that price ASR by duration and report no tokens.
+   */
+  inputAudioSeconds?: number;
 }
 
 export interface ObserveSpan {

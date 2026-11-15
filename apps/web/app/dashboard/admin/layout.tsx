@@ -1,27 +1,33 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 
 import { authClient } from "../../../lib/auth-client";
-import { getSkillMarketAdminMe } from "../../../lib/skill-market-audit";
+import { useDesktopTitlebar } from "../../../lib/desktop-titlebar";
+import type { AdminOverviewResponse } from "@sourceweft/contracts";
 
-const ADMIN_SECTIONS = [
-  { key: "market", href: "/dashboard/admin/market" },
-  { key: "blog", href: "/dashboard/admin/blog" },
-] as const;
+import { getAdminOverview } from "../../../lib/admin-overview";
+import { getSkillMarketAdminMe } from "../../../lib/skill-market-audit";
+import { AdminNav } from "./_components/admin-nav";
+import {
+  AdminOverviewProvider,
+  type AdminOverviewState,
+} from "./_components/admin-overview-context";
 
 type AccessState = {
   userId: string;
-  pathname: string;
   status: "allowed" | "error";
 } | null;
 
-/** One entry check for every /dashboard/admin route. The API remains the authority. */
+/**
+ * The admin shell and the one entry check for every /dashboard/admin route.
+ * The check runs again on each section, behind the shell, so moving between
+ * sections does not blank the page. The API remains the authority.
+ */
 export default function AdminLayout({
   children,
 }: {
@@ -35,6 +41,9 @@ export default function AdminLayout({
   const router = useRouter();
   const [access, setAccess] = React.useState<AccessState>(null);
   const [retry, setRetry] = React.useState(0);
+  // The workspace sidebar is hidden here, so this shell leaves the room the
+  // macOS window controls need.
+  const desktopTitlebar = useDesktopTitlebar();
 
   React.useEffect(() => {
     if (isPending || !userId) return;
@@ -44,7 +53,7 @@ export default function AdminLayout({
       .then((result) => {
         if (cancelled) return;
         if (result.isMarketAdmin === true) {
-          setAccess({ userId, pathname, status: "allowed" });
+          setAccess({ userId, status: "allowed" });
         } else {
           router.replace("/dashboard");
         }
@@ -59,7 +68,13 @@ export default function AdminLayout({
         } else if (error.status === 403) {
           router.replace("/dashboard");
         } else {
-          setAccess({ userId, pathname, status: "error" });
+          // A failed re-check while moving between sections keeps the shell
+          // up; the API still refuses anything this user may not do.
+          setAccess((current) =>
+            current && current.userId === userId && current.status === "allowed"
+              ? current
+              : { userId, status: "error" },
+          );
         }
       });
 
@@ -68,40 +83,63 @@ export default function AdminLayout({
     };
   }, [isPending, pathname, retry, router, search, userId]);
 
-  if (
-    userId &&
+  const allowed =
     !isPending &&
+    !!userId &&
     access?.userId === userId &&
-    access?.pathname === pathname
-  ) {
+    access?.status === "allowed";
+  const [overview, setOverview] = React.useState<AdminOverviewResponse | null>(
+    null,
+  );
+  const [overviewFailed, setOverviewFailed] = React.useState(false);
+  const [overviewTick, setOverviewTick] = React.useState(0);
+
+  // The pending numbers, read again on every section and whenever a page says
+  // a queue changed. A failure only hides the numbers.
+  React.useEffect(() => {
+    if (!allowed) return;
+    let cancelled = false;
+    void getAdminOverview()
+      .then((result) => {
+        if (cancelled) return;
+        setOverview(result);
+        setOverviewFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setOverviewFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allowed, overviewTick, pathname]);
+
+  const overviewState = React.useMemo<AdminOverviewState>(
+    () => ({
+      overview,
+      failed: overviewFailed,
+      refresh: () => setOverviewTick((value) => value + 1),
+    }),
+    [overview, overviewFailed],
+  );
+
+  if (userId && !isPending && access && access.userId === userId) {
     if (access.status === "allowed") {
       return (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <nav
-            aria-label={t("nav.label")}
-            className="flex shrink-0 gap-1 border-b border-border px-6 py-2"
-          >
-            {ADMIN_SECTIONS.map((section) => (
-              <Button
-                asChild
-                key={section.href}
-                size="sm"
-                variant={
-                  pathname.startsWith(section.href) ? "secondary" : "ghost"
-                }
-              >
-                <Link
-                  aria-current={
-                    pathname.startsWith(section.href) ? "page" : undefined
-                  }
-                  href={section.href}
-                >
-                  {t(`nav.${section.key}`)}
-                </Link>
-              </Button>
-            ))}
-          </nav>
-          {children}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {desktopTitlebar ? (
+            <div
+              className="h-10 shrink-0 select-none"
+              data-desktop-drag-region
+            />
+          ) : null}
+          <AdminOverviewProvider value={overviewState}>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+              <AdminNav pathname={pathname} />
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {children}
+              </div>
+            </div>
+          </AdminOverviewProvider>
         </div>
       );
     }

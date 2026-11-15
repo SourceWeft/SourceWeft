@@ -58,6 +58,17 @@ this service supports the packaged native protocol, sign-in/deep links, local
 files and permission prompts. An installer build alone does not verify those
 production flows.
 
+## macOS entitlements
+
+The macOS app is signed with the hardened runtime in every policy. Under it macOS refuses a
+protected resource to an app that does not declare it, whatever the user has allowed in System
+Settings. `apps/desktop/src-tauri/Entitlements.plist` declares the microphone
+(`com.apple.security.device.audio-input`), which voice input in the web view needs; the
+matching purpose string is in `Info.plist`. Screen capture needs no entitlement. Before the
+web app starts using another protected resource (camera, location, contacts), add its
+entitlement and purpose string together. `prepare-desktop-release.mjs` fails a macOS build
+whose app does not carry the microphone entitlement.
+
 ## Sandbox runtime bundle (macOS and Linux)
 
 Signed, macos-signed and updater-signed releases (not `candidate`) also attach the local-execution
@@ -65,7 +76,8 @@ runtime for each supported platform, with its `.sig`, to the GitHub Release:
 `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`,
 `sourceweft-sandbox-aarch64-apple-darwin.tar.gz` and
 `sourceweft-sandbox-x86_64-apple-darwin.tar.gz`. The app downloads the one for its own
-platform from the Release URL derived from its own version when the user clicks Install, and
+platform from the Release URL derived from its own version, by itself when the signed-in app
+opens without a usable runtime (Install in Settings → This computer retries it), and
 verifies the minisign signature (the same updater key as the installers,
 `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`) with the public key embedded in the build before
 extracting and checking the manifest. On macOS the binaries inside the bundle are additionally

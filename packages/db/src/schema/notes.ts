@@ -34,7 +34,7 @@ export const notes = pgTable(
     }),
     /** The `note` source this note is indexed as, once saved. */
     sourceId: text("source_id").references(() => sources.id, {
-      onDelete: "set null",
+      onDelete: "cascade",
     }),
     noteType: text("note_type").$type<NoteType>().notNull().default("manual"),
     title: text("title"),

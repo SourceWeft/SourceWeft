@@ -32,20 +32,46 @@ const READY = {
   updatedAt: "2026-11-14T00:00:00.000Z",
 };
 
+const PREFERENCE_KEY = "sourceweft:source-guide-expanded";
+
+// jsdom has no layout: each test says whether the screen is wide.
+let wideScreen = true;
+
 beforeEach(() => {
   getSourceGuide.mockReset();
   requestSourceGuide.mockReset();
   toastError.mockReset();
   push.mockReset();
+  wideScreen = true;
+  window.localStorage.clear();
+  window.matchMedia = ((query: string) => ({
+    matches: wideScreen,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  })) as unknown as typeof window.matchMedia;
 });
 afterEach(unmountAll);
 
-async function mount() {
+async function mount(
+  props: { collapsedByDefault?: boolean; onAsk?: () => void } = {},
+) {
   await mountWithIntl(
-    createElement(SourceGuideCard, { sourceId: "s1", workspaceId: "w1" }),
+    createElement(SourceGuideCard, {
+      sourceId: "s1",
+      workspaceId: "w1",
+      ...props,
+    }),
   );
   await flush();
 }
+
+const guideState = () =>
+  document.body
+    .querySelector("[data-source-guide]")
+    ?.getAttribute("data-state");
+const labelled = (label: string) =>
+  document.body.querySelector<HTMLElement>(`button[aria-label="${label}"]`);
 
 const text = () => document.body.textContent ?? "";
 const buttonNamed = (name: string) =>
@@ -171,4 +197,99 @@ test("a suggested question can also be copied", async () => {
 
   assert.equal(writeText.mock.calls[0]?.[0], "What drove growth?");
   assert.equal(push.mock.calls.length, 0);
+});
+
+test("on a wide screen the guide is an open rail, and closing it is remembered", async () => {
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  await mount();
+  assert.equal(guideState(), "expanded");
+  assert.ok(text().includes("What drove growth?"));
+
+  const collapse = labelled("Collapse guide");
+  assert.ok(collapse);
+  await click(collapse);
+
+  assert.equal(guideState(), "collapsed");
+  assert.equal(text().includes("Revenue grew in 2025."), false);
+  assert.equal(window.localStorage.getItem(PREFERENCE_KEY), "false");
+
+  const expand = labelled("Expand guide");
+  assert.ok(expand);
+  await click(expand);
+  assert.equal(guideState(), "expanded");
+  assert.equal(window.localStorage.getItem(PREFERENCE_KEY), "true");
+});
+
+test("a reader who closed the rail finds it closed the next time", async () => {
+  window.localStorage.setItem(PREFERENCE_KEY, "false");
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  await mount();
+
+  assert.equal(guideState(), "collapsed");
+  assert.equal(text().includes("What drove growth?"), false);
+  assert.ok(labelled("Expand guide"));
+});
+
+test("a view that needs the width starts with the rail closed and leaves the remembered choice alone", async () => {
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  await mount({ collapsedByDefault: true });
+  assert.equal(guideState(), "collapsed");
+
+  const expand = labelled("Expand guide");
+  assert.ok(expand);
+  await click(expand);
+
+  assert.equal(guideState(), "expanded");
+  assert.ok(text().includes("What drove growth?"));
+  assert.equal(window.localStorage.getItem(PREFERENCE_KEY), null);
+});
+
+test("on a narrow screen the guide starts as one line of the summary and opens on request", async () => {
+  wideScreen = false;
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  await mount();
+
+  assert.equal(guideState(), "collapsed");
+  assert.ok(text().includes("Revenue grew in 2025."));
+  assert.equal(text().includes("What drove growth?"), false);
+
+  const preview = document.body.querySelector<HTMLElement>(
+    "[data-source-guide-preview]",
+  );
+  assert.ok(preview);
+  await click(preview);
+
+  assert.equal(guideState(), "expanded");
+  assert.ok(text().includes("What drove growth?"));
+  assert.equal(window.localStorage.getItem(PREFERENCE_KEY), null);
+});
+
+test("on a narrow screen a guide that needs an action still says so", async () => {
+  wideScreen = false;
+  getSourceGuide.mockResolvedValue({ guide: null });
+  await mount();
+
+  assert.ok(text().includes("No guide yet."));
+  assert.ok(buttonNamed("Generate guide"));
+  assert.equal(labelled("Expand guide"), null);
+});
+
+test("asking a suggested question tells the surface showing the guide, copying one does not", async () => {
+  getSourceGuide.mockResolvedValue({ guide: READY });
+  Object.assign(navigator, {
+    clipboard: { writeText: async () => undefined },
+  });
+  const onAsk = vi.fn();
+  await mount({ onAsk });
+
+  const copy = labelled("Copy question");
+  assert.ok(copy);
+  await click(copy);
+  assert.equal(onAsk.mock.calls.length, 0);
+
+  const question = buttonNamed("What drove growth?");
+  assert.ok(question);
+  await click(question);
+  assert.equal(push.mock.calls.length, 1);
+  assert.equal(onAsk.mock.calls.length, 1);
 });

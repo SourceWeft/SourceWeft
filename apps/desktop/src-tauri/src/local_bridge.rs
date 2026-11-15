@@ -124,8 +124,9 @@ pub async fn run_sandbox_privileged_setup(
     Err("UNSUPPORTED_PLATFORM".to_string())
 }
 
-/// Downloads, verifies and installs the sandbox runtime for this app version; the user asked
-/// for it by clicking "Install", nothing downloads on its own. Holds an admission lease like the
+/// Downloads, verifies and installs the sandbox runtime for this app version. The web UI calls
+/// it without a click when the signed-in app opens and the runtime is missing, out of date or
+/// damaged, and again when the user retries. Holds an admission lease like the
 /// other local commands, so a pending app update waits for it. Returns the readiness after the
 /// install. Errors are strings starting with a stable code (`SANDBOX_DOWNLOAD_FAILED`,
 /// `SANDBOX_SIGNATURE_INVALID`, `SANDBOX_BUNDLE_INVALID`, `SANDBOX_UNVERIFIABLE_BUILD`,
@@ -201,4 +202,85 @@ pub async fn choose_working_directory(
     user_id: String,
 ) -> Result<serde_json::Value, String> {
     choose_local_folder(app, window, ticket, user_id).await
+}
+
+fn local_host(app: &AppHandle) -> Result<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>, String> {
+    app.try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
+        .map(|host| host.inner().clone())
+        .ok_or_else(|| LOCAL_EXECUTION_UNAVAILABLE.to_string())
+}
+
+/// Where new automatic task folders are created on this computer.
+#[tauri::command]
+pub async fn get_task_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<sourceweft_desktop::local_host::TaskFolder, String> {
+    crate::authorize_desktop_window(&app, &window, true)?;
+    local_host(&app)?.task_folder().map_err(|e| e.to_string())
+}
+
+/// Opens the native folder dialog and makes the chosen directory the place new automatic task
+/// folders are created in. The page supplies no path: the choice comes from the dialog alone.
+/// Existing conversations keep their folder.
+#[tauri::command]
+pub async fn choose_task_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<sourceweft_desktop::local_host::TaskFolder, String> {
+    crate::authorize_desktop_window(&app, &window, true)?;
+    let host = local_host(&app)?;
+    let _lease = host.admission.enter().map_err(str::to_owned)?;
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    {
+        use crate::remote_host::{pick_folder, picked_folder, FolderPurpose};
+        let picked = pick_folder(&app, FolderPurpose::TaskFolderLocation).await?;
+        let folder = picked_folder(&picked)?;
+        host.set_task_folder(&folder).map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    Err(LOCAL_EXECUTION_UNAVAILABLE.to_string())
+}
+
+/// Returns to the default task folder location. Existing conversations keep their folder.
+#[tauri::command]
+pub async fn reset_task_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<sourceweft_desktop::local_host::TaskFolder, String> {
+    crate::authorize_desktop_window(&app, &window, true)?;
+    let host = local_host(&app)?;
+    let _lease = host.admission.enter().map_err(str::to_owned)?;
+    host.reset_task_folder().map_err(|e| e.to_string())
+}
+
+/// Shows a directory in the system file manager. Only a directory this host works in (the task
+/// folder location, a conversation's working directory, a directory granted through the native
+/// dialog) is accepted, so the page cannot open arbitrary locations.
+#[tauri::command]
+pub async fn reveal_local_directory(
+    app: AppHandle,
+    window: WebviewWindow,
+    path: String,
+) -> Result<(), String> {
+    crate::authorize_desktop_window(&app, &window, true)?;
+    let host = local_host(&app)?;
+    #[cfg(windows)]
+    let directory = sourceweft_desktop::local_host::winpath::from_wire(&path)
+        .map_err(|e| e.to_string())?;
+    #[cfg(not(windows))]
+    let directory = std::path::PathBuf::from(&path);
+    if !host
+        .is_known_directory(&directory)
+        .map_err(|e| e.to_string())?
+    {
+        return Err("DIRECTORY_DENIED: Only a working directory of this app can be shown.".into());
+    }
+    let is_directory = directory
+        .symlink_metadata()
+        .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
+    if !is_directory {
+        return Err("WORKSPACE_MISSING: The directory does not exist yet or was replaced.".into());
+    }
+    tauri_plugin_opener::open_path(directory, None::<&str>).map_err(|error| error.to_string())
 }

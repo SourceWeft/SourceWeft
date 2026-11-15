@@ -19,6 +19,8 @@ export interface ModelPricing {
   output_cost_per_image?: number | null;
   /** Per billed text unit, for speech synthesis priced by character. */
   input_cost_per_character?: number | null;
+  /** Per second of audio, for speech recognition priced by duration. */
+  input_cost_per_second?: number | null;
   input_cost_per_pixel?: number | null;
   output_cost_per_pixel?: number | null;
   /**

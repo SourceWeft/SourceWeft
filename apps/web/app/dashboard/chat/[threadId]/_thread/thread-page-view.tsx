@@ -7,6 +7,7 @@ import {
   LocalConversationNotice,
   useLocalConversationStatus,
 } from "../../_components/local-conversation-status";
+import { minimalSourceItem } from "../../_components/source-types";
 import { ChatCanvas } from "../../_components/chat-canvas";
 import { ChatErrorNotice } from "../../_components/chat-canvas/chat-error-notice";
 import { selectedModelCapabilities } from "../../_components/model-catalog-utils";
@@ -461,6 +462,10 @@ export function DashboardChatThreadPageView({
             setByokCredentials(credentials);
             setByokModels(models);
             setByokProviders(providers);
+          }}
+          onOpenSource={(target) => {
+            setPreviewCitation(null);
+            setPreviewSource(minimalSourceItem(target));
           }}
           onPreviewSourceOpenChange={(open) => {
             if (!open) {

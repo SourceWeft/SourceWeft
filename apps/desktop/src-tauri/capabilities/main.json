@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "allow-hub-window-action",
     "allow-hub-window-send",
     "allow-local-host-status",
@@ -20,6 +21,10 @@
     "allow-authenticate-local-host",
     "allow-choose-local-folder",
     "allow-run-sandbox-privileged-setup",
-    "allow-install-sandbox-runtime"
+    "allow-install-sandbox-runtime",
+    "allow-get-task-folder",
+    "allow-choose-task-folder",
+    "allow-reset-task-folder",
+    "allow-reveal-local-directory"
   ]
 }

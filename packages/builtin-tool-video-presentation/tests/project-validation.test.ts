@@ -12,7 +12,7 @@ test("canonical validation executes install, build, and smoke in order", async (
   });
 
   assert.deepEqual(commands, [
-    'pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --store-dir "${SOURCEWEFT_PNPM_STORE:-.pnpm-store}"',
+    'pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --package-import-method copy --store-dir "${SOURCEWEFT_PNPM_STORE:-.pnpm-store}"',
     "pnpm run build",
     "pnpm run render-smoke",
   ]);
@@ -31,7 +31,7 @@ test("canonical validation stops after the first failed prerequisite", async () 
   });
 
   assert.deepEqual(commands, [
-    'pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --store-dir "${SOURCEWEFT_PNPM_STORE:-.pnpm-store}"',
+    'pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --package-import-method copy --store-dir "${SOURCEWEFT_PNPM_STORE:-.pnpm-store}"',
   ]);
   assert.deepEqual(result.install.diagnostics, ["dependency install failed"]);
   assert.equal(result.typecheck.ok, false);

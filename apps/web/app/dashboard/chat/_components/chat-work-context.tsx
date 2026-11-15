@@ -1,5 +1,12 @@
 "use client";
-import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import { useTranslations } from "next-intl";
 import { authClient } from "../../../../lib/auth-client";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
@@ -8,8 +15,11 @@ import {
   Cloud,
   Laptop,
   Folder,
+  FolderOpen,
+  FolderPlus,
   ChevronDown,
   Check,
+  Copy,
   Plus,
   Loader2,
 } from "lucide-react";
@@ -32,8 +42,19 @@ import {
   localRequest,
   type LocalDevice,
 } from "../../../../lib/local-execution";
-import { desktopBridge } from "../../../../lib/desktop-bridge";
+import {
+  desktopBridge,
+  FOLDER_SELECTION_CANCELLED,
+  type LocalHostStatus,
+} from "../../../../lib/desktop-bridge";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
+import { parentOfWirePath, shortenHomePath } from "../../../../lib/local-path";
+import { localSetupNotice } from "../../../../lib/sandbox-setup";
+import {
+  installSandboxRuntime,
+  useSandboxInstallState,
+} from "../../../../lib/sandbox-runtime-install";
+import { requestDashboardSettings } from "../../_components/dashboard-settings-open";
 
 import { LocalFilesPanel } from "./local-files-panel";
 import { useLocalConversationStatus } from "./local-conversation-status";
@@ -48,6 +69,8 @@ export function useChatCreationContext() {
   const router = useRouter();
   const [devices, setDevices] = useState<LocalDevice[]>([]);
   const [nativeId, setNativeId] = useState<string | null>(null);
+  // What the desktop app says about the computer it runs on. Null in a browser.
+  const [hostStatus, setHostStatus] = useState<LocalHostStatus | null>(null);
   const [readyFor, setReadyFor] = useState<string | null | undefined>(
     undefined,
   );
@@ -122,6 +145,15 @@ export function useChatCreationContext() {
     async (discover = true) => {
       const version = ++refreshVersion.current;
       let cloud = requested === "cloud";
+      // Read apart from the session bootstrap below, which reports a computer that still needs
+      // setup the same way as no computer at all. A failed read keeps what was last known.
+      if (desktopBridge.isAvailable())
+        void desktopBridge.localHostStatus().then(
+          (status) => {
+            if (version === refreshVersion.current) setHostStatus(status);
+          },
+          () => {},
+        );
       try {
         const native =
           !desktopBridge.isAvailable() || (requested === "cloud" && !discover)
@@ -162,6 +194,15 @@ export function useChatCreationContext() {
     },
     [requested, session.data?.user.id],
   );
+  // An install that finished may have made this computer usable: read it again now, so it
+  // is listed as a connected computer without waiting for the next poll or a reload.
+  const installsFinished = useSandboxInstallState().finished;
+  const installsSeen = useRef(installsFinished);
+  useEffect(() => {
+    if (installsSeen.current === installsFinished) return;
+    installsSeen.current = installsFinished;
+    void refresh();
+  }, [installsFinished, refresh]);
   useEffect(() => {
     const requests = refreshVersion;
     setDevices([]);
@@ -208,6 +249,10 @@ export function useChatCreationContext() {
       ? devices.find((d) => d.id === target.deviceId)
       : null;
   const invalid = ready && target?.kind === "local" && !selectedDevice;
+  const localSetup = useMemo(() => {
+    const notice = localSetupNotice(hostStatus?.readiness);
+    return notice && { ...notice, deviceId: hostStatus?.deviceId ?? null };
+  }, [hostStatus]);
   return {
     draftId,
     userId: session.data?.user.id ?? null,
@@ -216,6 +261,11 @@ export function useChatCreationContext() {
     devicesError,
     devicesLoading,
     nativeId,
+    /**
+     * Set while the computer the desktop app runs on cannot be a run location: it needs setup
+     * or local execution is not supported on it. `deviceId` is its identity when it has one.
+     */
+    localSetup,
     error: invalid
       ? t("work.computerUnavailableChooseAnother")
       : (draftMetadataError ?? error),
@@ -271,8 +321,11 @@ export function ChatWorkContext({
   }, [info, setWorkTarget]);
   const target = threadId ? info?.executionTarget : creation?.target;
   const device = threadId ? info?.target : creation?.selectedDevice;
+  // A check in progress carries a progress message, not a verdict: until it
+  // settles the computer is neither unavailable nor in error.
+  const checking = Boolean(threadId) && localStatus.status === "checking";
   const contextError =
-    error || (threadId && localStatus.message) || creation?.error;
+    error || (threadId && !checking && localStatus.message) || creation?.error;
   const label =
     target?.kind === "cloud"
       ? t("work.cloud")
@@ -292,9 +345,27 @@ export function ChatWorkContext({
   const triggerClassName = compact
     ? "-ml-1 flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
     : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
+  const localSetup = creation?.localSetup ?? null;
+  const install = useSandboxInstallState();
+  const openLocalSettings = () => {
+    setOpen(false);
+    requestDashboardSettings("local");
+  };
+  // While this computer cannot run anything, its row is the one that says why: an entry for
+  // the same computer in the connected list would show it twice.
+  const listedDevices = (creation?.devices ?? []).filter(
+    (d) =>
+      d.connected &&
+      !(
+        localSetup &&
+        (d.id === localSetup.deviceId || d.id === creation?.nativeId)
+      ),
+  );
   const icon =
     target?.kind === "cloud" ? (
       <Cloud className="size-3.5 shrink-0" />
+    ) : checking && !target ? (
+      <Loader2 className="size-3.5 shrink-0 animate-spin" />
     ) : (
       <Laptop className="size-3.5 shrink-0" />
     );
@@ -347,25 +418,29 @@ export function ChatWorkContext({
             className="w-72 max-w-[calc(100vw-2rem)] space-y-2 text-sm"
           >
             <p className="break-words font-medium">{device?.name ?? label}</p>
-            <p className="text-xs text-muted-foreground">
-              {target?.kind === "cloud"
-                ? t("work.runsInCloud")
-                : t("work.fixedComputer")}
-              {device &&
-                !contextError &&
-                (device.online
-                  ? ` ${t("work.computerOnline")}`
-                  : ` ${t("work.computerOffline")}`)}
-            </p>
+            {/* Before the first check settles the target is unknown, so
+                neither the cloud nor the fixed-computer description applies. */}
+            {(target || !checking) && (
+              <p className="text-xs text-muted-foreground">
+                {target?.kind === "cloud"
+                  ? t("work.runsInCloud")
+                  : t("work.fixedComputer")}
+                {device &&
+                  !contextError &&
+                  (device.online
+                    ? ` ${t("work.computerOnline")}`
+                    : ` ${t("work.computerOffline")}`)}
+              </p>
+            )}
             {target?.kind === "local" && (
               <div className="space-y-2 border-t pt-2">
                 <p className="text-xs font-medium">
                   {t("work.workingDirectory")}
                 </p>
-                <p className="break-all text-xs text-muted-foreground">
-                  {info?.workingDirectory ??
-                    t("work.directoryConnectedWhenUsed")}
-                </p>
+                <WorkingDirectoryPath
+                  path={info?.workingDirectory}
+                  native={target.deviceId === creation?.nativeId}
+                />
                 <Button
                   size="sm"
                   variant="outline"
@@ -444,9 +519,49 @@ export function ChatWorkContext({
                 </p>
               )}
             <div className="max-h-64 overflow-y-auto">
-              {creation?.devices
-                .filter((d) => d.connected)
-                .map((d) => (
+              {localSetup?.state === "needsSetup" &&
+                // The runtime is installed without being asked. While that runs, in this
+                // page or as the host reports it, the computer is being prepared; when it
+                // failed, the row says why and offers the retry.
+                (install.phase === "installing" ||
+                localSetup.kind === "installing" ? (
+                  <ThisComputerNotice
+                    status={t("work.preparing")}
+                    detail={t("work.setupInstalling")}
+                    onOpenSettings={openLocalSettings}
+                  />
+                ) : localSetup.kind === "install" &&
+                  install.phase === "failed" ? (
+                  <ThisComputerNotice
+                    status={t("work.setupFailed")}
+                    detail={t("work.setupFailedDetail", {
+                      error: install.error ?? "",
+                    })}
+                    failed
+                    onOpenSettings={openLocalSettings}
+                    onRetry={() => void installSandboxRuntime().catch(() => {})}
+                  />
+                ) : (
+                  <ThisComputerNotice
+                    status={t("work.needsSetup")}
+                    detail={
+                      localSetup.kind === "install"
+                        ? t("work.setupInstallRuntime")
+                        : localSetup.kind === "updateApp"
+                          ? t("work.setupAppUpdate")
+                          : t("work.setupOther")
+                    }
+                    onOpenSettings={openLocalSettings}
+                  />
+                ))}
+              {localSetup?.state === "unsupported" && (
+                <ThisComputerNotice
+                  status={t("work.notSupported")}
+                  detail={t("work.notSupportedDetail")}
+                />
+              )}
+              {creation &&
+                listedDevices.map((d) => (
                   <Button
                     key={d.id}
                     variant="ghost"
@@ -597,6 +712,239 @@ export function ChatWorkContext({
   );
 }
 
+/**
+ * The computer the desktop app runs on while it cannot be a run location. With
+ * `onOpenSettings` the row leads to the settings that fix it; without, it is only a statement.
+ * `onRetry` adds the retry of a failed install under the row. It never selects the computer.
+ */
+function ThisComputerNotice({
+  status,
+  detail,
+  failed = false,
+  onOpenSettings,
+  onRetry,
+}: {
+  status: string;
+  detail: string;
+  failed?: boolean;
+  onOpenSettings?: () => void;
+  onRetry?: () => void;
+}) {
+  const t = useTranslations("dashboardChat");
+  const content = (
+    <>
+      <Laptop className="mt-0.5 size-4 shrink-0" />
+      <span className="min-w-0 flex-1 text-left">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            {t("work.thisComputer")}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {status}
+          </span>
+        </span>
+        <span
+          role={failed ? "alert" : undefined}
+          className={cn(
+            "block whitespace-normal break-words text-xs font-normal",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {detail}
+        </span>
+      </span>
+    </>
+  );
+  return onOpenSettings ? (
+    <>
+      <Button
+        variant="ghost"
+        data-testid="this-computer-setup"
+        className="h-auto w-full items-start justify-start gap-2 py-1.5"
+        onClick={onOpenSettings}
+      >
+        {content}
+      </Button>
+      {onRetry && (
+        // Under the text of the row: the icon column stays empty.
+        <div className="pb-1.5 pl-9">
+          <Button size="xs" variant="outline" onClick={onRetry}>
+            {t("common.tryAgain")}
+          </Button>
+        </div>
+      )}
+    </>
+  ) : (
+    <div
+      data-testid="this-computer-setup"
+      className="flex items-start gap-2 px-3 py-1.5 text-sm text-muted-foreground"
+    >
+      {content}
+    </div>
+  );
+}
+
+/**
+ * A conversation's working directory with the actions that apply to it. `native` is true when
+ * the conversation runs on the computer this desktop app runs on: only then can the app ask
+ * that computer's file manager to show the directory.
+ */
+function WorkingDirectoryPath({
+  path,
+  native,
+}: {
+  path: string | null | undefined;
+  native: boolean;
+}) {
+  const t = useTranslations("dashboardChat");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<string | null>(null);
+  useEffect(() => {
+    if (!native) return;
+    let live = true;
+    // The platform only picks the file manager's name. Until it is known, and if the app
+    // cannot report it, the action keeps the name that is correct on every platform.
+    void desktopBridge.info().then(
+      (value) => {
+        if (live) setPlatform(value.platform);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [native]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  if (!path)
+    return (
+      <p className="break-all text-xs text-muted-foreground">
+        {t("work.directoryConnectedWhenUsed")}
+      </p>
+    );
+  return (
+    <>
+      <p
+        data-testid="working-directory-path"
+        title={path}
+        className="break-all text-xs text-muted-foreground"
+      >
+        {shortenHomePath(path)}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={async () => {
+            setError(null);
+            try {
+              await navigator.clipboard.writeText(path);
+              setCopied(true);
+            } catch {
+              setError(t("work.copyPathFailed"));
+            }
+          }}
+        >
+          {copied ? <Check /> : <Copy />}
+          {copied ? t("work.pathCopied") : t("work.copyPath")}
+        </Button>
+        {native && (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={async () => {
+              setError(null);
+              try {
+                await desktopBridge.revealLocalDirectory(path);
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+              }
+            }}
+          >
+            <FolderOpen />
+            {platform === "macos"
+              ? t("work.showInFinder")
+              : t("work.showInFileManager")}
+          </Button>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="break-words text-xs text-destructive">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** A folder this account may work in on a computer. `path` is in the wire form. */
+type GrantedFolder = { id: string; name: string; path?: string };
+
+/**
+ * One entry per directory, in a stable order. Picking the same directory again creates another
+ * grant with the same path; the selected grant is the one kept, so its check mark stays on the
+ * entry that is shown.
+ */
+function distinctFolders(
+  folders: GrantedFolder[],
+  selectedId: string | null | undefined,
+) {
+  const byPath = new Map<string, GrantedFolder>();
+  for (const folder of folders) {
+    const key = folder.path ?? `grant:${folder.id}`;
+    const kept = byPath.get(key);
+    if (!kept || folder.id === selectedId) byPath.set(key, folder);
+  }
+  return [...byPath.values()].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name) ||
+      (a.path ?? "").localeCompare(b.path ?? ""),
+  );
+}
+
+function FolderOption({
+  icon,
+  label,
+  detail,
+  detailTitle,
+  selected,
+  onSelect,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  detailTitle?: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      aria-current={selected ? "true" : undefined}
+      className="h-auto w-full justify-start gap-2 px-2 py-1.5 text-left"
+      onClick={onSelect}
+    >
+      {icon}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{label}</span>
+        {detail && (
+          <span
+            title={detailTitle}
+            className="block truncate text-xs font-normal text-muted-foreground"
+          >
+            {detail}
+          </span>
+        )}
+      </span>
+      {selected && <Check className="size-4 shrink-0" />}
+    </Button>
+  );
+}
+
 export function WorkingFolderPicker({
   creation,
   onChooseFolder,
@@ -610,18 +958,27 @@ export function WorkingFolderPicker({
   disabled?: boolean;
 }) {
   const t = useTranslations("dashboardChat");
-  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [folders, setFolders] = useState<GrantedFolder[]>([]);
+  // Where this computer creates automatic task folders. Known only for the computer the
+  // desktop app runs on; never guessed for another one.
+  const [taskFolderPath, setTaskFolderPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const target = creation.target;
   const id = target?.kind === "local" ? target.deviceId : null;
   const selectedFolderId = target?.kind === "local" ? target.folderId : null;
+  const connected = creation.selectedDevice?.connected;
+  const native = id !== null && id === creation.nativeId;
+  // Another computer has other folders. A new selection on the same computer keeps the list
+  // on screen while it is read again, so the chosen folder's name does not flicker.
+  useEffect(() => {
+    setFolders([]);
+  }, [id, connected]);
   useEffect(() => {
     let live = true;
-    setFolders([]);
     setError(null);
-    if (id && creation.selectedDevice?.connected)
-      void localRequest<{ folders: { id: string; name: string }[] }>(
+    if (id && connected)
+      void localRequest<{ folders: GrantedFolder[] }>(
         `/v1/local-devices/${id}/folders`,
         undefined,
         { localProof: true },
@@ -636,57 +993,110 @@ export function WorkingFolderPicker({
     return () => {
       live = false;
     };
-  }, [id, creation.selectedDevice?.connected, selectedFolderId]);
+  }, [id, connected, selectedFolderId]);
+  useEffect(() => {
+    if (!native) {
+      setTaskFolderPath(null);
+      return;
+    }
+    let live = true;
+    // Read again whenever the list opens: the location can be changed in Settings. An app
+    // version without this command leaves the location unknown, which the list says as such.
+    void desktopBridge.getTaskFolder().then(
+      (value) => {
+        if (live) setTaskFolderPath(value.path);
+      },
+      () => {
+        if (live) setTaskFolderPath(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [native, open]);
   if (target?.kind !== "local") return null;
   const folder = folders.find((f) => f.id === target.folderId);
+  const label =
+    folder?.name ??
+    (target.folderId
+      ? t("folderPicker.selectedFolderFallback")
+      : t("work.taskFolder"));
+  const title = target.folderId
+    ? (folder?.path ?? label)
+    : taskFolderPath
+      ? t("folderPicker.createdIn", { path: taskFolderPath })
+      : label;
+  const listed = distinctFolders(folders, target.folderId);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
           disabled={disabled}
+          data-testid="working-folder-trigger"
+          title={title}
           className="flex h-7 min-w-0 max-w-48 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted"
         >
-          <span className="truncate">
-            {folder?.name ??
-              (target.folderId
-                ? t("folderPicker.selectedFolderFallback")
-                : t("folderPicker.chooseExistingFolder"))}
-          </span>
+          <Folder className="size-3.5 shrink-0" />
+          <span className="truncate">{label}</span>
           <ChevronDown className="size-3 shrink-0" />
         </button>
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-64 max-w-[calc(100vw-2rem)] p-2"
+        className="w-72 max-w-[calc(100vw-2rem)] gap-1 p-1.5"
       >
-        <Button
-          variant="ghost"
-          className="w-full justify-start"
-          onClick={() => {
+        <FolderOption
+          icon={<FolderPlus className="size-4 text-muted-foreground" />}
+          label={t("folderPicker.newTaskFolder")}
+          detail={
+            taskFolderPath
+              ? t("folderPicker.createdIn", {
+                  path: shortenHomePath(taskFolderPath),
+                })
+              : t("folderPicker.createdAutomatically")
+          }
+          detailTitle={taskFolderPath ?? undefined}
+          selected={!target.folderId}
+          onSelect={() => {
             creation.setFolder("");
             setOpen(false);
           }}
-        >
-          {t("folderPicker.useConversationFolder")}
-        </Button>
-        {folders.map((f) => (
+        />
+        {listed.length > 0 && (
+          <>
+            <p className="px-2 pt-1 text-xs text-muted-foreground">
+              {t("folderPicker.folders")}
+            </p>
+            <div
+              data-testid="working-folder-list"
+              className="max-h-56 overflow-y-auto"
+            >
+              {listed.map((f) => (
+                <FolderOption
+                  key={f.id}
+                  icon={<Folder className="size-4 text-muted-foreground" />}
+                  label={f.name}
+                  detail={
+                    f.path
+                      ? shortenHomePath(parentOfWirePath(f.path))
+                      : undefined
+                  }
+                  detailTitle={f.path}
+                  selected={f.id === target.folderId}
+                  onSelect={() => {
+                    creation.setFolder(f.id);
+                    setOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
+        {native && (
           <Button
-            key={f.id}
             variant="ghost"
-            className="w-full justify-start"
-            onClick={() => {
-              creation.setFolder(f.id);
-              setOpen(false);
-            }}
-          >
-            {f.name}
-          </Button>
-        ))}
-        {id === creation.nativeId && (
-          <Button
-            variant="ghost"
-            className="w-full justify-start"
+            className="w-full justify-start rounded-t-none border-t-border"
             onClick={async () => {
               setError(null);
               try {
@@ -707,12 +1117,14 @@ export function WorkingFolderPicker({
                 creation.setFolder(f.id);
                 setOpen(false);
               } catch (e) {
-                setError(String(e));
+                // Closing the folder dialog without choosing is not a failure.
+                if (!String(e).includes(FOLDER_SELECTION_CANCELLED))
+                  setError(String(e));
               }
             }}
           >
             <Plus className="mr-2 size-4" />
-            {t("folderPicker.selectFolder")}
+            {t("folderPicker.chooseDifferentFolder")}
           </Button>
         )}
         {error && (

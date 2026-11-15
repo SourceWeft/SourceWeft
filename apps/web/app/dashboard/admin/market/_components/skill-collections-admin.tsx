@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  AlertTriangle,
   ExternalLink,
   Loader2,
   Plus,
@@ -15,6 +14,13 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
+import {
+  AdminEmpty,
+  AdminError,
+  AdminHeader,
+  AdminList,
+  AdminLoading,
+} from "../../_components/admin-ui";
 import {
   createSkillCollection,
   deleteSkillCollection,
@@ -292,10 +298,7 @@ export function SkillCollectionsAdmin() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">{t("collections.title")}</h1>
-      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        {t("collections.intro")}
-      </p>
+      <AdminHeader description={t("collections.intro")} title={t("collections.title")} />
 
       <form
         className="mt-6 flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-end"
@@ -337,26 +340,16 @@ export function SkillCollectionsAdmin() {
         </Button>
       </form>
 
-      {error ? (
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          <AlertTriangle className="size-4 shrink-0" />
-          {error}
-        </div>
-      ) : null}
+      {error ? <AdminError className="mt-6">{error}</AdminError> : null}
 
       {items === null ? (
-        <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          {t("collections.loading")}
-        </div>
+        <AdminLoading className="mt-4">{t("collections.loading")}</AdminLoading>
       ) : items.length === 0 ? (
         error ? null : (
-          <p className="mt-10 rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
-            {t("collections.empty")}
-          </p>
+          <AdminEmpty className="mt-6">{t("collections.empty")}</AdminEmpty>
         )
       ) : (
-        <div className="mt-6 divide-y overflow-hidden rounded-xl border">
+        <AdminList className="mt-6">
           {items.map((collection) => (
             <CollectionEditor
               collection={collection}
@@ -375,7 +368,7 @@ export function SkillCollectionsAdmin() {
               }
             />
           ))}
-        </div>
+        </AdminList>
       )}
     </div>
   );

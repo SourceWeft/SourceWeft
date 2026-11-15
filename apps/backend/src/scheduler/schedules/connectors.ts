@@ -1,4 +1,7 @@
-import { connectorSyncOrchestrator } from "../../modules/connectors";
+import {
+  connectorOAuthService,
+  connectorSyncOrchestrator,
+} from "../../modules/connectors";
 import {
   enqueueConnectorSyncJob,
   getConnectorSyncJobState,
@@ -183,4 +186,39 @@ export async function scheduleConnectorSyncs() {
   }
 
   await resumeQuotaBlockedConnectors(now);
+}
+
+/** How often the OAuth keep-alive sweep runs; see `refreshIdleConnectorTokens`. */
+export const KEEP_ALIVE_INTERVAL_MS = 60 * 60_000;
+
+// Not one of tick()'s jobs: a pass over a full batch of idle accounts against
+// a slow provider can legitimately run far longer than tick's STUCK_TICK_MS
+// budget, so scheduler/main.ts starts this on its own timer instead. The
+// in-flight guard below stands in for that interval timer's own overlap
+// protection, since a pass can outlive the hour between ticks of its timer.
+let keepAliveInFlight = false;
+
+/**
+ * Refresh OAuth accounts idle long enough that their refresh token risks
+ * silently expiring from disuse. Returns immediately, without calling
+ * `refreshIdleAccounts`, while a previous pass in this process is still
+ * running. Never rejects: a failed pass is logged and the guard is still
+ * released, so the next interval tries again.
+ */
+export async function refreshIdleConnectorTokens(
+  now: Date = new Date(),
+): Promise<void> {
+  if (keepAliveInFlight) {
+    return;
+  }
+  keepAliveInFlight = true;
+  try {
+    await connectorOAuthService.refreshIdleAccounts({ now });
+  } catch (error) {
+    logger.error("Failed to refresh idle connector OAuth tokens", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    keepAliveInFlight = false;
+  }
 }

@@ -37,6 +37,10 @@ pub fn web_capability(base: &Url) -> CapabilityBuilder {
         // own local pages: the configured web origin is covered by this capability alone.
         .permission("allow-run-sandbox-privileged-setup")
         .permission("allow-install-sandbox-runtime")
+        .permission("allow-get-task-folder")
+        .permission("allow-choose-task-folder")
+        .permission("allow-reset-task-folder")
+        .permission("allow-reveal-local-directory")
         .permission("allow-hub-window-action")
         .permission("allow-hub-window-send")
 }
@@ -123,6 +127,10 @@ mod tests {
                 "allow-disconnect-local-host",
                 "allow-run-sandbox-privileged-setup",
                 "allow-install-sandbox-runtime",
+                "allow-get-task-folder",
+                "allow-choose-task-folder",
+                "allow-reset-task-folder",
+                "allow-reveal-local-directory",
             ] {
                 assert!(
                     permissions.as_array().unwrap().iter().any(|permission| permission == command),

@@ -1347,7 +1347,7 @@
       "setup": {
         "title": "Set up local execution",
         "installingInProgress": "The sandbox runtime is being installed…",
-        "downloadRuntimeDescription": "Local execution runs commands inside a sandbox that needs the SourceWeft sandbox runtime. It is downloaded from the official SourceWeft release for this app version, and its signature is verified before anything is installed. Nothing is downloaded until you click Install.",
+        "downloadRuntimeDescription": "Local execution runs commands inside a sandbox that needs the SourceWeft sandbox runtime. The app downloads it automatically from the official SourceWeft release for this app version and verifies its signature before installing it. If that did not finish, click Install to try again.",
         "install": "Install sandbox runtime",
         "installing": "Installing…",
         "updateAppDescription": "This app and its sandbox runtime do not match. Update SourceWeft (Settings → About → Software update), then check again.",
@@ -1367,6 +1367,10 @@
       "remoteAccessTitle": "Allow access from other devices",
       "remoteAccessDescription": "Let your other devices use this computer with the same account. They can access task folders and authorized working directories. You can still work on this computer when remote access is off.",
       "turnOffRemoteAccess": "Turn off remote access",
+      "taskFolderTitle": "Default task folder",
+      "taskFolderDescription": "New conversations without a chosen folder create their folder here. Existing conversations keep their folder.",
+      "taskFolderChange": "Change…",
+      "taskFolderReset": "Reset to default",
       "workingDirectoriesTitle": "Working directories",
       "workingDirectoriesDescription": "Each conversation gets a separate task folder. Removing folder access stops further local operations for affected tasks and preserves the files.",
       "removeAccess": "Remove access",
@@ -1760,10 +1764,25 @@
       "computerOffline": "The computer is offline. Local tasks can continue when it reconnects.",
       "workingDirectory": "Working directory",
       "directoryConnectedWhenUsed": "The working directory will be connected when first used.",
+      "copyPath": "Copy path",
+      "pathCopied": "Copied",
+      "copyPathFailed": "Could not copy the path.",
+      "showInFinder": "Show in Finder",
+      "showInFileManager": "Show in file manager",
       "myComputers": "My computers",
       "loadingComputers": "Loading computers…",
       "couldNotLoadComputers": "Could not load computers: {error}",
       "thisComputer": "This computer",
+      "needsSetup": "Needs setup",
+      "notSupported": "Not supported",
+      "setupInstallRuntime": "The sandbox runtime needs to be installed. Open Settings to install it.",
+      "setupAppUpdate": "SourceWeft needs an update first. Open Settings for details.",
+      "setupOther": "One-time setup is not finished. Open Settings to complete it.",
+      "preparing": "Preparing…",
+      "setupFailed": "Setup failed",
+      "setupFailedDetail": "The sandbox runtime could not be installed: {error}",
+      "setupInstalling": "The sandbox runtime is being installed…",
+      "notSupportedDetail": "Local execution is not available on this computer",
       "connectComputerEllipsis": "Connect a computer…",
       "filesDescription": "Files in this conversation’s working directory.",
       "connectComputerTitle": "Connect a computer",
@@ -1780,10 +1799,12 @@
     "folderPicker": {
       "folderUnavailable": "Folder unavailable",
       "defaultTaskFolder": "Default task folder",
-      "selectFolder": "Select folder…",
       "selectedFolderFallback": "Selected folder",
-      "chooseExistingFolder": "Choose existing folder…",
-      "useConversationFolder": "Use conversation folder"
+      "newTaskFolder": "New task folder",
+      "createdIn": "Will be created in {path}",
+      "createdAutomatically": "Created automatically on that computer",
+      "folders": "Folders",
+      "chooseDifferentFolder": "Choose a different folder…"
     },
     "local": {
       "historyPreserved": "History remains readable and drafts are preserved.",
@@ -2547,7 +2568,7 @@
       "offline": "This computer is offline. Your folder selection is preserved.",
       "connectToBrowse": "Connect to this computer to browse its files.",
       "workingDirectory": "Working directory",
-      "conversationFolder": "Conversation folder",
+      "conversationFolder": "Task folder",
       "autoFolderHint": "An independent folder will be created automatically on this computer when the conversation starts using files.",
       "authorizeHint": "To authorize another folder, open SW on this computer. You can select an already authorized folder here."
     }
@@ -3435,7 +3456,42 @@
       "errorCredits": "You do not have enough credits to search for sources.",
       "errorUnavailable": "Web search is not available.",
       "errorSearch": "Could not search for sources. Try again in a moment.",
+      "errorBusy": "Finding sources is unavailable for a moment. Try again shortly.",
+      "tryAgainIn": "Try again in {wait}",
+      "rateLimitHint": "Searches you have already made can still be opened right away.",
+      "backToResults": "Back to the last results ({count})",
+      "cachedNote": "Showing results from {ago}. No new search was made.",
+      "rateLimit": {
+        "minute": "You are searching quickly. You can search again in {wait}.",
+        "hour": "You have reached the hourly limit for finding sources. It clears at {time} (in {wait}).",
+        "day": "You have reached today's limit for finding sources. It clears at {time} (in {wait}).",
+        "team": "Your team has reached its hourly limit for finding sources. It clears at {time} (in {wait})."
+      },
       "add": "Discover"
+    },
+    "noteOrigin": {
+      "title": "Saved note",
+      "edit": "Edit",
+      "savedFrom": "Saved from",
+      "savedOn": "saved {date}",
+      "editedOn": "edited {date}",
+      "cited": "Sources it cited",
+      "untitled": "Untitled source",
+      "sourceDeleted": "(deleted)",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer"
+    },
+    "noteEditor": {
+      "label": "Note text",
+      "hint": "Saving indexes the note again, which uses ingestion pages like any source. Earlier answers that cited it keep the text they quoted.",
+      "saved": "Note saved.",
+      "saveFailed": "The note's text was saved but could not be indexed.",
+      "indexingFailed": "The text was saved, but indexing did not finish. Press Save to try again.",
+      "conflict": "This note was changed by someone else while you were editing. Reload it to see their version; your text here is not saved.",
+      "reload": "Reload note",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving and indexing…"
     },
     "sourcePreview": {
       "mode": {
@@ -3575,7 +3631,6 @@
     }
   },
   "dashboardBlogAdmin": {
-    "eyebrow": "Blog · Admin",
     "heading": "Blog articles",
     "description": "Import Markdown articles, preview each language version, and decide which ones are public.",
     "refresh": "Reload the list",
@@ -3628,14 +3683,40 @@
       "minutes": "{count, plural, one {About # minute} other {About # minutes}}",
       "excerpt": "Excerpt",
       "preview": "Preview",
-      "loadingPreview": "Loading preview…"
+      "loadingPreview": "Loading preview…",
+      "back": "All articles",
+      "languages": "Language versions",
+      "notFound": "There is no article with the ID {articleId}."
+    },
+    "count": "{shown} of {total} articles",
+    "columns": {
+      "article": "Article",
+      "category": "Category",
+      "languages": "Languages",
+      "imported": "Last imported"
     }
   },
   "dashboardAdmin": {
     "nav": {
       "label": "Admin sections",
-      "market": "Market",
-      "blog": "Blog"
+      "title": "Admin",
+      "groups": {
+        "market": "Market",
+        "content": "Content",
+        "system": "System"
+      },
+      "items": {
+        "overview": "Overview",
+        "mcpReview": "MCP review",
+        "skillReview": "Skill review",
+        "reports": "Reports",
+        "skills": "All skills",
+        "collections": "Collections",
+        "blog": "Blog",
+        "marketSettings": "Market settings"
+      },
+      "backToApp": "Back to app",
+      "pending": "{count} waiting"
     },
     "checkingAccess": "Checking admin access…",
     "accessCheckFailed": "Could not check admin access. Please try again.",
@@ -3667,7 +3748,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "Internal / metadata address"
     },
-    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist."
+    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist.",
+    "overview": {
+      "title": "Overview",
+      "description": "What is waiting for a decision, section by section.",
+      "refresh": "Reload the numbers",
+      "retry": "Try again",
+      "loading": "Loading the numbers…",
+      "loadFailed": "Could not load the numbers. The sections still work.",
+      "summary": "{count, plural, =0 {Nothing is waiting for you.} one {# item is waiting for a decision.} other {# items are waiting for a decision.}}",
+      "queues": "Work queues",
+      "content": "Content",
+      "hints": {
+        "mcpReview": "Flagged MCP submissions",
+        "skillReview": "{review} new submissions · {listing} listing decisions",
+        "reports": "Open reports"
+      },
+      "blogDrafts": "{count, plural, one {# draft version} other {# draft versions}}",
+      "blogPublished": "{count, plural, one {# published version} other {# published versions}}"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -4649,8 +4748,6 @@
       "noLicense": "No license",
       "capabilityPromptOnly": "Instructions only",
       "capabilityExecutable": "Includes scripts",
-      "readSkillMd": "Read SKILL.md",
-      "hideSkillMd": "Hide SKILL.md",
       "loadingSkillMd": "Loading SKILL.md…",
       "skillMdFailed": "Failed to load SKILL.md.",
       "skillMdMissing": "This version has no SKILL.md text.",
@@ -4658,7 +4755,11 @@
       "reasonPlaceholder": "Recorded with the decision",
       "publish": "Approve and publish",
       "reject": "Reject",
-      "footnote": "Skill review uses the same admin allowlist as the MCP market."
+      "footnote": "Skill review uses the same admin allowlist as the MCP market.",
+      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}",
+      "loadMore": "Load more",
+      "loadMoreFailed": "Could not load more of the queue.",
+      "shownOf": "Showing {shown} of {total}"
     },
     "ownerListing": {
       "label": "Allow on the public market",
@@ -5218,7 +5319,7 @@
       }
     },
     "nav": {
-      "marketAdmin": "Market admin"
+      "marketAdmin": "Admin"
     },
     "restore": {
       "button": "Restore to SourceWeft",
@@ -5586,7 +5687,7 @@
         },
         "linuxBuild": {
           "question": "Is there a Linux build?",
-          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: open Settings → This computer and install the sandbox runtime (a signed download that starts only when you click Install). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution also works on Windows 10 and 11 (64-bit) after a one-time setup: the app asks for administrator approval once, through the standard Windows prompt, to install its sandbox helper and a restricted sandbox account."
+          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: the app downloads the signed sandbox runtime by itself when it opens (Settings → This computer shows the progress and can retry it). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution also works on Windows 10 and 11 (64-bit) after a one-time setup: the app asks for administrator approval once, through the standard Windows prompt, to install its sandbox helper and a restricted sandbox account."
         }
       }
     }

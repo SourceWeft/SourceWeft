@@ -1347,7 +1347,7 @@
       "setup": {
         "title": "设置本机执行",
         "installingInProgress": "正在安装沙箱运行时…",
-        "downloadRuntimeDescription": "本机执行会在沙箱中运行命令，这需要 SourceWeft 沙箱运行时。它会从当前应用版本对应的 SourceWeft 官方发布下载，并在安装任何内容之前校验其签名。在你点击“安装”之前不会下载任何内容。",
+        "downloadRuntimeDescription": "本机执行会在沙箱中运行命令，这需要 SourceWeft 沙箱运行时。应用会从当前应用版本对应的 SourceWeft 官方发布自动下载它，并在安装之前校验其签名。如果未能完成，请点击“安装”重试。",
         "install": "安装沙箱运行时",
         "installing": "正在安装…",
         "updateAppDescription": "此应用与其沙箱运行时不匹配。请更新 SourceWeft（设置 → 关于 → 软件更新），然后重新检查。",
@@ -1367,6 +1367,10 @@
       "remoteAccessTitle": "允许其他设备访问",
       "remoteAccessDescription": "让使用同一账户的其他设备访问这台电脑。它们可以访问任务文件夹和已授权的工作目录。即使关闭远程访问，你仍可在这台电脑上继续工作。",
       "turnOffRemoteAccess": "关闭远程访问",
+      "taskFolderTitle": "默认任务文件夹",
+      "taskFolderDescription": "未选择文件夹的新对话会在这里创建自己的文件夹。现有对话继续使用原来的文件夹。",
+      "taskFolderChange": "更改…",
+      "taskFolderReset": "恢复默认位置",
       "workingDirectoriesTitle": "工作目录",
       "workingDirectoriesDescription": "每个对话都会获得独立的任务文件夹。移除文件夹访问权限会停止受影响任务的后续本地操作，并保留其中的文件。",
       "removeAccess": "移除访问权限",
@@ -1760,10 +1764,25 @@
       "computerOffline": "电脑已离线。重新连接后本地任务可继续。",
       "workingDirectory": "工作目录",
       "directoryConnectedWhenUsed": "工作目录将在首次使用时连接。",
+      "copyPath": "复制路径",
+      "pathCopied": "已复制",
+      "copyPathFailed": "无法复制路径。",
+      "showInFinder": "在访达中显示",
+      "showInFileManager": "在文件管理器中显示",
       "myComputers": "我的电脑",
       "loadingComputers": "正在加载电脑…",
       "couldNotLoadComputers": "无法加载电脑：{error}",
       "thisComputer": "这台电脑",
+      "needsSetup": "需要设置",
+      "notSupported": "不支持",
+      "setupInstallRuntime": "需要先安装沙箱运行时。打开设置即可安装。",
+      "setupAppUpdate": "需要先更新 SourceWeft。打开设置查看详情。",
+      "setupOther": "一次性设置尚未完成。打开设置即可完成。",
+      "preparing": "正在准备…",
+      "setupFailed": "设置失败",
+      "setupFailedDetail": "无法安装沙箱运行时：{error}",
+      "setupInstalling": "正在安装沙箱运行时…",
+      "notSupportedDetail": "这台电脑不支持本机执行",
       "connectComputerEllipsis": "连接电脑…",
       "filesDescription": "此对话工作目录中的文件。",
       "connectComputerTitle": "连接电脑",
@@ -1780,10 +1799,12 @@
     "folderPicker": {
       "folderUnavailable": "文件夹不可用",
       "defaultTaskFolder": "默认任务文件夹",
-      "selectFolder": "选择文件夹…",
       "selectedFolderFallback": "已选择的文件夹",
-      "chooseExistingFolder": "选择已有文件夹…",
-      "useConversationFolder": "使用对话所在文件夹"
+      "newTaskFolder": "新建任务文件夹",
+      "createdIn": "将在 {path} 中创建",
+      "createdAutomatically": "将在那台电脑上自动创建",
+      "folders": "文件夹",
+      "chooseDifferentFolder": "选择其他文件夹…"
     },
     "local": {
       "historyPreserved": "历史记录仍可查看，草稿会被保留。",
@@ -2547,7 +2568,7 @@
       "offline": "这台电脑当前离线。你选择的文件夹会被保留。",
       "connectToBrowse": "连接到这台电脑以浏览其中的文件。",
       "workingDirectory": "工作目录",
-      "conversationFolder": "对话文件夹",
+      "conversationFolder": "任务文件夹",
       "autoFolderHint": "当对话开始使用文件时，系统会在这台电脑上自动创建一个独立的文件夹。",
       "authorizeHint": "要授权其他文件夹，请在这台电脑上打开 SW。你也可以在此选择一个已授权的文件夹。"
     }
@@ -3435,7 +3456,42 @@
       "errorCredits": "积分不足，无法查找来源。",
       "errorUnavailable": "网页搜索不可用。",
       "errorSearch": "无法查找来源，请稍后再试。",
+      "errorBusy": "暂时无法查找来源，请稍后再试。",
+      "tryAgainIn": "{wait}后可再试",
+      "rateLimitHint": "之前搜索过的内容仍可立即打开。",
+      "backToResults": "返回上一次结果（{count}）",
+      "cachedNote": "显示的是{ago}的结果，没有发起新的搜索。",
+      "rateLimit": {
+        "minute": "搜索太频繁了，{wait}后可再搜索。",
+        "hour": "已达到每小时查找来源的上限，将在 {time} 恢复（还需 {wait}）。",
+        "day": "已达到今天查找来源的上限，将在 {time} 恢复（还需 {wait}）。",
+        "team": "你的团队已达到每小时查找来源的上限，将在 {time} 恢复（还需 {wait}）。"
+      },
       "add": "发现"
+    },
+    "noteOrigin": {
+      "title": "已保存的笔记",
+      "edit": "编辑",
+      "savedFrom": "保存自",
+      "savedOn": "保存于 {date}",
+      "editedOn": "编辑于 {date}",
+      "cited": "引用的来源",
+      "untitled": "无标题来源",
+      "sourceDeleted": "（已删除）",
+      "showAll": "显示全部 {count} 个",
+      "showLess": "收起"
+    },
+    "noteEditor": {
+      "label": "笔记正文",
+      "hint": "保存会重新索引这条笔记，和其他来源一样占用入库页数。之前引用过它的回答仍保留当时引用的文字。",
+      "saved": "笔记已保存。",
+      "saveFailed": "笔记的文字已保存，但无法完成索引。",
+      "indexingFailed": "文字已保存，但索引没有完成。点保存可重试。",
+      "conflict": "编辑期间这条笔记已被其他人修改。请重新加载查看对方的版本；你在这里的文字没有保存。",
+      "reload": "重新加载",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "正在保存并索引…"
     },
     "sourcePreview": {
       "mode": {
@@ -3575,7 +3631,6 @@
     }
   },
   "dashboardBlogAdmin": {
-    "eyebrow": "博客 · 管理",
     "heading": "博客文章",
     "description": "导入 Markdown 文章，预览每个语言版本，并决定哪些公开。",
     "refresh": "重新加载列表",
@@ -3628,14 +3683,40 @@
       "minutes": "约 {count} 分钟",
       "excerpt": "摘要",
       "preview": "预览",
-      "loadingPreview": "正在加载预览…"
+      "loadingPreview": "正在加载预览…",
+      "back": "全部文章",
+      "languages": "语言版本",
+      "notFound": "没有 ID 为 {articleId} 的文章。"
+    },
+    "count": "共 {total} 篇，显示 {shown} 篇",
+    "columns": {
+      "article": "文章",
+      "category": "分类",
+      "languages": "语言版本",
+      "imported": "上次导入"
     }
   },
   "dashboardAdmin": {
     "nav": {
       "label": "管理分区",
-      "market": "市场",
-      "blog": "博客"
+      "title": "管理中心",
+      "groups": {
+        "market": "市场",
+        "content": "内容",
+        "system": "系统"
+      },
+      "items": {
+        "overview": "概览",
+        "mcpReview": "MCP 审核",
+        "skillReview": "技能审核",
+        "reports": "举报",
+        "skills": "全部技能",
+        "collections": "合集",
+        "blog": "博客",
+        "marketSettings": "市场设置"
+      },
+      "backToApp": "返回应用",
+      "pending": "{count} 项待处理"
     },
     "checkingAccess": "正在检查管理权限…",
     "accessCheckFailed": "无法检查管理权限，请重试。",
@@ -3667,7 +3748,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "内部/元数据地址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。",
+    "overview": {
+      "title": "概览",
+      "description": "各分区里等待处理的事项。",
+      "refresh": "重新加载数量",
+      "retry": "重试",
+      "loading": "正在加载数量…",
+      "loadFailed": "无法加载数量，各分区仍可正常使用。",
+      "summary": "{count, plural, =0 {没有等待处理的事项。} other {有 # 项等待处理。}}",
+      "queues": "待办队列",
+      "content": "内容",
+      "hints": {
+        "mcpReview": "被标记的 MCP 提交",
+        "skillReview": "{review} 个新提交 · {listing} 个上架决定",
+        "reports": "未处理的举报"
+      },
+      "blogDrafts": "{count} 个草稿版本",
+      "blogPublished": "{count} 个已发布版本"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -4649,8 +4748,6 @@
       "noLicense": "无许可证",
       "capabilityPromptOnly": "仅含指令",
       "capabilityExecutable": "包含脚本",
-      "readSkillMd": "阅读 SKILL.md",
-      "hideSkillMd": "隐藏 SKILL.md",
       "loadingSkillMd": "正在加载 SKILL.md…",
       "skillMdFailed": "加载 SKILL.md 失败。",
       "skillMdMissing": "此版本没有 SKILL.md 文本。",
@@ -4658,7 +4755,11 @@
       "reasonPlaceholder": "将与决定一并记录",
       "publish": "批准并发布",
       "reject": "拒绝",
-      "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。"
+      "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。",
+      "flagCount": "{count, plural, =0 {无标记} other {# 个标记}}",
+      "loadMore": "加载更多",
+      "loadMoreFailed": "无法加载队列的更多内容。",
+      "shownOf": "已显示 {shown} / {total}"
     },
     "ownerListing": {
       "label": "允许在公开市场上架",
@@ -5218,7 +5319,7 @@
       }
     },
     "nav": {
-      "marketAdmin": "市场管理"
+      "marketAdmin": "管理中心"
     },
     "restore": {
       "button": "恢复上架到 SourceWeft",
@@ -5586,7 +5687,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本吗？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。Linux x64 在一次性设置后即可使用本地设备执行：打开“设置 → 这台电脑”并安装沙箱运行时（带签名的下载，只有在你点击“安装”后才会开始）。.deb 软件包会在安装时配置沙箱辅助程序；使用 AppImage 时，应用会显示一条需要运行一次的管理员命令。Windows 10 和 11（64 位）在一次性设置后也可使用本地设备执行：应用会弹出一次标准的 Windows 管理员授权提示，用来安装沙箱辅助程序和一个受限的沙箱账户。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。Linux x64 在一次性设置后即可使用本地设备执行：应用打开后会自动下载带签名的沙箱运行时（“设置 → 这台电脑”会显示进度，并可重试）。.deb 软件包会在安装时配置沙箱辅助程序；使用 AppImage 时，应用会显示一条需要运行一次的管理员命令。Windows 10 和 11（64 位）在一次性设置后也可使用本地设备执行：应用会弹出一次标准的 Windows 管理员授权提示，用来安装沙箱辅助程序和一个受限的沙箱账户。"
         }
       }
     }

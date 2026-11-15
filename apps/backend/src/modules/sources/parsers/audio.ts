@@ -1,3 +1,4 @@
+import { asrChargeIdempotencyKey } from "./asr-charge-key";
 import type {
   AsrTranscribeResult,
   GatewayRequestMetadata,
@@ -195,11 +196,7 @@ export class AudioSourceParser implements SourceParser {
             referenceId: input.sourceId
               ? `source:${input.sourceId}:asr`
               : `source-file:${input.fileName}:asr`,
-            // Pinned verbatim: transcriptions already metered under this key
-            // must not be charged again.
-            idempotencyKey:
-              input.idempotencyKey ||
-              `source-asr:${input.sourceId ?? input.fileName}:${input.fileSize}:credits`,
+            idempotencyKey: asrChargeIdempotencyKey(input),
           },
         ),
     ).catch(async (error: unknown) => {

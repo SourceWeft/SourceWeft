@@ -95,6 +95,32 @@ test("connector adapters are collected from capabilities that declare connectors
   );
 });
 
+test("a connector factory receives the host logger and its errors propagate", async () => {
+  let receivedLogger: unknown;
+  await collectCapabilityConnectorContributions({
+    recordsProvider: async () => [connectorRecord()],
+    loadModule: async () => ({
+      createConnectorAdapters: (input: { logger?: unknown }) => {
+        receivedLogger = input.logger;
+        return { adapters: [], agentToolDefs: [] };
+      },
+    }),
+  });
+  assert.equal(typeof (receivedLogger as { warn?: unknown })?.warn, "function");
+
+  await assert.rejects(
+    collectCapabilityConnectorContributions({
+      recordsProvider: async () => [connectorRecord()],
+      loadModule: async () => ({
+        createConnectorAdapters: () => {
+          throw new Error("SYNTHETIC_CONNECTOR_ENABLED must be true or false");
+        },
+      }),
+    }),
+    /SYNTHETIC_CONNECTOR_ENABLED must be true or false/,
+  );
+});
+
 test("a capability that declares no connector is never asked for adapters", async () => {
   let loaded = 0;
   const contribution = await collectCapabilityConnectorContributions({

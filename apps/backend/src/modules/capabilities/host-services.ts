@@ -178,7 +178,7 @@ export async function collectCapabilityConnectorContributions(
       });
       continue;
     }
-    const contribution = await factory({ env });
+    const contribution = await factory({ env, logger });
     adapters.push(...contribution.adapters);
     agentToolDefs.push(...contribution.agentToolDefs);
   }

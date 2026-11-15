@@ -6,6 +6,7 @@ mod native_access;
 mod remote_host;
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
 mod secret_store;
+mod startup_page;
 mod tray_locale;
 mod window_chrome;
 mod updater;
@@ -96,6 +97,16 @@ struct SetAutostartInput {
     enabled: bool,
 }
 
+/// Where automatic task folders go unless settings name another location: `SourceWeft` in the
+/// user's home directory. `None` when the home directory cannot be determined; a location must
+/// then be chosen in settings.
+fn default_task_folder(app: &tauri::App) -> Option<PathBuf> {
+    app.path()
+        .home_dir()
+        .ok()
+        .map(|home| home.join(sourceweft_desktop::local_host::DEFAULT_TASK_FOLDER_NAME))
+}
+
 /// Opens the local host and its remote-dispatch wrapper, or says why it could not (Linux and
 /// Windows, where local execution is optional and must not stop the app from starting).
 #[cfg(any(target_os = "linux", windows))]
@@ -113,8 +124,11 @@ fn open_optional_local_host(
         .app_data_dir()
         .map_err(|error| format!("app data directory: {error}"))?;
     let host = std::sync::Arc::new(
-        sourceweft_desktop::local_host::LocalHost::open(&base)
-            .map_err(|error| format!("local host storage at {base:?}: {error}"))?,
+        sourceweft_desktop::local_host::LocalHost::open_with_task_folder(
+            &base,
+            default_task_folder(app).as_deref(),
+        )
+        .map_err(|error| format!("local host storage at {base:?}: {error}"))?,
     );
     let remote = remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())?;
     Ok((host, remote))
@@ -158,6 +172,10 @@ fn main() {
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
             local_bridge::choose_working_directory,
+            local_bridge::get_task_folder,
+            local_bridge::choose_task_folder,
+            local_bridge::reset_task_folder,
+            local_bridge::reveal_local_directory,
             local_bridge::run_sandbox_privileged_setup,
             local_bridge::install_sandbox_runtime,
             tray_locale::sync_tray_locale,
@@ -171,9 +189,12 @@ fn main() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
-                let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
-                    &app.path().app_data_dir()?,
-                )?);
+                let host = std::sync::Arc::new(
+                    sourceweft_desktop::local_host::LocalHost::open_with_task_folder(
+                        &app.path().app_data_dir()?,
+                        default_task_folder(app).as_deref(),
+                    )?,
+                );
                 app.manage(
                     remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
                         .map_err(std::io::Error::other)?,
@@ -218,7 +239,7 @@ fn main() {
             app.add_capability(native_access::hub_capability(&base))?;
             app.add_capability(preview_window::opener_capability(&base))?;
             app.add_capability(preview_window::reader_capability(&base))?;
-            create_main_window(app)?;
+            create_main_window(app, &startup_locale)?;
             setup_tray(app, &startup_locale)?;
             updater::setup(app.handle()).map_err(std::io::Error::other)?;
             emit_startup_deep_links(app.handle());
@@ -249,7 +270,7 @@ fn main() {
         .expect("failed to run tauri application");
 }
 
-fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
+fn create_main_window(app: &mut tauri::App, locale: &str) -> tauri::Result<()> {
     let mut window_config = app
         .config()
         .app
@@ -259,9 +280,16 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         .cloned()
         .unwrap_or_else(|| app.config().app.windows[0].clone());
 
-    window_config.url = tauri::WebviewUrl::External(
-        resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?,
-    );
+    let web_app =
+        resolve_app_url(app.handle(), "/dashboard/chat").map_err(std::io::Error::other)?;
+    // A packaged app opens on the bundled startup page, which then loads the web app
+    // (§startup_page). `tauri dev` serves no bundled pages, only the local web server, so
+    // there the window opens on the web app directly, as it always has.
+    window_config.url = if tauri::is_dev() {
+        tauri::WebviewUrl::External(web_app.clone())
+    } else {
+        tauri::WebviewUrl::App("index.html".into())
+    };
     let handle = app.handle().clone();
     let builder = WebviewWindowBuilder::from_config(app.handle(), &window_config)?;
     #[cfg(target_os = "macos")]
@@ -272,6 +300,7 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         .initialization_script(window_chrome::INITIALIZATION_SCRIPT);
     builder
         .initialization_script(desktop_bridge_script())
+        .initialization_script(startup_page::initialization_script(&web_app, locale))
         .on_navigation(move |url| handle_navigation(&handle, url))
         .on_new_window(move |url, _features| {
             let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
@@ -286,6 +315,12 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
     if url.scheme() == DESKTOP_SCHEME {
         emit_deep_link(app, url.to_string());
         return false;
+    }
+
+    // The one local page this window shows. On Windows it is served over `http`, so it has to
+    // be recognized before the rule below hands other `http` addresses to the system browser.
+    if startup_page::is_startup_page_url(url) {
+        return true;
     }
 
     if is_desktop_web_url(app, url) {

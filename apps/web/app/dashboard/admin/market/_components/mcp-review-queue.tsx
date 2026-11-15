@@ -1,16 +1,18 @@
 "use client";
 
 import * as React from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ExternalLink,
-  Loader2,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, ExternalLink, Loader2, XCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { useAdminOverview } from "../../_components/admin-overview-context";
+import {
+  AdminEmpty,
+  AdminError,
+  AdminHeader,
+  AdminList,
+  AdminLoading,
+} from "../../_components/admin-ui";
 import {
   listMarketReviewQueue,
   publishMarketSubmission,
@@ -48,6 +50,7 @@ export function McpReviewQueue() {
   const [items, setItems] = React.useState<ReviewSubmission[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<Set<string>>(new Set());
+  const { refresh: refreshOverview } = useAdminOverview();
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -81,6 +84,7 @@ export function McpReviewQueue() {
       setItems((prev) =>
         prev ? prev.filter((item) => item.identifier !== identifier) : prev,
       );
+      refreshOverview();
     } catch {
       setError(t("errors.actionFailed", { identifier }));
     } finally {
@@ -94,33 +98,21 @@ export function McpReviewQueue() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">
-        {t("heading")}
-      </h1>
-      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        {t("description")}
-      </p>
+      <AdminHeader description={t("description")} title={t("heading")} />
 
-      {error ? (
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          <AlertTriangle className="size-4 shrink-0" />
-          {error}
-        </div>
-      ) : null}
+      {error ? <AdminError className="mt-6">{error}</AdminError> : null}
 
       {items === null ? (
-        <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          {t("loading")}
-        </div>
-      ) : items.length === 0 && !error ? (
-        <div className="mt-10 flex flex-col items-center gap-2 rounded-xl border border-dashed py-16 text-center text-muted-foreground">
-          <CheckCircle2 className="size-6 text-emerald-500" />
-          <p className="text-sm">{t("empty")}</p>
-        </div>
+        <AdminLoading className="mt-4">{t("loading")}</AdminLoading>
+      ) : items.length === 0 ? (
+        error ? null : (
+          <AdminEmpty className="mt-6" done>
+            {t("empty")}
+          </AdminEmpty>
+        )
       ) : (
-        <div className="mt-6 divide-y overflow-hidden rounded-xl border">
-          {items?.map((item) => {
+        <AdminList className="mt-6">
+          {items.map((item) => {
             const critical = item.flags.some((flag) => CRITICAL_FLAG.test(flag));
             const isBusy = busy.has(item.identifier);
             return (
@@ -192,7 +184,7 @@ export function McpReviewQueue() {
               </div>
             );
           })}
-        </div>
+        </AdminList>
       )}
 
       <p className="mt-6 text-xs text-muted-foreground">

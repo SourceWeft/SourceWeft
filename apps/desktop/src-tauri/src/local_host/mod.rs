@@ -21,7 +21,7 @@ mod win_shell;
 mod windows;
 mod workspace;
 
-pub use workspace::{LocalHost, Workspace};
+pub use workspace::{LocalHost, TaskFolder, Workspace, DEFAULT_TASK_FOLDER_NAME};
 
 use serde::Serialize;
 

@@ -7,6 +7,7 @@
 - `src/`：前端入口和桌面 Web UI 连接代码。
 - `src/lib/sdk.ts`：桌面前端共享 SDK 的初始化占位代码。
 - `src-tauri/`：Rust 运行时与 Tauri 配置。
+- `startup-dist/`：打包后的应用主窗口最先打开的页面。它显示加载进度并加载线上 Web 应用，在 Web 应用开始渲染之前一直留在窗口里；加载过慢或失败时给出提示和重试按钮。`tauri dev` 会跳过它，直接打开本地 Web 服务。要查看它，请运行打包构建（`pnpm --filter @sourceweft/desktop exec tauri build --debug --no-bundle`）。
 
 桌面前端应复用 `packages/ui`（`@sourceweft/ui-web`）和 `packages/sdk`。
 

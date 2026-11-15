@@ -929,13 +929,15 @@ test("E18 a market admin reviews a flagged skill from the Skills tab", async ({
 
   await page.context().clearCookies();
   await page.context().addCookies(sessions.admin!.cookies);
-  await page.goto("/dashboard/admin/market?tab=skills");
-  const row = page.locator("li, article, tr, div").filter({
-    has: page.getByText(pending.slug!, { exact: true }),
-  });
-  await expect(page.getByText(pending.slug!, { exact: true })).toBeVisible({
-    timeout: 45000,
-  });
+  await page.goto("/dashboard/admin/market/skill-review");
+  // The queue is a list beside the open skill: choose ours, then decide it.
+  const queueRow = page
+    .getByTestId("review-row")
+    .filter({ hasText: pending.slug! });
+  await expect(queueRow).toBeVisible({ timeout: 45000 });
+  await queueRow.click();
+  const row = page.getByTestId("review-detail");
+  await expect(row.getByText(pending.slug!, { exact: true })).toBeVisible();
   const decided = page.waitForResponse(
     (r) =>
       r.url().endsWith(`/submissions/${pending.skillVersionId}/publish`) &&

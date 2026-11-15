@@ -49,6 +49,7 @@ import {
 import { enqueueSourceParseJob } from "../content/queue";
 import type { SourceRecord, SourceStatusDetail } from "../content/types";
 import { defaultParsingConfig } from "./parsing-config";
+import { computeContentHash } from "./content-hash";
 
 const SOURCE_TREE_MAX_DEPTH = 64;
 
@@ -1419,6 +1420,7 @@ export class ContentSourceService {
             sourceId: source.id,
             title: nextTitle,
             contentText: input.contentText,
+            contentHash: computeContentHash(input.contentText),
             parentSourceId: nextParentSourceId,
             estimatedPages: input.estimatedPages,
             parsedTokens: input.parsedTokens,

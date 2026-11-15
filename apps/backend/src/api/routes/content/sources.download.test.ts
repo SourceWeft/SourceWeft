@@ -6,6 +6,10 @@ vi.mock("../../../modules/sources", () => ({
   sourceIndexingService: {},
   sourceParsingService: {},
 }));
+vi.mock("../../../modules/notes", () => ({
+  getNoteOrigin: vi.fn(),
+  updateNoteContent: vi.fn(),
+}));
 vi.mock("../../middleware/auth-session", () => ({
   requireSession: mocks.session,
   getSessionUserId: () => "user",

@@ -1,5 +1,5 @@
 {
-  "id": "3d753e25-a834-4fd6-92f0-ab48d4414a3b",
+  "id": "d037c14d-0b6c-420e-b1a5-82dbaf252f27",
   "prevId": "a92579e4-5d10-4bfb-809e-0d06e03aab12",
   "version": "7",
   "dialect": "postgresql",
@@ -19172,7 +19172,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "notes_workspace_team_fk": {

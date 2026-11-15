@@ -80,6 +80,7 @@
     "@sourceweft/builtin-skill-report": "workspace:*",
     "@sourceweft/builtin-skill-video-presentation": "workspace:*",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
+    "@sourceweft/builtin-tool-study": "workspace:*",
     "@sourceweft/builtin-tool-video-presentation": "workspace:*",
     "@sourceweft/builtin-tool-web-search": "workspace:*",
     "@sourceweft/builtin-vfs": "workspace:*",

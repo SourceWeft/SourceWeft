@@ -48,7 +48,7 @@ import { McpIcon, SkillIcon } from "../../../../_components/site-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";
-import { type SourceItem } from "../source-types";
+import { minimalSourceItem, type SourceItem } from "../source-types";
 import { artifactMatchesQuery } from "./artifacts";
 import { ManageConnectorsDialog } from "./connectors/manage-dialog";
 import { ConnectorSettingsDialog } from "./connectors/settings-dialog";
@@ -1531,11 +1531,16 @@ export function SourcesHub({
       />
 
       <SourcePreviewPanel
+        // Only the drawer has something to close: it covers the message box
+        // the question was just put into.
+        onAskQuestion={variant === "drawer" ? onClose : undefined}
         onOpenChange={(open) => {
           if (!open) {
             setPreviewSource(null);
           }
         }}
+        onOpenSource={(target) => setPreviewSource(minimalSourceItem(target))}
+        onSourceChanged={() => void refreshSources()}
         open={Boolean(previewSource)}
         source={previewSource}
         workspaceId={workspaceId}

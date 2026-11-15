@@ -299,6 +299,55 @@ export async function decryptTeamSecret(
 }
 
 /**
+ * An in-memory cipher bound to one team's key set, for a caller that must do
+ * all of its encryption and decryption without touching the database — e.g.
+ * while holding a row lock, where acquiring a second pooled connection for a
+ * cold key cache could deadlock. {@link getTeamSecretCipher} resolves the key
+ * set once (one database touch, before the lock) and returns this; every
+ * `encrypt`/`decrypt` after that is pure in-process crypto.
+ */
+export type TeamSecretCipher = {
+  encrypt: (plainText: string) => string;
+  decrypt: (cipherText: string | null) => string;
+};
+
+/**
+ * Resolve the team's key set once — creating the current key lazily exactly as
+ * {@link encryptTeamSecret} does — and return a {@link TeamSecretCipher} that
+ * encrypts and decrypts using only that in-memory key set, with no further
+ * database access. `encrypt` matches {@link encryptTeamSecret} (empty input
+ * round-trips as an empty string, otherwise a `v2:` payload under the current
+ * key); `decrypt` matches {@link decryptTeamSecret} (empty/null → empty string;
+ * `v2:` payloads use the loaded key set, current key first and the retiring key
+ * only on GCM authentication failure; any other version falls back to the
+ * deployment master secret for pre-envelope v1 rows). A failure to load the key
+ * set propagates to the caller.
+ */
+export async function getTeamSecretCipher(
+  teamId: string,
+): Promise<TeamSecretCipher> {
+  const keys = await getOrCreateTeamKeySet(teamId);
+  return {
+    encrypt: (plainText: string) =>
+      plainText
+        ? encryptPayloadWithKey(plainText, keys.current, TEAM_PAYLOAD_PREFIX)
+        : "",
+    decrypt: (cipherText: string | null) => {
+      if (!cipherText) {
+        return "";
+      }
+      if (payloadVersion(cipherText) !== TEAM_PAYLOAD_PREFIX) {
+        return decryptSecret(cipherText, masterSecret());
+      }
+      // Validate the payload shape before using the key set, so malformed
+      // input fails identically to decryptTeamSecret.
+      parseSecretPayload(cipherText, TEAM_PAYLOAD_PREFIX);
+      return decryptV2WithKeySet(cipherText, keys);
+    },
+  };
+}
+
+/**
  * Rotate a team's data key: atomically promote a fresh key to current —
  * moving the previous current key into the retiring slot and stamping
  * `rotated_at` in the same UPDATE — then hand the caller

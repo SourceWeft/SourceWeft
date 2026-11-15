@@ -81,3 +81,25 @@ export function expandSelectedSources(
 
   return expanded;
 }
+
+/**
+ * A source known only by id and title, enough to open its preview: the preview
+ * loads everything else from the server.
+ */
+export function minimalSourceItem(input: {
+  id: string;
+  title: string;
+  sourceType?: SourceItem["sourceType"];
+}): SourceItem {
+  const sourceType = input.sourceType ?? "manual_upload";
+  return {
+    id: input.id,
+    title: input.title,
+    sourceType,
+    parentSourceId: null,
+    type: sourceType === "note" ? "NOTE" : "TEXT",
+    status: "Indexed",
+    meta: "",
+    contentText: "",
+  };
+}

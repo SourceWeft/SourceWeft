@@ -95,6 +95,21 @@ export type LocalHostStatus = {
   readiness?: SandboxReadiness;
 };
 
+/**
+ * Where automatic task folders are created on the computer the app runs on. Paths are in the
+ * wire form (`/` separators on every platform). `defaultPath` is null when that computer has
+ * no default location.
+ */
+export type TaskFolder = {
+  path: string;
+  defaultPath: string | null;
+  isDefault: boolean;
+};
+
+/** What the native folder dialog rejects with when it is dismissed. Not an error to show. */
+export const FOLDER_SELECTION_CANCELLED =
+  "Folder selection cancelled or unavailable";
+
 type DesktopListener<TPayload> = (payload: TPayload) => void;
 
 function getBridge() {
@@ -168,12 +183,31 @@ export const desktopBridge = {
       userId,
     });
   },
+  /**
+   * The task folder commands and `revealLocalDirectory` act only on the computer the app runs
+   * on. A desktop build without them rejects the call.
+   */
+  getTaskFolder() {
+    return invokeDesktop<TaskFolder>("get_task_folder");
+  },
+  /** Opens the native folder dialog and saves the choice. */
+  chooseTaskFolder() {
+    return invokeDesktop<TaskFolder>("choose_task_folder");
+  },
+  resetTaskFolder() {
+    return invokeDesktop<TaskFolder>("reset_task_folder");
+  },
+  /** Asks the system file manager to show a directory the app works in. */
+  revealLocalDirectory(path: string) {
+    return invokeDesktop<void>("reveal_local_directory", { path });
+  },
   localHostStatus() {
     return invokeDesktop<LocalHostStatus>("local_host_status");
   },
   /**
-   * Downloads, verifies and installs the sandbox runtime (explicit user consent: only ever
-   * called from an Install button). Resolves with the readiness after the install.
+   * Downloads, verifies and installs the sandbox runtime. Resolves with the readiness after the
+   * install. Call it through `installSandboxRuntime` in `sandbox-runtime-install.ts`, which
+   * starts it automatically when the dashboard opens and keeps the page to one run at a time.
    */
   installSandboxRuntime() {
     return invokeDesktop<SandboxReadiness>("install_sandbox_runtime");

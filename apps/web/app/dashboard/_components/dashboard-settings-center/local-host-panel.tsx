@@ -19,6 +19,7 @@ import {
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 import { deviceSystemLabel } from "../../../../lib/sandbox-setup";
 import { LocalSandboxSetupCard } from "./local-sandbox-setup-card";
+import { LocalTaskFolderSetting } from "./local-task-folder-setting";
 export function LocalHostPanel() {
   const t = useTranslations("dashboardSettings");
   const userId = authClient.useSession().data?.user.id;
@@ -227,6 +228,7 @@ export function LocalHostPanel() {
             : t("localHost.networkHelperUnenforced")}
         </p>
       </div>
+      {status?.storageInitialized && <LocalTaskFolderSetting />}
       <div className="space-y-3 rounded-lg border p-4">
         <h3 className="font-medium">{t("localHost.workingDirectoriesTitle")}</h3>
         <p className="text-sm text-muted-foreground">

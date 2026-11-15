@@ -30,8 +30,10 @@ export type {
 } from "./types";
 
 // Kicked off at import so the common path is warm by the time a request lands;
-// entrypoints await `connectorAdaptersReady()` before serving.
-void registerBuiltinConnectorAdapters();
+// entrypoints await `connectorAdaptersReady()` before serving, and that await
+// is where a failure surfaces (and stops startup). The empty handler only keeps
+// this early, unawaited copy from being reported as an unhandled rejection.
+registerBuiltinConnectorAdapters().catch(() => {});
 
 export { connectorAdaptersReady };
 

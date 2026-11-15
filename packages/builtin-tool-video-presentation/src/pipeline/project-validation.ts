@@ -26,6 +26,16 @@ export type CanonicalProjectValidationResult = {
 };
 
 /**
+ * Packages are copied out of the store rather than hard-linked. The sandbox
+ * image prewarms the store as root, and pnpm sets the executable bit on every
+ * linked bin: a hard link shares the store file's owner, so the sandbox user
+ * is refused (EPERM) and the install fails. A copy belongs to the installing
+ * user.
+ */
+export const VIDEO_PROJECT_INSTALL_COMMAND =
+  'pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --package-import-method copy --store-dir "${SOURCEWEFT_PNPM_STORE:-.pnpm-store}"';
+
+/**
  * Validate an already-materialized canonical project tree. The caller owns the
  * trusted root/cwd and command identity; this seam never rebuilds or uploads a
  * second payload, so validation operates on the immutable tree it will render.
@@ -37,9 +47,7 @@ export async function validateCanonicalProjectTree(input: {
     projectExecutionResultFromSandbox(await input.execute(command));
   // The dependency manifest and lockfile are host-generated and pinned.
   // Generated scene code never gets package lifecycle-script authority.
-  const install = await run(
-    'pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --store-dir "${SOURCEWEFT_PNPM_STORE:-.pnpm-store}"',
-  );
+  const install = await run(VIDEO_PROJECT_INSTALL_COMMAND);
   const typecheck = install.ok
     ? await run("pnpm run build")
     : { ok: false, diagnostics: [] };

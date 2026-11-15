@@ -36,5 +36,6 @@ export function addUsage(
     inputAudioTokens: sum(current?.inputAudioTokens, next.inputAudioTokens),
     outputAudioTokens: sum(current?.outputAudioTokens, next.outputAudioTokens),
     inputCharacters: sum(current?.inputCharacters, next.inputCharacters),
+    inputAudioSeconds: sum(current?.inputAudioSeconds, next.inputAudioSeconds),
   };
 }

@@ -81,6 +81,8 @@ export type GlobalProfilePricingEntry = {
   outputCostPerImage?: number | null;
   /** Per billed text unit, for TTS priced by character. */
   inputCostPerCharacter?: number | null;
+  /** Per second of audio, for ASR priced by duration. */
+  inputCostPerSecond?: number | null;
 };
 
 /**
@@ -875,6 +877,7 @@ const PRICING_COST_FIELDS = [
   "inputCostPerImage",
   "outputCostPerImage",
   "inputCostPerCharacter",
+  "inputCostPerSecond",
 ] as const satisfies ReadonlyArray<keyof GlobalProfilePricingEntry>;
 
 /**
@@ -964,6 +967,10 @@ function parsePricingEntry(
   parsed.inputCostPerCharacter = asOptionalNullableNumber(
     record.inputCostPerCharacter,
     `${fieldName}.inputCostPerCharacter`,
+  );
+  parsed.inputCostPerSecond = asOptionalNullableNumber(
+    record.inputCostPerSecond,
+    `${fieldName}.inputCostPerSecond`,
   );
 
   return parsed;

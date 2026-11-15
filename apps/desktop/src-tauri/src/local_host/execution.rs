@@ -226,6 +226,16 @@ impl LocalHost {
             )?;
             return Ok(json!({"ready":true}));
         }
+        if action == "workspace.reserve" {
+            // Decides and records where the conversation's automatic task folder will be; the
+            // folder itself is created by the first `workspace.ensure`.
+            return serde_json::to_value(self.reserve_workspace(
+                owner,
+                thread,
+                payload.get("workspaceId").and_then(Value::as_str),
+            )?)
+            .map_err(|e| HostError::new("INVALID_RESULT", e.to_string()));
+        }
         if action == "workspace.ensure" {
             if payload.get("folderId").is_some() && payload.get("directoryGrantId").is_some() {
                 return Err(HostError::new(

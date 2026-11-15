@@ -127,6 +127,9 @@ test("deepseek: every input is decoded and cut into chunks that fit 120 s", asyn
     ],
   );
   assert.equal(result.duration, 250);
+  // The whole audio is billed once, not once per chunk.
+  assert.equal(result.usage?.inputAudioSeconds, 250);
+  assert.equal(result.observation?.usage?.inputAudioSeconds, 250);
 });
 
 test("deepseek: a short wav is still normalized, as one chunk", async () => {
@@ -297,7 +300,7 @@ test("whisper providers: a small file is sent untouched without probing", async 
     kind: "openai",
     model: "whisper-1",
     preparer,
-    respond: () => json({ text: "x" }),
+    respond: () => json({ text: "x", duration: 12 }),
   });
   await gateway.asr.transcribe(request("small.mp3"));
   assert.deepEqual(state, { probes: 0, normalizes: 0, disposed: 0 });
@@ -365,4 +368,40 @@ test("an aborted call stops and still disposes the decoded audio", async () => {
   );
   assert.ok(calls.length <= 8);
   assert.equal(state.disposed, 1);
+});
+
+test("a passthrough transcription reports the provider's duration as audio seconds", async () => {
+  const { preparer, state } = fakePreparer({ durationSec: 99 });
+  const { gateway } = build({
+    kind: "openai",
+    model: "whisper-1",
+    preparer,
+    respond: () => json({ text: "x", duration: 17.24 }),
+  });
+  const result = await gateway.asr.transcribe(request("small.mp3"));
+  assert.equal(result.usage?.inputAudioSeconds, 17.24);
+  assert.equal(state.probes, 0);
+});
+
+test("when the provider reports no duration the file is measured instead", async () => {
+  const { preparer, state } = fakePreparer({ durationSec: 42 });
+  const { gateway } = build({
+    kind: "openai",
+    model: "whisper-1",
+    preparer,
+    respond: () => json({ text: "x" }),
+  });
+  const result = await gateway.asr.transcribe(request("small.mp3"));
+  assert.equal(result.usage?.inputAudioSeconds, 42);
+  assert.equal(state.probes, 1);
+});
+
+test("with no duration and no way to measure, usage stays empty", async () => {
+  const { gateway } = build({
+    kind: "openai",
+    model: "whisper-1",
+    respond: () => json({ text: "x" }),
+  });
+  const result = await gateway.asr.transcribe(request("small.mp3"));
+  assert.equal(result.usage?.inputAudioSeconds, undefined);
 });

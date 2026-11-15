@@ -149,12 +149,15 @@ CDN, so it must be reachable without a redirect or a bot challenge.
 
 ### App Store export
 
-`ExportOptions.plist` stays `debugging`, which is what development needs. An
-App Store or TestFlight build passes the method on the command line, and Tauri
-merges it into a temporary copy:
+`ExportOptions.plist` stays `debugging`, which is what development needs. The
+TestFlight job passes the method on the command line, and Tauri merges it into
+a temporary copy. Tauri also applies manual signing from the environment:
+`IOS_CERTIFICATE` (base64 `.p12`), `IOS_CERTIFICATE_PASSWORD` and
+`IOS_MOBILE_PROVISION` (base64 profile). Passing signing overrides after `--`
+does not work, because Tauri does not forward them to xcodebuild.
 
 ```sh
-pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect
+pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --ci
 ```
 
 ### CI and TestFlight

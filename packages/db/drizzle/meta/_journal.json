@@ -523,8 +523,22 @@
     {
       "idx": 74,
       "version": "7",
-      "when": 1794689014921,
-      "tag": "0074_sso_verified_domain_unique",
+      "when": 1794683361745,
+      "tag": "0074_notes_follow_their_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794736887976,
+      "tag": "0075_study_learning_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794736887977,
+      "tag": "0076_sso_verified_domain_unique",
       "breakpoints": true
     }
   ]

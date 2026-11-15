@@ -495,7 +495,13 @@ export function createGmailConnectorAdapter(
   return {
     capabilityId: "sourceweft/gmail",
     getManifest() {
-      return toBackendGmailManifest({ clientId: config.clientId, redirectUri });
+      // Without both credentials the manifest carries no client id, so the
+      // platform refuses to start authorization (CONNECTOR_OAUTH_CONFIG_MISSING)
+      // instead of sending the user to Google for a code it cannot exchange.
+      return toBackendGmailManifest({
+        clientId: config.clientId && config.clientSecret ? config.clientId : "",
+        redirectUri,
+      });
     },
     async exchangeOAuthCode(input: OAuthCodeExchangeInput) {
       const token = await tokenRequest(

@@ -10,6 +10,7 @@ import {
   listSourceMentionsRequestSchema,
   reparseSourceRequestSchema,
   sourceDiscoveryRequestSchema,
+  updateNoteContentRequestSchema,
   retrySourceRequestSchema,
   updateSourceRequestSchema,
 } from "@sourceweft/contracts";
@@ -21,6 +22,8 @@ import {
   discoverSources,
   isSourceDiscoveryAvailable,
 } from "../../../modules/sources/discovery/service";
+import { discoveryRateLimitedError } from "./source-discovery-errors";
+import { getNoteOrigin, updateNoteContent } from "../../../modules/notes";
 import { billingRuntime as billingService } from "../../../billing-host/bindings";
 import {
   contentSourceService,
@@ -347,6 +350,51 @@ export function registerSourceRoutes(app: Hono) {
       },
       { billing: billingService },
     );
+
+    if (result.kind === "limited") {
+      c.header("Retry-After", String(result.retryAfterSeconds));
+      throw discoveryRateLimitedError(result);
+    }
+    const { kind: _kind, ...response } = result;
+    return ApiResponse.success(c, response);
+  });
+
+  app.get("/sources/:id/note", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const origin = await getNoteOrigin({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, { origin });
+  });
+
+  app.put("/sources/:id/note", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = updateNoteContentRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await updateNoteContent({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      sourceId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      contentText: parsed.data.contentText,
+      expectedUpdatedAt: parsed.data.expectedUpdatedAt,
+    });
 
     return ApiResponse.success(c, result);
   });
