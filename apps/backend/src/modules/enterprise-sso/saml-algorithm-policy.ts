@@ -9,30 +9,39 @@
  * run as a guard before-hook on the SAML sign-in ACS endpoint before the plugin
  * processes the response.
  *
- * It is a pure, synchronous ALLOW-LIST check on the RAW decoded XML text — never
- * a blocklist, and it makes no trust decision (signature verification stays with
- * the plugin). The design intent is that an attacker who obfuscates the algorithm
- * declaration ends up REJECTED, never accepted, so every ambiguity fails closed:
+ * It is a pure, synchronous check on the RAW decoded XML text — an ALLOW-LIST,
+ * never a blocklist — and it makes no trust decision (signature verification
+ * stays with the plugin). It does not pattern-match for the two element names
+ * (that was bypassable with a non-ASCII namespace prefix, which `@xmldom/xmldom`
+ * parses and `xml-crypto` resolves by LOCAL NAME regardless of prefix). Instead
+ * it tokenises EVERY piece of markup and fails closed on anything it cannot
+ * positively recognise, so the output guarantees this invariant:
  *
- *  - every `SignatureMethod` / `DigestMethod` element's `Algorithm` attribute
- *    must read, with certainty, as exactly one allow-listed URI (byte-for-byte:
- *    no normalisation, case folding, or trimming);
- *  - at least one of each must be present;
- *  - anything the scanner cannot read with certainty is rejected: non-base64 or
- *    non-UTF-8-XML input, oversized input, a `<!DOCTYPE`/`<!ENTITY`, an
- *    `EncryptedAssertion`/`EncryptedData` (whose inner signature cannot be
- *    inspected before decryption — phase 1 does not support encrypted assertions),
- *    an `Algorithm` value carrying a character/entity reference (`&`), a method
- *    tag whose `Algorithm` attribute cannot be read unambiguously (missing,
- *    duplicated, or a `>` inside another attribute truncating the tag), and a
- *    SHA-1 declaration sitting in a comment or CDATA alongside a real signature.
+ *   every element any XML parser can see in this document has an ASCII NCName,
+ *   and every element whose local name is `SignatureMethod` or `DigestMethod`
+ *   carries an allow-listed `Algorithm`.
  *
- * A raw-text scan (not an XML parser) is deliberate: `apps/backend` has no direct
+ * How: walk every `<` (in well-formed XML a raw `<` always starts markup — text
+ * and attribute values cannot contain one — so this enumeration is complete);
+ * reject comments, CDATA, DOCTYPE / any `<!` declaration, and any processing
+ * instruction other than a single leading `<?xml …?>`; require every start /
+ * empty-element tag name to be an ASCII NCName (optional single ASCII prefix),
+ * scanning each tag's end quote-aware so a `>` inside a quoted attribute value
+ * never ends it early (unbalanced quotes reject); validate the `Algorithm` of
+ * every exact-`SignatureMethod`/`DigestMethod` tag (exactly one unprefixed
+ * `Algorithm`, byte-for-byte allow-listed, no `&`); reject any element whose
+ * local name case-insensitively matches a sensitive name but not exactly; reject
+ * `EncryptedAssertion`/`EncryptedData`; and require at least one of each method.
+ *
+ * Documented limitations: RSA-PSS (`…2007/05/xmldsig-more#sha256-rsa-MGF1`) is
+ * not on the allow-list; responses containing XML comments, CDATA sections, or
+ * encrypted assertions are refused (phase 1 does not need any of them). A raw-text
+ * scan rather than an XML parser is deliberate — `apps/backend` has no direct
  * XML-parser dependency, and a parser that silently resolves entities or tolerates
  * malformed input would defeat the fail-closed guarantee. No dependency is added.
  */
 
-/** XML Signature algorithm URIs (`<ds:SignatureMethod Algorithm="…">`) we accept. */
+/** XML Signature algorithm URIs (`SignatureMethod/@Algorithm`) we accept. */
 const ALLOWED_SIGNATURE_ALGORITHMS = new Set<string>([
   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
   "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384",
@@ -42,7 +51,7 @@ const ALLOWED_SIGNATURE_ALGORITHMS = new Set<string>([
   "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512",
 ]);
 
-/** XML Signature digest URIs (`<ds:DigestMethod Algorithm="…">`) we accept. */
+/** XML Signature digest URIs (`DigestMethod/@Algorithm`) we accept. */
 const ALLOWED_DIGEST_ALGORITHMS = new Set<string>([
   "http://www.w3.org/2001/04/xmlenc#sha256",
   "http://www.w3.org/2001/04/xmldsig-more#sha384",
@@ -52,16 +61,36 @@ const ALLOWED_DIGEST_ALGORITHMS = new Set<string>([
 /** Matches the plugin's own `saml.maxResponseSize` default (bytes of the base64). */
 const MAX_RESPONSE_SIZE = 262144;
 
+/** Local names that matter, compared case-insensitively for the "variant" check. */
+const SENSITIVE_LOCAL_NAMES = new Set([
+  "signaturemethod",
+  "digestmethod",
+  "encryptedassertion",
+  "encrypteddata",
+]);
+
+/** ASCII NCName, optionally prefixed by a single ASCII NCName and a colon. */
+const ASCII_QNAME = /^[A-Za-z_][A-Za-z0-9._-]*(?::[A-Za-z_][A-Za-z0-9._-]*)?$/;
+
 export type SamlAlgorithmRejectionReason =
   | "not_a_string"
   | "oversized"
   | "invalid_base64"
   | "not_utf8_xml"
+  | "non_utf8_declaration"
+  | "comment"
+  | "cdata"
   | "doctype_or_entity"
+  | "processing_instruction"
+  | "tag_name_not_ncname"
+  | "unterminated_tag"
+  | "unbalanced_quote"
+  | "suspicious_element_variant"
   | "encrypted_assertion"
   | "missing_signature_method"
   | "missing_digest_method"
   | "algorithm_declaration_unreadable"
+  | "algorithm_value_has_reference"
   | "signature_algorithm_not_allowed"
   | "digest_algorithm_not_allowed";
 
@@ -69,90 +98,180 @@ export type SamlAlgorithmPolicyResult =
   | { ok: true }
   | { ok: false; reason: SamlAlgorithmRejectionReason };
 
-function reject(reason: SamlAlgorithmRejectionReason): SamlAlgorithmPolicyResult {
+function reject(reason: SamlAlgorithmRejectionReason): { ok: false; reason: SamlAlgorithmRejectionReason } {
   return { ok: false, reason };
 }
 
-/** Does the raw text contain a start tag whose local name is `localName`? */
-function containsElement(text: string, localName: string): boolean {
-  return new RegExp(`<([A-Za-z_][\\w.-]*:)?${localName}(?=[\\s/>])`).test(text);
-}
-
-type AlgorithmRead =
-  | { kind: "ok"; value: string }
-  | { kind: "missing" }
-  | { kind: "unreadable" }
-  | { kind: "reference" };
+type ParsedStartTag =
+  | { ok: true; end: number; localName: string; attrsRegion: string }
+  | { ok: false; reason: SamlAlgorithmRejectionReason };
 
 /**
- * Read the single `Algorithm` attribute from a method tag's attribute region
- * (the text between the element name and the first `>`). Fails closed: a region
- * that does not tokenise cleanly into `name="value"` attributes (e.g. because a
- * `>` inside another attribute truncated the tag), a missing or duplicated
- * `Algorithm`, or a value carrying a `&` reference all return a non-`ok` kind.
- * A prefixed `ns:Algorithm` attribute is a different name than the unprefixed
- * `Algorithm` the verifier reads, so it is ignored here.
+ * Parse one start / empty-element tag beginning at `start` (the `<`). Reads the
+ * name up to the first whitespace, `/` or `>`, requires an ASCII QName, then
+ * finds the tag's real `>` with a quote-aware scan (a `>` inside a quoted
+ * attribute value does not end the tag; an unbalanced quote rejects).
  */
-function readAlgorithm(region: string): AlgorithmRead {
-  let rest = region.trim();
-  // A self-closing tag's region ends with the `/` of `/>`.
-  if (rest.endsWith("/")) {
-    rest = rest.slice(0, -1).trimEnd();
+function parseStartTag(text: string, start: number): ParsedStartTag {
+  let nameEnd = start + 1;
+  while (nameEnd < text.length && !/[\s/>]/.test(text[nameEnd]!)) {
+    nameEnd += 1;
   }
+  const name = text.slice(start + 1, nameEnd);
+  if (!ASCII_QNAME.test(name)) {
+    return reject("tag_name_not_ncname");
+  }
+
+  let i = nameEnd;
+  let quote: '"' | "'" | null = null;
+  let close = -1;
+  while (i < text.length) {
+    const char = text[i]!;
+    if (quote !== null) {
+      if (char === quote) {
+        quote = null;
+      }
+      i += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      i += 1;
+      continue;
+    }
+    if (char === ">") {
+      close = i;
+      break;
+    }
+    i += 1;
+  }
+  if (close === -1) {
+    return reject(quote !== null ? "unbalanced_quote" : "unterminated_tag");
+  }
+
+  const inner = text.slice(nameEnd, close);
+  const withoutTrailingSpace = inner.replace(/\s+$/, "");
+  const selfClosing = withoutTrailingSpace.endsWith("/");
+  const attrsRegion = selfClosing ? withoutTrailingSpace.slice(0, -1) : inner;
+  const colon = name.indexOf(":");
+  const localName = colon === -1 ? name : name.slice(colon + 1);
+  return { ok: true, end: close + 1, localName, attrsRegion };
+}
+
+/**
+ * Validate a `SignatureMethod`/`DigestMethod` tag's `Algorithm` against `allowed`.
+ * Fails closed: the attribute region must tokenise cleanly into quoted
+ * `name="value"` pairs (leftover junk, or an unquoted value, rejects); there must
+ * be exactly one attribute named exactly `Algorithm` (a prefixed `ns:Algorithm`
+ * is a different name the verifier ignores, so it does not count); the value must
+ * carry no `&` reference and equal an allow-listed URI byte-for-byte.
+ */
+function checkAlgorithm(
+  attrsRegion: string,
+  allowed: ReadonlySet<string>,
+  notAllowed: SamlAlgorithmRejectionReason,
+): SamlAlgorithmPolicyResult {
+  let rest = attrsRegion.trim();
   const attribute = /^([^\s=/<>"']+)\s*=\s*(?:"([^"]*)"|'([^']*)')\s*/;
-  const algorithmValues: string[] = [];
+  const values: string[] = [];
   while (rest.length > 0) {
     const match = attribute.exec(rest);
     if (!match) {
-      return { kind: "unreadable" };
+      return reject("algorithm_declaration_unreadable");
     }
     if (match[1] === "Algorithm") {
-      algorithmValues.push(match[2] ?? match[3] ?? "");
+      values.push(match[2] ?? match[3] ?? "");
     }
     rest = rest.slice(match[0].length);
   }
-  if (algorithmValues.length === 0) {
-    return { kind: "missing" };
+  if (values.length !== 1) {
+    return reject("algorithm_declaration_unreadable");
   }
-  if (algorithmValues.length > 1) {
-    return { kind: "unreadable" };
-  }
-  const value = algorithmValues[0]!;
+  const value = values[0]!;
   if (value.includes("&")) {
-    return { kind: "reference" };
+    return reject("algorithm_value_has_reference");
   }
-  return { kind: "ok", value };
+  if (!allowed.has(value)) {
+    return reject(notAllowed);
+  }
+  return { ok: true };
 }
 
-/** Validate every `localName` element's `Algorithm` against `allowed`. */
-function checkMethods(
-  text: string,
-  localName: "SignatureMethod" | "DigestMethod",
-  allowed: ReadonlySet<string>,
-): { ok: true; count: number } | { ok: false; reason: SamlAlgorithmRejectionReason } {
-  const notAllowed: SamlAlgorithmRejectionReason =
-    localName === "SignatureMethod"
-      ? "signature_algorithm_not_allowed"
-      : "digest_algorithm_not_allowed";
-  const finder = new RegExp(`<([A-Za-z_][\\w.-]*:)?${localName}(?=[\\s/>])`, "g");
-  let count = 0;
-  let match: RegExpExecArray | null;
-  while ((match = finder.exec(text)) !== null) {
-    count += 1;
-    const close = text.indexOf(">", match.index);
-    if (close === -1) {
-      return { ok: false, reason: "algorithm_declaration_unreadable" };
+/** Walk every tag, rejecting on the first thing not positively recognised. */
+function tokenizeAndCheck(text: string, start: number): SamlAlgorithmPolicyResult {
+  let i = start;
+  let signatureMethods = 0;
+  let digestMethods = 0;
+
+  while (i < text.length) {
+    const lt = text.indexOf("<", i);
+    if (lt === -1) {
+      break;
     }
-    const region = text.slice(match.index + match[0].length, close);
-    const algorithm = readAlgorithm(region);
-    if (algorithm.kind !== "ok") {
-      return { ok: false, reason: "algorithm_declaration_unreadable" };
+    if (text.startsWith("<!--", lt)) {
+      return reject("comment");
     }
-    if (!allowed.has(algorithm.value)) {
-      return { ok: false, reason: notAllowed };
+    if (text.startsWith("<![CDATA[", lt)) {
+      return reject("cdata");
     }
+    if (text.startsWith("<!", lt)) {
+      return reject("doctype_or_entity");
+    }
+    if (text.startsWith("<?", lt)) {
+      // The only legitimate PI is a leading XML declaration, consumed before this.
+      return reject("processing_instruction");
+    }
+    if (text.startsWith("</", lt)) {
+      // End tag: no attributes, so no quoted `>`; scan to the next `>`.
+      const gt = text.indexOf(">", lt);
+      if (gt === -1) {
+        return reject("unterminated_tag");
+      }
+      i = gt + 1;
+      continue;
+    }
+
+    const tag = parseStartTag(text, lt);
+    if (!tag.ok) {
+      return tag;
+    }
+    const localName = tag.localName;
+    if (localName === "SignatureMethod") {
+      const result = checkAlgorithm(
+        tag.attrsRegion,
+        ALLOWED_SIGNATURE_ALGORITHMS,
+        "signature_algorithm_not_allowed",
+      );
+      if (!result.ok) {
+        return result;
+      }
+      signatureMethods += 1;
+    } else if (localName === "DigestMethod") {
+      const result = checkAlgorithm(
+        tag.attrsRegion,
+        ALLOWED_DIGEST_ALGORITHMS,
+        "digest_algorithm_not_allowed",
+      );
+      if (!result.ok) {
+        return result;
+      }
+      digestMethods += 1;
+    } else if (localName === "EncryptedAssertion" || localName === "EncryptedData") {
+      return reject("encrypted_assertion");
+    } else if (SENSITIVE_LOCAL_NAMES.has(localName.toLowerCase())) {
+      // A case-variant of a sensitive name (e.g. `signaturemethod`): suspicious.
+      return reject("suspicious_element_variant");
+    }
+    i = tag.end;
   }
-  return { ok: true, count };
+
+  if (signatureMethods === 0) {
+    return reject("missing_signature_method");
+  }
+  if (digestMethods === 0) {
+    return reject("missing_digest_method");
+  }
+  return { ok: true };
 }
 
 /**
@@ -185,41 +304,39 @@ export function assertSamlResponseAlgorithmsAllowed(
   if (bytes.includes(0x00)) {
     return reject("not_utf8_xml");
   }
-  let text: string;
+  let decoded: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return reject("not_utf8_xml");
   }
+  // TextDecoder usually consumes a UTF-8 BOM already; strip a residual one.
+  const text = decoded.charCodeAt(0) === 0xfeff ? decoded.slice(1) : decoded;
   if (!text.includes("<")) {
     return reject("not_utf8_xml");
   }
 
-  const lower = text.toLowerCase();
-  if (lower.includes("<!doctype") || lower.includes("<!entity")) {
-    return reject("doctype_or_entity");
-  }
-  if (
-    containsElement(text, "EncryptedAssertion") ||
-    containsElement(text, "EncryptedData")
-  ) {
-    return reject("encrypted_assertion");
-  }
-
-  const signature = checkMethods(text, "SignatureMethod", ALLOWED_SIGNATURE_ALGORITHMS);
-  if (!signature.ok) {
-    return signature;
-  }
-  if (signature.count === 0) {
-    return reject("missing_signature_method");
-  }
-  const digest = checkMethods(text, "DigestMethod", ALLOWED_DIGEST_ALGORITHMS);
-  if (!digest.ok) {
-    return digest;
-  }
-  if (digest.count === 0) {
-    return reject("missing_digest_method");
+  // An optional single leading XML declaration (`<?xml …?>`) at the very start.
+  let cursor = 0;
+  if (text.startsWith("<?xml")) {
+    const afterPrefix = text[5];
+    if (afterPrefix !== undefined && !/[\s?]/.test(afterPrefix)) {
+      return reject("processing_instruction"); // e.g. `<?xmlfoo…` — a PI, not a declaration
+    }
+    const close = text.indexOf("?>");
+    if (close === -1) {
+      return reject("processing_instruction");
+    }
+    const declaration = text.slice(0, close + 2);
+    const encoding = /\bencoding\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(declaration);
+    if (encoding) {
+      const value = (encoding[1] ?? encoding[2] ?? "").toLowerCase();
+      if (value !== "utf-8" && value !== "utf8") {
+        return reject("non_utf8_declaration");
+      }
+    }
+    cursor = close + 2;
   }
 
-  return { ok: true };
+  return tokenizeAndCheck(text, cursor);
 }

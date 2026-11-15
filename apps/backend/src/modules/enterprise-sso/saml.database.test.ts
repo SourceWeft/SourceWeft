@@ -510,6 +510,34 @@ test("an RSA-SHA256 signature with a SHA-1 digest is rejected by the guard's alg
   );
 }, 200_000);
 
+test("the non-ASCII-prefix algorithm bypass is rejected by the guard at the ACS (fix round 1)", async () => {
+  // A SignatureMethod declaring rsa-sha1 under a non-ASCII namespace prefix,
+  // placed before the ASCII rsa-sha256 one. xml-crypto would resolve the first
+  // by local name and verify rsa-sha1; the guard's tokenizer rejects the
+  // non-ASCII element name before the plugin ever sees it.
+  const email = "bypass@acme.com";
+  const { acs, client } = await acmeSignIn(({ acsUrl, audience, inResponseTo }) => ({
+    acsUrl,
+    audience,
+    inResponseTo,
+    nameId: email,
+    email,
+    injectBeforeFirstSignatureMethod:
+      '<é:SignatureMethod xmlns:é="http://www.w3.org/2000/09/xmldsig#" ' +
+      'Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>',
+  }));
+  const error = await assertRejected(acs, client, { newIdentityEmail: email });
+  assert.ok(
+    error?.includes(SSO_ERROR_CODES.samlAlgorithmNotAllowed),
+    `expected ${SSO_ERROR_CODES.samlAlgorithmNotAllowed}, got ${error}`,
+  );
+  assert.equal(
+    await memberCountIn(orgA, (await userRow(email))?.id ?? ""),
+    0,
+    "a rejected bypass grants no membership",
+  );
+}, 200_000);
+
 test("a Response delivered to a different provider's ACS is rejected", async () => {
   // A fully valid acme Response (its Recipient/Destination/Audience name acme's
   // SP), POSTed to the other provider's ACS endpoint.
@@ -711,4 +739,144 @@ test("a SAML group attribute maps an admin role through a role-managed provider"
   const row = await userRow(email);
   assert.ok(row, "expected the admin user to be created");
   assert.equal(await memberRoleIn(roleOrg, row.id), "admin");
+}, 200_000);
+
+// ── Providers registered with explicit fields, the way the settings UI does ──
+// (sso-provider-dialog.tsx buildBody(): samlConfig = { entryPoint, cert,
+// idpMetadata: { entityID }, wantAssertionsSigned: true }, cert as bare base64,
+// top-level issuer = SP entity id — never idpMetadata.metadata XML.)
+
+/** Register a provider exactly as the UI's buildBody() would for SAML. */
+async function registerSamlProviderExplicit(input: {
+  providerId: string;
+  issuer: string;
+  domain: string;
+  organizationId: string;
+  cert: string;
+}): Promise<void> {
+  const response = await ownerA.client.withFreshIp().jsonRequest("/sso/register", {
+    providerId: input.providerId,
+    domain: input.domain,
+    organizationId: input.organizationId,
+    issuer: input.issuer,
+    samlConfig: {
+      entryPoint: fixture.entryPoint,
+      cert: input.cert,
+      idpMetadata: { entityID: fixture.entityId },
+      wantAssertionsSigned: true,
+    },
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+}
+
+/** SP-initiate, build a correctly (or rogue-) signed response, POST to the ACS. */
+async function explicitSignIn(input: {
+  providerId: string;
+  issuer: string;
+  email: string;
+  signWith?: "idp" | "rogue";
+}): Promise<{ acs: Response; client: SsoTestClient }> {
+  const acsUrl = metadataAcsUrl(await providerMetadata(input.providerId));
+  const start = await startSamlSignIn({ email: input.email });
+  assert.equal(start.signIn.status, 200, await start.signIn.clone().text());
+  const samlResponse = fixture.buildResponse({
+    acsUrl,
+    audience: input.issuer,
+    inResponseTo: start.requestId!,
+    nameId: input.email,
+    email: input.email,
+    ...(input.signWith ? { signWith: input.signWith } : {}),
+  });
+  const acs = await postAcs(start.client, input.providerId, samlResponse);
+  return { acs, client: start.client };
+}
+
+async function freshExplicitProvider(input: {
+  name: string;
+  cert: string;
+}): Promise<{ providerId: string; issuer: string; organizationId: string; domain: string }> {
+  const organizationId = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+    name: input.name,
+  });
+  const providerId = `explicit-${input.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+  const domain = `${providerId}.example`;
+  const issuer = `https://sp.sourceweft.test/metadata?providerId=${providerId}`;
+  await registerSamlProviderExplicit({ providerId, issuer, domain, organizationId, cert: input.cert });
+  await setProviderDomainVerified(harness, providerId);
+  return { providerId, issuer, organizationId, domain };
+}
+
+test("a provider registered with explicit fields (bare base64 cert) verifies a signed response and joins the user", async () => {
+  const p = await freshExplicitProvider({ name: "Explicit Base64", cert: fixture.certBase64 });
+  const email = `user@${p.domain}`;
+  const { acs, client } = await explicitSignIn({ providerId: p.providerId, issuer: p.issuer, email });
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(errorParam(acs), null, `unexpected error: ${acs.headers.get("location")}`);
+  const row = await userRow(email);
+  assert.ok(row, "expected a user row");
+  assert.equal((await sessionUser(client))?.id, row.id);
+  assert.equal(await memberRoleIn(p.organizationId, row.id), "member");
+}, 200_000);
+
+test("a provider registered with the certificate as PEM (with headers) also verifies a signed response", async () => {
+  const p = await freshExplicitProvider({ name: "Explicit Pem", cert: fixture.cert });
+  const email = `user@${p.domain}`;
+  const { acs } = await explicitSignIn({ providerId: p.providerId, issuer: p.issuer, email });
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(errorParam(acs), null, `unexpected error: ${acs.headers.get("location")}`);
+  const row = await userRow(email);
+  assert.ok(row, "expected a user row");
+  assert.equal(await memberRoleIn(p.organizationId, row.id), "member");
+}, 200_000);
+
+test("a response signed by a different key is rejected for an explicit-fields provider", async () => {
+  const p = await freshExplicitProvider({ name: "Explicit Rogue", cert: fixture.certBase64 });
+  const email = `user@${p.domain}`;
+  const { acs, client } = await explicitSignIn({
+    providerId: p.providerId,
+    issuer: p.issuer,
+    email,
+    signWith: "rogue",
+  });
+  await assertRejected(acs, client, { newIdentityEmail: email });
+}, 200_000);
+
+test("updating only the SAML entryPoint keeps the stored certificate and entity ID working", async () => {
+  const p = await freshExplicitProvider({ name: "Explicit Update Entry", cert: fixture.certBase64 });
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId: p.providerId,
+    samlConfig: { entryPoint: `${fixture.entryPoint}/v2` },
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+
+  const email = `after-update@${p.domain}`;
+  const { acs, client } = await explicitSignIn({ providerId: p.providerId, issuer: p.issuer, email });
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(
+    errorParam(acs),
+    null,
+    `sign-in must still succeed after the entryPoint update: ${acs.headers.get("location")}`,
+  );
+  assert.equal((await sessionUser(client))?.id, (await userRow(email))?.id);
+}, 200_000);
+
+test("updating only idpMetadata.entityID does not drop the stored certificate", async () => {
+  const p = await freshExplicitProvider({ name: "Explicit Update Entity", cert: fixture.certBase64 });
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId: p.providerId,
+    samlConfig: { idpMetadata: { entityID: fixture.entityId } },
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+
+  const email = `after-entity-update@${p.domain}`;
+  const { acs, client } = await explicitSignIn({ providerId: p.providerId, issuer: p.issuer, email });
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(
+    errorParam(acs),
+    null,
+    `sign-in must still succeed after the idpMetadata update: ${acs.headers.get("location")}`,
+  );
+  assert.equal((await sessionUser(client))?.id, (await userRow(email))?.id);
 }, 200_000);

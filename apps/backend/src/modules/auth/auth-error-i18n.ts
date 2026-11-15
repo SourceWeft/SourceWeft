@@ -61,7 +61,7 @@ const ssoErrorMessagesZhTW: TranslationDictionary = {
   [SSO_ERROR_CODES.organizationRequired]: "單一登入只能為團隊設定。",
   [SSO_ERROR_CODES.providerLimit]: "該團隊的身分提供者數量已達上限（5 個）。",
   [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
-    "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，併傳送未加密的斷言。",
+    "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，並傳送未加密的斷言。",
 };
 
 // Traditional Chinese error messages. The official @better-auth/i18n plugin

@@ -85,6 +85,13 @@ export type SamlResponseInput = {
    * Assertions.
    */
   injectedAssertion?: { nameId: string; email: string };
+  /**
+   * Insert raw markup immediately before the first `SignatureMethod` element in
+   * the signed response (so it becomes the first by document order). Used to
+   * reproduce the non-ASCII-prefix bypass — a `SignatureMethod` an XML parser
+   * resolves by local name but a prefix-based scanner would miss.
+   */
+  injectBeforeFirstSignatureMethod?: string;
 };
 
 export type SamlIdpFixture = {
@@ -92,8 +99,10 @@ export type SamlIdpFixture = {
   entityId: string;
   /** The IdP Single Sign-On URL, for the provider's `entryPoint`. */
   entryPoint: string;
-  /** The IdP signing certificate (PEM), for `idpMetadata.cert`. */
+  /** The IdP signing certificate (PEM), for `idpMetadata.cert` or top-level `cert`. */
   cert: string;
+  /** The signing certificate as a bare base64 body (no PEM armor), as the UI sends it. */
+  certBase64: string;
   /** IdP metadata XML carrying the signing certificate, for `idpMetadata.metadata`. */
   metadataXml: string;
   /** Build a base64-encoded `SAMLResponse` for the ACS form POST. */
@@ -416,6 +425,14 @@ export function createSamlIdpFixture(): SamlIdpFixture {
       );
     }
 
+    if (input.injectBeforeFirstSignatureMethod !== undefined) {
+      const injection = input.injectBeforeFirstSignatureMethod;
+      finalXml = finalXml.replace(
+        /<(?:[^\s/>]+:)?SignatureMethod\b/,
+        (firstTag) => `${injection}${firstTag}`,
+      );
+    }
+
     if (input.injectedAssertion) {
       // Splice a second, unsigned Assertion in front of the (already signed) one.
       // The genuine assertion's enveloped signature stays valid over its own
@@ -442,5 +459,12 @@ export function createSamlIdpFixture(): SamlIdpFixture {
     return Buffer.from(finalXml, "utf8").toString("base64");
   }
 
-  return { entityId, entryPoint, cert: idpCert, metadataXml, buildResponse };
+  return {
+    entityId,
+    entryPoint,
+    cert: idpCert,
+    certBase64: samlify.Utility.toCertificateBody(idpCert),
+    metadataXml,
+    buildResponse,
+  };
 }
