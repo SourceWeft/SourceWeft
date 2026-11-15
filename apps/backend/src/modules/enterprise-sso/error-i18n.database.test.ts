@@ -49,16 +49,15 @@ async function wrongPasswordSignIn(headers: Record<string, string>) {
 }
 
 /**
- * A fresh anonymous request to `/sso/register` with a public email domain —
- * a guard (before-hook) rejection. Anonymous is deliberate: `handleRegister`
- * validates `organizationId`/domain before any admin-membership check the
- * plugin's own handler would otherwise perform, so no session is needed to
- * reach it, which keeps this comparable to the handler-level request above
- * without a cookie-jar/session-cookie collision.
+ * An AUTHENTICATED request to `/sso/register` with a public email domain — a
+ * guard (before-hook) rejection. The admin session is required because the guard
+ * now hands an unauthenticated caller straight to the plugin's 401 without
+ * running (so the domain rejection would never be reached anonymously); the
+ * locale headers still drive the guard's own localization, which is what these
+ * tests compare against the handler-level error.
  */
-async function anonymousGuardRejection(headers: Record<string, string>) {
-  const client = new SsoTestClient(harness.auth, harness.baseUrl);
-  return registerOidc(client, {
+async function authenticatedGuardRejection(headers: Record<string, string>) {
+  return registerOidc(owner.client.withFreshIp(), {
     organizationId: orgId,
     domain: "gmail.com",
     headers,
@@ -177,7 +176,7 @@ test("a guard error and a handler error resolve the SAME locale from Accept-Lang
   // "zh-TW" (Traditional) for this header, while the `i18n` plugin picked
   // the bare `zh` (Simplified) for the handler error — same request, two
   // different languages.
-  const { response: guardResponse } = await anonymousGuardRejection(headers);
+  const { response: guardResponse } = await authenticatedGuardRejection(headers);
   assert.equal(guardResponse.status, 400, await guardResponse.clone().text());
   const guardBody = await bodyOf(guardResponse);
   assert.equal(guardBody.code, SSO_ERROR_CODES.domainNotAllowed);
@@ -191,7 +190,7 @@ test("a guard error and a handler error resolve the SAME locale from Accept-Lang
 
 test("a guard error and a handler error both go Traditional with x-sw-locale: zh-TW", async () => {
   const headers = { [AUTH_LOCALE_HEADER]: "zh-TW" };
-  const { response: guardResponse } = await anonymousGuardRejection(headers);
+  const { response: guardResponse } = await authenticatedGuardRejection(headers);
   assert.equal(guardResponse.status, 400, await guardResponse.clone().text());
   const guardBody = await bodyOf(guardResponse);
   assert.equal(guardBody.code, SSO_ERROR_CODES.domainNotAllowed);
@@ -205,7 +204,7 @@ test("a guard error and a handler error both go Traditional with x-sw-locale: zh
 
 test("a guard error and a handler error both go Simplified with the sw_locale cookie (no header)", async () => {
   const headers = { cookie: `${AUTH_LOCALE_COOKIE}=zh-CN` };
-  const { response: guardResponse } = await anonymousGuardRejection(headers);
+  const { response: guardResponse } = await authenticatedGuardRejection(headers);
   assert.equal(guardResponse.status, 400, await guardResponse.clone().text());
   const guardBody = await bodyOf(guardResponse);
   assert.equal(guardBody.code, SSO_ERROR_CODES.domainNotAllowed);

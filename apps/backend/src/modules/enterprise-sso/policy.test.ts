@@ -4,6 +4,7 @@ import { SSO_ERROR_CODES } from "./errors";
 import {
   assertSsoDomainAllowed,
   isPublicEmailDomain,
+  isPublicSuffixDomain,
   normalizeSsoDomain,
   ssoDomainCandidates,
 } from "./policy";
@@ -43,6 +44,20 @@ test("isPublicEmailDomain recognizes shared consumer providers, not private ones
   expect(isPublicEmailDomain("acme.com")).toBe(false);
 });
 
+test("isPublicSuffixDomain rejects bare public and PRIVATE suffixes, not registrable names", () => {
+  for (const suffix of ["co.uk", "github.io", "herokuapp.com", "blogspot.com", "com"]) {
+    expect(isPublicSuffixDomain(suffix)).toBe(true);
+  }
+  for (const registrable of [
+    "acme.co.uk",
+    "acme.github.io",
+    "acme.com",
+    "mail.acme.com",
+  ]) {
+    expect(isPublicSuffixDomain(registrable)).toBe(false);
+  }
+});
+
 test("assertSsoDomainAllowed rejects a public email domain", async () => {
   await assert.rejects(
     assertSsoDomainAllowed(
@@ -50,6 +65,20 @@ test("assertSsoDomainAllowed rejects a public email domain", async () => {
       async () => [],
     ),
     hasDomainNotAllowedCode,
+  );
+});
+
+test("assertSsoDomainAllowed rejects a bare public suffix (incl. private)", async () => {
+  for (const suffix of ["co.uk", "github.io", "herokuapp.com", "blogspot.com"]) {
+    await assert.rejects(
+      assertSsoDomainAllowed({ domain: suffix, organizationId: "org-a" }, async () => []),
+      hasDomainNotAllowedCode,
+      suffix,
+    );
+  }
+  // A registrable name under a private suffix is allowed.
+  await assert.doesNotReject(
+    assertSsoDomainAllowed({ domain: "acme.github.io", organizationId: "org-a" }, async () => []),
   );
 });
 
@@ -151,4 +180,9 @@ test("ssoDomainCandidates walks parents up to the registrable domain", () => {
   ]);
   // Never ascends into the public suffix.
   assert.deepEqual(ssoDomainCandidates("gmail.com"), ["gmail.com"]);
+  // Stops before a PRIVATE public suffix (github.io), never ascending to it.
+  assert.deepEqual(ssoDomainCandidates("sub.acme.github.io"), [
+    "sub.acme.github.io",
+    "acme.github.io",
+  ]);
 });

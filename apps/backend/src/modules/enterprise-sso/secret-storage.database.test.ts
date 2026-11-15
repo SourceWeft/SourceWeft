@@ -89,7 +89,7 @@ async function registerProvider(
   organizationId: string,
   clientSecret: string | undefined,
 ) {
-  const providerId = `oidc-secret-${randomUUID()}`;
+  const providerId = `oidc-secret-${randomUUID().slice(0, 8)}`;
   const response = await jsonRequest("/sso/register", {
     providerId,
     issuer: "https://idp.example.com",
@@ -219,7 +219,7 @@ test("get and list responses expose neither the plaintext secret nor the ciphert
 
 test("register and update responses never include the client secret", async () => {
   const organizationId = await createOrganization();
-  const providerId = `oidc-secret-${randomUUID()}`;
+  const providerId = `oidc-secret-${randomUUID().slice(0, 8)}`;
 
   const registerResponse = await jsonRequest("/sso/register", {
     providerId,

@@ -67,7 +67,9 @@ async function sessionUser(
 }
 
 async function registerOidcProvider(domain: string): Promise<string> {
-  const id = `prov-oidc-${domain}-${Date.now()}`;
+  // Provider ids must match ^[a-z0-9-]{3,47}$ (the DNS TXT label budget), so the
+  // domain's dots are flattened to hyphens.
+  const id = `prov-oidc-${domain.replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`;
   const response = await owner.client.jsonRequest("/sso/register", {
     providerId: id,
     issuer: mock.issuer,

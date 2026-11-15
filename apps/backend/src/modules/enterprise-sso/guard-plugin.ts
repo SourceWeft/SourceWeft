@@ -1,5 +1,7 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import { parseCookies } from "better-auth/cookies";
+import { logger } from "../../shared/logger";
 import { authErrorTranslations, resolveGuardErrorLocale } from "../auth/auth-error-i18n";
 import {
   recordSsoProviderChangeAfterHook,
@@ -17,32 +19,47 @@ import {
 } from "./policy";
 import { assertSamlResponseAlgorithmsAllowed } from "./saml-algorithm-policy";
 import { validateRoleAttribute } from "./role-mapping";
+import {
+  recordSsoCreatedUser,
+  recordSsoSignInSession,
+} from "./sso-sign-in-capture";
 
 /**
- * Tenant-policy guard for `@better-auth/sso` provider registration, updates,
- * domain verification and email-based sign-in routing.
+ * Tenant-policy guard for `@better-auth/sso`, wired in next to the plugin from
+ * sso-plugin.ts. The official plugin already rejects non-members (400) and
+ * non-admins (403), hides other organizations' providers, and SSRF-checks OIDC
+ * endpoints. This guard adds the SourceWeft rules the plugin cannot know, maps
+ * the plugin's own errors to localized codes, and records the per-request facts
+ * provisioning needs:
  *
- * The official plugin already rejects non-members (400) and non-admins (403),
- * hides other organizations' providers, and SSRF-checks OIDC endpoints. This
- * guard adds the SourceWeft multi-tenant rules the plugin cannot know:
+ *  - register/update (before-hook): a provider id must match
+ *    {@link PROVIDER_ID_PATTERN}; a provider must belong to a `team`
+ *    organization; its domain is normalized, must be private (no public mailbox
+ *    provider, no bare public suffix), unique within its organization, and not
+ *    verified by another organization. A team is capped at
+ *    {@link MAX_PROVIDERS_PER_ORGANIZATION} providers; a SAML provider always
+ *    stores `wantAssertionsSigned: true`; a role attribute is carried into the
+ *    config's mapping (seeded from the stored mapping on a partial update). An
+ *    unauthenticated caller is handed straight to the plugin's 401.
+ *  - verify-domain (before-hook): a domain already verified by another
+ *    organization cannot be verified again; a partial unique index backstops the
+ *    check against races (see {@link VERIFIED_DOMAIN_UNIQUE_INDEX}).
+ *  - sign-in (before-hook): an `organizationSlug` with no providerId resolves to
+ *    the org's single verified provider; otherwise email/domain sign-in routes to
+ *    the exact verified provider, else the nearest verified parent domain, making
+ *    unverified squatter rows invisible. No match is a 404.
+ *  - SAML ACS (before-hook): a response declaring a disallowed signature/digest
+ *    algorithm, or an encrypted assertion, is rejected before the plugin verifies
+ *    it (see ./saml-algorithm-policy.ts).
+ *  - delete (before-hook): snapshots the row for the audit after-hook.
+ *  - after-hooks: record the provider-lifecycle audit entry (best-effort), and
+ *    map the plugin's own sign-in / identity-locked errors onto localized codes.
+ *  - init: installs the verified-domain unique-violation adapter wrapper, marks
+ *    an SSO-created user email-verified, and captures (for ./provisioning.ts)
+ *    which user/session this sign-in created.
  *
- *  - register/update: a provider must belong to a `team` organization; its
- *    domain is normalized, must be private (no public mailbox provider), must be
- *    unique within its organization, and must not be verified by another
- *    organization (an unverified claim by another org does not block — ownership
- *    is established by verification). A team is capped at
- *    {@link MAX_PROVIDERS_PER_ORGANIZATION} providers, and a SAML provider always
- *    stores `wantAssertionsSigned: true`.
- *  - verify-domain: a domain already verified by another organization cannot be
- *    verified again. A partial unique index backstops the check against races;
- *    its violation is mapped to a clean `SSO_DOMAIN_NOT_ALLOWED` (see
- *    {@link VERIFIED_DOMAIN_UNIQUE_INDEX}).
- *  - sign-in: email/domain sign-in is routed to the exact verified provider,
- *    else the nearest verified parent domain, making unverified squatter rows
- *    invisible. No verified match is a 404 `SSO_PROVIDER_NOT_FOUND`.
- *
- * Rejections throw a better-auth `APIError` whose JSON body `code` is the
- * matching {@link SSO_ERROR_CODES} value.
+ * Before-hook rejections throw a better-auth `APIError` whose JSON body `code` is
+ * the matching {@link SSO_ERROR_CODES} value, localized in place.
  */
 
 const REGISTER_PATH = "/sso/register";
@@ -62,6 +79,7 @@ const SIGN_IN_PATH = "/sign-in/sso";
  */
 const SAML_ACS_PATH = "/sso/saml2/sp/acs/:providerId";
 const SSO_PROVIDER_MODEL = "ssoProvider";
+const SSO_PROVIDER_ORGANIZATION_MODEL = "organization";
 
 /**
  * The SSO sign-in callback / SAML ACS routes. Membership provisioning runs after
@@ -80,7 +98,9 @@ function isSsoCallbackPath(path: unknown): boolean {
   return typeof path === "string" && SSO_CALLBACK_PATHS.has(path);
 }
 
-/** Reserved OIDC/SAML mapping keys reused as role claims, for the SAML name default. */
+// Default profile-mapping claim names, used to fill `mapping.email`/`mapping.name`
+// when a before-hook injects a role claim into a config that carried no mapping,
+// so the plugin's (strict) mapping schema still validates.
 const SAML_NAME_MAPPING_DEFAULT = "displayName";
 const OIDC_NAME_MAPPING_DEFAULT = "name";
 const EMAIL_MAPPING_DEFAULT = "email";
@@ -90,6 +110,15 @@ const EMAIL_MAPPING_DEFAULT = "email";
  * caps providers per registering user; this caps them per tenant.
  */
 export const MAX_PROVIDERS_PER_ORGANIZATION = 5;
+
+/**
+ * Allowed provider-id shape at registration. The domain-verification TXT record
+ * is `_sourceweft-sso-<providerId>` (a 16-char prefix), and a DNS label caps at
+ * 63 chars, so an id over 47 chars could never be verified. The label charset is
+ * also narrower than a general string, so we fix it to lowercase letters, digits
+ * and hyphens. The provider id is immutable, so this is enforced at creation.
+ */
+export const PROVIDER_ID_PATTERN = /^[a-z0-9-]{3,47}$/;
 
 /**
  * Name of the partial unique index (added by a SQL migration) that enforces one
@@ -114,6 +143,37 @@ type GuardAdapter = {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * The context slice the unauthenticated-shortcut reads: the request headers and
+ * the configured session-cookie name.
+ */
+type SessionAwareCtx = {
+  headers?: Headers | null;
+  context: { authCookies?: { sessionToken?: { name?: string } } };
+};
+
+/**
+ * Whether the request carries a session cookie at all. The admin SSO endpoints
+ * (register / update / delete / verify-domain) all use the plugin's
+ * `sessionMiddleware` and 401 an unauthenticated caller, so when no session
+ * cookie is present the guard returns early instead of running its DB reads and
+ * (for update) decrypting the stored client secret for a request the plugin will
+ * reject anyway. A present-but-invalid cookie still proceeds — the plugin 401s
+ * it — so this only shortcuts the clearly-anonymous case, and does so with no DB
+ * read. If the cookie name cannot be determined, the guard proceeds as before.
+ */
+function hasSessionCookie(ctx: SessionAwareCtx): boolean {
+  const name = ctx.context.authCookies?.sessionToken?.name;
+  if (!name) {
+    return true;
+  }
+  const cookieHeader = ctx.headers?.get("cookie");
+  if (!cookieHeader) {
+    return false;
+  }
+  return parseCookies(cookieHeader).has(name);
 }
 
 function toDomainRow(row: Record<string, unknown>): SsoProviderDomainRow {
@@ -221,6 +281,29 @@ function withRoleExtraField(
   };
 }
 
+/**
+ * When an update body carries a provider config but no `mapping`, seed the
+ * mapping from the STORED config's mapping before the role claim is injected. The
+ * plugin merges a provider config's mapping whole (`updates.mapping ??
+ * current.mapping`), so a combined update like `{ oidcConfig: { scopes },
+ * roleAttribute }` — which {@link withRoleExtraField} would otherwise turn into a
+ * defaults-only mapping — would drop a custom `mapping.email`/`name` set earlier.
+ * An explicit `mapping` in the body wins.
+ */
+function seedMappingFromStored(
+  bodyConfig: Record<string, unknown>,
+  storedConfig: unknown,
+): Record<string, unknown> {
+  if (bodyConfig.mapping && typeof bodyConfig.mapping === "object") {
+    return bodyConfig;
+  }
+  const stored = storedConfigMapping(storedConfig);
+  if (Object.keys(stored).length === 0) {
+    return bodyConfig;
+  }
+  return { ...bodyConfig, mapping: stored };
+}
+
 /** The `mapping` object stored inside a provider's oidcConfig/samlConfig column. */
 function storedConfigMapping(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -272,6 +355,10 @@ async function handleRegister(
   adapter: GuardAdapter,
 ) {
   const body = ctx.body as Record<string, unknown>;
+  const providerId = asString(body.providerId);
+  if (!providerId || !PROVIDER_ID_PATTERN.test(providerId)) {
+    throw ssoError(SSO_ERROR_CODES.invalidProviderId, "BAD_REQUEST");
+  }
   const organizationId = asString(body.organizationId);
   if (!organizationId) {
     throw ssoError(SSO_ERROR_CODES.organizationRequired, "BAD_REQUEST");
@@ -342,13 +429,19 @@ async function handleUpdate(
     });
     if (body.oidcConfig && typeof body.oidcConfig === "object") {
       nextBody.oidcConfig = withRoleExtraField(
-        body.oidcConfig as Record<string, unknown>,
+        seedMappingFromStored(
+          body.oidcConfig as Record<string, unknown>,
+          current?.oidcConfig,
+        ),
         roleAttribute,
         "oidc",
       );
     } else if (body.samlConfig && typeof body.samlConfig === "object") {
       nextBody.samlConfig = withRoleExtraField(
-        body.samlConfig as Record<string, unknown>,
+        seedMappingFromStored(
+          body.samlConfig as Record<string, unknown>,
+          current?.samlConfig,
+        ),
         roleAttribute,
         "saml",
       );
@@ -417,9 +510,15 @@ async function handleSignInRouting(
   if (!body) {
     return;
   }
-  // Only resolve when the caller did not name a provider or organization.
-  if (asString(body.providerId) || asString(body.organizationSlug)) {
+  // The caller named a provider directly: nothing to resolve.
+  if (asString(body.providerId)) {
     return;
+  }
+  // A slug with no providerId: resolve it to the org's single verified provider,
+  // so the plugin never picks an arbitrary or unverified row for the slug.
+  const organizationSlug = asString(body.organizationSlug);
+  if (organizationSlug) {
+    return resolveSlugToVerifiedProvider(body, organizationSlug, adapter);
   }
   const raw = asString(body.domain) ?? emailDomain(asString(body.email));
   if (!raw) {
@@ -456,6 +555,47 @@ async function handleSignInRouting(
   }
 
   throw ssoError(SSO_ERROR_CODES.providerNotFound, "NOT_FOUND");
+}
+
+/**
+ * Resolve `/sign-in/sso` with an `organizationSlug` and no `providerId` to the
+ * organization's single VERIFIED provider. Given only a slug, the plugin would
+ * select the first `ssoProvider` row for the org — possibly unverified, and
+ * arbitrary among several — so the guard decides it instead: exactly one
+ * verified provider routes to it; an unknown slug, or zero or several verified
+ * providers, is a 404 `SSO_PROVIDER_NOT_FOUND` (the web then falls back to the
+ * email form).
+ */
+async function resolveSlugToVerifiedProvider(
+  body: Record<string, unknown>,
+  organizationSlug: string,
+  adapter: GuardAdapter,
+) {
+  const organization = await adapter.findOne({
+    model: SSO_PROVIDER_ORGANIZATION_MODEL,
+    where: [{ field: "slug", value: organizationSlug }],
+    select: ["id"],
+  });
+  const organizationId = organization ? asString(organization.id) : null;
+  if (!organizationId) {
+    throw ssoError(SSO_ERROR_CODES.providerNotFound, "NOT_FOUND");
+  }
+  const verified = await adapter.findMany({
+    model: SSO_PROVIDER_MODEL,
+    where: [
+      { field: "organizationId", value: organizationId },
+      { field: "domainVerified", value: true },
+    ],
+    select: ["providerId"],
+  });
+  if (verified.length !== 1) {
+    throw ssoError(SSO_ERROR_CODES.providerNotFound, "NOT_FOUND");
+  }
+  return {
+    context: {
+      body: { ...body, providerId: String(verified[0]!.providerId) },
+    },
+  };
 }
 
 /**
@@ -504,6 +644,27 @@ function mapSignInSsoPluginError(ctx: AfterHookCtx): void {
   }
   if (returned.message === PLUGIN_SIGN_IN_DOMAIN_NOT_VERIFIED_MESSAGE) {
     throw ssoError(SSO_ERROR_CODES.domainNotVerified, "UNAUTHORIZED");
+  }
+}
+
+/**
+ * The plugin's own 409 when an update changes a provider's identity fields
+ * (issuer, OIDC client id/endpoints, SAML certificate / entity id / sign-on URL)
+ * after any account has linked through it (dist index.mjs ~L2428). It carries a
+ * message but no `code`, so — like the sign-in errors above — the guard's
+ * after-hook re-throws it under {@link SSO_ERROR_CODES.providerIdentityLocked}
+ * (also a 409, so the status is unchanged) and the i18n plugin localizes it.
+ */
+const PLUGIN_UPDATE_IDENTITY_LOCKED_MESSAGE =
+  "Cannot change SSO provider identity fields while linked accounts exist";
+
+function mapUpdateProviderIdentityLock(ctx: AfterHookCtx): void {
+  const returned = ctx.context.returned;
+  if (
+    returned instanceof APIError &&
+    returned.message === PLUGIN_UPDATE_IDENTITY_LOCKED_MESSAGE
+  ) {
+    throw ssoError(SSO_ERROR_CODES.providerIdentityLocked, "CONFLICT");
   }
 }
 
@@ -675,6 +836,7 @@ function markSsoCreatedUserVerified(
  */
 function assertSamlAcsAlgorithms(ctx: {
   body?: { SAMLResponse?: unknown } | null;
+  params?: { providerId?: unknown };
 }): void {
   const samlResponse = ctx.body?.SAMLResponse;
   if (samlResponse === undefined || samlResponse === null) {
@@ -682,6 +844,12 @@ function assertSamlAcsAlgorithms(ctx: {
   }
   const result = assertSamlResponseAlgorithmsAllowed(samlResponse);
   if (!result.ok) {
+    // The reason is a closed enum of policy codes — never claim or assertion
+    // content — so it is safe to log alongside the provider id.
+    logger.warn("sso_saml_algorithm_rejected", {
+      providerId: asString(ctx.params?.providerId) ?? undefined,
+      reason: result.reason,
+    });
     throw ssoErrorRedirect(SSO_ERROR_CODES.samlAlgorithmNotAllowed, result.reason);
   }
 }
@@ -702,6 +870,42 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
                   user: { emailVerified?: unknown },
                   context: { path?: unknown } | null,
                 ) => markSsoCreatedUserVerified(user, context),
+                // Record that THIS sign-in created the user row, so provisioning
+                // can set the `sso.sign_in` audit's `isNewUser` correctly even
+                // when the plugin signs an existing SSO account in under a
+                // changed IdP email. Runs (and is awaited) after the sign-in
+                // transaction commits but before `provisionUser`.
+                after: async (
+                  user: { id?: unknown },
+                  context: { path?: unknown } | null,
+                ) => {
+                  if (isSsoCallbackPath(context?.path) && asString(user.id)) {
+                    recordSsoCreatedUser(String(user.id));
+                  }
+                },
+              },
+            },
+            session: {
+              create: {
+                // Capture the exact session this sign-in created, so a failed
+                // membership step revokes only it (never an older session the
+                // user already held). Only SSO-callback sessions are captured;
+                // a concurrent password sign-in's session is on another path.
+                after: async (
+                  session: { id?: unknown; userId?: unknown },
+                  context: { path?: unknown } | null,
+                ) => {
+                  if (
+                    isSsoCallbackPath(context?.path) &&
+                    asString(session.userId) &&
+                    asString(session.id)
+                  ) {
+                    recordSsoSignInSession(
+                      String(session.userId),
+                      String(session.id),
+                    );
+                  }
+                },
               },
             },
           },
@@ -713,8 +917,13 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
         {
           matcher: (context) =>
             context.path === REGISTER_PATH || context.path === UPDATE_PATH,
-          handler: createAuthMiddleware(async (ctx) =>
-            withLocalizedGuardErrors(ctx.headers, async () => {
+          handler: createAuthMiddleware(async (ctx) => {
+            // Unauthenticated: the plugin answers 401; do no DB reads or secret
+            // decryption here.
+            if (!hasSessionCookie(ctx)) {
+              return;
+            }
+            return withLocalizedGuardErrors(ctx.headers, async () => {
               if (!ctx.body) {
                 return;
               }
@@ -722,17 +931,20 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
               return ctx.path === REGISTER_PATH
                 ? handleRegister(ctx, adapter)
                 : handleUpdate(ctx, adapter);
-            }),
-          ),
+            });
+          }),
         },
         {
           matcher: (context) => context.path === VERIFY_DOMAIN_PATH,
-          handler: createAuthMiddleware(async (ctx) =>
-            withLocalizedGuardErrors(ctx.headers, async () => {
+          handler: createAuthMiddleware(async (ctx) => {
+            if (!hasSessionCookie(ctx)) {
+              return;
+            }
+            return withLocalizedGuardErrors(ctx.headers, async () => {
               const adapter = ctx.context.adapter as unknown as GuardAdapter;
               return handleVerifyDomain(ctx, adapter);
-            }),
-          ),
+            });
+          }),
         },
         {
           matcher: (context) => context.path === SIGN_IN_PATH,
@@ -749,7 +961,12 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
           // not enforce the algorithm on the POST binding.
           matcher: (context) => context.path === SAML_ACS_PATH,
           handler: createAuthMiddleware(async (ctx) => {
-            assertSamlAcsAlgorithms(ctx as { body?: { SAMLResponse?: unknown } });
+            assertSamlAcsAlgorithms(
+              ctx as {
+                body?: { SAMLResponse?: unknown };
+                params?: { providerId?: unknown };
+              },
+            );
           }),
         },
         {
@@ -757,6 +974,9 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
           // so snapshot it here for the audit log (see ./audit.ts).
           matcher: (context) => context.path === DELETE_PATH,
           handler: createAuthMiddleware(async (ctx) => {
+            if (!hasSessionCookie(ctx)) {
+              return;
+            }
             const providerId = asString(ctx.body?.providerId);
             if (!providerId) {
               return;
@@ -772,12 +992,28 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
             !!context.path &&
             (SSO_AUDIT_PATHS as readonly string[]).includes(context.path),
           handler: createAuthMiddleware(async (ctx) => {
-            await recordSsoProviderChangeAfterHook(ctx);
+            // Best-effort: the register/update/delete/verify has already
+            // committed, so an audit-write failure must not turn it into a 500.
+            try {
+              await recordSsoProviderChangeAfterHook(ctx);
+            } catch (error) {
+              logger.error("sso_provider_change_audit_failed", {
+                path: ctx.path,
+                reason: "audit_failed",
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
           }),
         },
         {
           matcher: (context) => context.path === SIGN_IN_PATH,
           handler: createAuthMiddleware(async (ctx) => mapSignInSsoPluginError(ctx)),
+        },
+        {
+          matcher: (context) => context.path === UPDATE_PATH,
+          handler: createAuthMiddleware(async (ctx) =>
+            mapUpdateProviderIdentityLock(ctx),
+          ),
         },
       ],
     },

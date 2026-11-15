@@ -33,8 +33,10 @@ const ASCII_HOSTNAME_PATTERN =
  * encodes internationalized labels (`bücher.example` → `xn--bcher-kva.example`).
  *
  * A subdomain is preserved as written — `mail.acme.com` never collapses to
- * `acme.com` — because the parent's verification must not be treated as
- * covering a subdomain (plan Review Focus 3).
+ * `acme.com` — so domain *uniqueness* is judged on the exact label a tenant
+ * registers (one tenant owning `acme.com` does not reserve `mail.acme.com` for
+ * itself through normalization). Sign-in routing, separately, does trust a
+ * verified parent for its subdomains (see {@link ssoDomainCandidates}).
  *
  * Throws {@link SSO_ERROR_CODES.domainNotAllowed} for anything that is not a
  * bare multi-label hostname: empty input, embedded paths/ports/spaces
@@ -70,6 +72,21 @@ export function isPublicEmailDomain(domain: string): boolean {
   return PUBLIC_EMAIL_DOMAINS.has(domain.toLowerCase());
 }
 
+/**
+ * Whether `domain` is itself a public suffix — a shared registration point
+ * under which anyone can create names (`co.uk`, `github.io`, `herokuapp.com`,
+ * `blogspot.com`), including the PRIVATE suffixes the Public Suffix List marks.
+ * A provider verified for such a suffix would, through sign-in's parent-domain
+ * trust, be trusted for every subdomain anyone else could register under it, so
+ * these can never be claimed. `tldts` with `allowPrivateDomains: true` reports no
+ * registrable domain for a bare public (or private) suffix.
+ *
+ * `domain` must already be normalized via {@link normalizeSsoDomain}.
+ */
+export function isPublicSuffixDomain(domain: string): boolean {
+  return parseDomain(domain, { allowPrivateDomains: true }).domain === null;
+}
+
 /** One `ssoProvider` row relevant to domain-uniqueness checks. */
 export type SsoProviderDomainRow = {
   providerId: string;
@@ -92,15 +109,18 @@ export type SsoProviderDomainLookup = (
  *
  * Rejects (with {@link SSO_ERROR_CODES.domainNotAllowed}):
  *  - a public mailbox domain;
+ *  - a bare public suffix (`co.uk`, `github.io`, …; see
+ *    {@link isPublicSuffixDomain});
  *  - a domain that already has a provider in the *same* organization (sign-in
  *    routes by domain, so one provider per domain per org);
  *  - a domain owned by a *verified* provider of another organization.
  *
  * An *unverified* claim by another organization does **not** block: ownership
  * is only established by verification, so an unverified squatter cannot stop the
- * real owner from registering and verifying the domain. Domain identity is
- * exact: `acme.com` and `mail.acme.com` are distinct (plan Review Focus 3). The
- * provider named by `excludeProviderId` (the row being updated) is skipped.
+ * real owner from registering and verifying the domain. Uniqueness is judged on
+ * the exact label: `acme.com` and `mail.acme.com` are distinct here (sign-in
+ * routing separately trusts a verified parent for a subdomain). The provider
+ * named by `excludeProviderId` (the row being updated) is skipped.
  *
  * `domain` must already be normalized via {@link normalizeSsoDomain}.
  */
@@ -108,7 +128,7 @@ export async function assertSsoDomainAllowed(
   input: { domain: string; organizationId: string; excludeProviderId?: string },
   lookup: SsoProviderDomainLookup,
 ): Promise<void> {
-  if (isPublicEmailDomain(input.domain)) {
+  if (isPublicEmailDomain(input.domain) || isPublicSuffixDomain(input.domain)) {
     throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
   }
 
@@ -136,14 +156,16 @@ export async function assertSsoDomainAllowed(
  * The domain itself, then each parent domain up to (and including) the
  * registrable domain, in nearest-first order. Used to route email-based SSO
  * sign-in: an exact verified match is preferred, then the nearest verified
- * parent. The walk stops at the registrable domain (`tldts`), so it never
- * ascends into a public suffix (`com`, `co.uk`, `example`).
+ * parent. The walk stops at the registrable domain (`tldts`, with
+ * `allowPrivateDomains: true`), so it never ascends into a public suffix —
+ * neither an ICANN one (`com`, `co.uk`) nor a PRIVATE one (`github.io`,
+ * `herokuapp.com`), under which anyone can register a sibling name.
  *
  * `domain` must already be normalized via {@link normalizeSsoDomain}.
  */
 export function ssoDomainCandidates(domain: string): string[] {
   const candidates = [domain];
-  const registrable = parseDomain(domain).domain;
+  const registrable = parseDomain(domain, { allowPrivateDomains: true }).domain;
   if (!registrable || registrable === domain) {
     return candidates;
   }

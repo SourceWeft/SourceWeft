@@ -127,6 +127,26 @@ async function signInByEmail(email: string) {
   });
 }
 
+/** POST /sign-in/sso with only an organizationSlug. */
+async function signInBySlug(organizationSlug: string) {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  return client.jsonRequest("/sign-in/sso", {
+    organizationSlug,
+    callbackURL: "https://app.example.com/after",
+  });
+}
+
+/** The slug createOrganization stamped on an org. */
+async function orgSlug(organizationId: string): Promise<string> {
+  const result = await harness.schema.database.query<{ slug: string }>(
+    `select slug from organization where id = $1`,
+    [organizationId],
+  );
+  const slug = result.rows[0]?.slug;
+  assert.ok(slug, `expected a slug for ${organizationId}`);
+  return slug;
+}
+
 /** The client_id query param of the authorization URL a sign-in redirects to. */
 async function routedClientId(response: Response): Promise<string | null> {
   const body = (await response.clone().json()) as { url?: string };
@@ -516,4 +536,122 @@ test("email sign-in with a public email domain is a 404", async () => {
   const response = await signInByEmail("user@gmail.com");
   assert.equal(response.status, 404, await response.clone().text());
   assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
+}, 200_000);
+
+// ── Public suffixes (R6) ────────────────────────────────────────────────────
+
+test("a bare public suffix is rejected at registration, including a PRIVATE one", async () => {
+  for (const domain of ["co.uk", "github.io", "herokuapp.com", "blogspot.com"]) {
+    const { response } = await registerOidc(ownerA.client, { organizationId: orgA, domain });
+    assert.equal(response.status, 400, `${domain}: ${await response.clone().text()}`);
+    assert.equal(await codeOf(response), SSO_ERROR_CODES.domainNotAllowed);
+  }
+}, 200_000);
+
+test("a registrable domain under a private suffix is accepted", async () => {
+  const org = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "team" });
+  for (const domain of ["acme.co.uk", "acme.github.io"]) {
+    const { response } = await registerOidc(ownerA.client, { organizationId: org, domain });
+    assert.equal(response.status, 200, `${domain}: ${await response.clone().text()}`);
+  }
+}, 200_000);
+
+// ── Provider id shape (R7) ──────────────────────────────────────────────────
+
+test("a provider id outside ^[a-z0-9-]{3,47}$ is rejected", async () => {
+  for (const providerId of [
+    "ab",
+    "a".repeat(48),
+    "Has-Upper",
+    "has.dot",
+    "under_score",
+    "white space",
+  ]) {
+    const response = await ownerA.client.withFreshIp().jsonRequest("/sso/register", {
+      ...oidcRegistration({ organizationId: orgA, domain: uniqueDomain() }),
+      providerId,
+    });
+    assert.equal(response.status, 400, `${providerId}: ${await response.clone().text()}`);
+    assert.equal(await codeOf(response), SSO_ERROR_CODES.invalidProviderId);
+  }
+}, 200_000);
+
+// ── Slug-based sign-in routing (R8) ─────────────────────────────────────────
+
+test("sign-in by slug routes to the org's single verified provider", async () => {
+  const org = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "team" });
+  await registerVerified(ownerA.client, {
+    organizationId: org,
+    domain: uniqueDomain(),
+    clientId: "cid-slug-one",
+  });
+  const response = await signInBySlug(await orgSlug(org));
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(await routedClientId(response), "cid-slug-one");
+}, 300_000);
+
+test("sign-in by slug routes to the verified provider when a pending one also exists", async () => {
+  const org = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "team" });
+  await registerVerified(ownerA.client, {
+    organizationId: org,
+    domain: uniqueDomain(),
+    clientId: "cid-slug-verified",
+  });
+  const pending = await registerOidc(ownerA.client, {
+    organizationId: org,
+    domain: uniqueDomain(),
+    clientId: "cid-slug-pending",
+  });
+  assert.equal(pending.response.status, 200, await pending.response.clone().text());
+  const response = await signInBySlug(await orgSlug(org));
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(await routedClientId(response), "cid-slug-verified");
+}, 300_000);
+
+test("sign-in by slug with two verified providers is a 404", async () => {
+  const org = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "team" });
+  await registerVerified(ownerA.client, {
+    organizationId: org,
+    domain: uniqueDomain(),
+    clientId: "cid-slug-two-a",
+  });
+  await registerVerified(ownerA.client, {
+    organizationId: org,
+    domain: uniqueDomain(),
+    clientId: "cid-slug-two-b",
+  });
+  const response = await signInBySlug(await orgSlug(org));
+  assert.equal(response.status, 404, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
+}, 300_000);
+
+test("sign-in by slug with no verified provider is a 404", async () => {
+  const org = await createOrganization(harness, { ownerUserId: ownerA.userId, kind: "team" });
+  const pending = await registerOidc(ownerA.client, {
+    organizationId: org,
+    domain: uniqueDomain(),
+  });
+  assert.equal(pending.response.status, 200, await pending.response.clone().text());
+  const response = await signInBySlug(await orgSlug(org));
+  assert.equal(response.status, 404, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
+}, 200_000);
+
+test("sign-in by an unknown slug is a 404", async () => {
+  const response = await signInBySlug("team-does-not-exist");
+  assert.equal(response.status, 404, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
+}, 200_000);
+
+// ── Unauthenticated admin endpoints go straight to the plugin's 401 (R12) ───
+
+test("an unauthenticated register is a 401, not a guard rejection", async () => {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  const response = await client.jsonRequest(
+    "/sso/register",
+    oidcRegistration({ organizationId: orgA, domain: "gmail.com" }),
+  );
+  // No session cookie → the guard returns early and the plugin answers 401,
+  // even though the domain (gmail.com) would otherwise be a guard rejection.
+  assert.equal(response.status, 401, await response.clone().text());
 }, 200_000);

@@ -2,9 +2,11 @@ import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
 
 /**
- * Error codes for enterprise SSO (OIDC + SAML for team organizations).
- * Declared here so later tasks (guards, provisioning, UI) share one catalog;
- * this task only registers the plugin and does not throw any of these yet.
+ * Error codes for enterprise SSO (OIDC + SAML for team organizations). This one
+ * catalog is shared by every throw site in the module — the guard before-hooks
+ * (`guard-plugin.ts`, `policy.ts`), the sign-in resolver and provisioning
+ * (`provisioning.ts`) and the SAML algorithm policy — so a code and its English
+ * message are defined in exactly one place ({@link SSO_ERROR_MESSAGES_EN}).
  */
 export const SSO_ERROR_CODES = {
   providerNotFound: "SSO_PROVIDER_NOT_FOUND",
@@ -13,18 +15,27 @@ export const SSO_ERROR_CODES = {
   accountLinkDenied: "SSO_ACCOUNT_LINK_DENIED",
   seatLimit: "SSO_SEAT_LIMIT",
   // The membership step failed after the session was created for a reason other
-  // than a seat limit (e.g. addMember threw); the sign-in is rolled back.
+  // than a seat limit (e.g. addMember threw); only the created session is
+  // revoked and the sign-in is redirected to the error page.
   provisioningFailed: "SSO_PROVISIONING_FAILED",
   // A provider was registered/updated with a role attribute that collides with a
   // reserved profile-mapping key or is otherwise unusable.
   invalidRoleAttribute: "SSO_INVALID_ROLE_ATTRIBUTE",
+  // A provider id outside `^[a-z0-9-]{3,47}$` was submitted at registration; a
+  // longer id would overflow the `_sourceweft-sso-<providerId>` DNS TXT label.
+  invalidProviderId: "SSO_INVALID_PROVIDER_ID",
   organizationRequired: "SSO_ORGANIZATION_REQUIRED",
-  // Per-organization provider cap (Task 3's guard); providersLimit on the
-  // plugin itself enforces the per-user cap registered in this task.
+  // Per-organization provider cap (the guard); providersLimit on the plugin
+  // itself enforces the per-user cap.
   providerLimit: "SSO_PROVIDER_LIMIT",
+  // An update tried to change a provider's identity fields (issuer, OIDC client
+  // id/endpoints, SAML certificate / entity id / sign-on URL) after at least one
+  // account had already linked through it; the plugin answers 409 and the guard
+  // surfaces it under this code.
+  providerIdentityLocked: "SSO_PROVIDER_IDENTITY_LOCKED",
   // A SAML response declared a signature or digest algorithm outside the
   // allow-list (SHA-1 and friends), or an encrypted assertion, so the guard's
-  // algorithm policy rejected it before the plugin could verify it (Task 6).
+  // algorithm policy rejected it before the plugin could verify it.
   samlAlgorithmNotAllowed: "SSO_SAML_ALGORITHM_NOT_ALLOWED",
 } as const;
 
@@ -55,10 +66,14 @@ export const SSO_ERROR_MESSAGES_EN: Record<SsoErrorCode, string> = {
     "We couldn't add you to your team. Try again, or contact your administrator.",
   [SSO_ERROR_CODES.invalidRoleAttribute]:
     "This role attribute name can't be used. Choose a different attribute.",
+  [SSO_ERROR_CODES.invalidProviderId]:
+    "Provider IDs use 3–47 lowercase letters, digits and hyphens.",
   [SSO_ERROR_CODES.organizationRequired]:
     "Single sign-on can only be set up for a team.",
   [SSO_ERROR_CODES.providerLimit]:
     "This team has reached the limit of 5 identity providers.",
+  [SSO_ERROR_CODES.providerIdentityLocked]:
+    "These settings can't be changed after members have signed in with this provider. To change them, delete the provider and add it again.",
   [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
     "Your identity provider's SAML response uses signature settings that aren't supported. Ask your administrator to sign with SHA-256 and to send unencrypted assertions.",
 };
