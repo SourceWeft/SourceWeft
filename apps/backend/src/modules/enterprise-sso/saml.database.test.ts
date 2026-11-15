@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
-import { afterAll, beforeAll, test } from "vitest";
+import { afterAll, beforeAll, test, vi } from "vitest";
+import { BillingError } from "@sourceweft/contracts/billing-runtime";
+import { billingOrganizationHooks } from "../../billing-host/bindings";
 import { config } from "../../shared/config";
 import {
   createSamlIdpFixture,
@@ -785,6 +787,261 @@ test("a SAML group attribute maps an admin role through a role-managed provider"
   assert.equal(await memberRoleIn(roleOrg, row.id), "admin");
 }, 200_000);
 
+// ── Item 1 / Item 4 (SAML): the single-connection guarantee, role claims across
+//    mapping updates, user-column safety, and failed-membership revocation ──────
+
+async function samlUserColumn(userId: string, column: string): Promise<unknown> {
+  const result = await harness.schema.database.query<Record<string, unknown>>(
+    `select "${column}" as value from "user" where id = $1`,
+    [userId],
+  );
+  return result.rows[0]?.value ?? null;
+}
+
+function spySamlSeatLimit() {
+  return vi
+    .spyOn(billingOrganizationHooks, "beforeAddMember")
+    .mockImplementation(async () => {
+      throw new BillingError(
+        "TEAM_SEAT_LIMIT_REACHED",
+        409,
+        "No team seats are available.",
+      );
+    });
+}
+
+function samlMappingExtraFields(
+  config: string | null,
+): Record<string, unknown> {
+  const parsed = JSON.parse(config ?? "{}") as {
+    mapping?: { extraFields?: Record<string, unknown> };
+  };
+  return parsed.mapping?.extraFields ?? {};
+}
+
+/**
+ * Register a role-managed SAML provider in its own org, set its adminRoleValue,
+ * verify its domain, and return its id, ACS URL and SP entity id (audience).
+ */
+async function registerSamlRoleProvider(input: {
+  suffix: string;
+  domain: string;
+  roleAttribute: string;
+  adminRoleValue: string;
+  mapping?: Record<string, unknown>;
+}): Promise<{
+  providerId: string;
+  acsUrl: string;
+  audience: string;
+  organizationId: string;
+}> {
+  const organizationId = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+    name: `SAML ${input.suffix}`,
+  });
+  const providerId = `saml-${input.suffix}`;
+  const audience = `https://sp.sourceweft.test/${providerId}`;
+  const response = await ownerA.client.withFreshIp().jsonRequest("/sso/register", {
+    providerId,
+    issuer: audience,
+    domain: input.domain,
+    organizationId,
+    roleAttribute: input.roleAttribute,
+    samlConfig: {
+      entryPoint: fixture.entryPoint,
+      idpMetadata: { metadata: fixture.metadataXml },
+      mapping: input.mapping ?? { email: "email", name: "displayName" },
+    },
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  // adminRoleValue is not a register body field; set it directly (OIDC suite does
+  // the same), which also re-asserts the injected ssoRoleClaim.
+  await setProviderRoleMapping(harness, providerId, {
+    roleAttribute: input.roleAttribute,
+    adminRoleValue: input.adminRoleValue,
+  });
+  await setProviderDomainVerified(harness, providerId);
+  const acsUrl = metadataAcsUrl(await providerMetadata(providerId));
+  return { providerId, acsUrl, audience, organizationId };
+}
+
+/** SP-initiate, build a signed Response for a role provider, and POST to its ACS. */
+async function roleSamlSignIn(
+  provider: { providerId: string; acsUrl: string; audience: string },
+  email: string,
+  attributes: Record<string, string[]>,
+): Promise<Response> {
+  const start = await startSamlSignIn({ email });
+  assert.equal(start.signIn.status, 200, await start.signIn.clone().text());
+  const samlResponse = fixture.buildResponse({
+    acsUrl: provider.acsUrl,
+    audience: provider.audience,
+    inResponseTo: start.requestId!,
+    nameId: email,
+    email,
+    attributes,
+  });
+  return postAcs(start.client, provider.providerId, samlResponse);
+}
+
+test("a SAML role claim named `role` promotes to admin without writing the user's role column (item 4e)", async () => {
+  const p = await registerSamlRoleProvider({
+    suffix: "rolecol",
+    domain: "samlrolecol.example",
+    roleAttribute: "role",
+    adminRoleValue: "sw-admins",
+  });
+  const email = "admin@samlrolecol.example";
+  const acs = await roleSamlSignIn(p, email, { role: ["sw-admins"] });
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(errorParam(acs), null, `unexpected error: ${acs.headers.get("location")}`);
+  const row = await userRow(email);
+  assert.ok(row, "the SSO user is created");
+  assert.equal(await memberRoleIn(p.organizationId, row.id), "admin", "promoted via the `role` attribute");
+  assert.equal(
+    await samlUserColumn(row.id, "role"),
+    null,
+    "the IdP's role attribute never wrote the user's role column",
+  );
+}, 200_000);
+
+test("a SAML role claim named `email` promotes to admin and leaves the email column intact (item 4e)", async () => {
+  const email = "boss@samlemailrole.example";
+  const p = await registerSamlRoleProvider({
+    suffix: "emailrole",
+    domain: "samlemailrole.example",
+    roleAttribute: "email",
+    adminRoleValue: email,
+  });
+  const acs = await roleSamlSignIn(p, email, {});
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(errorParam(acs), null, `unexpected error: ${acs.headers.get("location")}`);
+  const row = await userRow(email);
+  assert.ok(row, "the SSO user is created");
+  assert.equal(await memberRoleIn(p.organizationId, row.id), "admin", "promoted via the `email` attribute value");
+  assert.equal(await samlUserColumn(row.id, "email"), email, "the email column is the real email");
+}, 200_000);
+
+test("a SAML mapping-only update keeps the role claim, and an admin stays admin (item 4b)", async () => {
+  const p = await registerSamlRoleProvider({
+    suffix: "mapkeep",
+    domain: "samlmapkeep.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+  });
+  const before = await readStoredProvider(harness, p.providerId);
+  assert.equal(samlMappingExtraFields(before.samlConfig).ssoRoleClaim, "groups");
+
+  // A mapping-only update (no roleAttribute in the body) adding a non-user extra
+  // field must not drop the still-set role claim.
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId: p.providerId,
+    samlConfig: {
+      mapping: { email: "email", name: "displayName", extraFields: { dept: "department" } },
+    },
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+  const after = await readStoredProvider(harness, p.providerId);
+  const extra = samlMappingExtraFields(after.samlConfig);
+  assert.equal(extra.ssoRoleClaim, "groups", "the role claim survives a mapping-only update");
+  assert.equal(extra.dept, "department", "the new extra field is kept");
+
+  const email = "boss@samlmapkeep.example";
+  const acs = await roleSamlSignIn(p, email, { groups: ["sw-admins"] });
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(errorParam(acs), null, `unexpected error: ${acs.headers.get("location")}`);
+  const row = await userRow(email);
+  assert.ok(row, "the SSO user is created");
+  assert.equal(
+    await memberRoleIn(p.organizationId, row.id),
+    "admin",
+    "still promoted through the preserved role claim",
+  );
+}, 200_000);
+
+test("a failed membership step on the SAML ACS revokes the captured session (item 4e)", async () => {
+  const p = await registerSamlRoleProvider({
+    suffix: "seatfail",
+    domain: "samlseatfail.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+  });
+  const email = "newid@samlseatfail.example";
+  const spy = spySamlSeatLimit();
+  let acs: Response;
+  try {
+    acs = await roleSamlSignIn(p, email, { groups: [] });
+  } finally {
+    spy.mockRestore();
+  }
+  assert.equal(acs.status, 302, await acs.clone().text());
+  assert.equal(
+    errorParam(acs),
+    SSO_ERROR_CODES.seatLimit,
+    `expected SSO_SEAT_LIMIT, got ${acs.headers.get("location")}`,
+  );
+  assert.ok(!hasSessionCookie(acs), "the rejection sets no session cookie");
+  assert.equal(await sessionCount(email), 0, "the captured session is revoked (no session row)");
+}, 200_000);
+
+test("a SAML first sign-in takes no second pooled connection while it holds the provider row lock (TTL lapsed)", async () => {
+  const { expireTeamDataKeyCacheTtl } = await import("../../shared/team-secrets");
+  const p = await registerSamlRoleProvider({
+    suffix: "conn",
+    domain: "samlconn.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+    mapping: { email: "email", name: "displayName", extraFields: { dept: "department" } },
+  });
+  const email = "newid@samlconn.example";
+
+  const pool = harness.schema.database as unknown as {
+    connect: (...a: unknown[]) => Promise<{
+      query: (...q: unknown[]) => unknown;
+      release: (...r: unknown[]) => unknown;
+    }>;
+  };
+  let locksHeld = 0;
+  let sawLock = false;
+  let connectsWhileLocked = 0;
+  const realConnect = pool.connect.bind(pool);
+  const connectSpy = vi.spyOn(pool, "connect").mockImplementation((async (...args: unknown[]) => {
+    if (locksHeld > 0) connectsWhileLocked += 1;
+    const client = await realConnect(...args);
+    const realQuery = client.query.bind(client);
+    let holdsLock = false;
+    client.query = ((...q: unknown[]) => {
+      const text = typeof q[0] === "string" ? q[0] : (q[0] as { text?: string } | undefined)?.text ?? "";
+      if (/^update "ssoProvider" set "providerId"/i.test(text)) {
+        holdsLock = true;
+        locksHeld += 1;
+        sawLock = true;
+        expireTeamDataKeyCacheTtl();
+      } else if (holdsLock && /^\s*(commit|rollback)/i.test(text)) {
+        holdsLock = false;
+        locksHeld = Math.max(0, locksHeld - 1);
+      }
+      return realQuery(...q);
+    }) as typeof client.query;
+    return client;
+  }) as never);
+
+  try {
+    const acs = await roleSamlSignIn(p, email, { groups: ["sw-admins"] });
+    assert.equal(acs.status, 302, await acs.clone().text());
+    assert.equal(errorParam(acs), null, `unexpected error: ${acs.headers.get("location")}`);
+    assert.ok(sawLock, "expected the SAML sign-in to lock the provider row inside a transaction");
+    assert.equal(
+      connectsWhileLocked,
+      0,
+      `expected no second pooled connection while the provider lock was held, saw ${connectsWhileLocked}`,
+    );
+  } finally {
+    connectSpy.mockRestore();
+  }
+}, 200_000);
+
 // ── Providers registered with explicit fields, the way the settings UI does ──
 // (sso-provider-dialog.tsx buildBody(): samlConfig = { entryPoint, cert,
 // idpMetadata: { entityID }, wantAssertionsSigned: true }, cert as bare base64,
@@ -943,7 +1200,7 @@ test("changing the SAML certificate after a sign-in returns 409 SSO_PROVIDER_IDE
   assert.equal(body.code, SSO_ERROR_CODES.providerIdentityLocked);
   assert.equal(
     body.message,
-    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新创建。",
+    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新配置。",
   );
 }, 200_000);
 

@@ -931,6 +931,169 @@ test("two concurrent sign-ins of the same existing identity yield exactly one me
   assert.equal(await ssoAccountCount("concurrent@acme.com", acmeProviderId), 1, "one SSO account");
 }, 200_000);
 
+// ── Item 2: de-duplication keeps the highest role, never an owner ───────────
+//
+// Duplicate member rows are fabricated by direct SQL so the role/createdAt/id of
+// each is controlled exactly; the reconcile runs on the next sign-in. The
+// provider has no role attribute (roleManaged = false) so role sync never fires
+// and the surviving row's role is whatever the reconcile left.
+
+async function listOrgMembers(
+  organizationId: string,
+  userId: string,
+): Promise<{ id: string; role: string }[]> {
+  const result = await harness.schema.database.query<{ id: string; role: string }>(
+    `select id, role from member where "organizationId" = $1 and "userId" = $2 order by id`,
+    [organizationId, userId],
+  );
+  return result.rows;
+}
+
+async function insertMemberRow(
+  organizationId: string,
+  userId: string,
+  role: string,
+  createdAtIso: string,
+  id = `m-${randomUUID()}`,
+): Promise<string> {
+  await harness.schema.database.query(
+    `insert into member (id, "organizationId", "userId", role, "createdAt") values ($1, $2, $3, $4, $5)`,
+    [id, organizationId, userId, role, createdAtIso],
+  );
+  return id;
+}
+
+async function setMemberRow(
+  id: string,
+  role: string,
+  createdAtIso: string,
+): Promise<void> {
+  await harness.schema.database.query(
+    `update member set role = $2, "createdAt" = $3 where id = $1`,
+    [id, role, createdAtIso],
+  );
+}
+
+/**
+ * Register a role-unmanaged provider, sign the identity in once (creating the
+ * user, its SSO account and one member row), and return the hooks to drive the
+ * duplicate-row scenarios: the ids, and a `signIn` that re-runs the reconcile.
+ */
+async function dupMembershipSetup(domain: string): Promise<{
+  organizationId: string;
+  userId: string;
+  existingMemberId: string;
+  signIn: () => ReturnType<typeof signInViaSso>;
+}> {
+  const { organizationId } = await freshOidcProvider({ domain, verified: true });
+  const email = `dup@${domain}`;
+  const signIn = () =>
+    signInViaSso({
+      claims: { sub: `sub-${domain}`, email, name: "Dup", groups: [] },
+      body: { email },
+    });
+  const first = await signIn();
+  assert.equal(first.callback?.status, 302, await first.callback?.clone().text());
+  const user = await userRow(email);
+  assert.ok(user, "the identity was created");
+  const rows = await listOrgMembers(organizationId, user.id);
+  assert.equal(rows.length, 1, "one member row after the first sign-in");
+  return {
+    organizationId,
+    userId: user.id,
+    existingMemberId: rows[0]!.id,
+    signIn,
+  };
+}
+
+const OLDER = new Date(Date.now() - 60_000).toISOString();
+const NEWER = new Date().toISOString();
+
+test("de-dup keeps a newer owner row over an older member row", async () => {
+  const s = await dupMembershipSetup("dedupmo.example");
+  await setMemberRow(s.existingMemberId, "member", OLDER);
+  const ownerId = await insertMemberRow(s.organizationId, s.userId, "owner", NEWER);
+  const r = await s.signIn();
+  assert.equal(r.callback?.status, 302, await r.callback?.clone().text());
+  const rows = await listOrgMembers(s.organizationId, s.userId);
+  assert.deepEqual(
+    rows,
+    [{ id: ownerId, role: "owner" }],
+    "the owner row survives and the member row is deleted",
+  );
+}, 200_000);
+
+test("de-dup keeps an older admin row over a newer member row", async () => {
+  const s = await dupMembershipSetup("dedupam.example");
+  await setMemberRow(s.existingMemberId, "admin", OLDER);
+  await insertMemberRow(s.organizationId, s.userId, "member", NEWER);
+  const r = await s.signIn();
+  assert.equal(r.callback?.status, 302, await r.callback?.clone().text());
+  const rows = await listOrgMembers(s.organizationId, s.userId);
+  assert.deepEqual(rows, [{ id: s.existingMemberId, role: "admin" }]);
+}, 200_000);
+
+test("de-dup deletes nothing and warns when two rows both claim owner", async () => {
+  const { logger } = await import("../../shared/logger");
+  const s = await dupMembershipSetup("dedupoo.example");
+  await setMemberRow(s.existingMemberId, "owner", OLDER);
+  const ownerId = await insertMemberRow(s.organizationId, s.userId, "owner", NEWER);
+  const warn = vi.spyOn(logger, "warn");
+  try {
+    const r = await s.signIn();
+    assert.equal(r.callback?.status, 302, await r.callback?.clone().text());
+    const rows = await listOrgMembers(s.organizationId, s.userId);
+    assert.equal(rows.length, 2, "both owner rows are kept");
+    assert.deepEqual(
+      rows.map((row) => row.role).sort(),
+      ["owner", "owner"],
+    );
+    const unresolved = warn.mock.calls.find(
+      ([event]) => event === "sso_duplicate_member_rows_unresolved",
+    );
+    assert.ok(unresolved, "a warning is logged for the unresolved owner duplicates");
+    const ids = (unresolved![1] as { memberIds?: string[] }).memberIds ?? [];
+    assert.deepEqual(
+      [...ids].sort(),
+      [s.existingMemberId, ownerId].sort(),
+      "the warning carries both member ids",
+    );
+  } finally {
+    warn.mockRestore();
+  }
+}, 200_000);
+
+test("de-dup keeps the oldest row when two rows share the lowest role", async () => {
+  const s = await dupMembershipSetup("dedupmm.example");
+  await setMemberRow(s.existingMemberId, "member", OLDER);
+  await insertMemberRow(s.organizationId, s.userId, "member", NEWER);
+  const r = await s.signIn();
+  assert.equal(r.callback?.status, 302, await r.callback?.clone().text());
+  const rows = await listOrgMembers(s.organizationId, s.userId);
+  assert.deepEqual(rows, [{ id: s.existingMemberId, role: "member" }], "the oldest survives");
+}, 200_000);
+
+test("de-dup is deterministic on equal createdAt: the smallest id survives", async () => {
+  const s = await dupMembershipSetup("dedupeq.example");
+  const sameTime = new Date().toISOString();
+  await setMemberRow(s.existingMemberId, "member", sameTime);
+  const otherId = await insertMemberRow(
+    s.organizationId,
+    s.userId,
+    "member",
+    sameTime,
+  );
+  const expectedSurvivor = [s.existingMemberId, otherId].sort()[0];
+  const r = await s.signIn();
+  assert.equal(r.callback?.status, 302, await r.callback?.clone().text());
+  const rows = await listOrgMembers(s.organizationId, s.userId);
+  assert.deepEqual(
+    rows,
+    [{ id: expectedSurvivor, role: "member" }],
+    "the lexicographically smallest id survives, regardless of insertion order",
+  );
+}, 200_000);
+
 test("twelve simultaneous sign-ins through one provider complete without hanging (no pool deadlock)", async () => {
   // The member-add seat hook performs a REAL query through the global pool, so
   // if the resolver still needed a second pooled connection while holding the
@@ -1246,7 +1409,7 @@ test("changing the OIDC issuer after a sign-in returns 409 SSO_PROVIDER_IDENTITY
   assert.equal(body.code, SSO_ERROR_CODES.providerIdentityLocked);
   assert.equal(
     body.message,
-    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新创建。",
+    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新配置。",
   );
 }, 200_000);
 
@@ -1422,6 +1585,76 @@ test("a role claim named `email` is accepted and promotes to admin", async () =>
   assert.equal(await userColumn(user.id, "email"), email, "the email column is the real email");
 }, 200_000);
 
+async function storedRoleAttribute(providerId: string): Promise<string | null> {
+  const result = await harness.schema.database.query<{ roleAttribute: string | null }>(
+    `select "roleAttribute" from "ssoProvider" where "providerId" = $1`,
+    [providerId],
+  );
+  const value = result.rows[0]?.roleAttribute ?? null;
+  return value && value.length > 0 ? value : null;
+}
+
+test("clearing the role attribute on update drops the stored role claim (item 4a)", async () => {
+  const { response, providerId } = await registerOidcWithRoleAttribute({
+    domain: "clearrole.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await storedExtraFields(providerId)).ssoRoleClaim, "groups");
+  assert.equal(await storedRoleAttribute(providerId), "groups");
+
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId,
+    roleAttribute: "",
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+  assert.equal(
+    (await storedExtraFields(providerId)).ssoRoleClaim,
+    undefined,
+    "the stored mapping no longer copies a role claim",
+  );
+  assert.equal(await storedRoleAttribute(providerId), null, "the roleAttribute column is cleared");
+}, 200_000);
+
+test("an OIDC mapping-only update keeps the role claim, and an admin stays admin (item 4b)", async () => {
+  const { response, providerId, organizationId } = await registerOidcWithRoleAttribute({
+    domain: "mapkeep.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  await setProviderDomainVerified(harness, providerId);
+  assert.equal((await storedExtraFields(providerId)).ssoRoleClaim, "groups");
+
+  // A mapping-only update (no roleAttribute in the body) that also adds a
+  // non-user extra field; it must not drop the still-set role claim.
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId,
+    oidcConfig: {
+      mapping: { email: "email", name: "name", extraFields: { dept: "department" } },
+    },
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+  const extra = await storedExtraFields(providerId);
+  assert.equal(extra.ssoRoleClaim, "groups", "the role claim survives a mapping-only update");
+  assert.equal(extra.dept, "department", "the new extra field is kept");
+  assert.equal(await storedRoleAttribute(providerId), "groups", "the roleAttribute column is unchanged");
+
+  const email = "boss@mapkeep.example";
+  await signInViaSso({
+    claims: { sub: "sub-mapkeep", email, name: "Boss", groups: ["sw-admins"] },
+    body: { email },
+  });
+  const user = await userRow(email);
+  assert.ok(user, "the SSO user is created");
+  assert.equal(
+    await memberRoleIn(organizationId, user.id),
+    "admin",
+    "still promoted through the preserved role claim",
+  );
+}, 200_000);
+
 async function registerWithExtraFields(
   domain: string,
   extraFields: Record<string, unknown>,
@@ -1487,6 +1720,80 @@ test("an email with more than one @ is rejected, creating no user", async () => 
 }, 200_000);
 
 // ── B3: no second pooled connection while the sign-in transaction holds the lock
+
+test("an OIDC first sign-in takes no second pooled connection while it holds the provider row lock (TTL lapsed mid-transaction)", async () => {
+  // See the B1 note below on why team-secrets is imported here, not at top level.
+  const { expireTeamDataKeyCacheTtl } = await import("../../shared/team-secrets");
+  // A provider whose mapping carries a non-user extra field AND a role attribute,
+  // so the in-transaction provider re-read decrypts a real sealed secret.
+  const { providerId } = await freshOidcProvider({
+    domain: "conn1.example",
+    verified: true,
+    roleAttribute: "groups",
+    mapping: { email: "email", name: "name", extraFields: { dept: "department" } },
+  });
+  void providerId;
+  const email = "newid@conn1.example";
+
+  const pool = harness.schema.database as unknown as {
+    connect: (...a: unknown[]) => Promise<{
+      query: (...q: unknown[]) => unknown;
+      release: (...r: unknown[]) => unknown;
+    }>;
+  };
+
+  // "Lock held" spans from the statement that locks the provider row
+  // (`update "ssoProvider" set "providerId" …` inside a `begin`) to that same
+  // client's `commit`/`rollback`. Every `pool.connect` that happens while a lock
+  // is held is a would-be SECOND pooled connection — the deadlock the B1 fix
+  // prevents. The team-key cache TTL is lapsed at the lock statement (the moment
+  // the reviewer's pg trace shifts the clock), so a fetch-path decrypt WOULD
+  // reach for that second connection; the no-fetch path must not.
+  let locksHeld = 0;
+  let sawLock = false;
+  let connectsWhileLocked = 0;
+  const realConnect = pool.connect.bind(pool);
+  const connectSpy = vi.spyOn(pool, "connect").mockImplementation((async (...args: unknown[]) => {
+    if (locksHeld > 0) connectsWhileLocked += 1;
+    const client = await realConnect(...args);
+    const realQuery = client.query.bind(client);
+    let holdsLock = false;
+    client.query = ((...q: unknown[]) => {
+      const text = typeof q[0] === "string" ? q[0] : (q[0] as { text?: string } | undefined)?.text ?? "";
+      if (/^update "ssoProvider" set "providerId"/i.test(text)) {
+        holdsLock = true;
+        locksHeld += 1;
+        sawLock = true;
+        expireTeamDataKeyCacheTtl();
+      } else if (holdsLock && /^\s*(commit|rollback)/i.test(text)) {
+        holdsLock = false;
+        locksHeld = Math.max(0, locksHeld - 1);
+      }
+      return realQuery(...q);
+    }) as typeof client.query;
+    return client;
+  }) as never);
+
+  try {
+    const { callback } = await signInViaSso({
+      claims: { sub: "sub-conn1", email, name: "New", groups: ["sw-admins"] },
+      body: { email },
+    });
+    assert.equal(callback?.status, 302, await callback?.clone().text());
+    assert.ok(
+      !errorOf(callback!),
+      `expected a clean sign-in, got ${callback!.headers.get("location")}`,
+    );
+    assert.ok(sawLock, "expected the sign-in to lock the provider row inside a transaction");
+    assert.equal(
+      connectsWhileLocked,
+      0,
+      `expected no second pooled connection while the provider lock was held, saw ${connectsWhileLocked}`,
+    );
+  } finally {
+    connectSpy.mockRestore();
+  }
+}, 200_000);
 
 test("B1: a no-fetch decrypt serves an expired-TTL team key from memory with no pooled key read, the fetch path re-reads it, and it fails closed once the key is gone", async () => {
   // Imported here, not at module scope: a top-level import would pull in the
