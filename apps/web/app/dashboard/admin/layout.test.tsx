@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const auth = vi.hoisted(() => ({ userId: "user-1" as string | undefined }));
 const audit = vi.hoisted(() => ({ getSkillMarketAdminMe: vi.fn() }));
+const overviewApi = vi.hoisted(() => ({ getAdminOverview: vi.fn() }));
 const navigation = vi.hoisted(() => ({
   replace: vi.fn(),
   pathname: "/dashboard/admin/market/skill-review",
@@ -18,6 +19,7 @@ vi.mock("../../../lib/auth-client", () => ({
   },
 }));
 vi.mock("../../../lib/skill-market-audit", () => audit);
+vi.mock("../../../lib/admin-overview", () => overviewApi);
 vi.mock("../../../lib/desktop-titlebar", () => ({
   useDesktopTitlebar: () => false,
 }));
@@ -28,12 +30,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 import AdminLayout from "./layout";
-import { mount, type Mounted, unmountAll, withIntl } from "@/test/react";
+import { flush, mount, type Mounted, unmountAll, withIntl } from "@/test/react";
 
 let view: Mounted | undefined;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  // The numbers never arrive unless a test says so.
+  overviewApi.getAdminOverview.mockReturnValue(new Promise(() => {}));
   auth.userId = "user-1";
   navigation.pathname = "/dashboard/admin/market/skill-review";
 });
@@ -121,6 +125,7 @@ test("an admin sees every section in the navigation, with the current one marked
   expect(
     links.map((link) => [link.textContent, link.getAttribute("href")]),
   ).toEqual([
+    ["Overview", "/dashboard/admin"],
     ["MCP review", "/dashboard/admin/market/mcp-review"],
     ["Skill review", "/dashboard/admin/market/skill-review"],
     ["Reports", "/dashboard/admin/market/reports"],
@@ -156,4 +161,40 @@ test("an admin who loses access is sent away on the next section", async () => {
   navigation.pathname = "/dashboard/admin/blog";
   await render();
   expect(navigation.replace).toHaveBeenCalledWith("/dashboard");
+});
+
+test("sections with something waiting show how much; the numbers are read again on each section", async () => {
+  audit.getSkillMarketAdminMe.mockResolvedValue({ isMarketAdmin: true });
+  overviewApi.getAdminOverview.mockResolvedValue({
+    pending: { mcpReview: 0, skillReview: 2, skillListing: 1, reports: 120 },
+    blog: { drafts: 5, published: 0 },
+  });
+  await render();
+  await flush(2);
+  const badges = Object.fromEntries(
+    [...container.querySelectorAll("nav a")]
+      .map((link) => [
+        link.getAttribute("href"),
+        link.querySelector('[data-testid="admin-nav-pending"]')?.textContent,
+      ])
+      .filter(([, badge]) => badge),
+  );
+  expect(badges).toEqual({
+    "/dashboard/admin/market/skill-review": "3",
+    "/dashboard/admin/market/reports": "99+",
+  });
+
+  navigation.pathname = "/dashboard/admin/blog";
+  await render();
+  await flush(2);
+  expect(overviewApi.getAdminOverview).toHaveBeenCalledTimes(2);
+});
+
+test("numbers that cannot be read leave the navigation without badges", async () => {
+  audit.getSkillMarketAdminMe.mockResolvedValue({ isMarketAdmin: true });
+  overviewApi.getAdminOverview.mockRejectedValue(new Error("offline"));
+  await render();
+  await flush(2);
+  expect(container.querySelector('[data-testid="admin-nav-pending"]')).toBeNull();
+  expect(container.textContent).toContain("Private admin content");
 });

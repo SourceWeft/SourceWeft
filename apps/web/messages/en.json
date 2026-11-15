@@ -3706,6 +3706,7 @@
         "system": "System"
       },
       "items": {
+        "overview": "Overview",
         "mcpReview": "MCP review",
         "skillReview": "Skill review",
         "reports": "Reports",
@@ -3714,7 +3715,8 @@
         "blog": "Blog",
         "marketSettings": "Market settings"
       },
-      "backToApp": "Back to app"
+      "backToApp": "Back to app",
+      "pending": "{count} waiting"
     },
     "checkingAccess": "Checking admin access…",
     "accessCheckFailed": "Could not check admin access. Please try again.",
@@ -3746,7 +3748,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "Internal / metadata address"
     },
-    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist."
+    "footer": "Only users listed in <code>MARKET_ADMIN_USER_IDS</code> can access this page. Approval and rejection actions use the same allowlist.",
+    "overview": {
+      "title": "Overview",
+      "description": "What is waiting for a decision, section by section.",
+      "refresh": "Reload the numbers",
+      "retry": "Try again",
+      "loading": "Loading the numbers…",
+      "loadFailed": "Could not load the numbers. The sections still work.",
+      "summary": "{count, plural, =0 {Nothing is waiting for you.} one {# item is waiting for a decision.} other {# items are waiting for a decision.}}",
+      "queues": "Work queues",
+      "content": "Content",
+      "hints": {
+        "mcpReview": "Flagged MCP submissions",
+        "skillReview": "{review} new submissions · {listing} listing decisions",
+        "reports": "Open reports"
+      },
+      "blogDrafts": "{count, plural, one {# draft version} other {# draft versions}}",
+      "blogPublished": "{count, plural, one {# published version} other {# published versions}}"
+    }
   },
   "dashboardObservability": {
     "notices": {
@@ -4736,7 +4756,10 @@
       "publish": "Approve and publish",
       "reject": "Reject",
       "footnote": "Skill review uses the same admin allowlist as the MCP market.",
-      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}"
+      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}",
+      "loadMore": "Load more",
+      "loadMoreFailed": "Could not load more of the queue.",
+      "shownOf": "Showing {shown} of {total}"
     },
     "ownerListing": {
       "label": "Allow on the public market",

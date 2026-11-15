@@ -5,6 +5,7 @@ import { CheckCircle2, ExternalLink, Loader2, XCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { useAdminOverview } from "../../_components/admin-overview-context";
 import {
   AdminEmpty,
   AdminError,
@@ -49,6 +50,7 @@ export function McpReviewQueue() {
   const [items, setItems] = React.useState<ReviewSubmission[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<Set<string>>(new Set());
+  const { refresh: refreshOverview } = useAdminOverview();
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -82,6 +84,7 @@ export function McpReviewQueue() {
       setItems((prev) =>
         prev ? prev.filter((item) => item.identifier !== identifier) : prev,
       );
+      refreshOverview();
     } catch {
       setError(t("errors.actionFailed", { identifier }));
     } finally {

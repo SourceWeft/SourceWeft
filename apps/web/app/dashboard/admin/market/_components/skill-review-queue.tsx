@@ -13,6 +13,7 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { useAdminOverview } from "../../_components/admin-overview-context";
 import {
   AdminEmpty,
   AdminError,
@@ -37,6 +38,13 @@ import {
 } from "../../../skills/_components/skills-market-browse";
 
 type QueueItem = SkillListingQueueEntry;
+
+/** `nextCursor` and `total` come only from a queue that is read in pages. */
+type QueuePage = {
+  items: QueueItem[];
+  nextCursor?: string | null;
+  total?: number;
+};
 
 /**
  * A public skill whose new version added scan flags or scripts. It is public
@@ -64,7 +72,8 @@ const QUEUES = {
     // listing queue shares the rest of the review queue's.
     section: "review",
     takesReason: true,
-    load: listSkillReviewQueue,
+    // Read a page at a time: this queue can hold tens of thousands.
+    load: (cursor?: string): Promise<QueuePage> => listSkillReviewQueue(cursor),
     approve: (item: QueueItem, reason?: string) =>
       publishSkillSubmission(item.skillVersionId, reason),
     decline: (item: QueueItem, reason?: string) =>
@@ -73,7 +82,7 @@ const QUEUES = {
   listing: {
     section: "listingQueue",
     takesReason: false,
-    load: listSkillListingQueue,
+    load: (): Promise<QueuePage> => listSkillListingQueue(),
     approve: (item: QueueItem) =>
       isPublicUpdate(item)
         ? acknowledgeSkillVersion(item.skillVersionId)
@@ -120,7 +129,12 @@ export function SkillReviewQueue({
   } = QUEUES[queue];
   const [items, setItems] = React.useState<QueueItem[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // Where the next page starts, and how many are waiting in all.
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [total, setTotal] = React.useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [busy, setBusy] = React.useState<Set<string>>(new Set());
+  const { refresh: refreshOverview } = useAdminOverview();
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [skillMd, setSkillMd] = React.useState<Record<string, SkillMdState>>(
     {},
@@ -134,6 +148,8 @@ export function SkillReviewQueue({
     try {
       const result = await loadQueue();
       setItems(result.items);
+      setNextCursor(result.nextCursor ?? null);
+      setTotal(result.total ?? null);
     } catch (caught) {
       const status = (caught as { status?: number } | null)?.status;
       setError(
@@ -148,6 +164,34 @@ export function SkillReviewQueue({
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const result = await loadQueue(nextCursor);
+      setItems((prev) => {
+        const seen = new Set((prev ?? []).map((item) => item.skillVersionId));
+        return [
+          ...(prev ?? []),
+          ...result.items.filter((item) => !seen.has(item.skillVersionId)),
+        ];
+      });
+      setNextCursor(result.nextCursor ?? null);
+      if (result.total !== undefined) setTotal(result.total);
+    } catch {
+      setError(tm("review.loadMoreFailed"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // Every loaded entry has been decided while more are waiting: read on.
+  const drained = items !== null && items.length === 0 && nextCursor !== null;
+  React.useEffect(() => {
+    if (drained) void load();
+  }, [drained, load]);
 
   // The skill being read: the chosen one, or the first while none is chosen
   // or the chosen one has been decided and left the queue.
@@ -195,6 +239,8 @@ export function SkillReviewQueue({
       setItems((prev) =>
         prev ? prev.filter((entry) => entry.skillVersionId !== key) : prev,
       );
+      setTotal((prev) => (prev === null ? prev : Math.max(prev - 1, 0)));
+      refreshOverview();
     } catch {
       setError(tm("review.actionFailed", { slug: item.slug }));
     } finally {
@@ -431,7 +477,7 @@ export function SkillReviewQueue({
             {tm(`${section}.title`)}
             {items && items.length > 0 ? (
               <Badge className="ml-2 align-middle" variant="secondary">
-                {items.length}
+                {total ?? items.length}
               </Badge>
             ) : null}
           </>
@@ -440,7 +486,7 @@ export function SkillReviewQueue({
 
       {error ? <AdminError className="mt-6">{error}</AdminError> : null}
 
-      {items === null ? (
+      {items === null || drained ? (
         <AdminLoading className="mt-4">{tm(`${section}.loading`)}</AdminLoading>
       ) : items.length === 0 || !selected ? (
         error ? null : (
@@ -450,41 +496,63 @@ export function SkillReviewQueue({
         )
       ) : (
         <div className="mt-6 grid items-start gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-          <AdminList className="lg:sticky lg:top-0 lg:max-h-[80vh] lg:overflow-y-auto">
-            {items.map((item) => {
-              const active = item.skillVersionId === selected.skillVersionId;
-              const critical = item.flags.some(isCriticalSkillFlag);
-              return (
-                <button
-                  aria-pressed={active}
-                  className={cn(
-                    "block w-full border-l-[3px] px-3 py-2.5 text-left transition-colors hover:bg-muted/50",
-                    critical ? "border-l-destructive" : "border-l-amber-500",
-                    active && "bg-muted",
-                  )}
-                  data-testid="review-row"
-                  key={item.skillVersionId}
-                  onClick={() => setSelectedKey(item.skillVersionId)}
-                  type="button"
+          <div className="lg:sticky lg:top-0">
+            <AdminList className="lg:max-h-[72vh] lg:overflow-y-auto">
+              {items.map((item) => {
+                const active = item.skillVersionId === selected.skillVersionId;
+                const critical = item.flags.some(isCriticalSkillFlag);
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={cn(
+                      "block w-full border-l-[3px] px-3 py-2.5 text-left transition-colors hover:bg-muted/50",
+                      critical ? "border-l-destructive" : "border-l-amber-500",
+                      active && "bg-muted",
+                    )}
+                    data-testid="review-row"
+                    key={item.skillVersionId}
+                    onClick={() => setSelectedKey(item.skillVersionId)}
+                    type="button"
+                  >
+                    <span className="block truncate text-sm font-medium">
+                      {item.displayName}
+                    </span>
+                    <span className="block truncate font-mono text-xs text-muted-foreground">
+                      {item.slug}
+                    </span>
+                    <span className="mt-0.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="truncate">
+                        {tm("review.flagCount", { count: item.flags.length })}
+                      </span>
+                      <span className="shrink-0">
+                        {relativeTime(item.createdAt, ta)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </AdminList>
+            {nextCursor ? (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {total === null
+                    ? null
+                    : tm("review.shownOf", { shown: items.length, total })}
+                </span>
+                <Button
+                  disabled={loadingMore}
+                  onClick={() => void loadMore()}
+                  size="sm"
+                  variant="outline"
                 >
-                  <span className="block truncate text-sm font-medium">
-                    {item.displayName}
-                  </span>
-                  <span className="block truncate font-mono text-xs text-muted-foreground">
-                    {item.slug}
-                  </span>
-                  <span className="mt-0.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span className="truncate">
-                      {tm("review.flagCount", { count: item.flags.length })}
-                    </span>
-                    <span className="shrink-0">
-                      {relativeTime(item.createdAt, ta)}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </AdminList>
+                  {loadingMore ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : null}
+                  {tm("review.loadMore")}
+                </Button>
+              </div>
+            ) : null}
+          </div>
           {renderDetail(selected)}
         </div>
       )}
