@@ -17,4 +17,12 @@ export {
   createDropboxConnectorAdapter,
   parseDropboxSelection,
 } from "./adapter";
-export type { DropboxAdapterConfig } from "./adapter";
+export type {
+  DropboxAdapterConfig,
+  DropboxBrowseEntry,
+  DropboxBrowseFolder,
+  DropboxBrowseResult,
+  DropboxSearchResult,
+  DropboxDescribeItem,
+  DropboxDescribeResult,
+} from "./adapter";

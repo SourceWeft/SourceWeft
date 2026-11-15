@@ -1,4 +1,5 @@
 import {
+  ConnectorItemSkipError,
   type ConnectorActionInput,
   type ConnectorActionResult,
   type ConnectorAdapter,
@@ -6,6 +7,7 @@ import {
   type ConnectorDiscoveryPage,
   type ConnectorExtractInput,
   type ConnectorExtractedContent,
+  type ConnectorExtractedText,
   type ConnectorItem,
   type OAuthCodeExchangeInput,
   type OAuthRefreshInput,
@@ -32,6 +34,19 @@ const PAGE_SIZE = 50;
 /** `files/list_folder`'s own cap on entries per response page (global
  * constraints: folder listing limit 2000). */
 const FOLDER_LIST_LIMIT = 2000;
+/** Non-recursive `list_folder` page size for the `dropbox.browse` action
+ * (global constraints: browse listing limit 200). */
+const BROWSE_LIST_LIMIT = 200;
+/** A request body field was absent, the wrong type, or out of range for one
+ * of the three internal actions. The platform does not validate action input
+ * for these routes, so the adapter validates it itself before any Dropbox
+ * request is made. */
+const INVALID_REQUEST_MESSAGE = "Invalid Dropbox request";
+/** `dropbox.describe`'s own cap on how many ids one call may request. */
+const DESCRIBE_MAX_IDS = 100;
+/** A request cursor is opaque to this adapter; only its size is bounded
+ * (matches the `cursor` field's `maxLength` in contribution.ts). */
+const CURSOR_MAX_LENGTH = 4096;
 /** Past this many unique ids, discovery stops counting precisely and the cap
  * message reports "more than 20,000" instead of an exact count (R6). */
 const COUNT_CEILING = 20000;
@@ -47,6 +62,155 @@ export type DropboxAdapterConfig = {
 };
 
 export type DropboxSelectionEntry = { id: string; kind: "file" | "folder" };
+
+/** One file or folder row in a `dropbox.browse`/`dropbox.search` result. */
+export type DropboxBrowseEntry = {
+  id: string;
+  kind: "file" | "folder";
+  name: string;
+  pathDisplay: string;
+  size: number | null;
+  serverModified: string | null;
+  supported: boolean;
+};
+
+export type DropboxBrowseFolder = { id: string; name: string; pathDisplay: string };
+
+export type DropboxBrowseResult = {
+  folder: DropboxBrowseFolder | null;
+  breadcrumbs: Array<{ id: string; name: string }>;
+  entries: DropboxBrowseEntry[];
+  cursor: string;
+  hasMore: boolean;
+};
+
+export type DropboxSearchResult = {
+  entries: DropboxBrowseEntry[];
+  cursor: string;
+  hasMore: boolean;
+};
+
+export type DropboxDescribeItem = {
+  id: string;
+  kind: "file" | "folder" | null;
+  name: string | null;
+  pathDisplay: string | null;
+  pathLower: string | null;
+  exists: boolean;
+};
+
+export type DropboxDescribeResult = {
+  items: DropboxDescribeItem[];
+};
+
+function invalidRequest(): DropboxAdapterError {
+  return new DropboxAdapterError(400, "DROPBOX_INVALID_REQUEST", INVALID_REQUEST_MESSAGE);
+}
+
+/** Validates a `cursor` field shared by all three internal actions: absent is
+ * fine (no pagination requested yet), otherwise it must be a string within
+ * the declared `maxLength`. */
+function parseActionCursor(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length > CURSOR_MAX_LENGTH) {
+    throw invalidRequest();
+  }
+  return value;
+}
+
+function parseBrowseRequest(
+  request: Record<string, unknown>,
+): { folderId: string | null; cursor?: string } {
+  const rawFolderId = request.folderId;
+  let folderId: string | null = null;
+  if (rawFolderId !== undefined && rawFolderId !== null) {
+    if (typeof rawFolderId !== "string" || !SELECTION_ITEM_ID.test(rawFolderId)) {
+      throw invalidRequest();
+    }
+    folderId = rawFolderId;
+  }
+  return { folderId, cursor: parseActionCursor(request.cursor) };
+}
+
+/** The query is validated against its 1–200 char bound only after trimming,
+ * and the trimmed value is what the adapter actually sends to Dropbox. */
+function parseSearchRequest(
+  request: Record<string, unknown>,
+): { query: string; cursor?: string } {
+  const rawQuery = request.query;
+  if (typeof rawQuery !== "string") throw invalidRequest();
+  const query = rawQuery.trim();
+  if (query.length < 1 || query.length > 200) throw invalidRequest();
+  return { query, cursor: parseActionCursor(request.cursor) };
+}
+
+function parseDescribeRequest(request: Record<string, unknown>): { ids: string[] } {
+  const rawIds = request.ids;
+  if (!Array.isArray(rawIds) || rawIds.length < 1 || rawIds.length > DESCRIBE_MAX_IDS) {
+    throw invalidRequest();
+  }
+  const ids: string[] = [];
+  for (const id of rawIds) {
+    if (typeof id !== "string" || !SELECTION_ITEM_ID.test(id)) throw invalidRequest();
+    ids.push(id);
+  }
+  return { ids };
+}
+
+/** Maps one listing entry to a browse/search row, or `null` for an entry
+ * this adapter cannot surface (no id, or Dropbox's `deleted` tag, which
+ * `search_v2`/`list_folder` should not return but a future API change
+ * might). Folder entries are always `supported: true`; files defer to the
+ * same extension/downloadability check discovery uses. */
+function toBrowseEntry(entry: DropboxEntry): DropboxBrowseEntry | null {
+  const tag = entry[".tag"];
+  if (tag !== "file" && tag !== "folder") return null;
+  if (typeof entry.id !== "string") return null;
+  const name = entry.name ?? "";
+  return {
+    id: entry.id,
+    kind: tag,
+    name,
+    pathDisplay: entry.path_display ?? "",
+    size: typeof entry.size === "number" ? entry.size : null,
+    serverModified: typeof entry.server_modified === "string" ? entry.server_modified : null,
+    supported: tag === "folder" ? true : isDropboxFileSupported(name, entry.is_downloadable ?? true),
+  };
+}
+
+function toBrowseEntries(entries: DropboxEntry[]): DropboxBrowseEntry[] {
+  const mapped: DropboxBrowseEntry[] = [];
+  for (const entry of entries) {
+    const browseEntry = toBrowseEntry(entry);
+    if (browseEntry) mapped.push(browseEntry);
+  }
+  // Folders first, then case-insensitive name order.
+  return mapped.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
+/** Reads `handling`/`pathRoot`/`dropboxFileId` back out of the metadata
+ * Task 3's `toItem` wrote onto a discovered `ConnectorItem` (R3). An
+ * unrecognized `handling.kind` (e.g. corrupted or future-versioned metadata)
+ * is treated the same as `"unsupported"` rather than failing the extraction
+ * outright. */
+function handlingKindOf(metadata: Record<string, unknown>): DropboxFileHandling["kind"] {
+  const handling = metadata.handling;
+  if (handling && typeof handling === "object") {
+    const kind = (handling as { kind?: unknown }).kind;
+    if (kind === "download" || kind === "export_paper" || kind === "unsupported") {
+      return kind;
+    }
+  }
+  return "unsupported";
+}
+
+function pathRootOf(metadata: Record<string, unknown>): string | null {
+  const pathRoot = metadata.pathRoot;
+  return typeof pathRoot === "string" ? pathRoot : null;
+}
 
 function invalidSelection(): DropboxAdapterError {
   return new DropboxAdapterError(
@@ -302,6 +466,115 @@ export function createDropboxConnectorAdapter(
     }
   }
 
+  /**
+   * `dropbox.browse`: lists one folder (or continues a prior listing page).
+   * A `cursor` page and the root page both report `folder: null,
+   * breadcrumbs: []` (R7); only a first page for a specific `folderId`
+   * resolves the folder itself and its breadcrumb ancestors.
+   */
+  async function browseAction(input: ConnectorActionInput): Promise<DropboxBrowseResult> {
+    const { folderId, cursor } = parseBrowseRequest(input.request);
+    const account = await client.getCurrentAccount(input.accessToken);
+    const pathRoot = pathRootFor(account);
+
+    if (cursor !== undefined) {
+      const listing = await client.listFolderContinue(input.accessToken, pathRoot, cursor);
+      return {
+        folder: null,
+        breadcrumbs: [],
+        entries: toBrowseEntries(listing.entries),
+        cursor: listing.cursor,
+        hasMore: listing.hasMore,
+      };
+    }
+
+    const listing = await client.listFolder(input.accessToken, pathRoot, {
+      path: folderId ?? "",
+      recursive: false,
+      limit: BROWSE_LIST_LIMIT,
+    });
+    if (!listing) {
+      throw new DropboxAdapterError(404, "DROPBOX_NOT_FOUND", "Dropbox folder not found");
+    }
+    const entries = toBrowseEntries(listing.entries);
+
+    if (folderId === null) {
+      return { folder: null, breadcrumbs: [], entries, cursor: listing.cursor, hasMore: listing.hasMore };
+    }
+
+    const folderMetadata = await client.getMetadata(input.accessToken, pathRoot, folderId);
+    if (!folderMetadata || typeof folderMetadata.id !== "string") {
+      throw new DropboxAdapterError(404, "DROPBOX_NOT_FOUND", "Dropbox folder not found");
+    }
+    const pathDisplay = folderMetadata.path_display ?? "";
+    const folder: DropboxBrowseFolder = {
+      id: folderMetadata.id,
+      name: folderMetadata.name ?? "",
+      pathDisplay,
+    };
+
+    // Breadcrumbs are the ancestors strictly between the root and the
+    // current folder; each id comes from a `getMetadata` lookup on the
+    // ancestor's own path (not an id), because the discovered folder's
+    // path_display is the only source of its ancestry.
+    const breadcrumbs: Array<{ id: string; name: string }> = [];
+    let ancestorPath = "";
+    for (const segment of parentPathSegments(pathDisplay)) {
+      ancestorPath += `/${segment}`;
+      const ancestorMetadata = await client.getMetadata(input.accessToken, pathRoot, ancestorPath);
+      if (ancestorMetadata && typeof ancestorMetadata.id === "string") {
+        breadcrumbs.push({ id: ancestorMetadata.id, name: ancestorMetadata.name ?? segment });
+      }
+      // A breadcrumb whose metadata comes back null (e.g. a race with a
+      // rename or delete) is omitted rather than failing the whole browse.
+    }
+
+    return { folder, breadcrumbs, entries, cursor: listing.cursor, hasMore: listing.hasMore };
+  }
+
+  /** `dropbox.search`: a `cursor` continues the prior query's results;
+   * otherwise a fresh `search_v2` call is made with the trimmed query. */
+  async function searchAction(input: ConnectorActionInput): Promise<DropboxSearchResult> {
+    const { query, cursor } = parseSearchRequest(input.request);
+    const account = await client.getCurrentAccount(input.accessToken);
+    const pathRoot = pathRootFor(account);
+    const listing =
+      cursor !== undefined
+        ? await client.searchContinue(input.accessToken, pathRoot, cursor)
+        : await client.search(input.accessToken, pathRoot, query);
+    return {
+      entries: toBrowseEntries(listing.entries),
+      cursor: listing.cursor,
+      hasMore: listing.hasMore,
+    };
+  }
+
+  /** `dropbox.describe`: looks up each requested id independently (order
+   * preserved) and reports whether it still exists, for the settings list's
+   * folder names, file counts and "no longer exists" mark (R2). */
+  async function describeAction(input: ConnectorActionInput): Promise<DropboxDescribeResult> {
+    const { ids } = parseDescribeRequest(input.request);
+    const account = await client.getCurrentAccount(input.accessToken);
+    const pathRoot = pathRootFor(account);
+    const items = await Promise.all(
+      ids.map(async (id): Promise<DropboxDescribeItem> => {
+        const entry = await client.getMetadata(input.accessToken, pathRoot, id);
+        if (!entry || entry[".tag"] === "deleted") {
+          return { id, kind: null, name: null, pathDisplay: null, pathLower: null, exists: false };
+        }
+        return {
+          id,
+          kind: entry[".tag"],
+          name: entry.name ?? null,
+          pathDisplay: entry.path_display ?? null,
+          pathLower: entry.path_lower ?? null,
+          exists: true,
+        };
+      }),
+    );
+    return { items };
+  }
+
   return {
     capabilityId: "sourceweft/dropbox",
     getManifest() {
@@ -313,15 +586,20 @@ export function createDropboxConnectorAdapter(
         redirectUri,
       });
     },
-    // eslint-disable-next-line @typescript-eslint/require-await -- stub for Task 4.
     async exchangeOAuthCode(
-      _input: OAuthCodeExchangeInput,
+      input: OAuthCodeExchangeInput,
     ): Promise<OAuthTokenSet> {
-      throw new DropboxAdapterError(501, "DROPBOX_NOT_IMPLEMENTED", "Not implemented");
+      const token = await client.exchangeAuthorizationCode(input.code, input.redirectUri);
+      const account = await client.getCurrentAccount(token.accessToken);
+      return {
+        ...token,
+        providerAccountId: account.account_id,
+        providerAccountEmail: account.email ?? null,
+        displayName: account.name?.display_name ?? account.email ?? null,
+      };
     },
-    // eslint-disable-next-line @typescript-eslint/require-await -- stub for Task 4.
-    async refreshOAuthToken(_input: OAuthRefreshInput): Promise<OAuthTokenSet> {
-      throw new DropboxAdapterError(501, "DROPBOX_NOT_IMPLEMENTED", "Not implemented");
+    refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+      return client.refreshAccessToken(input.refreshToken);
     },
     async *discover(
       input: ConnectorDiscoverInput,
@@ -335,13 +613,54 @@ export function createDropboxConnectorAdapter(
     ): AsyncIterable<ConnectorDiscoveryPage> {
       return pages(input);
     },
-    // eslint-disable-next-line @typescript-eslint/require-await -- stub for Task 4.
-    async extract(_input: ConnectorExtractInput): Promise<ConnectorExtractedContent> {
-      throw new DropboxAdapterError(501, "DROPBOX_NOT_IMPLEMENTED", "Not implemented");
+    async extract(
+      input: ConnectorExtractInput,
+    ): Promise<ConnectorExtractedContent> {
+      const item = input.item;
+      const metadata = (item.metadata ?? {}) as Record<string, unknown>;
+      const fileId = assertDropboxId(metadata.dropboxFileId);
+      const pathRoot = pathRootOf(metadata);
+      const kind = handlingKindOf(metadata);
+      if (kind === "unsupported") {
+        throw new ConnectorItemSkipError("unsupported_type");
+      }
+      if (kind === "export_paper") {
+        const markdown = await client.exportPaperMarkdown(input.accessToken, pathRoot, fileId);
+        if (!markdown.trim()) {
+          throw new ConnectorItemSkipError("empty_content");
+        }
+        const content: ConnectorExtractedText = { item, contentText: markdown, markdown };
+        return content;
+      }
+      // kind === "download": the stored bytes are returned as-is.
+      return {
+        item,
+        file: {
+          fileName: item.title,
+          mimeType: item.mimeType ?? "application/octet-stream",
+          sizeBytes: item.sizeBytes,
+          download: ({ maxBytes }: { maxBytes: number }) =>
+            client.downloadBytes(input.accessToken, pathRoot, fileId, maxBytes),
+        },
+      };
     },
-    // eslint-disable-next-line @typescript-eslint/require-await -- stub for Task 4.
-    async executeAction(_input: ConnectorActionInput): Promise<ConnectorActionResult> {
-      throw new DropboxAdapterError(501, "DROPBOX_NOT_IMPLEMENTED", "Not implemented");
+    async executeAction(
+      input: ConnectorActionInput,
+    ): Promise<ConnectorActionResult> {
+      if (input.actionType === "dropbox.browse") {
+        return { result: await browseAction(input) };
+      }
+      if (input.actionType === "dropbox.search") {
+        return { result: await searchAction(input) };
+      }
+      if (input.actionType === "dropbox.describe") {
+        return { result: await describeAction(input) };
+      }
+      throw new DropboxAdapterError(
+        400,
+        "DROPBOX_UNSUPPORTED_ACTION",
+        "Unsupported Dropbox action",
+      );
     },
   };
 }
