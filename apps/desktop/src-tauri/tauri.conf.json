@@ -5,7 +5,7 @@
   "identifier": "nicelab.sourceweft",
   "build": {
     "devUrl": "http://localhost:3000/dashboard/chat",
-    "frontendDist": "../placeholder-dist"
+    "frontendDist": "../startup-dist"
   },
   "bundle": {
     "active": true,
