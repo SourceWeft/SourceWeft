@@ -484,7 +484,27 @@ export class ConnectorOAuthService {
   async revokeStoredAuthorization(
     account: ConnectorOAuthAccountSecretRecord,
   ): Promise<void> {
-    const adapter = this.registry.getAdapter(account.connectorType);
+    let adapter: ConnectorAdapter;
+    try {
+      adapter = this.registry.getAdapter(account.connectorType);
+    } catch (error) {
+      // The connector type is switched off at deployment level
+      // (e.g. GMAIL_CONNECTOR_ENABLED=false): there is no adapter in this
+      // process to revoke through, and a switched-off connector cannot make
+      // new connections either, so this is "nothing this process can revoke".
+      // Let the local delete proceed, as it did before brokered revocation.
+      if (
+        error instanceof ConnectorError &&
+        error.code === "CONNECTOR_ADAPTER_NOT_FOUND"
+      ) {
+        logger.error("connector_authorization_revoke_skipped", {
+          accountId: account.id,
+          connectorType: account.connectorType,
+        });
+        return;
+      }
+      throw error;
+    }
     if (!adapter.revokeAuthorization) {
       return;
     }

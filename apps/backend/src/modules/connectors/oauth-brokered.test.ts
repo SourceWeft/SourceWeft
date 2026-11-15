@@ -48,6 +48,7 @@ vi.mock("./repository", () => ({
 
 import { ConnectorError } from "./errors";
 import { ConnectorOAuthService } from "./oauth-service";
+import { ConnectorRegistry } from "./registry";
 
 const brokeredManifest = {
   type: "composio_gmail",
@@ -439,5 +440,17 @@ describe("revokeStoredAuthorization", () => {
       statusCode: 502,
       code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED",
     });
+  });
+
+  it("resolves (so the local delete still proceeds) when the connector's adapter is switched off at deployment level", async () => {
+    const switchedOffService = new ConnectorOAuthService(
+      new ConnectorRegistry(),
+      access as never,
+    );
+
+    await expect(
+      switchedOffService.revokeStoredAuthorization(brokeredAccount as never),
+    ).resolves.toBeUndefined();
+    expect(mocks.revokeAuthorization).not.toHaveBeenCalled();
   });
 });

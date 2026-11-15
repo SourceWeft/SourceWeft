@@ -3,7 +3,7 @@ vi.mock("../preview", () => ({
 }));
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
-import type { ConnectorRegistry } from "./registry";
+import { ConnectorRegistry } from "./registry";
 
 const mocks = vi.hoisted(() => ({
   archiveConnectorSources: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock("./repository", () => ({
   updateSourceConnectorRecord: mocks.updateSourceConnectorRecord,
 }));
 
-import type { ConnectorOAuthService } from "./oauth-service";
+import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorService } from "./service";
 
 const connector = {
@@ -442,4 +442,41 @@ test("disabling a connector never revokes the stored authorization", async () =>
   assert.equal(result.disabled, true);
   assert.equal(mocks.revokeStoredAuthorization.mock.calls.length, 0);
   assert.equal(mocks.findOAuthAccountRecord.mock.calls.length, 0);
+});
+
+test("hard delete still removes the connector locally when its adapter is switched off at deployment level", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector);
+  mocks.hasOtherSourceConnectorOAuthAccountReferences.mockResolvedValue(false);
+  mocks.findOAuthAccountRecord.mockResolvedValue(accountSecret);
+  mocks.hardDeleteSourceConnectorRecord.mockResolvedValue({
+    connectorDeleted: true,
+    sourcesDeleted: 2,
+    documentsDeleted: 5,
+    authorizationDeleted: true,
+  });
+
+  // A real oauth service whose registry has no adapter for this connector
+  // type (the operator set GMAIL_CONNECTOR_ENABLED=false), with the real
+  // revokeStoredAuthorization — not the mock — so the unregistered-adapter
+  // path is actually exercised and must not block the local delete.
+  const switchedOff = new ConnectorService(
+    {
+      getManifest: () => ({ type: "gmail", displayName: "Gmail" }),
+    } as unknown as ConnectorRegistry,
+    undefined,
+    new ConnectorOAuthService(new ConnectorRegistry()),
+  );
+
+  const result = await switchedOff.deleteConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorId: "connector",
+  });
+
+  assert.equal(result.hardDeleted, true);
+  assert.equal(mocks.hardDeleteSourceConnectorRecord.mock.calls.length, 1);
 });
