@@ -16,7 +16,7 @@ import {
  * fails if a key is missing from any locale.
  *
  * `signInWith*`/`sso*`/`workEmail`/`continue`/`backToSignIn` belong to the
- * sign-in entry (Task 8). Everything prefixed `org` belongs to the organization
+ * sign-in entry. Everything prefixed `org` belongs to the organization
  * settings "Single sign-on" tab.
  */
 export type SsoLocalization = {
@@ -26,6 +26,9 @@ export type SsoLocalization = {
   workEmail: string
   continue: string
   backToSignIn: string
+  ssoEmailRequired: string
+  ssoRateLimited: string
+  ssoNoSetup: string
 
   orgTabLabel: string
   orgTitle: string
@@ -97,6 +100,22 @@ export type SsoLocalization = {
   orgMetadataMultipleCerts: string
   orgSamlNeedsConfig: string
   orgRateLimited: string
+  orgProviderIdTaken: string
+  orgProviderIdReserved: string
+  orgIssuerInvalid: string
+  orgIssuerUnreachable: string
+  orgIdentityLocked: string
+  orgIdentityLockedHint: string
+  orgRoleMappingIncomplete: string
+  orgErrDomainVerificationFailed: string
+  orgErrNoPendingVerification: string
+  orgErrInvalidDomain: string
+  orgErrIdentifierTooLong: string
+  orgErrProviderChanged: string
+  orgServiceProviderPending: string
+  orgDirectSignInDescription: string
+  orgDirectSignInNone: string
+  orgDirectSignInMany: string
 
   orgDomainVerification: string
   orgDomainVerificationDescription: string
@@ -131,6 +150,9 @@ const ssoLocalization: SsoLocalization = {
   workEmail: "Work email",
   continue: "Continue",
   backToSignIn: "Back to sign in",
+  ssoEmailRequired: "Enter your work email address.",
+  ssoRateLimited: "Too many attempts. Please wait a minute and try again.",
+  ssoNoSetup: "No single sign-on is set up for this email address.",
 
   orgTabLabel: "Single sign-on",
   orgTitle: "Single sign-on",
@@ -167,7 +189,7 @@ const ssoLocalization: SsoLocalization = {
   orgProtocol: "Sign-in protocol",
   orgProviderId: "Provider ID",
   orgProviderIdHint:
-    "Lowercase letters, digits and hyphens, 3–64 characters.",
+    "Lowercase letters, digits and hyphens, 3–47 characters.",
   orgProviderIdImmutableHint:
     "The provider ID cannot be changed after creation.",
   orgDomain: "Email domain",
@@ -195,19 +217,19 @@ const ssoLocalization: SsoLocalization = {
   orgSamlKeepHint: "Leave blank to keep the current value.",
   orgRoleAttribute: "Role attribute (optional)",
   orgRoleAttributeHint:
-    "Claim or attribute that carries the member's role. Members are only ever made admin or member, never owner.",
+    "The claim (OIDC) or attribute (SAML) that carries the member's role.",
   orgAdminRoleValue: "Admin role value (optional)",
   orgAdminRoleValueHint:
-    "Members whose role attribute equals this value are given the admin role.",
+    "Members whose role attribute equals this value become admins; anyone who doesn't match is set to member at each sign-in. Owners are never changed.",
   orgSamlSecurityNote:
-    "Your identity provider must sign with SHA-256 or stronger and send unencrypted assertions.",
+    "Your identity provider must sign the SAML assertion with RSA-SHA256 or RSA-SHA512 using a SHA-256 or SHA-512 digest, and send it unencrypted.",
   orgSave: "Save",
   orgCancel: "Cancel",
   orgCreateSuccess: "Identity provider added.",
   orgUpdateSuccess: "Identity provider updated.",
   orgFieldRequired: "This field is required.",
   orgProviderIdInvalid:
-    "Use 3–64 lowercase letters, digits or hyphens.",
+    "Use 3–47 lowercase letters, digits or hyphens.",
   orgEntryPointInvalid: "Enter a valid sign-on URL.",
   orgCertificateInvalid: "Enter a PEM certificate or a base64 value.",
   orgMetadataTooLarge: "The metadata XML is too large (max 100 KB).",
@@ -224,10 +246,41 @@ const ssoLocalization: SsoLocalization = {
   orgSamlNeedsConfig:
     "Provide the sign-on URL, signing certificate and entity ID, or paste metadata XML.",
   orgRateLimited: "Too many attempts. Please wait a minute and try again.",
+  orgProviderIdTaken:
+    "A provider with this ID already exists. Choose a different one.",
+  orgProviderIdReserved: "This provider ID is reserved. Choose a different one.",
+  orgIssuerInvalid:
+    "Enter a valid issuer URL starting with http:// or https://.",
+  orgIssuerUnreachable:
+    "SourceWeft couldn't reach this issuer. An OIDC identity provider must be reachable from the SourceWeft server over the public internet and expose a valid discovery document. For an internal identity provider, use SAML instead.",
+  orgIdentityLocked:
+    "These settings can't be changed after members have signed in with this provider. To change them, delete the provider and add it again.",
+  orgIdentityLockedHint:
+    "The issuer, client ID, and the SAML sign-on URL, certificate and entity ID can't be changed after members have signed in. To change them, delete the provider and add it again.",
+  orgRoleMappingIncomplete:
+    "Fill in both the role attribute and the admin role value, or leave both empty.",
+  orgErrDomainVerificationFailed:
+    "We couldn't find the TXT record yet. DNS changes can take a few minutes — wait a little and verify again.",
+  orgErrNoPendingVerification:
+    "This verification request has expired. Request a new TXT record and verify again.",
+  orgErrInvalidDomain:
+    "This domain can't be verified. Check the email domain set on the provider.",
+  orgErrIdentifierTooLong:
+    "The provider ID is too long to create a DNS record for it.",
+  orgErrProviderChanged:
+    "This provider changed while the request was in progress. Reload the page and try again.",
+  orgServiceProviderPending:
+    "The service-provider details appear once you set a provider ID.",
+  orgDirectSignInDescription:
+    "Share this link to send members straight to single sign-on for this team.",
+  orgDirectSignInNone:
+    "Once a provider's domain is verified, members can sign in with single sign-on.",
+  orgDirectSignInMany:
+    "With more than one verified provider, members choose \"Sign in with SSO\" and enter their work email.",
 
   orgDomainVerification: "Verify domain ownership",
   orgDomainVerificationDescription:
-    "Add this TXT record to the DNS of",
+    "Add this TXT record to the DNS for {domain} to prove you control it:",
   orgTxtRecordHost: "TXT record name",
   orgTxtRecordValue: "TXT record value",
   orgDnsPropagationNote: "DNS changes can take a few minutes to take effect.",
