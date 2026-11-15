@@ -526,6 +526,13 @@
       "when": 1794683361745,
       "tag": "0074_notes_follow_their_source",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794736887976,
+      "tag": "0075_study_learning_state",
+      "breakpoints": true
     }
   ]
 }

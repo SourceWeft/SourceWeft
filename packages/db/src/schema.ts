@@ -14,5 +14,6 @@ export * from "./schema/notes";
 export * from "./schema/source-guides";
 export * from "./schema/artifacts";
 export * from "./schema/artifact-records";
+export * from "./schema/study";
 export * from "./schema/personas";
 export * from "./schema/local-execution";
