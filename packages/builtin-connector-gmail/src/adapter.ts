@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import type { ComposioBroker } from "@sourceweft/connector-broker-composio";
+import { ComposioBrokerError } from "@sourceweft/connector-broker-composio";
 import type {
   ConnectorActionInput,
   ConnectorActionResult,
@@ -94,6 +95,40 @@ function modeUnsupported(): never {
     "GMAIL_MODE_UNSUPPORTED",
     "Gmail via Composio does not support this operation",
   );
+}
+
+/**
+ * Translate a Composio broker failure raised by one of the authorization
+ * calls (`createLink`, `getConnectedAccount`, `deleteConnectedAccount`) into a
+ * terminal, user-facing `GmailAdapterError`. Composio-side trouble the user
+ * cannot act on becomes a 503 `GMAIL_UNAVAILABLE`; an inactive/unknown
+ * connection seen while finishing means the consent never completed, so (only
+ * there) it becomes a 409 `GMAIL_AUTHORIZATION_INCOMPLETE`. Anything that is
+ * not a `ComposioBrokerError` (a `GmailAdapterError` we raised ourselves, a
+ * programming error) is returned unchanged for the caller to rethrow.
+ */
+function translateComposioAuthError(
+  error: unknown,
+  options: { inactiveIsIncomplete?: boolean } = {},
+): unknown {
+  if (error instanceof ComposioBrokerError) {
+    if (
+      options.inactiveIsIncomplete &&
+      error.code === "COMPOSIO_CONNECTION_INACTIVE"
+    ) {
+      return new GmailAdapterError(
+        409,
+        "GMAIL_AUTHORIZATION_INCOMPLETE",
+        "Gmail authorization is not active yet",
+      );
+    }
+    return new GmailAdapterError(
+      503,
+      "GMAIL_UNAVAILABLE",
+      "Gmail is temporarily unavailable",
+    );
+  }
+  return error;
 }
 
 function assertId(value: unknown, label: string): string {
@@ -601,11 +636,16 @@ export function createGmailConnectorAdapter(
       },
       async startAuthorization(input: ConnectorAuthorizationStartInput) {
         if (!composioConfig.broker) throw composioConfigMissingError();
-        const link = await composioConfig.broker.createLink({
-          toolkit: "gmail",
-          ownerRef: input.ownerRef,
-          callbackUrl: input.callbackUrl,
-        });
+        let link;
+        try {
+          link = await composioConfig.broker.createLink({
+            toolkit: "gmail",
+            ownerRef: input.ownerRef,
+            callbackUrl: input.callbackUrl,
+          });
+        } catch (error) {
+          throw translateComposioAuthError(error);
+        }
         return {
           authorizationUrl: link.authorizationUrl,
           attemptRef: link.connectedAccountId,
@@ -625,9 +665,14 @@ export function createGmailConnectorAdapter(
             "Gmail authorization was not completed",
           );
         }
-        const account = await composioConfig.broker.getConnectedAccount(
-          input.attemptRef,
-        );
+        let account;
+        try {
+          account = await composioConfig.broker.getConnectedAccount(
+            input.attemptRef,
+          );
+        } catch (error) {
+          throw translateComposioAuthError(error, { inactiveIsIncomplete: true });
+        }
         if (account.status !== "ACTIVE" || account.toolkit !== "gmail") {
           throw new GmailAdapterError(
             409,
@@ -653,7 +698,11 @@ export function createGmailConnectorAdapter(
         const { connectedAccountId } = decodeComposioCredential(
           input.accessToken,
         );
-        await composioConfig.broker.deleteConnectedAccount(connectedAccountId);
+        try {
+          await composioConfig.broker.deleteConnectedAccount(connectedAccountId);
+        } catch (error) {
+          throw translateComposioAuthError(error);
+        }
       },
       async checkSyncReadiness() {
         return { ready: false, reason: "indexing_unavailable" };

@@ -557,7 +557,15 @@ export class ConnectorOAuthService {
     );
     try {
       await adapter.revokeAuthorization({ accessToken });
-    } catch {
+    } catch (error) {
+      // Record the cause (the classified error code, never its message or any
+      // credential) so an operator can see why a provider revoke failed before
+      // the caller sees the generic retryable error.
+      logger.error("connector_authorization_revoke_failed", {
+        accountId: account.id,
+        connectorType: account.connectorType,
+        code: toConnectorError(error).code,
+      });
       throw new ConnectorError(
         502,
         "CONNECTOR_AUTHORIZATION_REVOKE_FAILED",

@@ -524,6 +524,90 @@ test("getConnectedAccount throws COMPOSIO_REQUEST_FAILED when the answer has no 
   );
 });
 
+test("proxy throws COMPOSIO_REQUEST_FAILED when a 200 answer has no numeric status, and never falls back to the HTTP status", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 200,
+    json: { data: { ok: true }, headers: {} },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () =>
+      broker.proxy({
+        connectedAccountId: "ca_abc123",
+        ownerRef: "org_1:user_1",
+        url: "/messages",
+        method: "GET",
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(
+        err.code,
+        "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode,
+      );
+      assert.match(err.message, /status/);
+      return true;
+    },
+  );
+});
+
+test("the error hook fires for a COMPOSIO_UNAVAILABLE failure, not only auth and quota", async () => {
+  const calls: FakeCall[] = [];
+  const { logger, error } = collectingLogger();
+  const fetcher = fakeFetcher(() => ({ status: 500, json: { message: "boom" } }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher, logger });
+
+  await assert.rejects(() => broker.getConnectedAccount("ca_abc123"));
+
+  const errorEntry = error.find(([message]) => message === "composio_call");
+  assert.ok(errorEntry, "expected an error log for COMPOSIO_UNAVAILABLE");
+  assert.equal(errorEntry?.[1]?.code, "COMPOSIO_UNAVAILABLE");
+  assert.equal(errorEntry?.[1]?.status, 500);
+  assert.equal(typeof errorEntry?.[1]?.operation, "string");
+});
+
+test("the error hook fires for a missing-field (COMPOSIO_REQUEST_FAILED) answer", async () => {
+  const calls: FakeCall[] = [];
+  const { logger, error } = collectingLogger();
+  const fetcher = fakeFetcher(() => ({
+    status: 200,
+    json: { id: "ca_abc123", toolkit: { slug: "gmail" } },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher, logger });
+
+  await assert.rejects(() => broker.getConnectedAccount("ca_abc123"));
+
+  assert.ok(
+    error.some(
+      ([message, meta]) =>
+        message === "composio_call" &&
+        meta?.code === "COMPOSIO_REQUEST_FAILED",
+    ),
+    "expected an error log for the missing-field failure",
+  );
+});
+
+test("the error hook fires for a network/timeout (COMPOSIO_UNAVAILABLE) failure", async () => {
+  const { logger, error } = collectingLogger();
+  const fetcher = (async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch;
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher, logger });
+
+  await assert.rejects(() => broker.getConnectedAccount("ca_abc123"));
+
+  assert.ok(
+    error.some(
+      ([message, meta]) =>
+        message === "composio_call" &&
+        meta?.code === "COMPOSIO_UNAVAILABLE" &&
+        meta?.status === 0,
+    ),
+    "expected an error log for the network failure",
+  );
+});
+
 test("ids interpolated into a path are percent-encoded", async () => {
   const calls: FakeCall[] = [];
   const fetcher = fakeFetcher(() => ({

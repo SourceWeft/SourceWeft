@@ -28,6 +28,9 @@ vi.mock("./permissions", () => ({
 vi.mock("../../shared/config", () => ({
   config: { auth: { baseUrl: "https://api.sourceweft.test" } },
 }));
+vi.mock("../../shared/logger", () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
 vi.mock("../../shared/team-secrets", () => ({
   encryptTeamSecret: vi.fn(async (value: string) => `enc(${value})`),
   decryptTeamSecret: vi.fn(async (value: string) =>
@@ -46,6 +49,7 @@ vi.mock("./repository", () => ({
   updateOAuthAccountTokenRecord: mocks.updateToken,
 }));
 
+import { logger } from "../../shared/logger";
 import { ConnectorError } from "./errors";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry } from "./registry";
@@ -592,6 +596,29 @@ describe("revokeStoredAuthorization", () => {
       statusCode: 502,
       code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED",
     });
+  });
+
+  it("logs the cause (account id, connector type, error code) before throwing the retryable error", async () => {
+    mocks.revokeAuthorization.mockRejectedValue(
+      new ConnectorError(
+        503,
+        "GMAIL_UNAVAILABLE",
+        "Gmail is temporarily unavailable",
+      ),
+    );
+
+    await expect(
+      service.revokeStoredAuthorization(brokeredAccount as never),
+    ).rejects.toMatchObject({ code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED" });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "connector_authorization_revoke_failed",
+      {
+        accountId: "account_1",
+        connectorType: "composio_gmail",
+        code: "GMAIL_UNAVAILABLE",
+      },
+    );
   });
 
   it("resolves (so the local delete still proceeds) when the connector's adapter is switched off at deployment level", async () => {

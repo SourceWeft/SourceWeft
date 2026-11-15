@@ -90,20 +90,34 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
     });
   }
 
-  function logErrorIfNeeded(
+  // Every ComposioBrokerError this client throws is logged once at error
+  // level with its cause (operation, status, code, and toolkit when known) —
+  // an outage, a timeout, an unexpected 4xx and a malformed 2xx alike, not
+  // only bad-key and quota. The fields never include a request/response body,
+  // an id, or the API key.
+  function logError(
     operation: string,
     toolkit: string | undefined,
     code: ComposioBrokerErrorCode,
     status: number,
   ) {
-    if (code === "COMPOSIO_AUTH" || code === "COMPOSIO_QUOTA") {
-      logger?.error?.("composio_call", {
-        operation,
-        ...(toolkit !== undefined ? { toolkit } : {}),
-        status,
-        code,
-      });
-    }
+    logger?.error?.("composio_call", {
+      operation,
+      ...(toolkit !== undefined ? { toolkit } : {}),
+      status,
+      code,
+    });
+  }
+
+  function fail(
+    operation: string,
+    toolkit: string | undefined,
+    code: ComposioBrokerErrorCode,
+    status: number,
+    message: string,
+  ): never {
+    logError(operation, toolkit, code, status);
+    throw new ComposioBrokerError(code, status, message);
   }
 
   // Exactly one attempt per call: no retry here (a retrying caller, such as
@@ -127,7 +141,9 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
     } catch {
       const durationMs = Date.now() - start;
       logInfo(operation, toolkit, 0, durationMs);
-      throw new ComposioBrokerError(
+      return fail(
+        operation,
+        toolkit,
         "COMPOSIO_UNAVAILABLE",
         0,
         "Composio request failed: network error or timeout",
@@ -163,8 +179,13 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
     text: string,
   ): never {
     const code = classifyComposioError(status, text);
-    logErrorIfNeeded(operation, toolkit, code, status);
-    throw new ComposioBrokerError(code, status, `Composio request failed with status ${status}`);
+    return fail(
+      operation,
+      toolkit,
+      code,
+      status,
+      `Composio request failed with status ${status}`,
+    );
   }
 
   function isSuccess(status: number): boolean {
@@ -177,9 +198,17 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
   // failure instead of building a request with "undefined" in it or
   // returning a result typed as a string that is actually missing. Only the
   // field name is included in the message, never the response body.
-  function requireField<T>(value: T | undefined | null, fieldName: string, status: number): T {
+  function requireField<T>(
+    value: T | undefined | null,
+    fieldName: string,
+    status: number,
+    operation: string,
+    toolkit: string | undefined,
+  ): T {
     if (value === undefined || value === null) {
-      throw new ComposioBrokerError(
+      return fail(
+        operation,
+        toolkit,
         "COMPOSIO_REQUEST_FAILED",
         status,
         `Composio response is missing required field: ${fieldName}`,
@@ -204,7 +233,13 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
         throwForStatus("create_link_session", input.toolkit, sessionResult.status, sessionResult.text);
       }
       const sessionBody = sessionResult.json as { session_id?: string } | undefined;
-      const sessionId = requireField(sessionBody?.session_id, "session_id", sessionResult.status);
+      const sessionId = requireField(
+        sessionBody?.session_id,
+        "session_id",
+        sessionResult.status,
+        "create_link_session",
+        input.toolkit,
+      );
 
       const linkResult = await send({
         operation: "create_link",
@@ -226,8 +261,16 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
         linkBody?.connected_account_id,
         "connected_account_id",
         linkResult.status,
+        "create_link",
+        input.toolkit,
       );
-      const authorizationUrl = requireField(linkBody?.redirect_url, "redirect_url", linkResult.status);
+      const authorizationUrl = requireField(
+        linkBody?.redirect_url,
+        "redirect_url",
+        linkResult.status,
+        "create_link",
+        input.toolkit,
+      );
       return { authorizationUrl, connectedAccountId };
     },
 
@@ -243,8 +286,20 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
       const body = result.json as
         | { id?: string; status?: string; toolkit?: { slug?: string } }
         | undefined;
-      const status = requireField(body?.status, "status", result.status);
-      const toolkit = requireField(body?.toolkit?.slug, "toolkit.slug", result.status);
+      const status = requireField(
+        body?.status,
+        "status",
+        result.status,
+        "get_connected_account",
+        undefined,
+      );
+      const toolkit = requireField(
+        body?.toolkit?.slug,
+        "toolkit.slug",
+        result.status,
+        "get_connected_account",
+        undefined,
+      );
       return {
         id: body?.id ?? id,
         status,
@@ -298,8 +353,23 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
       const body = result.json as
         | { status?: number; data?: unknown; headers?: Record<string, string> }
         | undefined;
+      // The proxy answer must carry the provider's own numeric status. We do
+      // not fall back to the Composio HTTP status (always a success here): a
+      // 2xx envelope without a numeric `status` is a malformed answer, not a
+      // successful Gmail call, and silently coercing it would hide the real
+      // failure (I7).
+      const envelopeStatus = body?.status;
+      if (typeof envelopeStatus !== "number") {
+        return fail(
+          "proxy",
+          undefined,
+          "COMPOSIO_REQUEST_FAILED",
+          result.status,
+          "Composio response is missing required field: status",
+        );
+      }
       return {
-        status: body?.status ?? result.status,
+        status: envelopeStatus,
         data: body?.data,
         headers: body?.headers ?? {},
       };

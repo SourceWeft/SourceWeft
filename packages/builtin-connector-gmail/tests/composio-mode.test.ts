@@ -370,6 +370,73 @@ test("revokeAuthorization deletes the connected account Composio holds", async (
   assert.equal(deletedId, "ca_1");
 });
 
+test("startAuthorization translates a Composio broker failure to GMAIL_UNAVAILABLE", async () => {
+  const broker = fakeBroker({
+    async createLink() {
+      throw new ComposioBrokerError("COMPOSIO_QUOTA", 402, "plan limit");
+    },
+  });
+  const adapter = composioAdapter(broker);
+  await assert.rejects(
+    adapter.startAuthorization!({
+      callbackUrl: "https://sourceweft.example/callback?state=s",
+      ownerRef: "ws_workspace",
+    }),
+    { statusCode: 503, code: "GMAIL_UNAVAILABLE" },
+  );
+});
+
+test("finishAuthorization translates a Composio broker outage to GMAIL_UNAVAILABLE", async () => {
+  const broker = fakeBroker({
+    async getConnectedAccount() {
+      throw new ComposioBrokerError("COMPOSIO_UNAVAILABLE", 503, "down");
+    },
+  });
+  const adapter = composioAdapter(broker);
+  await assert.rejects(
+    adapter.finishAuthorization!({
+      callbackParams: { status: "success", connected_account_id: "ca_1" },
+      attemptRef: "ca_1",
+      ownerRef: "ws_workspace",
+    }),
+    { statusCode: 503, code: "GMAIL_UNAVAILABLE" },
+  );
+});
+
+test("finishAuthorization maps a Composio inactive-connection error to GMAIL_AUTHORIZATION_INCOMPLETE", async () => {
+  const broker = fakeBroker({
+    async getConnectedAccount() {
+      throw new ComposioBrokerError(
+        "COMPOSIO_CONNECTION_INACTIVE",
+        404,
+        "no connected account",
+      );
+    },
+  });
+  const adapter = composioAdapter(broker);
+  await assert.rejects(
+    adapter.finishAuthorization!({
+      callbackParams: { status: "success", connected_account_id: "ca_1" },
+      attemptRef: "ca_1",
+      ownerRef: "ws_workspace",
+    }),
+    { statusCode: 409, code: "GMAIL_AUTHORIZATION_INCOMPLETE" },
+  );
+});
+
+test("revokeAuthorization translates a Composio broker failure to GMAIL_UNAVAILABLE", async () => {
+  const broker = fakeBroker({
+    async deleteConnectedAccount() {
+      throw new ComposioBrokerError("COMPOSIO_REQUEST_FAILED", 418, "teapot");
+    },
+  });
+  const adapter = composioAdapter(broker);
+  await assert.rejects(
+    adapter.revokeAuthorization!({ accessToken: DEFAULT_CREDENTIAL }),
+    { statusCode: 503, code: "GMAIL_UNAVAILABLE" },
+  );
+});
+
 test("composio mode refuses the standard OAuth2 flow and mailbox indexing", async () => {
   const adapter = composioAdapter(fakeBroker());
   await assert.rejects(
