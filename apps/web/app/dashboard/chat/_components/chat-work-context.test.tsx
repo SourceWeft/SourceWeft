@@ -250,6 +250,33 @@ test("an unavailable status endpoint is shown as an error, not an offline or clo
   assert.equal(container.textContent?.includes("Cloud"), false);
 });
 
+test("a conversation whose status is still loading shows progress, not an unavailable computer", async () => {
+  let settle!: (info: unknown) => void;
+  mocks.request.mockReturnValue(
+    new Promise((resolve) => {
+      settle = resolve;
+    }),
+  );
+  await render(
+    createElement(ChatWorkContext, {
+      workspaceId: "w",
+      threadId: "thread-loading",
+    }),
+  );
+  assert.match(container.textContent ?? "", /Connecting…/);
+  assert.equal(container.textContent?.includes("Computer unavailable"), false);
+  assert.ok(container.querySelector(".animate-spin"));
+  await act(async () => {
+    settle({
+      executionTarget: { kind: "local", deviceId: "a" },
+      availability: { ready: true },
+      target: { deviceId: "a", name: "Mac A", online: true },
+    });
+  });
+  assert.match(container.textContent ?? "", /Mac A/);
+  assert.equal(container.querySelector(".animate-spin"), null);
+});
+
 test("selected directory remains visible after creation and survives an offline reload", async () => {
   const info = {
     executionTarget: {

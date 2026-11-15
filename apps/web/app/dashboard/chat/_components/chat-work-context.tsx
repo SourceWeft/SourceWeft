@@ -271,8 +271,11 @@ export function ChatWorkContext({
   }, [info, setWorkTarget]);
   const target = threadId ? info?.executionTarget : creation?.target;
   const device = threadId ? info?.target : creation?.selectedDevice;
+  // A check in progress carries a progress message, not a verdict: until it
+  // settles the computer is neither unavailable nor in error.
+  const checking = Boolean(threadId) && localStatus.status === "checking";
   const contextError =
-    error || (threadId && localStatus.message) || creation?.error;
+    error || (threadId && !checking && localStatus.message) || creation?.error;
   const label =
     target?.kind === "cloud"
       ? t("work.cloud")
@@ -295,6 +298,8 @@ export function ChatWorkContext({
   const icon =
     target?.kind === "cloud" ? (
       <Cloud className="size-3.5 shrink-0" />
+    ) : checking && !target ? (
+      <Loader2 className="size-3.5 shrink-0 animate-spin" />
     ) : (
       <Laptop className="size-3.5 shrink-0" />
     );
@@ -347,16 +352,20 @@ export function ChatWorkContext({
             className="w-72 max-w-[calc(100vw-2rem)] space-y-2 text-sm"
           >
             <p className="break-words font-medium">{device?.name ?? label}</p>
-            <p className="text-xs text-muted-foreground">
-              {target?.kind === "cloud"
-                ? t("work.runsInCloud")
-                : t("work.fixedComputer")}
-              {device &&
-                !contextError &&
-                (device.online
-                  ? ` ${t("work.computerOnline")}`
-                  : ` ${t("work.computerOffline")}`)}
-            </p>
+            {/* Before the first check settles the target is unknown, so
+                neither the cloud nor the fixed-computer description applies. */}
+            {(target || !checking) && (
+              <p className="text-xs text-muted-foreground">
+                {target?.kind === "cloud"
+                  ? t("work.runsInCloud")
+                  : t("work.fixedComputer")}
+                {device &&
+                  !contextError &&
+                  (device.online
+                    ? ` ${t("work.computerOnline")}`
+                    : ` ${t("work.computerOffline")}`)}
+              </p>
+            )}
             {target?.kind === "local" && (
               <div className="space-y-2 border-t pt-2">
                 <p className="text-xs font-medium">
