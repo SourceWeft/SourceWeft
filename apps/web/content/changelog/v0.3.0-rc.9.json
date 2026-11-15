@@ -2,7 +2,7 @@
   "tag": "v0.3.0-rc.9",
   "releasedAt": "2026-11-15",
   "category": "Release",
-  "commit": "29f543af8b449cd29e3668a3b946f1861b77ff87",
+  "commit": "d83521f2074290f2e684dc4e0c23836daf8abc7c",
   "title": "Notarized macOS app, sandboxed local commands and deeper sources",
   "summary": "The macOS desktop app is now signed with an Apple Developer ID and notarized, and the desktop app can run commands on your own computer inside a sandbox on macOS, Windows and Linux. Research reports, citations, sources and the MCP catalog all gain substantial features. Update packages remain Tauri-signed on the Preview channel; Windows installers are not publisher-signed, and stable/latest promotion is unchanged.",
   "items": [
