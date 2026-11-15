@@ -4746,7 +4746,10 @@
       "publish": "Approve and publish",
       "reject": "Reject",
       "footnote": "Skill review uses the same admin allowlist as the MCP market.",
-      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}"
+      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}",
+      "loadMore": "Load more",
+      "loadMoreFailed": "Could not load more of the queue.",
+      "shownOf": "Showing {shown} of {total}"
     },
     "ownerListing": {
       "label": "Allow on the public market",

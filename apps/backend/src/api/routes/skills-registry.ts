@@ -10,7 +10,9 @@ import { getRegistryVersionDetail } from "../../modules/skills/registry/versions
 import type { Hono } from "hono";
 import { isMarketAdmin } from "../../modules/market/admin";
 import { findUserIdentitiesByIds } from "../../modules/workspace/store";
+import { decodeRegistryReviewCursor } from "../../modules/skills/registry/review-cursor";
 import {
+  countRegistryReviewQueue,
   listRegistryReviewQueue,
   setRegistrySkillVersionStatus,
 } from "../../modules/skills/registry/review";
@@ -95,8 +97,26 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
 
   app.get("/v1/skills/registry/admin/submissions", async (c) => {
     await requireSkillRegistryAdmin(c);
+    // A page at a time, newest first: `cursor` is the `nextCursor` of the page
+    // before, and `total` counts the whole queue.
+    const rawLimit = c.req.query("limit");
+    const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+      throw ApiError.validation({ limit: "must be a positive whole number" });
+    }
+    const rawCursor = c.req.query("cursor");
+    const cursor = rawCursor ? decodeRegistryReviewCursor(rawCursor) : null;
+    if (rawCursor && !cursor) {
+      throw ApiError.validation({ cursor: "is not a cursor from this queue" });
+    }
+    const [page, total] = await Promise.all([
+      listRegistryReviewQueue({ limit, cursor }),
+      countRegistryReviewQueue(),
+    ]);
     return ApiResponse.success(c, {
-      items: await withSubmitterNames(await listRegistryReviewQueue()),
+      items: await withSubmitterNames(page.items),
+      nextCursor: page.nextCursor,
+      total,
     });
   });
 
@@ -110,7 +130,11 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
           visibility: z.enum(["public", "restricted"]).optional(),
         })
         .strict()
-        .safeParse(await c.req.json().catch(() => { throw ApiError.invalidJson(); }));
+        .safeParse(
+          await c.req.json().catch(() => {
+            throw ApiError.invalidJson();
+          }),
+        );
       if (!parsed.success) throw ApiError.validation();
       const versionId = decodeURIComponent(c.req.param("versionId"));
       const before = await getVersionForAudit(versionId);
@@ -129,7 +153,10 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
         actorUserId: getSessionUserId(session),
         ...parsed.data,
       });
-      logger.info("Registry version moderated", { actorUserId: getSessionUserId(session), ...result });
+      logger.info("Registry version moderated", {
+        actorUserId: getSessionUserId(session),
+        ...result,
+      });
       return ApiResponse.success(c, result);
     },
   );
@@ -144,7 +171,11 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
           visibility: z.enum(["public", "restricted"]).optional(),
         })
         .strict()
-        .safeParse(await c.req.json().catch(() => { throw ApiError.invalidJson(); }));
+        .safeParse(
+          await c.req.json().catch(() => {
+            throw ApiError.invalidJson();
+          }),
+        );
       if (!parsed.success) throw ApiError.validation();
       const versionId = decodeURIComponent(c.req.param("versionId"));
       const before = await getVersionForAudit(versionId);
@@ -164,7 +195,10 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
         actorUserId: getSessionUserId(session),
         reason: parsed.data.reason,
       });
-      logger.info("Registry version moderated", { actorUserId: getSessionUserId(session), ...result });
+      logger.info("Registry version moderated", {
+        actorUserId: getSessionUserId(session),
+        ...result,
+      });
       return ApiResponse.success(c, result);
     },
   );
@@ -217,7 +251,10 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
 
   app.get("/v1/skills/registry/admin/skills/:skillId/market", async (c) => {
     await requireSkillRegistryAdmin(c);
-    return ApiResponse.success(c, await requireStanding(c.req.param("skillId")));
+    return ApiResponse.success(
+      c,
+      await requireStanding(c.req.param("skillId")),
+    );
   });
 
   app.post("/v1/skills/registry/admin/skills/:skillId/list", async (c) => {
@@ -245,7 +282,9 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   app.put("/v1/skills/registry/admin/skills/:skillId/verified", async (c) => {
     const session = await requireSkillRegistryAdmin(c);
     const parsed = setSkillMarketVerifiedRequestSchema.safeParse(
-      await c.req.json().catch(() => { throw ApiError.invalidJson(); }),
+      await c.req.json().catch(() => {
+        throw ApiError.invalidJson();
+      }),
     );
     if (!parsed.success) throw ApiError.validation();
     const input = {
@@ -265,7 +304,9 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   app.put("/v1/skills/registry/admin/skills/:skillId/featured", async (c) => {
     const session = await requireSkillRegistryAdmin(c);
     const parsed = setSkillMarketFeaturedRequestSchema.safeParse(
-      await c.req.json().catch(() => { throw ApiError.invalidJson(); }),
+      await c.req.json().catch(() => {
+        throw ApiError.invalidJson();
+      }),
     );
     if (!parsed.success) throw ApiError.validation();
     const input = {
@@ -282,7 +323,9 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   app.put("/v1/skills/registry/admin/skills/:skillId/categories", async (c) => {
     const session = await requireSkillRegistryAdmin(c);
     const parsed = setSkillMarketCategoriesRequestSchema.safeParse(
-      await c.req.json().catch(() => { throw ApiError.invalidJson(); }),
+      await c.req.json().catch(() => {
+        throw ApiError.invalidJson();
+      }),
     );
     if (!parsed.success) throw ApiError.validation();
     const input = {
@@ -303,7 +346,9 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   app.post("/v1/skills/registry/admin/claims", async (c) => {
     const session = await requireSkillRegistryAdmin(c);
     const parsed = grantSkillClaimRequestSchema.safeParse(
-      await c.req.json().catch(() => { throw ApiError.invalidJson(); }),
+      await c.req.json().catch(() => {
+        throw ApiError.invalidJson();
+      }),
     );
     if (!parsed.success) {
       throw ApiError.validation(

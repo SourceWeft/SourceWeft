@@ -4746,7 +4746,10 @@
       "publish": "批准并发布",
       "reject": "拒绝",
       "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。",
-      "flagCount": "{count, plural, =0 {无标记} other {# 个标记}}"
+      "flagCount": "{count, plural, =0 {无标记} other {# 个标记}}",
+      "loadMore": "加载更多",
+      "loadMoreFailed": "无法加载队列的更多内容。",
+      "shownOf": "已显示 {shown} / {total}"
     },
     "ownerListing": {
       "label": "允许在公开市场上架",
