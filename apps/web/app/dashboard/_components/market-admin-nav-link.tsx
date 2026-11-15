@@ -10,7 +10,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { getSkillMarketAdminMe } from "../../../lib/skill-market-audit";
 
-export const MARKET_ADMIN_HREF = "/dashboard/admin/market";
+export const MARKET_ADMIN_HREF = "/dashboard/admin";
 
 // One question per page load, however many places render the link.
 let adminCheck: Promise<boolean> | null = null;
@@ -46,7 +46,7 @@ export function useIsMarketAdmin(): boolean {
 }
 
 /**
- * The sidebar's "Market admin" entry, for market admins only; nothing for
+ * The sidebar's "Admin" entry, for market admins only; nothing for
  * everyone else. `variant="link"` matches the sidebar's main links;
  * `variant="menu-item"` goes inside the "More" dropdown's content.
  */

@@ -3669,8 +3669,22 @@
   "dashboardAdmin": {
     "nav": {
       "label": "管理分區",
-      "market": "市場",
-      "blog": "部落格"
+      "title": "管理中心",
+      "groups": {
+        "market": "市場",
+        "content": "內容",
+        "system": "系統"
+      },
+      "items": {
+        "mcpReview": "MCP 審核",
+        "skillReview": "技能審核",
+        "reports": "檢舉",
+        "skills": "全部技能",
+        "collections": "合集",
+        "blog": "部落格",
+        "marketSettings": "市場設定"
+      },
+      "backToApp": "返回應用"
     },
     "checkingAccess": "正在檢查管理權限…",
     "accessCheckFailed": "無法檢查管理權限，請重試。",
@@ -5253,7 +5267,7 @@
       }
     },
     "nav": {
-      "marketAdmin": "市場管理"
+      "marketAdmin": "管理中心"
     },
     "restore": {
       "button": "恢復上架到 SourceWeft",

@@ -50,7 +50,7 @@ vi.mock("./dashboard-sidebar-brand", () => ({
   DashboardSidebarBrand: () => createElement("span", null, "Brand"),
 }));
 vi.mock("./market-admin-nav-link", () => ({
-  MARKET_ADMIN_HREF: "/dashboard/admin/market",
+  MARKET_ADMIN_HREF: "/dashboard/admin",
   MarketAdminNavLink: () =>
     createElement("span", { "data-market-admin": "" }, "Market admin"),
 }));

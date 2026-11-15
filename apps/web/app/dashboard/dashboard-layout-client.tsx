@@ -75,7 +75,12 @@ export function DashboardLayoutClient({
   const searchParams = useSearchParams();
   // An embedded thread (framed inside a sub-agent panel) shows only the
   // conversation: the sidebar and mobile nav belong to the framing page.
-  const embedMode = isEmbedMode(searchParams);
+  // The admin area brings its own navigation, so it gets the bare frame an
+  // embedded thread does.
+  const embedMode =
+    isEmbedMode(searchParams) ||
+    pathname === "/dashboard/admin" ||
+    Boolean(pathname?.startsWith("/dashboard/admin/"));
   const mountedRef = useRef(false);
   const redirectToRef = useRef("/dashboard");
   const sessionConfirmingRef = useRef(false);

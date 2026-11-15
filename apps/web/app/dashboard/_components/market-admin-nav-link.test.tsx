@@ -31,8 +31,8 @@ test("a market admin gets the link, marked current on the admin page", async () 
   nav.pathname = "/dashboard/admin/market";
   await render();
   const link = container.querySelector("a")!;
-  expect(link.getAttribute("href")).toBe("/dashboard/admin/market");
-  expect(link.textContent).toBe("Market admin");
+  expect(link.getAttribute("href")).toBe("/dashboard/admin");
+  expect(link.textContent).toBe("Admin");
   expect(link.getAttribute("aria-current")).toBe("page");
 });
 
