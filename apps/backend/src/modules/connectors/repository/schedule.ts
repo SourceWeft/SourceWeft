@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   connectorSyncRuns,
   db,
@@ -7,30 +7,15 @@ import {
   sourceConnectors,
   taskSchedules,
 } from "@sourceweft/db";
+import {
+  claimDispatchableOccurrences,
+  intervalSlot,
+  materializeDueSchedules,
+  stableJitterMs,
+} from "../../schedules";
 
-const DISPATCH_LEASE_MS = 5 * 60_000;
-
-export function stableJitterMs(connectorId: string, intervalMinutes: number) {
-  const maxMs = Math.min(5 * 60_000, intervalMinutes * 60_000 * 0.1);
-  if (maxMs < 1) return 0;
-  return (
-    createHash("sha256").update(connectorId).digest().readUInt32BE(0) %
-    Math.floor(maxMs)
-  );
-}
-
-function nextSlot(due: Date, intervalMinutes: number, now: Date) {
-  const intervalMs = intervalMinutes * 60_000;
-  const steps = Math.max(
-    0,
-    Math.floor((now.getTime() - due.getTime()) / intervalMs),
-  );
-  const scheduledFor = new Date(due.getTime() + steps * intervalMs);
-  return {
-    scheduledFor,
-    nextDueAt: new Date(scheduledFor.getTime() + intervalMs),
-  };
-}
+// Callers (and the connector row writer) keep importing the jitter from here.
+export { stableJitterMs };
 
 export async function putConnectorSchedule(input: {
   teamId: string;
@@ -192,69 +177,21 @@ export async function materializeDueConnectorSchedules(input: {
   now: Date;
   limit: number;
 }) {
-  return db.transaction(async (tx) => {
-    const due = await tx
-      .select()
-      .from(taskSchedules)
-      .where(
-        and(
-          eq(taskSchedules.enabled, true),
-          eq(taskSchedules.taskKind, "connector_sync"),
-          lte(taskSchedules.nextDueAt, input.now),
-        ),
-      )
-      .orderBy(asc(taskSchedules.nextDueAt))
-      .limit(input.limit)
-      .for("update", { skipLocked: true });
-    for (const schedule of due) {
-      if (
-        !schedule.nextDueAt ||
-        !schedule.connectorId ||
-        !schedule.intervalMinutes
-      )
-        continue;
-      const slot = nextSlot(
-        schedule.nextDueAt,
-        schedule.intervalMinutes,
-        input.now,
-      );
-      const [pending] = await tx
-        .select()
-        .from(scheduleOccurrences)
-        .where(
-          and(
-            eq(scheduleOccurrences.scheduleId, schedule.id),
-            eq(scheduleOccurrences.status, "pending"),
-          ),
-        )
-        .limit(1)
-        .for("update");
-      if (pending) {
-        await tx
-          .update(scheduleOccurrences)
-          .set({ scheduledFor: slot.scheduledFor, updatedAt: input.now })
-          .where(eq(scheduleOccurrences.id, pending.id));
-      } else {
-        await tx
-          .insert(scheduleOccurrences)
-          .values({
-            id: randomUUID(),
-            scheduleId: schedule.id,
-            scheduledFor: slot.scheduledFor,
-          })
-          .onConflictDoNothing();
-      }
-      await tx
-        .update(taskSchedules)
-        .set({ nextDueAt: slot.nextDueAt, updatedAt: input.now })
-        .where(eq(taskSchedules.id, schedule.id));
-      // Compatibility projection for existing connector API/UI clients.
+  return materializeDueSchedules({
+    taskKind: "connector_sync",
+    now: input.now,
+    limit: input.limit,
+    computeSlot: (schedule, now) =>
+      schedule.nextDueAt && schedule.connectorId && schedule.intervalMinutes
+        ? intervalSlot(schedule.nextDueAt, schedule.intervalMinutes, now)
+        : null,
+    // Compatibility projection for existing connector API/UI clients.
+    onMaterialized: async (tx, schedule, slot) => {
       await tx
         .update(sourceConnectors)
         .set({ nextScheduledAt: slot.nextDueAt, updatedAt: input.now })
-        .where(eq(sourceConnectors.id, schedule.connectorId));
-    }
-    return due.length;
+        .where(eq(sourceConnectors.id, schedule.connectorId!));
+    },
   });
 }
 
@@ -262,61 +199,24 @@ export async function claimDispatchableConnectorOccurrences(input: {
   now: Date;
   limit: number;
 }) {
-  return db.transaction(async (tx) => {
-    const candidates = await tx
-      .select({ occurrence: scheduleOccurrences, schedule: taskSchedules })
-      .from(scheduleOccurrences)
-      .innerJoin(
-        taskSchedules,
-        eq(scheduleOccurrences.scheduleId, taskSchedules.id),
-      )
-      .where(
-        and(
-          eq(taskSchedules.enabled, true),
-          eq(taskSchedules.taskKind, "connector_sync"),
-          or(
-            and(
-              eq(scheduleOccurrences.status, "pending"),
-              or(
-                isNull(scheduleOccurrences.retryAt),
-                lte(scheduleOccurrences.retryAt, input.now),
-              ),
-            ),
-            and(
-              eq(scheduleOccurrences.status, "dispatching"),
-              lte(scheduleOccurrences.leaseUntil, input.now),
-            ),
-          ),
-        ),
-      )
-      .orderBy(asc(scheduleOccurrences.scheduledFor))
-      .limit(input.limit)
-      .for("update", { skipLocked: true });
-    const claimed: typeof candidates = [];
-    for (const candidate of candidates) {
-      if (!candidate.schedule.connectorId) continue;
+  return claimDispatchableOccurrences({
+    taskKind: "connector_sync",
+    now: input.now,
+    limit: input.limit,
+    // One sync per connector at a time; the occurrence's own run is not a rival.
+    isTargetBusy: async (tx, { occurrence, schedule }) => {
+      if (!schedule.connectorId) return true;
       const [active] = await tx
         .select({ id: connectorSyncRuns.id })
         .from(connectorSyncRuns)
         .where(
           and(
-            eq(connectorSyncRuns.connectorId, candidate.schedule.connectorId),
+            eq(connectorSyncRuns.connectorId, schedule.connectorId),
             inArray(connectorSyncRuns.status, ["queued", "running"]),
           ),
         )
         .limit(1);
-      if (active && active.id !== candidate.occurrence.syncRunId) continue;
-      await tx
-        .update(scheduleOccurrences)
-        .set({
-          status: "dispatching",
-          leaseUntil: new Date(input.now.getTime() + DISPATCH_LEASE_MS),
-          attempts: candidate.occurrence.attempts + 1,
-          updatedAt: input.now,
-        })
-        .where(eq(scheduleOccurrences.id, candidate.occurrence.id));
-      claimed.push(candidate);
-    }
-    return claimed;
+      return Boolean(active && active.id !== occurrence.syncRunId);
+    },
   });
 }
