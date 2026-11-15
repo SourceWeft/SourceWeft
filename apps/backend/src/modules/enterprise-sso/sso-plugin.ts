@@ -1,7 +1,29 @@
 import { sso } from "@better-auth/sso";
 import type { BetterAuthPlugin } from "better-auth";
 import { sourceweftSsoGuard } from "./guard-plugin";
+import { mapSsoRole } from "./role-mapping";
+import {
+  provisionSsoUser,
+  rememberSsoIsNewUser,
+  resolveSsoSignIn,
+  takeSsoIsNewUser,
+  type SsoResolutionAdapter,
+} from "./provisioning";
 import { ssoSecretStoragePlugin } from "./secret-storage";
+
+/** The persisted `ssoProvider` fields the provisioning hooks read at sign-in. */
+type SsoProviderRuntimeRow = {
+  providerId: string;
+  organizationId?: unknown;
+  domain?: unknown;
+  roleAttribute?: unknown;
+  adminRoleValue?: unknown;
+  samlConfig?: unknown;
+};
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
 
 /**
  * Registers the better-auth SSO plugin (OIDC + SAML) for team organizations,
@@ -52,6 +74,57 @@ export function buildSsoPlugins({
             "SSO providers must belong to a team organization.",
           );
         }
+      },
+      // Decide, inside the sign-in transaction and before any user/account/
+      // session row exists, whether a verified identity may sign in and to
+      // which user. `@better-auth/sso@1.7.7` runs `provisionUser` AFTER the
+      // session is created, so the fail-closed domain gate and the billing-seat
+      // pre-check (which must leave no session behind) live here instead.
+      resolveUser: async (input, { database }) => {
+        const resolution = await resolveSsoSignIn({
+          providerId: input.providerId,
+          email: input.providerUser.email,
+          database: database as unknown as SsoResolutionAdapter,
+        });
+        if (resolution.action !== "reject") {
+          // Carry "is this a newly created account?" to provisionUser, which the
+          // plugin does not pass its own `isRegister` to.
+          rememberSsoIsNewUser(
+            input.providerId,
+            input.accountKey.accountId,
+            resolution.action === "continue",
+          );
+        }
+        return resolution;
+      },
+      // Add the signed-in user to the provider's organization through the real
+      // member-added path, sync a managed role, and audit the sign-in.
+      provisionUser: async ({ user, userInfo, provider }) => {
+        const row = provider as unknown as SsoProviderRuntimeRow;
+        const organizationId = nonEmptyString(row.organizationId);
+        if (!organizationId) {
+          // An organization-less provider is never routed to at sign-in; nothing
+          // to provision into.
+          return;
+        }
+        const protocol: "oidc" | "saml" = row.samlConfig ? "saml" : "oidc";
+        const accountId = nonEmptyString(userInfo.id) ?? "";
+        const roleAttribute = nonEmptyString(row.roleAttribute);
+        const role = mapSsoRole({
+          userInfo,
+          roleAttribute,
+          adminRoleValue: nonEmptyString(row.adminRoleValue),
+        });
+        await provisionSsoUser({
+          userId: user.id,
+          organizationId,
+          role,
+          providerId: row.providerId,
+          protocol,
+          domain: nonEmptyString(row.domain) ?? "",
+          isNewUser: takeSsoIsNewUser(row.providerId, accountId),
+          roleManaged: roleAttribute !== null,
+        });
       },
       // Upstream IdP profile changes (e.g. a role attribute change) should
       // apply on every sign-in, not just first registration.

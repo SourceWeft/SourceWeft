@@ -30,9 +30,28 @@ export type SsoTestHarness = {
   baseUrl: string;
 };
 
-/** Boot auth (migration mode) against a fresh isolated database. */
+/**
+ * Boot auth against a fresh isolated database.
+ *
+ * Defaults to "migration" mode (the plugin `init`s run, runtime-only mail/
+ * onboarding/billing hooks do not) — enough for the provider-lifecycle suites.
+ * Pass `mode: "runtime"` for the suites that must exercise the real
+ * organization and session hooks (JIT membership, personal-org provisioning,
+ * shared-workspace access): mail delivery is not configured in the test env
+ * (`mailDeliveryConfigured()` is false), so the runtime mail callbacks resolve
+ * to the console provider and send nothing.
+ *
+ * `trustedOrigins` are appended to this auth instance's trusted origins before
+ * it is built. Tests pass a loopback mock IdP's origin so the plugin's SSRF
+ * guard admits it — the documented escape hatch for an internal IdP. This is
+ * test-only and never touches production configuration.
+ */
 export async function bootSsoTestHarness(
   label: string,
+  options: {
+    mode?: "runtime" | "migration";
+    trustedOrigins?: string[];
+  } = {},
 ): Promise<SsoTestHarness> {
   const isolated = await createIsolatedTestDatabase(label);
   process.env.DATABASE_URL = isolated.url;
@@ -42,7 +61,15 @@ export async function bootSsoTestHarness(
   const sharedConfig = await import("../../shared/config");
   const baseUrl = sharedConfig.config.auth.baseUrl;
 
-  const auth = authConfig.createSourceweftAuth({ mode: "migration" });
+  for (const origin of options.trustedOrigins ?? []) {
+    if (!sharedConfig.config.auth.trustedOrigins.includes(origin)) {
+      sharedConfig.config.auth.trustedOrigins.push(origin);
+    }
+  }
+
+  const auth = authConfig.createSourceweftAuth({
+    mode: options.mode ?? "migration",
+  });
   await auth.$context;
 
   return { isolated, schema, auth, baseUrl };
@@ -142,14 +169,21 @@ export type SsoTestUser = {
   email: string;
 };
 
-/** Sign a fresh user up (email/password) and return an authenticated client. */
+/**
+ * Sign a fresh user up (email/password) and return an authenticated client.
+ * Pass `email` to control the address (e.g. to put the user on an SSO domain);
+ * it is lowercased to survive better-auth's email normalization.
+ */
 export async function signUpUser(
   harness: SsoTestHarness,
   name: string,
+  options: { email?: string } = {},
 ): Promise<SsoTestUser> {
   // Lowercase so the generated address survives better-auth's email
   // normalization unchanged and the lookup below matches.
-  const email = `${name.toLowerCase()}-${randomUUID()}@sourceweft.test`;
+  const email = (
+    options.email ?? `${name.toLowerCase()}-${randomUUID()}@sourceweft.test`
+  ).toLowerCase();
   const client = new SsoTestClient(harness.auth, harness.baseUrl);
   const response = await client.jsonRequest("/sign-up/email", {
     name,
@@ -216,6 +250,25 @@ export async function setProviderDomainVerified(
   await harness.schema.database.query(
     `update "ssoProvider" set "domainVerified" = true where "providerId" = $1`,
     [providerId],
+  );
+}
+
+/**
+ * Set a provider's role-mapping attributes directly in SQL. The register
+ * endpoint does not accept these additionalFields in its body, so tests write
+ * them straight to the columns (they carry no secret, so no adapter wrapper is
+ * needed). `null` leaves the provider unconfigured for role mapping.
+ */
+export async function setProviderRoleMapping(
+  harness: SsoTestHarness,
+  providerId: string,
+  input: { roleAttribute: string | null; adminRoleValue: string | null },
+): Promise<void> {
+  await harness.schema.database.query(
+    `update "ssoProvider"
+       set "roleAttribute" = $2, "adminRoleValue" = $3
+     where "providerId" = $1`,
+    [providerId, input.roleAttribute, input.adminRoleValue],
   );
 }
 

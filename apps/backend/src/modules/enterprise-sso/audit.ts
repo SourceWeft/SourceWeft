@@ -81,6 +81,57 @@ export async function recordSsoProviderAudit(
   await teamAuditService.record(entry);
 }
 
+/**
+ * Record a successful SSO sign-in (`sso.sign_in`). Metadata is exactly
+ * `{ providerId, protocol, domain, isNewUser }` — no claim, attribute or token
+ * value. The signed-in user is the actor. Called from the provisioning path
+ * (see ./provisioning.ts) once membership is settled.
+ */
+export async function recordSsoSignInAudit(input: {
+  teamId: string;
+  actorUserId: string;
+  providerId: string;
+  protocol: SsoAuditProtocol;
+  domain: string;
+  isNewUser: boolean;
+}): Promise<void> {
+  await recordSsoProviderAudit({
+    teamId: input.teamId,
+    actorUserId: input.actorUserId,
+    action: "sso.sign_in",
+    targetType: "sso_provider",
+    targetId: input.providerId,
+    metadata: {
+      providerId: input.providerId,
+      protocol: input.protocol,
+      domain: input.domain,
+      isNewUser: input.isNewUser,
+    },
+  });
+}
+
+/**
+ * Record an organization role change applied by SSO role mapping
+ * (`organization.member_role_changed`). Mirrors how auth-config.ts records the
+ * other membership events; the signed-in user is the actor and the target.
+ * Only `member`/`admin` role strings reach here — SSO never touches `owner`.
+ */
+export async function recordSsoMemberRoleChangeAudit(input: {
+  teamId: string;
+  userId: string;
+  previousRole: string;
+  newRole: "member" | "admin";
+}): Promise<void> {
+  await recordSsoProviderAudit({
+    teamId: input.teamId,
+    actorUserId: input.userId,
+    action: "organization.member_role_changed",
+    targetType: "member",
+    targetId: input.userId,
+    metadata: { previousRole: input.previousRole, newRole: input.newRole },
+  });
+}
+
 /** The narrow adapter slice needed to snapshot a provider row. */
 type SnapshotAdapter = {
   findOne: (args: {
