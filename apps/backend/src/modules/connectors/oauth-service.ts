@@ -16,11 +16,12 @@ import {
   findOAuthStateRecord,
   findReauthorizableOAuthAccountRecord,
   reauthorizeOAuthAccountRecord,
-  updateOAuthAccountStatusRecord,
-  updateOAuthAccountTokenRecord,
+  withOAuthAccountRefreshLock,
+  type OAuthAccountRefreshWrite,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import type {
+  ConnectorAdapter,
   ConnectorManifest,
   ConnectorOAuthAccountSecretRecord,
   OAuthTokenSet,
@@ -28,6 +29,27 @@ import type {
 
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
+const REFRESH_LOCK_TIMEOUT_MS = 30_000;
+const REFRESH_PROVIDER_TIMEOUT_MS = 20_000;
+
+type OAuthAccountRef = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+};
+
+type RefreshDecision =
+  | { ok: true; accessToken: string; refreshed: boolean }
+  | { ok: false; error: ConnectorError };
+
+function reauthRequiredError() {
+  return new ConnectorError(
+    409,
+    "CONNECTOR_REAUTH_REQUIRED",
+    "Connector account must be reauthorized",
+  );
+}
 
 function hashState(state: string) {
   return createHash("sha256").update(state).digest("hex");
@@ -85,6 +107,19 @@ export class ConnectorOAuthService {
     private readonly registry: ConnectorRegistry = connectorRegistry,
     private readonly access = new ConnectorAccessPolicy(undefined, registry),
   ) {}
+
+  /**
+   * One in-flight refresh per account at a time: a later task's keep-alive
+   * sweep and concurrent `getRuntimeToken` callers for the same account share
+   * the same provider call and lock wait instead of racing the provider's
+   * single-use refresh token against each other. An entry is removed as soon
+   * as its promise settles, success or failure, so the next call tries again
+   * rather than reusing a rejected result.
+   */
+  private readonly refreshInFlight = new Map<
+    string,
+    Promise<{ accessToken: string; refreshed: boolean }>
+  >();
 
   async start(input: {
     workspaceId: string;
@@ -377,72 +412,193 @@ export class ConnectorOAuthService {
       return decryptTeamSecret(account.accessTokenEncrypted, account.teamId);
     }
 
-    return this.refreshAccountToken(account);
+    const { accessToken } = await this.refreshAccountToken(
+      account,
+      (locked) =>
+        !locked.expiresAt ||
+        new Date(locked.expiresAt).getTime() >
+          Date.now() + TOKEN_REFRESH_SKEW_MS,
+    );
+    return accessToken;
   }
 
+  /**
+   * Refresh an OAuth account's access token, one caller at a time per
+   * account. `isFresh` is evaluated on the row read under the lock, not on
+   * `account`: another caller, the keep-alive sweep, or an administrator may
+   * have changed it while this call waited.
+   */
   private async refreshAccountToken(
-    account: ConnectorOAuthAccountSecretRecord,
-  ) {
-    const refreshToken = await decryptTeamSecret(
-      account.refreshTokenEncrypted,
-      account.teamId,
-    );
-    if (!refreshToken) {
-      await updateOAuthAccountStatusRecord({
-        teamId: account.teamId,
-        workspaceId: account.workspaceId,
-        accountId: account.id,
-        status: "reauth_required",
-        lastError: "Refresh token is unavailable",
-      });
-      throw new ConnectorError(
-        409,
-        "CONNECTOR_REAUTH_REQUIRED",
-        "Connector account must be reauthorized",
-      );
+    account: OAuthAccountRef,
+    isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
+  ): Promise<{ accessToken: string; refreshed: boolean }> {
+    // R2: resolve the adapter before touching the lock or the single-flight
+    // map, and outside the retryable/non-retryable classification below, so
+    // an unregistered adapter never marks the account.
+    const adapter = this.registry.getAdapter(account.connectorType);
+
+    const inFlight = this.refreshInFlight.get(account.id);
+    if (inFlight) {
+      return inFlight;
     }
 
-    try {
-      const adapter = this.registry.getAdapter(account.connectorType);
-      const tokenSet = await adapter.refreshOAuthToken({
-        refreshToken,
-        scopes: account.scopes,
+    const task = this.lockAndRefresh(account, adapter, isFresh);
+    this.refreshInFlight.set(account.id, task);
+    task
+      .finally(() => {
+        this.refreshInFlight.delete(account.id);
+      })
+      .catch(() => {
+        // Cleanup only; callers holding `task` itself still observe the
+        // rejection, so this chained promise must not become unhandled.
       });
-      await updateOAuthAccountTokenRecord({
+    return task;
+  }
+
+  private async lockAndRefresh(
+    account: OAuthAccountRef,
+    adapter: ConnectorAdapter,
+    isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
+  ): Promise<{ accessToken: string; refreshed: boolean }> {
+    const outcome = await withOAuthAccountRefreshLock<RefreshDecision>(
+      {
         teamId: account.teamId,
         workspaceId: account.workspaceId,
         accountId: account.id,
-        accessTokenEncrypted: await encryptTeamSecret(
-          tokenSet.accessToken,
-          account.teamId,
-        ),
-        refreshTokenEncrypted:
-          tokenSet.refreshToken === undefined
-            ? undefined
-            : tokenSet.refreshToken
-              ? await encryptTeamSecret(tokenSet.refreshToken, account.teamId)
-              : null,
-        expiresAt: tokenSet.expiresAt ?? null,
-        scopes: normalizeScopes(tokenSet, account.scopes),
-      });
-      return tokenSet.accessToken;
+        lockTimeoutMs: REFRESH_LOCK_TIMEOUT_MS,
+      },
+      (locked) => this.decideRefresh(locked, adapter, isFresh),
+    );
+
+    if (!outcome.ok) {
+      throw outcome.error;
+    }
+    return { accessToken: outcome.accessToken, refreshed: outcome.refreshed };
+  }
+
+  private async decideRefresh(
+    locked: ConnectorOAuthAccountSecretRecord | null,
+    adapter: ConnectorAdapter,
+    isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
+  ): Promise<{ write: OAuthAccountRefreshWrite; result: RefreshDecision }> {
+    if (!locked) {
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND",
+        "Connector OAuth account not found",
+      );
+    }
+    if (locked.status !== "active") {
+      throw new ConnectorError(
+        409,
+        "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE",
+        "Connector OAuth account is not active",
+      );
+    }
+    if (isFresh(locked)) {
+      return {
+        write: { kind: "none" },
+        result: {
+          ok: true,
+          accessToken: await decryptTeamSecret(
+            locked.accessTokenEncrypted,
+            locked.teamId,
+          ),
+          refreshed: false,
+        },
+      };
+    }
+
+    const refreshToken = await this.decryptRefreshToken(locked);
+    if (!refreshToken) {
+      return {
+        write: {
+          kind: "status",
+          status: "reauth_required",
+          lastError: "Refresh token is unavailable",
+        },
+        result: { ok: false, error: reauthRequiredError() },
+      };
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const providerCall = adapter.refreshOAuthToken({
+      refreshToken,
+      scopes: locked.scopes,
+    });
+    try {
+      const tokenSet = await Promise.race<OAuthTokenSet>([
+        providerCall,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new ConnectorError(
+                503,
+                "CONNECTOR_OAUTH_REFRESH_TIMEOUT",
+                "Connector token refresh timed out",
+              ),
+            );
+          }, REFRESH_PROVIDER_TIMEOUT_MS);
+        }),
+      ]);
+
+      return {
+        write: {
+          kind: "token",
+          accessTokenEncrypted: await encryptTeamSecret(
+            tokenSet.accessToken,
+            locked.teamId,
+          ),
+          refreshTokenEncrypted:
+            tokenSet.refreshToken === undefined
+              ? undefined
+              : tokenSet.refreshToken
+                ? await encryptTeamSecret(tokenSet.refreshToken, locked.teamId)
+                : null,
+          expiresAt: tokenSet.expiresAt ?? null,
+          scopes: normalizeScopes(tokenSet, locked.scopes),
+        },
+        result: {
+          ok: true,
+          accessToken: tokenSet.accessToken,
+          refreshed: true,
+        },
+      };
     } catch (error) {
       if (isRetryableOAuthRefreshError(error)) {
+        // Nothing written: a transport failure or a timeout (itself a 503
+        // ConnectorError, which this classifier also treats as retryable)
+        // should not be mistaken for a reauthorization failure.
         throw toConnectorError(error);
       }
       const message = error instanceof Error ? error.message : String(error);
-      await updateOAuthAccountStatusRecord({
-        teamId: account.teamId,
-        workspaceId: account.workspaceId,
-        accountId: account.id,
-        status: "reauth_required",
-        lastError: message,
-      });
-      throw new ConnectorError(
-        409,
-        "CONNECTOR_REAUTH_REQUIRED",
-        "Connector account must be reauthorized",
+      return {
+        write: {
+          kind: "status",
+          status: "reauth_required",
+          lastError: message,
+        },
+        result: { ok: false, error: reauthRequiredError() },
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+      // The loser of the race (almost always the provider call, when the
+      // timeout wins) may still settle later; swallow that so it never
+      // surfaces as an unhandled rejection.
+      providerCall.catch(() => {});
+    }
+  }
+
+  private async decryptRefreshToken(
+    locked: ConnectorOAuthAccountSecretRecord,
+  ): Promise<string | null> {
+    try {
+      return await decryptTeamSecret(
+        locked.refreshTokenEncrypted,
+        locked.teamId,
       );
+    } catch {
+      return null;
     }
   }
 }
