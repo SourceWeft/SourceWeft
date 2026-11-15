@@ -1596,6 +1596,18 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  packages/connector-broker-composio:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/contracts:
     dependencies:
       '@sourceweft/market-contracts':
