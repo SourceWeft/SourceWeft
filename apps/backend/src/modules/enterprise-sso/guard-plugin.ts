@@ -14,6 +14,7 @@ import {
   type SsoProviderDomainLookup,
   type SsoProviderDomainRow,
 } from "./policy";
+import { validateRoleAttribute } from "./role-mapping";
 
 /**
  * Tenant-policy guard for `@better-auth/sso` provider registration, updates,
@@ -48,6 +49,28 @@ const DELETE_PATH = "/sso/delete-provider";
 const VERIFY_DOMAIN_PATH = "/sso/verify-domain";
 const SIGN_IN_PATH = "/sign-in/sso";
 const SSO_PROVIDER_MODEL = "ssoProvider";
+
+/**
+ * The SSO sign-in callback / SAML ACS routes. Membership provisioning runs after
+ * these commit a session, and a provisioning failure (see ./provisioning.ts) is
+ * turned into an error-URL redirect by the after-hook below; a user created on
+ * these paths is also marked email-verified (its domain was proven by the
+ * resolver). Matched by the endpoint's route pattern, as the other hooks are.
+ */
+const SSO_CALLBACK_PATHS = new Set([
+  "/sso/callback",
+  "/sso/callback/:providerId",
+  "/sso/saml2/sp/acs/:providerId",
+]);
+
+function isSsoCallbackPath(path: unknown): boolean {
+  return typeof path === "string" && SSO_CALLBACK_PATHS.has(path);
+}
+
+/** Reserved OIDC/SAML mapping keys reused as role claims, for the SAML name default. */
+const SAML_NAME_MAPPING_DEFAULT = "displayName";
+const OIDC_NAME_MAPPING_DEFAULT = "name";
+const EMAIL_MAPPING_DEFAULT = "email";
 
 /**
  * Maximum SSO providers one organization may own. The plugin's `providersLimit`
@@ -138,6 +161,112 @@ function emailDomain(email: string | null): string | null {
   return domain.length > 0 ? domain : null;
 }
 
+/**
+ * Validate the body's role attribute. Returns the trimmed attribute to carry,
+ * or `null` when the provider sets none (or clears it — an empty value leaves the
+ * existing mapping untouched). A present-but-invalid attribute (reserved key or
+ * over-long) is rejected with {@link SSO_ERROR_CODES.invalidRoleAttribute}.
+ */
+function roleAttributeFromBody(body: Record<string, unknown>): string | null {
+  const raw = body.roleAttribute;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    return null;
+  }
+  const result = validateRoleAttribute(raw);
+  if (!result.ok) {
+    throw new APIError("BAD_REQUEST", {
+      code: SSO_ERROR_CODES.invalidRoleAttribute,
+      message:
+        result.reason === "reserved"
+          ? `"${raw.trim()}" is a reserved profile-mapping key and cannot be used as a role attribute.`
+          : "The role attribute is too long.",
+    });
+  }
+  return result.value;
+}
+
+function asMapping(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? { ...(value as object) } : {};
+}
+
+/**
+ * Carry the role claim into a config's `mapping.extraFields`, so the attribute
+ * the IdP returns under `roleAttribute` reaches `userInfo` and role mapping can
+ * read it. Existing mapping is preserved; `email`/`name` are defaulted so the
+ * (strict) mapping schema still validates after this before-hook.
+ */
+function withRoleExtraField(
+  providerConfig: Record<string, unknown>,
+  roleAttribute: string,
+  kind: "oidc" | "saml",
+): Record<string, unknown> {
+  const existing = asMapping(providerConfig.mapping);
+  const extraFields = {
+    ...asMapping(existing.extraFields),
+    [roleAttribute]: roleAttribute,
+  };
+  return {
+    ...providerConfig,
+    mapping: {
+      ...existing,
+      email: typeof existing.email === "string" ? existing.email : EMAIL_MAPPING_DEFAULT,
+      name:
+        typeof existing.name === "string"
+          ? existing.name
+          : kind === "saml"
+            ? SAML_NAME_MAPPING_DEFAULT
+            : OIDC_NAME_MAPPING_DEFAULT,
+      extraFields,
+    },
+  };
+}
+
+/** The `mapping` object stored inside a provider's oidcConfig/samlConfig column. */
+function storedConfigMapping(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try {
+      return asMapping((JSON.parse(value) as { mapping?: unknown }).mapping);
+    } catch {
+      return {};
+    }
+  }
+  if (value && typeof value === "object") {
+    return asMapping((value as { mapping?: unknown }).mapping);
+  }
+  return {};
+}
+
+/** Inject the role claim into the registration body's oidc/saml mapping. */
+function applyRegisterRoleMapping(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  const roleAttribute = roleAttributeFromBody(body);
+  if (!roleAttribute) {
+    return body;
+  }
+  if (body.oidcConfig && typeof body.oidcConfig === "object") {
+    return {
+      ...body,
+      oidcConfig: withRoleExtraField(
+        body.oidcConfig as Record<string, unknown>,
+        roleAttribute,
+        "oidc",
+      ),
+    };
+  }
+  if (body.samlConfig && typeof body.samlConfig === "object") {
+    return {
+      ...body,
+      samlConfig: withRoleExtraField(
+        body.samlConfig as Record<string, unknown>,
+        roleAttribute,
+        "saml",
+      ),
+    };
+  }
+  return body;
+}
+
 async function handleRegister(
   ctx: { body?: Record<string, unknown> },
   adapter: GuardAdapter,
@@ -167,7 +296,11 @@ async function handleRegister(
   const domain = normalizeSsoDomain(String(body.domain ?? ""));
   await assertSsoDomainAllowed({ domain, organizationId }, domainLookup(adapter));
 
-  return { context: { body: withSignedAssertions({ ...body, domain }) } };
+  return {
+    context: {
+      body: withSignedAssertions(applyRegisterRoleMapping({ ...body, domain })),
+    },
+  };
 }
 
 async function handleUpdate(
@@ -198,6 +331,46 @@ async function handleUpdate(
       );
     }
     nextBody.domain = domain;
+  }
+
+  // Keep the role claim in the mapping when the attribute is (re)set. The update
+  // body may carry only the attribute, so merge into the body's config when it
+  // sends one, else into a mapping-only patch over the provider's current config
+  // (the plugin's mergeOIDCConfig/mergeSAMLConfig preserves the rest).
+  const roleAttribute = roleAttributeFromBody(body);
+  if (roleAttribute && providerId) {
+    const current = await adapter.findOne({
+      model: SSO_PROVIDER_MODEL,
+      where: [{ field: "providerId", value: providerId }],
+      // organizationId is required so the secret-storage adapter wrapper can
+      // resolve the team key when it decrypts the stored config on read.
+      select: ["organizationId", "oidcConfig", "samlConfig"],
+    });
+    if (body.oidcConfig && typeof body.oidcConfig === "object") {
+      nextBody.oidcConfig = withRoleExtraField(
+        body.oidcConfig as Record<string, unknown>,
+        roleAttribute,
+        "oidc",
+      );
+    } else if (body.samlConfig && typeof body.samlConfig === "object") {
+      nextBody.samlConfig = withRoleExtraField(
+        body.samlConfig as Record<string, unknown>,
+        roleAttribute,
+        "saml",
+      );
+    } else if (current?.oidcConfig) {
+      nextBody.oidcConfig = withRoleExtraField(
+        { mapping: storedConfigMapping(current.oidcConfig) },
+        roleAttribute,
+        "oidc",
+      );
+    } else if (current?.samlConfig) {
+      nextBody.samlConfig = withRoleExtraField(
+        { mapping: storedConfigMapping(current.samlConfig) },
+        roleAttribute,
+        "saml",
+      );
+    }
   }
 
   return { context: { body: withSignedAssertions(nextBody) } };
@@ -393,6 +566,25 @@ export function wrapAdapterForVerifiedDomainUniqueness<T extends object>(
   });
 }
 
+/**
+ * `user.create` before-hook: a user created on an SSO callback path is marked
+ * email-verified. Its email domain was proven by `resolveUser` (which rejects a
+ * mismatch before any user is created) together with the provider's verified
+ * domain, so the account is verified at creation — without trusting the IdP's
+ * own `email_verified` claim and without the sign-up verification mail the
+ * plugin would otherwise dispatch for an unverified new account. Non-SSO user
+ * creation is left untouched.
+ */
+function markSsoCreatedUserVerified(
+  user: { emailVerified?: unknown },
+  context: { path?: unknown } | null | undefined,
+): { data: { emailVerified: true } } | undefined {
+  if (!isSsoCallbackPath(context?.path) || user.emailVerified === true) {
+    return undefined;
+  }
+  return { data: { emailVerified: true } };
+}
+
 export function sourceweftSsoGuard(): BetterAuthPlugin {
   return {
     id: "sourceweft-sso-guard",
@@ -400,6 +592,18 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
       return {
         context: {
           adapter: wrapAdapterForVerifiedDomainUniqueness(ctx.adapter),
+        },
+        options: {
+          databaseHooks: {
+            user: {
+              create: {
+                before: async (
+                  user: { emailVerified?: unknown },
+                  context: { path?: unknown } | null,
+                ) => markSsoCreatedUserVerified(user, context),
+              },
+            },
+          },
         },
       };
     },

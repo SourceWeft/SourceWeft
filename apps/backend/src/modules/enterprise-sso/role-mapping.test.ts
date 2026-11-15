@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { mapSsoRole } from "./role-mapping";
+import { mapSsoRole, validateRoleAttribute } from "./role-mapping";
 
 /**
  * `mapSsoRole` turns an IdP's role attribute into the only two organization
@@ -64,5 +64,30 @@ describe("mapSsoRole", () => {
         userInfo: { groups: ["sw-admins"] },
       }),
     ).toBe("member");
+  });
+});
+
+describe("validateRoleAttribute", () => {
+  test("accepts a normal claim name and trims it", () => {
+    expect(validateRoleAttribute("  groups  ")).toEqual({
+      ok: true,
+      value: "groups",
+    });
+  });
+
+  test("rejects a reserved profile-mapping key", () => {
+    for (const reserved of ["id", "email", "emailVerified", "name", "image"]) {
+      expect(validateRoleAttribute(reserved)).toEqual({
+        ok: false,
+        reason: "reserved",
+      });
+    }
+  });
+
+  test("rejects an attribute longer than 128 characters", () => {
+    expect(validateRoleAttribute("x".repeat(129))).toEqual({
+      ok: false,
+      reason: "too_long",
+    });
   });
 });

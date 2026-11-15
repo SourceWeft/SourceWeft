@@ -1,4 +1,7 @@
+import { APIError } from "better-auth/api";
 import { billingOrganizationHooks } from "../../billing-host/bindings";
+import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 import { parseSourceweftOrganizationKind } from "../auth/organization-metadata";
 import {
   recordSsoMemberRoleChangeAudit,
@@ -226,19 +229,105 @@ type SsoProvisioningContext = {
       where: Array<{ field: string; value: unknown }>;
       select?: string[];
     }) => Promise<Record<string, unknown> | null>;
+    findMany: (args: {
+      model: string;
+      where: Array<{ field: string; value: unknown }>;
+      select?: string[];
+    }) => Promise<Array<Record<string, unknown>>>;
     update: (args: {
       model: string;
       where: Array<{ field: string; value: unknown }>;
       update: Record<string, unknown>;
     }) => Promise<unknown>;
-  };
-  internalAdapter: {
-    updateUser: (
-      userId: string,
-      data: Record<string, unknown>,
-    ) => Promise<unknown>;
+    delete: (args: {
+      model: string;
+      where: Array<{ field: string; value: unknown }>;
+    }) => Promise<unknown>;
   };
 };
+
+function toMillis(value: unknown): number {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+  return 0;
+}
+
+/**
+ * Undo a sign-in whose membership step failed after the session was committed.
+ *
+ * `@better-auth/sso@1.7.7` creates and commits the session before it calls
+ * `provisionUser`, so a membership failure there leaves a committed session row
+ * (and, for a brand-new identity, a committed user + SSO account). The session
+ * cookie is never set, because the plugin sets it only after `provisionUser`
+ * returns, so this only has to remove the committed rows:
+ *
+ *  - the session this sign-in created — identified as the most recent session
+ *    for the user, which is this one (provisionUser runs synchronously, within
+ *    the same request, immediately after the session is committed);
+ *  - any membership row (defensive: the member-added path throws its billing
+ *    seat check before it inserts a row, but a later failure could leave one);
+ *  - the SSO account this provider linked (matched by provider + user);
+ *  - and, only for a user this sign-in created, the user row itself.
+ *
+ * An existing user's own rows (their password/other accounts and their other
+ * sessions) are left untouched.
+ */
+async function rollbackFailedSsoSignIn(
+  context: SsoProvisioningContext,
+  input: {
+    userId: string;
+    organizationId: string;
+    providerId: string;
+    isNewUser: boolean;
+  },
+): Promise<void> {
+  const sessions = await context.adapter.findMany({
+    model: "session",
+    where: [{ field: "userId", value: input.userId }],
+    select: ["id", "createdAt"],
+  });
+  const newest = sessions.reduce<Record<string, unknown> | null>(
+    (latest, session) =>
+      latest === null || toMillis(session.createdAt) >= toMillis(latest.createdAt)
+        ? session
+        : latest,
+    null,
+  );
+  if (newest?.id) {
+    await context.adapter.delete({
+      model: "session",
+      where: [{ field: "id", value: String(newest.id) }],
+    });
+  }
+
+  await context.adapter.delete({
+    model: "member",
+    where: [
+      { field: "organizationId", value: input.organizationId },
+      { field: "userId", value: input.userId },
+    ],
+  });
+
+  await context.adapter.delete({
+    model: "account",
+    where: [
+      { field: "providerId", value: input.providerId },
+      { field: "userId", value: input.userId },
+    ],
+  });
+
+  if (input.isNewUser) {
+    await context.adapter.delete({
+      model: "user",
+      where: [{ field: "id", value: input.userId }],
+    });
+  }
+}
 
 /**
  * Add or reconcile a signed-in SSO user's membership of the provider's
@@ -256,10 +345,23 @@ type SsoProvisioningContext = {
  *     and `organization.member_added` audit all run.
  *  3. Every SSO sign-in is recorded as `sso.sign_in`.
  *
- * `role` is already mapped (never `owner`). `isNewUser` only labels the audit
- * entry and, for a freshly created account, confirms the email as verified:
- * ownership is proven by the verified domain + matching email, so the account is
- * verified without trusting the IdP's own `email_verified` claim.
+ * `role` is already mapped (never `owner`). A brand-new account is already
+ * `emailVerified: true` before this runs — the guard's `user.create` hook marks
+ * an SSO-created account verified (ownership is proven by the verified domain +
+ * matching email, which `resolveUser` enforced), so no redundant verification
+ * mail is sent and `trustEmailVerified` stays unset.
+ *
+ * The member-added step runs after the plugin has already committed the session.
+ * If it throws (a seat taken since the resolver's pre-check, a billing error, a
+ * vanished organization), the committed session — and a brand-new user + its SSO
+ * account — are rolled back by {@link rollbackFailedSsoSignIn} and a redirect to
+ * the error URL carrying {@link SSO_ERROR_CODES.seatLimit} or
+ * {@link SSO_ERROR_CODES.provisioningFailed} is thrown. Throwing the redirect
+ * from here (inside the plugin's callback endpoint, via a `FOUND` `APIError`)
+ * routes it through the same error-URL response the plugin emits for a resolver
+ * rejection, rather than surfacing a raw error body. Audit recording and the
+ * role-sync write are best-effort: once membership exists the sign-in has
+ * succeeded, so their failures are logged, not raised.
  */
 export async function provisionSsoUser(input: {
   userId: string;
@@ -276,15 +378,6 @@ export async function provisionSsoUser(input: {
   const { auth } = await import("../auth/auth");
   const context = (await auth.$context) as unknown as SsoProvisioningContext;
 
-  if (input.isNewUser) {
-    // A new account is created with emailVerified=false (trustEmailVerified is
-    // never set). The verified domain + matching email already prove ownership,
-    // so mark it verified now rather than mailing a redundant confirmation.
-    await context.internalAdapter.updateUser(input.userId, {
-      emailVerified: true,
-    });
-  }
-
   const member = await context.adapter.findOne({
     model: "member",
     where: [
@@ -295,41 +388,130 @@ export async function provisionSsoUser(input: {
   });
 
   if (!member) {
-    await auth.api.addMember({
-      body: {
-        userId: input.userId,
-        organizationId: input.organizationId,
-        role: input.role,
-      },
-    });
-  } else {
-    const currentRole = typeof member.role === "string" ? member.role : "";
-    const isOwner = currentRole
-      .split(",")
-      .map((entry) => entry.trim())
-      .includes("owner");
-
-    if (!isOwner && input.roleManaged && currentRole !== input.role) {
-      await context.adapter.update({
-        model: "member",
-        where: [{ field: "id", value: String(member.id) }],
-        update: { role: input.role },
+    try {
+      await auth.api.addMember({
+        body: {
+          userId: input.userId,
+          organizationId: input.organizationId,
+          role: input.role,
+        },
       });
-      await recordSsoMemberRoleChangeAudit({
-        teamId: input.organizationId,
+    } catch (error) {
+      await rollbackFailedSsoSignIn(context, input);
+      throw provisioningRedirect(
+        await isSeatRejection(input.organizationId),
+        error,
+      );
+    }
+  } else if (input.roleManaged) {
+    // Role sync is best-effort; a failure must not undo a sign-in whose
+    // membership already holds.
+    try {
+      await syncExistingMemberRole({
+        context,
+        memberId: String(member.id),
+        currentRole: typeof member.role === "string" ? member.role : "",
+        nextRole: input.role,
+        organizationId: input.organizationId,
         userId: input.userId,
-        previousRole: currentRole,
-        newRole: input.role,
+      });
+    } catch (error) {
+      logger.error("sso_role_sync_failed", {
+        organizationId: input.organizationId,
+        userId: input.userId,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
-  await recordSsoSignInAudit({
-    teamId: input.organizationId,
-    actorUserId: input.userId,
-    providerId: input.providerId,
-    protocol: input.protocol,
-    domain: input.domain,
-    isNewUser: input.isNewUser,
+  // Best-effort: the sign-in has succeeded by now.
+  try {
+    await recordSsoSignInAudit({
+      teamId: input.organizationId,
+      actorUserId: input.userId,
+      providerId: input.providerId,
+      protocol: input.protocol,
+      domain: input.domain,
+      isNewUser: input.isNewUser,
+    });
+  } catch (error) {
+    logger.error("sso_sign_in_audit_failed", {
+      organizationId: input.organizationId,
+      userId: input.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** Promote/demote a non-owner member to the mapped role, auditing the change. */
+async function syncExistingMemberRole(input: {
+  context: SsoProvisioningContext;
+  memberId: string;
+  currentRole: string;
+  nextRole: "member" | "admin";
+  organizationId: string;
+  userId: string;
+}): Promise<void> {
+  const isOwner = input.currentRole
+    .split(",")
+    .map((entry) => entry.trim())
+    .includes("owner");
+  if (isOwner || input.currentRole === input.nextRole) {
+    return;
+  }
+  await input.context.adapter.update({
+    model: "member",
+    where: [{ field: "id", value: input.memberId }],
+    update: { role: input.nextRole },
   });
+  await recordSsoMemberRoleChangeAudit({
+    teamId: input.organizationId,
+    userId: input.userId,
+    previousRole: input.currentRole,
+    newRole: input.nextRole,
+  });
+}
+
+/**
+ * Whether the organization's billing seat check now rejects, used to classify a
+ * failed member-add after the fact: a seat rejection becomes `SSO_SEAT_LIMIT`,
+ * anything else `SSO_PROVISIONING_FAILED`. Re-running the (read-only) seat hook
+ * is the only reliable discriminator, since `addMember` can throw for either.
+ */
+async function isSeatRejection(organizationId: string): Promise<boolean> {
+  try {
+    await billingOrganizationHooks.beforeAddMember(organizationId);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Build the error-URL redirect for a failed membership step. A `FOUND`
+ * `APIError` with a `location` header is exactly what the plugin's own
+ * `ctx.redirect(...)` produces for a resolver rejection, so thrown from inside
+ * the callback endpoint it yields a clean 302 to the error page carrying the
+ * code — never a raw error body. No session cookie is set, because the plugin
+ * sets it only after `provisionUser` returns.
+ */
+function provisioningRedirect(isSeat: boolean, cause: unknown): APIError {
+  const code = isSeat
+    ? SSO_ERROR_CODES.seatLimit
+    : SSO_ERROR_CODES.provisioningFailed;
+  const url = new URL(config.auth.errorUrl);
+  url.searchParams.set("error", code);
+  const error = new APIError(
+    "FOUND",
+    undefined,
+    new Headers({ location: url.toString() }),
+  );
+  // Keep the originating error for diagnostics without leaking it in the
+  // serialized body (a non-enumerable property is skipped by JSON.stringify).
+  Object.defineProperty(error, "cause", {
+    value: cause,
+    enumerable: false,
+    configurable: true,
+  });
+  return error;
 }

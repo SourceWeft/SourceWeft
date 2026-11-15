@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { billingOrganizationHooks } from "../../billing-host/bindings";
 import {
@@ -12,6 +13,7 @@ import {
   bootSsoTestHarness,
   closeSsoTestHarness,
   createOrganization,
+  readStoredProvider,
   setProviderDomainVerified,
   setProviderRoleMapping,
   signUpUser,
@@ -212,6 +214,91 @@ async function auditEntries(): Promise<
 > {
   const { teamAuditService } = await import("../team-audit");
   return teamAuditService.list({ teamId: orgA, limit: 500 });
+}
+
+async function userCount(): Promise<number> {
+  const result = await harness.schema.database.query<{ count: number }>(
+    `select count(*)::int as count from "user"`,
+  );
+  return result.rows[0]?.count ?? 0;
+}
+
+async function codeOf(response: Response): Promise<string | undefined> {
+  const body = (await response.clone().json()) as { code?: string };
+  return body.code;
+}
+
+/** Spy `beforeAddMember` so the first `passCount` calls succeed and the rest throw. */
+function spyBeforeAddMemberThrowAfter(passCount: number) {
+  let calls = 0;
+  return vi
+    .spyOn(billingOrganizationHooks, "beforeAddMember")
+    .mockImplementation(async () => {
+      calls += 1;
+      if (calls > passCount) {
+        throw new Error("seat limit reached");
+      }
+    });
+}
+
+/**
+ * Register an OIDC provider carrying `roleAttribute` in the body (Finding 2), in
+ * a fresh team organization so the per-org provider cap (orgA is near it) is not
+ * hit. Returns the organization too, for membership assertions.
+ */
+async function registerOidcWithRoleAttribute(input: {
+  domain: string;
+  roleAttribute?: string;
+  adminRoleValue?: string;
+}): Promise<{ response: Response; providerId: string; organizationId: string }> {
+  const organizationId = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+    name: `Role ${input.domain}`,
+  });
+  const providerId = `prov-role-${input.domain}-${Date.now()}`;
+  const response = await ownerA.client.jsonRequest("/sso/register", {
+    providerId,
+    issuer: mock.issuer,
+    domain: input.domain,
+    organizationId,
+    ...(input.roleAttribute ? { roleAttribute: input.roleAttribute } : {}),
+    ...(input.adminRoleValue ? { adminRoleValue: input.adminRoleValue } : {}),
+    oidcConfig: {
+      clientId: mock.clientId,
+      clientSecret: mock.clientSecret,
+      tokenEndpointAuthentication: "client_secret_basic",
+      skipDiscovery: true,
+      pkce: false,
+      scopes: ["openid", "email", "profile"],
+      authorizationEndpoint: `${mock.issuer}/authorize`,
+      tokenEndpoint: `${mock.issuer}/token`,
+      jwksEndpoint: `${mock.issuer}/jwks`,
+      userInfoEndpoint: `${mock.issuer}/userinfo`,
+    },
+  });
+  return { response, providerId, organizationId };
+}
+
+async function memberRoleIn(
+  organizationId: string,
+  userId: string,
+): Promise<string | null> {
+  const result = await harness.schema.database.query<{ role: string }>(
+    `select role from member where "organizationId" = $1 and "userId" = $2`,
+    [organizationId, userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
+async function storedExtraFields(
+  providerId: string,
+): Promise<Record<string, unknown>> {
+  const stored = await readStoredProvider(harness, providerId);
+  const oidc = JSON.parse(stored.oidcConfig ?? "{}") as {
+    mapping?: { extraFields?: Record<string, unknown> };
+  };
+  return oidc.mapping?.extraFields ?? {};
 }
 
 beforeAll(async () => {
@@ -599,4 +686,268 @@ test("sign-in is rejected when the provider's organization is no longer a team o
   );
   assert.equal(await sessionUser(client), null, "must not establish a session");
   assert.equal(await userRow("member@demoted.example"), null, "must not create a user");
+}, 200_000);
+
+// ── Finding 1: failure handling after the session is committed ──────────────
+
+test("a seat taken after the resolver pre-check rolls back the committed sign-in", async () => {
+  const email = "seat-race@acme.com";
+  // The resolver pre-check (call 1) passes; addMember's own seat hook (call 2)
+  // throws — the failure window the fix closes.
+  const spy = spyBeforeAddMemberThrowAfter(1);
+  let result: Awaited<ReturnType<typeof signInViaSso>>;
+  try {
+    result = await signInViaSso({
+      claims: { sub: "sub-seatrace", email, name: "Racer", groups: [] },
+      body: { email },
+    });
+  } finally {
+    spy.mockRestore();
+  }
+  const { callback, client } = result;
+  assert.ok(callback);
+  assert.equal(callback.status, 302);
+  assert.ok(
+    callback.headers.get("location")!.includes(SSO_ERROR_CODES.seatLimit),
+    `expected SSO_SEAT_LIMIT, got ${callback.headers.get("location")}`,
+  );
+  assert.ok(!hasSessionCookie(callback), "no session cookie");
+  assert.equal(await sessionUser(client), null, "no session");
+  assert.equal(await userRow(email), null, "the new user is rolled back");
+  assert.equal(await sessionCount(email), 0, "no session row");
+  assert.equal(await ssoAccountCount(email, acmeProviderId), 0, "no account row");
+}, 200_000);
+
+test("a seat taken for an existing user rolls back only this sign-in", async () => {
+  const existing = await signUpUser(harness, "seatexisting", {
+    email: "seatexisting@acme.com",
+  });
+  const sessionsBefore = await sessionCount("seatexisting@acme.com");
+  assert.ok(sessionsBefore >= 1, "the existing user has a sign-up session");
+
+  const spy = spyBeforeAddMemberThrowAfter(1);
+  let result: Awaited<ReturnType<typeof signInViaSso>>;
+  try {
+    result = await signInViaSso({
+      claims: {
+        sub: "sub-seatexisting",
+        email: "seatexisting@acme.com",
+        name: "Existing",
+        groups: [],
+      },
+      body: { email: "seatexisting@acme.com" },
+    });
+  } finally {
+    spy.mockRestore();
+  }
+  const { callback, client } = result;
+  assert.equal(callback?.status, 302);
+  assert.ok(
+    callback!.headers.get("location")!.includes(SSO_ERROR_CODES.seatLimit),
+  );
+  assert.ok(!hasSessionCookie(callback!));
+  assert.equal(await sessionUser(client), null);
+  // Existing identity intact; only this sign-in's session + SSO account are gone.
+  assert.ok(await userRow("seatexisting@acme.com"), "existing user kept");
+  assert.equal(await memberCount(existing.userId), 0, "not a member");
+  assert.equal(await ssoAccountCount("seatexisting@acme.com", acmeProviderId), 0);
+  assert.equal(
+    await sessionCount("seatexisting@acme.com"),
+    sessionsBefore,
+    "the pre-existing session is intact",
+  );
+}, 200_000);
+
+test("a non-billing provisioning failure rolls back and redirects SSO_PROVISIONING_FAILED", async () => {
+  const { auth } = await import("../auth/auth");
+  const spy = vi
+    .spyOn(auth.api, "addMember")
+    .mockRejectedValue(new Error("boom"));
+  const email = "provfail@acme.com";
+  let result: Awaited<ReturnType<typeof signInViaSso>>;
+  try {
+    result = await signInViaSso({
+      claims: { sub: "sub-provfail", email, name: "ProvFail", groups: [] },
+      body: { email },
+    });
+  } finally {
+    spy.mockRestore();
+  }
+  const { callback, client } = result;
+  assert.equal(callback?.status, 302);
+  assert.ok(
+    callback!.headers
+      .get("location")!
+      .includes(SSO_ERROR_CODES.provisioningFailed),
+    `expected SSO_PROVISIONING_FAILED, got ${callback!.headers.get("location")}`,
+  );
+  assert.ok(!hasSessionCookie(callback!));
+  assert.equal(await sessionUser(client), null);
+  assert.equal(await userRow(email), null, "the new user is rolled back");
+  assert.equal(await sessionCount(email), 0);
+}, 200_000);
+
+test("an audit failure after a successful add does not fail the sign-in", async () => {
+  const { teamAuditService } = await import("../team-audit");
+  // Fail only the sso.sign_in audit (after membership holds); leave the
+  // member-added audit alone so addMember still succeeds.
+  const spy = vi
+    .spyOn(teamAuditService, "record")
+    .mockImplementation(async (entry) => {
+      if (entry.action === "sso.sign_in") {
+        throw new Error("audit down");
+      }
+    });
+  const email = "auditfail@acme.com";
+  let result: Awaited<ReturnType<typeof signInViaSso>>;
+  try {
+    result = await signInViaSso({
+      claims: { sub: "sub-auditfail", email, name: "AuditFail", groups: [] },
+      body: { email },
+    });
+  } finally {
+    spy.mockRestore();
+  }
+  const { callback, client } = result;
+  assert.equal(callback?.status, 302);
+  assert.ok(
+    !new URL(callback!.headers.get("location")!).searchParams.get("error"),
+    "the sign-in succeeds despite the audit failure",
+  );
+  assert.ok(hasSessionCookie(callback!), "a session cookie is set");
+  assert.equal((await sessionUser(client))?.email, email);
+  const row = await userRow(email);
+  assert.ok(row);
+  assert.equal(await memberRole(row.id), "member", "membership is present");
+}, 200_000);
+
+test("an IdP that returns no email claim is rejected cleanly, not with a 500", async () => {
+  const before = await userCount();
+  const { signIn, callback, client } = await signInViaSso({
+    claims: { sub: "sub-noemail", email: "", name: "No Email", groups: [] },
+    body: { providerId: acmeProviderId },
+  });
+  assert.equal(signIn.status, 200, await signIn.clone().text());
+  assert.ok(callback);
+  assert.equal(callback.status, 302);
+  assert.ok(
+    new URL(callback.headers.get("location")!).searchParams.get("error"),
+    "a clean error redirect, not a 500",
+  );
+  assert.equal(await sessionUser(client), null, "no session");
+  assert.equal(await userCount(), before, "no user created");
+}, 200_000);
+
+// ── Finding 2: the guard carries the role claim into the mapping ────────────
+
+test("registering with a role attribute carries the claim into the mapping", async () => {
+  const { response, providerId } = await registerOidcWithRoleAttribute({
+    domain: "rolemap.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await storedExtraFields(providerId)).groups, "groups");
+}, 200_000);
+
+test("a provider configured only with roleAttribute maps the admin group end to end", async () => {
+  const { response, providerId, organizationId } =
+    await registerOidcWithRoleAttribute({
+      domain: "e2erole.example",
+      roleAttribute: "groups",
+      adminRoleValue: "sw-admins",
+    });
+  assert.equal(response.status, 200, await response.clone().text());
+  await setProviderDomainVerified(harness, providerId);
+
+  const user = await signUpUser(harness, "e2erole", {
+    email: "e2e@e2erole.example",
+  });
+  await addOrganizationMember(harness, {
+    organizationId,
+    userId: user.userId,
+    role: "member",
+  });
+
+  const { callback } = await signInViaSso({
+    claims: {
+      sub: "sub-e2erole",
+      email: "e2e@e2erole.example",
+      name: "E2E Role",
+      groups: ["sw-admins"],
+    },
+    body: { email: "e2e@e2erole.example" },
+  });
+  assert.equal(callback?.status, 302, await callback?.clone().text());
+  assert.equal(await memberRoleIn(organizationId, user.userId), "admin");
+}, 200_000);
+
+test("updating the role attribute adds the new claim and keeps the old one", async () => {
+  const { response, providerId } = await registerOidcWithRoleAttribute({
+    domain: "updrole.example",
+    roleAttribute: "groups",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+
+  const update = await ownerA.client.jsonRequest("/sso/update-provider", {
+    providerId,
+    roleAttribute: "roles",
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+
+  const extraFields = await storedExtraFields(providerId);
+  assert.equal(extraFields.roles, "roles", "the new claim is carried");
+  assert.equal(extraFields.groups, "groups", "the earlier claim is preserved");
+}, 200_000);
+
+test("a reserved role attribute is rejected with SSO_INVALID_ROLE_ATTRIBUTE", async () => {
+  const { response } = await registerOidcWithRoleAttribute({
+    domain: "badrole.example",
+    roleAttribute: "email",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.invalidRoleAttribute);
+}, 200_000);
+
+// ── Finding 3: no redundant verification mail for a domain-verified user ────
+
+test("a new SSO user is created verified and triggers no verification email", async () => {
+  const { mailService } = await import("../mail");
+  const spy = vi.spyOn(mailService, "sendTemplate");
+  const email = "verified@acme.com";
+  try {
+    const { callback } = await signInViaSso({
+      claims: { sub: "sub-verified", email, name: "Verified", groups: [] },
+      body: { email },
+    });
+    assert.equal(callback?.status, 302, await callback?.clone().text());
+
+    const verifyCalls = spy.mock.calls.filter(([arg]) => {
+      const input = arg as { templateId?: string; to?: unknown };
+      const to = Array.isArray(input?.to) ? input.to : [input?.to];
+      return input?.templateId === "auth.verify-email" && to.includes(email);
+    });
+    assert.equal(verifyCalls.length, 0, "no verification email for the SSO user");
+
+    // A normal email/password sign-up still goes through the verification path.
+    spy.mockClear();
+    await signUpUser(harness, "plainverify", {
+      email: `plain-${randomUUID()}@example.test`,
+    });
+    const signUpVerifyCalls = spy.mock.calls.filter(
+      ([arg]) => (arg as { templateId?: string })?.templateId === "auth.verify-email",
+    );
+    assert.ok(
+      signUpVerifyCalls.length >= 1,
+      "a normal sign-up still sends a verification email",
+    );
+  } finally {
+    spy.mockRestore();
+  }
+
+  const row = await userRow(email);
+  assert.ok(row);
+  assert.equal(row.emailVerified, true, "the SSO user is verified at creation");
 }, 200_000);
