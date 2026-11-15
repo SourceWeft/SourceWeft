@@ -110,7 +110,7 @@ test("tts.speech sends DeepInfra OpenAI-compatible speech request", async () => 
   const result = await gateway.tts.speech({
     model: "tts-default",
     input: "Hello from SourceWeft",
-    voice: "mimo",
+    voice: "mimo_default",
     instructions: "Use a warm narration voice.",
     responseFormat: "wav",
     speed: 1.1,
@@ -130,7 +130,7 @@ test("tts.speech sends DeepInfra OpenAI-compatible speech request", async () => 
   assert.deepEqual(JSON.parse(String(requests[0]?.init.body)), {
     model: "XiaomiMiMo/MiMo-V2.5-tts",
     input: "Hello from SourceWeft",
-    voice: "mimo",
+    voice: "mimo_default",
     response_format: "wav",
     speed: 1.1,
     instructions: "Use a warm narration voice.",
