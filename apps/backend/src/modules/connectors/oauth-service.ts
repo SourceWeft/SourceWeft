@@ -1,6 +1,7 @@
 import { ConnectorAccessPolicy } from "./access-policy";
 import { createHash, randomBytes } from "node:crypto";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 import {
   decryptTeamSecret,
   encryptTeamSecret,
@@ -15,6 +16,7 @@ import {
   findOAuthAccountRecord,
   findOAuthStateRecord,
   findReauthorizableOAuthAccountRecord,
+  listOAuthAccountsDueForKeepAlive,
   reauthorizeOAuthAccountRecord,
   withOAuthAccountRefreshLock,
   type OAuthAccountRefreshWrite,
@@ -31,6 +33,11 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 const REFRESH_LOCK_TIMEOUT_MS = 30_000;
 const REFRESH_PROVIDER_TIMEOUT_MS = 20_000;
+// A refresh token a provider never sees used for a while can silently expire,
+// quietly killing a connection nobody is actively touching. The keep-alive
+// sweep (`refreshIdleAccounts`) refreshes accounts idle longer than this.
+const KEEP_ALIVE_MIN_AGE_MS = 7 * 24 * 60 * 60_000;
+const KEEP_ALIVE_BATCH_LIMIT = 50;
 
 type OAuthAccountRef = {
   id: string;
@@ -420,6 +427,86 @@ export class ConnectorOAuthService {
           Date.now() + TOKEN_REFRESH_SKEW_MS,
     );
     return accessToken;
+  }
+
+  /**
+   * Walk the accounts idle longer than `KEEP_ALIVE_MIN_AGE_MS` and refresh
+   * each one through the same locked path as `getRuntimeToken`, one after
+   * another so a pass never holds more than one database connection at a
+   * time. One account's outcome never stops the rest of the batch.
+   *
+   * `isFresh` here decides by `lastRefreshAt` (or `createdAt`, before any
+   * refresh), not by `expiresAt`: a token a provider issued without an
+   * expiry is otherwise never swept, even though its refresh token can still
+   * go stale from disuse.
+   */
+  async refreshIdleAccounts(input: { now: Date }): Promise<{
+    checked: number;
+    refreshed: number;
+    alreadyFresh: number;
+    reauthRequired: number;
+    skipped: number;
+    failed: number;
+  }> {
+    const candidates = await listOAuthAccountsDueForKeepAlive({
+      refreshedBefore: new Date(input.now.getTime() - KEEP_ALIVE_MIN_AGE_MS),
+      limit: KEEP_ALIVE_BATCH_LIMIT,
+    });
+
+    const counts = {
+      checked: candidates.length,
+      refreshed: 0,
+      alreadyFresh: 0,
+      reauthRequired: 0,
+      skipped: 0,
+      failed: 0,
+    };
+
+    for (const candidate of candidates) {
+      try {
+        const { refreshed } = await this.refreshAccountToken(
+          candidate,
+          (locked) =>
+            new Date(locked.lastRefreshAt ?? locked.createdAt).getTime() >=
+            input.now.getTime() - KEEP_ALIVE_MIN_AGE_MS,
+        );
+        if (refreshed) {
+          counts.refreshed += 1;
+        } else {
+          counts.alreadyFresh += 1;
+        }
+      } catch (error) {
+        const connectorError = toConnectorError(error);
+        if (connectorError.code === "CONNECTOR_REAUTH_REQUIRED") {
+          counts.reauthRequired += 1;
+        } else if (
+          // The adapter was never resolved (connector switched off), or the
+          // account was gone or no longer active by the time the lock was
+          // taken: nothing was attempted and nothing changed, so this is not
+          // a failure worth a warning.
+          connectorError.code === "CONNECTOR_ADAPTER_NOT_FOUND" ||
+          connectorError.code === "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND" ||
+          connectorError.code === "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE"
+        ) {
+          counts.skipped += 1;
+        } else {
+          counts.failed += 1;
+          logger.warn("connector_token_keep_alive_failed", {
+            accountId: candidate.id,
+            connectorType: candidate.connectorType,
+            code: connectorError.code,
+          });
+        }
+      }
+    }
+
+    // Skipped when nothing was checked so an idle deployment does not log
+    // every hour.
+    if (counts.checked > 0) {
+      logger.info("connector_token_keep_alive", counts);
+    }
+
+    return counts;
   }
 
   /**
