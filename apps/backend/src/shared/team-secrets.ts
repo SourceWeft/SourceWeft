@@ -87,6 +87,17 @@ function cachedKeySet(teamId: string) {
   return cached && cached.expiresAt > Date.now() ? cached.keys : null;
 }
 
+/**
+ * The team's cached key set ignoring the TTL — for the no-fetch decrypt path,
+ * which must not touch the database. The unwrapped keys live in process memory
+ * until a rotation or an explicit cache clear, so an expired entry still holds
+ * the right material (the data key does not change on a TTL lapse). `null` when
+ * nothing was ever cached for this team.
+ */
+function inMemoryKeySet(teamId: string): TeamKeySet | null {
+  return dataKeyCache.get(teamId)?.keys ?? null;
+}
+
 /** Drop cached unwrapped keys — for one team, or all of them. */
 export function clearTeamDataKeyCache(teamId?: string) {
   if (teamId === undefined) {
@@ -94,6 +105,25 @@ export function clearTeamDataKeyCache(teamId?: string) {
     return;
   }
   dataKeyCache.delete(teamId);
+}
+
+/**
+ * Expire the cached TTL for one team, or all of them, WITHOUT dropping the
+ * unwrapped key material. Models the 5-minute cache lapsing: a fetch path
+ * ({@link getTeamKeySetForDecrypt}) treats the entry as a miss, while the
+ * no-fetch path ({@link inMemoryKeySet}) still returns the retained keys. Test
+ * seam only — production never needs to expire without clearing.
+ */
+export function expireTeamDataKeyCacheTtl(teamId?: string) {
+  const expire = (entry: CachedKeySet) => {
+    entry.expiresAt = 0;
+  };
+  if (teamId === undefined) {
+    for (const entry of dataKeyCache.values()) expire(entry);
+    return;
+  }
+  const entry = dataKeyCache.get(teamId);
+  if (entry) expire(entry);
 }
 
 async function readKeyRow(teamId: string) {
@@ -233,10 +263,19 @@ export async function encryptTeamSecret(plainText: string, teamId: string) {
  * versions with the same error shape. Decrypting never creates a key row: a
  * `v2:` payload for a team without one fails fast. Empty/null input returns
  * an empty string, matching `decryptSecret`.
+ *
+ * `noFetch` decrypts using only key material already in process memory
+ * (regardless of TTL) and never queries the database — for callers that run
+ * inside a database transaction holding a row lock, where a second pooled
+ * connection could deadlock. If no key is in memory it fails closed (throws)
+ * rather than fetching; the only `v2:` writer is a team that already has a key
+ * row, and every such caller here has already read the row (warming the cache)
+ * earlier in the same request.
  */
 export async function decryptTeamSecret(
   cipherText: string | null,
   teamId: string,
+  options?: { noFetch?: boolean },
 ) {
   if (!cipherText) {
     return "";
@@ -247,6 +286,15 @@ export async function decryptTeamSecret(
   // Validate the payload shape before touching the database, so malformed
   // input fails identically whether or not the team has a key row.
   parseSecretPayload(cipherText, TEAM_PAYLOAD_PREFIX);
+  if (options?.noFetch) {
+    const keys = inMemoryKeySet(requireTeamId(teamId));
+    if (!keys) {
+      throw new Error(
+        `Team data key not in memory for team '${teamId}' (no-fetch decrypt)`,
+      );
+    }
+    return decryptV2WithKeySet(cipherText, keys);
+  }
   return decryptV2WithKeySet(cipherText, await getTeamKeySetForDecrypt(teamId));
 }
 

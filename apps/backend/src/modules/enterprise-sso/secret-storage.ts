@@ -115,6 +115,7 @@ export async function sealOidcConfig(
 export async function openOidcConfig(
   oidcConfigJson: string,
   organizationId: string,
+  options?: { noFetch?: boolean },
 ): Promise<string> {
   if (!oidcConfigJson) {
     return oidcConfigJson;
@@ -130,6 +131,7 @@ export async function openOidcConfig(
   const opened = await decryptTeamSecret(
     clientSecret.slice(SEALED_SECRET_PREFIX.length),
     organizationId,
+    options,
   );
   return JSON.stringify({ ...parsed, clientSecret: opened });
 }
@@ -161,14 +163,17 @@ function organizationIdOf(row: AdapterRow | null | undefined): string {
 }
 
 /** Open the `oidcConfig` of an `ssoProvider` row read out of the adapter. */
-async function openRow(row: AdapterRow): Promise<AdapterRow> {
+async function openRow(
+  row: AdapterRow,
+  options?: { noFetch?: boolean },
+): Promise<AdapterRow> {
   const { oidcConfig } = row;
   if (typeof oidcConfig !== "string" || !oidcConfig) {
     return row;
   }
   return {
     ...row,
-    oidcConfig: await openOidcConfig(oidcConfig, organizationIdOf(row)),
+    oidcConfig: await openOidcConfig(oidcConfig, organizationIdOf(row), options),
   };
 }
 
@@ -206,9 +211,21 @@ type LooseAdapter = {
  * table depends on — pass straight through, and so a transaction adapter is
  * re-wrapped recursively (the plugin runs secret mutations inside
  * `runWithTransaction`, whose transaction adapter must seal too).
+ *
+ * `inTransaction` reads (the re-wrapped transaction adapter) decrypt the secret
+ * with `noFetch: true` — key material already in memory, never a pool query —
+ * because the sign-in transaction holds the provider row lock and a second
+ * pooled connection could deadlock it. Every in-transaction consumer of the
+ * decrypted secret (the OIDC provider-reference fingerprint, which strips it;
+ * the update endpoint's config merge, which read the row before the
+ * transaction) has already warmed the team-key cache in the same request.
  */
-function wrapAdapter<T extends DBTransactionAdapter>(adapter: T): T {
+function wrapAdapter<T extends DBTransactionAdapter>(
+  adapter: T,
+  inTransaction = false,
+): T {
   const base = adapter as unknown as LooseAdapter;
+  const openOptions = { noFetch: inTransaction };
 
   const handler: ProxyHandler<T> = {
     get(target, property, receiver) {
@@ -293,7 +310,7 @@ function wrapAdapter<T extends DBTransactionAdapter>(adapter: T): T {
             if (args.model !== SSO_PROVIDER_MODEL || !row) {
               return row;
             }
-            return openRow(row);
+            return openRow(row, openOptions);
           };
         case "findMany":
           return async (args: { model: string }) => {
@@ -301,7 +318,7 @@ function wrapAdapter<T extends DBTransactionAdapter>(adapter: T): T {
             if (args.model !== SSO_PROVIDER_MODEL || !Array.isArray(rows)) {
               return rows;
             }
-            return Promise.all(rows.map(openRow));
+            return Promise.all(rows.map((row) => openRow(row, openOptions)));
           };
         case "transaction": {
           const runTransaction = base.transaction;
@@ -311,7 +328,7 @@ function wrapAdapter<T extends DBTransactionAdapter>(adapter: T): T {
           return <R>(
             callback: (trx: DBTransactionAdapter) => Promise<R>,
           ): Promise<R> =>
-            runTransaction((trx) => callback(wrapAdapter(trx)));
+            runTransaction((trx) => callback(wrapAdapter(trx, true)));
         }
         default:
           return Reflect.get(target, property, receiver);
