@@ -3264,6 +3264,61 @@
           "unknown": "因未知原因被跳过"
         }
       },
+      "dropbox": {
+        "itemsTitle": "文件和文件夹",
+        "itemsDescription": "选择要索引的 Dropbox 文件和文件夹。所选内容都会按连接器的同步计划保持同步。",
+        "chooseFiles": "选择文件",
+        "count": "{count} / {limit}",
+        "empty": "尚未选择任何内容。选择文件或文件夹以进行索引。",
+        "foldersGroup": "文件夹",
+        "filesGroup": "文件",
+        "folderIndexedCount": "{count, plural, other {已索引 # 个文件}}",
+        "folderMissing": "已不存在",
+        "remove": "移除 {name}",
+        "lastSynced": "{date} 已同步",
+        "limitReached": "最多可选择 {limit} 个文件和文件夹。请先移除部分内容再添加。",
+        "browser": {
+          "title": "从 Dropbox 选择",
+          "description": "打开文件夹查看其中内容，然后勾选要索引的文件和文件夹。",
+          "root": "Dropbox",
+          "breadcrumbLabel": "文件夹路径",
+          "searchLabel": "按文件名搜索 Dropbox",
+          "searchPlaceholder": "搜索 Dropbox",
+          "emptyFolder": "此文件夹为空。",
+          "noResults": "没有与搜索匹配的文件或文件夹。",
+          "loadMore": "加载更多",
+          "select": "选择 {name}",
+          "unsupported": "此文件类型无法索引",
+          "alreadyAdded": "已添加",
+          "selectedCount": "已选择 {count} 项",
+          "folderNote": "文件夹合计最多同步 {limit, number} 个文件",
+          "cancel": "取消",
+          "add": "添加"
+        },
+        "error": {
+          "reconnect": "你的 Dropbox 账号需要重新连接。重新连接后再试。",
+          "notFound": "此 Dropbox 连接器不可用。请刷新后重试。",
+          "tryLater": "Dropbox 暂时繁忙。请稍后再试。",
+          "generic": "无法连接到 Dropbox。请重试。"
+        },
+        "state": {
+          "skipped": "已跳过",
+          "indexed": "已索引",
+          "processing": "同步中",
+          "failed": "失败",
+          "waiting": "等待同步",
+          "unavailable": "已在 Dropbox 中删除或失去访问权限"
+        },
+        "skipReason": {
+          "unsupported_type": "不支持的文件类型",
+          "too_large": "文件过大，无法索引",
+          "needs_ocr": "扫描版 PDF 暂不支持",
+          "export_too_large": "导出内容过大，无法索引",
+          "empty_content": "没有可读内容",
+          "unreadable": "无法读取文件",
+          "unknown": "因未知原因被跳过"
+        }
+      },
       "settingsTab": {
         "overview": "概览",
         "configuration": "配置",
