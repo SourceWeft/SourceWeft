@@ -183,7 +183,15 @@ test("the providerId cannot be changed while editing", async () => {
   );
 });
 
-test("a SAML provider with pasted metadata sends idpMetadata.metadata and no fetch URL", async () => {
+// A compact but valid IdP metadata document (Okta-style prefixes).
+const SAML_METADATA = `<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.acme.com/entity">
+  <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <md:KeyDescriptor use="signing"><ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:X509Data><ds:X509Certificate>ACMESIGNINGCERT==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.acme.com/sso"/>
+  </md:IDPSSODescriptor>
+</md:EntityDescriptor>`;
+
+test("pasting SAML metadata fills the explicit fields and submits them (never raw metadata)", async () => {
   await renderCreate();
   await flush();
 
@@ -191,21 +199,60 @@ test("a SAML provider with pasted metadata sends idpMetadata.metadata and no fet
   await flush();
 
   typeInto(field("sso-domain")!, "acme.com");
-  const xml = "<EntityDescriptor>metadata</EntityDescriptor>";
-  typeInto(field("sso-metadata")!, xml);
+  await flush();
+  typeInto(field("sso-metadata")!, SAML_METADATA);
+  await flush();
+
+  // The three explicit fields are filled from the metadata.
+  assert.equal(field("sso-entry-point")!.value, "https://idp.acme.com/sso");
+  assert.equal(field("sso-idp-entity-id")!.value, "https://idp.acme.com/entity");
+  assert.equal(field("sso-cert")!.value, "ACMESIGNINGCERT==");
+
   button("orgSave").click();
   await flush(3);
 
   assert.equal(state.register.mock.calls.length, 1);
   const payload = state.register.mock.calls[0]?.[0] as Record<string, unknown>;
-  const saml = payload.samlConfig as Record<string, unknown>;
-  const idpMetadata = saml.idpMetadata as Record<string, unknown>;
-  assert.equal(idpMetadata.metadata, xml);
-  const serialized = JSON.stringify(payload).toLowerCase();
+  const saml = payload.samlConfig as {
+    entryPoint?: unknown;
+    cert?: unknown;
+    idpMetadata?: { entityID?: unknown; metadata?: unknown };
+  };
+  // The register body zod schema is NOT exported from `@better-auth/sso`; these
+  // shapes are checked against the plugin's `samlConfigSchema`
+  // (node_modules/@better-auth/sso/dist/index.mjs ~L1917): `entryPoint:
+  // z.string().url()` is REQUIRED, `idpMetadata` is required (metadata|entityID),
+  // `cert` optional. A metadata-only body (no entryPoint) is a 400 — the bug this
+  // test guards against.
   assert(
-    !serialized.includes("metadataurl") && !serialized.includes("fetch"),
-    "no metadata-by-URL field is sent",
+    typeof saml.entryPoint === "string" && /^https?:\/\//.test(saml.entryPoint),
+    "a valid URL entryPoint is always sent",
   );
+  assert.equal(saml.cert, "ACMESIGNINGCERT==");
+  assert.equal(saml.idpMetadata?.entityID, "https://idp.acme.com/entity");
+  assert(
+    !("metadata" in (saml.idpMetadata ?? {})),
+    "the raw metadata XML is never submitted",
+  );
+});
+
+test("a SAML provider can never submit a samlConfig without an entryPoint", async () => {
+  await renderCreate();
+  await flush();
+
+  button("orgProtocolSaml").click();
+  await flush();
+
+  typeInto(field("sso-domain")!, "acme.com");
+  // Fill cert + entity id but leave the sign-on URL blank.
+  typeInto(field("sso-cert")!, "ACMESIGNINGCERT==");
+  typeInto(field("sso-idp-entity-id")!, "https://idp.acme.com/entity");
+  await flush();
+  button("orgSave").click();
+  await flush();
+
+  assert.equal(state.register.mock.calls.length, 0);
+  assert(document.body.textContent?.includes("orgFieldRequired"));
 });
 
 test("a SAML provider with neither endpoint config nor metadata does not submit", async () => {
@@ -235,4 +282,19 @@ test("a rejected domain shows the backend message in the dialog", async () => {
   await flush(3);
 
   assert(document.body.textContent?.includes("域名不被允许。"));
+});
+
+test("a 429 shows the localized rate-limit message instead of the raw body", async () => {
+  state.register.mockResolvedValue({
+    error: { status: 429, message: "Too many requests" },
+  });
+  await renderCreate();
+  await flush();
+
+  fillOidc();
+  button("orgSave").click();
+  await flush(3);
+
+  assert(document.body.textContent?.includes("orgRateLimited"));
+  assert(!document.body.textContent?.includes("Too many requests"));
 });

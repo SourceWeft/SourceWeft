@@ -22,6 +22,7 @@ import {
 import { Spinner } from "@sourceweft/ui-web/components/ui/spinner"
 import { ssoPlugin } from "@/lib/auth/sso-plugin"
 
+import { ssoErrorMessage } from "./sso-errors"
 import {
   SsoProviderDialog,
   type SsoProviderSummary
@@ -105,7 +106,13 @@ export function OrganizationSso({
     try {
       const result = await authClient.sso.providers()
       if (result?.error) {
-        setLoadError(result.error.message || coreLocalization.errors.generic)
+        setLoadError(
+          ssoErrorMessage(
+            result.error,
+            localization.orgRateLimited,
+            coreLocalization.errors.generic
+          )
+        )
         return
       }
       setProviders(
@@ -114,7 +121,7 @@ export function OrganizationSso({
     } catch {
       setLoadError(coreLocalization.errors.generic)
     }
-  }, [authClient, coreLocalization])
+  }, [authClient, coreLocalization, localization.orgRateLimited])
 
   // Load (and reload) only when the gate opens or the organization changes —
   // not whenever `loadProviders`'s identity shifts. A ref keeps the effect off

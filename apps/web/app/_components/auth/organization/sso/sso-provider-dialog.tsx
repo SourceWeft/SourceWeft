@@ -29,10 +29,9 @@ import { apiBaseUrl } from "@/lib/api-base-url"
 import { ssoPlugin } from "@/lib/auth/sso-plugin"
 import { cn } from "@sourceweft/ui-web/lib/utils"
 
+import { parseIdpMetadata } from "./parse-idp-metadata"
 import { SsoServiceProviderInfo } from "./sso-service-provider-info"
 
-/** Matches the backend plugin's `saml.maxMetadataSize` default (100 KiB). */
-const MAX_METADATA_BYTES = 100 * 1024
 const PROVIDER_ID_PATTERN = /^[a-z0-9-]{3,64}$/
 const DEFAULT_SCOPES = "openid email profile"
 
@@ -83,17 +82,28 @@ function looksLikeCertificate(value: string) {
   return trimmed.length > 0 && /^[A-Za-z0-9+/=\s]+$/.test(trimmed)
 }
 
-function byteLength(value: string) {
-  return new TextEncoder().encode(value).length
+function isHttpUrl(value: string) {
+  try {
+    const url = new URL(value)
+    return url.protocol === "http:" || url.protocol === "https:"
+  } catch {
+    return false
+  }
 }
 
 /**
  * Create/edit dialog for an SSO identity provider. Hosts an OIDC and a SAML
- * form; the backend derives OIDC discovery from the issuer and extracts SAML
- * details from pasted metadata, so neither form exposes per-endpoint inputs or
- * a fetch-by-URL control. Secrets are never prefilled: on edit, a blank secret
- * or client id means "leave unchanged". The backend's already-localized error
- * message is surfaced (domain errors under the domain field).
+ * form in a tab each; the backend derives OIDC discovery from the issuer.
+ *
+ * SAML registration always submits explicit fields — IdP sign-on URL, signing
+ * certificate and IdP entity ID — which the admin can enter by hand or fill by
+ * pasting IdP metadata XML (parsed in the browser, never uploaded or stored).
+ * We deliberately do NOT send the raw metadata: the plugin ignores entryPoint
+ * and cert when `idpMetadata.metadata` is present, which would silently discard
+ * any edits the admin made to the parsed values. Secrets are never prefilled: on
+ * edit, a blank secret/client id/cert means "leave unchanged". The backend's
+ * already-localized error message is surfaced (domain errors under the domain
+ * field; 429 as a localized rate-limit notice).
  */
 export function SsoProviderDialog({
   open,
@@ -126,6 +136,8 @@ export function SsoProviderDialog({
   const [cert, setCert] = useState("")
   const [idpEntityId, setIdpEntityId] = useState("")
   const [metadata, setMetadata] = useState("")
+  const [metadataError, setMetadataError] = useState<string | null>(null)
+  const [metadataNotices, setMetadataNotices] = useState<string[]>([])
   const [roleAttribute, setRoleAttribute] = useState(
     provider?.roleAttribute ?? ""
   )
@@ -153,6 +165,52 @@ export function SsoProviderDialog({
     [providerId]
   )
 
+  // Paste-to-fill: parse the IdP metadata XML in the browser and populate the
+  // explicit SAML fields. Nothing is submitted from here — the admin reviews and
+  // edits the filled values, which are what registration sends.
+  function handleMetadataChange(value: string) {
+    setMetadata(value)
+    if (!value.trim()) {
+      setMetadataError(null)
+      setMetadataNotices([])
+      return
+    }
+    const result = parseIdpMetadata(value)
+    if (!result.ok) {
+      setMetadataNotices([])
+      setMetadataError(
+        result.reason === "too-large"
+          ? localization.orgMetadataTooLarge
+          : localization.orgMetadataParseError
+      )
+      return
+    }
+    setMetadataError(null)
+    const notices: string[] = []
+    if (result.value.entryPoint) {
+      setEntryPoint(result.value.entryPoint)
+      setFieldErrors((current) => ({ ...current, entryPoint: "" }))
+    } else {
+      notices.push(localization.orgMetadataNoEntryPoint)
+    }
+    if (result.value.entityId) {
+      setIdpEntityId(result.value.entityId)
+      setFieldErrors((current) => ({ ...current, idpEntityId: "" }))
+    } else {
+      notices.push(localization.orgMetadataNoEntityId)
+    }
+    if (result.value.signingCert) {
+      setCert(result.value.signingCert)
+      setFieldErrors((current) => ({ ...current, cert: "" }))
+    } else {
+      notices.push(localization.orgMetadataNoCert)
+    }
+    if (result.value.multipleSigningCerts) {
+      notices.push(localization.orgMetadataMultipleCerts)
+    }
+    setMetadataNotices(notices)
+  }
+
   function validate(): {
     errors: Record<string, string>
     formLevel: string | null
@@ -160,10 +218,8 @@ export function SsoProviderDialog({
     const errors: Record<string, string> = {}
     let formLevel: string | null = null
 
-    if (!isEdit) {
-      if (!PROVIDER_ID_PATTERN.test(providerId)) {
-        errors.providerId = localization.orgProviderIdInvalid
-      }
+    if (!isEdit && !PROVIDER_ID_PATTERN.test(providerId)) {
+      errors.providerId = localization.orgProviderIdInvalid
     }
     if (!domain.trim()) errors.domain = localization.orgFieldRequired
 
@@ -176,32 +232,24 @@ export function SsoProviderDialog({
         }
       }
     } else {
-      const hasMetadata = metadata.trim().length > 0
-      if (hasMetadata) {
-        if (byteLength(metadata) > MAX_METADATA_BYTES) {
-          errors.metadata = localization.orgMetadataTooLarge
-        }
-      } else if (
-        !entryPoint.trim() &&
-        !cert.trim() &&
-        !idpEntityId.trim() &&
-        !isEdit
-      ) {
+      const hasEntry = entryPoint.trim().length > 0
+      const hasCert = cert.trim().length > 0
+      const hasEntity = idpEntityId.trim().length > 0
+      if (!hasEntry && !hasCert && !hasEntity) {
+        // Nothing provided at all — one clear prompt instead of three.
         formLevel = localization.orgSamlNeedsConfig
-      } else if (!isEdit) {
-        if (!entryPoint.trim()) errors.entryPoint = localization.orgFieldRequired
-        if (!cert.trim()) {
+      } else {
+        // SAML submit is blocked until all three explicit fields are present,
+        // regardless of whether they were typed or filled from metadata.
+        if (!isHttpUrl(entryPoint.trim())) {
+          errors.entryPoint = localization.orgFieldRequired
+        }
+        if (!hasCert) {
           errors.cert = localization.orgFieldRequired
         } else if (!looksLikeCertificate(cert)) {
           errors.cert = localization.orgCertificateInvalid
         }
-        if (!idpEntityId.trim()) {
-          errors.idpEntityId = localization.orgFieldRequired
-        }
-      } else {
-        if (cert.trim() && !looksLikeCertificate(cert)) {
-          errors.cert = localization.orgCertificateInvalid
-        }
+        if (!hasEntity) errors.idpEntityId = localization.orgFieldRequired
       }
     }
 
@@ -230,14 +278,12 @@ export function SsoProviderDialog({
         }
       } else {
         body.issuer = samlEntityId
-        body.samlConfig = metadata.trim()
-          ? { idpMetadata: { metadata }, wantAssertionsSigned: true }
-          : {
-              entryPoint: entryPoint.trim(),
-              cert: cert.trim(),
-              idpMetadata: { entityID: idpEntityId.trim() },
-              wantAssertionsSigned: true
-            }
+        body.samlConfig = {
+          entryPoint: entryPoint.trim(),
+          cert: cert.trim(),
+          idpMetadata: { entityID: idpEntityId.trim() },
+          wantAssertionsSigned: true
+        }
       }
       return body
     }
@@ -261,13 +307,14 @@ export function SsoProviderDialog({
       if (Object.keys(oidcConfig).length > 0) body.oidcConfig = oidcConfig
     } else {
       const samlConfig: Record<string, unknown> = {}
-      if (entryPoint.trim() && entryPoint.trim() !== provider?.samlConfig?.entryPoint) {
+      if (
+        entryPoint.trim() &&
+        entryPoint.trim() !== provider?.samlConfig?.entryPoint
+      ) {
         samlConfig.entryPoint = entryPoint.trim()
       }
       if (cert.trim()) samlConfig.cert = cert.trim()
-      if (metadata.trim()) {
-        samlConfig.idpMetadata = { metadata }
-      } else if (idpEntityId.trim()) {
+      if (idpEntityId.trim()) {
         samlConfig.idpMetadata = { entityID: idpEntityId.trim() }
       }
       if (Object.keys(samlConfig).length > 0) body.samlConfig = samlConfig
@@ -299,6 +346,10 @@ export function SsoProviderDialog({
         : await authClient.sso.register(body)
 
       if (result?.error) {
+        if (result.error.status === 429) {
+          setFormError(localization.orgRateLimited)
+          return
+        }
         const message = result.error.message || coreLocalization.errors.generic
         if (result.error.code === "SSO_DOMAIN_NOT_ALLOWED") {
           setFieldErrors((current) => ({ ...current, domain: message }))
@@ -342,32 +393,6 @@ export function SsoProviderDialog({
             </Alert>
           )}
 
-          {!isEdit && (
-            <div
-              role="tablist"
-              aria-label={localization.orgProtocol}
-              className="grid grid-cols-2 gap-2"
-            >
-              {(["oidc", "saml"] as const).map((value) => (
-                <Button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  aria-selected={protocol === value}
-                  variant={protocol === value ? "default" : "outline"}
-                  onClick={() => {
-                    setProtocol(value)
-                    syncProviderId(domain, value)
-                  }}
-                >
-                  {value === "oidc"
-                    ? localization.orgProtocolOidc
-                    : localization.orgProtocolSaml}
-                </Button>
-              ))}
-            </div>
-          )}
-
           <Field data-invalid={Boolean(fieldErrors.domain)}>
             <FieldLabel htmlFor="sso-domain">{localization.orgDomain}</FieldLabel>
             <Input
@@ -384,7 +409,9 @@ export function SsoProviderDialog({
                 {localization.orgDomainChangeWarning}
               </FieldDescription>
             )}
-            {fieldErrors.domain && <FieldError errors={[{ message: fieldErrors.domain }]} />}
+            {fieldErrors.domain && (
+              <FieldError errors={[{ message: fieldErrors.domain }]} />
+            )}
           </Field>
 
           <Field data-invalid={Boolean(fieldErrors.providerId)}>
@@ -411,159 +438,225 @@ export function SsoProviderDialog({
             )}
           </Field>
 
-          {protocol === "oidc" ? (
-            <>
-              <Field data-invalid={Boolean(fieldErrors.issuer)}>
-                <FieldLabel htmlFor="sso-issuer">
-                  {localization.orgIssuer}
-                </FieldLabel>
-                <Input
-                  id="sso-issuer"
-                  value={issuer}
-                  placeholder="https://idp.example.com"
-                  aria-invalid={Boolean(fieldErrors.issuer)}
-                  onChange={(event) => setIssuer(event.target.value)}
-                />
-                <FieldDescription>{localization.orgIssuerHint}</FieldDescription>
-                {fieldErrors.issuer && (
-                  <FieldError errors={[{ message: fieldErrors.issuer }]} />
-                )}
-              </Field>
+          <div className="flex flex-col gap-3">
+            <span className="text-sm font-medium" id="sso-protocol-label">
+              {localization.orgProtocol}
+            </span>
+            <div
+              role="tablist"
+              aria-labelledby="sso-protocol-label"
+              className={cn("grid grid-cols-2 gap-2", isEdit && "hidden")}
+            >
+              {(["oidc", "saml"] as const).map((value) => (
+                <Button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  id={`sso-tab-${value}`}
+                  aria-selected={protocol === value}
+                  aria-controls={`sso-panel-${value}`}
+                  variant={protocol === value ? "default" : "outline"}
+                  onClick={() => {
+                    setProtocol(value)
+                    syncProviderId(domain, value)
+                  }}
+                >
+                  {value === "oidc"
+                    ? localization.orgProtocolOidc
+                    : localization.orgProtocolSaml}
+                </Button>
+              ))}
+            </div>
 
-              <Field data-invalid={Boolean(fieldErrors.clientId)}>
-                <FieldLabel htmlFor="sso-client-id">
-                  {localization.orgClientId}
-                </FieldLabel>
-                <Input
-                  id="sso-client-id"
-                  value={clientId}
-                  autoComplete="off"
-                  placeholder={
-                    isEdit && provider?.oidcConfig?.clientIdLastFour
-                      ? `•••• ${provider.oidcConfig.clientIdLastFour}`
-                      : undefined
-                  }
-                  aria-invalid={Boolean(fieldErrors.clientId)}
-                  onChange={(event) => setClientId(event.target.value)}
-                />
-                {isEdit && (
+            {protocol === "oidc" ? (
+              <div
+                role="tabpanel"
+                id="sso-panel-oidc"
+                aria-labelledby="sso-tab-oidc"
+                className="flex flex-col gap-5"
+              >
+                <Field data-invalid={Boolean(fieldErrors.issuer)}>
+                  <FieldLabel htmlFor="sso-issuer">
+                    {localization.orgIssuer}
+                  </FieldLabel>
+                  <Input
+                    id="sso-issuer"
+                    value={issuer}
+                    placeholder="https://idp.example.com"
+                    aria-invalid={Boolean(fieldErrors.issuer)}
+                    onChange={(event) => setIssuer(event.target.value)}
+                  />
+                  <FieldDescription>{localization.orgIssuerHint}</FieldDescription>
+                  {fieldErrors.issuer && (
+                    <FieldError errors={[{ message: fieldErrors.issuer }]} />
+                  )}
+                </Field>
+
+                <Field data-invalid={Boolean(fieldErrors.clientId)}>
+                  <FieldLabel htmlFor="sso-client-id">
+                    {localization.orgClientId}
+                  </FieldLabel>
+                  <Input
+                    id="sso-client-id"
+                    value={clientId}
+                    autoComplete="off"
+                    placeholder={
+                      isEdit && provider?.oidcConfig?.clientIdLastFour
+                        ? `•••• ${provider.oidcConfig.clientIdLastFour}`
+                        : undefined
+                    }
+                    aria-invalid={Boolean(fieldErrors.clientId)}
+                    onChange={(event) => setClientId(event.target.value)}
+                  />
+                  {isEdit && (
+                    <FieldDescription>
+                      {localization.orgClientIdKeepHint}
+                    </FieldDescription>
+                  )}
+                  {fieldErrors.clientId && (
+                    <FieldError errors={[{ message: fieldErrors.clientId }]} />
+                  )}
+                </Field>
+
+                <Field data-invalid={Boolean(fieldErrors.clientSecret)}>
+                  <FieldLabel htmlFor="sso-client-secret">
+                    {localization.orgClientSecret}
+                  </FieldLabel>
+                  <Input
+                    id="sso-client-secret"
+                    type="password"
+                    autoComplete="off"
+                    value={clientSecret}
+                    aria-invalid={Boolean(fieldErrors.clientSecret)}
+                    onChange={(event) => setClientSecret(event.target.value)}
+                  />
+                  {isEdit && (
+                    <FieldDescription>
+                      {localization.orgClientSecretKeepHint}
+                    </FieldDescription>
+                  )}
+                  {fieldErrors.clientSecret && (
+                    <FieldError
+                      errors={[{ message: fieldErrors.clientSecret }]}
+                    />
+                  )}
+                </Field>
+
+                <Field>
+                  <FieldLabel htmlFor="sso-scopes">
+                    {localization.orgScopes}
+                  </FieldLabel>
+                  <Input
+                    id="sso-scopes"
+                    value={scopes}
+                    onChange={(event) => setScopes(event.target.value)}
+                  />
                   <FieldDescription>
-                    {localization.orgClientIdKeepHint}
+                    {localization.orgScopesHint}
                   </FieldDescription>
-                )}
-                {fieldErrors.clientId && (
-                  <FieldError errors={[{ message: fieldErrors.clientId }]} />
-                )}
-              </Field>
+                </Field>
+              </div>
+            ) : (
+              <div
+                role="tabpanel"
+                id="sso-panel-saml"
+                aria-labelledby="sso-tab-saml"
+                className="flex flex-col gap-5"
+              >
+                <FieldDescription>
+                  {localization.orgSamlConfigHint}
+                </FieldDescription>
 
-              <Field data-invalid={Boolean(fieldErrors.clientSecret)}>
-                <FieldLabel htmlFor="sso-client-secret">
-                  {localization.orgClientSecret}
-                </FieldLabel>
-                <Input
-                  id="sso-client-secret"
-                  type="password"
-                  autoComplete="off"
-                  value={clientSecret}
-                  aria-invalid={Boolean(fieldErrors.clientSecret)}
-                  onChange={(event) => setClientSecret(event.target.value)}
-                />
-                {isEdit && (
+                <Field data-invalid={Boolean(fieldErrors.entryPoint)}>
+                  <FieldLabel htmlFor="sso-entry-point">
+                    {localization.orgEntryPoint}
+                  </FieldLabel>
+                  <Input
+                    id="sso-entry-point"
+                    value={entryPoint}
+                    placeholder="https://idp.example.com/sso"
+                    aria-invalid={Boolean(fieldErrors.entryPoint)}
+                    onChange={(event) => setEntryPoint(event.target.value)}
+                  />
+                  {fieldErrors.entryPoint && (
+                    <FieldError errors={[{ message: fieldErrors.entryPoint }]} />
+                  )}
+                </Field>
+
+                <Field data-invalid={Boolean(fieldErrors.idpEntityId)}>
+                  <FieldLabel htmlFor="sso-idp-entity-id">
+                    {localization.orgIdpEntityId}
+                  </FieldLabel>
+                  <Input
+                    id="sso-idp-entity-id"
+                    value={idpEntityId}
+                    aria-invalid={Boolean(fieldErrors.idpEntityId)}
+                    onChange={(event) => setIdpEntityId(event.target.value)}
+                  />
+                  {fieldErrors.idpEntityId && (
+                    <FieldError
+                      errors={[{ message: fieldErrors.idpEntityId }]}
+                    />
+                  )}
+                </Field>
+
+                <Field data-invalid={Boolean(fieldErrors.cert)}>
+                  <FieldLabel htmlFor="sso-cert">
+                    {localization.orgCertificate}
+                  </FieldLabel>
+                  <Textarea
+                    id="sso-cert"
+                    rows={4}
+                    value={cert}
+                    className="font-mono text-xs"
+                    aria-invalid={Boolean(fieldErrors.cert)}
+                    onChange={(event) => setCert(event.target.value)}
+                  />
                   <FieldDescription>
-                    {localization.orgClientSecretKeepHint}
+                    {localization.orgCertificateHint}
                   </FieldDescription>
-                )}
-                {fieldErrors.clientSecret && (
-                  <FieldError errors={[{ message: fieldErrors.clientSecret }]} />
-                )}
-              </Field>
+                  {fieldErrors.cert && (
+                    <FieldError errors={[{ message: fieldErrors.cert }]} />
+                  )}
+                </Field>
 
-              <Field>
-                <FieldLabel htmlFor="sso-scopes">
-                  {localization.orgScopes}
-                </FieldLabel>
-                <Input
-                  id="sso-scopes"
-                  value={scopes}
-                  onChange={(event) => setScopes(event.target.value)}
-                />
-                <FieldDescription>{localization.orgScopesHint}</FieldDescription>
-              </Field>
-            </>
-          ) : (
-            <>
-              <FieldDescription>{localization.orgSamlConfigHint}</FieldDescription>
+                <Field data-invalid={Boolean(metadataError)}>
+                  <FieldLabel htmlFor="sso-metadata">
+                    {localization.orgSamlMetadata}
+                  </FieldLabel>
+                  <Textarea
+                    id="sso-metadata"
+                    rows={4}
+                    value={metadata}
+                    className="font-mono text-xs"
+                    aria-invalid={Boolean(metadataError)}
+                    onChange={(event) => handleMetadataChange(event.target.value)}
+                  />
+                  <FieldDescription>
+                    {localization.orgSamlMetadataHint}
+                  </FieldDescription>
+                  {metadataError && (
+                    <FieldError errors={[{ message: metadataError }]} />
+                  )}
+                  {metadataNotices.map((notice) => (
+                    <p
+                      key={notice}
+                      className="text-xs text-muted-foreground"
+                    >
+                      {notice}
+                    </p>
+                  ))}
+                </Field>
 
-              <Field data-invalid={Boolean(fieldErrors.entryPoint)}>
-                <FieldLabel htmlFor="sso-entry-point">
-                  {localization.orgEntryPoint}
-                </FieldLabel>
-                <Input
-                  id="sso-entry-point"
-                  value={entryPoint}
-                  placeholder="https://idp.example.com/sso"
-                  aria-invalid={Boolean(fieldErrors.entryPoint)}
-                  onChange={(event) => setEntryPoint(event.target.value)}
-                />
-                {fieldErrors.entryPoint && (
-                  <FieldError errors={[{ message: fieldErrors.entryPoint }]} />
-                )}
-              </Field>
-
-              <Field data-invalid={Boolean(fieldErrors.idpEntityId)}>
-                <FieldLabel htmlFor="sso-idp-entity-id">
-                  {localization.orgIdpEntityId}
-                </FieldLabel>
-                <Input
-                  id="sso-idp-entity-id"
-                  value={idpEntityId}
-                  aria-invalid={Boolean(fieldErrors.idpEntityId)}
-                  onChange={(event) => setIdpEntityId(event.target.value)}
-                />
-                {fieldErrors.idpEntityId && (
-                  <FieldError errors={[{ message: fieldErrors.idpEntityId }]} />
-                )}
-              </Field>
-
-              <Field data-invalid={Boolean(fieldErrors.cert)}>
-                <FieldLabel htmlFor="sso-cert">
-                  {localization.orgCertificate}
-                </FieldLabel>
-                <Textarea
-                  id="sso-cert"
-                  rows={4}
-                  value={cert}
-                  className="font-mono text-xs"
-                  aria-invalid={Boolean(fieldErrors.cert)}
-                  onChange={(event) => setCert(event.target.value)}
-                />
-                <FieldDescription>
-                  {localization.orgCertificateHint}
-                </FieldDescription>
-                {fieldErrors.cert && <FieldError errors={[{ message: fieldErrors.cert }]} />}
-              </Field>
-
-              <Field data-invalid={Boolean(fieldErrors.metadata)}>
-                <FieldLabel htmlFor="sso-metadata">
-                  {localization.orgSamlMetadata}
-                </FieldLabel>
-                <Textarea
-                  id="sso-metadata"
-                  rows={4}
-                  value={metadata}
-                  className="font-mono text-xs"
-                  aria-invalid={Boolean(fieldErrors.metadata)}
-                  onChange={(event) => setMetadata(event.target.value)}
-                />
-                <FieldDescription>
-                  {localization.orgSamlMetadataHint}
-                </FieldDescription>
-                {fieldErrors.metadata && (
-                  <FieldError errors={[{ message: fieldErrors.metadata }]} />
-                )}
-              </Field>
-            </>
-          )}
+                <Alert>
+                  <AlertCircle />
+                  <AlertDescription>
+                    {localization.orgSamlSecurityNote}
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+          </div>
 
           <Field>
             <FieldLabel htmlFor="sso-role-attribute">
@@ -598,7 +691,7 @@ export function SsoProviderDialog({
             organizationSlug={organizationSlug}
           />
 
-          <DialogFooter className={cn("pt-2")}>
+          <DialogFooter className="pt-2">
             <Button
               type="button"
               variant="outline"

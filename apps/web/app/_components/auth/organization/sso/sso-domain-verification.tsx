@@ -12,6 +12,8 @@ import { Label } from "@sourceweft/ui-web/components/ui/label"
 import { Spinner } from "@sourceweft/ui-web/components/ui/spinner"
 import { ssoPlugin } from "@/lib/auth/sso-plugin"
 
+import { ssoErrorMessage } from "./sso-errors"
+
 /**
  * DNS label prefix the backend's SSO plugin is configured with
  * (`domainVerification.tokenPrefix: "sourceweft-sso"` in
@@ -93,7 +95,11 @@ export function SsoDomainVerification({
       })
       if (result?.error) {
         setErrorMessage(
-          result.error.message || coreLocalization.errors.generic
+          ssoErrorMessage(
+            result.error,
+            localization.orgRateLimited,
+            coreLocalization.errors.generic
+          )
         )
         return
       }
@@ -103,7 +109,7 @@ export function SsoDomainVerification({
     } finally {
       setIsRequesting(false)
     }
-  }, [authClient, providerId, coreLocalization])
+  }, [authClient, providerId, coreLocalization, localization.orgRateLimited])
 
   useEffect(() => {
     if (requestedRef.current) return
@@ -119,7 +125,11 @@ export function SsoDomainVerification({
       const result = await authClient.sso.verifyDomain({ providerId })
       if (result?.error) {
         setErrorMessage(
-          result.error.message || coreLocalization.errors.generic
+          ssoErrorMessage(
+            result.error,
+            localization.orgRateLimited,
+            coreLocalization.errors.generic
+          )
         )
         return
       }

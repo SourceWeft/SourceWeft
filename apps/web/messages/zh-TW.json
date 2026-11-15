@@ -5387,7 +5387,8 @@
         "SSO_SEAT_LIMIT": "團隊席位已滿，請聯絡管理員增加席位。",
         "SSO_PROVISIONING_FAILED": "無法將你加入團隊，請重試或聯絡管理員。",
         "SSO_DOMAIN_NOT_VERIFIED": "該網域尚未完成驗證，請聯絡管理員完成設定。",
-        "SSO_PROVIDER_NOT_FOUND": "該電子郵件未設定企業單一登入。"
+        "SSO_PROVIDER_NOT_FOUND": "該電子郵件未設定企業單一登入。",
+        "SSO_SAML_ALGORITHM_NOT_ALLOWED": "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，並傳送未加密的斷言。"
       }
     },
     "guestInvite": {
@@ -5568,11 +5569,11 @@
         },
         "macosVerification": {
           "question": "為什麼 macOS 提示該應用程式無法驗證？",
-          "answer": "早期的測試版本未經簽名或公證。安裝前請先檢視該發布版本的簽名資訊，並比對其 SHA-256 雜湊值。已簽名的發布版本使用 Apple 開發者憑證簽名，並完成公證。"
+          "answer": "早期的測試版本未經簽名或公證。安裝前請先檢視該發布版本的簽名資訊，並比對其 SHA-256 雜湊值。已簽名的發布版本使用 Apple 開發者證書簽名，並完成公證。"
         },
         "windowsSmartScreen": {
           "question": "為什麼 Windows SmartScreen 會對安裝程式發出警告？",
-          "answer": "早期的測試安裝程式未經簽名。繼續安裝前請先檢視該發布版本的簽名資訊和 SHA-256 雜湊值。已簽名的發布流程使用 Windows 程式碼簽名憑證。"
+          "answer": "早期的測試安裝程式未經簽名。繼續安裝前請先檢視該發布版本的簽名資訊和 SHA-256 雜湊值。已簽名的發布流程使用 Windows 程式碼簽名證書。"
         },
         "updates": {
           "question": "更新是如何工作的？",
@@ -5831,7 +5832,7 @@
         "orgEditTitle": "編輯身分提供者",
         "orgCreateDescription": "為你的團隊掌控的網域註冊一個 OIDC 或 SAML 身分提供者。",
         "orgEditDescription": "更新此身分提供者。金鑰留空表示保持不變。",
-        "orgProtocol": "協定",
+        "orgProtocol": "登入協定",
         "orgProviderId": "身分提供者 ID",
         "orgProviderIdHint": "由小寫字母、數字和連字元組成，3–64 個字元。",
         "orgProviderIdImmutableHint": "身分提供者 ID 建立後無法更改。",
@@ -5845,26 +5846,33 @@
         "orgClientSecretKeepHint": "留空表示保持目前金鑰不變。",
         "orgScopes": "Scopes",
         "orgScopesHint": "以空格分隔。預設為 openid email profile。",
-        "orgSamlConfigHint": "填寫 IdP 登入地址、憑證和實體 ID，或在下方貼上 IdP metadata XML。",
+        "orgSamlConfigHint": "在下方填寫 IdP 登入地址、簽名憑證和實體 ID，或貼上 IdP metadata XML 自動填充。",
         "orgEntryPoint": "IdP 登入地址",
         "orgIdpEntityId": "IdP 實體 ID / issuer",
         "orgCertificate": "IdP 簽名憑證",
-        "orgCertificateHint": "貼上 PEM 格式憑證。",
-        "orgSamlMetadata": "IdP metadata XML",
-        "orgSamlMetadataHint": "貼上 IdP metadata XML，自動填充上面的欄位。",
+        "orgCertificateHint": "貼上 IdP 簽名憑證（PEM 格式），或從下方 metadata 自動填充。",
+        "orgSamlMetadata": "從 IdP metadata XML 自動填充",
+        "orgSamlMetadataHint": "貼上 IdP metadata XML 以填充上面的欄位。metadata 本身不會被儲存。",
         "orgRoleAttribute": "角色屬性（選填）",
         "orgRoleAttributeHint": "攜帶成員角色的 claim 或屬性。成員只會被設為管理員或普通成員，永不會成為擁有者。",
         "orgAdminRoleValue": "管理員角色值（選填）",
         "orgAdminRoleValueHint": "角色屬性等於該值的成員將被授予管理員角色。",
+        "orgSamlSecurityNote": "身分提供者必須使用 SHA-256 或更強的演算法簽名，並傳送未加密的斷言。",
         "orgSave": "儲存",
         "orgCancel": "取消",
         "orgCreateSuccess": "身分提供者已新增。",
         "orgUpdateSuccess": "身分提供者已更新。",
         "orgFieldRequired": "此項為必填。",
         "orgProviderIdInvalid": "請使用 3–64 個小寫字母、數字或連字元。",
-        "orgCertificateInvalid": "請輸入 PEM 憑證或 base64 值。",
+        "orgCertificateInvalid": "請輸入 IdP 簽名憑證（PEM）或 base64 值。",
         "orgMetadataTooLarge": "metadata XML 過大（上限 100 KB）。",
-        "orgSamlNeedsConfig": "請填寫登入地址、憑證和實體 ID，或貼上 metadata XML。",
+        "orgMetadataParseError": "無法讀取 metadata XML。請檢查後重新貼上，或手動填寫各欄位。",
+        "orgMetadataNoEntryPoint": "無法從 metadata 讀取登入地址，請手動填寫。",
+        "orgMetadataNoEntityId": "無法從 metadata 讀取實體 ID，請手動填寫。",
+        "orgMetadataNoCert": "無法從 metadata 讀取 IdP 簽名憑證，請手動貼上。",
+        "orgMetadataMultipleCerts": "檢測到多張 IdP 簽名憑證，預設使用第一張，請確認它是否為目前生效的那張。",
+        "orgSamlNeedsConfig": "請填寫登入地址、簽名憑證和實體 ID，或貼上 metadata XML。",
+        "orgRateLimited": "操作過於頻繁，請稍等一分鐘後重試。",
         "orgDomainVerification": "驗證網域歸屬",
         "orgDomainVerificationDescription": "將此 TXT 記錄新增到以下網域的 DNS：",
         "orgTxtRecordHost": "TXT 記錄名稱",

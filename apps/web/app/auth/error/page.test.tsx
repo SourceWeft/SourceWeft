@@ -38,6 +38,16 @@ test("renders the backend seat-limit copy for ?error=SSO_SEAT_LIMIT", async () =
   expect(html).toContain("SSO_SEAT_LIMIT");
 });
 
+test("renders the SAML algorithm copy for ?error=SSO_SAML_ALGORITHM_NOT_ALLOWED", async () => {
+  const html = await renderPage("SSO_SAML_ALGORITHM_NOT_ALLOWED");
+  // Apostrophes render as HTML entities in static markup, so assert on the
+  // apostrophe-free remainder of the sentence.
+  expect(html).toContain(
+    "Ask your administrator to sign with SHA-256 and to send unencrypted assertions.",
+  );
+  expect(html).toContain("SSO_SAML_ALGORITHM_NOT_ALLOWED");
+});
+
 test("falls back to the generic description for an unknown error code", async () => {
   const html = await renderPage("NOT_A_REAL_CODE");
   expect(html).toContain(

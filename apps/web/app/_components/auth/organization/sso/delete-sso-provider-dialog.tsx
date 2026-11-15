@@ -20,6 +20,8 @@ import { Button } from "@sourceweft/ui-web/components/ui/button"
 import { Spinner } from "@sourceweft/ui-web/components/ui/spinner"
 import { ssoPlugin } from "@/lib/auth/sso-plugin"
 
+import { ssoErrorMessage } from "./sso-errors"
+
 export type DeleteSsoProviderDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -51,7 +53,13 @@ export function DeleteSsoProviderDialog({
         providerId: provider.providerId
       })
       if (result?.error) {
-        toast.error(result.error.message || coreLocalization.errors.generic)
+        toast.error(
+          ssoErrorMessage(
+            result.error,
+            localization.orgRateLimited,
+            coreLocalization.errors.generic
+          )
+        )
         return
       }
       toast.success(localization.orgDeleteSuccess)

@@ -79,6 +79,7 @@ export type SsoLocalization = {
   orgRoleAttributeHint: string
   orgAdminRoleValue: string
   orgAdminRoleValueHint: string
+  orgSamlSecurityNote: string
   orgSave: string
   orgCancel: string
   orgCreateSuccess: string
@@ -87,7 +88,13 @@ export type SsoLocalization = {
   orgProviderIdInvalid: string
   orgCertificateInvalid: string
   orgMetadataTooLarge: string
+  orgMetadataParseError: string
+  orgMetadataNoEntryPoint: string
+  orgMetadataNoEntityId: string
+  orgMetadataNoCert: string
+  orgMetadataMultipleCerts: string
   orgSamlNeedsConfig: string
+  orgRateLimited: string
 
   orgDomainVerification: string
   orgDomainVerificationDescription: string
@@ -155,7 +162,7 @@ const ssoLocalization: SsoLocalization = {
     "Register an OIDC or SAML identity provider for a domain your team controls.",
   orgEditDescription:
     "Update this identity provider. Leave secrets blank to keep the current values.",
-  orgProtocol: "Protocol",
+  orgProtocol: "Sign-in protocol",
   orgProviderId: "Provider ID",
   orgProviderIdHint:
     "Lowercase letters, digits and hyphens, 3–64 characters.",
@@ -174,20 +181,23 @@ const ssoLocalization: SsoLocalization = {
   orgScopes: "Scopes",
   orgScopesHint: "Space-separated. Defaults to openid email profile.",
   orgSamlConfigHint:
-    "Provide the IdP sign-on URL, certificate and entity ID, or paste the IdP metadata XML below.",
+    "Enter the IdP sign-on URL, signing certificate and entity ID below, or paste the IdP metadata XML to fill them.",
   orgEntryPoint: "IdP sign-on URL",
   orgIdpEntityId: "IdP entity ID / issuer",
   orgCertificate: "IdP signing certificate",
-  orgCertificateHint: "Paste the PEM certificate.",
-  orgSamlMetadata: "IdP metadata XML",
+  orgCertificateHint:
+    "Paste the PEM certificate, or fill it from the metadata below.",
+  orgSamlMetadata: "Auto-fill from IdP metadata XML",
   orgSamlMetadataHint:
-    "Paste the IdP metadata XML to fill the fields above automatically.",
+    "Paste the IdP metadata XML to fill the fields above. The metadata itself is not stored.",
   orgRoleAttribute: "Role attribute (optional)",
   orgRoleAttributeHint:
     "Claim or attribute that carries the member's role. Members are only ever made admin or member, never owner.",
   orgAdminRoleValue: "Admin role value (optional)",
   orgAdminRoleValueHint:
     "Members whose role attribute equals this value are given the admin role.",
+  orgSamlSecurityNote:
+    "Your identity provider must sign with SHA-256 or stronger and send unencrypted assertions.",
   orgSave: "Save",
   orgCancel: "Cancel",
   orgCreateSuccess: "Identity provider added.",
@@ -197,8 +207,19 @@ const ssoLocalization: SsoLocalization = {
     "Use 3–64 lowercase letters, digits or hyphens.",
   orgCertificateInvalid: "Enter a PEM certificate or a base64 value.",
   orgMetadataTooLarge: "The metadata XML is too large (max 100 KB).",
+  orgMetadataParseError:
+    "Could not read the metadata XML. Check it and paste again, or fill the fields manually.",
+  orgMetadataNoEntryPoint:
+    "Could not read the sign-on URL from the metadata — enter it manually.",
+  orgMetadataNoEntityId:
+    "Could not read the entity ID from the metadata — enter it manually.",
+  orgMetadataNoCert:
+    "Could not read the IdP signing certificate from the metadata — paste it manually.",
+  orgMetadataMultipleCerts:
+    "This IdP publishes more than one signing certificate; the first is used — confirm it is the active one.",
   orgSamlNeedsConfig:
-    "Provide a sign-on URL, certificate and entity ID, or paste metadata XML.",
+    "Provide the sign-on URL, signing certificate and entity ID, or paste metadata XML.",
+  orgRateLimited: "Too many attempts. Please wait a minute and try again.",
 
   orgDomainVerification: "Verify domain ownership",
   orgDomainVerificationDescription:
