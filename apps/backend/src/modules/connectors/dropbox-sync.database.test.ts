@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { afterAll, beforeAll, beforeEach, test, vi } from "vitest";
-import { createDropboxConnectorAdapter } from "@sourceweft/builtin-connector-dropbox";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
+import { collectCapabilityConnectorContributions } from "../capabilities/host-services";
+import { listCapabilityRecords } from "../threads/turn/capability-command-workflows";
 import { makeSetup } from "./sync-test-support";
 
 let schema: typeof import("@sourceweft/db");
@@ -142,13 +143,47 @@ function createFakeDropboxFetcher(tree: FakeDropboxTree): typeof fetch {
   }) as typeof fetch;
 }
 
-function dropboxAdapter(tree: FakeDropboxTree) {
-  return createDropboxConnectorAdapter({
-    baseUrl: "https://sourceweft.example",
-    clientId: "app-key",
-    clientSecret: "app-secret",
-    fetcher: createFakeDropboxFetcher(tree),
+/**
+ * Loads the real, registered Dropbox adapter through the host's own
+ * capability-loading seam — never importing `@sourceweft/builtin-connector-
+ * dropbox` by specifier (see `architecture-capability-imports.test.ts`:
+ * `apps/backend/src` must not know which capabilities exist).
+ *
+ * `collectCapabilityConnectorContributions` is not memoized: it builds fresh
+ * adapters on every call. The real discovery is filtered down to just the
+ * Dropbox capability record so no other installed connector (Gmail, Google
+ * Drive, Notion) is constructed — their own activation/credentials never
+ * come into it, so this is independent of whatever the ambient environment
+ * happens to hold for them. `DROPBOX_CONNECTOR_ENABLED`/`CLIENT_ID`/
+ * `CLIENT_SECRET` are stubbed so the connector registers regardless of the
+ * ambient environment too, and global `fetch` is stubbed to the fake Dropbox
+ * fetcher *before* the factory runs, because `createDropboxConnectorAdapter`
+ * captures `fetch` once, synchronously, at construction time when no
+ * `fetcher` override is passed — so the stub must already be in place at
+ * that single point. Caller must `vi.unstubAllEnvs()`/`vi.unstubAllGlobals()`
+ * afterwards.
+ */
+async function loadDropboxAdapter(fetcher: typeof fetch) {
+  vi.stubEnv("DROPBOX_CONNECTOR_ENABLED", "true");
+  vi.stubEnv("DROPBOX_CLIENT_ID", "test-client-id");
+  vi.stubEnv("DROPBOX_CLIENT_SECRET", "test-client-secret");
+  vi.stubGlobal("fetch", fetcher);
+  const { adapters } = await collectCapabilityConnectorContributions({
+    recordsProvider: async () =>
+      (await listCapabilityRecords()).filter(
+        (record) => record.manifest.id === "sourceweft/dropbox",
+      ),
   });
+  const adapter = adapters.find(
+    (candidate) => candidate.getManifest().type === "dropbox",
+  );
+  if (!adapter) {
+    throw new Error(
+      "Dropbox adapter was not contributed by collectCapabilityConnectorContributions; " +
+        "check that DROPBOX_CONNECTOR_ENABLED was stubbed before calling it",
+    );
+  }
+  return adapter;
 }
 
 test("selected file and folder index, then a deletion is archived", async () => {
@@ -193,65 +228,79 @@ test("selected file and folder index, then a deletion is archived", async () => 
     body: "binary-ish",
   });
 
-  const t = await setup({
-    pagesOf: [],
-    adapter: dropboxAdapter(tree),
-    connectorType: "dropbox",
-    configJson: {
-      items: [
-        { id: "id:notes1", kind: "file" },
-        { id: "id:proj", kind: "folder" },
-      ],
-    },
-  });
-
-  // First sync: three supported files are discovered and indexed; the
-  // unsupported pic.png is dropped silently inside the selected folder and
-  // never becomes a source.
-  const run1 = await t.sync();
-  assert.equal(run1.status, "succeeded");
-  const rows1 = await t.sourceRows();
-  assert.deepEqual(
-    rows1.map((row) => row.externalId).sort(),
-    ["file:id:a1", "file:id:b1", "file:id:notes1"],
-  );
-  assert.equal(
-    rows1.every((row) => row.status === "indexed"),
-    true,
-  );
-
-  // Second sync: b.txt is deleted from the fake tree. The reconciling scan
-  // archives its source; the other two stay indexed.
-  tree.remove("id:b1");
-  const run2 = await t.sync();
-  assert.equal(run2.status, "succeeded");
-  const rows2 = await t.sourceRows();
-  const statusByExternalId = Object.fromEntries(
-    rows2.map((row) => [row.externalId, row.status]),
-  );
-  assert.equal(statusByExternalId["file:id:b1"], "archived");
-  assert.equal(statusByExternalId["file:id:a1"], "indexed");
-  assert.equal(statusByExternalId["file:id:notes1"], "indexed");
-
-  // Third sync: the folder now holds 1,001 files, past the selection cap.
-  // The run fails before any page is produced, and no source changes status.
-  for (let i = 0; i < 1001; i += 1) {
-    tree.add({
-      id: `id:big${String(i).padStart(4, "0")}`,
-      tag: "file",
-      name: `big${i}.txt`,
-      path: `/proj/big${i}.txt`,
-      parentId: "id:proj",
-      body: "x",
+  try {
+    const adapter = await loadDropboxAdapter(createFakeDropboxFetcher(tree));
+    const t = await setup({
+      pagesOf: [],
+      adapter,
+      connectorType: "dropbox",
+      configJson: {
+        items: [
+          { id: "id:notes1", kind: "file" },
+          { id: "id:proj", kind: "folder" },
+        ],
+      },
     });
+
+    // First sync: three supported files are discovered and indexed; the
+    // unsupported pic.png is dropped silently inside the selected folder and
+    // never becomes a source.
+    const run1 = await t.sync();
+    assert.equal(run1.status, "succeeded");
+    const rows1 = await t.sourceRows();
+    assert.deepEqual(
+      rows1.map((row) => row.externalId).sort(),
+      ["file:id:a1", "file:id:b1", "file:id:notes1"],
+    );
+    assert.equal(
+      rows1.every((row) => row.status === "indexed"),
+      true,
+    );
+
+    // Second sync: b.txt is deleted from the fake tree. The reconciling scan
+    // archives its source; the other two stay indexed.
+    tree.remove("id:b1");
+    const run2 = await t.sync();
+    assert.equal(run2.status, "succeeded");
+    const rows2 = await t.sourceRows();
+    const statusByExternalId = Object.fromEntries(
+      rows2.map((row) => [row.externalId, row.status]),
+    );
+    assert.equal(statusByExternalId["file:id:b1"], "archived");
+    assert.equal(statusByExternalId["file:id:a1"], "indexed");
+    assert.equal(statusByExternalId["file:id:notes1"], "indexed");
+
+    // Third sync: the folder now holds 1,001 files, past the selection cap.
+    // The run fails before any page is produced, and no source changes
+    // status. orchestrator.run() re-throws after persisting the failed run,
+    // so this uses syncExpectingFailure (not sync) and asserts the thrown
+    // error's code matches the stored run's errorCode.
+    for (let i = 0; i < 1001; i += 1) {
+      tree.add({
+        id: `id:big${String(i).padStart(4, "0")}`,
+        tag: "file",
+        name: `big${i}.txt`,
+        path: `/proj/big${i}.txt`,
+        parentId: "id:proj",
+        body: "x",
+      });
+    }
+    const rowsBeforeCapFailure = await t.sourceRows();
+    const { run: run3, error } = await t.syncExpectingFailure();
+    assert.equal(run3.status, "failed");
+    assert.equal(run3.errorCode, "DROPBOX_SELECTION_TOO_LARGE");
+    assert.equal(
+      (error as { code?: unknown }).code,
+      "DROPBOX_SELECTION_TOO_LARGE",
+    );
+    assert.equal((error as { code?: unknown }).code, run3.errorCode);
+    const rowsAfterCapFailure = await t.sourceRows();
+    assert.deepEqual(
+      rowsAfterCapFailure.map((row) => ({ id: row.id, status: row.status })),
+      rowsBeforeCapFailure.map((row) => ({ id: row.id, status: row.status })),
+    );
+  } finally {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   }
-  const rowsBeforeCapFailure = await t.sourceRows();
-  const run3 = await t.sync();
-  assert.equal(run3.status, "failed");
-  assert.equal(run3.errorCode, "DROPBOX_SELECTION_TOO_LARGE");
-  const rowsAfterCapFailure = await t.sourceRows();
-  assert.deepEqual(
-    rowsAfterCapFailure.map((row) => ({ id: row.id, status: row.status })),
-    rowsBeforeCapFailure.map((row) => ({ id: row.id, status: row.status })),
-  );
 });

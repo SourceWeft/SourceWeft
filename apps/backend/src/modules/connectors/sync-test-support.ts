@@ -309,15 +309,55 @@ export function makeSetup(ctx: ConnectorTestContext) {
       resolveActor,
     );
     const target = { teamId, workspaceId, connectorId };
-    async function sync(
-      triggerType: "manual" | "scheduled" | "webhook" = "manual",
-      targetExternalIds?: string[],
-    ) {
-      const run = await syncRunRepo.createSyncRunRecord({
+    async function createRun(triggerType: "manual" | "scheduled" | "webhook") {
+      return syncRunRepo.createSyncRunRecord({
         ...target,
         triggerType,
         status: "queued",
       });
+    }
+    async function runRow(runId: string) {
+      const [row] = await schema.db
+        .select()
+        .from(schema.connectorSyncRuns)
+        .where(eq(schema.connectorSyncRuns.id, runId));
+      return row!;
+    }
+    /**
+     * Runs the orchestrator and returns the persisted run row. Propagates a
+     * rejection exactly as `orchestrator.run()` throws it — a non-blocked
+     * failure is persisted to the run (and connector/source rows) before
+     * `sync-orchestrator.ts`'s outer catch re-throws to its caller, so a
+     * caller expecting success must see that rejection, not a silent
+     * swallow that would hide a real regression. Use `syncExpectingFailure`
+     * for a case that is expected to end in such a failure.
+     */
+    async function sync(
+      triggerType: "manual" | "scheduled" | "webhook" = "manual",
+      targetExternalIds?: string[],
+    ) {
+      const run = await createRun(triggerType);
+      await orchestrator.run({
+        ...target,
+        runId: run.id,
+        userId: TRIGGER,
+        ...(targetExternalIds ? { targetExternalIds } : {}),
+      });
+      return runRow(run.id);
+    }
+    /**
+     * For a case that is expected to end in a non-blocked failure (see
+     * `sync`'s doc comment). Awaits that rejection, asserts it actually
+     * happened, and returns both the persisted run row and the thrown error
+     * so the caller can assert on the error itself (e.g. its `code`) in
+     * addition to `run.status`/`run.errorCode`.
+     */
+    async function syncExpectingFailure(
+      triggerType: "manual" | "scheduled" | "webhook" = "manual",
+      targetExternalIds?: string[],
+    ) {
+      const run = await createRun(triggerType);
+      let caught: unknown;
       try {
         await orchestrator.run({
           ...target,
@@ -325,19 +365,15 @@ export function makeSetup(ctx: ConnectorTestContext) {
           userId: TRIGGER,
           ...(targetExternalIds ? { targetExternalIds } : {}),
         });
-      } catch {
-        // A failure that is not a quota block is persisted to the run (and
-        // connector/source rows) before the orchestrator re-throws it to its
-        // caller (see sync-orchestrator.ts's outer catch). The harness reads
-        // that persisted state back from the database instead of propagating
-        // the rejection, so callers assert on `run.status`/`run.errorCode`
-        // the same way regardless of which path failed.
+      } catch (error) {
+        caught = error;
       }
-      const [row] = await schema.db
-        .select()
-        .from(schema.connectorSyncRuns)
-        .where(eq(schema.connectorSyncRuns.id, run.id));
-      return row!;
+      if (caught === undefined) {
+        throw new Error(
+          "syncExpectingFailure: orchestrator.run() did not throw",
+        );
+      }
+      return { run: await runRow(run.id), error: caught };
     }
     async function connectorRow() {
       const [row] = await schema.db
@@ -367,6 +403,7 @@ export function makeSetup(ctx: ConnectorTestContext) {
       index,
       resolveActor,
       sync,
+      syncExpectingFailure,
       connectorRow,
       sourceRows,
       cursor,
