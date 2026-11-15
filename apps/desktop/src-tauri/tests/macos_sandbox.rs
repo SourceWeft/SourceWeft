@@ -325,22 +325,30 @@ fn task_folder_in_the_visible_home_location_runs_and_is_isolated() {
         "task-cross",
         &first,
         &format!(
-            "cat {}; cat {}; ls {}; printf x > {}",
+            "cat {}; cat {}; printf x > {}",
             quoted(&second.path.join("secret.txt")),
             quoted(&scratch.path().canonicalize().unwrap().join("private.txt")),
-            quoted(&location),
             quoted(&planted)
         ),
     );
     let text = output(&result);
     assert!(!text.contains(&secret), "read a neighbour's task folder: {result}");
     assert!(!text.contains(&home_secret), "read the home directory: {result}");
-    assert!(
-        !text.contains(second.path.file_name().unwrap().to_str().unwrap()),
-        "listed the task folder location: {result}"
-    );
     assert_ne!(result["exitCode"], 0, "{result}");
     assert!(!planted.exists(), "wrote into a neighbour's task folder: {result}");
+
+    // This command names only the location, so the neighbour's folder name can reach the output
+    // only through the listing itself, not through an error message that repeats a path.
+    let listing = execute_denied(
+        &host,
+        "task-list",
+        &first,
+        &format!("ls -R {}", quoted(&location)),
+    );
+    assert!(
+        !output(&listing).contains(second.path.file_name().unwrap().to_str().unwrap()),
+        "listed a neighbour's task folder: {listing}"
+    );
 }
 
 #[test]

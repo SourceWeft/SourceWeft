@@ -826,8 +826,8 @@ fn cannot_read_another_granted_workspace_outside_home() {
 #[ignore = "requires bubblewrap and the sandbox bundle"]
 fn task_folder_in_the_visible_home_location_runs_and_is_isolated() {
     // Automatic task folders live in `<home>/SourceWeft/<date>/<name>`: inside the home directory,
-    // which the sandbox denies as a whole. A command gets exactly its own task folder, not the
-    // location, not its neighbour's folder and not the rest of the home.
+    // which the sandbox denies as a whole. A command gets exactly its own task folder, not its
+    // neighbour's folder and not the rest of the home.
     ensure_tmp_claude();
     let scratch = tempfile::Builder::new()
         .prefix("sw-task-")
@@ -869,22 +869,31 @@ fn task_folder_in_the_visible_home_location_runs_and_is_isolated() {
         "task-cross",
         &first,
         &format!(
-            "cat {}; cat {}; ls {}; printf x > {}",
+            "cat {}; cat {}; printf x > {}",
             quoted(&second.path.join("secret.txt")),
             quoted(&scratch_root.join("private.txt")),
-            quoted(&location),
             quoted(&planted)
         ),
     );
     let text = output(&result);
     assert!(!text.contains(&secret), "read a neighbour's task folder: {result}");
     assert!(!text.contains(&home_secret), "read the home directory: {result}");
-    assert!(
-        !text.contains(second.path.file_name().unwrap().to_str().unwrap()),
-        "listed the task folder location: {result}"
-    );
     assert_ne!(result["exitCode"], 0, "{result}");
     assert!(!planted.exists(), "wrote into a neighbour's task folder: {result}");
+
+    // The sandbox shows the directories that lead to this task folder, so the location itself
+    // lists. This command names only the location, so the neighbour's folder name can reach the
+    // output only through the listing itself, not through an error message that repeats a path.
+    let listing = execute_denied(
+        &host,
+        "task-list",
+        &first,
+        &format!("ls -R {}", quoted(&location)),
+    );
+    assert!(
+        !output(&listing).contains(second.path.file_name().unwrap().to_str().unwrap()),
+        "listed a neighbour's task folder: {listing}"
+    );
 }
 
 #[test]
