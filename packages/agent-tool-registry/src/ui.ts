@@ -23,12 +23,14 @@ import type {
 import type { ComponentType } from "react";
 import { generateImageArtifactUi } from "@sourceweft/builtin-tool-generate-image/ui";
 import { publishArtifactArtifactUi } from "@sourceweft/builtin-tool-publish-artifact/ui";
+import { studyArtifactUi } from "@sourceweft/builtin-tool-study/ui";
 import { videoPresentationArtifactUi } from "@sourceweft/builtin-tool-video-presentation/ui";
 
 /** Every capability that renders its own artifacts. Add one line per capability. */
 export const ARTIFACT_UI_MODULES: readonly ArtifactUiModule[] = [
   generateImageArtifactUi,
   publishArtifactArtifactUi,
+  studyArtifactUi,
   videoPresentationArtifactUi,
 ];
 

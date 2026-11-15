@@ -138,6 +138,16 @@ export type ArtifactPreviewArtifactView = {
   readonly artifactType: string;
   readonly status: string;
   readonly errorMessage: string | null;
+  /**
+   * The failure code, for owners that word failures per code. Optional: hosts
+   * that only know the message leave it out.
+   */
+  readonly errorCode?: string | null;
+  /**
+   * The exact version the payload belongs to, for owners that keep per-version
+   * state (e.g. learning progress). Optional, like `errorCode`.
+   */
+  readonly artifactVersionId?: string | null;
 };
 
 export type ArtifactPreviewContext = {

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/study-tool",
+  "kind": "tool",
+  "name": "Study",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "tools": []
+}
