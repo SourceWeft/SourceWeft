@@ -5382,7 +5382,12 @@
         "invalid_token": "你的登入連結無效或已過期。",
         "account_not_linked": "此帳號尚未連結，請嘗試其他登入方式。",
         "email_not_verified": "登入前請先驗證你的電子郵件。",
-        "user_not_found": "找不到與此次登入符合的帳號。"
+        "user_not_found": "找不到與此次登入符合的帳號。",
+        "SSO_ACCOUNT_LINK_DENIED": "無法將此登入關聯到已有帳號，請聯絡管理員。",
+        "SSO_SEAT_LIMIT": "團隊席位已滿，請聯絡管理員增加席位。",
+        "SSO_PROVISIONING_FAILED": "無法將你加入團隊，請重試或聯絡管理員。",
+        "SSO_DOMAIN_NOT_VERIFIED": "該網域尚未完成驗證，請聯絡管理員完成設定。",
+        "SSO_PROVIDER_NOT_FOUND": "該電子郵件未設定企業單一登入。"
       }
     },
     "guestInvite": {
@@ -5794,6 +5799,14 @@
       }
     },
     "plugins": {
+      "sso": {
+        "signInWithSso": "使用企業 SSO 登入",
+        "ssoTitle": "企業單一登入",
+        "ssoDescription": "輸入工作電子郵件，透過公司的登入方式繼續。",
+        "workEmail": "工作電子郵件",
+        "continue": "繼續",
+        "backToSignIn": "返回登入"
+      },
       "magicLink": {
         "magicLink": "免密登入連結",
         "sendMagicLink": "傳送免密登入連結",

@@ -5382,7 +5382,12 @@
         "invalid_token": "Your sign-in link is invalid or has expired.",
         "account_not_linked": "This account is not linked yet. Try signing in a different way.",
         "email_not_verified": "Please verify your email before signing in.",
-        "user_not_found": "We could not find an account for this sign-in."
+        "user_not_found": "We could not find an account for this sign-in.",
+        "SSO_ACCOUNT_LINK_DENIED": "This sign-in cannot be linked to an existing account. Contact your administrator.",
+        "SSO_SEAT_LIMIT": "Your team has no seats left. Ask your administrator to add seats.",
+        "SSO_PROVISIONING_FAILED": "We couldn't add you to your team. Try again, or contact your administrator.",
+        "SSO_DOMAIN_NOT_VERIFIED": "This domain has not been verified yet. Ask your administrator to finish setup.",
+        "SSO_PROVIDER_NOT_FOUND": "No single sign-on is set up for this email address."
       }
     },
     "guestInvite": {
@@ -5794,6 +5799,14 @@
       }
     },
     "plugins": {
+      "sso": {
+        "signInWithSso": "Sign in with SSO",
+        "ssoTitle": "Single sign-on",
+        "ssoDescription": "Enter your work email to continue with your company's sign-in.",
+        "workEmail": "Work email",
+        "continue": "Continue",
+        "backToSignIn": "Back to sign in"
+      },
       "magicLink": {
         "magicLink": "Magic Link",
         "sendMagicLink": "Send Magic Link",

@@ -32,6 +32,7 @@ import { magicLinkPlugin } from "../lib/auth/magic-link-plugin";
 import { multiSessionPlugin } from "../lib/auth/multi-session-plugin";
 import { organizationPlugin } from "../lib/auth/organization-plugin";
 import { passkeyPlugin } from "../lib/auth/passkey-plugin";
+import { ssoPlugin } from "../lib/auth/sso-plugin";
 import { twoFactorPlugin } from "../lib/auth/two-factor-plugin";
 import { getQueryClient } from "../lib/query-client";
 import { useUserSettings } from "../lib/user-settings";
@@ -248,6 +249,7 @@ export function Providers({
             multiSessionPlugin(),
             apiKeyPlugin({ organization: true }),
             organizationPlugin(organizationPluginOptions),
+            ssoPlugin(),
           ]}
           redirectTo="/dashboard"
           socialProviders={["google", "github"]}

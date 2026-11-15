@@ -7,6 +7,8 @@ import {
 } from "@better-auth-ui/core/plugins/organization";
 import { twoFactorPlugin } from "@better-auth-ui/core/plugins/two-factor";
 
+import { ssoPlugin } from "./auth/sso-plugin";
+
 /**
  * `app/providers.tsx` registers the organization plugin with exactly these
  * options, and the static paths below are derived from them. Keeping one
@@ -33,6 +35,10 @@ const authPlugins = [
   () => emailOtpPlugin({}),
   () => twoFactorPlugin({}),
   () => organizationPlugin(organizationPluginOptions),
+  // The app's own SSO plugin contributes the `/auth/sso` route segment; it must
+  // appear here so `sso` lands in `authStaticPaths` (the `[path]` route sets
+  // `dynamicParams = false`, so a missing segment 404s).
+  () => ssoPlugin(),
 ];
 
 function pluginViewPaths(scope: "auth" | "settings" | "organization") {

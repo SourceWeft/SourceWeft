@@ -5382,7 +5382,12 @@
         "invalid_token": "你的登录链接无效或已过期。",
         "account_not_linked": "此账号尚未关联，请尝试其他登录方式。",
         "email_not_verified": "登录前请先验证你的邮箱。",
-        "user_not_found": "未找到与此次登录匹配的账号。"
+        "user_not_found": "未找到与此次登录匹配的账号。",
+        "SSO_ACCOUNT_LINK_DENIED": "无法将此登录关联到已有账号，请联系管理员。",
+        "SSO_SEAT_LIMIT": "团队席位已满，请联系管理员增加席位。",
+        "SSO_PROVISIONING_FAILED": "无法将你加入团队，请重试或联系管理员。",
+        "SSO_DOMAIN_NOT_VERIFIED": "该域名尚未完成验证，请联系管理员完成配置。",
+        "SSO_PROVIDER_NOT_FOUND": "该邮箱未配置企业单点登录。"
       }
     },
     "guestInvite": {
@@ -5794,6 +5799,14 @@
       }
     },
     "plugins": {
+      "sso": {
+        "signInWithSso": "使用企业 SSO 登录",
+        "ssoTitle": "企业单点登录",
+        "ssoDescription": "输入工作邮箱，通过公司的登录方式继续。",
+        "workEmail": "工作邮箱",
+        "continue": "继续",
+        "backToSignIn": "返回登录"
+      },
       "magicLink": {
         "magicLink": "免密登录链接",
         "sendMagicLink": "发送免密登录链接",

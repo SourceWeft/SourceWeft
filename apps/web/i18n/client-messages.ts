@@ -62,6 +62,9 @@ export const CLIENT_NAMESPACES = {
   ],
   /** `app/auth`: sign-in, invitations, consent, desktop hand-off. */
   auth: [
+    // The hand-written mobile login view links to `/auth/sso` with the SSO
+    // plugin's own copy; the rest of the auth UI reads it through Better Auth.
+    "authLocale.plugins.sso",
     "authPages.acceptInvitation",
     "authPages.additionalField",
     "authPages.consent",
