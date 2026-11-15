@@ -1,0 +1,17 @@
+---
+subject: Scheduled task failed: {{taskName}}
+heading: Your scheduled task failed
+preview: {{taskName}} could not finish its latest run. Open it to see what happened.
+action: See what happened
+url: {{url}}
+---
+
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  The latest run of your scheduled task <strong>{{taskName}}</strong> could not finish. Open it to see what happened. We send at most one of these emails per task each day.
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  Repeated failures pause the task automatically, so it does not keep using your credits.
+</p>
