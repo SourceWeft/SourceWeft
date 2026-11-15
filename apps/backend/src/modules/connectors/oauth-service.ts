@@ -493,6 +493,10 @@ export class ConnectorOAuthService {
         const connectorError = toConnectorError(error);
         if (connectorError.code === "CONNECTOR_REAUTH_REQUIRED") {
           counts.reauthRequired += 1;
+          logger.info("connector_token_keep_alive_reauth_required", {
+            accountId: candidate.id,
+            connectorType: candidate.connectorType,
+          });
         } else if (
           // The adapter was never resolved (connector switched off), or the
           // account was gone or no longer active by the time the lock was

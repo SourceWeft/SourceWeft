@@ -7,10 +7,7 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { connectorOAuthAccounts, db, sourceConnectors } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapOAuthAccount, mapOAuthAccountWithSecret } from "../mappers";
-import type {
-  ConnectorOAuthAccountSecretRecord,
-  ConnectorOAuthAccountStatus,
-} from "../types";
+import type { ConnectorOAuthAccountSecretRecord } from "../types";
 
 export async function createOAuthAccountRecord(input: {
   teamId: string;
@@ -145,7 +142,10 @@ export async function findReauthorizableOAuthAccountRecord(input: {
 /**
  * Replace a stored authorization's tokens after the provider account
  * authorized again, and make it usable again. An omitted refresh token or
- * email keeps the stored value: providers do not reissue them every time.
+ * email keeps the stored value: providers do not reissue them every time. A
+ * reconnect stores fresh tokens, so `lastRefreshAt` is stamped now — otherwise
+ * a just-reconnected old account would be swept by the keep-alive pass within
+ * the hour.
  */
 export async function reauthorizeOAuthAccountRecord(input: {
   teamId: string;
@@ -165,6 +165,7 @@ export async function reauthorizeOAuthAccountRecord(input: {
     expiresAt: input.expiresAt,
     status: "active",
     lastError: null,
+    lastRefreshAt: new Date(),
     updatedAt: new Date(),
   };
   if (input.providerAccountEmail) {
@@ -230,8 +231,8 @@ export async function deleteOAuthAccountRecord(input: {
  * Column values for a successful token refresh: the access token always
  * changes, an omitted refresh token or scopes list keeps the stored value
  * (providers do not always reissue them), and the account comes back
- * `active` with its error cleared. Shared by `updateOAuthAccountTokenRecord`
- * and the `"token"` write applied under `withOAuthAccountRefreshLock`.
+ * `active` with its error cleared. Used for the `"token"` write applied under
+ * `withOAuthAccountRefreshLock`.
  */
 function oauthAccountTokenWriteColumns(input: {
   accessTokenEncrypted: string;
@@ -256,56 +257,6 @@ function oauthAccountTokenWriteColumns(input: {
   return updates;
 }
 
-export async function updateOAuthAccountTokenRecord(input: {
-  teamId: string;
-  workspaceId: string;
-  accountId: string;
-  accessTokenEncrypted: string;
-  refreshTokenEncrypted?: string | null;
-  expiresAt?: Date | null;
-  scopes?: string[];
-}) {
-  const [row] = await db
-    .update(connectorOAuthAccounts)
-    .set(oauthAccountTokenWriteColumns(input))
-    .where(
-      and(
-        eq(connectorOAuthAccounts.id, input.accountId),
-        eq(connectorOAuthAccounts.teamId, input.teamId),
-        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning();
-
-  return row ? mapOAuthAccount(row) : null;
-}
-
-export async function updateOAuthAccountStatusRecord(input: {
-  teamId: string;
-  workspaceId: string;
-  accountId: string;
-  status: ConnectorOAuthAccountStatus;
-  lastError?: string | null;
-}) {
-  const [row] = await db
-    .update(connectorOAuthAccounts)
-    .set({
-      status: input.status,
-      lastError: input.lastError ?? null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(connectorOAuthAccounts.id, input.accountId),
-        eq(connectorOAuthAccounts.teamId, input.teamId),
-        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning();
-
-  return row ? mapOAuthAccount(row) : null;
-}
-
 export type OAuthAccountRefreshWrite =
   | { kind: "none" }
   | {
@@ -319,7 +270,12 @@ export type OAuthAccountRefreshWrite =
 
 const LOCK_TIMEOUT_PG_ERROR_CODE = "55P03";
 
-/** drizzle wraps the driver error, so the pg fields may sit on `cause`. */
+/**
+ * drizzle-orm 0.45.2 throws a `DrizzleQueryError` for a failed query and puts
+ * the driver (pg) error — which carries the `55P03` lock_timeout code — on its
+ * `cause`. A lock-timeout can therefore reach us either as the pg error itself
+ * or wrapped, so check the error and its `cause`.
+ */
 function isLockTimeoutError(error: unknown): boolean {
   for (const candidate of [error, (error as { cause?: unknown } | null)?.cause]) {
     const pg = candidate as { code?: string } | null | undefined;
@@ -342,6 +298,13 @@ function isLockTimeoutError(error: unknown): boolean {
  * `lockTimeoutMs` is reported as `ConnectorError(503,
  * "CONNECTOR_OAUTH_REFRESH_BUSY")` so a caller can retry later instead of
  * hanging.
+ *
+ * The row is locked `FOR NO KEY UPDATE`, not `FOR UPDATE`: it still conflicts
+ * with itself and with this function's own row updates, so two refreshers
+ * serialize, but it does not conflict with the `FOR KEY SHARE` lock that a
+ * foreign-key check takes from a row referencing this account. Creating a
+ * connector that points at the account therefore does not block for up to
+ * `lockTimeoutMs` while a refresh holds the lock.
  */
 export async function withOAuthAccountRefreshLock<T>(
   input: {
@@ -376,7 +339,7 @@ export async function withOAuthAccountRefreshLock<T>(
             eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
           ),
         )
-        .for("update");
+        .for("no key update");
 
       const { write, result } = await decide(
         row ? mapOAuthAccountWithSecret(row) : null,

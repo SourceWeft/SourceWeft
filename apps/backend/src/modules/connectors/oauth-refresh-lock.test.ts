@@ -59,8 +59,6 @@ vi.mock("./repository", () => ({
   findReauthorizableOAuthAccountRecord: vi.fn(),
   listOAuthAccountsDueForKeepAlive: mocks.listDue,
   reauthorizeOAuthAccountRecord: vi.fn(),
-  updateOAuthAccountStatusRecord: vi.fn(),
-  updateOAuthAccountTokenRecord: vi.fn(),
   withOAuthAccountRefreshLock: mocks.lock,
 }));
 
@@ -376,6 +374,71 @@ it("a provider call that never answers times out without marking the account", a
   }
 });
 
+// F8
+it("logs a late success when the abandoned provider call resolves after the timeout", async () => {
+  vi.useFakeTimers();
+  try {
+    let resolveProvider!: (value: OAuthTokenSet) => void;
+    mocks.refresh.mockReturnValue(
+      new Promise<OAuthTokenSet>((resolve) => {
+        resolveProvider = resolve;
+      }),
+    );
+    const pending = service.getRuntimeToken(input);
+    const assertion = expect(pending).rejects.toMatchObject({
+      statusCode: 503,
+      code: "CONNECTOR_OAUTH_REFRESH_TIMEOUT",
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+
+    // The timed-out provider call now answers with a rotated token we dropped.
+    resolveProvider({
+      accessToken: "a2",
+      refreshToken: "r2",
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.warn).toHaveBeenCalledWith(
+      "connector_token_refresh_late_success",
+      { accountId: "account-1", connectorType: "google_drive" },
+    );
+    expect(writes).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// F8: a late provider rejection (as opposed to a late success) stays silent.
+it("does not log when the abandoned provider call rejects after the timeout", async () => {
+  vi.useFakeTimers();
+  try {
+    let rejectProvider!: (error: Error) => void;
+    mocks.refresh.mockReturnValue(
+      new Promise<OAuthTokenSet>((_resolve, reject) => {
+        rejectProvider = reject;
+      }),
+    );
+    const pending = service.getRuntimeToken(input);
+    const assertion = expect(pending).rejects.toMatchObject({
+      code: "CONNECTOR_OAUTH_REFRESH_TIMEOUT",
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+
+    rejectProvider(new Error("too late"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.warn).not.toHaveBeenCalledWith(
+      "connector_token_refresh_late_success",
+      expect.anything(),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("a lock wait timeout surfaces as CONNECTOR_OAUTH_REFRESH_BUSY and marks nothing", async () => {
   mocks.lock.mockRejectedValueOnce(
     new ConnectorError(
@@ -632,6 +695,11 @@ it("keep-alive refreshes each due account through the locked path and counts out
     connectorType: "type_e",
     code: "CONNECTOR_OPERATION_FAILED",
   });
+  // F8: the provider-refused account (acct-c) is logged as reauth-required.
+  expect(mocks.info).toHaveBeenCalledWith(
+    "connector_token_keep_alive_reauth_required",
+    { accountId: "acct-c", connectorType: "type_c" },
+  );
   expect(mocks.info).toHaveBeenCalledWith("connector_token_keep_alive", {
     checked: 5,
     refreshed: 1,

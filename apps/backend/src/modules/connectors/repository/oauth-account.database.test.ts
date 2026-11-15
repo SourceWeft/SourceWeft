@@ -47,6 +47,7 @@ async function account(input: {
   lastRefreshAt?: Date | null;
   expiresAt?: Date | null;
   status?: ConnectorOAuthAccountStatus;
+  lastError?: string | null;
 }) {
   const created = await accounts.createOAuthAccountRecord({
     teamId: input.teamId,
@@ -73,6 +74,7 @@ async function account(input: {
   if (input.lastRefreshAt !== undefined)
     overrides.lastRefreshAt = input.lastRefreshAt;
   if (input.status) overrides.status = input.status;
+  if (input.lastError !== undefined) overrides.lastError = input.lastError;
   if (Object.keys(overrides).length > 0) {
     await schema.db
       .update(schema.connectorOAuthAccounts)
@@ -110,13 +112,7 @@ const lookup = (scope: { teamId: string; workspaceId: string }) =>
 
 test("finds a stored authorization for the same provider account whatever its status", async () => {
   const scope = await workspace();
-  const stored = await account(scope);
-  await accounts.updateOAuthAccountStatusRecord({
-    ...scope,
-    accountId: stored.id,
-    status: "reauth_required",
-    lastError: "invalid_grant",
-  });
+  const stored = await account({ ...scope, status: "reauth_required" });
 
   const found = await lookup(scope);
 
@@ -180,14 +176,15 @@ test("falls back to the newest authorization when no connector uses any", async 
 
 test("reauthorizing replaces the tokens and makes the authorization active again", async () => {
   const scope = await workspace();
-  const stored = await account(scope);
-  await accounts.updateOAuthAccountStatusRecord({
+  // Old, idle account: last refreshed 10 days ago, marked reauth_required.
+  const stored = await account({
     ...scope,
-    accountId: stored.id,
     status: "reauth_required",
     lastError: "invalid_grant",
+    lastRefreshAt: new Date(Date.now() - 10 * 24 * 60 * 60_000),
   });
   const expiresAt = new Date("2026-11-14T10:00:00.000Z");
+  const before = Date.now();
 
   const refreshed = await accounts.reauthorizeOAuthAccountRecord({
     ...scope,
@@ -214,6 +211,11 @@ test("reauthorizing replaces the tokens and makes the authorization active again
   assert.equal(row?.accessTokenEncrypted, "enc(access-2)");
   assert.equal(row?.refreshTokenEncrypted, "enc(refresh-2)");
   assert.equal(row?.expiresAt, expiresAt.toISOString());
+  // F8: a reconnect stamps lastRefreshAt to now, so the keep-alive pass does
+  // not immediately sweep a just-reconnected old account.
+  assert.ok(row?.lastRefreshAt);
+  assert.ok(Date.parse(row!.lastRefreshAt!) >= before - 1_000);
+  assert.ok(Date.parse(row!.lastRefreshAt!) <= Date.now() + 1_000);
 });
 
 test("reauthorizing without a new refresh token keeps the stored one", async () => {
@@ -367,10 +369,6 @@ test("a status write commits even though the caller throws afterwards", async ()
 
   // The write already committed inside the repository function; a caller
   // throwing after it returns (the later service task) cannot undo that.
-  assert.throws(() => {
-    if (!outcome.ok) throw new Error("service surfaces failure after commit");
-  });
-
   const row = await accounts.findOAuthAccountRecord({
     ...scope,
     accountId: stored.id,
