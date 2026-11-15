@@ -4,12 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import test from "node:test";
-import {
-  BUNDLE_ID,
-  REQUIRED_TESTFLIGHT_SECRETS,
-  TEAM_ID,
-  exportOptionsPlist,
-} from "./ios-build.mjs";
+import { REQUIRED_TESTFLIGHT_SECRETS } from "./ios-build.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const workflow = readFileSync(
@@ -56,20 +51,13 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
     "the TestFlight job must run only for a manual testflight dispatch",
   );
   assert(testflight.includes("environment: ios-testflight"));
-  assert(
-    testflight.includes("xcodebuild archive") &&
-      testflight.includes("xcodebuild -exportArchive"),
-    "the TestFlight job must archive and export with xcodebuild",
-  );
-  assert(
-    !testflight.includes("-allowProvisioningUpdates") &&
-      !testflight.includes("exec tauri ios build"),
-    "the TestFlight job must not rely on automatic signing or tauri's export",
-  );
-  assert(
-    testflight.includes("CODE_SIGN_STYLE=Manual"),
-    "the archive must force manual signing",
-  );
+  assert(testflight.includes("--export-method app-store-connect"));
+  for (const name of ["IOS_CERTIFICATE", "IOS_CERTIFICATE_PASSWORD", "IOS_MOBILE_PROVISION"]) {
+    assert(
+      testflight.includes(`${name}: `),
+      `TestFlight job does not set the Tauri signing variable ${name}`,
+    );
+  }
   for (const name of REQUIRED_TESTFLIGHT_SECRETS) {
     assert(
       testflight.includes(`secrets.${name}`),
@@ -111,24 +99,6 @@ test("a missing signing secret fails before any signing step and names the secre
       return true;
     },
   );
-});
-
-test("export options use manual App Store signing for the app's bundle id and team", () => {
-  const plist = exportOptionsPlist({
-    teamId: TEAM_ID,
-    bundleId: BUNDLE_ID,
-    identity: "iPhone Distribution",
-    profile: "SourceWeft iOS App Store",
-  });
-  assert(plist.includes("<string>app-store-connect</string>"));
-  assert(plist.includes("<key>signingStyle</key><string>manual</string>"));
-  assert(plist.includes(`<key>teamID</key><string>${TEAM_ID}</string>`));
-  assert(
-    plist.includes(
-      `<key>${BUNDLE_ID}</key><string>SourceWeft iOS App Store</string>`,
-    ),
-  );
-  assert(plist.includes("<string>iPhone Distribution</string>"));
 });
 
 test("a fully provided secret set passes the check", () => {
