@@ -1,21 +1,7 @@
-/** Dropbox files this connector can extract are identified purely by name
- * extension: unlike Drive, the Dropbox API reports no structured MIME type
- * on file metadata. `isDownloadable` mirrors Dropbox's own `is_downloadable`
- * metadata field, which is false for files the content API cannot read as
- * bytes (e.g. a `.paper` doc has to be exported instead of downloaded). */
-const DOWNLOAD_MIME_TYPES_BY_EXTENSION: Readonly<Record<string, string>> = {
-  pdf: "application/pdf",
-  doc: "application/msword",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ppt: "application/vnd.ms-powerpoint",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  xls: "application/vnd.ms-excel",
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  txt: "text/plain",
-  md: "text/markdown",
-  markdown: "text/markdown",
-  csv: "text/csv",
-};
+import {
+  classifySourceFile,
+  CONNECTOR_FILE_KINDS,
+} from "@sourceweft/builtin-document-parsers/file-types";
 
 /**
  * How to extract a Dropbox file. `mimeType` on the download variant is the
@@ -37,8 +23,18 @@ function extensionOf(name: string): string | null {
   return name.slice(lastDot + 1).toLowerCase();
 }
 
-/** How to extract content from a Dropbox file, keyed by its name extension
- * and whether Dropbox reports it as downloadable. */
+/** How to extract content from a Dropbox file, keyed by its name and whether
+ * Dropbox reports it as downloadable. `isDownloadable` mirrors Dropbox's own
+ * `is_downloadable` metadata field, which is false for files the content API
+ * cannot read as bytes (e.g. a `.paper` doc has to be exported instead of
+ * downloaded).
+ *
+ * Supported file types are the platform's own file-type classification
+ * (`@sourceweft/builtin-document-parsers/file-types`) — the same rules
+ * uploads and every other connector are held to — restricted to the kinds a
+ * connector sync can resolve (`CONNECTOR_FILE_KINDS`): document, text,
+ * table, and json. Images, audio, and transcripts are never indexable from
+ * Dropbox. */
 export function resolveDropboxFileHandling(
   name: string,
   isDownloadable: boolean,
@@ -47,11 +43,12 @@ export function resolveDropboxFileHandling(
   if (extension === "paper") {
     return { kind: "export_paper", mimeType: "text/markdown" };
   }
-  if (extension !== null && isDownloadable) {
-    const mimeType = DOWNLOAD_MIME_TYPES_BY_EXTENSION[extension];
-    if (mimeType !== undefined) {
-      return { kind: "download", mimeType };
-    }
+  if (!isDownloadable) {
+    return { kind: "unsupported" };
+  }
+  const classification = classifySourceFile({ fileName: name });
+  if (classification.supported && CONNECTOR_FILE_KINDS.has(classification.kind)) {
+    return { kind: "download", mimeType: classification.mimeType };
   }
   return { kind: "unsupported" };
 }
