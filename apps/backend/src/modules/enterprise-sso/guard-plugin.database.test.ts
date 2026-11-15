@@ -643,15 +643,106 @@ test("sign-in by an unknown slug is a 404", async () => {
   assert.equal(await codeOf(response), SSO_ERROR_CODES.providerNotFound);
 }, 200_000);
 
-// ── Unauthenticated admin endpoints go straight to the plugin's 401 (R12) ───
+// ── The guard runs for EVERY caller; the plugin still 401s the unauthenticated ─
 
-test("an unauthenticated register is a 401, not a guard rejection", async () => {
+test("an unauthenticated register with a valid body reaches the plugin's 401", async () => {
+  // A valid private domain passes every guard rule, so the request reaches the
+  // plugin's sessionMiddleware, which answers 401 for the missing session.
   const client = new SsoTestClient(harness.auth, harness.baseUrl);
   const response = await client.jsonRequest(
     "/sso/register",
+    oidcRegistration({ organizationId: orgA, domain: uniqueDomain() }),
+  );
+  assert.equal(response.status, 401, await response.clone().text());
+}, 200_000);
+
+// ── A (CRITICAL): the guard must not be skippable by how a caller authenticates ─
+
+/** A signed session token exposed by the bearer plugin after a sign-in. */
+async function bearerTokenFor(user: SsoTestUser): Promise<string> {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  const response = await client.jsonRequest("/sign-in/email", {
+    email: user.email,
+    password: "correct horse battery staple",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  const token = response.headers.get("set-auth-token");
+  assert.ok(token, "expected a set-auth-token header from the bearer plugin");
+  return token;
+}
+
+/** A user-scoped API key for the owner, authenticated via the x-api-key header. */
+async function userApiKeyFor(user: SsoTestUser): Promise<string> {
+  const response = await user.client.withFreshIp().jsonRequest("/api-key/create", {
+    configId: "user",
+    name: `guard-${randomUUID().slice(0, 8)}`,
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  const body = (await response.json()) as { key?: string };
+  assert.ok(body.key, "expected an API key");
+  return body.key;
+}
+
+/** A request carrying ONLY the given header (no cookie), as a fresh client. */
+async function registerWithHeader(
+  header: Record<string, string>,
+  body: Record<string, unknown>,
+) {
+  return new SsoTestClient(harness.auth, harness.baseUrl).jsonRequest(
+    "/sso/register",
+    body,
+    { headers: header },
+  );
+}
+
+test("a bearer-authenticated caller cannot skip the guard rules", async () => {
+  const token = await bearerTokenFor(ownerA);
+  const header = { Authorization: `Bearer ${token}` };
+
+  const gmail = await registerWithHeader(
+    header,
     oidcRegistration({ organizationId: orgA, domain: "gmail.com" }),
   );
-  // No session cookie → the guard returns early and the plugin answers 401,
-  // even though the domain (gmail.com) would otherwise be a guard rejection.
-  assert.equal(response.status, 401, await response.clone().text());
+  assert.equal(gmail.status, 400, await gmail.clone().text());
+  assert.equal(await codeOf(gmail), SSO_ERROR_CODES.domainNotAllowed);
+
+  const github = await registerWithHeader(
+    header,
+    oidcRegistration({ organizationId: orgA, domain: "github.io" }),
+  );
+  assert.equal(github.status, 400, await github.clone().text());
+  assert.equal(await codeOf(github), SSO_ERROR_CODES.domainNotAllowed);
+
+  const longId = await registerWithHeader(header, {
+    ...oidcRegistration({ organizationId: orgA, domain: uniqueDomain() }),
+    providerId: "a".repeat(60),
+  });
+  assert.equal(longId.status, 400, await longId.clone().text());
+  assert.equal(await codeOf(longId), SSO_ERROR_CODES.invalidProviderId);
+
+  const personal = await registerWithHeader(
+    header,
+    oidcRegistration({ organizationId: orgP, domain: uniqueDomain() }),
+  );
+  assert.equal(personal.status, 400, await personal.clone().text());
+  assert.equal(await codeOf(personal), SSO_ERROR_CODES.organizationRequired);
+
+  // An update to a public domain, via bearer, is still rejected.
+  const update = await new SsoTestClient(harness.auth, harness.baseUrl).jsonRequest(
+    "/sso/update-provider",
+    { providerId: acmeProviderId, domain: "gmail.com" },
+    { headers: header },
+  );
+  assert.equal(update.status, 400, await update.clone().text());
+  assert.equal(await codeOf(update), SSO_ERROR_CODES.domainNotAllowed);
+}, 300_000);
+
+test("an API-key-authenticated caller cannot skip the guard rules either", async () => {
+  const key = await userApiKeyFor(ownerA);
+  const gmail = await registerWithHeader(
+    { "x-api-key": key },
+    oidcRegistration({ organizationId: orgA, domain: "gmail.com" }),
+  );
+  assert.equal(gmail.status, 400, await gmail.clone().text());
+  assert.equal(await codeOf(gmail), SSO_ERROR_CODES.domainNotAllowed);
 }, 200_000);

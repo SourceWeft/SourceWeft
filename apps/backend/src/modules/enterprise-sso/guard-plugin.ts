@@ -1,6 +1,6 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { parseCookies } from "better-auth/cookies";
+import { socialProviderList } from "@better-auth/core/social-providers";
 import { logger } from "../../shared/logger";
 import { authErrorTranslations, resolveGuardErrorLocale } from "../auth/auth-error-i18n";
 import {
@@ -18,7 +18,7 @@ import {
   type SsoProviderDomainRow,
 } from "./policy";
 import { assertSamlResponseAlgorithmsAllowed } from "./saml-algorithm-policy";
-import { validateRoleAttribute } from "./role-mapping";
+import { SSO_ROLE_CLAIM_KEY, validateRoleAttribute } from "./role-mapping";
 import {
   recordSsoCreatedUser,
   recordSsoSignInSession,
@@ -39,8 +39,9 @@ import {
  *    verified by another organization. A team is capped at
  *    {@link MAX_PROVIDERS_PER_ORGANIZATION} providers; a SAML provider always
  *    stores `wantAssertionsSigned: true`; a role attribute is carried into the
- *    config's mapping (seeded from the stored mapping on a partial update). An
- *    unauthenticated caller is handed straight to the plugin's 401.
+ *    config's mapping (seeded from the stored mapping on a partial update). These
+ *    rules run for EVERY caller — however they authenticate — and the plugin's
+ *    own sessionMiddleware answers 401 for an unauthenticated one afterwards.
  *  - verify-domain (before-hook): a domain already verified by another
  *    organization cannot be verified again; a partial unique index backstops the
  *    check against races (see {@link VERIFIED_DOMAIN_UNIQUE_INDEX}).
@@ -83,10 +84,11 @@ const SSO_PROVIDER_ORGANIZATION_MODEL = "organization";
 
 /**
  * The SSO sign-in callback / SAML ACS routes. Membership provisioning runs after
- * these commit a session, and a provisioning failure (see ./provisioning.ts) is
- * turned into an error-URL redirect by the after-hook below; a user created on
- * these paths is also marked email-verified (its domain was proven by the
- * resolver). Matched by the endpoint's route pattern, as the other hooks are.
+ * these commit a session; a provisioning failure throws its own error-URL
+ * redirect from inside `provisionUser` (see ./provisioning.ts). A user created on
+ * these paths is marked email-verified here (its domain was proven by the
+ * resolver), and the captures below record which user/session this sign-in made.
+ * Matched by the endpoint's route pattern, as the other hooks are.
  */
 const SSO_CALLBACK_PATHS = new Set([
   "/sso/callback",
@@ -121,6 +123,22 @@ export const MAX_PROVIDERS_PER_ORGANIZATION = 5;
 export const PROVIDER_ID_PATTERN = /^[a-z0-9-]{3,47}$/;
 
 /**
+ * Provider ids better-auth already uses as account `providerId`s: its built-in
+ * social providers plus the password `credential` provider. Deleting a provider
+ * removes `account` rows by providerId (lifecycle.ts), so a provider registered
+ * under one of these ids would, once that social provider is enabled, sweep real
+ * accounts — so they are rejected at registration. `okta` and other
+ * generic-OAuth / SAML names are NOT here (they are plausible SSO ids).
+ */
+const RESERVED_PROVIDER_IDS = new Set<string>([
+  ...socialProviderList,
+  "credential",
+]);
+export function isReservedProviderId(providerId: string): boolean {
+  return RESERVED_PROVIDER_IDS.has(providerId.toLowerCase());
+}
+
+/**
  * Name of the partial unique index (added by a SQL migration) that enforces one
  * verified provider per domain across all organizations. A write that violates
  * it is mapped to {@link SSO_ERROR_CODES.domainNotAllowed} instead of a 500.
@@ -143,37 +161,6 @@ type GuardAdapter = {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-/**
- * The context slice the unauthenticated-shortcut reads: the request headers and
- * the configured session-cookie name.
- */
-type SessionAwareCtx = {
-  headers?: Headers | null;
-  context: { authCookies?: { sessionToken?: { name?: string } } };
-};
-
-/**
- * Whether the request carries a session cookie at all. The admin SSO endpoints
- * (register / update / delete / verify-domain) all use the plugin's
- * `sessionMiddleware` and 401 an unauthenticated caller, so when no session
- * cookie is present the guard returns early instead of running its DB reads and
- * (for update) decrypting the stored client secret for a request the plugin will
- * reject anyway. A present-but-invalid cookie still proceeds — the plugin 401s
- * it — so this only shortcuts the clearly-anonymous case, and does so with no DB
- * read. If the cookie name cannot be determined, the guard proceeds as before.
- */
-function hasSessionCookie(ctx: SessionAwareCtx): boolean {
-  const name = ctx.context.authCookies?.sessionToken?.name;
-  if (!name) {
-    return true;
-  }
-  const cookieHeader = ctx.headers?.get("cookie");
-  if (!cookieHeader) {
-    return false;
-  }
-  return parseCookies(cookieHeader).has(name);
 }
 
 function toDomainRow(row: Record<string, unknown>): SsoProviderDomainRow {
@@ -230,8 +217,10 @@ function emailDomain(email: string | null): string | null {
 /**
  * Validate the body's role attribute. Returns the trimmed attribute to carry,
  * or `null` when the provider sets none (or clears it — an empty value leaves the
- * existing mapping untouched). A present-but-invalid attribute (reserved key or
- * over-long) is rejected with {@link SSO_ERROR_CODES.invalidRoleAttribute}.
+ * existing mapping untouched). A present-but-invalid attribute (over-long or with
+ * control characters) is rejected with
+ * {@link SSO_ERROR_CODES.invalidRoleAttribute}. Any claim name is allowed — the
+ * guard maps it into a namespaced key, so it cannot touch a user column.
  */
 function roleAttributeFromBody(body: Record<string, unknown>): string | null {
   const raw = body.roleAttribute;
@@ -250,10 +239,14 @@ function asMapping(value: unknown): Record<string, unknown> {
 }
 
 /**
- * Carry the role claim into a config's `mapping.extraFields`, so the attribute
- * the IdP returns under `roleAttribute` reaches `userInfo` and role mapping can
- * read it. Existing mapping is preserved; `email`/`name` are defaulted so the
- * (strict) mapping schema still validates after this before-hook.
+ * Carry the role claim into a config's `mapping.extraFields` under the FIXED,
+ * namespaced {@link SSO_ROLE_CLAIM_KEY} (never the tenant's attribute name, which
+ * could be a user column), so the IdP's `roleAttribute` claim reaches `userInfo`
+ * as `ssoRoleClaim` and role mapping reads it there. The plugin drops that key
+ * from the user row (it is not a user field). Existing mapping is preserved;
+ * `email`/`name` are defaulted so the (strict) mapping schema still validates.
+ * When the role attribute changes the same key is overwritten; it carries no
+ * stale role fields.
  */
 function withRoleExtraField(
   providerConfig: Record<string, unknown>,
@@ -263,7 +256,7 @@ function withRoleExtraField(
   const existing = asMapping(providerConfig.mapping);
   const extraFields = {
     ...asMapping(existing.extraFields),
-    [roleAttribute]: roleAttribute,
+    [SSO_ROLE_CLAIM_KEY]: roleAttribute,
   };
   return {
     ...providerConfig,
@@ -319,6 +312,75 @@ function storedConfigMapping(value: unknown): Record<string, unknown> {
   return {};
 }
 
+/**
+ * The resolved set of `user`-table field names — core fields, the
+ * `user.additionalFields` from auth-config, and any user fields plugins add —
+ * derived from the auth options the same way better-auth's own
+ * `getFields(options, "user", …)` does, and memoized per options object. These
+ * are the keys a provider's `mapping.extraFields` must never use: a matching key
+ * would let the IdP write that user column at sign-in (or run a plugin's
+ * `user.create` hook — e.g. username validation — inside the sign-in
+ * transaction).
+ */
+const userFieldCache = new WeakMap<object, Set<string>>();
+function resolvedUserFieldNames(options: unknown): Set<string> {
+  if (options && typeof options === "object" && userFieldCache.has(options)) {
+    return userFieldCache.get(options)!;
+  }
+  const names = new Set<string>([
+    "id",
+    "email",
+    "emailVerified",
+    "name",
+    "image",
+    "createdAt",
+    "updatedAt",
+  ]);
+  const opts = (options ?? {}) as {
+    user?: { additionalFields?: Record<string, unknown> };
+    plugins?: Array<{ schema?: Record<string, { fields?: Record<string, unknown> }> }>;
+  };
+  for (const key of Object.keys(opts.user?.additionalFields ?? {})) {
+    names.add(key);
+  }
+  for (const plugin of opts.plugins ?? []) {
+    const fields = plugin?.schema?.user?.fields;
+    if (fields) {
+      for (const key of Object.keys(fields)) {
+        names.add(key);
+      }
+    }
+  }
+  if (options && typeof options === "object") {
+    userFieldCache.set(options, names);
+  }
+  return names;
+}
+
+/**
+ * Reject a provider config whose `mapping.extraFields` uses a key that is a user
+ * field (see {@link resolvedUserFieldNames}). Our own namespaced role claim
+ * ({@link SSO_ROLE_CLAIM_KEY}) is never a user field, so it always passes.
+ */
+function assertSafeExtraFields(config: unknown, userFields: Set<string>): void {
+  if (!config || typeof config !== "object") {
+    return;
+  }
+  const mapping = (config as { mapping?: unknown }).mapping;
+  if (!mapping || typeof mapping !== "object") {
+    return;
+  }
+  const extraFields = (mapping as { extraFields?: unknown }).extraFields;
+  if (!extraFields || typeof extraFields !== "object") {
+    return;
+  }
+  for (const key of Object.keys(extraFields)) {
+    if (userFields.has(key)) {
+      throw ssoError(SSO_ERROR_CODES.invalidAttributeMapping, "BAD_REQUEST");
+    }
+  }
+}
+
 /** Inject the role claim into the registration body's oidc/saml mapping. */
 function applyRegisterRoleMapping(
   body: Record<string, unknown>,
@@ -350,13 +412,16 @@ function applyRegisterRoleMapping(
   return body;
 }
 
-async function handleRegister(
-  ctx: { body?: Record<string, unknown> },
-  adapter: GuardAdapter,
-) {
+/** The before-hook context slice the handlers read (body + resolved options). */
+type GuardHandlerCtx = {
+  body?: Record<string, unknown>;
+  context?: { options?: unknown };
+};
+
+async function handleRegister(ctx: GuardHandlerCtx, adapter: GuardAdapter) {
   const body = ctx.body as Record<string, unknown>;
   const providerId = asString(body.providerId);
-  if (!providerId || !PROVIDER_ID_PATTERN.test(providerId)) {
+  if (!providerId || !PROVIDER_ID_PATTERN.test(providerId) || isReservedProviderId(providerId)) {
     throw ssoError(SSO_ERROR_CODES.invalidProviderId, "BAD_REQUEST");
   }
   const organizationId = asString(body.organizationId);
@@ -377,6 +442,10 @@ async function handleRegister(
   const domain = normalizeSsoDomain(String(body.domain ?? ""));
   await assertSsoDomainAllowed({ domain, organizationId }, domainLookup(adapter));
 
+  const userFields = resolvedUserFieldNames(ctx.context?.options);
+  assertSafeExtraFields(body.oidcConfig, userFields);
+  assertSafeExtraFields(body.samlConfig, userFields);
+
   return {
     context: {
       body: withSignedAssertions(applyRegisterRoleMapping({ ...body, domain })),
@@ -384,11 +453,11 @@ async function handleRegister(
   };
 }
 
-async function handleUpdate(
-  ctx: { body?: Record<string, unknown> },
-  adapter: GuardAdapter,
-) {
+async function handleUpdate(ctx: GuardHandlerCtx, adapter: GuardAdapter) {
   const body = ctx.body as Record<string, unknown>;
+  const userFields = resolvedUserFieldNames(ctx.context?.options);
+  assertSafeExtraFields(body.oidcConfig, userFields);
+  assertSafeExtraFields(body.samlConfig, userFields);
   const providerId = asString(body.providerId);
   const nextBody: Record<string, unknown> = { ...body };
 
@@ -870,40 +939,39 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
                   user: { emailVerified?: unknown },
                   context: { path?: unknown } | null,
                 ) => markSsoCreatedUserVerified(user, context),
-                // Record that THIS sign-in created the user row, so provisioning
-                // can set the `sso.sign_in` audit's `isNewUser` correctly even
-                // when the plugin signs an existing SSO account in under a
-                // changed IdP email. Runs (and is awaited) after the sign-in
-                // transaction commits but before `provisionUser`.
+                // Record that THIS sign-in created the user row (keyed by the
+                // request's endpoint context), so provisioning can set the
+                // `sso.sign_in` audit's `isNewUser` correctly even when the
+                // plugin signs an existing SSO account in under a changed IdP
+                // email. Runs (and is awaited) after the sign-in transaction
+                // commits but before `provisionUser`.
                 after: async (
-                  user: { id?: unknown },
+                  _user: { id?: unknown },
                   context: { path?: unknown } | null,
                 ) => {
-                  if (isSsoCallbackPath(context?.path) && asString(user.id)) {
-                    recordSsoCreatedUser(String(user.id));
+                  if (context && isSsoCallbackPath(context.path)) {
+                    recordSsoCreatedUser(context);
                   }
                 },
               },
             },
             session: {
               create: {
-                // Capture the exact session this sign-in created, so a failed
-                // membership step revokes only it (never an older session the
-                // user already held). Only SSO-callback sessions are captured;
-                // a concurrent password sign-in's session is on another path.
+                // Capture the exact session this sign-in created (keyed by the
+                // request's endpoint context), so a failed membership step
+                // revokes only it. Only SSO-callback sessions are captured; a
+                // concurrent password sign-in's session is on another path and
+                // in another endpoint context.
                 after: async (
                   session: { id?: unknown; userId?: unknown },
                   context: { path?: unknown } | null,
                 ) => {
                   if (
-                    isSsoCallbackPath(context?.path) &&
-                    asString(session.userId) &&
+                    context &&
+                    isSsoCallbackPath(context.path) &&
                     asString(session.id)
                   ) {
-                    recordSsoSignInSession(
-                      String(session.userId),
-                      String(session.id),
-                    );
+                    recordSsoSignInSession(context, String(session.id));
                   }
                 },
               },
@@ -917,13 +985,13 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
         {
           matcher: (context) =>
             context.path === REGISTER_PATH || context.path === UPDATE_PATH,
-          handler: createAuthMiddleware(async (ctx) => {
-            // Unauthenticated: the plugin answers 401; do no DB reads or secret
-            // decryption here.
-            if (!hasSessionCookie(ctx)) {
-              return;
-            }
-            return withLocalizedGuardErrors(ctx.headers, async () => {
+          handler: createAuthMiddleware(async (ctx) =>
+            // The guard runs for EVERY caller, however they authenticate (cookie,
+            // bearer token, API key…): its tenant rules must never be skipped by
+            // how a request carries its credentials. The plugin's own
+            // sessionMiddleware answers 401 for an unauthenticated caller after
+            // these rules have run.
+            withLocalizedGuardErrors(ctx.headers, async () => {
               if (!ctx.body) {
                 return;
               }
@@ -931,20 +999,17 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
               return ctx.path === REGISTER_PATH
                 ? handleRegister(ctx, adapter)
                 : handleUpdate(ctx, adapter);
-            });
-          }),
+            }),
+          ),
         },
         {
           matcher: (context) => context.path === VERIFY_DOMAIN_PATH,
-          handler: createAuthMiddleware(async (ctx) => {
-            if (!hasSessionCookie(ctx)) {
-              return;
-            }
-            return withLocalizedGuardErrors(ctx.headers, async () => {
+          handler: createAuthMiddleware(async (ctx) =>
+            withLocalizedGuardErrors(ctx.headers, async () => {
               const adapter = ctx.context.adapter as unknown as GuardAdapter;
               return handleVerifyDomain(ctx, adapter);
-            });
-          }),
+            }),
+          ),
         },
         {
           matcher: (context) => context.path === SIGN_IN_PATH,
@@ -974,9 +1039,6 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
           // so snapshot it here for the audit log (see ./audit.ts).
           matcher: (context) => context.path === DELETE_PATH,
           handler: createAuthMiddleware(async (ctx) => {
-            if (!hasSessionCookie(ctx)) {
-              return;
-            }
             const providerId = asString(ctx.body?.providerId);
             if (!providerId) {
               return;
@@ -997,9 +1059,21 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
             try {
               await recordSsoProviderChangeAfterHook(ctx);
             } catch (error) {
+              const body = ctx.body as Record<string, unknown> | undefined;
+              const returned = ctx.context?.returned as
+                | Record<string, unknown>
+                | undefined;
               logger.error("sso_provider_change_audit_failed", {
                 path: ctx.path,
                 reason: "audit_failed",
+                providerId:
+                  asString(body?.providerId) ??
+                  asString(returned?.providerId) ??
+                  undefined,
+                organizationId:
+                  asString(body?.organizationId) ??
+                  asString(returned?.organizationId) ??
+                  undefined,
                 error: error instanceof Error ? error.message : String(error),
               });
             }
