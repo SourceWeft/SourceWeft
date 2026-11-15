@@ -16,6 +16,7 @@ export async function createOAuthStateRecord(input: {
   connectorType: string;
   redirectAfter?: string | null;
   expiresAt: Date;
+  attemptRef?: string | null;
 }) {
   const [row] = await db
     .insert(connectorOAuthStates)
@@ -28,6 +29,7 @@ export async function createOAuthStateRecord(input: {
       connectorType: input.connectorType,
       redirectAfter: input.redirectAfter ?? null,
       expiresAt: input.expiresAt,
+      attemptRef: input.attemptRef ?? null,
     })
     .returning();
 
