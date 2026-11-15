@@ -97,6 +97,16 @@ struct SetAutostartInput {
     enabled: bool,
 }
 
+/// Where automatic task folders go unless settings name another location: `SourceWeft` in the
+/// user's home directory. `None` when the home directory cannot be determined; a location must
+/// then be chosen in settings.
+fn default_task_folder(app: &tauri::App) -> Option<PathBuf> {
+    app.path()
+        .home_dir()
+        .ok()
+        .map(|home| home.join(sourceweft_desktop::local_host::DEFAULT_TASK_FOLDER_NAME))
+}
+
 /// Opens the local host and its remote-dispatch wrapper, or says why it could not (Linux and
 /// Windows, where local execution is optional and must not stop the app from starting).
 #[cfg(any(target_os = "linux", windows))]
@@ -114,8 +124,11 @@ fn open_optional_local_host(
         .app_data_dir()
         .map_err(|error| format!("app data directory: {error}"))?;
     let host = std::sync::Arc::new(
-        sourceweft_desktop::local_host::LocalHost::open(&base)
-            .map_err(|error| format!("local host storage at {base:?}: {error}"))?,
+        sourceweft_desktop::local_host::LocalHost::open_with_task_folder(
+            &base,
+            default_task_folder(app).as_deref(),
+        )
+        .map_err(|error| format!("local host storage at {base:?}: {error}"))?,
     );
     let remote = remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())?;
     Ok((host, remote))
@@ -159,6 +172,10 @@ fn main() {
             local_bridge::enable_local_host,
             local_bridge::disconnect_local_host,
             local_bridge::choose_working_directory,
+            local_bridge::get_task_folder,
+            local_bridge::choose_task_folder,
+            local_bridge::reset_task_folder,
+            local_bridge::reveal_local_directory,
             local_bridge::run_sandbox_privileged_setup,
             local_bridge::install_sandbox_runtime,
             tray_locale::sync_tray_locale,
@@ -172,9 +189,12 @@ fn main() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
-                let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
-                    &app.path().app_data_dir()?,
-                )?);
+                let host = std::sync::Arc::new(
+                    sourceweft_desktop::local_host::LocalHost::open_with_task_folder(
+                        &app.path().app_data_dir()?,
+                        default_task_folder(app).as_deref(),
+                    )?,
+                );
                 app.manage(
                     remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
                         .map_err(std::io::Error::other)?,

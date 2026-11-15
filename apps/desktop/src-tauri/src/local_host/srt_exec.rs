@@ -3,8 +3,8 @@
 //! Windows). Produces the result shape `{"output","exitCode","truncated","cancelled"}`.
 //!
 //! macOS and Linux keep one sidecar per `LocalHost`, started lazily from `readiness::bundle_dir`.
-//! Its `init` lists `<base>/task-workspaces` plus every currently granted directory as the
-//! workspace roots a wrap may name; each `wrap` grants read and write access to exactly that
+//! Its `init` lists `<base>/task-workspaces`, every task folder location in use and every
+//! currently granted directory as the workspace roots a wrap may name; each `wrap` grants read and write access to exactly that
 //! command's workspace root (plus read access to the toolchain read roots and the in-sandbox
 //! helper files). The sidecar's policy denies reading `/` on both Linux and macOS and re-allows
 //! only its per-platform system read set on top of those (`sandbox-sidecar/src/policy.ts`,
@@ -768,8 +768,8 @@ fn wrap_in_instances(
     }
 }
 
-/// Starts a sidecar from this host's installed bundle, with `init.workspaceRoots` set to the
-/// automatic workspace base plus every currently granted directory.
+/// Starts a sidecar from this host's installed bundle, with `init.workspaceRoots` set to
+/// `LocalHost::sandbox_workspace_roots`.
 #[cfg(unix)]
 fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
     let bundle = bundle_dir(&host.base);
@@ -1463,6 +1463,62 @@ mod tests {
             instance.finish("id");
         }
         assert_eq!(starts, 1);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn workspace_roots_are_the_allocation_store_then_task_folder_locations_then_grants() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir(&home).unwrap();
+        let host = LocalHost::open_with_task_folder(
+            &temp.path().join("app"),
+            Some(&home.join("SourceWeft")),
+        )
+        .unwrap();
+        let store = host.workspace_base();
+        assert_eq!(host.sandbox_workspace_roots().unwrap(), [store.clone()]);
+
+        // Reserved but not created: its location does not exist, so it is not a root yet.
+        let reserved = host.reserve_workspace("owner", "first", None).unwrap();
+        assert_eq!(host.sandbox_workspace_roots().unwrap(), [store.clone()]);
+        let first = host
+            .ensure_bound_workspace("owner", "first", Some(&reserved.id), None)
+            .unwrap();
+        let location = first.path.parent().unwrap().parent().unwrap().to_path_buf();
+        assert_eq!(
+            host.sandbox_workspace_roots().unwrap(),
+            [store.clone(), location.clone()]
+        );
+
+        // A second folder in the same location adds nothing; another location is its own root.
+        let second = host.reserve_workspace("owner", "second", None).unwrap();
+        host.ensure_bound_workspace("owner", "second", Some(&second.id), None)
+            .unwrap();
+        let other = temp.path().join("other");
+        fs::create_dir(&other).unwrap();
+        host.set_task_folder(&other).unwrap();
+        let third = host.reserve_workspace("owner", "third", None).unwrap();
+        let third = host
+            .ensure_bound_workspace("owner", "third", Some(&third.id), None)
+            .unwrap();
+        let granted = temp.path().join("granted");
+        fs::create_dir(&granted).unwrap();
+        let (_, granted) = host.grant_directory("owner", &granted).unwrap();
+        let roots = host.sandbox_workspace_roots().unwrap();
+        assert_eq!(
+            roots,
+            [
+                store,
+                location,
+                other.canonicalize().unwrap(),
+                granted
+            ]
+        );
+        // Every task folder lies inside one root, which is what a wrap is validated against.
+        for workspace in [&first.path, &third.path] {
+            assert!(roots.iter().any(|root| root_within(workspace, root)));
+        }
     }
 
     #[test]

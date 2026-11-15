@@ -29,6 +29,20 @@ fn serialize_wire_path<S: serde::Serializer>(
     serializer.serialize_str(&wire)
 }
 
+/// The folder, directly in the user's home directory, that holds automatic task folders unless
+/// another location was chosen in settings.
+pub const DEFAULT_TASK_FOLDER_NAME: &str = "SourceWeft";
+
+/// Where automatic task folders are created (`LocalHost::task_folder`), in the wire form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskFolder {
+    pub path: String,
+    /// `None` when this computer has no default location (its home directory is unavailable).
+    pub default_path: Option<String>,
+    pub is_default: bool,
+}
+
 /// The database is outside the task filesystem. Workspace names are generated here,
 /// never assembled from model-controlled paths, account IDs or conversation titles.
 pub struct LocalHost {
@@ -39,6 +53,10 @@ pub struct LocalHost {
     // Widened from private so `readiness.rs` can locate the sandbox bundle directly under the
     // app-data base, without a single-purpose accessor method.
     pub(super) base: PathBuf,
+    /// Where automatic task folders go unless settings name another location: a visible folder
+    /// in the user's home directory. `None` when the host was opened without one; reserving a
+    /// task folder then needs a location chosen in settings.
+    default_task_base: Option<PathBuf>,
     // Caches `sandbox_readiness()`'s result; see `ReadinessCache`'s own doc comment in
     // readiness.rs for the policy. Present on every platform (only macOS and Linux read it) so
     // the struct's shape does not depend on target OS.
@@ -53,7 +71,20 @@ pub struct LocalHost {
 }
 
 impl LocalHost {
+    /// A host without a default task folder location. A conversation's automatic folder is then
+    /// either the application-storage one (`ensure_workspace`) or under a location chosen with
+    /// `set_task_folder`.
     pub fn open(app_data: &Path) -> Result<Self> {
+        Self::open_with_task_folder(app_data, None)
+    }
+
+    /// `default_task_folder` is where automatic task folders go unless settings name another
+    /// location (`<home>/SourceWeft` in the desktop app). It need not exist: it is created by the
+    /// first task that uses it. Its parent must exist; otherwise the host has no default.
+    pub fn open_with_task_folder(
+        app_data: &Path,
+        default_task_folder: Option<&Path>,
+    ) -> Result<Self> {
         #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         return Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
@@ -83,7 +114,7 @@ impl LocalHost {
                 "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
             )?;
             let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-            if version > 4 {
+            if version > 5 {
                 return Err(HostError::new(
                     "DATABASE_VERSION_UNSUPPORTED",
                     "Update the desktop app before opening this database.",
@@ -153,11 +184,37 @@ impl LocalHost {
                 tx.execute_batch("PRAGMA user_version=4;")?;
                 tx.commit()?;
             }
+            if version < 5 {
+                // `root_path`: the files directory of an automatic workspace that lives in the
+                // visible task folder. NULL for one in application storage and for a chosen
+                // directory. `host_settings`: this computer's own settings.
+                let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let columns: Vec<String> = tx
+                    .prepare("PRAGMA table_info(workspaces)")?
+                    .query_map([], |r| r.get(1))?
+                    .collect::<std::result::Result<_, _>>()?;
+                if !columns.iter().any(|c| c == "root_path") {
+                    tx.execute_batch("ALTER TABLE workspaces ADD COLUMN root_path TEXT;")?;
+                }
+                tx.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS host_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                     PRAGMA user_version=5;",
+                )?;
+                tx.commit()?;
+            }
+            // Canonical parent plus the name, so the stored paths are canonical even though the
+            // folder itself may not exist yet.
+            let default_task_base = default_task_folder.and_then(|folder| {
+                let parent = canonical_dir(folder.parent()?).ok()?;
+                let candidate = parent.join(folder.file_name()?);
+                (!paths_overlap(&base, &candidate)).then_some(candidate)
+            });
             Ok(Self {
                 admission: super::maintenance::Admission::default(),
                 db: Mutex::new(connection),
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
+                default_task_base,
                 sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
                 network: Default::default(),
                 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
@@ -232,8 +289,129 @@ impl LocalHost {
         Ok(path)
     }
 
+    /// The allocation store in application storage: one directory per automatic workspace,
+    /// holding its ownership marker and, for workspaces that predate the visible task folder
+    /// (or were created through a backend that does not reserve one), its `files` directory.
     pub fn workspace_base(&self) -> PathBuf {
         self.base.join("task-workspaces")
+    }
+
+    /// Where automatic task folders are created.
+    pub fn task_folder(&self) -> Result<TaskFolder> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Settings database lock failed."))?;
+        self.task_folder_with(&db)
+    }
+
+    /// Makes `selected` (an existing directory the user picked in the native dialog) the place
+    /// new automatic task folders are created in. Existing conversations keep their folder.
+    /// Never expose a path-taking version of this method to the WebView or model.
+    pub fn set_task_folder(&self, selected: &Path) -> Result<TaskFolder> {
+        require_real_directory(selected)?;
+        let path = canonical_dir(selected)?;
+        #[cfg(windows)]
+        {
+            let (profile, app_data_roots) = winpath::user_locations()?;
+            winpath::refuse_broad_grant(&path, &profile, &app_data_roots)?;
+        }
+        self.check_selected_directory(&path)?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Settings database lock failed."))?;
+        db.execute(
+            "INSERT INTO host_settings(key,value) VALUES(?1,?2)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![TASK_FOLDER_SETTING, db_path(&path)?],
+        )?;
+        self.task_folder_with(&db)
+    }
+
+    /// Returns to the default location. Existing conversations keep their folder.
+    pub fn reset_task_folder(&self) -> Result<TaskFolder> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Settings database lock failed."))?;
+        db.execute(
+            "DELETE FROM host_settings WHERE key=?1",
+            [TASK_FOLDER_SETTING],
+        )?;
+        self.task_folder_with(&db)
+    }
+
+    fn task_folder_with(&self, db: &Connection) -> Result<TaskFolder> {
+        let base = self.task_base(db)?;
+        Ok(TaskFolder {
+            path: super::winpath::host_to_wire(&base)?,
+            default_path: self
+                .default_task_base
+                .as_deref()
+                .map(super::winpath::host_to_wire)
+                .transpose()?,
+            is_default: self.is_default_task_base(&base),
+        })
+    }
+
+    fn is_default_task_base(&self, location: &Path) -> bool {
+        self.default_task_base
+            .as_deref()
+            .is_some_and(|default| same_directory(default, location))
+    }
+
+    /// The location chosen in settings, else the default one.
+    fn task_base(&self, db: &Connection) -> Result<PathBuf> {
+        let chosen: Option<String> = db
+            .query_row(
+                "SELECT value FROM host_settings WHERE key=?1",
+                [TASK_FOLDER_SETTING],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match chosen {
+            Some(stored) => path_from_db(&stored),
+            None => self.default_task_base.clone().ok_or_else(|| {
+                HostError::new(
+                    "TASK_FOLDER_UNAVAILABLE",
+                    "This computer has no default task folder. Choose one in settings.",
+                )
+            }),
+        }
+    }
+
+    /// Whether `path` is a directory this host works in: the task folder location, a
+    /// conversation's working directory, or a directory granted through the native picker.
+    /// The file manager may be asked to show such a directory, and no other.
+    pub fn is_known_directory(&self, path: &Path) -> Result<bool> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Directory database lock failed."))?;
+        if self.task_base(&db).is_ok_and(|base| same_directory(&base, path)) {
+            return Ok(true);
+        }
+        let mut known = Vec::new();
+        for query in [
+            "SELECT path FROM directory_grants",
+            "SELECT selected_path FROM workspaces WHERE selected_path IS NOT NULL",
+            "SELECT root_path FROM workspaces WHERE root_path IS NOT NULL",
+        ] {
+            let mut statement = db.prepare(query)?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            for stored in rows {
+                known.push(path_from_db(&stored?)?);
+            }
+        }
+        let mut statement = db.prepare(
+            "SELECT id FROM workspaces WHERE selected_path IS NULL AND root_path IS NULL",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        for id in rows {
+            known.push(self.workspace_base().join(id?).join("files"));
+        }
+        Ok(known.iter().any(|candidate| same_directory(candidate, path)))
     }
 
     /// `workspace_base()` as the backend sees it (see `winpath`).
@@ -241,8 +419,10 @@ impl LocalHost {
         super::winpath::host_to_wire(&self.workspace_base())
     }
 
-    /// The sandbox sidecar's `init.workspaceRoots`: the automatic workspace base plus every
-    /// currently granted directory that still exists (a missing one cannot be a workspace).
+    /// The sandbox sidecar's `init.workspaceRoots`: the allocation store, every task folder
+    /// location that holds a conversation's folder, and every currently granted directory. Only
+    /// those that exist (a missing one cannot be a workspace). The allocation store stays first:
+    /// the sidecar probes with the first root.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(super) fn sandbox_workspace_roots(&self) -> Result<Vec<PathBuf>> {
         let mut roots = vec![self.workspace_base()];
@@ -250,6 +430,20 @@ impl LocalHost {
             .db
             .lock()
             .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Directory database lock failed."))?;
+        let mut statement = db.prepare(
+            "SELECT DISTINCT root_path FROM workspaces WHERE root_path IS NOT NULL ORDER BY root_path",
+        )?;
+        let task_roots = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for root in task_roots {
+            let root = path_from_db(&root)?;
+            if let Some(location) = task_location(&root) {
+                if location.is_dir() && !roots.iter().any(|known| known == location) {
+                    roots.push(location.to_path_buf());
+                }
+            }
+        }
         let mut statement =
             db.prepare("SELECT DISTINCT path FROM directory_grants ORDER BY path")?;
         let paths = statement
@@ -278,6 +472,103 @@ impl LocalHost {
         grant: Option<&str>,
     ) -> Result<Workspace> {
         self.ensure_bound_workspace(owner, thread, None, grant)
+    }
+
+    /// Decides where a conversation's automatic task folder will be, in the visible task
+    /// folder location, and records it. Nothing is created on disk: the first
+    /// `ensure_bound_workspace` creates the folder. Repeating the call returns the same answer,
+    /// also for a conversation whose folder is in application storage.
+    ///
+    /// The folder is `<location>/<local date>/<start of the workspace ID>`: the name is
+    /// generated here from the date and the ID alone.
+    pub fn reserve_workspace(
+        &self,
+        owner: &str,
+        thread: &str,
+        requested_id: Option<&str>,
+    ) -> Result<Workspace> {
+        let requested = requested_id
+            .map(|id| {
+                Uuid::parse_str(id).map_err(|_| {
+                    HostError::new("INVALID_WORKSPACE_ID", "Workspace ID must be a UUID.")
+                })
+            })
+            .transpose()?;
+        validate_identity(owner)?;
+        validate_identity(thread)?;
+        let mut db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Workspace database lock failed."))?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        type Bound = (String, Option<String>, Option<String>, Option<String>);
+        let bound: Option<Bound> = tx
+            .query_row(
+                "SELECT id,directory_grant_id,selected_path,root_path FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
+                params![owner, thread],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+        if let Some((id, grant, selected, root)) = bound {
+            if requested_id.is_some_and(|requested| requested != id) {
+                return Err(HostError::new(
+                    "WORKSPACE_BINDING_IMMUTABLE",
+                    "Conversation already uses another directory.",
+                ));
+            }
+            if grant.is_some() || selected.is_some() {
+                return Err(HostError::new(
+                    "LOCAL_WORKSPACE_IMMUTABLE",
+                    "The conversation directory cannot be changed.",
+                ));
+            }
+            let path = match root {
+                Some(root) => path_from_db(&root)?,
+                None => self.workspace_base().join(&id).join("files"),
+            };
+            return Ok(Workspace {
+                id,
+                thread_id: thread.into(),
+                path,
+            });
+        }
+        let uuid = requested.unwrap_or_else(Uuid::new_v4);
+        let id = requested_id
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid.to_string());
+        let day = self.task_base(&tx)?.join(local_date()?);
+        let name = uuid.simple().to_string();
+        // A longer name only when the short one is taken, by another conversation or on disk.
+        let mut root = None;
+        for length in [8, 12, name.len()] {
+            let candidate = day.join(&name[..length]);
+            let taken: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM workspaces WHERE root_path=?1)",
+                [db_path(&candidate)?],
+                |row| row.get(0),
+            )?;
+            if !taken && candidate.symlink_metadata().is_err() {
+                root = Some(candidate);
+                break;
+            }
+        }
+        let root = root.ok_or_else(|| {
+            HostError::new(
+                "WORKSPACE_OWNERSHIP_MISMATCH",
+                "The task folder for this conversation already exists; unknown files will not be adopted.",
+            )
+        })?;
+        self.check_selected_directory(&root)?;
+        tx.execute(
+            "INSERT INTO workspaces(id,owner_id,thread_id,state,root_path) VALUES(?1,?2,?3,'provisioning',?4)",
+            params![id, owner, thread, db_path(&root)?],
+        )?;
+        tx.commit()?;
+        Ok(Workspace {
+            id,
+            thread_id: thread.into(),
+            path: root,
+        })
     }
 
     pub fn ensure_bound_workspace(
@@ -377,15 +668,24 @@ impl LocalHost {
         // A second immediate transaction serializes filesystem provisioning across
         // processes. The reservation above survives a crash before directory creation.
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let state: String =
-            tx.query_row("SELECT state FROM workspaces WHERE id=?1", [&id], |row| {
-                row.get(0)
-            })?;
+        let (state, reserved): (String, Option<String>) = tx.query_row(
+            "SELECT state,root_path FROM workspaces WHERE id=?1",
+            [&id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
 
         let base = self.workspace_base();
         require_real_directory(&base)?;
         let allocation = base.join(&id);
-        let root = allocation.join("files");
+        // A reserved task folder (`reserve_workspace`) is in the visible location; the
+        // allocation directory then holds only the ownership marker.
+        let task_root = reserved.as_deref().map(path_from_db).transpose()?;
+        if let Some(root) = &task_root {
+            self.check_selected_directory(root)?;
+        }
+        let root = task_root
+            .clone()
+            .unwrap_or_else(|| allocation.join("files"));
         if state == "ready" {
             require_real_directory(&allocation)?;
             verify_root(&tx, &id, &root)?;
@@ -443,7 +743,10 @@ impl LocalHost {
             }
             Err(error) => return Err(error.into()),
         }
-        private_dir(&root)?;
+        match &task_root {
+            Some(root) => self.create_task_root(root)?,
+            None => private_dir(&root)?,
+        }
         // Persist directory entries before committing readiness.
         sync_directory(&allocation)?;
         sync_directory(&base)?;
@@ -458,6 +761,69 @@ impl LocalHost {
             thread_id: thread.to_owned(),
             path: root,
         })
+    }
+
+    /// Creates a reserved task folder: the location (only the default one; a location chosen in
+    /// settings must still exist), the date directory, and the folder itself. The folder may
+    /// already exist only as the empty directory an interrupted earlier attempt left behind.
+    fn create_task_root(&self, root: &Path) -> Result<()> {
+        let (day, location) = root
+            .parent()
+            .and_then(|day| Some((day, day.parent()?)))
+            .ok_or_else(|| HostError::new("INVALID_PATH", "The task folder path is incomplete."))?;
+        if self.is_default_task_base(location) {
+            private_dir(location)?;
+        } else if require_real_directory(location).is_err() {
+            return Err(HostError::new(
+                "TASK_FOLDER_MISSING",
+                "The task folder location is missing or was replaced. Choose a location in settings; it will not be recreated automatically.",
+            ));
+        }
+        private_dir(day)?;
+        match fs::create_dir(root) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                require_real_directory(root)?;
+                if fs::read_dir(root)?.next().is_some() {
+                    return Err(HostError::new(
+                        "WORKSPACE_OWNERSHIP_MISMATCH",
+                        "The task folder already contains files; unknown files will not be adopted.",
+                    ));
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+        sync_directory(day)?;
+        sync_directory(location)
+    }
+
+    /// Whether the folder of a reserved but not yet created task could be created: its location
+    /// exists, or is the default one (created on first use) inside an existing directory.
+    fn check_task_location(&self, root: &Path) -> Result<()> {
+        let location = task_location(root)
+            .ok_or_else(|| HostError::new("INVALID_PATH", "The task folder path is incomplete."))?;
+        if location.symlink_metadata().is_err() && self.is_default_task_base(location) {
+            let home = location.parent().ok_or_else(|| {
+                HostError::new("INVALID_PATH", "The task folder path is incomplete.")
+            })?;
+            require_real_directory(home)?;
+            fs::read_dir(home)?;
+            return Ok(());
+        }
+        if require_real_directory(location).is_err() {
+            return Err(HostError::new(
+                "TASK_FOLDER_MISSING",
+                "The task folder location is missing or was replaced. Choose a location in settings; it will not be recreated automatically.",
+            ));
+        }
+        fs::read_dir(location)?;
+        Ok(())
     }
 
     fn check_selected_directory(&self, path: &Path) -> Result<()> {
@@ -483,19 +849,32 @@ impl LocalHost {
             .db
             .lock()
             .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Workspace database lock failed."))?;
-        let bound: Option<(String, Option<String>)> = db
+        type Bound = (String, Option<String>, String, Option<String>);
+        let bound: Option<Bound> = db
             .query_row(
-                "SELECT id,directory_grant_id FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
+                "SELECT id,directory_grant_id,state,root_path FROM workspaces WHERE owner_id=?1 AND thread_id=?2",
                 params![owner, thread],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        if let Some((id, previous_grant)) = bound {
+        if let Some((id, previous_grant, state, reserved)) = bound {
             if requested_id.is_some_and(|value| value != id) || previous_grant.as_deref() != grant {
                 return Err(HostError::new(
                     "WORKSPACE_BINDING_IMMUTABLE",
                     "The working directory binding changed.",
                 ));
+            }
+            if state != "ready" {
+                // Reserved, not created yet: the first real operation creates it. Checking
+                // availability must not.
+                return match reserved {
+                    Some(root) => self.check_task_location(&path_from_db(&root)?),
+                    None => {
+                        require_real_directory(&self.workspace_base())?;
+                        fs::read_dir(self.workspace_base())?;
+                        Ok(())
+                    }
+                };
             }
             drop(db);
             let workspace = self.get_workspace(owner, thread, &id)?;
@@ -548,10 +927,10 @@ impl LocalHost {
                 "No workspace is authorized for this account.",
             )
         })?;
-        let selected: Option<String> = db.query_row(
-            "SELECT selected_path FROM workspaces WHERE id=?1",
+        let (selected, reserved): (Option<String>, Option<String>) = db.query_row(
+            "SELECT selected_path,root_path FROM workspaces WHERE id=?1",
             [id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         if let Some(selected) = selected {
             let path = path_from_db(&selected)?;
@@ -566,7 +945,14 @@ impl LocalHost {
         require_real_directory(&self.workspace_base())?;
         let allocation = self.workspace_base().join(id);
         require_real_directory(&allocation)?;
-        let path = allocation.join("files");
+        let path = match reserved {
+            Some(root) => {
+                let root = path_from_db(&root)?;
+                self.check_selected_directory(&root)?;
+                root
+            }
+            None => allocation.join("files"),
+        };
         verify_root(&db, id, &path)?;
         Ok(Workspace {
             id: id.to_owned(),
@@ -574,6 +960,61 @@ impl LocalHost {
             path,
         })
     }
+}
+
+const TASK_FOLDER_SETTING: &str = "task_folder";
+
+/// The task folder location a reserved root (`<location>/<date>/<name>`) lies in.
+fn task_location(root: &Path) -> Option<&Path> {
+    root.parent()?.parent()
+}
+
+/// Whether two paths name the same directory. Case-insensitive on Windows.
+fn same_directory(a: &Path, b: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        winpath::same_path(a, b)
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
+/// Today's date in the computer's own time zone, as `YYYY-MM-DD`.
+fn local_date() -> Result<String> {
+    #[cfg(unix)]
+    {
+        let unavailable =
+            || HostError::new("LOCAL_TIME_UNAVAILABLE", "The local date could not be determined.");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| unavailable())?
+            .as_secs() as libc::time_t;
+        // SAFETY: `localtime_r` writes only the `tm` it is given and reads only `now`.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        if unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+            return Err(unavailable());
+        }
+        Ok(format!(
+            "{:04}-{:02}-{:02}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday
+        ))
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: `GetLocalTime` only writes the `SYSTEMTIME` it is given and cannot fail.
+        let mut now: windows_sys::Win32::Foundation::SYSTEMTIME = unsafe { std::mem::zeroed() };
+        unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut now) };
+        Ok(format!("{:04}-{:02}-{:02}", now.wYear, now.wMonth, now.wDay))
+    }
+    #[cfg(not(any(unix, windows)))]
+    Err(HostError::new(
+        "UNSUPPORTED_PLATFORM",
+        "The local date requires macOS, Linux or Windows.",
+    ))
 }
 
 /// The directory's identity as stored in the `root_device`/`root_inode` columns. Unix: the real

@@ -1367,6 +1367,10 @@
       "remoteAccessTitle": "允许其他设备访问",
       "remoteAccessDescription": "让使用同一账户的其他设备访问这台电脑。它们可以访问任务文件夹和已授权的工作目录。即使关闭远程访问，你仍可在这台电脑上继续工作。",
       "turnOffRemoteAccess": "关闭远程访问",
+      "taskFolderTitle": "默认任务文件夹",
+      "taskFolderDescription": "未选择文件夹的新对话会在这里创建自己的文件夹。现有对话继续使用原来的文件夹。",
+      "taskFolderChange": "更改…",
+      "taskFolderReset": "恢复默认位置",
       "workingDirectoriesTitle": "工作目录",
       "workingDirectoriesDescription": "每个对话都会获得独立的任务文件夹。移除文件夹访问权限会停止受影响任务的后续本地操作，并保留其中的文件。",
       "removeAccess": "移除访问权限",
@@ -1760,6 +1764,11 @@
       "computerOffline": "电脑已离线。重新连接后本地任务可继续。",
       "workingDirectory": "工作目录",
       "directoryConnectedWhenUsed": "工作目录将在首次使用时连接。",
+      "copyPath": "复制路径",
+      "pathCopied": "已复制",
+      "copyPathFailed": "无法复制路径。",
+      "showInFinder": "在访达中显示",
+      "showInFileManager": "在文件管理器中显示",
       "myComputers": "我的电脑",
       "loadingComputers": "正在加载电脑…",
       "couldNotLoadComputers": "无法加载电脑：{error}",
@@ -1780,10 +1789,12 @@
     "folderPicker": {
       "folderUnavailable": "文件夹不可用",
       "defaultTaskFolder": "默认任务文件夹",
-      "selectFolder": "选择文件夹…",
       "selectedFolderFallback": "已选择的文件夹",
-      "chooseExistingFolder": "选择已有文件夹…",
-      "useConversationFolder": "使用对话所在文件夹"
+      "newTaskFolder": "新建任务文件夹",
+      "createdIn": "将在 {path} 中创建",
+      "createdAutomatically": "将在那台电脑上自动创建",
+      "folders": "文件夹",
+      "chooseDifferentFolder": "选择其他文件夹…"
     },
     "local": {
       "historyPreserved": "历史记录仍可查看，草稿会被保留。",
@@ -2547,7 +2558,7 @@
       "offline": "这台电脑当前离线。你选择的文件夹会被保留。",
       "connectToBrowse": "连接到这台电脑以浏览其中的文件。",
       "workingDirectory": "工作目录",
-      "conversationFolder": "对话文件夹",
+      "conversationFolder": "任务文件夹",
       "autoFolderHint": "当对话开始使用文件时，系统会在这台电脑上自动创建一个独立的文件夹。",
       "authorizeHint": "要授权其他文件夹，请在这台电脑上打开 SW。你也可以在此选择一个已授权的文件夹。"
     }

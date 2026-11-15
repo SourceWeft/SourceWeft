@@ -9,14 +9,46 @@ implicit migration, synchronization, or fallback.
 
 ## Choosing and using a directory
 
-A new PC conversation automatically allocates a durable directory under the app's
-`task-workspaces/<id>/files` storage. In the selected Mac's desktop client, choose
-an existing directory before creating the conversation instead. The native picker
-issues an opaque, account-scoped directory grant. Neither browser requests nor
-model tool arguments can grant access by supplying a path.
+A new PC conversation automatically gets a durable task folder in a visible
+location on that computer: `<task folder location>/<date>/<name>`, for example
+`~/SourceWeft/2026-11-15/0a1b2c3d`. The date is the computer's local date and the
+name is the start of the workspace ID; neither comes from the conversation or the
+model. In the selected computer's desktop client, choose an existing directory
+before creating the conversation instead. The native picker issues an opaque,
+account-scoped directory grant. Neither browser requests nor model tool arguments
+can grant access by supplying a path.
 
-Before sending the first message, Files shows “Conversation folder” for the
-automatic choice and offers “Choose existing folder”. Opening an empty draft
+### Task folder location
+
+The location is `SourceWeft` in the user's home directory (`%USERPROFILE%\SourceWeft`
+on Windows) unless another one is chosen in Settings → This computer → Default task
+folder. It is outside Documents, so it does not trigger the macOS Documents
+permission prompt and is not picked up by Desktop & Documents cloud sync. The
+setting is stored on the computer, applies to conversations created afterwards,
+and never moves an existing folder. A chosen location must be an existing directory
+outside application storage; a missing one (an unplugged drive) is reported as
+`TASK_FOLDER_MISSING` and is not recreated. The default location is created by the
+first task that uses it.
+
+The backend asks the computer where the folder goes (`workspace.reserve`). The
+computer records the answer and creates nothing; the folder is created by the first
+real operation, so a conversation that never uses a tool leaves no empty folder.
+The ownership marker of each automatic folder stays in application storage
+(`task-workspaces/<id>/owner.json`); the visible folder holds task files only.
+
+Compatibility, in both directions:
+
+- A computer whose desktop client does not announce `workspace.reserve` keeps the
+  earlier layout, `<app data>/task-workspaces/<id>/files`, at a path the backend
+  derives from the workspace ID.
+- A backend that does not send `workspace.reserve` gets that same earlier layout
+  from an updated desktop client.
+- Conversations created before this change keep their folder in application storage.
+  Nothing is migrated.
+
+Before sending the first message, the composer's folder control shows “Task folder”
+for the automatic choice, the folders already granted on that computer with their
+parent path, and “Choose a different folder…”. Opening an empty draft
 never allocates storage. Selecting an authorized directory immediately shows its
 path, subdirectories and file previews, without creating a conversation. Cloud
 drafts instead show “Conversation cloud files”. The composer and all Hub surfaces
@@ -39,7 +71,10 @@ and offline devices return errors; they do not create replacement storage.
 
 After creation, the conversation header keeps the chosen directory name visible
 beside the computer name; the full path is available on hover and in Conversation
-details. The selection is read-only after creation.
+details, which also copy the path and, in the desktop client on that computer, show
+the directory in the file manager. The desktop client only opens directories it
+works in (the task folder location, a conversation's working directory, a granted
+directory). The selection is read-only after creation.
 
 Hub Workfiles shows “Cloud · saved with this conversation” for database-backed
 cloud files. For PC conversations it shows “This computer” and the device name,
@@ -107,6 +142,14 @@ second editable Workfiles copy. Artifact publication remains explicit.
   browser session has connected to it.
 - Existing skill/runtime asset installation retains its own provider constraints;
   this change does not validate arbitrary cloud-only dependencies on macOS.
+
+## Rollout of visible task folders
+
+No backend database migration. The desktop client upgrades its local SQLite schema
+to version 5 on first start (a `root_path` column and a settings table); an older
+desktop client refuses a version 5 database and asks for an update. Backend and
+desktop client can be deployed in either order (see Compatibility above); the
+visible location takes effect for new conversations once both are updated.
 
 ## Rollout
 

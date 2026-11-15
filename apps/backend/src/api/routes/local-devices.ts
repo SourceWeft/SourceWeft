@@ -272,7 +272,11 @@ export function registerLocalDeviceRoutes(app: Hono) {
     );
     await requireDeviceAccess(session.user.id, c.req.param("deviceId"), caller);
     const folders = await db
-      .select({ id: localFolderGrants.id, name: localFolderGrants.name })
+      .select({
+        id: localFolderGrants.id,
+        name: localFolderGrants.name,
+        path: localFolderGrants.path,
+      })
       .from(localFolderGrants)
       .where(
         and(

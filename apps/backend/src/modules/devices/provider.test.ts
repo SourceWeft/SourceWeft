@@ -9,10 +9,15 @@ const state = vi.hoisted(() => ({
     executionTargetJson: {
       kind: "local",
       deviceId: "pc",
-      directoryGrantId: "grant",
+      directoryGrantId: "grant" as string | undefined,
     },
   },
   binding: { threadId: "t", userId: "owner", deviceId: "pc" },
+  device: {
+    id: "pc",
+    workspaceBase: null as string | null,
+    capabilities: null as string[] | null,
+  },
   call: vi.fn(),
   update: vi.fn(),
   policy: vi.fn(),
@@ -25,6 +30,7 @@ vi.mock("@sourceweft/db", () => ({
     query: {
       threads: { findFirst: async () => state.thread },
       localThreadBindings: { findFirst: async () => state.binding },
+      localDevices: { findFirst: async () => state.device },
     },
     update: () => ({
       set: (value: Record<string, unknown>) => ({
@@ -52,6 +58,9 @@ const context = {
 beforeEach(() => {
   vi.clearAllMocks();
   state.thread.createdBy = "owner";
+  state.thread.executionTargetJson.directoryGrantId = "grant";
+  state.device.workspaceBase = null;
+  state.device.capabilities = null;
   state.policy.mockResolvedValue({ mode: "ask", allow: [], suggested: {} });
   state.call.mockImplementation(async (input) => {
     if (input.action === "workspace.ensure")
@@ -262,4 +271,85 @@ test("a failed policy lookup stops the command instead of running it unrestricte
   expect(
     state.call.mock.calls.some(([input]) => input.action === "command.execute"),
   ).toBe(false);
+});
+
+test("a computer that announces workspace.reserve decides where the automatic task folder goes", async () => {
+  state.thread.executionTargetJson.directoryGrantId = undefined;
+  state.device.workspaceBase = "/Users/test/Library/app/task-workspaces";
+  state.device.capabilities = ["workspace.ensure", "workspace.reserve"];
+  const root = "/Users/test/SourceWeft/2026-11-15/0a1b2c3d";
+  state.call.mockImplementation(async (input) =>
+    input.action === "workspace.reserve" || input.action === "workspace.ensure"
+      ? { id: "native", path: root }
+      : {},
+  );
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  // Reserving records the location on the computer; nothing is created until
+  // a tool acquires the directory.
+  expect(state.call).toHaveBeenCalledTimes(1);
+  expect(state.call.mock.calls[0]![0]).toMatchObject({
+    action: "workspace.reserve",
+    payload: {},
+    threadId: "t",
+  });
+  expect(state.update).toHaveBeenCalledWith({
+    localWorkspaceId: "native",
+    workspacePath: root,
+  });
+  expect(provider.pathPolicy.defaultCwd).toBe(root);
+  await provider.ensureDirectory!({
+    providerSandboxId: "native",
+    directory: `${root}/src`,
+  });
+  expect(state.call.mock.calls[1]![0]).toMatchObject({
+    action: "workspace.ensure",
+    payload: { workspaceId: "native" },
+  });
+});
+
+test("a computer without the reserve action keeps the path derived from its application storage", async () => {
+  state.thread.executionTargetJson.directoryGrantId = undefined;
+  state.device.workspaceBase = "/Users/test/Library/app/task-workspaces";
+  state.device.capabilities = ["workspace.ensure", "workspace.check"];
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  expect(state.call).not.toHaveBeenCalled();
+  const saved = state.update.mock.calls[0]![0] as {
+    localWorkspaceId: string;
+    workspacePath: string;
+  };
+  expect(saved.workspacePath).toBe(
+    `/Users/test/Library/app/task-workspaces/${saved.localWorkspaceId}/files`,
+  );
+  expect(provider.pathPolicy.defaultCwd).toBe(saved.workspacePath);
+});
+
+test("a computer with neither the reserve action nor a reported storage path needs an upgrade", async () => {
+  state.thread.executionTargetJson.directoryGrantId = undefined;
+  await expect(localProviderForTurn(context)).rejects.toMatchObject({
+    code: "LOCAL_HOST_UPGRADE_REQUIRED",
+  });
+  expect(state.call).not.toHaveBeenCalled();
+  expect(state.update).not.toHaveBeenCalled();
+});
+
+test.each(["relative/path", "C:\\Users\\Test\\SourceWeft", undefined])(
+  "an invalid reserved task folder is refused: %s",
+  async (path) => {
+    state.thread.executionTargetJson.directoryGrantId = undefined;
+    state.device.capabilities = ["workspace.reserve"];
+    state.call.mockImplementation(async () => ({ id: "native", path }));
+    await expect(localProviderForTurn(context)).rejects.toMatchObject({
+      code: "LOCAL_WORKSPACE_MISMATCH",
+    });
+    expect(state.update).not.toHaveBeenCalled();
+  },
+);
+
+test("an offline computer fails the reservation instead of deriving a path", async () => {
+  state.thread.executionTargetJson.directoryGrantId = undefined;
+  state.device.workspaceBase = "/Users/test/Library/app/task-workspaces";
+  state.device.capabilities = ["workspace.reserve"];
+  state.call.mockRejectedValue(new Error("DEVICE_OFFLINE"));
+  await expect(localProviderForTurn(context)).rejects.toThrow("DEVICE_OFFLINE");
+  expect(state.update).not.toHaveBeenCalled();
 });

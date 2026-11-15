@@ -92,6 +92,17 @@ pub fn host_with_bundle_at(app_path: &Path) -> LocalHost {
     host
 }
 
+/// A `LocalHost` whose automatic task folders go to `task_folder` (as the desktop app puts them
+/// in `<home>/SourceWeft`), over a fresh app-data directory with the bundle installed.
+pub fn host_with_task_folder(task_folder: &Path) -> (tempfile::TempDir, LocalHost) {
+    ensure_tmp_claude();
+    let app = tempfile::tempdir().unwrap();
+    copy_bundle_into(&bundle_dir(app.path()));
+    let host = LocalHost::open_with_task_folder(app.path(), Some(task_folder)).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    (app, host)
+}
+
 pub fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -> Value {
     host.dispatch(
         &Executions::default(),

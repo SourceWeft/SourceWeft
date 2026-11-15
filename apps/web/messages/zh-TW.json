@@ -1367,6 +1367,10 @@
       "remoteAccessTitle": "允許其他裝置存取",
       "remoteAccessDescription": "讓使用同一帳戶的其他裝置存取這臺電腦。它們可以存取任務資料夾和已授權的工作目錄。即使關閉遠端存取，你仍可在這臺電腦上繼續工作。",
       "turnOffRemoteAccess": "關閉遠端存取",
+      "taskFolderTitle": "預設任務資料夾",
+      "taskFolderDescription": "未選擇資料夾的新對話會在這裡建立自己的資料夾。現有對話繼續使用原來的資料夾。",
+      "taskFolderChange": "更改…",
+      "taskFolderReset": "恢復預設位置",
       "workingDirectoriesTitle": "工作目錄",
       "workingDirectoriesDescription": "每個對話都會獲得獨立的任務資料夾。移除資料夾存取權限會停止受影響任務的後續本機操作，並保留其中的檔案。",
       "removeAccess": "移除存取權限",
@@ -1760,6 +1764,11 @@
       "computerOffline": "電腦已離線。重新連接後本機任務可繼續。",
       "workingDirectory": "工作目錄",
       "directoryConnectedWhenUsed": "工作目錄將在首次使用時連接。",
+      "copyPath": "複製路徑",
+      "pathCopied": "已複製",
+      "copyPathFailed": "無法複製路徑。",
+      "showInFinder": "在 Finder 中顯示",
+      "showInFileManager": "在檔案管理員中顯示",
       "myComputers": "我的電腦",
       "loadingComputers": "正在載入電腦…",
       "couldNotLoadComputers": "無法載入電腦：{error}",
@@ -1780,10 +1789,12 @@
     "folderPicker": {
       "folderUnavailable": "資料夾不可用",
       "defaultTaskFolder": "預設任務資料夾",
-      "selectFolder": "選擇資料夾…",
       "selectedFolderFallback": "已選擇的資料夾",
-      "chooseExistingFolder": "選擇已有資料夾…",
-      "useConversationFolder": "使用對話所在資料夾"
+      "newTaskFolder": "新增任務資料夾",
+      "createdIn": "將在 {path} 中建立",
+      "createdAutomatically": "將在那臺電腦上自動建立",
+      "folders": "資料夾",
+      "chooseDifferentFolder": "選擇其他資料夾…"
     },
     "local": {
       "historyPreserved": "歷史記錄仍可檢視，草稿會被保留。",
@@ -2547,7 +2558,7 @@
       "offline": "這臺電腦目前離線。你選擇的資料夾會被保留。",
       "connectToBrowse": "連接到這臺電腦以瀏覽其中的檔案。",
       "workingDirectory": "工作目錄",
-      "conversationFolder": "對話資料夾",
+      "conversationFolder": "任務資料夾",
       "autoFolderHint": "當對話開始使用檔案時，系統會在這臺電腦上自動建立一個獨立的資料夾。",
       "authorizeHint": "要授權其他資料夾，請在這臺電腦上開啟 SW。你也可以在此選擇一個已授權的資料夾。"
     }

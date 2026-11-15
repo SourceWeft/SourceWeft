@@ -168,13 +168,39 @@ pub struct RemoteHost {
     keychain_service: String,
 }
 
+/// What the native folder dialog is opened for. The prompt is one of these constants, never
+/// text from the page.
+// `tests/remote_host_live.rs` compiles this file without the settings bridge, which is the
+// only user of the second purpose.
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub(crate) enum FolderPurpose {
+    WorkingDirectory,
+    TaskFolderLocation,
+}
+
+impl FolderPurpose {
+    fn prompt(self) -> &'static str {
+        match self {
+            Self::WorkingDirectory => "Choose a working directory",
+            Self::TaskFolderLocation => "Choose where new task folders are created",
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
-async fn pick_folder(_app: &tauri::AppHandle) -> Result<String, String> {
-    let output = tauri::async_runtime::spawn_blocking(|| {
+pub(crate) async fn pick_folder(
+    _app: &tauri::AppHandle,
+    purpose: FolderPurpose,
+) -> Result<String, String> {
+    let output = tauri::async_runtime::spawn_blocking(move || {
         std::process::Command::new("/usr/bin/osascript")
             .args([
                 "-e",
-                "POSIX path of (choose folder with prompt \"Choose a working directory\")",
+                &format!(
+                    "POSIX path of (choose folder with prompt \"{}\")",
+                    purpose.prompt()
+                ),
             ])
             .output()
     })
@@ -188,11 +214,19 @@ async fn pick_folder(_app: &tauri::AppHandle) -> Result<String, String> {
 }
 
 #[cfg(any(target_os = "linux", windows))]
-async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
+pub(crate) async fn pick_folder(
+    app: &tauri::AppHandle,
+    purpose: FolderPurpose,
+) -> Result<String, String> {
     use tauri_plugin_dialog::{DialogExt, FilePath};
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        match app.dialog().file().blocking_pick_folder() {
+        match app
+            .dialog()
+            .file()
+            .set_title(purpose.prompt())
+            .blocking_pick_folder()
+        {
             Some(FilePath::Path(path)) => path
                 .into_os_string()
                 .into_string()
@@ -261,7 +295,7 @@ fn keychain_lookup_error(error: String) -> String {
 /// a drive root or anything containing the profile is refused before a grant exists. The
 /// registration canonicalises and checks again, so a symlinked or 8.3 spelling of those is
 /// refused too.
-fn picked_folder(raw: &str) -> Result<std::path::PathBuf, String> {
+pub(crate) fn picked_folder(raw: &str) -> Result<std::path::PathBuf, String> {
     #[cfg(windows)]
     {
         let (profile, roots) =
@@ -318,7 +352,7 @@ impl RemoteHost {
         if self.status().device_id.as_deref() != Some(&credential.id) {
             return Err("Authenticate this computer before choosing a folder".into());
         }
-        let picked = pick_folder(app).await?;
+        let picked = pick_folder(app, FolderPurpose::WorkingDirectory).await?;
         let folder = picked_folder(&picked)?;
         if self.generation.load(Ordering::SeqCst) != folder_generation
             || self.status().user_id.as_deref() != Some(&owner)
