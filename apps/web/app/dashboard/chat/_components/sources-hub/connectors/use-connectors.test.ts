@@ -508,19 +508,22 @@ test("handleConnectConnector still carries gmail_mode for today's indexable Gmai
 });
 
 test("a first authorization for a tools-only, brokered Gmail creates it with liveSearchEnabled only", async () => {
-  // A persistent mock, not `mockResolvedValueOnce`: this exercise can hit
-  // `listManifests` twice (once from the mount-time `refreshConnectors`,
-  // and again from `ensureConnector`'s own direct check, which runs ahead of
-  // that fetch resolving on a fresh OAuth-return page load), and both calls
-  // must see the same tools-only manifest.
-  listManifests.mockResolvedValue({
-    items: [
-      fakeManifest("gmail", {
-        resources: [],
-        auth: { kind: "brokered", broker: "composio" },
-      }),
-    ],
-  });
+  // Prove the direct-fetch fallback actually ran, not just that the manifest
+  // was available by coincidence: the mount-time `refreshConnectors` call to
+  // `listManifests` hangs forever, so `connectorManifestInfoByTypeRef` can
+  // never be populated that way. The only remaining source for the tools-only
+  // manifest is `ensureConnector`'s own direct `listManifests` call, which
+  // gets the second queued response.
+  listManifests
+    .mockImplementationOnce(() => new Promise(() => {}))
+    .mockResolvedValueOnce({
+      items: [
+        fakeManifest("gmail", {
+          resources: [],
+          auth: { kind: "brokered", broker: "composio" },
+        }),
+      ],
+    });
   listAccounts.mockResolvedValue({
     items: [
       {
@@ -546,6 +549,12 @@ test("a first authorization for a tools-only, brokered Gmail creates it with liv
 
   await mountHook(baseInput("ws-brokered-first"));
 
+  // The mount-time call never resolves, so `connectorManifestInfoByType`
+  // (the hook's cached, state-backed view) never learns about Gmail through
+  // the normal channel; `listManifests` was called again regardless,
+  // confirming the fallback path, not the cache, is what ran.
+  expect(listManifests.mock.calls.length).toBeGreaterThanOrEqual(2);
+  expect(api().availableConnectorTypes).not.toContain("gmail");
   expect(create).toHaveBeenCalledWith(
     "ws-brokered-first",
     expect.objectContaining({
@@ -555,6 +564,38 @@ test("a first authorization for a tools-only, brokered Gmail creates it with liv
   );
   // Settings are never auto-opened for the tools-only config.
   expect(api().connectorSettingsConnector).toBeNull();
+});
+
+test("a first authorization never guesses a Gmail mode when the direct manifest check fails", async () => {
+  // Same race as above (the mount-time fetch never resolves), but this time
+  // `ensureConnector`'s own direct `listManifests` call rejects. The brief's
+  // "no silent fallback" rule means this must not default to either shape:
+  // the connector is never created, and the failure surfaces through the
+  // same error path any other failed connector creation already uses.
+  listManifests
+    .mockImplementationOnce(() => new Promise(() => {}))
+    .mockRejectedValueOnce(new Error("manifest fetch failed"));
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-brokered-fails",
+    connectorType: "gmail",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-brokered-fails"));
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("manifest fetch failed");
+  expect(api().connectorWaitingByType.gmail).toBeUndefined();
 });
 
 // --- Reconnecting an existing connector -----------------------------------

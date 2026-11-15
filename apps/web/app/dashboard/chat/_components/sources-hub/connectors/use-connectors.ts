@@ -977,25 +977,24 @@ export function useConnectors(input: {
           // auto-create path runs right after the OAuth return, which can be
           // a fresh page load whose own manifest fetch (`refreshConnectors`)
           // has not resolved yet; ask directly rather than defaulting to
-          // today's shape on a guess.
+          // today's shape on a guess. Never guess in either direction: if
+          // this request fails, let it throw into the catch below, the same
+          // error path any other failed connector creation already uses,
+          // instead of creating the connector with an unconfirmed config.
           let gmailSupportsIndexing = true;
           if (item.id === "gmail") {
             const cachedGmailInfo = connectorManifestInfoByTypeRef.current.gmail;
             if (cachedGmailInfo) {
               gmailSupportsIndexing = cachedGmailInfo.supportsIndexing;
             } else {
-              try {
-                const manifests =
-                  await connectorsClient.listManifests(workspaceId);
-                const gmailManifest = manifests.items.find(
-                  (entry) => entry.type === "gmail",
-                );
-                gmailSupportsIndexing = gmailManifest
-                  ? deriveConnectorManifestInfo(gmailManifest).supportsIndexing
-                  : true;
-              } catch {
-                gmailSupportsIndexing = true;
-              }
+              const manifests =
+                await connectorsClient.listManifests(workspaceId);
+              const gmailManifest = manifests.items.find(
+                (entry) => entry.type === "gmail",
+              );
+              gmailSupportsIndexing = gmailManifest
+                ? deriveConnectorManifestInfo(gmailManifest).supportsIndexing
+                : true;
             }
           }
           const effectiveGmailMode =

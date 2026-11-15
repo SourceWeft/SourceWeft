@@ -92,6 +92,18 @@ async function selectTab(label: string) {
   });
 }
 
+function liveSearchCheckbox() {
+  const checkbox = document.querySelector<HTMLElement>(
+    'button[role="checkbox"]',
+  );
+  if (!checkbox) throw new Error("live-search checkbox not found");
+  return checkbox;
+}
+
+async function clickCheckbox(node: HTMLElement) {
+  await act(async () => node.click());
+}
+
 test("a tools-only, brokered Gmail shows only the live-search switch and never fetches labels", async () => {
   listGmailLabels.mockResolvedValue({ labels: [] });
   const connector = gmailConnector({ liveSearchEnabled: true });
@@ -154,4 +166,52 @@ test("a Gmail manifest absent from the map behaves like today's (indexable) shap
   expect(configurationTabText()).toContain(
     "Index selected mail in this workspace",
   );
+});
+
+test("saving a tools-only Gmail sends only liveSearchEnabled, never the indexing fields", async () => {
+  listGmailLabels.mockResolvedValue({ labels: [] });
+  const connector = gmailConnector({ liveSearchEnabled: true });
+  const { props, handlers } = baseProps(connector, {
+    gmail: { supportsIndexing: false, broker: "composio" },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+  await clickCheckbox(liveSearchCheckbox());
+  await act(async () => button("Save settings").click());
+
+  expect(handlers.onSaveSettings).toHaveBeenCalledTimes(1);
+  const [, input] = handlers.onSaveSettings.mock.calls[0]!;
+  expect(input.configJson).toEqual({ liveSearchEnabled: false });
+});
+
+test("saving today's indexable Gmail still sends the full config shape", async () => {
+  listGmailLabels.mockResolvedValue({
+    labels: [{ id: "l1", name: "Label 1", type: "user" }],
+  });
+  const connector = gmailConnector({
+    liveSearchEnabled: true,
+    indexingEnabled: false,
+    labelIds: [],
+    maxMessages: 500,
+  });
+  const { props, handlers } = baseProps(connector, {
+    gmail: { supportsIndexing: true, broker: null },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+  await clickCheckbox(liveSearchCheckbox());
+  await act(async () => button("Save settings").click());
+
+  expect(handlers.onSaveSettings).toHaveBeenCalledTimes(1);
+  const [, input] = handlers.onSaveSettings.mock.calls[0]!;
+  expect(input.configJson).toEqual({
+    liveSearchEnabled: false,
+    indexingEnabled: false,
+    labelIds: [],
+    maxMessages: 500,
+  });
 });
