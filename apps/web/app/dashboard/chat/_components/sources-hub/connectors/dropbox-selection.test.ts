@@ -140,8 +140,9 @@ describe("removeDropboxItem", () => {
   });
 
   test("removing the last item leaves an empty selection", () => {
-    expect(removeDropboxItem([{ id: "id:a", kind: "file" as const }], "id:a"))
-      .toEqual([]);
+    expect(
+      removeDropboxItem([{ id: "id:a", kind: "file" as const }], "id:a"),
+    ).toEqual([]);
   });
 });
 
@@ -153,9 +154,21 @@ describe("dropboxFolderFileCount", () => {
       { status: "indexed", metadata: { pathLower: "/a/bc/z.pdf" } },
       { status: "indexed", metadata: { pathLower: "/a/b" } },
     ];
-    expect(
-      dropboxFolderFileCount({ folderPathLower: "/a/b", sources }),
-    ).toBe(2);
+    expect(dropboxFolderFileCount({ folderPathLower: "/a/b", sources })).toBe(
+      2,
+    );
+  });
+
+  test("counts only indexed sources", () => {
+    const sources = [
+      { status: "indexed", metadata: { pathLower: "/a/b/x.pdf" } },
+      { status: "processing", metadata: { pathLower: "/a/b/y.pdf" } },
+      { status: "failed", metadata: { pathLower: "/a/b/z.pdf" } },
+      { status: "pending", metadata: { pathLower: "/a/b/w.pdf" } },
+    ];
+    expect(dropboxFolderFileCount({ folderPathLower: "/a/b", sources })).toBe(
+      1,
+    );
   });
 
   test("is defensive about archived sources even though listSources already excludes them", () => {
@@ -163,9 +176,9 @@ describe("dropboxFolderFileCount", () => {
       { status: "archived", metadata: { pathLower: "/a/b/x.pdf" } },
       { status: "indexed", metadata: { pathLower: "/a/b/y.pdf" } },
     ];
-    expect(
-      dropboxFolderFileCount({ folderPathLower: "/a/b", sources }),
-    ).toBe(1);
+    expect(dropboxFolderFileCount({ folderPathLower: "/a/b", sources })).toBe(
+      1,
+    );
   });
 
   test("ignores sources with a missing or non-string pathLower", () => {
@@ -173,9 +186,9 @@ describe("dropboxFolderFileCount", () => {
       { status: "indexed", metadata: {} },
       { status: "indexed", metadata: { pathLower: 42 } },
     ];
-    expect(
-      dropboxFolderFileCount({ folderPathLower: "/a/b", sources }),
-    ).toBe(0);
+    expect(dropboxFolderFileCount({ folderPathLower: "/a/b", sources })).toBe(
+      0,
+    );
   });
 });
 
@@ -281,7 +294,11 @@ describe("dropboxItemState", () => {
       dropboxItemState({
         fileId: "id:abc",
         source: null,
-        latestRun: { status: "succeeded", startedAt: afterRun, skippedItems: [] },
+        latestRun: {
+          status: "succeeded",
+          startedAt: afterRun,
+          skippedItems: [],
+        },
         selectionChangedAt: runStart,
       }).kind,
     ).toBe("unavailable");

@@ -1,6 +1,6 @@
 import { formatDisplayDate } from "@/lib/i18n/format";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Folder, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale as useDisplayLocale, useTranslations } from "next-intl";
@@ -45,23 +45,16 @@ function stateBadgeVariant(kind: DropboxFileState["kind"]): BadgeVariant {
   return "outline";
 }
 
-async function describeInChunks(
-  workspaceId: string,
-  connectorId: string,
-  ids: string[],
-): Promise<DropboxDescribeItem[]> {
+/** What `dropbox.describe` said about an id; `null` when it answered without
+ * that id. */
+type DescribedById = ReadonlyMap<string, DropboxDescribeItem | null>;
+
+function chunk(ids: readonly string[]): string[][] {
   const chunks: string[][] = [];
   for (let index = 0; index < ids.length; index += DESCRIBE_CHUNK_SIZE) {
     chunks.push(ids.slice(index, index + DESCRIBE_CHUNK_SIZE));
   }
-  const results = await Promise.all(
-    chunks.map((chunk) =>
-      connectorsClient.dropboxDescribe(workspaceId, connectorId, {
-        ids: chunk,
-      }),
-    ),
-  );
-  return results.flatMap((result) => result.items);
+  return chunks;
 }
 
 /**
@@ -94,12 +87,19 @@ export function DropboxItems({
 
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [isLoadingSources, setIsLoadingSources] = useState(true);
-  const [described, setDescribed] = useState<Map<string, DropboxDescribeItem>>(
-    () => new Map(),
-  );
-  // The describe request whose answer is shown; `null` until the first one
-  // settles, so rows wait for names instead of flashing raw ids.
-  const [describedKey, setDescribedKey] = useState<string | null>(null);
+  // Describe answers cached across source reloads, so a sync advancing does
+  // not describe the same folders again. Reset when the connector changes.
+  const [described, setDescribed] = useState<DescribedById>(() => new Map());
+  // False until the first describe settles, so rows wait for names instead of
+  // flashing raw ids.
+  const [describeSettled, setDescribeSettled] = useState(false);
+  // Ids already asked about in this generation (in flight, answered or
+  // failed), so a re-render never asks twice. A failed id is retried only when
+  // the section mounts again (the settings reopen) or the connector changes.
+  const askedRef = useRef(new Set<string>());
+  // Bumped on connector change and unmount; a describe answer from an older
+  // generation is dropped.
+  const describeGenerationRef = useRef(0);
   const [browserOpen, setBrowserOpen] = useState(false);
   // When this session last submitted an add or remove. Feeds the "unavailable"
   // vs "waiting" decision, as in GoogleDriveFiles. Reset when the connector
@@ -114,7 +114,12 @@ export function DropboxItems({
   useEffect(() => {
     setSelectionChangedAt(null);
     setDescribed(new Map());
-    setDescribedKey(null);
+    setDescribeSettled(false);
+    askedRef.current = new Set();
+    describeGenerationRef.current += 1;
+    return () => {
+      describeGenerationRef.current += 1;
+    };
   }, [connectorId]);
 
   useEffect(() => {
@@ -159,14 +164,14 @@ export function DropboxItems({
       }
     : null;
 
-  // Folders always need describe; a file only when neither its source nor a
-  // skipped item names it. Wait for the sources so files are not described
-  // needlessly.
-  const describeIds = isLoadingSources
-    ? []
-    : [
-        ...folders.map((item) => item.id),
-        ...files
+  // Folders always need describe, whether or not the sources have loaded; a
+  // file only when neither its source nor a skipped item names it, which is
+  // known once the sources load. Ids already described are not asked again.
+  const describeIds = [
+    ...folders.map((item) => item.id),
+    ...(isLoadingSources
+      ? []
+      : files
           .filter((item) => {
             const externalId = dropboxExternalId(item.id);
             return (
@@ -174,31 +179,45 @@ export function DropboxItems({
               !skippedTitleByExternalId.has(externalId)
             );
           })
-          .map((item) => item.id),
-      ];
+          .map((item) => item.id)),
+  ].filter((id) => !described.has(id));
   const describeKey = describeIds.join(",");
 
   useEffect(() => {
     if (!describeKey) return;
-    let active = true;
-    describeInChunks(workspaceId, connectorId, describeKey.split(","))
-      .then((result) => {
-        if (active)
-          setDescribed(new Map(result.map((item) => [item.id, item])));
-      })
-      .catch(() => {
-        // Names fall back to ids; the rows stay usable.
-        if (active) setDescribed(new Map());
-      })
-      .finally(() => {
-        if (active) setDescribedKey(describeKey);
-      });
-    return () => {
-      active = false;
-    };
+    const idsToDescribe = describeKey
+      .split(",")
+      .filter((id) => !askedRef.current.has(id));
+    if (idsToDescribe.length === 0) return;
+    const generation = describeGenerationRef.current;
+    const isCurrent = () => generation === describeGenerationRef.current;
+    for (const id of idsToDescribe) askedRef.current.add(id);
+    void (async () => {
+      // One chunk at a time: the backend looks up each id separately, so
+      // parallel chunks would multiply the concurrent Dropbox calls.
+      for (const ids of chunk(idsToDescribe)) {
+        try {
+          const result = await connectorsClient.dropboxDescribe(
+            workspaceId,
+            connectorId,
+            { ids },
+          );
+          if (!isCurrent()) return;
+          const byId = new Map(result.items.map((item) => [item.id, item]));
+          setDescribed((current) => {
+            const next = new Map(current);
+            for (const id of ids) next.set(id, byId.get(id) ?? null);
+            return next;
+          });
+        } catch {
+          // Keep what is already known; these rows fall back to ids.
+        }
+      }
+      if (isCurrent()) setDescribeSettled(true);
+    })();
   }, [workspaceId, connectorId, describeKey]);
 
-  const awaitingNames = describeKey !== "" && describedKey === null;
+  const awaitingNames = describeKey !== "" && !describeSettled;
   const isLoading = (isLoadingSources || awaitingNames) && items.length > 0;
 
   const handleConfirm = useCallback(

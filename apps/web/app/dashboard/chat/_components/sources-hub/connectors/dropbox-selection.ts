@@ -133,12 +133,10 @@ export function removeDropboxItem(
 }
 
 /**
- * Count active (non-archived) sources whose `metadata.pathLower` sits
- * inside the given folder, i.e. starts with `folderPathLower + "/"`. Used by
- * the settings list to show how many indexed files a selected folder
- * contributed. `listSources` already excludes archived sources, but this
- * stays defensive about `status` since the caller controls what it passes
- * in.
+ * Count indexed sources whose `metadata.pathLower` sits inside the given
+ * folder, i.e. starts with `folderPathLower + "/"`. Used by the settings list
+ * to show how many indexed files a selected folder contributed; sources still
+ * processing, failed or archived are not counted.
  */
 export function dropboxFolderFileCount(input: {
   folderPathLower: string;
@@ -149,7 +147,7 @@ export function dropboxFolderFileCount(input: {
 }): number {
   const prefix = `${input.folderPathLower}/`;
   return input.sources.filter((source) => {
-    if (source.status === "archived") {
+    if (source.status !== "indexed") {
       return false;
     }
     const pathLower = source.metadata?.pathLower;
