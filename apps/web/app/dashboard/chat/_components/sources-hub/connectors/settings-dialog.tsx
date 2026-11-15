@@ -79,6 +79,7 @@ import { isGoogleDrivePickerElement } from "./google-drive-picker";
 import { commitGoogleDriveSelection } from "./google-drive-selection";
 import type {
   ConnectorItem,
+  ConnectorManifestInfo,
   ConnectorReadinessState,
   ConnectorWebhookConfig,
 } from "./types";
@@ -114,6 +115,7 @@ export function ConnectorSettingsDialog({
   activityError,
   connector,
   connectorBusyById,
+  connectorManifestInfoByType,
   connectorReadinessById,
   isLoadingActivity,
   onCopyWebhook,
@@ -131,6 +133,7 @@ export function ConnectorSettingsDialog({
   activityError: string | null;
   connector: ConnectorItem | null;
   connectorBusyById: Record<string, boolean>;
+  connectorManifestInfoByType: Record<string, ConnectorManifestInfo>;
   connectorReadinessById: Record<string, ConnectorReadinessState>;
   isLoadingActivity: boolean;
   onCopyWebhook: (value: string) => void;
@@ -217,7 +220,16 @@ export function ConnectorSettingsDialog({
     Array<{ id: string; name: string }>
   >([]);
   const [gmailLabelsError, setGmailLabelsError] = useState<string | null>(null);
-  const canUsePeriodicSync = catalogItem?.isIndexable ?? true;
+  // Absent when this type's manifest has not loaded yet; treat that the same
+  // as today's (indexable) shape rather than hiding controls on a guess.
+  const gmailSupportsIndexing =
+    connectorManifestInfoByType[connectorType]?.supportsIndexing !== false;
+  const isGmailWithIndexing =
+    connectorType === "gmail" && gmailSupportsIndexing;
+  const canUsePeriodicSync =
+    connectorType === "gmail"
+      ? gmailSupportsIndexing
+      : catalogItem?.isIndexable ?? true;
   const isSavingSettings = isBusy;
 
   useEffect(() => {
@@ -254,7 +266,7 @@ export function ConnectorSettingsDialog({
   }, [connector]);
 
   useEffect(() => {
-    if (!open || !connector || connector.raw.connectorType !== "gmail") return;
+    if (!open || !connector || !isGmailWithIndexing) return;
     let active = true;
     connectorsClient
       .listGmailLabels(connector.raw.workspaceId, connector.id)
@@ -270,7 +282,7 @@ export function ConnectorSettingsDialog({
     return () => {
       active = false;
     };
-  }, [open, connector, t]);
+  }, [open, connector, isGmailWithIndexing, t]);
 
   if (!connector) {
     return null;
@@ -299,20 +311,23 @@ export function ConnectorSettingsDialog({
   const isSettingsValid =
     settingsName.trim().length > 0 &&
     (frequencyValue !== "custom" || hasValidCustomFrequency) &&
-    (connector.raw.connectorType !== "gmail" || validGmailLimit) &&
-    (connector.raw.connectorType !== "gmail" || validGmailScope) &&
-    (connector.raw.connectorType !== "gmail" ||
-      gmailIndexing ||
-      frequencyValue === "manual");
-  const gmailConfig = {
-    ...connector.raw.configJson,
-    liveSearchEnabled: gmailLiveSearch,
-    indexingEnabled: gmailIndexing,
-    labelIds: gmailLabelIds,
-    maxMessages: parsedGmailLimit,
-    ...(gmailAfter ? { after: gmailAfter } : {}),
-  };
-  if (!gmailAfter) delete gmailConfig.after;
+    (!isGmailWithIndexing || validGmailLimit) &&
+    (!isGmailWithIndexing || validGmailScope) &&
+    (!isGmailWithIndexing || gmailIndexing || frequencyValue === "manual");
+  // A tools-only Gmail (no sync resources in its manifest) accepts only
+  // `liveSearchEnabled`; indexing fields would be rejected by config
+  // validation, so they are never built or sent for it.
+  const gmailConfig: Record<string, unknown> = isGmailWithIndexing
+    ? {
+        ...connector.raw.configJson,
+        liveSearchEnabled: gmailLiveSearch,
+        indexingEnabled: gmailIndexing,
+        labelIds: gmailLabelIds,
+        maxMessages: parsedGmailLimit,
+        ...(gmailAfter ? { after: gmailAfter } : {}),
+      }
+    : { liveSearchEnabled: gmailLiveSearch };
+  if (isGmailWithIndexing && !gmailAfter) delete gmailConfig.after;
   const gmailChanged =
     connector.raw.connectorType === "gmail" &&
     JSON.stringify(gmailConfig) !== JSON.stringify(connector.raw.configJson);
@@ -385,7 +400,7 @@ export function ConnectorSettingsDialog({
     if (!currentConnector) {
       return;
     }
-    if (currentConnector.raw.connectorType === "gmail" && !validGmailScope) {
+    if (isGmailWithIndexing && !validGmailScope) {
       toast.error(t("connectors.gmail.scopeRequired"));
       return;
     }
@@ -721,89 +736,97 @@ export function ConnectorSettingsDialog({
                             />
                             {t("connectors.gmail.liveSearch")}
                           </label>
-                          <label className="flex items-center gap-2 text-xs">
-                            <Checkbox
-                              checked={gmailIndexing}
-                              disabled={isSavingSettings}
-                              onCheckedChange={(checked) => {
-                                setGmailIndexing(checked === true);
-                                if (checked !== true)
-                                  setFrequencyValue("manual");
-                              }}
-                            />
-                            {t("connectors.gmail.indexMail")}
-                          </label>
-                          <p className="text-[10px] leading-4 text-muted-foreground">
-                            {t("connectors.gmail.indexNotice")}
-                          </p>
-                          {gmailIndexing ? (
+                          {isGmailWithIndexing ? (
                             <>
-                              {!validGmailScope ? (
-                                <p className="text-xs text-destructive">
-                                  {t("connectors.gmail.scopeRequired")}
-                                </p>
-                              ) : null}
-                              <label className="block space-y-1.5 text-xs">
-                                <span>{t("connectors.gmail.after")}</span>
-                                <Input
+                              <label className="flex items-center gap-2 text-xs">
+                                <Checkbox
+                                  checked={gmailIndexing}
                                   disabled={isSavingSettings}
-                                  onChange={(event) =>
-                                    setGmailAfter(event.target.value)
-                                  }
-                                  type="date"
-                                  value={gmailAfter}
+                                  onCheckedChange={(checked) => {
+                                    setGmailIndexing(checked === true);
+                                    if (checked !== true)
+                                      setFrequencyValue("manual");
+                                  }}
                                 />
+                                {t("connectors.gmail.indexMail")}
                               </label>
-                              <label className="block space-y-1.5 text-xs">
-                                <span>{t("connectors.gmail.maxMessages")}</span>
-                                <Input
-                                  disabled={isSavingSettings}
-                                  max={10000}
-                                  min={1}
-                                  onChange={(event) =>
-                                    setGmailMaxMessages(event.target.value)
-                                  }
-                                  type="number"
-                                  value={gmailMaxMessages}
-                                />
-                              </label>
-                              <div className="space-y-1.5 text-xs">
-                                <p>{t("connectors.gmail.labels")}</p>
-                                <p className="text-[10px] text-muted-foreground">
-                                  {t("connectors.gmail.labelsNote")}
-                                </p>
-                                {gmailLabelsError ? (
-                                  <p className="text-destructive">
-                                    {gmailLabelsError}
-                                  </p>
-                                ) : null}
-                                {gmailLabels.map((label) => (
-                                  <label
-                                    className="flex items-center gap-2"
-                                    key={label.id}
-                                  >
-                                    <Checkbox
-                                      checked={gmailLabelIds.includes(label.id)}
+                              <p className="text-[10px] leading-4 text-muted-foreground">
+                                {t("connectors.gmail.indexNotice")}
+                              </p>
+                              {gmailIndexing ? (
+                                <>
+                                  {!validGmailScope ? (
+                                    <p className="text-xs text-destructive">
+                                      {t("connectors.gmail.scopeRequired")}
+                                    </p>
+                                  ) : null}
+                                  <label className="block space-y-1.5 text-xs">
+                                    <span>{t("connectors.gmail.after")}</span>
+                                    <Input
                                       disabled={isSavingSettings}
-                                      onCheckedChange={(checked) =>
-                                        setGmailLabelIds((previous) =>
-                                          checked === true
-                                            ? [
-                                                ...new Set([
-                                                  ...previous,
-                                                  label.id,
-                                                ]),
-                                              ]
-                                            : previous.filter(
-                                                (id) => id !== label.id,
-                                              ),
-                                        )
+                                      onChange={(event) =>
+                                        setGmailAfter(event.target.value)
                                       }
+                                      type="date"
+                                      value={gmailAfter}
                                     />
-                                    {label.name}
                                   </label>
-                                ))}
-                              </div>
+                                  <label className="block space-y-1.5 text-xs">
+                                    <span>
+                                      {t("connectors.gmail.maxMessages")}
+                                    </span>
+                                    <Input
+                                      disabled={isSavingSettings}
+                                      max={10000}
+                                      min={1}
+                                      onChange={(event) =>
+                                        setGmailMaxMessages(event.target.value)
+                                      }
+                                      type="number"
+                                      value={gmailMaxMessages}
+                                    />
+                                  </label>
+                                  <div className="space-y-1.5 text-xs">
+                                    <p>{t("connectors.gmail.labels")}</p>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {t("connectors.gmail.labelsNote")}
+                                    </p>
+                                    {gmailLabelsError ? (
+                                      <p className="text-destructive">
+                                        {gmailLabelsError}
+                                      </p>
+                                    ) : null}
+                                    {gmailLabels.map((label) => (
+                                      <label
+                                        className="flex items-center gap-2"
+                                        key={label.id}
+                                      >
+                                        <Checkbox
+                                          checked={gmailLabelIds.includes(
+                                            label.id,
+                                          )}
+                                          disabled={isSavingSettings}
+                                          onCheckedChange={(checked) =>
+                                            setGmailLabelIds((previous) =>
+                                              checked === true
+                                                ? [
+                                                    ...new Set([
+                                                      ...previous,
+                                                      label.id,
+                                                    ]),
+                                                  ]
+                                                : previous.filter(
+                                                    (id) => id !== label.id,
+                                                  ),
+                                            )
+                                          }
+                                        />
+                                        {label.name}
+                                      </label>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : null}
                             </>
                           ) : null}
                         </div>

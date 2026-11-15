@@ -122,6 +122,23 @@ async function flushMicrotasks() {
   }
 }
 
+// Minimal shapes the hook actually reads (`auth.kind`/`auth.broker` and
+// `sync.resources.length`), not the full `ConnectorManifest` contract shape —
+// nothing else in the hook touches a manifest field.
+function fakeManifest(
+  type: string,
+  overrides: {
+    resources?: unknown[];
+    auth?: { kind: "oauth2" } | { kind: "brokered"; broker: string };
+  } = {},
+) {
+  return {
+    type,
+    auth: overrides.auth ?? { kind: "oauth2" },
+    sync: { resources: overrides.resources ?? [{ type: "resource" }] },
+  };
+}
+
 function fakeConnector(
   overrides: Partial<SourceConnector> = {},
 ): SourceConnector {
@@ -209,8 +226,8 @@ beforeEach(() => {
   listAccounts.mockResolvedValue({ items: [] });
   listManifests.mockResolvedValue({
     items: [
-      { type: "notion" },
-      { type: "dropbox", selection: dropboxSelectionSpec },
+      fakeManifest("notion"),
+      { ...fakeManifest("dropbox"), selection: dropboxSelectionSpec },
     ],
   });
   listActivity.mockResolvedValue({ items: [] });
@@ -375,7 +392,7 @@ test("handleConfirmDisconnectConnector deletes (soft) and clears pending state",
 });
 
 test("account switch clears prior manifest eligibility even while the next fetch is pending", async () => {
-  listManifests.mockResolvedValueOnce({ items: [{ type: "gmail" }] });
+  listManifests.mockResolvedValueOnce({ items: [fakeManifest("gmail")] });
   const input = baseInput("ws-shared-preview");
   function Harness() {
     latest = useConnectors(input);
@@ -391,7 +408,7 @@ test("account switch clears prior manifest eligibility even while the next fetch
 });
 
 test("failed manifest refresh clears old Gmail eligibility", async () => {
-  listManifests.mockResolvedValueOnce({ items: [{ type: "gmail" }] });
+  listManifests.mockResolvedValueOnce({ items: [fakeManifest("gmail")] });
   await mountHook(baseInput("ws-preview-error"));
   expect(api().availableConnectorTypes).toEqual(["gmail"]);
   listManifests.mockRejectedValueOnce(new Error("offline"));
@@ -399,6 +416,145 @@ test("failed manifest refresh clears old Gmail eligibility", async () => {
     await api().refreshConnectors();
   });
   expect(api().availableConnectorTypes).toEqual([]);
+});
+
+test("connectorManifestInfoByType derives supportsIndexing and broker from each manifest", async () => {
+  listManifests.mockResolvedValueOnce({
+    items: [
+      fakeManifest("notion"),
+      fakeManifest("gmail", {
+        resources: [],
+        auth: { kind: "brokered", broker: "composio" },
+      }),
+    ],
+  });
+
+  await mountHook(baseInput("ws-manifest-info"));
+
+  expect(api().connectorManifestInfoByType).toEqual({
+    notion: { supportsIndexing: true, broker: null },
+    gmail: { supportsIndexing: false, broker: "composio" },
+  });
+});
+
+// --- Connecting a tools-only, Composio-brokered Gmail ---------------------
+// A manifest with no sync resources carries no mode to choose: the redirect
+// never asks for one, and the connector created on return takes the
+// tools-only config the brief requires, regardless of what a stale
+// `gmail_mode` might otherwise suggest.
+
+test("handleConnectConnector omits gmail_mode for a tools-only Gmail manifest", async () => {
+  listManifests.mockResolvedValueOnce({
+    items: [
+      fakeManifest("gmail", {
+        resources: [],
+        auth: { kind: "brokered", broker: "composio" },
+      }),
+    ],
+  });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...original, href: original.href, origin: original.origin, assign },
+  });
+  try {
+    await mountHook(baseInput("ws-brokered-start"));
+    act(() => {
+      api().handleConnectConnector(
+        { id: "gmail", name: "Gmail" } as never,
+        "tools",
+      );
+    });
+
+    expect(assign).toHaveBeenCalledTimes(1);
+    const target = new URL(String(assign.mock.calls[0]![0]));
+    const returnTo = new URL(target.searchParams.get("return_to")!);
+    expect(returnTo.searchParams.has("gmail_mode")).toBe(false);
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("handleConnectConnector still carries gmail_mode for today's indexable Gmail manifest", async () => {
+  listManifests.mockResolvedValueOnce({ items: [fakeManifest("gmail")] });
+  const assign = vi.fn();
+  const original = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { ...original, href: original.href, origin: original.origin, assign },
+  });
+  try {
+    await mountHook(baseInput("ws-indexable-start"));
+    act(() => {
+      api().handleConnectConnector(
+        { id: "gmail", name: "Gmail" } as never,
+        "both",
+      );
+    });
+
+    const target = new URL(String(assign.mock.calls[0]![0]));
+    const returnTo = new URL(target.searchParams.get("return_to")!);
+    expect(returnTo.searchParams.get("gmail_mode")).toBe("both");
+  } finally {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test("a first authorization for a tools-only, brokered Gmail creates it with liveSearchEnabled only", async () => {
+  // A persistent mock, not `mockResolvedValueOnce`: this exercise can hit
+  // `listManifests` twice (once from the mount-time `refreshConnectors`,
+  // and again from `ensureConnector`'s own direct check, which runs ahead of
+  // that fetch resolving on a fresh OAuth-return page load), and both calls
+  // must see the same tools-only manifest.
+  listManifests.mockResolvedValue({
+    items: [
+      fakeManifest("gmail", {
+        resources: [],
+        auth: { kind: "brokered", broker: "composio" },
+      }),
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  create.mockResolvedValue({
+    connector: fakeConnector({
+      id: "gmail-1",
+      connectorType: "gmail",
+      configJson: { liveSearchEnabled: true },
+    }),
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-brokered-first",
+    connectorType: "gmail",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-brokered-first"));
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-brokered-first",
+    expect.objectContaining({
+      connectorType: "gmail",
+      configJson: { liveSearchEnabled: true },
+    }),
+  );
+  // Settings are never auto-opened for the tools-only config.
+  expect(api().connectorSettingsConnector).toBeNull();
 });
 
 // --- Reconnecting an existing connector -----------------------------------

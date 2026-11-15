@@ -40,7 +40,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { RawImage } from "../../../../../_components/raw-image";
 import { memoComponent } from "../memo-component";
 import { TypeBadge } from "../type-badge";
-import { connectorCatalog } from "./catalog";
+import { connectorCatalog, connectorCatalogCapabilities } from "./catalog";
 import type {
   ConnectorAccountItem,
   ConnectorCatalogItem,
@@ -526,6 +526,7 @@ export const ConnectorCatalogCard = memoComponent(
     onCreateConnector,
     onDisconnect,
     onReconnectConnector,
+    supportsIndexing,
   }: {
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
@@ -536,6 +537,9 @@ export const ConnectorCatalogCard = memoComponent(
     onCreateConnector: (item: ConnectorCatalogItem) => void;
     onDisconnect: (connector: ConnectorItem) => void;
     onReconnectConnector: (item: ConnectorCatalogItem) => void;
+    /** Omit when the type's manifest has not loaded yet; see
+     * `connectorCatalogCapabilities`. */
+    supportsIndexing?: boolean;
   }) {
     const t = useTranslations("dashboardSourcesHub");
     const isBusy = status.kind === "syncing";
@@ -623,7 +627,9 @@ export const ConnectorCatalogCard = memoComponent(
                     : t("connectors.type.searchApi")
                 }
               />
-              {item.capabilities.slice(0, 2).map((capability) => (
+              {connectorCatalogCapabilities(item, supportsIndexing)
+                .slice(0, 2)
+                .map((capability) => (
                 <TypeBadge key={capability} label={capability} />
               ))}
             </div>
