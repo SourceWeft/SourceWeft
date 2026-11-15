@@ -71,8 +71,17 @@ export const settingsStaticPaths = Array.from(
   ]),
 );
 
+// Plugins can also contribute first-class organization tabs (e.g. the SSO
+// plugin's `organizationTabs`), which the shell routes by `path`. Those paths
+// must be pre-generated too, so collect them alongside the view paths.
+const pluginOrganizationTabPaths = authPlugins.flatMap((plugin) => {
+  const tabs = (plugin() as { organizationTabs?: Array<{ path: string }> })
+    .organizationTabs;
+  return tabs?.map((tab) => tab.path) ?? [];
+});
+
 export const organizationStaticPaths = Array.from(
-  new Set(pluginViewPaths("organization")),
+  new Set([...pluginViewPaths("organization"), ...pluginOrganizationTabPaths]),
 );
 
 /**
