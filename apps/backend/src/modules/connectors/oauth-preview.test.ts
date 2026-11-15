@@ -19,8 +19,6 @@ vi.mock("./repository", () => ({
   createOAuthStateRecord: vi.fn(),
   findOAuthAccountRecord: mocks.account,
   findOAuthStateRecord: vi.fn(),
-  updateOAuthAccountStatusRecord: vi.fn(),
-  updateOAuthAccountTokenRecord: vi.fn(),
 }));
 import { ConnectorOAuthService } from "./oauth-service";
 const registry = {
