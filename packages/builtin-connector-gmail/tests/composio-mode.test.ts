@@ -437,6 +437,89 @@ test("revokeAuthorization translates a Composio broker failure to GMAIL_UNAVAILA
   );
 });
 
+test("composio mode refreshOAuthToken is a terminal reauthorization (401), not a retryable 501", async () => {
+  const adapter = composioAdapter(fakeBroker());
+  // A 401 is terminal for the platform's refresh-error classifier
+  // (isRetryableOAuthRefreshError retries only 429 and >= 500), so the account
+  // is marked for reconnection instead of retried forever.
+  await assert.rejects(
+    adapter.refreshOAuthToken({ refreshToken: "refresh", scopes: [] }),
+    { statusCode: 401, code: "GMAIL_REAUTH_REQUIRED" },
+  );
+});
+
+test("finishAuthorization deletes the just-created connection once when the profile read fails, and surfaces the original error", async () => {
+  const deletes: string[] = [];
+  const broker = fakeBroker({
+    async getConnectedAccount(id) {
+      return { id, status: "ACTIVE", toolkit: "gmail" };
+    },
+    // The profile read (the one proxy call) fails terminally.
+    async proxy() {
+      throw new ComposioBrokerError(
+        "COMPOSIO_CONNECTION_INACTIVE",
+        404,
+        "no connected account",
+      );
+    },
+    async deleteConnectedAccount(id) {
+      deletes.push(id);
+    },
+  });
+  const adapter = composioAdapter(broker);
+  await assert.rejects(
+    adapter.finishAuthorization!({
+      callbackParams: { status: "success", connected_account_id: "ca_1" },
+      attemptRef: "ca_1",
+      ownerRef: "ws_workspace",
+    }),
+    { statusCode: 401, code: "GMAIL_REAUTH_REQUIRED" },
+  );
+  assert.deepEqual(deletes, ["ca_1"]);
+});
+
+test("finishAuthorization still surfaces the original profile error when the cleanup delete also fails", async () => {
+  const broker = fakeBroker({
+    async getConnectedAccount(id) {
+      return { id, status: "ACTIVE", toolkit: "gmail" };
+    },
+    async proxy() {
+      throw new ComposioBrokerError(
+        "COMPOSIO_CONNECTION_INACTIVE",
+        404,
+        "no connected account",
+      );
+    },
+    async deleteConnectedAccount() {
+      throw new ComposioBrokerError("COMPOSIO_UNAVAILABLE", 503, "down too");
+    },
+  });
+  const adapter = composioAdapter(broker);
+  // The original profile failure (GMAIL_REAUTH_REQUIRED), not the cleanup
+  // failure, is what surfaces.
+  await assert.rejects(
+    adapter.finishAuthorization!({
+      callbackParams: { status: "success", connected_account_id: "ca_1" },
+      attemptRef: "ca_1",
+      ownerRef: "ws_workspace",
+    }),
+    { statusCode: 401, code: "GMAIL_REAUTH_REQUIRED" },
+  );
+});
+
+test("revokeAuthorization resolves without calling the broker when the credential is not a Composio credential", async () => {
+  let deleteCalled = false;
+  const broker = fakeBroker({
+    async deleteConnectedAccount() {
+      deleteCalled = true;
+    },
+  });
+  const adapter = composioAdapter(broker);
+  // A Google access token stored before the mode was switched to composio.
+  await adapter.revokeAuthorization!({ accessToken: "ya29.google-token" });
+  assert.equal(deleteCalled, false);
+});
+
 test("composio mode refuses the standard OAuth2 flow and mailbox indexing", async () => {
   const adapter = composioAdapter(fakeBroker());
   await assert.rejects(
@@ -445,10 +528,6 @@ test("composio mode refuses the standard OAuth2 flow and mailbox indexing", asyn
       redirectUri: "https://sourceweft.example/callback",
       scopes: [],
     }),
-    { statusCode: 501, code: "GMAIL_MODE_UNSUPPORTED" },
-  );
-  await assert.rejects(
-    adapter.refreshOAuthToken({ refreshToken: "refresh", scopes: [] }),
     { statusCode: 501, code: "GMAIL_MODE_UNSUPPORTED" },
   );
   await assert.rejects(

@@ -632,7 +632,18 @@ export function createGmailConnectorAdapter(
         modeUnsupported();
       },
       async refreshOAuthToken(_input: OAuthRefreshInput) {
-        modeUnsupported();
+        // Composio holds and refreshes the Google token itself, so there is
+        // nothing to refresh here. A credential reaching this path (e.g. a
+        // Google token left behind when the mode was switched to composio)
+        // cannot be used in this mode, so this is a terminal reauthorization,
+        // not a transient failure: a 401 is treated as terminal by
+        // `isRetryableOAuthRefreshError`, whereas the old 501 was retried
+        // forever and never marked the account as needing reconnection.
+        throw new GmailAdapterError(
+          401,
+          "GMAIL_REAUTH_REQUIRED",
+          "Reconnect Gmail to continue",
+        );
       },
       async startAuthorization(input: ConnectorAuthorizationStartInput) {
         if (!composioConfig.broker) throw composioConfigMissingError();
@@ -684,7 +695,24 @@ export function createGmailConnectorAdapter(
           ownerRef: input.ownerRef,
           connectedAccountId: input.attemptRef,
         });
-        const identity = await profile(credential);
+        let identity;
+        try {
+          identity = await profile(credential);
+        } catch (error) {
+          // The connection is ACTIVE at Composio now. If reading the mailbox
+          // address fails, the platform never stores a credential pointing at
+          // it, so the state row is spent and the user must start again:
+          // delete the just-created connection best-effort rather than orphan
+          // it. A failed cleanup must not mask the original error.
+          try {
+            await composioConfig.broker.deleteConnectedAccount(
+              input.attemptRef,
+            );
+          } catch {
+            // Keep the original failure.
+          }
+          throw error;
+        }
         return {
           accessToken: credential,
           providerAccountId: identity.email,
@@ -695,9 +723,18 @@ export function createGmailConnectorAdapter(
       },
       async revokeAuthorization(input: { accessToken: string }) {
         if (!composioConfig.broker) throw composioConfigMissingError();
-        const { connectedAccountId } = decodeComposioCredential(
-          input.accessToken,
-        );
+        let connectedAccountId: string;
+        try {
+          ({ connectedAccountId } = decodeComposioCredential(
+            input.accessToken,
+          ));
+        } catch {
+          // The stored credential is not a Composio credential (e.g. a Google
+          // token stored before the mode was switched to composio). There is
+          // nothing to revoke at Composio, so let the local delete proceed
+          // rather than block it forever.
+          return;
+        }
         try {
           await composioConfig.broker.deleteConnectedAccount(connectedAccountId);
         } catch (error) {
