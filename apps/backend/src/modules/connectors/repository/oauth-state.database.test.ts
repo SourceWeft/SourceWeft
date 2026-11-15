@@ -101,3 +101,23 @@ test("finding a state row returns the authorization attempt it was created with"
 
   assert.equal(found?.attemptRef, "ca_test");
 });
+
+test("finding a state row created without an authorization attempt returns null", async () => {
+  const scope = await workspace();
+  const created = await states.createOAuthStateRecord({
+    stateHash: randomUUID(),
+    teamId: scope.teamId,
+    workspaceId: scope.workspaceId,
+    userId: "user-1",
+    connectorType: "gmail",
+    expiresAt: futureExpiry(),
+  });
+
+  const found = await states.findOAuthStateRecord({
+    stateHash: created.stateHash,
+    connectorType: "gmail",
+    now: new Date(),
+  });
+
+  assert.equal(found?.attemptRef, null);
+});
