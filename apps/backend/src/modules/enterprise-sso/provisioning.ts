@@ -350,10 +350,30 @@ async function findSsoMember(
 }
 
 /**
+ * Role precedence for choosing which duplicate member row to keep: a role
+ * string containing `owner` outranks one containing `admin`, which outranks the
+ * rest. Substring (case-insensitive) so a composite role like `owner,member`
+ * still counts as owner — a superset of {@link syncExistingMemberRole}'s owner
+ * check, so no row this treats as owner can ever be demoted or deleted.
+ */
+function memberRoleRank(role: unknown): 0 | 1 | 2 {
+  const value = typeof role === "string" ? role.toLowerCase() : "";
+  if (value.includes("owner")) return 2;
+  if (value.includes("admin")) return 1;
+  return 0;
+}
+
+/**
  * Re-read the member rows and collapse any duplicates — a check-then-insert race
  * (another API process, or an add that slipped past the mutex) can leave more
- * than one row for the same user in the organization. The oldest is kept and the
- * rest deleted; only row ids are logged. Returns the surviving row.
+ * than one row for the same user in the organization. This runs on every
+ * sign-in, so it must never drop a privileged row: the survivor is the HIGHEST
+ * role (owner > admin > rest), then the oldest `createdAt`, then the smallest
+ * `id` as a final deterministic tie-break. A row whose role contains `owner` is
+ * never deleted. If two rows both contain `owner` — or the survivor cannot be
+ * decided confidently — nothing is deleted and a warning is logged with the
+ * member ids; the (oldest) owner row is still returned so role sync operates on
+ * an owner and leaves it untouched. Returns the surviving row.
  */
 async function reconcileSsoMemberRows(
   context: SsoProvisioningContext,
@@ -370,8 +390,34 @@ async function reconcileSsoMemberRows(
   if (rows.length <= 1) {
     return rows[0] ?? null;
   }
+
+  const byId = (a: MemberRow, b: MemberRow) => {
+    const left = String(a.id);
+    const right = String(b.id);
+    return left < right ? -1 : left > right ? 1 : 0;
+  };
+
+  const owners = rows.filter((row) => memberRoleRank(row.role) === 2);
+  if (owners.length > 1) {
+    // Two rows both claim owner: collapsing either could drop an owner. Leave
+    // every row in place for a human and keep role sync on the oldest owner.
+    logger.warn("sso_duplicate_member_rows_unresolved", {
+      organizationId: input.organizationId,
+      userId: input.userId,
+      reason: "multiple_owner_rows",
+      memberIds: rows.map((row) => String(row.id)),
+    });
+    return [...owners].sort(
+      (a, b) => toMillis(a.createdAt) - toMillis(b.createdAt) || byId(a, b),
+    )[0]!;
+  }
+
+  // Highest role first, then oldest, then smallest id — fully deterministic.
   const sorted = [...rows].sort(
-    (a, b) => toMillis(a.createdAt) - toMillis(b.createdAt),
+    (a, b) =>
+      memberRoleRank(b.role) - memberRoleRank(a.role) ||
+      toMillis(a.createdAt) - toMillis(b.createdAt) ||
+      byId(a, b),
   );
   const survivor = sorted[0]!;
   const duplicates = sorted.slice(1);
@@ -379,9 +425,15 @@ async function reconcileSsoMemberRows(
     organizationId: input.organizationId,
     userId: input.userId,
     keptMemberId: String(survivor.id),
+    keptRole: typeof survivor.role === "string" ? survivor.role : null,
     deletedMemberIds: duplicates.map((row) => String(row.id)),
   });
   for (const row of duplicates) {
+    if (memberRoleRank(row.role) === 2) {
+      // Unreachable (a lone owner always outranks and survives), but never
+      // delete an owner row even if the invariant above is violated.
+      continue;
+    }
     await context.adapter.delete({
       model: "member",
       where: [{ field: "id", value: String(row.id) }],
