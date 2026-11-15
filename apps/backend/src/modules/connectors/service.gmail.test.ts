@@ -7,11 +7,16 @@ import type { ConnectorRegistry } from "./registry";
 
 const mocks = vi.hoisted(() => ({
   archiveConnectorSources: vi.fn(),
+  deleteOAuthAccountRecord: vi.fn(),
   findOAuthAccountRecord: vi.fn(),
   findSourceConnectorRecord: vi.fn(),
   getConnectorScheduleStatus: vi.fn(),
+  hardDeleteSourceConnectorRecord: vi.fn(),
+  hasOtherSourceConnectorOAuthAccountReferences: vi.fn(),
+  listWorkspaceSourceConnectorRecordsByOAuthAccount: vi.fn(),
   putConnectorSchedule: vi.fn(),
   requireConnectorWorkspace: vi.fn(),
+  revokeStoredAuthorization: vi.fn(),
   updateSourceConnectorRecord: vi.fn(),
 }));
 
@@ -21,13 +26,20 @@ vi.mock("./permissions", () => ({
 
 vi.mock("./repository", () => ({
   archiveConnectorSources: mocks.archiveConnectorSources,
+  deleteOAuthAccountRecord: mocks.deleteOAuthAccountRecord,
   findOAuthAccountRecord: mocks.findOAuthAccountRecord,
   findSourceConnectorRecord: mocks.findSourceConnectorRecord,
   getConnectorScheduleStatus: mocks.getConnectorScheduleStatus,
+  hardDeleteSourceConnectorRecord: mocks.hardDeleteSourceConnectorRecord,
+  hasOtherSourceConnectorOAuthAccountReferences:
+    mocks.hasOtherSourceConnectorOAuthAccountReferences,
+  listWorkspaceSourceConnectorRecordsByOAuthAccount:
+    mocks.listWorkspaceSourceConnectorRecordsByOAuthAccount,
   putConnectorSchedule: mocks.putConnectorSchedule,
   updateSourceConnectorRecord: mocks.updateSourceConnectorRecord,
 }));
 
+import type { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorService } from "./service";
 
 const connector = {
@@ -60,25 +72,31 @@ const gmailConfigSchema = {
 };
 
 function service() {
-  return new ConnectorService({
-    getManifest: () => ({
-      type: "gmail",
-      displayName: "Gmail",
-      configSchema: gmailConfigSchema,
-      sync: {
-        supportsIncremental: true,
-        defaultFrequencyMinutes: 360,
-        minFrequencyMinutes: 60,
-        resources: [
-          {
-            type: "gmail_message",
-            displayName: "Gmail message",
-            supportsDeleteDetection: true,
-          },
-        ],
-      },
-    }),
-  } as unknown as ConnectorRegistry);
+  return new ConnectorService(
+    {
+      getManifest: () => ({
+        type: "gmail",
+        displayName: "Gmail",
+        configSchema: gmailConfigSchema,
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          minFrequencyMinutes: 60,
+          resources: [
+            {
+              type: "gmail_message",
+              displayName: "Gmail message",
+              supportsDeleteDetection: true,
+            },
+          ],
+        },
+      }),
+    } as unknown as ConnectorRegistry,
+    undefined,
+    {
+      revokeStoredAuthorization: mocks.revokeStoredAuthorization,
+    } as unknown as ConnectorOAuthService,
+  );
 }
 
 test("Gmail reconnect binds only the same provider identity in the workspace", async () => {
@@ -195,7 +213,11 @@ test("updates a connector without re-validating an untouched stored config", asy
   vi.clearAllMocks();
   const storedConnector = {
     ...connector,
-    configJson: { liveSearchEnabled: true, indexingEnabled: false, labelIds: labelIds(21) },
+    configJson: {
+      liveSearchEnabled: true,
+      indexingEnabled: false,
+      labelIds: labelIds(21),
+    },
   };
   mocks.requireConnectorWorkspace.mockResolvedValue({
     workspace: { id: "workspace", organizationId: "team" },
@@ -270,4 +292,154 @@ test("accepts a config update within the declared limits", async () => {
   });
 
   assert.deepEqual(result.connector.configJson, nextConfig);
+});
+
+const accountSecret = {
+  id: "old-account",
+  teamId: "team",
+  workspaceId: "workspace",
+  connectorType: "gmail",
+  accessTokenEncrypted: "enc(broker-credential)",
+  refreshTokenEncrypted: null,
+};
+
+test("hard delete revokes the stored authorization before any local row is removed", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector);
+  mocks.hasOtherSourceConnectorOAuthAccountReferences.mockResolvedValue(false);
+  mocks.findOAuthAccountRecord.mockResolvedValue(accountSecret);
+  const callOrder: string[] = [];
+  mocks.revokeStoredAuthorization.mockImplementation(async () => {
+    callOrder.push("revoke");
+  });
+  mocks.hardDeleteSourceConnectorRecord.mockImplementation(async () => {
+    callOrder.push("delete");
+    return {
+      connectorDeleted: true,
+      sourcesDeleted: 2,
+      documentsDeleted: 5,
+      authorizationDeleted: true,
+    };
+  });
+
+  const result = await service().deleteConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorId: "connector",
+  });
+
+  assert.deepEqual(callOrder, ["revoke", "delete"]);
+  assert.deepEqual(
+    mocks.revokeStoredAuthorization.mock.calls[0]?.[0],
+    accountSecret,
+  );
+  assert.equal(result.hardDeleted, true);
+});
+
+test("hard delete aborts and keeps the connector, its sources and the account when the provider revoke fails", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector);
+  mocks.hasOtherSourceConnectorOAuthAccountReferences.mockResolvedValue(false);
+  mocks.findOAuthAccountRecord.mockResolvedValue(accountSecret);
+  mocks.revokeStoredAuthorization.mockRejectedValue(
+    Object.assign(new Error("provider is down"), {
+      statusCode: 502,
+      code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED",
+    }),
+  );
+
+  await assert.rejects(
+    service().deleteConnector({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "connector",
+    }),
+    { code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED" },
+  );
+  assert.equal(mocks.hardDeleteSourceConnectorRecord.mock.calls.length, 0);
+});
+
+test("deleteOAuthAccount revokes the stored authorization before deleting the account row", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findOAuthAccountRecord.mockResolvedValue(accountSecret);
+  mocks.listWorkspaceSourceConnectorRecordsByOAuthAccount.mockResolvedValue([]);
+  const callOrder: string[] = [];
+  mocks.revokeStoredAuthorization.mockImplementation(async () => {
+    callOrder.push("revoke");
+  });
+  mocks.deleteOAuthAccountRecord.mockImplementation(async () => {
+    callOrder.push("delete");
+    return true;
+  });
+
+  const result = await service().deleteOAuthAccount({
+    workspaceId: "workspace",
+    userId: "user",
+    accountId: "old-account",
+  });
+
+  assert.deepEqual(callOrder, ["revoke", "delete"]);
+  assert.deepEqual(
+    mocks.revokeStoredAuthorization.mock.calls[0]?.[0],
+    accountSecret,
+  );
+  assert.equal(result.deleted, true);
+});
+
+test("deleteOAuthAccount aborts and keeps the account row when the provider revoke fails", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findOAuthAccountRecord.mockResolvedValue(accountSecret);
+  mocks.listWorkspaceSourceConnectorRecordsByOAuthAccount.mockResolvedValue([]);
+  mocks.revokeStoredAuthorization.mockRejectedValue(
+    Object.assign(new Error("provider is down"), {
+      statusCode: 502,
+      code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED",
+    }),
+  );
+
+  await assert.rejects(
+    service().deleteOAuthAccount({
+      workspaceId: "workspace",
+      userId: "user",
+      accountId: "old-account",
+    }),
+    { code: "CONNECTOR_AUTHORIZATION_REVOKE_FAILED" },
+  );
+  assert.equal(mocks.deleteOAuthAccountRecord.mock.calls.length, 0);
+});
+
+test("disabling a connector never revokes the stored authorization", async () => {
+  vi.clearAllMocks();
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector);
+  mocks.updateSourceConnectorRecord.mockResolvedValue({
+    ...connector,
+    status: "disabled",
+  });
+  mocks.putConnectorSchedule.mockResolvedValue(undefined);
+
+  const result = await service().deleteConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorId: "connector",
+    disable: true,
+  });
+
+  assert.equal(result.disabled, true);
+  assert.equal(mocks.revokeStoredAuthorization.mock.calls.length, 0);
+  assert.equal(mocks.findOAuthAccountRecord.mock.calls.length, 0);
 });
