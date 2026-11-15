@@ -3621,7 +3621,6 @@
     }
   },
   "dashboardBlogAdmin": {
-    "eyebrow": "Blog · Admin",
     "heading": "Blog articles",
     "description": "Import Markdown articles, preview each language version, and decide which ones are public.",
     "refresh": "Reload the list",
@@ -3674,7 +3673,17 @@
       "minutes": "{count, plural, one {About # minute} other {About # minutes}}",
       "excerpt": "Excerpt",
       "preview": "Preview",
-      "loadingPreview": "Loading preview…"
+      "loadingPreview": "Loading preview…",
+      "back": "All articles",
+      "languages": "Language versions",
+      "notFound": "There is no article with the ID {articleId}."
+    },
+    "count": "{shown} of {total} articles",
+    "columns": {
+      "article": "Article",
+      "category": "Category",
+      "languages": "Languages",
+      "imported": "Last imported"
     }
   },
   "dashboardAdmin": {

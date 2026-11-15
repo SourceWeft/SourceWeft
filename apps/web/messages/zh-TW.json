@@ -3621,7 +3621,6 @@
     }
   },
   "dashboardBlogAdmin": {
-    "eyebrow": "部落格 · 管理",
     "heading": "部落格文章",
     "description": "匯入 Markdown 文章，預覽每個語言版本，並決定哪些公開。",
     "refresh": "重新載入列表",
@@ -3674,7 +3673,17 @@
       "minutes": "約 {count} 分鐘",
       "excerpt": "摘要",
       "preview": "預覽",
-      "loadingPreview": "正在載入預覽…"
+      "loadingPreview": "正在載入預覽…",
+      "back": "全部文章",
+      "languages": "語言版本",
+      "notFound": "沒有 ID 為 {articleId} 的文章。"
+    },
+    "count": "共 {total} 篇，顯示 {shown} 篇",
+    "columns": {
+      "article": "文章",
+      "category": "分類",
+      "languages": "語言版本",
+      "imported": "上次匯入"
     }
   },
   "dashboardAdmin": {

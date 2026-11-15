@@ -13,14 +13,9 @@ vi.mock("../../../../../lib/blog-admin", async (original) => ({
   ...api,
 }));
 
-import {
-  BlogAdmin,
-  blogPostPublicPath,
-  filterBlogGroups,
-  groupBlogPosts,
-  visibilityOf,
-} from "./blog-admin";
-import { button, flush, mountWithIntl, typeInto, unmountAll } from "@/test/react";
+import { BlogAdmin } from "./blog-admin";
+import { blogPosts as posts } from "./blog-posts.fixture";
+import { flush, mountWithIntl, typeInto, unmountAll } from "@/test/react";
 
 let container: HTMLDivElement;
 afterEach(async () => {
@@ -28,91 +23,10 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-const post = (overrides: Record<string, unknown> = {}) => ({
-  id: "post_mcp_en",
-  articleId: "what-is-mcp",
-  locale: "en",
-  slug: "what-is-mcp",
-  status: "draft",
-  syncEnabled: true,
-  title: "What is MCP?",
-  excerpt: "An open protocol.",
-  category: "Guides",
-  tags: ["MCP"],
-  readingTimeMinutes: 5,
-  publishedAt: null,
-  syncedAt: "2026-11-15T01:00:00.000Z",
-  source: "markdown",
-  ...overrides,
-});
-
-const posts = [
-  post(),
-  post({ id: "post_mcp_tw", locale: "zh-TW", slug: "what-is-mcp-zh-tw", title: "什麼是 MCP？" }),
-  post({
-    id: "post_mcp_cn",
-    locale: "zh-CN",
-    slug: "what-is-mcp-zh-cn",
-    title: "什么是 MCP？",
-    status: "published",
-    publishedAt: "2026-11-16T00:00:00.000Z",
-  }),
-  post({
-    id: "post_dir_en",
-    articleId: "mcp-server-directories-compared",
-    slug: "mcp-server-directories-compared",
-    title: "MCP server directories compared",
-    category: "Comparisons",
-    syncedAt: "2026-11-16T02:00:00.000Z",
-    status: "published",
-    publishedAt: "2026-11-16T02:00:00.000Z",
-  }),
-];
-
 async function render() {
   ({ container } = await mountWithIntl(<BlogAdmin />));
   await flush(2);
 }
-
-async function click(label: string) {
-  await act(async () => {
-    button(label)!.click();
-  });
-  await flush(2);
-}
-
-test("groups versions by article, in a fixed language order, newest first", () => {
-  const groups = groupBlogPosts(posts as never);
-  expect(groups.map((group) => group.articleId)).toEqual([
-    "mcp-server-directories-compared",
-    "what-is-mcp",
-  ]);
-  expect(groups[1]?.versions.map((version) => version.locale)).toEqual([
-    "en",
-    "zh-CN",
-    "zh-TW",
-  ]);
-  expect(groups[1]?.title).toBe("What is MCP?");
-});
-
-test("search matches id, title and slug; the status filter matches any version", () => {
-  const groups = groupBlogPosts(posts as never);
-  expect(filterBlogGroups(groups, "什么是", "all").map((g) => g.articleId)).toEqual(["what-is-mcp"]);
-  expect(filterBlogGroups(groups, "zh-tw", "all").map((g) => g.articleId)).toEqual(["what-is-mcp"]);
-  expect(filterBlogGroups(groups, "", "draft").map((g) => g.articleId)).toEqual(["what-is-mcp"]);
-  expect(filterBlogGroups(groups, "", "published")).toHaveLength(2);
-  expect(filterBlogGroups(groups, "nothing", "all")).toHaveLength(0);
-});
-
-test("visibility and public address", () => {
-  expect(visibilityOf({ status: "published", syncEnabled: true })).toBe("published");
-  expect(visibilityOf({ status: "published", syncEnabled: false })).toBe("hidden");
-  expect(visibilityOf({ status: "draft", syncEnabled: true })).toBe("draft");
-  expect(blogPostPublicPath({ locale: "en", slug: "what-is-mcp" })).toBe("/blog/what-is-mcp");
-  expect(blogPostPublicPath({ locale: "zh-TW", slug: "what-is-mcp-zh-tw" })).toBe(
-    "/zh-TW/blog/what-is-mcp-zh-tw",
-  );
-});
 
 test("lists articles with one status per language", async () => {
   api.listBlogAdminPosts.mockResolvedValue({ items: posts });
@@ -135,50 +49,14 @@ test("an empty blog says how to add the first article; a failed load says so", a
   expect(container.textContent).toContain("offline");
 });
 
-test("selecting an article previews it, and publishing updates the list", async () => {
+test("each article and each language version links to the article's own page", async () => {
   api.listBlogAdminPosts.mockResolvedValue({ items: posts });
-  api.getBlogAdminPost.mockResolvedValue({
-    ...post(),
-    contentHtml: '<h2 id="hello">Hello</h2><p>Body.</p>',
-  });
-  api.setBlogAdminPostStatus.mockResolvedValue({
-    ...post({ status: "published", publishedAt: "2026-11-17T00:00:00.000Z" }),
-    contentHtml: '<h2 id="hello">Hello</h2><p>Body.</p>',
-  });
   await render();
-
-  await act(async () => {
-    [...container.querySelectorAll("button")]
-      .find((node) => node.textContent?.includes("What is MCP?"))!
-      .click();
-  });
-  await flush(2);
-  expect(api.getBlogAdminPost).toHaveBeenCalledWith("post_mcp_en");
-  expect(container.querySelector(".blog-content h2")?.textContent).toBe("Hello");
-  expect(container.textContent).toContain("/blog/what-is-mcp");
-  expect(button("Unpublish")).toBeUndefined();
-
-  await click("Publish");
-  expect(api.setBlogAdminPostStatus).toHaveBeenCalledWith("post_mcp_en", "published");
-  expect(container.textContent).toContain("en · Published");
-  expect(button("Unpublish")).toBeDefined();
-  expect(container.textContent).toContain("View on site");
-});
-
-test("a status change that fails keeps the article as it was and says so", async () => {
-  api.listBlogAdminPosts.mockResolvedValue({ items: posts });
-  api.getBlogAdminPost.mockResolvedValue({ ...post(), contentHtml: "<p>Body.</p>" });
-  api.setBlogAdminPostStatus.mockRejectedValue(new Error("Forbidden"));
-  await render();
-  await act(async () => {
-    [...container.querySelectorAll("button")]
-      .find((node) => node.textContent?.includes("What is MCP?"))!
-      .click();
-  });
-  await flush(2);
-  await click("Publish");
-  expect(container.textContent).toContain("Forbidden");
-  expect(container.textContent).toContain("en · Draft");
+  const hrefs = [...container.querySelectorAll("tbody a")].map((node) => node.getAttribute("href"));
+  expect(hrefs).toContain("/dashboard/admin/blog/what-is-mcp");
+  expect(hrefs).toContain("/dashboard/admin/blog/what-is-mcp?locale=zh-CN");
+  expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+  expect(container.textContent).toContain("2 of 2 articles");
 });
 
 // jsdom's File has no text(); browsers do.
