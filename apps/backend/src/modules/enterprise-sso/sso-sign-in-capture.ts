@@ -1,3 +1,5 @@
+import { tryGetCurrentAuthEndpointContext } from "@better-auth/core/context";
+
 /**
  * Per-request facts the `@better-auth/sso@1.7.7` plugin does not pass to
  * `provisionUser`: whether THIS sign-in created the user row, and the id of the
@@ -5,21 +7,19 @@
  *
  * The plugin creates the user and the session inside the sign-in transaction and
  * only then — after the transaction commits — calls `provisionUser` with just
- * `{ user, userInfo, token, provider }` (no `isRegister`, no session, no endpoint
- * context). So the guard registers `user.create.after` / `session.create.after`
- * database hooks that run (and, being queued as after-transaction hooks, are
- * awaited) between the commit and `provisionUser`; they record the two facts
- * here keyed by userId, and {@link provisionSsoUser} reads and clears them.
+ * `{ user, userInfo, token, provider }` (no `isRegister`, no session). So the
+ * guard registers `user.create.after` / `session.create.after` database hooks
+ * that run (and, being queued as after-transaction hooks, are awaited) between
+ * the commit and `provisionUser`, and record the two facts here.
  *
- * Keying by userId is exact in the normal case — one SSO sign-in creates at most
- * one user and one session per user per request — and the hooks only record on
- * an SSO callback path, so a concurrent password sign-in's session (created on a
- * different endpoint) is never captured here. Two concurrent sign-ins of the
- * SAME existing identity can overwrite each other's `sessionId`, but that path
- * ends in "already a member" (handled as success, no session revocation), so the
- * stale entry is never read. A user whose session creation itself fails leaves a
- * `userCreated` entry that `provisionUser` never reads; such residue is rare and
- * bounded (a later sign-in by the same user overwrites it).
+ * The capture is keyed by the REQUEST's endpoint context object — the same
+ * object better-auth threads through the whole request via `runWithEndpointContext`
+ * and hands every database hook (and which `provisionUser` reads back through
+ * `tryGetCurrentAuthEndpointContext`). Two concurrent sign-ins of one user run in
+ * two different endpoint contexts, so they can never cross-read each other's
+ * capture (the earlier user-id key could). A `WeakMap` lets the entry be
+ * collected with its request even if `provisionUser` never takes it (e.g. a
+ * sign-in whose session creation itself failed).
  */
 export type SsoSignInCapture = {
   /** True only when this sign-in created the user row. */
@@ -28,33 +28,48 @@ export type SsoSignInCapture = {
   sessionId?: string;
 };
 
-const captures = new Map<string, SsoSignInCapture>();
+const captures = new WeakMap<object, SsoSignInCapture>();
 
-function entryFor(userId: string): SsoSignInCapture {
-  const existing = captures.get(userId);
+function entryFor(context: object): SsoSignInCapture {
+  const existing = captures.get(context);
   if (existing) {
     return existing;
   }
   const created: SsoSignInCapture = { userCreated: false };
-  captures.set(userId, created);
+  captures.set(context, created);
   return created;
 }
 
-/** Record that an SSO sign-in created this user row (user.create.after hook). */
-export function recordSsoCreatedUser(userId: string): void {
-  entryFor(userId).userCreated = true;
+/**
+ * Record that an SSO sign-in created this user row (`user.create.after` hook).
+ * `context` is the endpoint context the hook receives.
+ */
+export function recordSsoCreatedUser(context: object): void {
+  entryFor(context).userCreated = true;
 }
 
-/** Record the session an SSO sign-in created (session.create.after hook). */
-export function recordSsoSignInSession(userId: string, sessionId: string): void {
-  entryFor(userId).sessionId = sessionId;
+/**
+ * Record the session an SSO sign-in created (`session.create.after` hook).
+ * `context` is the endpoint context the hook receives.
+ */
+export function recordSsoSignInSession(
+  context: object,
+  sessionId: string,
+): void {
+  entryFor(context).sessionId = sessionId;
 }
 
-/** Read and clear this sign-in's capture for `userId`. */
-export function takeSsoSignInCapture(
-  userId: string,
-): SsoSignInCapture | undefined {
-  const capture = captures.get(userId);
-  captures.delete(userId);
+/**
+ * Read and clear this request's capture, resolving the endpoint context from the
+ * async context `provisionUser` runs in. Returns `undefined` outside a request
+ * or when nothing was recorded.
+ */
+export function takeSsoSignInCapture(): SsoSignInCapture | undefined {
+  const context = tryGetCurrentAuthEndpointContext();
+  if (!context) {
+    return undefined;
+  }
+  const capture = captures.get(context);
+  captures.delete(context);
   return capture;
 }

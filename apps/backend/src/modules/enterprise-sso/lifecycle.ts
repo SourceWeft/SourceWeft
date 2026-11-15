@@ -40,12 +40,15 @@ export async function deleteSsoProvidersForOrganization(input: {
     [input.organizationId],
   );
   for (const row of rows) {
-    // Remove the SSO account rows first (their `providerId` is the ssoProvider's
-    // providerId), then the provider row itself.
-    await database.query(`delete from account where "providerId" = $1`, [
+    // Delete the provider row FIRST, then its linked `account` rows (whose
+    // `providerId` is the ssoProvider's providerId). Doing it in this order means
+    // a concurrent sign-in callback cannot link a NEW account between the two
+    // deletes: once the provider is gone the callback has nothing to link to, so
+    // the account sweep below is final.
+    await database.query(`delete from "ssoProvider" where "providerId" = $1`, [
       row.providerId,
     ]);
-    await database.query(`delete from "ssoProvider" where "providerId" = $1`, [
+    await database.query(`delete from account where "providerId" = $1`, [
       row.providerId,
     ]);
     try {

@@ -965,12 +965,12 @@ test("twelve simultaneous sign-ins through one provider complete without hanging
         `sign-in ${i} errored: ${r.callback!.headers.get("location")}`,
       );
     }
-    // The point of this test is the absence of a hang. Member-count exactness is
-    // NOT asserted here: better-auth's addMember has a check-then-insert residual
-    // race (acknowledged in billing-host's seat check) that twelve simultaneous
-    // sign-ins of ONE shared identity can trip, which the two-concurrent test —
-    // whose narrow window reliably yields one member — covers instead.
-    assert.ok(await userRow("load@acme.com"), "the shared identity exists and is not deleted");
+    // No hang, and — because the membership step is serialized per (org, user)
+    // and its rows de-duplicated — exactly one member row despite the twelve
+    // concurrent sign-ins of one shared identity.
+    const loadUser = await userRow("load@acme.com");
+    assert.ok(loadUser, "the shared identity exists and is not deleted");
+    assert.equal(await memberCount(loadUser.id), 1, "exactly one member row");
   } finally {
     spy.mockRestore();
   }
@@ -1036,7 +1036,8 @@ test("registering with a role attribute carries the claim into the mapping", asy
     adminRoleValue: "sw-admins",
   });
   assert.equal(response.status, 200, await response.clone().text());
-  assert.equal((await storedExtraFields(providerId)).groups, "groups");
+  // The role claim is carried under the namespaced key, never the tenant's name.
+  assert.equal((await storedExtraFields(providerId)).ssoRoleClaim, "groups");
 }, 200_000);
 
 test("a provider configured only with roleAttribute maps the admin group end to end", async () => {
@@ -1072,29 +1073,40 @@ test("a provider configured only with roleAttribute maps the admin group end to 
   assert.equal(await memberRoleIn(organizationId, user.userId), "admin");
 }, 200_000);
 
-test("updating the role attribute adds the new claim and keeps the old one", async () => {
+test("updating the role attribute overwrites the namespaced claim (no stale role fields)", async () => {
   const { response, providerId } = await registerOidcWithRoleAttribute({
     domain: "updrole.example",
     roleAttribute: "groups",
     adminRoleValue: "sw-admins",
   });
   assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await storedExtraFields(providerId)).ssoRoleClaim, "groups");
 
-  const update = await ownerA.client.jsonRequest("/sso/update-provider", {
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
     providerId,
     roleAttribute: "roles",
   });
   assert.equal(update.status, 200, await update.clone().text());
 
   const extraFields = await storedExtraFields(providerId);
-  assert.equal(extraFields.roles, "roles", "the new claim is carried");
-  assert.equal(extraFields.groups, "groups", "the earlier claim is preserved");
+  assert.equal(extraFields.ssoRoleClaim, "roles", "the claim is overwritten in place");
+  assert.ok(!("groups" in extraFields), "no stale role field accumulates");
+  assert.ok(!("roles" in extraFields), "the attribute name never becomes a mapping key");
 }, 200_000);
 
-test("a reserved role attribute is rejected with SSO_INVALID_ROLE_ATTRIBUTE", async () => {
+test("a role attribute with control characters is rejected; a user-column name is accepted", async () => {
+  // The tenant's attribute name may be any claim name now (it is namespaced):
+  // `email` — previously reserved — is accepted.
+  const ok = await registerOidcWithRoleAttribute({
+    domain: "emailrole.example",
+    roleAttribute: "email",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(ok.response.status, 200, await ok.response.clone().text());
+
   const { response } = await registerOidcWithRoleAttribute({
     domain: "badrole.example",
-    roleAttribute: "email",
+    roleAttribute: "bad\u0000name",
     adminRoleValue: "sw-admins",
   });
   assert.equal(response.status, 400, await response.clone().text());
@@ -1211,7 +1223,7 @@ test("a combined update with oidcConfig scopes + role attribute keeps a custom m
     mapping?: { email?: string; extraFields?: Record<string, unknown> };
   };
   assert.equal(oidc.mapping?.email, "mail", "the custom email mapping is preserved");
-  assert.equal(oidc.mapping?.extraFields?.groups, "groups", "the role claim is carried");
+  assert.equal(oidc.mapping?.extraFields?.ssoRoleClaim, "groups", "the role claim is carried");
 }, 200_000);
 
 // ── R9: identity fields lock after an account is linked ─────────────────────
@@ -1234,7 +1246,7 @@ test("changing the OIDC issuer after a sign-in returns 409 SSO_PROVIDER_IDENTITY
   assert.equal(body.code, SSO_ERROR_CODES.providerIdentityLocked);
   assert.equal(
     body.message,
-    "已有成员通过该身份源登录后，这些设置不能再修改。如需修改，请删除该身份源后重新添加。",
+    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新创建。",
   );
 }, 200_000);
 
@@ -1357,4 +1369,200 @@ test("an admin is demoted when the IdP stops asserting the admin value; an owner
     body: { email: "owner@r10role.example" },
   });
   assert.equal(await memberRoleIn(organizationId, ownerUser.userId), "owner", "owner unchanged");
+}, 200_000);
+
+// ── B2: tenant-controlled attribute mapping cannot touch user columns ────────
+
+async function userColumn(userId: string, column: string): Promise<unknown> {
+  const result = await harness.schema.database.query<Record<string, unknown>>(
+    `select "${column}" as value from "user" where id = $1`,
+    [userId],
+  );
+  return result.rows[0]?.value ?? null;
+}
+
+test("a role claim named `role` promotes to admin without writing the user's role column", async () => {
+  const { response, providerId, organizationId } = await registerOidcWithRoleAttribute({
+    domain: "rolecol.example",
+    roleAttribute: "role",
+    adminRoleValue: "sw-admins",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  await setProviderDomainVerified(harness, providerId);
+
+  const email = "admin@rolecol.example";
+  await signInViaSso({
+    claims: { sub: "sub-rolecol", email, name: "Role Col", role: "sw-admins" },
+    body: { email },
+  });
+  const user = await userRow(email);
+  assert.ok(user, "the SSO user is created");
+  assert.equal(await memberRoleIn(organizationId, user.id), "admin", "promoted via the `role` claim");
+  assert.equal(await userColumn(user.id, "role"), null, "the IdP's role claim never wrote the user's role column");
+}, 200_000);
+
+test("a role claim named `email` is accepted and promotes to admin", async () => {
+  const email = "boss@emailrole2.example";
+  const { response, providerId, organizationId } = await registerOidcWithRoleAttribute({
+    domain: "emailrole2.example",
+    roleAttribute: "email",
+    adminRoleValue: email,
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  await setProviderDomainVerified(harness, providerId);
+
+  await signInViaSso({
+    claims: { sub: "sub-emailrole2", email, name: "Email Role" },
+    body: { email },
+  });
+  const user = await userRow(email);
+  assert.ok(user, "the SSO user is created");
+  assert.equal(await memberRoleIn(organizationId, user.id), "admin", "promoted via the `email` claim value");
+  // The user's email is the mapped email (found by it), uncorrupted by the role.
+  assert.equal(await userColumn(user.id, "email"), email, "the email column is the real email");
+}, 200_000);
+
+async function registerWithExtraFields(
+  domain: string,
+  extraFields: Record<string, unknown>,
+): Promise<Response> {
+  const organizationId = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+    name: `ExtraFields ${domain}`,
+  });
+  return ownerA.client.withFreshIp().jsonRequest("/sso/register", {
+    providerId: providerIdFor("extra", domain),
+    issuer: mock.issuer,
+    domain,
+    organizationId,
+    oidcConfig: {
+      clientId: mock.clientId,
+      clientSecret: mock.clientSecret,
+      tokenEndpointAuthentication: "client_secret_basic",
+      skipDiscovery: true,
+      pkce: false,
+      scopes: ["openid", "email", "profile"],
+      authorizationEndpoint: `${mock.issuer}/authorize`,
+      tokenEndpoint: `${mock.issuer}/token`,
+      jwksEndpoint: `${mock.issuer}/jwks`,
+      userInfoEndpoint: `${mock.issuer}/userinfo`,
+      mapping: { email: "email", name: "name", extraFields },
+    },
+  });
+}
+
+test("mapping.extraFields using a user-table field name is rejected", async () => {
+  const response = await registerWithExtraFields("extrabad.example", {
+    username: "preferred_username",
+  });
+  assert.equal(response.status, 400, await response.clone().text());
+  assert.equal(await codeOf(response), SSO_ERROR_CODES.invalidAttributeMapping);
+}, 200_000);
+
+test("mapping.extraFields with a non-user field name is accepted", async () => {
+  const response = await registerWithExtraFields("extraok.example", {
+    department: "dept",
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+}, 200_000);
+
+// ── A crafted multi-@ email never matches a provider domain ─────────────────
+
+test("an email with more than one @ is rejected, creating no user", async () => {
+  const crafted = "victim@acme.com@evil.com";
+  const { signIn, callback, client } = await signInViaSso({
+    claims: { sub: "sub-multiat", email: crafted, name: "Multi At", groups: [] },
+    body: { providerId: acmeProviderId },
+  });
+  assert.equal(signIn.status, 200, await signIn.clone().text());
+  assert.ok(callback);
+  assert.equal(callback.status, 302);
+  assert.ok(
+    callback.headers.get("location")!.includes(SSO_ERROR_CODES.accountLinkDenied),
+    `expected SSO_ACCOUNT_LINK_DENIED, got ${callback.headers.get("location")}`,
+  );
+  assert.equal(await sessionUser(client), null, "no session");
+  assert.equal(await userRow(crafted), null, "no user is created for the crafted address");
+}, 200_000);
+
+// ── B3: no second pooled connection while the sign-in transaction holds the lock
+
+test("B1: a no-fetch decrypt serves an expired-TTL team key from memory with no pooled key read, the fetch path re-reads it, and it fails closed once the key is gone", async () => {
+  // Imported here, not at module scope: a top-level import would pull in the
+  // eager `@sourceweft/db` pool (team-secrets imports it) at file-eval, before
+  // the harness repoints DATABASE_URL at the isolated clone — binding the pool
+  // to the ambient database. The harness has already imported `@sourceweft/db`
+  // against the clone, so this shares that same pool and the same key cache the
+  // secret-storage decrypt path uses.
+  //
+  // secret-storage.wrapAdapter passes `noFetch: true` for the adapter it hands a
+  // transaction (it opens the stored provider secret INSIDE the sign-in /
+  // provider-update transaction, which holds the provider row lock). This proves
+  // the contract that wiring depends on: a no-fetch decrypt never issues the
+  // pooled `team_data_keys` read whose second connection could deadlock a held
+  // lock, while the ordinary fetch path — the pre-fix behavior — does.
+  const {
+    encryptTeamSecret,
+    decryptTeamSecret,
+    expireTeamDataKeyCacheTtl,
+    clearTeamDataKeyCache,
+  } = await import("../../shared/team-secrets");
+
+  const teamId = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+    name: "B1 secret team",
+  });
+  // Writes the team's key row and warms the in-memory cache.
+  const sealed = await encryptTeamSecret("super-secret-value", teamId);
+
+  // Count pooled `team_data_keys` reads. drizzle runs `db.select(...)` as a
+  // `pool.query(...)` (node-postgres acquires and releases a client internally),
+  // so spying `pool.query` catches the key-row read.
+  const pool = harness.schema.database as unknown as {
+    query: (...q: unknown[]) => unknown;
+  };
+  let teamKeyReads = 0;
+  const realQuery = pool.query.bind(pool);
+  const querySpy = vi.spyOn(pool, "query").mockImplementation(((...q: unknown[]) => {
+    const text = typeof q[0] === "string" ? q[0] : (q[0] as { text?: string } | undefined)?.text ?? "";
+    if (/team_data_keys/i.test(text)) teamKeyReads += 1;
+    return realQuery(...q);
+  }) as never);
+
+  try {
+    // 1. The 5-minute TTL has lapsed but the unwrapped key is still in memory:
+    //    the no-fetch decrypt serves the secret WITHOUT a pooled key read.
+    expireTeamDataKeyCacheTtl(teamId);
+    teamKeyReads = 0;
+    assert.equal(
+      await decryptTeamSecret(sealed, teamId, { noFetch: true }),
+      "super-secret-value",
+    );
+    assert.equal(teamKeyReads, 0, "a no-fetch decrypt must not read the key row");
+
+    // 2. The ordinary fetch path, on the same lapsed TTL, DOES re-read the key
+    //    row on the pool — exactly the query the no-fetch path must avoid while a
+    //    transaction holds the provider lock.
+    expireTeamDataKeyCacheTtl(teamId);
+    teamKeyReads = 0;
+    assert.equal(await decryptTeamSecret(sealed, teamId), "super-secret-value");
+    assert.ok(
+      teamKeyReads >= 1,
+      "the fetch path re-reads the key row once the TTL has lapsed",
+    );
+
+    // 3. Fail closed: with the key gone from memory (not merely expired), a
+    //    no-fetch decrypt throws rather than silently fetching.
+    clearTeamDataKeyCache(teamId);
+    teamKeyReads = 0;
+    await assert.rejects(
+      () => decryptTeamSecret(sealed, teamId, { noFetch: true }),
+      /not in memory/,
+    );
+    assert.equal(teamKeyReads, 0, "a failed no-fetch decrypt still issues no key read");
+  } finally {
+    querySpy.mockRestore();
+  }
 }, 200_000);

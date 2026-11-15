@@ -79,13 +79,22 @@ function asNonEmptyString(value: unknown): string | null {
  * domain: an exact match, or a subdomain of it. Mirrors the plugin's own
  * `domainMatches` suffix rule (a provider verified for `acme.com` is trusted for
  * `x@mail.acme.com`), so our account-link gate and the plugin's trusted-provider
- * linking agree. An email without a domain part never matches.
+ * linking agree.
+ *
+ * The domain is the part after the LAST `@` (as the guard's routing uses), and an
+ * address with anything other than exactly one `@` never matches — so a crafted
+ * `victim@acme.com@evil.com` (whose real mailbox is at `evil.com`) is rejected
+ * rather than treated as `evil.com` while matching nothing, or as `acme.com`.
  */
 export function emailDomainMatchesProviderDomain(
   email: string,
   providerDomain: string,
 ): boolean {
-  const emailDomain = email.split("@")[1]?.toLowerCase();
+  const atCount = email.split("@").length - 1;
+  if (atCount !== 1) {
+    return false;
+  }
+  const emailDomain = email.slice(email.lastIndexOf("@") + 1).toLowerCase();
   const domain = providerDomain.toLowerCase();
   if (!emailDomain || !domain) {
     return false;
@@ -251,10 +260,11 @@ function isAlreadyMemberError(error: unknown): boolean {
  * `@better-auth/sso@1.7.7` creates and commits the session before it calls
  * `provisionUser`, but sets the session cookie only after `provisionUser`
  * returns — so a failure here leaves a committed, cookie-less session row that
- * must be removed, and nothing else. The session is identified exactly from the
- * `session.create.after` capture; if that is somehow missing, the fallback is
- * restricted to the newest session for this user created in the last few seconds
- * (this request), never an older session the user already held.
+ * must be removed, and nothing else. The session is identified EXACTLY from the
+ * `session.create.after` capture (keyed by this request's endpoint context); if
+ * no capture is present there is no safe session to revoke, so nothing is
+ * deleted and the gap is logged — never a heuristic that could revoke another
+ * sign-in's session.
  *
  * Nothing else is deleted: a brand-new identity keeps its user row (email
  * verified, SSO account linked, personal workspace) without team membership, and
@@ -265,14 +275,19 @@ async function revokeSsoSignInSession(
   input: { userId: string; organizationId: string; providerId: string },
   sessionId: string | undefined,
 ): Promise<void> {
+  if (!sessionId) {
+    logger.error("sso_session_revocation_skipped", {
+      organizationId: input.organizationId,
+      providerId: input.providerId,
+      reason: "no_session_capture",
+    });
+    return;
+  }
   try {
-    const id = sessionId ?? (await recentSessionId(context, input.userId));
-    if (id) {
-      await context.adapter.delete({
-        model: "session",
-        where: [{ field: "id", value: id }],
-      });
-    }
+    await context.adapter.delete({
+      model: "session",
+      where: [{ field: "id", value: sessionId }],
+    });
   } catch (error) {
     logger.error("sso_session_revocation_failed", {
       organizationId: input.organizationId,
@@ -283,52 +298,203 @@ async function revokeSsoSignInSession(
   }
 }
 
-/** Fallback: the newest session for `userId` created in the last few seconds. */
-async function recentSessionId(
-  context: SsoProvisioningContext,
-  userId: string,
-): Promise<string | null> {
-  const cutoff = Date.now() - 10_000;
-  const sessions = await context.adapter.findMany({
-    model: "session",
-    where: [{ field: "userId", value: userId }],
-    select: ["id", "createdAt"],
+/**
+ * Per-`(organizationId, userId)` in-process mutex serializing the membership
+ * step. `provisionUser` runs AFTER the sign-in transaction commits, so holding
+ * this across its awaits cannot deadlock the pool, and it makes "check → add →
+ * re-read" atomic within this process: two concurrent sign-ins of one identity
+ * no longer both pass the existence check and insert two member rows. Across
+ * multiple API processes a database constraint would still be needed; the
+ * post-add de-duplication below is the defensive backstop.
+ */
+const membershipLocks = new Map<string, Promise<unknown>>();
+
+function membershipLockKey(organizationId: string, userId: string): string {
+  return `${organizationId}\u0000${userId}`;
+}
+
+async function runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prior = membershipLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const mine = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  const newest = sessions.reduce<Record<string, unknown> | null>(
-    (latest, session) =>
-      latest === null ||
-      toMillis(session.createdAt) >= toMillis(latest.createdAt)
-        ? session
-        : latest,
-    null,
-  );
-  if (newest?.id && toMillis(newest.createdAt) >= cutoff) {
-    return String(newest.id);
+  const tail = prior.then(() => mine, () => mine);
+  membershipLocks.set(key, tail);
+  await prior.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (membershipLocks.get(key) === tail) {
+      membershipLocks.delete(key);
+    }
   }
-  return null;
+}
+
+type MemberRow = Record<string, unknown>;
+
+/** Read this user's member row for the organization. */
+async function findSsoMember(
+  context: SsoProvisioningContext,
+  input: { organizationId: string; userId: string },
+): Promise<MemberRow | null> {
+  return context.adapter.findOne({
+    model: "member",
+    where: [
+      { field: "organizationId", value: input.organizationId },
+      { field: "userId", value: input.userId },
+    ],
+    select: ["id", "role", "createdAt"],
+  });
+}
+
+/**
+ * Re-read the member rows and collapse any duplicates — a check-then-insert race
+ * (another API process, or an add that slipped past the mutex) can leave more
+ * than one row for the same user in the organization. The oldest is kept and the
+ * rest deleted; only row ids are logged. Returns the surviving row.
+ */
+async function reconcileSsoMemberRows(
+  context: SsoProvisioningContext,
+  input: { organizationId: string; userId: string },
+): Promise<MemberRow | null> {
+  const rows = await context.adapter.findMany({
+    model: "member",
+    where: [
+      { field: "organizationId", value: input.organizationId },
+      { field: "userId", value: input.userId },
+    ],
+    select: ["id", "role", "createdAt"],
+  });
+  if (rows.length <= 1) {
+    return rows[0] ?? null;
+  }
+  const sorted = [...rows].sort(
+    (a, b) => toMillis(a.createdAt) - toMillis(b.createdAt),
+  );
+  const survivor = sorted[0]!;
+  const duplicates = sorted.slice(1);
+  logger.warn("sso_duplicate_member_rows", {
+    organizationId: input.organizationId,
+    userId: input.userId,
+    keptMemberId: String(survivor.id),
+    deletedMemberIds: duplicates.map((row) => String(row.id)),
+  });
+  for (const row of duplicates) {
+    await context.adapter.delete({
+      model: "member",
+      where: [{ field: "id", value: String(row.id) }],
+    });
+  }
+  return survivor;
+}
+
+/**
+ * A failed membership step: log it, revoke this sign-in's session, and return
+ * the error-URL redirect to throw. Any failure of the member reads/adds (not
+ * just addMember) routes here, so none can surface as a raw 500.
+ */
+async function failedMembershipRedirect(
+  context: SsoProvisioningContext,
+  input: { organizationId: string; userId: string; providerId: string },
+  sessionId: string | undefined,
+  error: unknown,
+): Promise<APIError> {
+  const seat = isSeatLimitError(error);
+  logger.error("sso_membership_add_failed", {
+    organizationId: input.organizationId,
+    providerId: input.providerId,
+    reason: seat ? "seat_limit" : "provisioning_failed",
+    error: error instanceof Error ? error.message : String(error),
+  });
+  await revokeSsoSignInSession(context, input, sessionId);
+  return ssoErrorRedirect(
+    seat ? SSO_ERROR_CODES.seatLimit : SSO_ERROR_CODES.provisioningFailed,
+    error,
+  );
+}
+
+/**
+ * Ensure the signed-in user is a member of the organization, serialized per
+ * `(organizationId, userId)`. Returns the (single, surviving) member row.
+ * Throws the error-URL redirect on a genuine failure; an "already a member" from
+ * a concurrent add is success.
+ */
+async function ensureSsoMembership(
+  context: SsoProvisioningContext,
+  auth: {
+    api: {
+      addMember: (args: {
+        body: {
+          userId: string;
+          organizationId: string;
+          role: "member" | "admin";
+        };
+      }) => Promise<unknown>;
+    };
+  },
+  input: {
+    userId: string;
+    organizationId: string;
+    role: "member" | "admin";
+    providerId: string;
+  },
+  sessionId: string | undefined,
+): Promise<MemberRow | null> {
+  let member: MemberRow | null;
+  try {
+    member = await findSsoMember(context, input);
+  } catch (error) {
+    throw await failedMembershipRedirect(context, input, sessionId, error);
+  }
+
+  if (!member) {
+    try {
+      await auth.api.addMember({
+        body: {
+          userId: input.userId,
+          organizationId: input.organizationId,
+          role: input.role,
+        },
+      });
+    } catch (error) {
+      if (!isAlreadyMemberError(error)) {
+        throw await failedMembershipRedirect(context, input, sessionId, error);
+      }
+      // A concurrent sign-in of this identity (or an invitation accept) won the
+      // race: that is success. Reconcile below.
+    }
+  }
+
+  try {
+    return await reconcileSsoMemberRows(context, input);
+  } catch (error) {
+    throw await failedMembershipRedirect(context, input, sessionId, error);
+  }
 }
 
 /**
  * Add or reconcile a signed-in SSO user's membership of the provider's
  * organization, then audit the sign-in.
  *
- * Rules:
+ * Rules (the membership step is serialized per `(organizationId, userId)` and
+ * its member rows de-duplicated — see {@link ensureSsoMembership}):
  *  1. Not a member: added via `auth.api.addMember`, the same member-added path
  *     an admin invitation uses, so the billing seat hook, workspace provisioning
- *     and `organization.member_added` audit all run. The role is already mapped
- *     (never `owner`), so a fresh add needs no further role reconcile.
+ *     and `organization.member_added` audit all run.
  *  2. A concurrent sign-in of the same identity (or a race with an invitation)
- *     may have added the member between the check and the add — `addMember` then
- *     throws "already a member", which is SUCCESS: we reconcile the role and
- *     audit as for an existing member.
- *  3. Already a member whose role contains `owner`: untouched. Otherwise, when
- *     the provider manages roles (`roleManaged`) and the mapped role differs, the
- *     role is updated and `organization.member_role_changed` is recorded.
+ *     that reports "already a member" is SUCCESS.
+ *  3. The surviving member row, re-read after the add, is reconciled: an `owner`
+ *     is untouched; otherwise, when the provider manages roles (`roleManaged`)
+ *     and the mapped role differs, the role is updated and
+ *     `organization.member_role_changed` is recorded.
  *  4. Every SSO sign-in is recorded as `sso.sign_in`.
  *
  * On a genuine membership failure (a seat taken since sign-in, a billing error, a
- * vanished organization) the step is NON-DESTRUCTIVE: only the session this
- * sign-in created is revoked, and a redirect to the error URL carrying
+ * vanished organization, or a failed member read) the step is NON-DESTRUCTIVE:
+ * only the session this sign-in created is revoked, and a redirect to the error
+ * URL carrying
  * {@link SSO_ERROR_CODES.seatLimit} (billing seat limit) or
  * {@link SSO_ERROR_CODES.provisioningFailed} (anything else) is thrown — routed
  * through the plugin's own error-URL response, so no session cookie is set.
@@ -351,60 +517,21 @@ export async function provisionSsoUser(input: {
 
   // Read (and clear) the facts the plugin does not pass to `provisionUser`:
   // whether this sign-in created the user row, and which session it created.
-  const capture = takeSsoSignInCapture(input.userId);
+  // Keyed by this request's endpoint context, so concurrent sign-ins of one user
+  // never cross-read each other's capture.
+  const capture = takeSsoSignInCapture();
   const isNewUser = capture?.userCreated ?? false;
 
-  let member = await context.adapter.findOne({
-    model: "member",
-    where: [
-      { field: "organizationId", value: input.organizationId },
-      { field: "userId", value: input.userId },
-    ],
-    select: ["id", "role"],
-  });
+  // Serialize the membership step per (org, user) so concurrent sign-ins of one
+  // identity cannot each insert a member row. Any failure in here is turned into
+  // the error-URL redirect with the session revoked (never a raw 500).
+  const member = await runExclusive(
+    membershipLockKey(input.organizationId, input.userId),
+    () => ensureSsoMembership(context, auth, input, capture?.sessionId),
+  );
 
-  if (!member) {
-    try {
-      await auth.api.addMember({
-        body: {
-          userId: input.userId,
-          organizationId: input.organizationId,
-          role: input.role,
-        },
-      });
-    } catch (error) {
-      if (isAlreadyMemberError(error)) {
-        // A concurrent sign-in of this identity (or an invitation accept) won
-        // the race: that is success. Re-read the member row and reconcile below.
-        member = await context.adapter.findOne({
-          model: "member",
-          where: [
-            { field: "organizationId", value: input.organizationId },
-            { field: "userId", value: input.userId },
-          ],
-          select: ["id", "role"],
-        });
-      } else {
-        const seat = isSeatLimitError(error);
-        logger.error("sso_membership_add_failed", {
-          organizationId: input.organizationId,
-          providerId: input.providerId,
-          reason: seat ? "seat_limit" : "provisioning_failed",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        await revokeSsoSignInSession(context, input, capture?.sessionId);
-        throw ssoErrorRedirect(
-          seat ? SSO_ERROR_CODES.seatLimit : SSO_ERROR_CODES.provisioningFailed,
-          error,
-        );
-      }
-    }
-  }
-
-  // Reconcile a managed role on an existing (or concurrently-added) member. A
-  // freshly added member already carries the mapped role, so `member` is still
-  // null and this is skipped. Best-effort: a failure must not undo a sign-in
-  // whose membership already holds.
+  // Reconcile a managed role on the surviving member row. Best-effort: a failure
+  // must not undo a sign-in whose membership already holds.
   if (member && input.roleManaged) {
     try {
       await syncExistingMemberRole({
