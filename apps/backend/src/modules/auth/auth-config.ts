@@ -346,9 +346,14 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
         // its own rule, `/sign-in/sso` would fall under the built-in
         // `/sign-in/*` special rule (3 per 10s), too tight for a page that
         // retries IdP discovery.
+        //
+        // `/sign-in/sso` is keyed by client IP, and a whole office shares one
+        // egress IP; the endpoint itself only computes/returns a redirect URL
+        // (no credential check, no IdP round-trip), so a much higher ceiling
+        // still blocks a real flood without punishing a shared-IP office.
         "/sign-in/sso": {
           window: 60,
-          max: 10,
+          max: 100,
         },
         "/sso/register": {
           window: 60,

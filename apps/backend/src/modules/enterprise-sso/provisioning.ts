@@ -8,7 +8,7 @@ import {
   recordSsoSignInAudit,
   type SsoAuditProtocol,
 } from "./audit";
-import { SSO_ERROR_CODES } from "./errors";
+import { SSO_ERROR_CODES, SSO_ERROR_MESSAGES_EN, type SsoErrorCode } from "./errors";
 
 /**
  * JIT membership, account-linking rules and role mapping for enterprise SSO.
@@ -50,8 +50,17 @@ export type SsoResolutionAdapter = {
   }) => Promise<Record<string, unknown> | null>;
 };
 
-function reject(code: string, message: string): SsoUserResolution {
-  return { action: "reject", code, message };
+/**
+ * Builds a resolver rejection whose `message` comes from
+ * {@link SSO_ERROR_MESSAGES_EN} — the single English-language source of
+ * truth every `SSO_ERROR_CODES` throw site uses (errors.ts) — rather than a
+ * second, independent copy of the text. This message is never shown to a
+ * user directly: the plugin redirects to the error URL carrying only the
+ * `code` query param (a later task renders it); it still must not drift from
+ * the table so logs/diagnostics stay consistent with the JSON-error paths.
+ */
+function reject(code: SsoErrorCode): SsoUserResolution {
+  return { action: "reject", code, message: SSO_ERROR_MESSAGES_EN[code] };
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -98,25 +107,16 @@ export async function resolveSsoSignIn(input: {
     select: ["providerId", "organizationId", "domain", "domainVerified"],
   });
   if (!provider) {
-    return reject(
-      SSO_ERROR_CODES.providerNotFound,
-      "No SSO provider matched this sign-in.",
-    );
+    return reject(SSO_ERROR_CODES.providerNotFound);
   }
 
   const organizationId = asNonEmptyString(provider.organizationId);
   const domain = asNonEmptyString(provider.domain);
   if (!organizationId || !domain) {
-    return reject(
-      SSO_ERROR_CODES.organizationRequired,
-      "This SSO provider is not bound to a team organization.",
-    );
+    return reject(SSO_ERROR_CODES.organizationRequired);
   }
   if (provider.domainVerified !== true) {
-    return reject(
-      SSO_ERROR_CODES.domainNotVerified,
-      "This SSO provider's domain is not verified.",
-    );
+    return reject(SSO_ERROR_CODES.domainNotVerified);
   }
 
   // The provider's organization must still exist and still be a team org; a
@@ -130,20 +130,14 @@ export async function resolveSsoSignIn(input: {
     !organization ||
     parseSourceweftOrganizationKind(organization.metadata) !== "team"
   ) {
-    return reject(
-      SSO_ERROR_CODES.organizationRequired,
-      "This SSO provider's organization is no longer a team organization.",
-    );
+    return reject(SSO_ERROR_CODES.organizationRequired);
   }
 
   // Fail closed on a domain mismatch: an identity whose email domain is not
   // covered by the verified domain must never link to an existing account nor
   // create one. This also rejects an email with no domain part.
   if (!emailDomainMatchesProviderDomain(email, domain)) {
-    return reject(
-      SSO_ERROR_CODES.accountLinkDenied,
-      "This identity's email domain is not covered by a verified SSO domain.",
-    );
+    return reject(SSO_ERROR_CODES.accountLinkDenied);
   }
 
   const existingUser = await database.findOne({
@@ -174,10 +168,7 @@ export async function resolveSsoSignIn(input: {
     try {
       await billingOrganizationHooks.beforeAddMember(organizationId);
     } catch {
-      return reject(
-        SSO_ERROR_CODES.seatLimit,
-        "The organization has no available seat for this member.",
-      );
+      return reject(SSO_ERROR_CODES.seatLimit);
     }
   }
 

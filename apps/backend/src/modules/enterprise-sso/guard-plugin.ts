@@ -1,13 +1,12 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { authErrorTranslations } from "../auth/auth-error-i18n";
-import { resolveMailLocale } from "../auth/mail-locale";
+import { authErrorTranslations, resolveGuardErrorLocale } from "../auth/auth-error-i18n";
 import {
   recordSsoProviderChangeAfterHook,
   SSO_AUDIT_PATHS,
   snapshotSsoProviderForAudit,
 } from "./audit";
-import { SSO_ERROR_CODES } from "./errors";
+import { SSO_ERROR_CODES, ssoError } from "./errors";
 import {
   assertSsoDomainAllowed,
   assertTeamOrganization,
@@ -105,13 +104,6 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function domainNotAllowed(message: string): APIError {
-  return new APIError("BAD_REQUEST", {
-    code: SSO_ERROR_CODES.domainNotAllowed,
-    message,
-  });
-}
-
 function toDomainRow(row: Record<string, unknown>): SsoProviderDomainRow {
   return {
     providerId: String(row.providerId ?? ""),
@@ -176,11 +168,7 @@ function roleAttributeFromBody(body: Record<string, unknown>): string | null {
   }
   const result = validateRoleAttribute(raw);
   if (!result.ok) {
-    throw new APIError("BAD_REQUEST", {
-      code: SSO_ERROR_CODES.invalidRoleAttribute,
-      message:
-        "This role attribute name can't be used. Choose a different attribute.",
-    });
+    throw ssoError(SSO_ERROR_CODES.invalidRoleAttribute, "BAD_REQUEST");
   }
   return result.value;
 }
@@ -274,10 +262,7 @@ async function handleRegister(
   const body = ctx.body as Record<string, unknown>;
   const organizationId = asString(body.organizationId);
   if (!organizationId) {
-    throw new APIError("BAD_REQUEST", {
-      code: SSO_ERROR_CODES.organizationRequired,
-      message: "Single sign-on can only be set up for a team.",
-    });
+    throw ssoError(SSO_ERROR_CODES.organizationRequired, "BAD_REQUEST");
   }
   await assertTeamOrganization(organizationId);
 
@@ -287,10 +272,7 @@ async function handleRegister(
     select: ["providerId"],
   });
   if (existing.length >= MAX_PROVIDERS_PER_ORGANIZATION) {
-    throw new APIError("BAD_REQUEST", {
-      code: SSO_ERROR_CODES.providerLimit,
-      message: "This team has reached the limit of 5 identity providers.",
-    });
+    throw ssoError(SSO_ERROR_CODES.providerLimit, "BAD_REQUEST");
   }
 
   const domain = normalizeSsoDomain(String(body.domain ?? ""));
@@ -411,7 +393,7 @@ async function handleVerifyDomain(
       row.organizationId !== organizationId,
   );
   if (conflict) {
-    throw domainNotAllowed("This domain cannot be used for single sign-on.");
+    throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
   }
 }
 
@@ -436,10 +418,7 @@ async function handleSignInRouting(
   try {
     domain = normalizeSsoDomain(raw);
   } catch {
-    throw new APIError("NOT_FOUND", {
-      code: SSO_ERROR_CODES.providerNotFound,
-      message: "No single sign-on is set up for this email address.",
-    });
+    throw ssoError(SSO_ERROR_CODES.providerNotFound, "NOT_FOUND");
   }
 
   const candidates = ssoDomainCandidates(domain);
@@ -464,10 +443,7 @@ async function handleSignInRouting(
     }
   }
 
-  throw new APIError("NOT_FOUND", {
-    code: SSO_ERROR_CODES.providerNotFound,
-    message: "No single sign-on is set up for this email address.",
-  });
+  throw ssoError(SSO_ERROR_CODES.providerNotFound, "NOT_FOUND");
 }
 
 /**
@@ -512,17 +488,10 @@ function mapSignInSsoPluginError(ctx: AfterHookCtx): void {
     return;
   }
   if (returned.message === PLUGIN_SIGN_IN_PROVIDER_NOT_FOUND_MESSAGE) {
-    throw new APIError("NOT_FOUND", {
-      code: SSO_ERROR_CODES.providerNotFound,
-      message: "No single sign-on is set up for this email address.",
-    });
+    throw ssoError(SSO_ERROR_CODES.providerNotFound, "NOT_FOUND");
   }
   if (returned.message === PLUGIN_SIGN_IN_DOMAIN_NOT_VERIFIED_MESSAGE) {
-    throw new APIError("UNAUTHORIZED", {
-      code: SSO_ERROR_CODES.domainNotVerified,
-      message:
-        "This domain has not been verified yet. Ask your administrator to finish setup.",
-    });
+    throw ssoError(SSO_ERROR_CODES.domainNotVerified, "UNAUTHORIZED");
   }
 }
 
@@ -538,9 +507,11 @@ function mapSignInSsoPluginError(ctx: AfterHookCtx): void {
  * `handleVerifyDomain`, `handleSignInRouting`, and the policy helpers they
  * call) escapes `dispatchAuthEndpoint` before any after-hook gets a chance to
  * run (confirmed against better-auth@1.7.7's `runBeforeHooks`, which only
- * logs and re-throws). So a before-hook must localize its own errors; this
- * reuses the same request-signal locale resolution the mail service already
- * uses (design §16.7) instead of inventing a second one.
+ * logs and re-throws). So a before-hook must localize its own errors — and
+ * must resolve the locale the exact same way the `i18n` plugin would for a
+ * handler-level error, via {@link resolveGuardErrorLocale} (not an
+ * independent negotiator — see that function's doc comment for why one
+ * request could otherwise get two different languages for two SSO errors).
  */
 async function withLocalizedGuardErrors<T>(
   headers: Headers | null | undefined,
@@ -551,8 +522,12 @@ async function withLocalizedGuardErrors<T>(
   } catch (error) {
     if (error instanceof APIError && typeof error.body?.code === "string") {
       const code = error.body.code;
-      const locale = await resolveMailLocale({ headers });
-      const translated = authErrorTranslations[locale]?.[code];
+      const locale = resolveGuardErrorLocale(headers);
+      const messages = authErrorTranslations[locale] as Record<
+        string,
+        string | undefined
+      >;
+      const translated = messages[code];
       if (translated) {
         throw new APIError(error.status, { code, message: translated });
       }
@@ -623,8 +598,9 @@ export function wrapAdapterForVerifiedDomainUniqueness<T extends object>(
               args?.model === SSO_PROVIDER_MODEL &&
               isVerifiedDomainUniqueViolation(error)
             ) {
-              const rejection = domainNotAllowed(
-                "This domain cannot be used for single sign-on.",
+              const rejection = ssoError(
+                SSO_ERROR_CODES.domainNotAllowed,
+                "BAD_REQUEST",
               );
               // Keep the originating DB error for diagnostics/tests without
               // leaking it in the serialized response body: a non-enumerable

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 
-import { SSO_ERROR_CODES } from "../enterprise-sso/errors";
+import {
+  SSO_ERROR_CODES,
+  SSO_ERROR_MESSAGES_EN,
+  ssoError,
+} from "../enterprise-sso/errors";
 import {
   AUTH_ERROR_LOCALE_DETECTION,
   AUTH_LOCALE_COOKIE,
@@ -9,28 +13,6 @@ import {
   authErrorTranslations,
   resolveAuthErrorLocale,
 } from "./auth-error-i18n";
-
-/** The task-7 table (en / zh-CN), verbatim. */
-const SSO_MESSAGES_EN: Record<string, string> = {
-  [SSO_ERROR_CODES.providerNotFound]:
-    "No single sign-on is set up for this email address.",
-  [SSO_ERROR_CODES.domainNotVerified]:
-    "This domain has not been verified yet. Ask your administrator to finish setup.",
-  [SSO_ERROR_CODES.domainNotAllowed]:
-    "This domain cannot be used for single sign-on.",
-  [SSO_ERROR_CODES.accountLinkDenied]:
-    "This sign-in cannot be linked to an existing account. Contact your administrator.",
-  [SSO_ERROR_CODES.seatLimit]:
-    "Your team has no seats left. Ask your administrator to add seats.",
-  [SSO_ERROR_CODES.provisioningFailed]:
-    "We couldn't add you to your team. Try again, or contact your administrator.",
-  [SSO_ERROR_CODES.invalidRoleAttribute]:
-    "This role attribute name can't be used. Choose a different attribute.",
-  [SSO_ERROR_CODES.organizationRequired]:
-    "Single sign-on can only be set up for a team.",
-  [SSO_ERROR_CODES.providerLimit]:
-    "This team has reached the limit of 5 identity providers.",
-};
 
 const SSO_MESSAGES_ZH_CN: Record<string, string> = {
   [SSO_ERROR_CODES.providerNotFound]: "该邮箱未配置企业单点登录。",
@@ -149,11 +131,19 @@ describe("auth error i18n", () => {
 
   test("en and zh-CN SSO messages match the task-7 table verbatim", () => {
     for (const code of Object.values(SSO_ERROR_CODES)) {
-      assert.equal(authErrorTranslations.en[code], SSO_MESSAGES_EN[code]);
+      assert.equal(authErrorTranslations.en[code], SSO_ERROR_MESSAGES_EN[code]);
       assert.equal(
         authErrorTranslations["zh-CN"][code],
         SSO_MESSAGES_ZH_CN[code],
       );
+    }
+  });
+
+  test("ssoError's message (errors.ts's single English source) matches authErrorTranslations.en for every code", () => {
+    for (const code of Object.values(SSO_ERROR_CODES)) {
+      const error = ssoError(code, "BAD_REQUEST");
+      assert.equal(error.body?.code, code);
+      assert.equal(error.message, authErrorTranslations.en[code]);
     }
   });
 

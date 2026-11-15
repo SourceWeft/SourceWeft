@@ -1,8 +1,7 @@
 import { domainToASCII } from "node:url";
-import { APIError } from "better-auth/api";
 import { parse as parseDomain } from "tldts";
 import { parseSourceweftOrganizationKind } from "../auth/organization-metadata";
-import { SSO_ERROR_CODES } from "./errors";
+import { SSO_ERROR_CODES, ssoError } from "./errors";
 import { PUBLIC_EMAIL_DOMAINS } from "./public-email-domains";
 
 /**
@@ -25,20 +24,6 @@ const DOMAIN_INPUT_PATTERN = /^[\p{L}\p{N}.-]+$/u;
  */
 const ASCII_HOSTNAME_PATTERN =
   /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
-function domainNotAllowed(message: string): APIError {
-  return new APIError("BAD_REQUEST", {
-    code: SSO_ERROR_CODES.domainNotAllowed,
-    message,
-  });
-}
-
-function organizationRequired(message: string): APIError {
-  return new APIError("BAD_REQUEST", {
-    code: SSO_ERROR_CODES.organizationRequired,
-    message,
-  });
-}
 
 /**
  * Normalize an SSO provider domain to a canonical, lowercase, ASCII hostname.
@@ -65,12 +50,12 @@ export function normalizeSsoDomain(input: string): string {
     .replace(/\.+$/, "");
 
   if (!stripped || !DOMAIN_INPUT_PATTERN.test(stripped)) {
-    throw domainNotAllowed("This domain cannot be used for single sign-on.");
+    throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
   }
 
   const ascii = domainToASCII(stripped);
   if (!ascii || !ASCII_HOSTNAME_PATTERN.test(ascii)) {
-    throw domainNotAllowed("This domain cannot be used for single sign-on.");
+    throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
   }
 
   return ascii;
@@ -124,7 +109,7 @@ export async function assertSsoDomainAllowed(
   lookup: SsoProviderDomainLookup,
 ): Promise<void> {
   if (isPublicEmailDomain(input.domain)) {
-    throw domainNotAllowed("This domain cannot be used for single sign-on.");
+    throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
   }
 
   const rows = await lookup(input.domain);
@@ -139,10 +124,10 @@ export async function assertSsoDomainAllowed(
       continue;
     }
     if (row.organizationId === input.organizationId) {
-      throw domainNotAllowed("This domain cannot be used for single sign-on.");
+      throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
     }
     if (row.domainVerified) {
-      throw domainNotAllowed("This domain cannot be used for single sign-on.");
+      throw ssoError(SSO_ERROR_CODES.domainNotAllowed, "BAD_REQUEST");
     }
   }
 }
@@ -192,6 +177,6 @@ export async function assertTeamOrganization(
     !organization ||
     parseSourceweftOrganizationKind(organization.metadata) !== "team"
   ) {
-    throw organizationRequired("Single sign-on can only be set up for a team.");
+    throw ssoError(SSO_ERROR_CODES.organizationRequired, "BAD_REQUEST");
   }
 }

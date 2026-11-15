@@ -1,7 +1,8 @@
 import { locales, type TranslationDictionary } from "@better-auth/i18n";
 import type { GenericEndpointContext } from "@better-auth/core";
+import { parseCookies } from "better-auth/cookies";
 import { isLocale, type Locale } from "@sourceweft/i18n";
-import { SSO_ERROR_CODES } from "../enterprise-sso/errors";
+import { SSO_ERROR_CODES, SSO_ERROR_MESSAGES_EN } from "../enterprise-sso/errors";
 
 // The web layer conveys the active locale (design §16) on every auth request via
 // the `x-sw-locale` header and the `sw_locale` cookie; the browser also always
@@ -12,32 +13,13 @@ export const AUTH_LOCALE_COOKIE = "sw_locale";
 /**
  * Our own enterprise-SSO error messages (design §16 / task 7), keyed by
  * {@link SSO_ERROR_CODES} value so they merge into the plugin's own
- * translation tables below. English is also the fallback `message` thrown in
- * code (see errors.ts call sites), so the untranslated and `en`-translated
- * text agree.
+ * translation tables below. `en` is {@link SSO_ERROR_MESSAGES_EN} itself —
+ * errors.ts's single source of truth, also what every `guard-plugin.ts` /
+ * `policy.ts` throw site uses via `ssoError`, so the untranslated and
+ * `en`-translated text can never drift apart.
  */
-const ssoErrorMessagesEn: TranslationDictionary = {
-  [SSO_ERROR_CODES.providerNotFound]:
-    "No single sign-on is set up for this email address.",
-  [SSO_ERROR_CODES.domainNotVerified]:
-    "This domain has not been verified yet. Ask your administrator to finish setup.",
-  [SSO_ERROR_CODES.domainNotAllowed]:
-    "This domain cannot be used for single sign-on.",
-  [SSO_ERROR_CODES.accountLinkDenied]:
-    "This sign-in cannot be linked to an existing account. Contact your administrator.",
-  [SSO_ERROR_CODES.seatLimit]:
-    "Your team has no seats left. Ask your administrator to add seats.",
-  [SSO_ERROR_CODES.provisioningFailed]:
-    "We couldn't add you to your team. Try again, or contact your administrator.",
-  [SSO_ERROR_CODES.invalidRoleAttribute]:
-    "This role attribute name can't be used. Choose a different attribute.",
-  [SSO_ERROR_CODES.organizationRequired]:
-    "Single sign-on can only be set up for a team.",
-  [SSO_ERROR_CODES.providerLimit]:
-    "This team has reached the limit of 5 identity providers.",
-};
 
-/** Simplified Chinese counterpart of {@link ssoErrorMessagesEn}. */
+/** Simplified Chinese counterpart of {@link SSO_ERROR_MESSAGES_EN}. */
 const ssoErrorMessagesZhCN: TranslationDictionary = {
   [SSO_ERROR_CODES.providerNotFound]: "该邮箱未配置企业单点登录。",
   [SSO_ERROR_CODES.domainNotVerified]:
@@ -136,7 +118,7 @@ const zhTW: TranslationDictionary = {
  * full app locale and are what distinguish "zh-TW" (Traditional).
  */
 export const authErrorTranslations = {
-  en: { ...locales.en, ...ssoErrorMessagesEn },
+  en: { ...locales.en, ...SSO_ERROR_MESSAGES_EN },
   zh: { ...locales.zh, ...ssoErrorMessagesZhCN },
   "zh-CN": { ...locales.zh, ...ssoErrorMessagesZhCN },
   "zh-TW": zhTW,
@@ -165,4 +147,80 @@ export function resolveAuthErrorLocale(
 ): Locale | null {
   const header = ctx.headers?.get(AUTH_LOCALE_HEADER);
   return isLocale(header) ? header : null;
+}
+
+/**
+ * Parses an `Accept-Language` header into base-language codes ordered by
+ * quality (e.g. `"zh-TW,zh;q=0.9"` -> `["zh"]`, region/script subtags
+ * dropped). A byte-for-byte copy of `@better-auth/i18n`'s own
+ * `parseAcceptLanguage` (not exported by that package), kept identical on
+ * purpose: {@link resolveGuardErrorLocale} below must resolve a bare
+ * `Accept-Language` header exactly the way the plugin's own `detectLocale`
+ * does, or the same request could get two different languages depending on
+ * which code path throws.
+ */
+function parseAcceptLanguageBaseLocales(header: string | null): string[] {
+  if (!header) {
+    return [];
+  }
+  return header
+    .split(",")
+    .map((part) => {
+      const [localeStr, quality = "q=1"] = part.trim().split(";");
+      const q = Number.parseFloat(quality.replace("q=", ""));
+      return { locale: localeStr?.trim().split("-")[0] ?? "", q };
+    })
+    .filter((item) => item.locale.length > 0)
+    .sort((a, b) => b.q - a.q)
+    .map((item) => item.locale);
+}
+
+/**
+ * Resolves the locale an SSO guard (before-hook) error should be localized
+ * in — using the exact same detection as the `@better-auth/i18n` plugin
+ * applies to a handler-level error: the same sources, in the same order
+ * ({@link AUTH_ERROR_LOCALE_DETECTION}), the same `Accept-Language`
+ * base-language matching ({@link parseAcceptLanguageBaseLocales}, not a
+ * normalizing negotiator), and the same English default.
+ *
+ * This exists because a before-hook's throw (every validation in
+ * `guard-plugin.ts` / `policy.ts`) never reaches the `i18n` plugin's
+ * after-hook at all (confirmed against better-auth@1.7.7's
+ * `dispatchAuthEndpoint`: a before-hook rejection escapes it before any
+ * after-hook runs), so those errors must localize themselves — and must
+ * reproduce the plugin's own resolution rather than approximate it, or the
+ * same request could see two different languages depending on which code
+ * path happened to throw (e.g. `resolveMailLocale`'s negotiator folds
+ * `Accept-Language: zh-TW` to `zh-TW`, while the plugin's own detection
+ * folds it to the bare `zh` key, which this app's `zh` entry serves as
+ * Simplified).
+ */
+export function resolveGuardErrorLocale(
+  headers: Headers | null | undefined,
+): keyof typeof authErrorTranslations {
+  const availableLocales = Object.keys(authErrorTranslations);
+  for (const strategy of AUTH_ERROR_LOCALE_DETECTION) {
+    if (strategy === "callback") {
+      const locale = resolveAuthErrorLocale({ headers } as GenericEndpointContext);
+      if (locale && availableLocales.includes(locale)) {
+        return locale as keyof typeof authErrorTranslations;
+      }
+    } else if (strategy === "cookie") {
+      const cookieHeader = headers?.get("cookie");
+      const cookieLocale = cookieHeader
+        ? parseCookies(cookieHeader).get(AUTH_LOCALE_COOKIE)
+        : undefined;
+      if (cookieLocale && availableLocales.includes(cookieLocale)) {
+        return cookieLocale as keyof typeof authErrorTranslations;
+      }
+    } else if (strategy === "header") {
+      const matched = parseAcceptLanguageBaseLocales(
+        headers?.get("Accept-Language") ?? null,
+      ).find((locale) => availableLocales.includes(locale));
+      if (matched) {
+        return matched as keyof typeof authErrorTranslations;
+      }
+    }
+  }
+  return "en";
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, test } from "vitest";
-import { AUTH_LOCALE_HEADER } from "../auth/auth-error-i18n";
+import { AUTH_LOCALE_COOKIE, AUTH_LOCALE_HEADER } from "../auth/auth-error-i18n";
 import { SSO_ERROR_CODES } from "./errors";
 import {
   bootSsoTestHarness,
@@ -29,6 +29,41 @@ import {
 let harness: SsoTestHarness;
 let owner: SsoTestUser;
 let orgId: string;
+let localeUser: SsoTestUser;
+
+/**
+ * A fresh anonymous request to `/sign-in/email` with the wrong password — a
+ * handler-level error (`INVALID_EMAIL_OR_PASSWORD`), translated by the
+ * official `@better-auth/i18n` plugin. Used as the reference the guard's own
+ * (before-hook) locale resolution must agree with for the same request
+ * signals (fix round 1, finding 1).
+ */
+async function wrongPasswordSignIn(headers: Record<string, string>) {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  const response = await client.jsonRequest(
+    "/sign-in/email",
+    { email: localeUser.email, password: "not-the-real-password" },
+    { headers },
+  );
+  return response;
+}
+
+/**
+ * A fresh anonymous request to `/sso/register` with a public email domain —
+ * a guard (before-hook) rejection. Anonymous is deliberate: `handleRegister`
+ * validates `organizationId`/domain before any admin-membership check the
+ * plugin's own handler would otherwise perform, so no session is needed to
+ * reach it, which keeps this comparable to the handler-level request above
+ * without a cookie-jar/session-cookie collision.
+ */
+async function anonymousGuardRejection(headers: Record<string, string>) {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  return registerOidc(client, {
+    organizationId: orgId,
+    domain: "gmail.com",
+    headers,
+  });
+}
 
 function uniqueDomain() {
   return `${randomUUID().slice(0, 8)}.example`;
@@ -44,9 +79,18 @@ function oidcEndpoints() {
 
 async function registerOidc(
   client: SsoTestClient,
-  input: { organizationId: string; domain: string; locale?: string },
+  input: {
+    organizationId: string;
+    domain: string;
+    locale?: string;
+    headers?: Record<string, string>;
+  },
 ) {
   const providerId = `i18n-oidc-${randomUUID()}`;
+  const headers = {
+    ...(input.locale ? { [AUTH_LOCALE_HEADER]: input.locale } : {}),
+    ...input.headers,
+  };
   const response = await client.jsonRequest(
     "/sso/register",
     {
@@ -63,7 +107,7 @@ async function registerOidc(
         ...oidcEndpoints(),
       },
     },
-    input.locale ? { headers: { [AUTH_LOCALE_HEADER]: input.locale } } : {},
+    Object.keys(headers).length > 0 ? { headers } : {},
   );
   return { response, providerId };
 }
@@ -81,6 +125,7 @@ beforeAll(async () => {
     ownerUserId: owner.userId,
     kind: "team",
   });
+  localeUser = await signUpUser(harness, "localeuser");
 }, 600_000);
 
 afterAll(async () => {
@@ -120,6 +165,56 @@ test("a guard rejection falls back to English with no locale header", async () =
   const body = await bodyOf(response);
   assert.equal(body.code, SSO_ERROR_CODES.domainNotAllowed);
   assert.equal(body.message, "This domain cannot be used for single sign-on.");
+}, 200_000);
+
+test("a guard error and a handler error resolve the SAME locale from Accept-Language alone (fix round 1, finding 1)", async () => {
+  const headers = { "Accept-Language": "zh-TW,zh;q=0.9" };
+  // Base-language matching (the plugin's own detection) folds both "zh-TW"
+  // and "zh" to the bare "zh" key before either gets a chance to look like a
+  // region-specific locale — so BOTH resolve to Simplified here, not
+  // Traditional. That is the point of this test: before the fix, the guard's
+  // own locale resolution used a full negotiator that would have picked
+  // "zh-TW" (Traditional) for this header, while the `i18n` plugin picked
+  // the bare `zh` (Simplified) for the handler error — same request, two
+  // different languages.
+  const { response: guardResponse } = await anonymousGuardRejection(headers);
+  assert.equal(guardResponse.status, 400, await guardResponse.clone().text());
+  const guardBody = await bodyOf(guardResponse);
+  assert.equal(guardBody.code, SSO_ERROR_CODES.domainNotAllowed);
+  assert.equal(guardBody.message, "该域名不能用于单点登录。");
+
+  const handlerResponse = await wrongPasswordSignIn(headers);
+  assert.equal(handlerResponse.status, 401, await handlerResponse.clone().text());
+  const handlerBody = await bodyOf(handlerResponse);
+  assert.equal(handlerBody.message, "邮箱或密码无效");
+}, 200_000);
+
+test("a guard error and a handler error both go Traditional with x-sw-locale: zh-TW", async () => {
+  const headers = { [AUTH_LOCALE_HEADER]: "zh-TW" };
+  const { response: guardResponse } = await anonymousGuardRejection(headers);
+  assert.equal(guardResponse.status, 400, await guardResponse.clone().text());
+  const guardBody = await bodyOf(guardResponse);
+  assert.equal(guardBody.code, SSO_ERROR_CODES.domainNotAllowed);
+  assert.equal(guardBody.message, "該網域不能用於單一登入。");
+
+  const handlerResponse = await wrongPasswordSignIn(headers);
+  assert.equal(handlerResponse.status, 401, await handlerResponse.clone().text());
+  const handlerBody = await bodyOf(handlerResponse);
+  assert.equal(handlerBody.message, "郵箱或密碼無效");
+}, 200_000);
+
+test("a guard error and a handler error both go Simplified with the sw_locale cookie (no header)", async () => {
+  const headers = { cookie: `${AUTH_LOCALE_COOKIE}=zh-CN` };
+  const { response: guardResponse } = await anonymousGuardRejection(headers);
+  assert.equal(guardResponse.status, 400, await guardResponse.clone().text());
+  const guardBody = await bodyOf(guardResponse);
+  assert.equal(guardBody.code, SSO_ERROR_CODES.domainNotAllowed);
+  assert.equal(guardBody.message, "该域名不能用于单点登录。");
+
+  const handlerResponse = await wrongPasswordSignIn(headers);
+  assert.equal(handlerResponse.status, 401, await handlerResponse.clone().text());
+  const handlerBody = await bodyOf(handlerResponse);
+  assert.equal(handlerBody.message, "邮箱或密码无效");
 }, 200_000);
 
 test("sign-in with an unknown email domain is a localized 404", async () => {
@@ -170,10 +265,23 @@ test("sign-in with a nonexistent providerId is a localized provider-not-found er
   assert.equal(body.message, "该邮箱未配置企业单点登录。");
 }, 200_000);
 
-test("/sign-in/sso allows 10 requests per 60s from one IP and rejects the 11th", async () => {
+test("/sign-in/sso's own 100-per-60s rule is the one in effect, not the built-in 3-per-10s default", async () => {
+  // Two cheaper proofs instead of issuing 100+1 full requests:
+  //  1. The resolved rate-limit context (what `onRequestRateLimit` actually
+  //     reads, not a re-derivation of it) carries our rule for this path.
+  const context = (await harness.auth.$context) as unknown as {
+    rateLimit: { customRules?: Record<string, { window: number; max: number }> };
+  };
+  assert.deepEqual(context.rateLimit.customRules?.["/sign-in/sso"], {
+    window: 60,
+    max: 100,
+  });
+  //  2. A live check too small for the built-in `/sign-in/*` default (3 per
+  //     10s) to allow: if that default — not our rule — were in effect, the
+  //     4th of these (well within 10s) would already be a 429.
   const client = new SsoTestClient(harness.auth, harness.baseUrl);
   const statuses: number[] = [];
-  for (let i = 0; i < 11; i += 1) {
+  for (let i = 0; i < 4; i += 1) {
     const response = await client.jsonRequest("/sign-in/sso", {
       email: `user@${uniqueDomain()}`,
       callbackURL: "https://app.example.com/after",
@@ -181,13 +289,8 @@ test("/sign-in/sso allows 10 requests per 60s from one IP and rejects the 11th",
     statuses.push(response.status);
   }
   assert.equal(
-    statuses.slice(0, 10).every((status) => status !== 429),
+    statuses.every((status) => status !== 429),
     true,
-    `expected no 429 in the first 10 requests, got ${JSON.stringify(statuses)}`,
-  );
-  assert.equal(
-    statuses[10],
-    429,
-    `expected the 11th request to be rate-limited, got ${JSON.stringify(statuses)}`,
+    `expected no 429 in 4 requests (the built-in 3/10s default would reject the 4th), got ${JSON.stringify(statuses)}`,
   );
 }, 200_000);
