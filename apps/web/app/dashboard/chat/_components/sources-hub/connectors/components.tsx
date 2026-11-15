@@ -542,6 +542,17 @@ export const ConnectorCatalogCard = memoComponent(
     supportsIndexing?: boolean;
   }) {
     const t = useTranslations("dashboardSourcesHub");
+    // A deployment can register a type (a tools-only, Composio-brokered Gmail)
+    // with no sync resources; the manifest says so via `supportsIndexing`.
+    // Never advertise that card as indexable, and drop the indexing wording
+    // from its description. `undefined` keeps today's shape (manifest not
+    // loaded yet). Derived here from the same flag the capability chip uses.
+    const cardIsIndexable =
+      supportsIndexing === false ? false : item.isIndexable;
+    const cardDescription =
+      item.id === "gmail" && supportsIndexing === false
+        ? t("connectors.gmail.toolsOnlyCardDescription")
+        : item.description;
     const isBusy = status.kind === "syncing";
     // Authorizing again is safe for any connector that reports a problem, and
     // it is the only fix when the provider no longer accepts the stored grant.
@@ -594,7 +605,7 @@ export const ConnectorCatalogCard = memoComponent(
                   {item.name}
                 </h4>
                 <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
-                  {item.description}
+                  {cardDescription}
                 </p>
               </div>
               <div className="flex shrink-0 items-start gap-1">
@@ -622,7 +633,7 @@ export const ConnectorCatalogCard = memoComponent(
             <div className="mt-1.5 hidden flex-wrap gap-1 sm:flex">
               <TypeBadge
                 label={
-                  item.isIndexable
+                  cardIsIndexable
                     ? t("connectors.type.indexable")
                     : t("connectors.type.searchApi")
                 }

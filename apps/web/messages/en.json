@@ -3246,6 +3246,7 @@
         "brokerNoticeTitle": "Connect Gmail through Composio",
         "brokerNoticeBody": "SourceWeft connects to Gmail through Composio. Google will show Composio's name and ask for access to your whole mailbox. SourceWeft only searches your mail and reads the messages you ask about, and sends a message only after you approve it. Mail content that passes through is kept by Composio for up to one year.",
         "brokerNoticeContinue": "Continue to Google",
+        "toolsOnlyCardDescription": "Search and read mail, and send messages you approve.",
         "liveSearch": "Live Gmail search",
         "indexMail": "Index selected mail in this workspace",
         "indexNotice": "Indexing stores selected message content in workspace sources. Disabling it hides retained mail from agent search; deleting the connector removes the stored copies. Scheduled sync is a separate choice.",

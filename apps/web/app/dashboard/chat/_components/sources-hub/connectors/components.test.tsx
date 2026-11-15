@@ -118,3 +118,41 @@ test("today's indexable Gmail card keeps 'Optional indexing'", async () => {
 
   expect(container.textContent).toContain("Optional indexing");
 });
+
+test("a tools-only Gmail card shows the Search API type badge, not Indexable", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: false,
+  });
+
+  expect(container.textContent).toContain("Search API");
+  expect(container.textContent).not.toContain("Indexable");
+});
+
+test("today's indexable Gmail card shows the Indexable type badge", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: true,
+  });
+
+  expect(container.textContent).toContain("Indexable");
+});
+
+test("a tools-only Gmail card description does not mention indexing", async () => {
+  const gmail = connectorCatalog.find((entry) => entry.id === "gmail")!;
+  const { container } = await card({
+    connector: null,
+    item: gmail,
+    status: { kind: "available", label: "Available", detail: "Ready" },
+    supportsIndexing: false,
+  });
+
+  expect(container.textContent).not.toContain("optionally index");
+  expect(container.textContent).toContain("send messages you approve");
+});

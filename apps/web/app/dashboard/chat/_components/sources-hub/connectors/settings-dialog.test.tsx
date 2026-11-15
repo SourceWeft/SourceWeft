@@ -215,3 +215,41 @@ test("saving today's indexable Gmail still sends the full config shape", async (
     maxMessages: 500,
   });
 });
+
+test("a tools-only Gmail is never advertised as indexable in the settings dialog", async () => {
+  listGmailLabels.mockResolvedValue({ labels: [] });
+  const connector = gmailConnector({ liveSearchEnabled: true });
+  const { props } = baseProps(connector, {
+    gmail: { supportsIndexing: false, broker: "composio" },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+
+  // The header type badge is always visible.
+  expect(document.body.textContent ?? "").toContain("Search API");
+
+  await selectTab("Configuration");
+  const text = document.body.textContent ?? "";
+  expect(text).toContain("Non-indexable search"); // capabilities row
+  expect(text).not.toContain("Indexable source");
+  expect(text).not.toContain("Periodic sync");
+});
+
+test("today's indexable Gmail is advertised as indexable in the settings dialog", async () => {
+  listGmailLabels.mockResolvedValue({ labels: [] });
+  const connector = gmailConnector({ liveSearchEnabled: true });
+  const { props } = baseProps(connector, {
+    gmail: { supportsIndexing: true, broker: null },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+
+  expect(document.body.textContent ?? "").toContain("Indexable");
+
+  await selectTab("Configuration");
+  const text = document.body.textContent ?? "";
+  expect(text).toContain("Indexable source");
+  expect(text).toContain("Periodic sync");
+});

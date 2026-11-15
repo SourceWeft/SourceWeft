@@ -350,7 +350,7 @@ export function ManageConnectorsDialog({
                                 onConnectConnector={beginConnect}
                                 onCreateConnector={onCreateConnector}
                                 onDisconnect={onDisconnectConnector}
-                                onReconnectConnector={onConnectConnector}
+                                onReconnectConnector={beginConnect}
                                 status={status}
                                 supportsIndexing={
                                   connectorManifestInfoByType[item.id]

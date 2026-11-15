@@ -230,6 +230,14 @@ export function ConnectorSettingsDialog({
     connectorType === "gmail"
       ? gmailSupportsIndexing
       : catalogItem?.isIndexable ?? true;
+  // The static catalog marks a type indexable, but a deployment can register
+  // it with no sync resources (a tools-only, Composio-brokered Gmail); the
+  // manifest says so. Never advertise this type as an indexable source in that
+  // case, the same way the Configuration tab already hides the indexing
+  // controls.
+  const typeIsIndexable =
+    (catalogItem?.isIndexable ?? false) &&
+    connectorManifestInfoByType[connectorType]?.supportsIndexing !== false;
   const isSavingSettings = isBusy;
 
   useEffect(() => {
@@ -459,7 +467,7 @@ export function ConnectorSettingsDialog({
                 {catalogItem ? (
                   <TypeBadge
                     label={
-                      catalogItem.isIndexable
+                      typeIsIndexable
                         ? t("connectors.type.indexable")
                         : t("connectors.type.searchApi")
                     }
@@ -911,12 +919,13 @@ export function ConnectorSettingsDialog({
                         <>
                           <TypeBadge
                             label={
-                              catalogItem.isIndexable
+                              typeIsIndexable
                                 ? t("connectors.config.indexableSource")
                                 : t("connectors.config.nonIndexableSearch")
                             }
                           />
-                          {catalogItem.supportsPeriodicSync ? (
+                          {catalogItem.supportsPeriodicSync &&
+                          typeIsIndexable ? (
                             <TypeBadge
                               label={t("connectors.config.periodicSync")}
                             />

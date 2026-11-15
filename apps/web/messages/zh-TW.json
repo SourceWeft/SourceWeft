@@ -3246,6 +3246,7 @@
         "brokerNoticeTitle": "透過 Composio 連接 Gmail",
         "brokerNoticeBody": "SourceWeft 透過 Composio 連接 Gmail。Google 的授權頁會顯示 Composio 的名稱，並請求存取你的整個信箱。SourceWeft 只會搜尋你的郵件、讀取你詢問的郵件，並且只在你確認後傳送郵件。經過的郵件內容會由 Composio 保留最長一年。",
         "brokerNoticeContinue": "繼續前往 Google",
+        "toolsOnlyCardDescription": "搜尋並閱讀郵件，經確認後傳送郵件。",
         "liveSearch": "即時搜尋 Gmail",
         "indexMail": "將選定郵件索引到此工作區",
         "indexNotice": "索引會將選定郵件內容存入工作區資料來源。關閉索引會使保留的郵件不再參與代理檢索；刪除連接器可移除儲存副本。定期同步需另行選擇。",

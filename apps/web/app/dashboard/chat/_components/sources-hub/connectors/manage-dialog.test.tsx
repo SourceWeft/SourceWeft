@@ -180,3 +180,43 @@ test("today's Gmail manifest keeps the 'Optional indexing' chip", async () => {
 
   expect(gmailCard().textContent?.includes("Optional indexing")).toBe(true);
 });
+
+test("reconnecting a Composio-brokered Gmail shows the broker notice, like a first connect", async () => {
+  const { props, handlers } = baseProps({
+    connectorManifestInfoByType: {
+      gmail: { supportsIndexing: false, broker: "composio" },
+    },
+  });
+  // A Gmail connector that needs attention, so its card offers Reconnect.
+  props.connectors = [
+    {
+      id: "gmail-1",
+      name: "Gmail",
+      status: "error",
+      meta: "",
+      raw: {
+        id: "gmail-1",
+        connectorType: "gmail",
+        status: "error",
+        configJson: {},
+        oauthAccountId: "acc-1",
+        lastError: "Needs attention",
+      },
+    },
+  ] as never;
+  await mountWithIntl(createElement(ManageConnectorsDialog, props));
+
+  await click(buttonWithText(gmailCard(), "Reconnect"));
+
+  expect(
+    document.body.textContent?.includes("Connect Gmail through Composio"),
+  ).toBe(true);
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+
+  await click(buttonWithText(document.body, "Continue to Google"));
+
+  expect(handlers.onConnectConnector).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "gmail" }),
+    "tools",
+  );
+});
