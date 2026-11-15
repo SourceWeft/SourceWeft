@@ -461,3 +461,99 @@ test("quiz answers carry selections or a self grade, nothing else", () => {
   assert.ok(!submitAnswersSchema.safeParse({ answers: { q_1: { selfGrade: "maybe" } } }).success);
   assert.ok(!submitAnswersSchema.safeParse({ answers: { q_1: { unknown: 1 } } }).success);
 });
+
+// Supplemental review checks (PR-1 review).
+
+test("the portable sha256 matches node:crypto on random text of every padding length", () => {
+  // Deterministic LCG so a failure reproduces.
+  let seed = 0x5eed;
+  const next = () => {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    return seed;
+  };
+  const alphabet = ["a", "Z", "0", " ", "é", "汉", "\u{1F331}", "\n", "\u0000"];
+  for (let length = 0; length <= 200; length++) {
+    let text = "";
+    for (let i = 0; i < length; i++) text += alphabet[next() % alphabet.length];
+    assert.equal(
+      sha256Hex(text),
+      createHash("sha256").update(text, "utf8").digest("hex"),
+      `length ${length}`,
+    );
+  }
+});
+
+test("a maximally wide and deep mind map is rejected quickly", () => {
+  // 8-ary tree four levels below the root: 4681 nodes, every level in bounds.
+  let n = 0;
+  const full = (levels: number): unknown =>
+    mindmapNode(
+      `n_f${n++}`,
+      levels === 0 ? [] : Array.from({ length: 8 }, () => full(levels - 1)),
+    );
+  const root = full(4);
+  const started = performance.now();
+  const result = studyContentSchema.safeParse(content("mindmap", { root }));
+  const elapsed = performance.now() - started;
+  assert.ok(!result.success);
+  assert.ok(elapsed < 2000, `took ${elapsed}ms`);
+});
+
+test("duplicate ids are caught at any mind map depth and in quizzes", () => {
+  const deep = mindmapNode("n_root", [
+    mindmapNode("n_a", [mindmapNode("n_dup")]),
+    mindmapNode("n_b", [mindmapNode("n_c", [mindmapNode("n_dup")])]),
+  ]);
+  assert.ok(!studyContentSchema.safeParse(content("mindmap", { root: deep })).success);
+  assert.ok(
+    !studyContentSchema.safeParse(
+      content("quiz", { items: [quizItem(), quizItem({ stem: "other" })] }),
+    ).success,
+  );
+  assert.ok(
+    studyContentSchema.safeParse(
+      content("quiz", { items: [quizItem(), quizItem({ id: "q_other" })] }),
+    ).success,
+  );
+});
+
+test("choice questions need both options and correct", () => {
+  assert.ok(!quizItemSchema.safeParse(quizItem({ options: undefined })).success);
+  assert.ok(!quizItemSchema.safeParse(quizItem({ correct: undefined })).success);
+  assert.ok(
+    !quizItemSchema.safeParse(quizItem({ type: "multi", correct: [] })).success,
+  );
+  assert.ok(
+    !quizItemSchema.safeParse(quizItem({ correct: [0.5] })).success,
+  );
+});
+
+test("mind map nodes need the node id prefix and a children array", () => {
+  assert.ok(!mindmapNodeSchema.safeParse(mindmapNode("c_1")).success);
+  const { children: _children, ...leafWithoutChildren } = mindmapNode("n_1") as {
+    children: unknown;
+  };
+  assert.ok(!mindmapNodeSchema.safeParse(leafWithoutChildren).success);
+});
+
+test("parsing content for an artifact rejects invalid content before comparing kinds", () => {
+  assert.throws(() =>
+    parseStudyContentForArtifact("quiz", content("quiz", { items: [] })),
+  );
+  assert.equal(
+    parseStudyContentForArtifact("quiz", content("quiz")).kind,
+    "quiz",
+  );
+});
+
+test("fingerprints fold full-width forms and keep kinds apart", () => {
+  assert.equal(
+    studyFingerprint("flashcards", "ＡＢＣ１２３"),
+    studyFingerprint("flashcards", "abc 123"),
+  );
+  assert.notEqual(
+    studyFingerprint("flashcards", "same text"),
+    studyFingerprint("quiz", "same text"),
+  );
+  assert.match(studyFingerprint("mindmap", ""), /^[a-f0-9]{16}$/);
+});

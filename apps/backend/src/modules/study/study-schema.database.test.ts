@@ -243,3 +243,92 @@ test("the queue and history lookups are indexed", async () => {
     assert.ok(names.includes(expected), `missing index ${expected}`);
   }
 });
+
+// Supplemental review checks (PR-1 review).
+
+test("deleting a workspace removes its learning state", async () => {
+  const otherWorkspaceId = randomUUID();
+  await db.db.insert(db.workspaces).values({
+    id: otherWorkspaceId,
+    organizationId: teamId,
+    name: "Doomed",
+    slug: otherWorkspaceId,
+  });
+  const artifactId = randomUUID();
+  await db.db.insert(db.artifacts).values({
+    id: artifactId,
+    teamId,
+    workspaceId: otherWorkspaceId,
+    artifactType: "quiz",
+    status: "ready",
+    currentVersionNo: 1,
+    visibility: "private",
+    createdBy: userId,
+  });
+  const scoped = { workspaceId: otherWorkspaceId };
+  await db.db
+    .insert(db.studyReviewStates)
+    .values({ ...stateRow(artifactId, "q_1"), ...scoped });
+  await db.db
+    .insert(db.studyReviewLogs)
+    .values({ ...logRow(artifactId, "q_1"), ...scoped });
+  await db.db
+    .insert(db.studyQuizAttempts)
+    .values(attemptRow(artifactId, scoped));
+  await db.database.query("delete from workspaces where id = $1", [
+    otherWorkspaceId,
+  ]);
+  for (const table of [
+    "study_review_states",
+    "study_review_logs",
+    "study_quiz_attempts",
+  ]) {
+    assert.equal(await count(table, artifactId), 0, table);
+  }
+});
+
+test("deleting one artifact leaves another artifact's learning state alone", async () => {
+  const doomed = await insertArtifact();
+  const kept = await insertArtifact();
+  for (const artifactId of [doomed, kept]) {
+    await db.db.insert(db.studyReviewStates).values(stateRow(artifactId, "c_1"));
+    await db.db.insert(db.studyReviewLogs).values(logRow(artifactId, "c_1"));
+    await db.db.insert(db.studyQuizAttempts).values(attemptRow(artifactId));
+  }
+  await db.database.query("delete from artifacts where id = $1", [doomed]);
+  assert.equal(await count("study_review_states", kept), 1);
+  assert.equal(await count("study_review_logs", kept), 1);
+  assert.equal(await count("study_quiz_attempts", kept), 1);
+});
+
+test("quiz answers and item ids round-trip as JSON", async () => {
+  const artifactId = await insertArtifact();
+  const answers = {
+    q_1: { selected: [0, 2] },
+    q_2: { text: "光合作用", selfGrade: "knew" },
+  };
+  await db.db
+    .insert(db.studyQuizAttempts)
+    .values(attemptRow(artifactId, { answers, score: 2, total: 2 }));
+  const result = await db.database.query(
+    "select item_ids, answers, score from study_quiz_attempts where artifact_id = $1",
+    [artifactId],
+  );
+  assert.deepEqual(result.rows[0].item_ids, ["q_1", "q_2"]);
+  assert.deepEqual(result.rows[0].answers, answers);
+  assert.equal(result.rows[0].score, 2);
+});
+
+test("a review state cannot point at a missing artifact or workspace", async () => {
+  await assert.rejects(
+    db.db.insert(db.studyReviewStates).values(stateRow(randomUUID(), "c_1")),
+    /foreign key|failed query/i,
+  );
+  const artifactId = await insertArtifact();
+  await assert.rejects(
+    db.db
+      .insert(db.studyReviewStates)
+      .values({ ...stateRow(artifactId, "c_1"), workspaceId: randomUUID() }),
+    /foreign key|failed query/i,
+  );
+});
