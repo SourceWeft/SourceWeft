@@ -1,4 +1,12 @@
-import { generateKeyPairSync, type KeyObject, randomUUID, sign } from "node:crypto";
+import {
+  createSign,
+  generateKeyPairSync,
+  type KeyObject,
+  randomUUID,
+  sign,
+} from "node:crypto";
+import { createRequire } from "node:module";
+import { DOMParser } from "@xmldom/xmldom";
 import * as samlify from "samlify";
 
 /**
@@ -27,6 +35,8 @@ import * as samlify from "samlify";
 
 const SAML_PROTOCOL_NS = "urn:oasis:names:tc:SAML:2.0:protocol";
 const SAML_ASSERTION_NS = "urn:oasis:names:tc:SAML:2.0:assertion";
+const EXC_C14N = "http://www.w3.org/2001/10/xml-exc-c14n#";
+const ENVELOPED_SIGNATURE = "http://www.w3.org/2000/09/xmldsig#enveloped-signature";
 const NAMEID_FORMAT_EMAIL =
   "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress";
 const BEARER_METHOD = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
@@ -85,13 +95,6 @@ export type SamlResponseInput = {
    * Assertions.
    */
   injectedAssertion?: { nameId: string; email: string };
-  /**
-   * Insert raw markup immediately before the first `SignatureMethod` element in
-   * the signed response (so it becomes the first by document order). Used to
-   * reproduce the non-ASCII-prefix bypass — a `SignatureMethod` an XML parser
-   * resolves by local name but a prefix-based scanner would miss.
-   */
-  injectBeforeFirstSignatureMethod?: string;
 };
 
 export type SamlIdpFixture = {
@@ -107,6 +110,19 @@ export type SamlIdpFixture = {
   metadataXml: string;
   /** Build a base64-encoded `SAMLResponse` for the ACS form POST. */
   buildResponse(input: SamlResponseInput): string;
+  /**
+   * Build a base64-encoded response whose signature is a GENUINE RSA-SHA1
+   * signature (over the recovered SignedInfo, with the IdP's key) in which the
+   * rsa-sha1 `SignatureMethod` the verifier selects is hidden by `hide` — a
+   * malformed end tag (`"endTag"`) or a non-ASCII namespace prefix
+   * (`"nonAscii"`) — ahead of an rsa-sha256 decoy. Without the guard, xml-crypto
+   * resolves and verifies it as rsa-sha1; with the guard it is rejected.
+   */
+  buildRsaSha1Exploit(input: {
+    hide: "endTag" | "nonAscii";
+    nameId: string;
+    email: string;
+  }): string;
 };
 
 // ── Minimal DER encoder, just enough for a self-signed X.509 certificate ──────
@@ -425,14 +441,6 @@ export function createSamlIdpFixture(): SamlIdpFixture {
       );
     }
 
-    if (input.injectBeforeFirstSignatureMethod !== undefined) {
-      const injection = input.injectBeforeFirstSignatureMethod;
-      finalXml = finalXml.replace(
-        /<(?:[^\s/>]+:)?SignatureMethod\b/,
-        (firstTag) => `${injection}${firstTag}`,
-      );
-    }
-
     if (input.injectedAssertion) {
       // Splice a second, unsigned Assertion in front of the (already signed) one.
       // The genuine assertion's enveloped signature stays valid over its own
@@ -459,6 +467,86 @@ export function createSamlIdpFixture(): SamlIdpFixture {
     return Buffer.from(finalXml, "utf8").toString("base64");
   }
 
+  /** xml-crypto's SignedXml surface this fixture drives (resolved via samlify). */
+  interface XmlCryptoSignedXml {
+    publicCert?: string;
+    references: Array<{ digestAlgorithm: string }>;
+    loadSignature(node: unknown): void;
+    getCanonReferenceXml(doc: unknown, ref: unknown, element: unknown): string;
+    findHashAlgorithm(name: string): { getHash(xml: string): string };
+    getCanonSignedInfoXml(doc: unknown): string;
+  }
+  interface XmlCryptoModule {
+    SignedXml: new () => XmlCryptoSignedXml;
+  }
+  interface XpathModule {
+    select1(expression: string, node: unknown): unknown;
+  }
+
+  function buildRsaSha1Exploit(input: {
+    hide: "endTag" | "nonAscii";
+    nameId: string;
+    email: string;
+  }): string {
+    // xml-crypto / xpath are samlify's own (transitive) dependencies — resolve
+    // them through samlify rather than adding a backend dependency.
+    const requireFromSamlify = createRequire(
+      createRequire(import.meta.url).resolve("samlify"),
+    );
+    const { SignedXml } = requireFromSamlify("xml-crypto") as XmlCryptoModule;
+    const xpath = requireFromSamlify("xpath") as XpathModule;
+
+    const dsigNs = "http://www.w3.org/2000/09/xmldsig#";
+    const hiddenMethod =
+      input.hide === "endTag"
+        ? `<ds:z>q</ds:z junk <ds:SignatureMethod Algorithm="${SAML_SIGNATURE_ALGORITHMS.rsaSha1}"/>>`
+        : `<xé:SignatureMethod xmlns:xé="${dsigNs}" Algorithm="${SAML_SIGNATURE_ALGORITHMS.rsaSha1}"/>`;
+
+    const rawWith = (digestValue: string, signatureValue: string): string =>
+      `<samlp:Response xmlns:samlp="${SAML_PROTOCOL_NS}" xmlns:saml="${SAML_ASSERTION_NS}">` +
+      `<saml:Assertion ID="_exploit"><saml:Issuer>${escapeXml(entityId)}</saml:Issuer>` +
+      `<ds:Signature xmlns:ds="${dsigNs}"><ds:SignedInfo>` +
+      hiddenMethod +
+      `<ds:CanonicalizationMethod Algorithm="${EXC_C14N}"/>` +
+      `<ds:SignatureMethod Algorithm="${SAML_SIGNATURE_ALGORITHMS.rsaSha256}"/>` +
+      `<ds:Reference URI="#_exploit">` +
+      `<ds:Transforms><ds:Transform Algorithm="${ENVELOPED_SIGNATURE}"/><ds:Transform Algorithm="${EXC_C14N}"/></ds:Transforms>` +
+      `<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>` +
+      `<ds:DigestValue>${digestValue}</ds:DigestValue></ds:Reference>` +
+      `</ds:SignedInfo><ds:SignatureValue>${signatureValue}</ds:SignatureValue>` +
+      `<ds:KeyInfo><ds:X509Data/></ds:KeyInfo></ds:Signature>` +
+      `<saml:Subject><saml:NameID>${escapeXml(input.nameId)}</saml:NameID></saml:Subject></saml:Assertion></samlp:Response>`;
+
+    const signatureNodeOf = (doc: unknown): unknown =>
+      xpath.select1(
+        "/*[local-name()='Response']/*[local-name()='Assertion']/*[local-name()='Signature']",
+        doc,
+      );
+
+    // Compute the reference digest over the (recovered) assertion.
+    let doc: unknown = new DOMParser().parseFromString(rawWith("PH", "PH"), "text/xml");
+    let signed = new SignedXml();
+    signed.loadSignature(signatureNodeOf(doc));
+    const assertionElement = xpath.select1("//*[@*[local-name()='ID']='_exploit']", doc);
+    const reference = signed.references[0]!;
+    const canonicalReference = signed.getCanonReferenceXml(doc, reference, assertionElement);
+    const digest = signed
+      .findHashAlgorithm(reference.digestAlgorithm)
+      .getHash(canonicalReference);
+
+    // Sign the canonical SignedInfo with RSA-SHA1 using the IdP's key.
+    doc = new DOMParser().parseFromString(rawWith(digest, "PH"), "text/xml");
+    signed = new SignedXml();
+    signed.loadSignature(signatureNodeOf(doc));
+    const canonicalSignedInfo = signed.getCanonSignedInfoXml(doc);
+    const signatureValue = createSign("RSA-SHA1")
+      .update(canonicalSignedInfo)
+      .sign(idpKeyPair.privateKey)
+      .toString("base64");
+
+    return Buffer.from(rawWith(digest, signatureValue), "utf8").toString("base64");
+  }
+
   return {
     entityId,
     entryPoint,
@@ -466,5 +554,6 @@ export function createSamlIdpFixture(): SamlIdpFixture {
     certBase64: samlify.Utility.toCertificateBody(idpCert),
     metadataXml,
     buildResponse,
+    buildRsaSha1Exploit,
   };
 }

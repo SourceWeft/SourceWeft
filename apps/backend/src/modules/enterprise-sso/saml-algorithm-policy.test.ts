@@ -1,456 +1,299 @@
+import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
-import { assertSamlResponseAlgorithmsAllowed } from "./saml-algorithm-policy";
+import { createSamlIdpFixture } from "../../test/saml-fixture";
+import {
+  assertSamlResponseAlgorithmsAllowed,
+  type SamlAlgorithmRejectionReason,
+} from "./saml-algorithm-policy";
 
 const SIG_SHA256 = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
 const SIG_SHA512 = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512";
 const SIG_SHA1 = "http://www.w3.org/2000/09/xmldsig#rsa-sha1";
+const SIG_SHA384 = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384";
+const SIG_ECDSA = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
+const SIG_HMAC = "http://www.w3.org/2000/09/xmldsig#hmac-sha256";
+const SIG_PSS = "http://www.w3.org/2007/05/xmldsig-more#sha256-rsa-MGF1";
 const DIG_SHA256 = "http://www.w3.org/2001/04/xmlenc#sha256";
+const DIG_SHA512 = "http://www.w3.org/2001/04/xmlenc#sha512";
 const DIG_SHA1 = "http://www.w3.org/2000/09/xmldsig#sha1";
+const DSIG_NS = "http://www.w3.org/2000/09/xmldsig#";
+const EXC_C14N = "http://www.w3.org/2001/10/xml-exc-c14n#";
 
 function base64(xml: string): string {
   return Buffer.from(xml, "utf8").toString("base64");
 }
 
-/** A SignedInfo carrying the given raw SignatureMethod / DigestMethod tags. */
-function signedInfo(signatureMethod: string, digestMethod: string): string {
+/** A Signature whose SignedInfo carries `inner` before the (decoy) method tags. */
+function signedResponse(inner = "", sm = SIG_SHA256, dm = DIG_SHA256): string {
   return (
-    `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-    `${signatureMethod}<ds:Reference>${digestMethod}</ds:Reference>` +
-    `</ds:SignedInfo><ds:SignatureValue>AA==</ds:SignatureValue></ds:Signature>`
+    `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
+    `<saml:Assertion ID="_a"><ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo>` +
+    `<ds:CanonicalizationMethod Algorithm="${EXC_C14N}"/>` +
+    inner +
+    `<ds:SignatureMethod Algorithm="${sm}"/>` +
+    `<ds:Reference URI="#_a"><ds:DigestMethod Algorithm="${dm}"/><ds:DigestValue>x</ds:DigestValue></ds:Reference>` +
+    `</ds:SignedInfo><ds:SignatureValue>x</ds:SignatureValue></ds:Signature></saml:Assertion></samlp:Response>`
   );
 }
 
-/** A minimal signed SAML Response around `inner` assertion content. */
-function response(inner: string): string {
+/** A single `<ds:Signature>` fragment with the given algorithms. */
+function signatureFragment(sm = SIG_SHA256, dm = DIG_SHA256): string {
   return (
-    `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
-    `<saml:Assertion ID="_a">${inner}<saml:Subject><saml:NameID>a@b.com</saml:NameID></saml:Subject></saml:Assertion>` +
+    `<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo>` +
+    `<ds:SignatureMethod Algorithm="${sm}"/>` +
+    `<ds:Reference><ds:DigestMethod Algorithm="${dm}"/></ds:Reference>` +
+    `</ds:SignedInfo></ds:Signature>`
+  );
+}
+
+/** Wrap body content in a minimal `<samlp:Response>`. */
+function wrap(body: string): string {
+  return (
+    `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:xenc="u">` +
+    body +
     `</samlp:Response>`
   );
 }
 
-function sig(algorithm: string, attrs = ""): string {
-  return `<ds:SignatureMethod${attrs} Algorithm="${algorithm}"/>`;
-}
-function digest(algorithm: string): string {
-  return `<ds:DigestMethod Algorithm="${algorithm}"/>`;
-}
-
-/** The standard happy-path response: rsa-sha256 signature, sha256 digest. */
-function okResponse(): string {
-  return response(signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)));
-}
-
 function assertOk(xml: string): void {
-  const result = assertSamlResponseAlgorithmsAllowed(base64(xml));
-  expect(result).toEqual({ ok: true });
+  expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({ ok: true });
 }
-
 function assertRejected(input: string): void {
-  const result = assertSamlResponseAlgorithmsAllowed(input);
-  expect(result.ok).toBe(false);
+  expect(assertSamlResponseAlgorithmsAllowed(input).ok).toBe(false);
+}
+function assertReason(xml: string, reason: SamlAlgorithmRejectionReason): void {
+  expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({ ok: false, reason });
 }
 
-describe("assertSamlResponseAlgorithmsAllowed", () => {
-  test("accepts an rsa-sha256 signature with a sha256 digest", () => {
-    assertOk(okResponse());
+describe("assertSamlResponseAlgorithmsAllowed (parsed-document policy)", () => {
+  // The "same parser" premise: the policy must inspect the exact tree the verifier
+  // (samlify/xml-crypto) inspects, which only holds while both resolve the same
+  // @xmldom/xmldom. If a dependency change makes them differ, the policy's
+  // guarantee is void and this test fails loudly.
+  test("the @xmldom/xmldom the backend imports is the same version samlify resolves", () => {
+    const here = createRequire(import.meta.url);
+    const backendVersion = here("@xmldom/xmldom/package.json").version as string;
+    const fromSamlify = createRequire(here.resolve("samlify"));
+    const samlifyVersion = fromSamlify("@xmldom/xmldom/package.json").version as string;
+    expect(
+      samlifyVersion,
+      "The policy inspects the DOM produced by @xmldom/xmldom; if samlify/xml-crypto " +
+        "resolve a DIFFERENT @xmldom/xmldom version, the policy no longer inspects the " +
+        "same tree the signature verifier does and its guarantee is void.",
+    ).toBe(backendVersion);
+    expect(backendVersion.startsWith("0.8.")).toBe(true);
   });
 
-  test("accepts rsa-sha512 with sha512 digest", () => {
+  // ── Happy paths ─────────────────────────────────────────────────────────────
+
+  test("accepts rsa-sha256 + sha256", () => assertOk(signedResponse()));
+  test("accepts rsa-sha512 + sha512", () =>
+    assertOk(signedResponse("", SIG_SHA512, DIG_SHA512)));
+
+  test("accepts a real samlify-signed fixture response", () => {
+    const fixture = createSamlIdpFixture();
+    const samlResponse = fixture.buildResponse({
+      acsUrl: "http://localhost:3001/api/auth/sso/saml2/sp/acs/p",
+      audience: "https://sp/p",
+      inResponseTo: "_req1",
+      nameId: "a@b.com",
+      email: "a@b.com",
+    });
+    expect(assertSamlResponseAlgorithmsAllowed(samlResponse)).toEqual({ ok: true });
+  });
+
+  test("accepts a realistic Okta/Entra/Keycloak-shape response (decl, &amp;, KeyInfo, Transforms)", () => {
     assertOk(
-      response(
-        signedInfo(
-          sig(SIG_SHA512),
-          digest("http://www.w3.org/2001/04/xmlenc#sha512"),
-        ),
-      ),
-    );
-  });
-
-  test("rejects an rsa-sha1 SignatureMethod", () => {
-    assertRejected(base64(response(signedInfo(sig(SIG_SHA1), digest(DIG_SHA256)))));
-  });
-
-  test("rejects a sha1 DigestMethod even with an rsa-sha256 signature", () => {
-    assertRejected(base64(response(signedInfo(sig(SIG_SHA256), digest(DIG_SHA1)))));
-  });
-
-  test("rejects two signatures where the second uses rsa-sha1", () => {
-    const first = signedInfo(sig(SIG_SHA256), digest(DIG_SHA256));
-    const second = signedInfo(sig(SIG_SHA1), digest(DIG_SHA256));
-    assertRejected(base64(response(first + second)));
-  });
-
-  test("rejects an Algorithm value written with a character reference", () => {
-    assertRejected(
-      base64(response(signedInfo(sig("rsa-sha&#49;"), digest(DIG_SHA256)))),
-    );
-  });
-
-  test("rejects the exact SHA-256 URI with one character entity-encoded", () => {
-    // Decodes to the allowed URI, but the `&` is fail-closed-rejected before decoding.
-    const encoded = "http://www.w3.org/2001/04/xmldsig-more#&#114;sa-sha256";
-    assertRejected(base64(response(signedInfo(sig(encoded), digest(DIG_SHA256)))));
-  });
-
-  test("accepts an allowed URI quoted with single quotes", () => {
-    const xml = response(
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-        `<ds:SignatureMethod Algorithm='${SIG_SHA256}'/>` +
-        `<ds:Reference><ds:DigestMethod Algorithm='${DIG_SHA256}'/></ds:Reference>` +
-        `</ds:SignedInfo></ds:Signature>`,
-    );
-    assertOk(xml);
-  });
-
-  test("rejects a method carrying only a lower-case `algorithm` attribute", () => {
-    assertRejected(
-      base64(
-        response(signedInfo(sig(SIG_SHA256, "").replace("Algorithm", "algorithm"), digest(DIG_SHA256))),
-      ),
-    );
-  });
-
-  test("accepts a `>` inside a quoted attribute value of the method tag (quote-aware end)", () => {
-    // The `>` is inside a quoted value, so the tag's real end is after it.
-    const method = `<ds:SignatureMethod Foo="a>b" Algorithm="${SIG_SHA256}"/>`;
-    assertOk(response(signedInfo(method, digest(DIG_SHA256))));
-  });
-
-  test("a `>` in a quoted attribute of an unrelated element does not hide a following SHA-1 SignatureMethod", () => {
-    const xml = response(
-      `<saml:Attribute Name="x>y"></saml:Attribute>` +
-        signedInfo(sig(SIG_SHA1), digest(DIG_SHA256)),
-    );
-    assertRejected(base64(xml));
-  });
-
-  test("accepts unprefixed and differently-prefixed SignatureMethod/DigestMethod names", () => {
-    const xml = response(
-      `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo>` +
-        `<SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-        `<Reference><DigestMethod Algorithm="${DIG_SHA256}"/></Reference>` +
-        `</SignedInfo></Signature>`,
-    );
-    assertOk(xml);
-    const prefixed = response(
-      `<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#"><dsig:SignedInfo>` +
-        `<dsig:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-        `<dsig:Reference><dsig:DigestMethod Algorithm="${DIG_SHA256}"/></dsig:Reference>` +
-        `</dsig:SignedInfo></dsig:Signature>`,
-    );
-    assertOk(prefixed);
-  });
-
-  test("rejects a response with no SignatureMethod at all", () => {
-    const result = assertSamlResponseAlgorithmsAllowed(
-      base64(response("<saml:Issuer>idp</saml:Issuer>")),
-    );
-    expect(result).toEqual({ ok: false, reason: "missing_signature_method" });
-  });
-
-  test("rejects a signature with no DigestMethod", () => {
-    const xml = response(
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-        `<ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-        `</ds:SignedInfo></ds:Signature>`,
-    );
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "missing_digest_method",
-    });
-  });
-
-  test("rejects a document with a DOCTYPE", () => {
-    const xml = `<!DOCTYPE Response>${okResponse()}`;
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "doctype_or_entity",
-    });
-  });
-
-  test("rejects a document declaring an ENTITY", () => {
-    const xml = `<!DOCTYPE x [<!ENTITY e "x">]>${okResponse()}`;
-    assertRejected(base64(xml));
-  });
-
-  test("rejects a response containing an EncryptedAssertion", () => {
-    const xml = response(
-      signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)) +
-        `<saml:EncryptedAssertion><xenc:EncryptedData xmlns:xenc="x"/></saml:EncryptedAssertion>`,
-    );
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "encrypted_assertion",
-    });
-  });
-
-  test("rejects a bare EncryptedData element", () => {
-    const xml = response(
-      signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)) + `<xenc:EncryptedData xmlns:xenc="x"/>`,
-    );
-    assertRejected(base64(xml));
-  });
-
-  test("rejects non-base64 input", () => {
-    expect(assertSamlResponseAlgorithmsAllowed("not valid base64 !!!")).toEqual({
-      ok: false,
-      reason: "invalid_base64",
-    });
-  });
-
-  test("rejects an empty / non-string input", () => {
-    expect(assertSamlResponseAlgorithmsAllowed("")).toEqual({
-      ok: false,
-      reason: "not_a_string",
-    });
-    expect(assertSamlResponseAlgorithmsAllowed(undefined)).toEqual({
-      ok: false,
-      reason: "not_a_string",
-    });
-  });
-
-  test("rejects oversized input before decoding", () => {
-    const oversized = "A".repeat(262145);
-    expect(assertSamlResponseAlgorithmsAllowed(oversized)).toEqual({
-      ok: false,
-      reason: "oversized",
-    });
-  });
-
-  test("rejects a UTF-16-encoded document", () => {
-    const utf16 = Buffer.from(okResponse(), "utf16le").toString("base64");
-    expect(assertSamlResponseAlgorithmsAllowed(utf16)).toEqual({
-      ok: false,
-      reason: "not_utf8_xml",
-    });
-  });
-
-  test("rejects an allowed URI with a trailing space (no normalisation)", () => {
-    assertRejected(
-      base64(response(signedInfo(sig(`${SIG_SHA256} `), digest(DIG_SHA256)))),
-    );
-  });
-
-  test("rejects an allowed URI in a different case (no case folding)", () => {
-    assertRejected(
-      base64(
-        response(signedInfo(sig(SIG_SHA256.toUpperCase()), digest(DIG_SHA256))),
-      ),
-    );
-  });
-
-  test("fail-closed: a SHA-1 SignatureMethod inside an XML comment is still rejected", () => {
-    const xml = response(
-      `<!-- ${sig(SIG_SHA1)} -->` +
-        signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)),
-    );
-    assertRejected(base64(xml));
-  });
-
-  test("fail-closed: a SHA-1 SignatureMethod inside a CDATA section is still rejected", () => {
-    const xml = response(
-      `<saml:AttributeValue><![CDATA[ ${sig(SIG_SHA1)} ]]></saml:AttributeValue>` +
-        signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)),
-    );
-    assertRejected(base64(xml));
-  });
-
-  // ── Fix round 1: markup tokenisation (non-ASCII-prefix bypass and kin) ──────
-
-  test("rejects the reviewer's bypass: a non-ASCII-prefixed rsa-sha1 SignatureMethod first, ASCII rsa-sha256 decoy after", () => {
-    const xml = response(
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-        `<é:SignatureMethod xmlns:é="http://www.w3.org/2000/09/xmldsig#" Algorithm="${SIG_SHA1}"/>` +
-        `<ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-        `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>` +
-        `</ds:SignedInfo></ds:Signature>`,
-    );
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "tag_name_not_ncname",
-    });
-  });
-
-  test("rejects the DigestMethod variant of the bypass (non-ASCII prefix via a second Reference)", () => {
-    const xml = response(
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-        `<ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-        `<ds:Reference><é:DigestMethod xmlns:é="http://www.w3.org/2000/09/xmldsig#" Algorithm="${DIG_SHA1}"/></ds:Reference>` +
-        `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>` +
-        `</ds:SignedInfo></ds:Signature>`,
-    );
-    assertRejected(base64(xml));
-  });
-
-  test("rejects a non-ASCII prefix even when the algorithm is allowed (the name rule rejects first)", () => {
-    const xml = response(
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-        `<é:SignatureMethod xmlns:é="http://www.w3.org/2000/09/xmldsig#" Algorithm="${SIG_SHA256}"/>` +
-        `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>` +
-        `</ds:SignedInfo></ds:Signature>`,
-    );
-    assertRejected(base64(xml));
-  });
-
-  test("rejects an element name with two colons", () => {
-    assertRejected(
-      base64(response(signedInfo(`<a:b:SignatureMethod Algorithm="${SIG_SHA256}"/>`, digest(DIG_SHA256)))),
-    );
-  });
-
-  test("rejects a comment anywhere in the document", () => {
-    const xml = response(`<!-- hi -->` + signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)));
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "comment",
-    });
-  });
-
-  test("rejects a CDATA section anywhere in the document", () => {
-    const xml = response(
-      `<saml:X><![CDATA[hi]]></saml:X>` + signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)),
-    );
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "cdata",
-    });
-  });
-
-  test("rejects a processing instruction in the body", () => {
-    const xml = response(`<?target data?>` + signedInfo(sig(SIG_SHA256), digest(DIG_SHA256)));
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "processing_instruction",
-    });
-  });
-
-  test("rejects an XML declaration claiming UTF-16 over UTF-8 bytes", () => {
-    const xml = `<?xml version="1.0" encoding="UTF-16"?>${okResponse()}`;
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "non_utf8_declaration",
-    });
-  });
-
-  test("accepts a valid response with an explicit UTF-8 XML declaration", () => {
-    assertOk(`<?xml version="1.0" encoding="UTF-8"?>${okResponse()}`);
-  });
-
-  test("accepts a valid response with a leading BOM and an XML declaration", () => {
-    assertOk(`\uFEFF<?xml version="1.0" encoding="UTF-8"?>${okResponse()}`);
-  });
-
-  test("rejects an unterminated tag with an unbalanced quote", () => {
-    const xml =
-      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
-      `<foo bar="unclosed/></samlp:Response>`;
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "unbalanced_quote",
-    });
-  });
-
-  test("rejects a lower-case `signaturemethod` element (suspicious variant)", () => {
-    const xml = response(
-      `<ds:signaturemethod Algorithm="${SIG_SHA256}"/><ds:DigestMethod Algorithm="${DIG_SHA256}"/>`,
-    );
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "suspicious_element_variant",
-    });
-  });
-
-  test("rejects a SignatureMethod carrying only a prefixed `ds:Algorithm` attribute", () => {
-    assertRejected(
-      base64(
-        response(signedInfo(`<ds:SignatureMethod ds:Algorithm="${SIG_SHA256}"/>`, digest(DIG_SHA256))),
-      ),
-    );
-  });
-
-  test("rejects a SignatureMethod with two Algorithm attributes", () => {
-    assertRejected(
-      base64(
-        response(
-          signedInfo(
-            `<ds:SignatureMethod Algorithm="${SIG_SHA256}" Algorithm="${SIG_SHA1}"/>`,
-            digest(DIG_SHA256),
-          ),
-        ),
-      ),
-    );
-  });
-
-  // ── Self-break attempts (parser differential vs xmldom/xml-crypto) ──────────
-  // Each records an attempt to make the raw scan disagree with the real verifier.
-  // Accepted values are exact allow-listed URIs only, which carry no whitespace,
-  // so XML attribute-value normalisation (tab/newline → space) cannot turn an
-  // accepted value into a different one for xml-crypto.
-
-  test("rejects a newline inside an Algorithm value (raw read, no attribute normalisation)", () => {
-    assertRejected(
-      base64(response(signedInfo(`<ds:SignatureMethod Algorithm="${SIG_SHA256}\n"/>`, digest(DIG_SHA256)))),
-    );
-  });
-
-  test("rejects a tab inside an Algorithm value", () => {
-    assertRejected(
-      base64(response(signedInfo(`<ds:SignatureMethod Algorithm="${SIG_SHA256}\t"/>`, digest(DIG_SHA256)))),
-    );
-  });
-
-  test("rejects whitespace between `<` and the element name", () => {
-    assertRejected(
-      base64(response(signedInfo(`< ds:SignatureMethod Algorithm="${SIG_SHA256}"/>`, digest(DIG_SHA256)))),
-    );
-  });
-
-  test("rejects an unquoted Algorithm value", () => {
-    assertRejected(
-      base64(response(signedInfo(`<ds:SignatureMethod Algorithm=${SIG_SHA256}/>`, digest(DIG_SHA256)))),
-    );
-  });
-
-  test("accepts a SignatureMethod in a redeclared default namespace", () => {
-    assertOk(
-      response(
-        `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo>` +
-          `<SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-          `<Reference><DigestMethod Algorithm="${DIG_SHA256}"/></Reference>` +
-          `</SignedInfo></Signature>`,
-      ),
-    );
-  });
-
-  test("rejects a tag left unterminated at end of input", () => {
-    const xml =
-      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
-      `<ds:SignatureMethod Algorithm="${SIG_SHA256}"`;
-    expect(assertSamlResponseAlgorithmsAllowed(base64(xml))).toEqual({
-      ok: false,
-      reason: "unterminated_tag",
-    });
-  });
-
-  test("accepts a realistic Okta/Entra/Keycloak-shape response (two signatures, KeyInfo, c14n, Transforms, &amp; in a URL)", () => {
-    const xml =
       `<?xml version="1.0" encoding="UTF-8"?>` +
-      `<saml2p:Response xmlns:saml2p="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" Destination="https://sp.example.com/acs?foo=1&amp;bar=2" ID="_resp" Version="2.0">` +
-      `<saml2:Issuer>https://idp.example.com</saml2:Issuer>` +
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-      `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"><ec:InclusiveNamespaces xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#" PrefixList="saml2p saml2"/></ds:CanonicalizationMethod>` +
-      `<ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-      `<ds:Reference URI="#_resp"><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/></ds:Transforms><ds:DigestMethod Algorithm="${DIG_SHA256}"/><ds:DigestValue>abcd==</ds:DigestValue></ds:Reference>` +
-      `</ds:SignedInfo><ds:SignatureValue>c2ln</ds:SignatureValue>` +
-      `<ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIICdummy==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature>` +
-      `<saml2:Assertion ID="_a" Version="2.0"><saml2:Issuer>https://idp.example.com</saml2:Issuer>` +
-      `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo>` +
-      `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>` +
-      `<ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
-      `<ds:Reference URI="#_a"><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/></ds:Transforms><ds:DigestMethod Algorithm="${DIG_SHA256}"/><ds:DigestValue>ef==</ds:DigestValue></ds:Reference>` +
-      `</ds:SignedInfo><ds:SignatureValue>c2ln</ds:SignatureValue></ds:Signature>` +
-      `<saml2:Subject><saml2:NameID>user@example.com</saml2:NameID></saml2:Subject></saml2:Assertion></saml2p:Response>`;
-    assertOk(xml);
+        `<saml2p:Response xmlns:saml2p="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" Destination="https://sp/acs?a=1&amp;b=2">` +
+        `<saml2:Assertion ID="_a"><ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo>` +
+        `<ds:CanonicalizationMethod Algorithm="${EXC_C14N}"><ec:InclusiveNamespaces xmlns:ec="${EXC_C14N}" PrefixList="saml2p saml2"/></ds:CanonicalizationMethod>` +
+        `<ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
+        `<ds:Reference URI="#_a"><ds:Transforms><ds:Transform Algorithm="${DSIG_NS}enveloped-signature"/><ds:Transform Algorithm="${EXC_C14N}"/></ds:Transforms><ds:DigestMethod Algorithm="${DIG_SHA256}"/><ds:DigestValue>abcd==</ds:DigestValue></ds:Reference>` +
+        `</ds:SignedInfo><ds:SignatureValue>c2ln</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIdummy==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature>` +
+        `<saml2:Subject><saml2:NameID>u@example.com</saml2:NameID></saml2:Subject></saml2:Assertion></saml2p:Response>`,
+    );
+  });
+
+  test("accepts a valid response with an explicit UTF-8 XML declaration", () =>
+    assertOk(`<?xml version="1.0" encoding="UTF-8"?>${signedResponse()}`));
+  test("accepts a valid response with a leading BOM and an XML declaration", () =>
+    assertOk(`\uFEFF<?xml version="1.0" encoding="UTF-8"?>${signedResponse()}`));
+
+  // Changed expectation vs the text-scanner policy: the parsed Algorithm value is
+  // entity-decoded, so an entity-encoded but allow-listed URI now equals the
+  // allow-listed string and is ACCEPTED (the verifier reads the same decoded value).
+  test("accepts an entity-encoded but allow-listed Algorithm URI", () =>
+    assertOk(signedResponse("", `http://www.w3.org/2001/04/xmldsig-more#&#114;sa-sha256`)));
+  test("accepts an allow-listed URI quoted with single quotes", () =>
+    assertOk(
+      wrap(
+        `<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo>` +
+          `<ds:SignatureMethod Algorithm='${SIG_SHA256}'/>` +
+          `<ds:Reference><ds:DigestMethod Algorithm='${DIG_SHA256}'/></ds:Reference>` +
+          `</ds:SignedInfo></ds:Signature>`,
+      ),
+    ));
+  // Changed expectation: a non-ASCII namespace prefix with an ALLOW-LISTED algorithm
+  // is now ACCEPTED — xmldom parses it as a SignatureMethod with that algorithm, the
+  // same element and value the verifier resolves.
+  test("accepts a non-ASCII-prefixed SignatureMethod with an allow-listed algorithm", () =>
+    assertOk(
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
+        `<saml:Assertion ID="_a"><ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo>` +
+        `<é:SignatureMethod xmlns:é="${DSIG_NS}" Algorithm="${SIG_SHA256}"/>` +
+        `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>` +
+        `</ds:SignedInfo></ds:Signature></saml:Assertion></samlp:Response>`,
+    ));
+
+  // ── Algorithm allow-list ────────────────────────────────────────────────────
+
+  test("rejects rsa-sha1", () => assertReason(signedResponse("", SIG_SHA1), "signature_algorithm_not_allowed"));
+  test("rejects a sha1 digest", () => assertReason(signedResponse("", SIG_SHA256, DIG_SHA1), "digest_algorithm_not_allowed"));
+  test("rejects rsa-sha384 (not allow-listed)", () => assertReason(signedResponse("", SIG_SHA384), "signature_algorithm_not_allowed"));
+  test("rejects ecdsa-sha256 (not allow-listed)", () => assertReason(signedResponse("", SIG_ECDSA), "signature_algorithm_not_allowed"));
+  test("rejects hmac-sha256 (not allow-listed)", () => assertReason(signedResponse("", SIG_HMAC), "signature_algorithm_not_allowed"));
+  test("rejects RSA-PSS sha256-rsa-MGF1 (documented limitation)", () => assertReason(signedResponse("", SIG_PSS), "signature_algorithm_not_allowed"));
+  test("rejects two signatures where the second uses rsa-sha1", () =>
+    assertRejected(base64(wrap(signatureFragment(SIG_SHA256) + signatureFragment(SIG_SHA1)))));
+
+  // Changed reason: the parsed value is decoded, so `rsa-sha&#49;` decodes to
+  // "rsa-sha1" — not an allow-listed URI — and is rejected as such.
+  test("rejects a decoded Algorithm that is not an allow-listed URI", () =>
+    assertReason(signedResponse("", "rsa-sha&#49;"), "signature_algorithm_not_allowed"));
+  test("rejects an allow-listed URI with a trailing space (value has whitespace)", () =>
+    assertReason(signedResponse("", `${SIG_SHA256} `), "algorithm_value_invalid"));
+  test("rejects an allow-listed URI with a tab/newline inside (normalised to a space)", () =>
+    assertReason(signedResponse("", `${SIG_SHA256}\n`), "algorithm_value_invalid"));
+  test("rejects an allow-listed URI in a different case", () =>
+    assertReason(signedResponse("", SIG_SHA256.toUpperCase()), "signature_algorithm_not_allowed"));
+
+  // ── Attribute shape ─────────────────────────────────────────────────────────
+
+  test("rejects a SignatureMethod with only a lower-case `algorithm` attribute", () =>
+    assertReason(signedResponse(`<ds:SignatureMethod algorithm="${SIG_SHA256}"/>`), "algorithm_declaration_unreadable"));
+  test("rejects a SignatureMethod with only a prefixed `ds:Algorithm`", () =>
+    assertReason(signedResponse(`<ds:SignatureMethod ds:Algorithm="${SIG_SHA256}"/>`), "algorithm_declaration_unreadable"));
+  test("rejects a duplicate Algorithm attribute (the parser reports it)", () =>
+    assertReason(signedResponse(`<ds:SignatureMethod Algorithm="${SIG_SHA256}" Algorithm="${SIG_SHA1}"/>`), "parser_reported_problem"));
+
+  // ── Element structure ───────────────────────────────────────────────────────
+
+  test("rejects an EncryptedAssertion", () =>
+    assertReason(wrap(signatureFragment() + `<saml:EncryptedAssertion/>`), "encrypted_assertion"));
+  test("rejects a bare EncryptedData element", () =>
+    assertReason(wrap(signatureFragment() + `<xenc:EncryptedData/>`), "encrypted_assertion"));
+  test("rejects a lower-case `signaturemethod` element (suspicious variant)", () =>
+    assertReason(
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:signaturemethod Algorithm="${SIG_SHA256}"/><ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference></ds:SignedInfo></ds:Signature></samlp:Response>`,
+      "suspicious_element_variant",
+    ));
+  test("rejects a response with no SignatureMethod", () =>
+    assertReason(
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">idp</saml:Issuer></samlp:Response>`,
+      "missing_signature_method",
+    ));
+  test("rejects a Signature with no SignatureMethod while a decoy exists elsewhere (G1)", () =>
+    assertReason(
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">` +
+        `<saml:Extra><ds:SignatureMethod xmlns:ds="${DSIG_NS}" Algorithm="${SIG_SHA256}"/><ds:DigestMethod xmlns:ds="${DSIG_NS}" Algorithm="${DIG_SHA256}"/></saml:Extra>` +
+        `<saml:Assertion ID="_a"><ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm="${EXC_C14N}"/><ds:Reference URI="#_a"><ds:DigestMethod Algorithm="${DIG_SHA256}"/><ds:DigestValue>x</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>x</ds:SignatureValue></ds:Signature></saml:Assertion></samlp:Response>`,
+      "signature_without_method",
+    ));
+  test("rejects a Reference with no DigestMethod", () =>
+    assertReason(
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:SignatureMethod Algorithm="${SIG_SHA256}"/><ds:Reference URI="#_a"><ds:DigestValue>x</ds:DigestValue></ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:SignedInfo></ds:Signature></samlp:Response>`,
+      "reference_without_digest",
+    ));
+
+  // ── The re-review exploits ──────────────────────────────────────────────────
+
+  test("rejects the end-tag over-consumption exploit (rsa-sha1 hidden in a malformed end tag)", () =>
+    assertRejected(base64(signedResponse(`<ds:X>y</ds:X foo <ds:SignatureMethod Algorithm="${SIG_SHA1}"/>>`))));
+  test("rejects the DigestMethod end-tag variant", () =>
+    assertRejected(base64(signedResponse(`<ds:X>y</ds:X foo <ds:DigestMethod Algorithm="${DIG_SHA1}"/>>`))));
+  test("rejects a non-ASCII-prefixed rsa-sha1 SignatureMethod (by the allow-list)", () =>
+    assertReason(
+      signedResponse(`<é:SignatureMethod xmlns:é="${DSIG_NS}" Algorithm="${SIG_SHA1}"/>`),
+      "signature_algorithm_not_allowed",
+    ));
+  test("rejects a non-ASCII-prefixed sha1 DigestMethod (by the allow-list)", () =>
+    assertReason(
+      signedResponse(`<é:DigestMethod xmlns:é="${DSIG_NS}" Algorithm="${DIG_SHA1}"/>`),
+      "digest_algorithm_not_allowed",
+    ));
+
+  // ── Comments / CDATA / PIs / DOCTYPE / encoding ─────────────────────────────
+
+  test("rejects a comment anywhere", () => assertReason(signedResponse(`<!-- x -->`), "comment"));
+  test("rejects a CDATA section anywhere", () =>
+    assertReason(signedResponse(`<saml:X xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"><![CDATA[x]]></saml:X>`), "cdata"));
+  test("rejects a processing instruction in the body", () =>
+    assertReason(signedResponse(`<?target d?>`), "processing_instruction"));
+  test("rejects a DOCTYPE", () => assertReason(`<!DOCTYPE Response>${signedResponse()}`, "doctype_or_entity"));
+  test("rejects an ENTITY declaration", () => assertRejected(base64(`<!DOCTYPE x [<!ENTITY e "x">]>${signedResponse()}`)));
+  test("rejects an XML declaration claiming UTF-16 over UTF-8 bytes", () =>
+    assertReason(`<?xml version="1.0" encoding="UTF-16"?>${signedResponse()}`, "non_utf8_declaration"));
+
+  // ── Encoding / base64 pre-checks ────────────────────────────────────────────
+
+  test("rejects a non-string / empty input", () => {
+    expect(assertSamlResponseAlgorithmsAllowed("")).toEqual({ ok: false, reason: "not_a_string" });
+    expect(assertSamlResponseAlgorithmsAllowed(undefined)).toEqual({ ok: false, reason: "not_a_string" });
+  });
+  test("rejects non-base64 input", () =>
+    expect(assertSamlResponseAlgorithmsAllowed("not valid base64 !!!")).toEqual({ ok: false, reason: "invalid_base64" }));
+  test("rejects oversized input before decoding", () =>
+    expect(assertSamlResponseAlgorithmsAllowed("A".repeat(262145))).toEqual({ ok: false, reason: "oversized" }));
+  test("rejects a UTF-16-encoded document (NUL bytes)", () =>
+    expect(assertSamlResponseAlgorithmsAllowed(Buffer.from(signedResponse(), "utf16le").toString("base64"))).toEqual({ ok: false, reason: "not_utf8_xml" }));
+
+  // ── Malformed inputs xmldom 0.8.15 might recover; each must still reject ─────
+
+  test("rejects an unclosed tag (parser reports it)", () =>
+    assertReason(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><a>`, "parser_reported_problem"));
+  test("rejects a mismatched end tag (parser reports it)", () =>
+    assertReason(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><a></b></samlp:Response>`, "parser_reported_problem"));
+  test("rejects an attribute without a value (parser reports it)", () =>
+    assertReason(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><a b/></samlp:Response>`, "parser_reported_problem"));
+  test("rejects an unquoted attribute value (parser reports it)", () =>
+    assertReason(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"><a b=c/></samlp:Response>`, "parser_reported_problem"));
+  test("rejects a stray `<` in text (parser reports it)", () =>
+    assertReason(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">a < b</samlp:Response>`, "parser_reported_problem"));
+  test("rejects two root elements (parser reports it)", () =>
+    assertReason(`<a/><b/>`, "parser_reported_problem"));
+  test("rejects a two-colon element name (parser reports it)", () =>
+    assertReason(signedResponse(`<a:b:SignatureMethod Algorithm="${SIG_SHA256}"/>`), "parser_reported_problem"));
+  test("rejects markup (a comment) after the root (the walk catches it)", () =>
+    assertReason(`${signedResponse()}<!-- x -->`, "comment"));
+  test("rejects non-whitespace text before the root (the raw-text check catches it; xmldom drops it)", () =>
+    assertReason(`junk${signedResponse()}`, "text_outside_root"));
+  test("rejects non-whitespace text after the root (the walk catches it)", () =>
+    assertReason(`${signedResponse()}trailing`, "text_outside_root"));
+
+  // ── Cap / robustness (no crash, returns promptly) ───────────────────────────
+
+  test("rejects a very large number of nodes by the node cap, promptly", () => {
+    const many =
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+      "<a/>".repeat(35000) +
+      `</samlp:Response>`;
+    const started = Date.now();
+    const result = assertSamlResponseAlgorithmsAllowed(base64(many));
+    expect(result).toEqual({ ok: false, reason: "too_many_nodes" });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test("handles a deeply nested document without a stack overflow, promptly", () => {
+    const depth = 8000;
+    const deep =
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+      "<a>".repeat(depth) +
+      "</a>".repeat(depth) +
+      `</samlp:Response>`;
+    const started = Date.now();
+    const result = assertSamlResponseAlgorithmsAllowed(base64(deep));
+    expect(result.ok).toBe(false); // no SignatureMethod → rejected, but must not crash
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });

@@ -510,22 +510,16 @@ test("an RSA-SHA256 signature with a SHA-1 digest is rejected by the guard's alg
   );
 }, 200_000);
 
-test("the non-ASCII-prefix algorithm bypass is rejected by the guard at the ACS (fix round 1)", async () => {
-  // A SignatureMethod declaring rsa-sha1 under a non-ASCII namespace prefix,
-  // placed before the ASCII rsa-sha256 one. xml-crypto would resolve the first
-  // by local name and verify rsa-sha1; the guard's tokenizer rejects the
-  // non-ASCII element name before the plugin ever sees it.
-  const email = "bypass@acme.com";
-  const { acs, client } = await acmeSignIn(({ acsUrl, audience, inResponseTo }) => ({
-    acsUrl,
-    audience,
-    inResponseTo,
-    nameId: email,
-    email,
-    injectBeforeFirstSignatureMethod:
-      '<é:SignatureMethod xmlns:é="http://www.w3.org/2000/09/xmldsig#" ' +
-      'Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>',
-  }));
+/**
+ * POST a genuinely RSA-SHA1-signed exploit (the hidden rsa-sha1 SignatureMethod
+ * is the one xml-crypto would resolve and verify) straight to the ACS. The guard
+ * before-hook runs the algorithm policy on the parsed document before the plugin,
+ * so a real sign-in is unnecessary.
+ */
+async function assertExploitRejected(hide: "endTag" | "nonAscii", email: string) {
+  const client = new SsoTestClient(harness.auth, harness.baseUrl);
+  const exploit = fixture.buildRsaSha1Exploit({ hide, nameId: email, email });
+  const acs = await postAcs(client, ACME_PROVIDER, exploit);
   const error = await assertRejected(acs, client, { newIdentityEmail: email });
   assert.ok(
     error?.includes(SSO_ERROR_CODES.samlAlgorithmNotAllowed),
@@ -536,6 +530,18 @@ test("the non-ASCII-prefix algorithm bypass is rejected by the guard at the ACS 
     0,
     "a rejected bypass grants no membership",
   );
+}
+
+test("the end-tag rsa-sha1 bypass (genuine signature) is rejected by the guard at the ACS (fix round 2)", async () => {
+  // rsa-sha1 SignatureMethod hidden in a malformed end tag before the rsa-sha256
+  // decoy; without the guard, xml-crypto recovers it and verifies RSA-SHA1.
+  await assertExploitRejected("endTag", "endtag-bypass@acme.com");
+}, 200_000);
+
+test("the non-ASCII-prefix rsa-sha1 bypass (genuine signature) is rejected by the guard at the ACS (fix round 2)", async () => {
+  // rsa-sha1 SignatureMethod under a non-ASCII namespace prefix, first in document
+  // order; without the guard, xml-crypto resolves it by local name and verifies RSA-SHA1.
+  await assertExploitRejected("nonAscii", "nonascii-bypass@acme.com");
 }, 200_000);
 
 test("a Response delivered to a different provider's ACS is rejected", async () => {
