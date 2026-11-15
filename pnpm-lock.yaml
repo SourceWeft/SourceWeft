@@ -1019,6 +1019,9 @@ importers:
       '@sourceweft/capability-contracts':
         specifier: workspace:*
         version: link:../capability-contracts
+      '@sourceweft/connector-broker-composio':
+        specifier: workspace:*
+        version: link:../connector-broker-composio
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts

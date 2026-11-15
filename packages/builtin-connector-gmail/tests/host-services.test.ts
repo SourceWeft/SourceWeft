@@ -101,3 +101,113 @@ test("Gmail capability registers adapter and tools only when configured", async 
   assert.equal(result.adapters[0]?.getManifest().type, "gmail");
   assert.equal(result.agentToolDefs.length, 4);
 });
+
+function assertGoogleMode(manifest: { auth: { kind: string } }) {
+  assert.equal(manifest.auth.kind, "oauth2");
+}
+
+function assertComposioMode(manifest: { auth: { kind: string } }) {
+  assert.equal(manifest.auth.kind, "brokered");
+}
+
+test("GMAIL_AUTH_PROVIDER unset stays in google mode, identical to before", async () => {
+  const result = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "true",
+      GMAIL_CLIENT_ID: "id",
+      GMAIL_CLIENT_SECRET: "secret",
+    }),
+  });
+  assertGoogleMode(result.adapters[0]!.getManifest());
+});
+
+test("GMAIL_AUTH_PROVIDER=google stays in google mode", async () => {
+  const result = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "true",
+      GMAIL_AUTH_PROVIDER: "google",
+      GMAIL_CLIENT_ID: "id",
+      GMAIL_CLIENT_SECRET: "secret",
+    }),
+  });
+  assertGoogleMode(result.adapters[0]!.getManifest());
+});
+
+test("GMAIL_AUTH_PROVIDER=composio with a key registers a working composio-mode adapter", async () => {
+  const { warnings, logger } = recordingLogger();
+  const result = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "true",
+      GMAIL_AUTH_PROVIDER: "composio",
+      COMPOSIO_API_KEY: "key",
+    }),
+    logger,
+  });
+  assert.equal(result.adapters.length, 1);
+  assertComposioMode(result.adapters[0]!.getManifest());
+  assert.deepEqual(warnings, []);
+});
+
+test("GMAIL_AUTH_PROVIDER=composio without a key stays registered, warns, and refuses to start authorization", async () => {
+  const { warnings, logger } = recordingLogger();
+  const result = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "true",
+      GMAIL_AUTH_PROVIDER: "composio",
+    }),
+    logger,
+  });
+  assert.equal(result.adapters.length, 1);
+  assertComposioMode(result.adapters[0]!.getManifest());
+  assert.deepEqual(warnings, [
+    {
+      message: "connector_not_configured",
+      meta: { connectorType: "gmail", missing: ["COMPOSIO_API_KEY"] },
+    },
+  ]);
+  await assert.rejects(
+    result.adapters[0]!.startAuthorization!({
+      callbackUrl: "https://api.sourceweft.example/callback",
+      ownerRef: "ws_workspace",
+    }),
+    { statusCode: 500, code: "CONNECTOR_OAUTH_CONFIG_MISSING" },
+  );
+});
+
+test("GMAIL_AUTH_PROVIDER is trimmed and lower-cased before matching", async () => {
+  const result = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "true",
+      GMAIL_AUTH_PROVIDER: "Composio ",
+      COMPOSIO_API_KEY: "key",
+    }),
+  });
+  assertComposioMode(result.adapters[0]!.getManifest());
+});
+
+test("an unrecognized GMAIL_AUTH_PROVIDER throws", () => {
+  assert.throws(
+    () =>
+      createConnectorAdapters({
+        env: environment({
+          GMAIL_CONNECTOR_ENABLED: "true",
+          GMAIL_AUTH_PROVIDER: "foo",
+          GMAIL_CLIENT_ID: "id",
+          GMAIL_CLIENT_SECRET: "secret",
+        }),
+      }),
+    /GMAIL_AUTH_PROVIDER must be google or composio/,
+  );
+});
+
+test("COMPOSIO_API_KEY alone, with no GMAIL_AUTH_PROVIDER, still yields google mode", async () => {
+  const result = await createConnectorAdapters({
+    env: environment({
+      GMAIL_CONNECTOR_ENABLED: "true",
+      COMPOSIO_API_KEY: "key",
+      GMAIL_CLIENT_ID: "id",
+      GMAIL_CLIENT_SECRET: "secret",
+    }),
+  });
+  assertGoogleMode(result.adapters[0]!.getManifest());
+});

@@ -11,6 +11,10 @@ Preview eligibility is operator-managed data in the existing `user_settings.sett
 
 The user settings API returns normalized preview flags but only accepts appearance updates. Users cannot grant themselves preview access. Missing flags are disabled. Only the boolean `true` grants access; malformed data is denied with a diagnostic, and database failures are surfaced rather than converted to an ordinary disabled flag.
 
+## Authorization mode
+
+`GMAIL_AUTH_PROVIDER` selects how the Gmail connector authorizes and talks to Gmail, independently of the preview gate above. The default, `google`, uses SourceWeft's own Google OAuth client (`GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`) and calls the Gmail API directly, with full mailbox indexing. Setting it to `composio` instead authorizes through Composio and relays every Gmail request through Composio's proxy using `COMPOSIO_API_KEY`, so SourceWeft never holds a Google token; that mode offers live Gmail tools only (search, read message, read thread, approved send) and has no mailbox indexing. Setting `COMPOSIO_API_KEY` alone enables nothing — it only takes effect once `GMAIL_AUTH_PROVIDER=composio`.
+
 ## Deployment order
 
 1. Deploy the preview-aware API, workers and scheduler. All processes that save user settings must use the atomic partial-update implementation before any preview grant is written. Older versions replace the complete JSON document and can erase grants when a user changes appearance.

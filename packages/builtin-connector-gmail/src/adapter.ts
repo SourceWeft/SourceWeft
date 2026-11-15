@@ -1,8 +1,11 @@
 import { Buffer } from "node:buffer";
+import type { ComposioBroker } from "@sourceweft/connector-broker-composio";
 import type {
   ConnectorActionInput,
   ConnectorActionResult,
   ConnectorAdapter,
+  ConnectorAuthorizationFinishInput,
+  ConnectorAuthorizationStartInput,
   ConnectorDiscoverInput,
   ConnectorDiscoveryPage,
   ConnectorExtractInput,
@@ -12,12 +15,23 @@ import type {
   OAuthRefreshInput,
   OAuthTokenSet,
 } from "@sourceweft/contracts";
-import { toBackendGmailManifest } from "./backend-manifest";
-import { GMAIL_READ_SCOPE } from "./contribution";
+import { toBackendGmailComposioManifest, toBackendGmailManifest } from "./backend-manifest";
+import { GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE } from "./contribution";
+import {
+  createComposioTransport,
+  createGoogleDirectTransport,
+  decodeComposioCredential,
+  encodeComposioCredential,
+  GmailAdapterError,
+  type GmailTransport,
+  type GmailTransportResponse,
+} from "./transport";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const MESSAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+export { GmailAdapterError };
 
 type GmailHeader = { name?: string; value?: string };
 type GmailPart = {
@@ -51,24 +65,36 @@ type GmailHistory = {
   }>;
 };
 
-export class GmailAdapterError extends Error {
-  constructor(
-    readonly statusCode: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "GmailAdapterError";
-  }
+export type GmailAdapterConfig =
+  | {
+      mode: "google";
+      baseUrl: string;
+      redirectUri?: string;
+      clientId: string;
+      clientSecret: string;
+      fetcher?: typeof fetch;
+    }
+  | {
+      mode: "composio";
+      baseUrl: string;
+      broker: ComposioBroker | null;
+    };
+
+function composioConfigMissingError(): GmailAdapterError {
+  return new GmailAdapterError(
+    500,
+    "CONNECTOR_OAUTH_CONFIG_MISSING",
+    "Gmail is not configured: COMPOSIO_API_KEY is missing",
+  );
 }
 
-export type GmailAdapterConfig = {
-  baseUrl: string;
-  redirectUri?: string;
-  clientId: string;
-  clientSecret: string;
-  fetcher?: typeof fetch;
-};
+function modeUnsupported(): never {
+  throw new GmailAdapterError(
+    501,
+    "GMAIL_MODE_UNSUPPORTED",
+    "Gmail via Composio does not support this operation",
+  );
+}
 
 function assertId(value: unknown, label: string): string {
   if (typeof value !== "string" || !MESSAGE_ID.test(value)) {
@@ -315,30 +341,34 @@ function cursorPart(
 export function createGmailConnectorAdapter(
   config: GmailAdapterConfig,
 ): ConnectorAdapter {
-  const fetcher = config.fetcher ?? fetch;
-  const redirectUri =
-    config.redirectUri ??
-    `${config.baseUrl}/v1/connectors/oauth/gmail/callback`;
+  const transport: GmailTransport =
+    config.mode === "composio"
+      ? config.broker
+        ? createComposioTransport(config.broker)
+        : async () => {
+            throw composioConfigMissingError();
+          }
+      : createGoogleDirectTransport(config.fetcher ?? fetch);
 
   async function providerRequest<T>(
     url: string,
-    token: string,
-    init: RequestInit = {},
+    credential: string,
+    init: { method?: string; body?: string; headers?: Record<string, string> } = {},
   ): Promise<T> {
     const retryableMethod = !init.method || init.method === "GET";
     for (let attempt = 0; attempt < (retryableMethod ? 3 : 1); attempt += 1) {
-      let response: Response;
+      let result: GmailTransportResponse;
       try {
-        response = await fetcher(url, {
-          ...init,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(init.body ? { "Content-Type": "application/json" } : {}),
-            ...init.headers,
-          },
-          signal: AbortSignal.timeout(15000),
-        });
-      } catch {
+        result = await transport(url, credential, init);
+      } catch (error) {
+        // A GmailAdapterError thrown by the transport is already a final,
+        // classified outcome (e.g. a non-retryable Composio failure or a
+        // missing-broker configuration error): it is rethrown unchanged
+        // rather than retried. Anything else is treated as the existing
+        // network-failure branch.
+        if (error instanceof GmailAdapterError) {
+          throw error;
+        }
         if (retryableMethod && attempt < 2) {
           await new Promise((resolve) =>
             setTimeout(resolve, 250 * 2 ** attempt),
@@ -351,33 +381,33 @@ export function createGmailConnectorAdapter(
           "Gmail is unavailable",
         );
       }
-      if (response.ok) return (await response.json()) as T;
-      const retryableStatus = response.status === 429 || response.status >= 500;
+      if (result.status >= 200 && result.status < 300)
+        return result.body as T;
+      const retryableStatus = result.status === 429 || result.status >= 500;
       if (retryableMethod && retryableStatus && attempt < 2) {
-        const retryAfter = Number(response.headers.get("Retry-After"));
         const delay =
-          Number.isFinite(retryAfter) && retryAfter > 0
-            ? Math.min(5000, retryAfter * 1000)
+          result.retryAfterSeconds && result.retryAfterSeconds > 0
+            ? Math.min(5000, result.retryAfterSeconds * 1000)
             : 250 * 2 ** attempt;
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
       const code =
-        response.status === 401
+        result.status === 401
           ? "GMAIL_REAUTH_REQUIRED"
-          : response.status === 403
+          : result.status === 403
             ? "GMAIL_ACCESS_DENIED"
-            : response.status === 404
+            : result.status === 404
               ? "GMAIL_NOT_FOUND"
-              : response.status === 429
+              : result.status === 429
                 ? "GMAIL_RATE_LIMITED"
-                : response.status >= 500
+                : result.status >= 500
                   ? "GMAIL_UNAVAILABLE"
                   : "GMAIL_REQUEST_FAILED";
       throw new GmailAdapterError(
-        response.status,
+        result.status,
         code,
-        `Gmail request failed (${response.status})`,
+        `Gmail request failed (${result.status})`,
       );
     }
     throw new GmailAdapterError(
@@ -387,7 +417,272 @@ export function createGmailConnectorAdapter(
     );
   }
 
+  async function profile(credential: string) {
+    const value = await providerRequest<{
+      emailAddress?: string;
+      historyId?: string;
+    }>(`${API}/profile`, credential);
+    if (!value.emailAddress || !value.historyId) {
+      throw new GmailAdapterError(
+        502,
+        "GMAIL_PROFILE_INVALID",
+        "Gmail profile is incomplete",
+      );
+    }
+    return { email: value.emailAddress, historyId: value.historyId };
+  }
+
+  async function getMessage(
+    credential: string,
+    id: string,
+    format: "metadata" | "full",
+  ) {
+    return providerRequest<GmailMessage>(
+      `${API}/messages/${encodeURIComponent(assertId(id, "message ID"))}?format=${format}`,
+      credential,
+    );
+  }
+
+  async function validateSelectedLabels(input: ConnectorDiscoverInput) {
+    const chosen = Array.isArray(input.config.labelIds)
+      ? input.config.labelIds.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
+    if (!chosen.length) return;
+    const available = await providerRequest<{
+      labels?: Array<{ id?: string }>;
+    }>(`${API}/labels`, input.accessToken);
+    const ids = new Set((available.labels ?? []).map((label) => label.id));
+    if (chosen.some((id) => !ids.has(id))) {
+      throw new GmailAdapterError(
+        409,
+        "GMAIL_LABEL_UNAVAILABLE",
+        "A selected Gmail label is no longer available; update indexing scope",
+      );
+    }
+  }
+
+  // Shared between modes: Gmail request building and result shaping for
+  // every action are identical whether the transport talks to Google
+  // directly or through Composio's proxy.
+  async function executeAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorActionResult> {
+    const action = input.actionType;
+    if (action === "gmail.labels.list") {
+      const page = await providerRequest<{
+        labels?: Array<{ id?: string; name?: string; type?: string }>;
+      }>(`${API}/labels`, input.accessToken);
+      return {
+        result: {
+          labels: (page.labels ?? [])
+            .filter((label) => label.id && label.name)
+            .map((label) => ({
+              id: label.id,
+              name: label.name,
+              type: label.type ?? "user",
+            })),
+        },
+      };
+    }
+    if (action === "gmail.message.send") {
+      const identity = await profile(input.accessToken);
+      const raw = sendRaw(input.request, identity.email);
+      const sent = await providerRequest<{ id?: string; threadId?: string }>(
+        `${API}/messages/send`,
+        input.accessToken,
+        { method: "POST", body: JSON.stringify({ raw }) },
+      );
+      if (!sent.id) {
+        throw new GmailAdapterError(
+          502,
+          "GMAIL_SEND_RESULT_INVALID",
+          "Gmail did not confirm a sent message ID",
+        );
+      }
+      return {
+        externalId: sent.id,
+        result: {
+          sent: true,
+          messageId: sent.id,
+          threadId: sent.threadId ?? null,
+        },
+      };
+    }
+    if (input.config.liveSearchEnabled === false) {
+      throw new GmailAdapterError(
+        409,
+        "GMAIL_LIVE_DISABLED",
+        "Live Gmail search is disabled",
+      );
+    }
+    const identity = await profile(input.accessToken);
+    if (action === "gmail.message.search") {
+      const query = safeString(input.request.query, 512).trim();
+      if (!query)
+        throw new GmailAdapterError(
+          400,
+          "GMAIL_QUERY_REQUIRED",
+          "Search query is required",
+        );
+      const maxResults =
+        typeof input.request.maxResults === "number"
+          ? Math.min(50, Math.max(1, input.request.maxResults))
+          : 20;
+      const url = new URL(`${API}/messages`);
+      url.searchParams.set("q", query);
+      url.searchParams.set("maxResults", String(maxResults));
+      if (typeof input.request.pageToken === "string")
+        url.searchParams.set("pageToken", input.request.pageToken);
+      const page = await providerRequest<GmailList>(
+        url.toString(),
+        input.accessToken,
+      );
+      const messages = [];
+      for (const ref of page.messages ?? []) {
+        if (!ref.id) continue;
+        const message = await getMessage(input.accessToken, ref.id, "metadata");
+        messages.push(messageMetadata(message, identity.email));
+      }
+      return {
+        result: { messages, nextPageToken: page.nextPageToken ?? null },
+      };
+    }
+    if (action === "gmail.message.read") {
+      const message = await getMessage(
+        input.accessToken,
+        assertId(input.request.messageId, "message ID"),
+        "full",
+      );
+      return {
+        result: {
+          ...messageMetadata(message, identity.email),
+          body: bodyText(message.payload),
+        },
+      };
+    }
+    if (action === "gmail.thread.read") {
+      const id = assertId(input.request.threadId, "thread ID");
+      const thread = await providerRequest<{ messages?: GmailMessage[] }>(
+        `${API}/threads/${encodeURIComponent(id)}?format=full`,
+        input.accessToken,
+      );
+      return {
+        result: {
+          threadId: id,
+          messages: (thread.messages ?? []).slice(0, 50).map((message) => ({
+            ...messageMetadata(message, identity.email),
+            body: bodyText(message.payload),
+          })),
+          truncated: (thread.messages?.length ?? 0) > 50,
+        },
+      };
+    }
+    throw new GmailAdapterError(
+      400,
+      "GMAIL_ACTION_UNSUPPORTED",
+      "Unsupported Gmail action",
+    );
+  }
+
+  if (config.mode === "composio") {
+    const composioConfig = config;
+    return {
+      capabilityId: "sourceweft/gmail",
+      getManifest() {
+        return toBackendGmailComposioManifest();
+      },
+      async exchangeOAuthCode(_input: OAuthCodeExchangeInput) {
+        modeUnsupported();
+      },
+      async refreshOAuthToken(_input: OAuthRefreshInput) {
+        modeUnsupported();
+      },
+      async startAuthorization(input: ConnectorAuthorizationStartInput) {
+        if (!composioConfig.broker) throw composioConfigMissingError();
+        const link = await composioConfig.broker.createLink({
+          toolkit: "gmail",
+          ownerRef: input.ownerRef,
+          callbackUrl: input.callbackUrl,
+        });
+        return {
+          authorizationUrl: link.authorizationUrl,
+          attemptRef: link.connectedAccountId,
+        };
+      },
+      async finishAuthorization(
+        input: ConnectorAuthorizationFinishInput,
+      ): Promise<OAuthTokenSet> {
+        if (!composioConfig.broker) throw composioConfigMissingError();
+        if (
+          input.callbackParams.status !== "success" ||
+          input.callbackParams.connected_account_id !== input.attemptRef
+        ) {
+          throw new GmailAdapterError(
+            400,
+            "GMAIL_AUTHORIZATION_INVALID",
+            "Gmail authorization was not completed",
+          );
+        }
+        const account = await composioConfig.broker.getConnectedAccount(
+          input.attemptRef,
+        );
+        if (account.status !== "ACTIVE" || account.toolkit !== "gmail") {
+          throw new GmailAdapterError(
+            409,
+            "GMAIL_AUTHORIZATION_INCOMPLETE",
+            "Gmail authorization is not active yet",
+          );
+        }
+        const credential = encodeComposioCredential({
+          ownerRef: input.ownerRef,
+          connectedAccountId: input.attemptRef,
+        });
+        const identity = await profile(credential);
+        return {
+          accessToken: credential,
+          providerAccountId: identity.email,
+          providerAccountEmail: identity.email,
+          displayName: identity.email,
+          scopes: [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE],
+        };
+      },
+      async revokeAuthorization(input: { accessToken: string }) {
+        if (!composioConfig.broker) throw composioConfigMissingError();
+        const { connectedAccountId } = decodeComposioCredential(
+          input.accessToken,
+        );
+        await composioConfig.broker.deleteConnectedAccount(connectedAccountId);
+      },
+      async checkSyncReadiness() {
+        return { ready: false, reason: "indexing_unavailable" };
+      },
+      discover(_input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem> {
+        modeUnsupported();
+      },
+      discoverPages(
+        _input: ConnectorDiscoverInput,
+      ): AsyncIterable<ConnectorDiscoveryPage> {
+        modeUnsupported();
+      },
+      async extract(
+        _input: ConnectorExtractInput,
+      ): Promise<ConnectorExtractedContent> {
+        modeUnsupported();
+      },
+      executeAction,
+    };
+  }
+
+  const redirectUri =
+    config.redirectUri ??
+    `${config.baseUrl}/v1/connectors/oauth/gmail/callback`;
+
   async function tokenRequest(params: URLSearchParams): Promise<OAuthTokenSet> {
+    if (config.mode !== "google") {
+      modeUnsupported();
+    }
     if (!config.clientId || !config.clientSecret) {
       throw new GmailAdapterError(
         500,
@@ -395,6 +690,7 @@ export function createGmailConnectorAdapter(
         "Gmail OAuth client is not configured",
       );
     }
+    const fetcher = config.fetcher ?? fetch;
     params.set("client_id", config.clientId);
     params.set("client_secret", config.clientSecret);
     let response: Response;
@@ -444,52 +740,6 @@ export function createGmailConnectorAdapter(
         : null,
       scopes,
     };
-  }
-
-  async function profile(token: string) {
-    const value = await providerRequest<{
-      emailAddress?: string;
-      historyId?: string;
-    }>(`${API}/profile`, token);
-    if (!value.emailAddress || !value.historyId) {
-      throw new GmailAdapterError(
-        502,
-        "GMAIL_PROFILE_INVALID",
-        "Gmail profile is incomplete",
-      );
-    }
-    return { email: value.emailAddress, historyId: value.historyId };
-  }
-
-  async function getMessage(
-    token: string,
-    id: string,
-    format: "metadata" | "full",
-  ) {
-    return providerRequest<GmailMessage>(
-      `${API}/messages/${encodeURIComponent(assertId(id, "message ID"))}?format=${format}`,
-      token,
-    );
-  }
-
-  async function validateSelectedLabels(input: ConnectorDiscoverInput) {
-    const chosen = Array.isArray(input.config.labelIds)
-      ? input.config.labelIds.filter(
-          (value): value is string => typeof value === "string",
-        )
-      : [];
-    if (!chosen.length) return;
-    const available = await providerRequest<{
-      labels?: Array<{ id?: string }>;
-    }>(`${API}/labels`, input.accessToken);
-    const ids = new Set((available.labels ?? []).map((label) => label.id));
-    if (chosen.some((id) => !ids.has(id))) {
-      throw new GmailAdapterError(
-        409,
-        "GMAIL_LABEL_UNAVAILABLE",
-        "A selected Gmail label is no longer available; update indexing scope",
-      );
-    }
   }
 
   return {
@@ -750,128 +1000,6 @@ export function createGmailConnectorAdapter(
         ],
       };
     },
-    async executeAction(
-      input: ConnectorActionInput,
-    ): Promise<ConnectorActionResult> {
-      const action = input.actionType;
-      if (action === "gmail.labels.list") {
-        const page = await providerRequest<{
-          labels?: Array<{ id?: string; name?: string; type?: string }>;
-        }>(`${API}/labels`, input.accessToken);
-        return {
-          result: {
-            labels: (page.labels ?? [])
-              .filter((label) => label.id && label.name)
-              .map((label) => ({
-                id: label.id,
-                name: label.name,
-                type: label.type ?? "user",
-              })),
-          },
-        };
-      }
-      if (action === "gmail.message.send") {
-        const identity = await profile(input.accessToken);
-        const raw = sendRaw(input.request, identity.email);
-        const sent = await providerRequest<{ id?: string; threadId?: string }>(
-          `${API}/messages/send`,
-          input.accessToken,
-          { method: "POST", body: JSON.stringify({ raw }) },
-        );
-        if (!sent.id) {
-          throw new GmailAdapterError(
-            502,
-            "GMAIL_SEND_RESULT_INVALID",
-            "Gmail did not confirm a sent message ID",
-          );
-        }
-        return {
-          externalId: sent.id,
-          result: {
-            sent: true,
-            messageId: sent.id,
-            threadId: sent.threadId ?? null,
-          },
-        };
-      }
-      if (input.config.liveSearchEnabled === false) {
-        throw new GmailAdapterError(
-          409,
-          "GMAIL_LIVE_DISABLED",
-          "Live Gmail search is disabled",
-        );
-      }
-      const identity = await profile(input.accessToken);
-      if (action === "gmail.message.search") {
-        const query = safeString(input.request.query, 512).trim();
-        if (!query)
-          throw new GmailAdapterError(
-            400,
-            "GMAIL_QUERY_REQUIRED",
-            "Search query is required",
-          );
-        const maxResults =
-          typeof input.request.maxResults === "number"
-            ? Math.min(50, Math.max(1, input.request.maxResults))
-            : 20;
-        const url = new URL(`${API}/messages`);
-        url.searchParams.set("q", query);
-        url.searchParams.set("maxResults", String(maxResults));
-        if (typeof input.request.pageToken === "string")
-          url.searchParams.set("pageToken", input.request.pageToken);
-        const page = await providerRequest<GmailList>(
-          url.toString(),
-          input.accessToken,
-        );
-        const messages = [];
-        for (const ref of page.messages ?? []) {
-          if (!ref.id) continue;
-          const message = await getMessage(
-            input.accessToken,
-            ref.id,
-            "metadata",
-          );
-          messages.push(messageMetadata(message, identity.email));
-        }
-        return {
-          result: { messages, nextPageToken: page.nextPageToken ?? null },
-        };
-      }
-      if (action === "gmail.message.read") {
-        const message = await getMessage(
-          input.accessToken,
-          assertId(input.request.messageId, "message ID"),
-          "full",
-        );
-        return {
-          result: {
-            ...messageMetadata(message, identity.email),
-            body: bodyText(message.payload),
-          },
-        };
-      }
-      if (action === "gmail.thread.read") {
-        const id = assertId(input.request.threadId, "thread ID");
-        const thread = await providerRequest<{ messages?: GmailMessage[] }>(
-          `${API}/threads/${encodeURIComponent(id)}?format=full`,
-          input.accessToken,
-        );
-        return {
-          result: {
-            threadId: id,
-            messages: (thread.messages ?? []).slice(0, 50).map((message) => ({
-              ...messageMetadata(message, identity.email),
-              body: bodyText(message.payload),
-            })),
-            truncated: (thread.messages?.length ?? 0) > 50,
-          },
-        };
-      }
-      throw new GmailAdapterError(
-        400,
-        "GMAIL_ACTION_UNSUPPORTED",
-        "Unsupported Gmail action",
-      );
-    },
+    executeAction,
   };
 }
