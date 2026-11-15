@@ -204,6 +204,15 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           ? {
               async beforeDelete(user) {
                 await assertUserHardDeleteAllowed(user.id);
+                // Hand this user's team SSO providers to a surviving owner/admin
+                // before the `ssoProvider.userId` ON DELETE CASCADE would take
+                // the team's identity source down with the departing account.
+                // Runs after the sole-owner guard, so a team whose only owner is
+                // leaving has already blocked the delete.
+                const { reassignSsoProvidersOnUserDelete } = await import(
+                  "../enterprise-sso/lifecycle"
+                );
+                await reassignSsoProvidersOnUserDelete(user.id);
                 // Before any data is erased: a failed revocation must leave the
                 // account exactly as it was, so deleting can be retried.
                 const { revokeAppleTokensBeforeDelete } =
@@ -488,12 +497,24 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                     organization.id,
                   );
                 },
-                async beforeDeleteOrganization({ organization }) {
+                async beforeDeleteOrganization({ organization, user }) {
                   if (isPersonalOrganizationMetadata(organization.metadata)) {
                     throw new APIError("BAD_REQUEST", {
                       message: "Personal workspace cannot be deleted.",
                     });
                   }
+                  // Remove the team's SSO providers and their linked `account`
+                  // rows: otherwise a verified provider keeps blocking its domain
+                  // for every other team, and no one can delete it once its org
+                  // is gone. Runs here (before the org row goes) so the audit
+                  // sink still exists.
+                  const { deleteSsoProvidersForOrganization } = await import(
+                    "../enterprise-sso/lifecycle"
+                  );
+                  await deleteSsoProvidersForOrganization({
+                    organizationId: organization.id,
+                    actorUserId: user?.id ?? null,
+                  });
                 },
                 async afterCreateOrganization({ organization, user }) {
                   const { onboardingService } = await import("../onboarding");
@@ -740,7 +761,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
       }),
       // Registered outside the isRuntimeMode branching below so that
       // `auth migrate` (mode: "migration") still creates its table.
-      ...buildSsoPlugins({ isRuntimeMode }),
+      ...buildSsoPlugins(),
       // Localizes better-auth error messages for the request locale. Registered
       // last so its `after` hook runs after every other plugin's and can
       // translate errors surfaced by any of them (design §16, D11).
