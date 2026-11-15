@@ -13,3 +13,8 @@ export {
 } from "./file-types";
 export type { DropboxFileHandling } from "./file-types";
 export { DropboxAdapterError } from "./dropbox-client";
+export {
+  createDropboxConnectorAdapter,
+  parseDropboxSelection,
+} from "./adapter";
+export type { DropboxAdapterConfig } from "./adapter";
