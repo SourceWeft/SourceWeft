@@ -943,7 +943,7 @@ test("changing the SAML certificate after a sign-in returns 409 SSO_PROVIDER_IDE
   assert.equal(body.code, SSO_ERROR_CODES.providerIdentityLocked);
   assert.equal(
     body.message,
-    "已有成员通过该身份源登录后，这些设置不能再修改。如需修改，请删除该身份源后重新添加。",
+    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新创建。",
   );
 }, 200_000);
 
@@ -960,6 +960,27 @@ test("after a sign-in, updating only the SAML domain still succeeds", async () =
     domain: `renamed-${p.providerId}.example`,
   });
   assert.equal(update.status, 200, await update.clone().text());
+}, 200_000);
+
+test("after a sign-in, updating only the SAML role attribute or admin value succeeds", async () => {
+  const p = await freshExplicitProvider({ name: "Lock Role", cert: fixture.certBase64 });
+  const { acs } = await explicitSignIn({
+    providerId: p.providerId,
+    issuer: p.issuer,
+    email: `user@${p.domain}`,
+  });
+  assert.equal(errorParam(acs), null, "the sign-in links an account first");
+  for (const patch of [{ roleAttribute: "groups" }, { adminRoleValue: "sw-admins" }]) {
+    const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+      providerId: p.providerId,
+      ...patch,
+    });
+    assert.equal(
+      update.status,
+      200,
+      `${JSON.stringify(patch)}: ${await update.clone().text()}`,
+    );
+  }
 }, 200_000);
 
 // ── R5: a combined SAML update keeps a stored custom mapping ─────────────────
@@ -998,5 +1019,5 @@ test("a SAML combined update with samlConfig + role attribute keeps a custom map
     mapping?: { email?: string; extraFields?: Record<string, unknown> };
   };
   assert.equal(saml.mapping?.email, "mail", "the custom email mapping is preserved");
-  assert.equal(saml.mapping?.extraFields?.groups, "groups", "the role claim is carried");
+  assert.equal(saml.mapping?.extraFields?.ssoRoleClaim, "groups", "the role claim is carried");
 }, 200_000);

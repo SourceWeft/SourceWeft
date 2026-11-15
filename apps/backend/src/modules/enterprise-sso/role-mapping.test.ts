@@ -1,67 +1,64 @@
 import { describe, expect, test } from "vitest";
-import { mapSsoRole, validateRoleAttribute } from "./role-mapping";
+import { mapSsoRole, SSO_ROLE_CLAIM_KEY, validateRoleAttribute } from "./role-mapping";
 
 /**
- * `mapSsoRole` turns an IdP's role attribute into the only two organization
- * roles SSO may assign: `member` or `admin`. It never grants `owner`, and it
- * never splits a value — an attribute is `admin` only when it carries the
- * configured `adminRoleValue` as a whole string (directly or as one element of
- * a string array). Anything else — unconfigured mapping, a non-string/array
- * value, an empty `adminRoleValue` — is `member`.
+ * `mapSsoRole` turns the IdP's role claim — which the guard maps into the fixed
+ * {@link SSO_ROLE_CLAIM_KEY} on `userInfo`, never the tenant's attribute name —
+ * into the only two organization roles SSO may assign: `member` or `admin`. It
+ * never grants `owner`, and never splits a value: `admin` only when the claim
+ * carries the configured `adminRoleValue` as a whole string (directly or as one
+ * element of a string array). Anything else is `member`.
  */
 describe("mapSsoRole", () => {
-  const base = { roleAttribute: "groups", adminRoleValue: "sw-admins" };
+  const base = { roleManaged: true, adminRoleValue: "sw-admins" };
+  const claim = (value: unknown) => ({ [SSO_ROLE_CLAIM_KEY]: value });
 
   test("an array containing the admin value maps to admin", () => {
-    expect(
-      mapSsoRole({ ...base, userInfo: { groups: ["dev", "sw-admins"] } }),
-    ).toBe("admin");
-  });
-
-  test("a bare string equal to the admin value maps to admin", () => {
-    expect(mapSsoRole({ ...base, userInfo: { groups: "sw-admins" } })).toBe(
+    expect(mapSsoRole({ ...base, userInfo: claim(["dev", "sw-admins"]) })).toBe(
       "admin",
     );
   });
 
-  test("an array without the admin value maps to member", () => {
-    expect(mapSsoRole({ ...base, userInfo: { groups: ["dev"] } })).toBe(
-      "member",
-    );
+  test("a bare string equal to the admin value maps to admin", () => {
+    expect(mapSsoRole({ ...base, userInfo: claim("sw-admins") })).toBe("admin");
   });
 
-  test("a missing attribute maps to member", () => {
+  test("an array without the admin value maps to member", () => {
+    expect(mapSsoRole({ ...base, userInfo: claim(["dev"]) })).toBe("member");
+  });
+
+  test("a missing claim maps to member", () => {
     expect(mapSsoRole({ ...base, userInfo: {} })).toBe("member");
   });
 
-  test("an unconfigured mapping always maps to member", () => {
+  test("an unmanaged provider always maps to member", () => {
     expect(
       mapSsoRole({
-        userInfo: { groups: ["sw-admins"] },
-        roleAttribute: null,
+        userInfo: claim(["sw-admins"]),
+        roleManaged: false,
         adminRoleValue: null,
       }),
     ).toBe("member");
   });
 
-  test("a non-string, non-array attribute value maps to member", () => {
-    expect(
-      mapSsoRole({ ...base, userInfo: { groups: { nested: true } } }),
-    ).toBe("member");
+  test("a non-string, non-array claim value maps to member", () => {
+    expect(mapSsoRole({ ...base, userInfo: claim({ nested: true }) })).toBe(
+      "member",
+    );
   });
 
   test("a comma-separated string is not split (exact match only)", () => {
-    expect(
-      mapSsoRole({ ...base, userInfo: { groups: "dev,sw-admins" } }),
-    ).toBe("member");
+    expect(mapSsoRole({ ...base, userInfo: claim("dev,sw-admins") })).toBe(
+      "member",
+    );
   });
 
   test("an empty adminRoleValue maps to member", () => {
     expect(
       mapSsoRole({
-        roleAttribute: "groups",
+        roleManaged: true,
         adminRoleValue: "",
-        userInfo: { groups: ["sw-admins"] },
+        userInfo: claim(["sw-admins"]),
       }),
     ).toBe("member");
   });
@@ -75,12 +72,9 @@ describe("validateRoleAttribute", () => {
     });
   });
 
-  test("rejects a reserved profile-mapping key", () => {
-    for (const reserved of ["id", "email", "emailVerified", "name", "image"]) {
-      expect(validateRoleAttribute(reserved)).toEqual({
-        ok: false,
-        reason: "reserved",
-      });
+  test("accepts names that are user columns (they map into a namespaced key)", () => {
+    for (const name of ["id", "email", "emailVerified", "name", "image", "role"]) {
+      expect(validateRoleAttribute(name)).toEqual({ ok: true, value: name });
     }
   });
 
@@ -88,6 +82,13 @@ describe("validateRoleAttribute", () => {
     expect(validateRoleAttribute("x".repeat(129))).toEqual({
       ok: false,
       reason: "too_long",
+    });
+  });
+
+  test("rejects an attribute containing control characters", () => {
+    expect(validateRoleAttribute("groups\u0000")).toEqual({
+      ok: false,
+      reason: "control_characters",
     });
   });
 });

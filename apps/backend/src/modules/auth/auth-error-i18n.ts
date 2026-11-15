@@ -32,12 +32,14 @@ const ssoErrorMessagesZhCN: TranslationDictionary = {
     "无法将你加入团队，请重试或联系管理员。",
   [SSO_ERROR_CODES.invalidRoleAttribute]:
     "该角色属性名不可用，请换一个属性。",
+  [SSO_ERROR_CODES.invalidAttributeMapping]:
+    "该属性映射使用了保留的字段名，请换一个字段名。",
   [SSO_ERROR_CODES.invalidProviderId]:
     "身份源 ID 需为 3–47 个小写字母、数字或连字符。",
   [SSO_ERROR_CODES.organizationRequired]: "单点登录只能为团队配置。",
   [SSO_ERROR_CODES.providerLimit]: "该团队的身份源数量已达上限（5 个）。",
   [SSO_ERROR_CODES.providerIdentityLocked]:
-    "已有成员通过该身份源登录后，这些设置不能再修改。如需修改，请删除该身份源后重新添加。",
+    "已有成员使用该身份源登录后，这些设置不能再修改。如需修改，请先删除该身份源，再重新创建。",
   [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
     "身份源返回的 SAML 响应使用了不支持的签名设置。请联系管理员改用 SHA-256 签名，并发送未加密的断言。",
 };
@@ -62,12 +64,16 @@ const ssoErrorMessagesZhTW: TranslationDictionary = {
     "無法將你加入團隊，請重試或聯絡管理員。",
   [SSO_ERROR_CODES.invalidRoleAttribute]:
     "該角色屬性名不可用，請換一個屬性。",
+  [SSO_ERROR_CODES.invalidAttributeMapping]:
+    "該屬性對映使用了保留的欄位名，請換一個欄位名。",
   [SSO_ERROR_CODES.invalidProviderId]:
     "身分提供者 ID 需為 3–47 個小寫字母、數字或連字元。",
   [SSO_ERROR_CODES.organizationRequired]: "單一登入只能為團隊設定。",
   [SSO_ERROR_CODES.providerLimit]: "該團隊的身分提供者數量已達上限（5 個）。",
+  // `重新建立` hand-corrected from the generator's `重新增立` (the glossary's
+  // `新建→新增` rule mis-matches the `新建` inside `重新建立`); reported upstream.
   [SSO_ERROR_CODES.providerIdentityLocked]:
-    "已有成員通過該身分提供者登入後，這些設定不能再修改。如需修改，請刪除該身分提供者後重新新增。",
+    "已有成員使用該身分提供者登入後，這些設定不能再修改。如需修改，請先刪除該身分提供者，再重新建立。",
   [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
     "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，並傳送未加密的斷言。",
 };

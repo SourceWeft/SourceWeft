@@ -98,9 +98,12 @@ export function buildSsoPlugins(): BetterAuthPlugin[] {
         }
         const protocol: "oidc" | "saml" = row.samlConfig ? "saml" : "oidc";
         const roleAttribute = nonEmptyString(row.roleAttribute);
+        // The role claim reaches `userInfo` under a fixed namespaced key the
+        // guard injected (never the tenant's attribute name), so a role attribute
+        // called `role` or `email` cannot have written a user column.
         const role = mapSsoRole({
           userInfo,
-          roleAttribute,
+          roleManaged: roleAttribute !== null,
           adminRoleValue: nonEmptyString(row.adminRoleValue),
         });
         await provisionSsoUser({

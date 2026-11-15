@@ -18,9 +18,13 @@ export const SSO_ERROR_CODES = {
   // than a seat limit (e.g. addMember threw); only the created session is
   // revoked and the sign-in is redirected to the error page.
   provisioningFailed: "SSO_PROVISIONING_FAILED",
-  // A provider was registered/updated with a role attribute that collides with a
-  // reserved profile-mapping key or is otherwise unusable.
+  // A provider was registered/updated with a role attribute that is unusable
+  // (over-long, or contains control characters).
   invalidRoleAttribute: "SSO_INVALID_ROLE_ATTRIBUTE",
+  // A provider's `mapping.extraFields` used a key that is a field of the user
+  // table, which would let the IdP write that user column (or trigger a plugin's
+  // user-create hook) during sign-in.
+  invalidAttributeMapping: "SSO_INVALID_ATTRIBUTE_MAPPING",
   // A provider id outside `^[a-z0-9-]{3,47}$` was submitted at registration; a
   // longer id would overflow the `_sourceweft-sso-<providerId>` DNS TXT label.
   invalidProviderId: "SSO_INVALID_PROVIDER_ID",
@@ -66,6 +70,8 @@ export const SSO_ERROR_MESSAGES_EN: Record<SsoErrorCode, string> = {
     "We couldn't add you to your team. Try again, or contact your administrator.",
   [SSO_ERROR_CODES.invalidRoleAttribute]:
     "This role attribute name can't be used. Choose a different attribute.",
+  [SSO_ERROR_CODES.invalidAttributeMapping]:
+    "This attribute mapping uses a name that is reserved. Choose a different field name.",
   [SSO_ERROR_CODES.invalidProviderId]:
     "Provider IDs use 3–47 lowercase letters, digits and hyphens.",
   [SSO_ERROR_CODES.organizationRequired]:

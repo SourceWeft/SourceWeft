@@ -286,9 +286,14 @@ export async function setProviderDomainVerified(
 
 /**
  * Set a provider's role-mapping attributes directly in SQL. The register
- * endpoint does not accept these additionalFields in its body, so tests write
- * them straight to the columns (they carry no secret, so no adapter wrapper is
- * needed). `null` leaves the provider unconfigured for role mapping.
+ * endpoint does not accept `adminRoleValue` in its body, so tests write it (and
+ * `roleAttribute`) straight to the columns. When `roleAttribute` is set, this
+ * ALSO injects the namespaced role claim into the stored oidc/saml mapping's
+ * `extraFields.ssoRoleClaim`, exactly as the guard's before-hook does at
+ * registration, so sign-in maps the IdP's claim into `userInfo.ssoRoleClaim` for
+ * {@link mapSsoRole}. The row is rewritten in raw SQL (the secret wrapper is
+ * bypassed), so an encrypted `clientSecret` is preserved verbatim. `null`
+ * clears role mapping.
  */
 export async function setProviderRoleMapping(
   harness: SsoTestHarness,
@@ -301,6 +306,31 @@ export async function setProviderRoleMapping(
      where "providerId" = $1`,
     [providerId, input.roleAttribute, input.adminRoleValue],
   );
+  if (!input.roleAttribute) {
+    return;
+  }
+  for (const column of ["oidcConfig", "samlConfig"] as const) {
+    const result = await harness.schema.database.query<Record<string, string | null>>(
+      `select "${column}" as config from "ssoProvider" where "providerId" = $1`,
+      [providerId],
+    );
+    const raw = result.rows[0]?.config;
+    if (typeof raw !== "string" || !raw) {
+      continue;
+    }
+    const parsed = JSON.parse(raw) as {
+      mapping?: { extraFields?: Record<string, unknown> };
+    };
+    const mapping = parsed.mapping ?? {};
+    parsed.mapping = {
+      ...mapping,
+      extraFields: { ...(mapping.extraFields ?? {}), ssoRoleClaim: input.roleAttribute },
+    };
+    await harness.schema.database.query(
+      `update "ssoProvider" set "${column}" = $2 where "providerId" = $1`,
+      [providerId, JSON.stringify(parsed)],
+    );
+  }
 }
 
 /**
