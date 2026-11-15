@@ -1,5 +1,5 @@
 import { APIError } from "better-auth/api";
-import { billingOrganizationHooks } from "../../billing-host/bindings";
+import { isBillingError } from "@sourceweft/contracts/billing-runtime";
 import { logger } from "../../shared/logger";
 import { parseSourceweftOrganizationKind } from "../auth/organization-metadata";
 import {
@@ -13,6 +13,7 @@ import {
   ssoErrorRedirect,
   type SsoErrorCode,
 } from "./errors";
+import { takeSsoSignInCapture } from "./sso-sign-in-capture";
 
 /**
  * JIT membership, account-linking rules and role mapping for enterprise SSO.
@@ -22,19 +23,21 @@ import {
  *
  *  - {@link resolveSsoSignIn} backs the plugin's `resolveUser` hook. It runs
  *    inside the sign-in transaction, BEFORE any user, account or session row is
- *    created, and decides whether the verified identity may sign in at all:
- *    it fails closed on a domain mismatch (an IdP asserting an email outside the
- *    provider's verified domain must never link to or create an account — plan
- *    Review Focus 1), and it pre-checks the billing seat so a rejection leaves
- *    no session behind (plan Review Focus 2). `@better-auth/sso@1.7.7` calls
- *    `provisionUser` AFTER the session is created and committed, so the seat
- *    check cannot live there without orphaning a session.
+ *    created, and decides whether the verified identity may sign in at all. It
+ *    fails closed on a domain mismatch (an IdP asserting an email outside the
+ *    provider's verified domain), and — the C1 fix — never links to a
+ *    pre-existing UNVERIFIED local account. Every query it makes runs on the
+ *    transaction's own database handle; it acquires no second pooled connection,
+ *    so it cannot deadlock the shared pool while it holds the provider row lock.
  *
- *  - {@link provisionSsoUser} backs `provisionUser`. By then the user exists and
- *    is signed in; this adds them to the provider's organization through the
- *    real member-added path (so billing, workspace access and audit all apply),
- *    syncs an existing member's role when the provider manages roles, and
- *    records the `sso.sign_in` audit entry.
+ *  - {@link provisionSsoUser} backs `provisionUser`, which the plugin calls AFTER
+ *    the session is created and the transaction has committed. It adds the user
+ *    to the provider's organization through the real member-added path (so
+ *    billing, workspace access and audit all apply), reconciles a managed role,
+ *    and records the `sso.sign_in` audit entry. If the membership step fails it
+ *    is NON-DESTRUCTIVE: it revokes only the session this sign-in created and
+ *    redirects to the error page, leaving the user, SSO account and personal
+ *    workspace in place so the next sign-in retries membership.
  */
 
 export type SsoSignInProtocol = SsoAuditProtocol;
@@ -60,8 +63,8 @@ export type SsoResolutionAdapter = {
  * truth every `SSO_ERROR_CODES` throw site uses (errors.ts) — rather than a
  * second, independent copy of the text. This message is never shown to a
  * user directly: the plugin redirects to the error URL carrying only the
- * `code` query param (a later task renders it); it still must not drift from
- * the table so logs/diagnostics stay consistent with the JSON-error paths.
+ * `code` query param; it still must not drift from the table so
+ * logs/diagnostics stay consistent with the JSON-error paths.
  */
 function reject(code: SsoErrorCode): SsoUserResolution {
   return { action: "reject", code, message: SSO_ERROR_MESSAGES_EN[code] };
@@ -96,6 +99,10 @@ export function emailDomainMatchesProviderDomain(
  * Runs inside the sign-in transaction. Rejecting here rolls back the whole
  * sign-in: no user, account or session row survives, and the plugin redirects
  * to the error URL carrying the rejection `code`.
+ *
+ * Every read goes through `database` — the transaction adapter the plugin hands
+ * the resolver — so nothing here acquires a second pooled connection while the
+ * transaction holds its connection and the provider row lock (the I1 deadlock).
  */
 export async function resolveSsoSignIn(input: {
   providerId: string;
@@ -147,73 +154,27 @@ export async function resolveSsoSignIn(input: {
   const existingUser = await database.findOne({
     model: "user",
     where: [{ field: "email", value: email }],
-    select: ["id"],
+    select: ["id", "emailVerified"],
   });
   const existingUserId = existingUser ? asNonEmptyString(existingUser.id) : null;
 
-  let alreadyMember = false;
+  // Fail closed on a pre-existing UNVERIFIED local account (C1). Returning
+  // `link` makes the plugin skip its own `requireLocalEmailVerified` refusal (it
+  // only applies when no `selectedUser` is supplied — better-auth
+  // dist/oauth2/link-account.mjs), so a link here would attach the SSO identity
+  // to a row nobody has proven they own — the pre-hijack takeover. A verified
+  // row links as before; an unverified one is rejected and left untouched.
+  //
+  // Returning `continue` is safe: it is reached only when NO user has this
+  // email, and if a row somehow appeared the plugin's own unverified-link
+  // refusal still applies (no `selectedUser` is handed over for a `continue`).
   if (existingUserId) {
-    const member = await database.findOne({
-      model: "member",
-      where: [
-        { field: "organizationId", value: organizationId },
-        { field: "userId", value: existingUserId },
-      ],
-      select: ["id"],
-    });
-    alreadyMember = member !== null;
-  }
-
-  // Pre-check the billing seat before a session exists. Any rejection from the
-  // member-added billing hook means no seat, so fail the whole sign-in with a
-  // seat-limit code rather than orphan a session. Skipped for an existing
-  // member, who consumes no new seat.
-  if (!alreadyMember) {
-    try {
-      await billingOrganizationHooks.beforeAddMember(organizationId);
-    } catch {
-      return reject(SSO_ERROR_CODES.seatLimit);
+    if (existingUser?.emailVerified !== true) {
+      return reject(SSO_ERROR_CODES.accountLinkDenied);
     }
-  }
-
-  if (existingUserId) {
     return { action: "link", userId: existingUserId, profile: "preserve" };
   }
   return { action: "continue" };
-}
-
-/**
- * `@better-auth/sso@1.7.7` calls `provisionUser` without the plugin's own
- * `isRegister`, so whether this sign-in created a new user account is carried
- * from {@link resolveSsoSignIn}'s decision (continue = new, link = existing) to
- * {@link provisionSsoUser} through this per-identity map. An entry is set only
- * for a non-rejected resolution (one that will reach `provisionUser`) and is
- * read-and-deleted on provisioning, so the only possible residue is a rare
- * post-resolution authentication failure, which a retry of the same identity
- * overwrites.
- */
-const newUserByIdentity = new Map<string, boolean>();
-
-function identityKey(providerId: string, accountId: string): string {
-  return `${providerId}\u0000${accountId}`;
-}
-
-export function rememberSsoIsNewUser(
-  providerId: string,
-  accountId: string,
-  isNewUser: boolean,
-): void {
-  newUserByIdentity.set(identityKey(providerId, accountId), isNewUser);
-}
-
-export function takeSsoIsNewUser(
-  providerId: string,
-  accountId: string,
-): boolean {
-  const key = identityKey(providerId, accountId);
-  const value = newUserByIdentity.get(key);
-  newUserByIdentity.delete(key);
-  return value ?? false;
 }
 
 /** The auth-context slice {@link provisionSsoUser} needs. */
@@ -252,76 +213,99 @@ function toMillis(value: unknown): number {
   return 0;
 }
 
+/** better-auth's error code when a member row already exists for the user. */
+const ALREADY_A_MEMBER_CODE = "USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION";
+
 /**
- * Undo a sign-in whose membership step failed after the session was committed.
+ * The commercial billing seat-limit signal. The seat check throws a
+ * `BillingError("TEAM_SEAT_LIMIT_REACHED", …)` (enterprise/billing's
+ * subscription-service); the add-member org hook raises it inside
+ * `auth.api.addMember`, which re-throws non-`APIError`s unchanged, so it reaches
+ * us here. Any OTHER failure is reported as a generic provisioning failure, not
+ * as "no seats left".
+ */
+const SEAT_LIMIT_BILLING_CODE = "TEAM_SEAT_LIMIT_REACHED";
+
+/** Only the seat-limit case maps to `SSO_SEAT_LIMIT`; everything else is generic. */
+function isSeatLimitError(error: unknown): boolean {
+  for (let layer: unknown = error, depth = 0; layer && depth < 5; depth += 1) {
+    if (isBillingError(layer) && layer.code === SEAT_LIMIT_BILLING_CODE) {
+      return true;
+    }
+    layer = (layer as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** Whether `auth.api.addMember` failed because the user is already a member. */
+function isAlreadyMemberError(error: unknown): boolean {
+  return (
+    error instanceof APIError &&
+    (error.body as { code?: unknown } | undefined)?.code === ALREADY_A_MEMBER_CODE
+  );
+}
+
+/**
+ * Revoke ONLY the session this sign-in created, after a membership step failed.
  *
  * `@better-auth/sso@1.7.7` creates and commits the session before it calls
- * `provisionUser`, so a membership failure there leaves a committed session row
- * (and, for a brand-new identity, a committed user + SSO account). The session
- * cookie is never set, because the plugin sets it only after `provisionUser`
- * returns, so this only has to remove the committed rows:
+ * `provisionUser`, but sets the session cookie only after `provisionUser`
+ * returns — so a failure here leaves a committed, cookie-less session row that
+ * must be removed, and nothing else. The session is identified exactly from the
+ * `session.create.after` capture; if that is somehow missing, the fallback is
+ * restricted to the newest session for this user created in the last few seconds
+ * (this request), never an older session the user already held.
  *
- *  - the session this sign-in created — identified as the most recent session
- *    for the user, which is this one (provisionUser runs synchronously, within
- *    the same request, immediately after the session is committed);
- *  - any membership row (defensive: the member-added path throws its billing
- *    seat check before it inserts a row, but a later failure could leave one);
- *  - the SSO account this provider linked (matched by provider + user);
- *  - and, only for a user this sign-in created, the user row itself.
- *
- * An existing user's own rows (their password/other accounts and their other
- * sessions) are left untouched.
+ * Nothing else is deleted: a brand-new identity keeps its user row (email
+ * verified, SSO account linked, personal workspace) without team membership, and
+ * the next SSO sign-in retries the membership step.
  */
-async function rollbackFailedSsoSignIn(
+async function revokeSsoSignInSession(
   context: SsoProvisioningContext,
-  input: {
-    userId: string;
-    organizationId: string;
-    providerId: string;
-    isNewUser: boolean;
-  },
+  input: { userId: string; organizationId: string; providerId: string },
+  sessionId: string | undefined,
 ): Promise<void> {
+  try {
+    const id = sessionId ?? (await recentSessionId(context, input.userId));
+    if (id) {
+      await context.adapter.delete({
+        model: "session",
+        where: [{ field: "id", value: id }],
+      });
+    }
+  } catch (error) {
+    logger.error("sso_session_revocation_failed", {
+      organizationId: input.organizationId,
+      providerId: input.providerId,
+      reason: "membership_failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** Fallback: the newest session for `userId` created in the last few seconds. */
+async function recentSessionId(
+  context: SsoProvisioningContext,
+  userId: string,
+): Promise<string | null> {
+  const cutoff = Date.now() - 10_000;
   const sessions = await context.adapter.findMany({
     model: "session",
-    where: [{ field: "userId", value: input.userId }],
+    where: [{ field: "userId", value: userId }],
     select: ["id", "createdAt"],
   });
   const newest = sessions.reduce<Record<string, unknown> | null>(
     (latest, session) =>
-      latest === null || toMillis(session.createdAt) >= toMillis(latest.createdAt)
+      latest === null ||
+      toMillis(session.createdAt) >= toMillis(latest.createdAt)
         ? session
         : latest,
     null,
   );
-  if (newest?.id) {
-    await context.adapter.delete({
-      model: "session",
-      where: [{ field: "id", value: String(newest.id) }],
-    });
+  if (newest?.id && toMillis(newest.createdAt) >= cutoff) {
+    return String(newest.id);
   }
-
-  await context.adapter.delete({
-    model: "member",
-    where: [
-      { field: "organizationId", value: input.organizationId },
-      { field: "userId", value: input.userId },
-    ],
-  });
-
-  await context.adapter.delete({
-    model: "account",
-    where: [
-      { field: "providerId", value: input.providerId },
-      { field: "userId", value: input.userId },
-    ],
-  });
-
-  if (input.isNewUser) {
-    await context.adapter.delete({
-      model: "user",
-      where: [{ field: "id", value: input.userId }],
-    });
-  }
+  return null;
 }
 
 /**
@@ -329,34 +313,27 @@ async function rollbackFailedSsoSignIn(
  * organization, then audit the sign-in.
  *
  * Rules:
- *  1. Already a member whose role contains `owner`: untouched. Otherwise, when
- *     the provider manages roles (`roleManaged`) and the mapped role differs,
- *     the role is updated and an `organization.member_role_changed` entry is
- *     recorded. No workspace rewrite is needed — the workspace role derives from
- *     the organization role on every read (see auth-config.ts, which records no
- *     `afterUpdateMemberRole` for the same reason).
- *  2. Not a member: added via `auth.api.addMember`, the same member-added path
+ *  1. Not a member: added via `auth.api.addMember`, the same member-added path
  *     an admin invitation uses, so the billing seat hook, workspace provisioning
- *     and `organization.member_added` audit all run.
- *  3. Every SSO sign-in is recorded as `sso.sign_in`.
+ *     and `organization.member_added` audit all run. The role is already mapped
+ *     (never `owner`), so a fresh add needs no further role reconcile.
+ *  2. A concurrent sign-in of the same identity (or a race with an invitation)
+ *     may have added the member between the check and the add — `addMember` then
+ *     throws "already a member", which is SUCCESS: we reconcile the role and
+ *     audit as for an existing member.
+ *  3. Already a member whose role contains `owner`: untouched. Otherwise, when
+ *     the provider manages roles (`roleManaged`) and the mapped role differs, the
+ *     role is updated and `organization.member_role_changed` is recorded.
+ *  4. Every SSO sign-in is recorded as `sso.sign_in`.
  *
- * `role` is already mapped (never `owner`). A brand-new account is already
- * `emailVerified: true` before this runs — the guard's `user.create` hook marks
- * an SSO-created account verified (ownership is proven by the verified domain +
- * matching email, which `resolveUser` enforced), so no redundant verification
- * mail is sent and `trustEmailVerified` stays unset.
- *
- * The member-added step runs after the plugin has already committed the session.
- * If it throws (a seat taken since the resolver's pre-check, a billing error, a
- * vanished organization), the committed session — and a brand-new user + its SSO
- * account — are rolled back by {@link rollbackFailedSsoSignIn} and a redirect to
- * the error URL carrying {@link SSO_ERROR_CODES.seatLimit} or
- * {@link SSO_ERROR_CODES.provisioningFailed} is thrown. Throwing the redirect
- * from here (inside the plugin's callback endpoint, via a `FOUND` `APIError`)
- * routes it through the same error-URL response the plugin emits for a resolver
- * rejection, rather than surfacing a raw error body. Audit recording and the
- * role-sync write are best-effort: once membership exists the sign-in has
- * succeeded, so their failures are logged, not raised.
+ * On a genuine membership failure (a seat taken since sign-in, a billing error, a
+ * vanished organization) the step is NON-DESTRUCTIVE: only the session this
+ * sign-in created is revoked, and a redirect to the error URL carrying
+ * {@link SSO_ERROR_CODES.seatLimit} (billing seat limit) or
+ * {@link SSO_ERROR_CODES.provisioningFailed} (anything else) is thrown — routed
+ * through the plugin's own error-URL response, so no session cookie is set.
+ * Audit recording and the role-sync write are best-effort: once membership
+ * holds the sign-in has succeeded, so their failures are logged, not raised.
  */
 export async function provisionSsoUser(input: {
   userId: string;
@@ -365,7 +342,6 @@ export async function provisionSsoUser(input: {
   providerId: string;
   protocol: SsoSignInProtocol;
   domain: string;
-  isNewUser: boolean;
   roleManaged: boolean;
 }): Promise<void> {
   // Lazy import breaks the module-load cycle with auth-config (which registers
@@ -373,7 +349,12 @@ export async function provisionSsoUser(input: {
   const { auth } = await import("../auth/auth");
   const context = (await auth.$context) as unknown as SsoProvisioningContext;
 
-  const member = await context.adapter.findOne({
+  // Read (and clear) the facts the plugin does not pass to `provisionUser`:
+  // whether this sign-in created the user row, and which session it created.
+  const capture = takeSsoSignInCapture(input.userId);
+  const isNewUser = capture?.userCreated ?? false;
+
+  let member = await context.adapter.findOne({
     model: "member",
     where: [
       { field: "organizationId", value: input.organizationId },
@@ -392,15 +373,39 @@ export async function provisionSsoUser(input: {
         },
       });
     } catch (error) {
-      await rollbackFailedSsoSignIn(context, input);
-      throw provisioningRedirect(
-        await isSeatRejection(input.organizationId),
-        error,
-      );
+      if (isAlreadyMemberError(error)) {
+        // A concurrent sign-in of this identity (or an invitation accept) won
+        // the race: that is success. Re-read the member row and reconcile below.
+        member = await context.adapter.findOne({
+          model: "member",
+          where: [
+            { field: "organizationId", value: input.organizationId },
+            { field: "userId", value: input.userId },
+          ],
+          select: ["id", "role"],
+        });
+      } else {
+        const seat = isSeatLimitError(error);
+        logger.error("sso_membership_add_failed", {
+          organizationId: input.organizationId,
+          providerId: input.providerId,
+          reason: seat ? "seat_limit" : "provisioning_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await revokeSsoSignInSession(context, input, capture?.sessionId);
+        throw ssoErrorRedirect(
+          seat ? SSO_ERROR_CODES.seatLimit : SSO_ERROR_CODES.provisioningFailed,
+          error,
+        );
+      }
     }
-  } else if (input.roleManaged) {
-    // Role sync is best-effort; a failure must not undo a sign-in whose
-    // membership already holds.
+  }
+
+  // Reconcile a managed role on an existing (or concurrently-added) member. A
+  // freshly added member already carries the mapped role, so `member` is still
+  // null and this is skipped. Best-effort: a failure must not undo a sign-in
+  // whose membership already holds.
+  if (member && input.roleManaged) {
     try {
       await syncExistingMemberRole({
         context,
@@ -413,7 +418,8 @@ export async function provisionSsoUser(input: {
     } catch (error) {
       logger.error("sso_role_sync_failed", {
         organizationId: input.organizationId,
-        userId: input.userId,
+        providerId: input.providerId,
+        reason: "role_sync_failed",
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -427,12 +433,13 @@ export async function provisionSsoUser(input: {
       providerId: input.providerId,
       protocol: input.protocol,
       domain: input.domain,
-      isNewUser: input.isNewUser,
+      isNewUser,
     });
   } catch (error) {
     logger.error("sso_sign_in_audit_failed", {
       organizationId: input.organizationId,
-      userId: input.userId,
+      providerId: input.providerId,
+      reason: "audit_failed",
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -465,34 +472,4 @@ async function syncExistingMemberRole(input: {
     previousRole: input.currentRole,
     newRole: input.nextRole,
   });
-}
-
-/**
- * Whether the organization's billing seat check now rejects, used to classify a
- * failed member-add after the fact: a seat rejection becomes `SSO_SEAT_LIMIT`,
- * anything else `SSO_PROVISIONING_FAILED`. Re-running the (read-only) seat hook
- * is the only reliable discriminator, since `addMember` can throw for either.
- */
-async function isSeatRejection(organizationId: string): Promise<boolean> {
-  try {
-    await billingOrganizationHooks.beforeAddMember(organizationId);
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Build the error-URL redirect for a failed membership step, delegating to the
- * shared {@link ssoErrorRedirect} (the same 302-to-error-page construction the
- * guard's SAML algorithm policy reuses). A membership failure after the session
- * is committed redirects to the error page carrying `SSO_SEAT_LIMIT` or
- * `SSO_PROVISIONING_FAILED`, never a raw error body; no session cookie is set,
- * because the plugin sets it only after `provisionUser` returns.
- */
-function provisioningRedirect(isSeat: boolean, cause: unknown): APIError {
-  return ssoErrorRedirect(
-    isSeat ? SSO_ERROR_CODES.seatLimit : SSO_ERROR_CODES.provisioningFailed,
-    cause,
-  );
 }

@@ -106,6 +106,10 @@ export type SamlIdpFixture = {
   cert: string;
   /** The signing certificate as a bare base64 body (no PEM armor), as the UI sends it. */
   certBase64: string;
+  /** An UNRELATED signing certificate (bare base64), a different trust anchor than
+   * {@link certBase64} — used to prove a provider's cert rotation is locked once
+   * an account has linked through it. */
+  rogueCertBase64: string;
   /** IdP metadata XML carrying the signing certificate, for `idpMetadata.metadata`. */
   metadataXml: string;
   /** Build a base64-encoded `SAMLResponse` for the ACS form POST. */
@@ -552,6 +556,7 @@ export function createSamlIdpFixture(): SamlIdpFixture {
     entryPoint,
     cert: idpCert,
     certBase64: samlify.Utility.toCertificateBody(idpCert),
+    rogueCertBase64: samlify.Utility.toCertificateBody(rogueCert),
     metadataXml,
     buildResponse,
     buildRsaSha1Exploit,

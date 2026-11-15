@@ -4,9 +4,7 @@ import { sourceweftSsoGuard } from "./guard-plugin";
 import { mapSsoRole } from "./role-mapping";
 import {
   provisionSsoUser,
-  rememberSsoIsNewUser,
   resolveSsoSignIn,
-  takeSsoIsNewUser,
   type SsoResolutionAdapter,
 } from "./provisioning";
 import { ssoSecretStoragePlugin } from "./secret-storage";
@@ -27,22 +25,21 @@ function nonEmptyString(value: unknown): string | null {
 
 /**
  * Registers the better-auth SSO plugin (OIDC + SAML) for team organizations,
- * alongside {@link ssoSecretStoragePlugin}, which encrypts the OIDC
- * clientSecret at rest.
+ * together with:
+ *  - {@link ssoSecretStoragePlugin}, which encrypts the OIDC clientSecret at
+ *    rest, and
+ *  - {@link sourceweftSsoGuard}, which enforces the SourceWeft multi-tenant
+ *    rules (team-only orgs, private/unique domains, provider cap, signed SAML,
+ *    the SAML ACS algorithm policy), maps the plugin's own errors to localized
+ *    codes, and records the per-request facts provisioning needs.
  *
- * Guards and user provisioning are later tasks; `provisionUser` is
- * deliberately not configured yet.
- *
- * `isRuntimeMode` is accepted (not yet used) for parity with the other
- * plugins in `auth-config.ts`, which gate runtime-only side effects (mail
- * sends, lazy imports that would otherwise cycle with auth-config) behind
- * this flag. A later task's `provisionUser` callback is expected to need it.
+ * `resolveUser` fails closed on the account-linking rules (domain mismatch, an
+ * unverified pre-existing account) before any row is created; `provisionUser`
+ * adds the signed-in user to the provider's organization after the transaction
+ * commits. Registered outside the `isRuntimeMode` branching in auth-config.ts so
+ * `auth migrate` still creates the plugin's table.
  */
-export function buildSsoPlugins({
-  isRuntimeMode: _isRuntimeMode,
-}: {
-  isRuntimeMode: boolean;
-}): BetterAuthPlugin[] {
+export function buildSsoPlugins(): BetterAuthPlugin[] {
   return [
     // Seals the OIDC clientSecret in `ssoProvider.oidcConfig` at the adapter
     // layer (better-auth databaseHooks don't cover plugin tables). Registered
@@ -77,28 +74,20 @@ export function buildSsoPlugins({
       },
       // Decide, inside the sign-in transaction and before any user/account/
       // session row exists, whether a verified identity may sign in and to
-      // which user. `@better-auth/sso@1.7.7` runs `provisionUser` AFTER the
-      // session is created, so the fail-closed domain gate and the billing-seat
-      // pre-check (which must leave no session behind) live here instead.
-      resolveUser: async (input, { database }) => {
-        const resolution = await resolveSsoSignIn({
+      // which user. All reads go through the transaction adapter (`database`),
+      // so the resolver never acquires a second pooled connection while it
+      // holds the provider row lock.
+      resolveUser: async (input, { database }) =>
+        resolveSsoSignIn({
           providerId: input.providerId,
           email: input.providerUser.email,
           database: database as unknown as SsoResolutionAdapter,
-        });
-        if (resolution.action !== "reject") {
-          // Carry "is this a newly created account?" to provisionUser, which the
-          // plugin does not pass its own `isRegister` to.
-          rememberSsoIsNewUser(
-            input.providerId,
-            input.accountKey.accountId,
-            resolution.action === "continue",
-          );
-        }
-        return resolution;
-      },
+        }),
       // Add the signed-in user to the provider's organization through the real
-      // member-added path, sync a managed role, and audit the sign-in.
+      // member-added path, reconcile a managed role, and audit the sign-in.
+      // Runs after the session is committed; whether this sign-in created the
+      // user row (for the audit's `isNewUser`) and which session to revoke on a
+      // failed add are read from the guard's capture, not passed here.
       provisionUser: async ({ user, userInfo, provider }) => {
         const row = provider as unknown as SsoProviderRuntimeRow;
         const organizationId = nonEmptyString(row.organizationId);
@@ -108,7 +97,6 @@ export function buildSsoPlugins({
           return;
         }
         const protocol: "oidc" | "saml" = row.samlConfig ? "saml" : "oidc";
-        const accountId = nonEmptyString(userInfo.id) ?? "";
         const roleAttribute = nonEmptyString(row.roleAttribute);
         const role = mapSsoRole({
           userInfo,
@@ -122,7 +110,6 @@ export function buildSsoPlugins({
           providerId: row.providerId,
           protocol,
           domain: nonEmptyString(row.domain) ?? "",
-          isNewUser: takeSsoIsNewUser(row.providerId, accountId),
           roleManaged: roleAttribute !== null,
         });
       },
@@ -144,9 +131,8 @@ export function buildSsoPlugins({
         ssoProvider: {
           additionalFields: {
             // Attribute/claim name the IdP returns the member's role in, and
-            // the value that maps to the `admin` organization role. A later
-            // guard reads these; IdP role mapping never grants or revokes
-            // `owner`.
+            // the value that maps to the `admin` organization role. The guard
+            // reads these; IdP role mapping never grants or revokes `owner`.
             roleAttribute: {
               type: "string",
               required: false,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 import { afterAll, beforeAll, test } from "vitest";
 import { config } from "../../shared/config";
@@ -13,6 +14,7 @@ import {
   bootSsoTestHarness,
   closeSsoTestHarness,
   createOrganization,
+  readStoredProvider,
   setProviderDomainVerified,
   setProviderRoleMapping,
   signUpUser,
@@ -663,8 +665,11 @@ test("an identity whose email domain is unrelated to the provider is rejected", 
   assert.equal(await ssoAccountCount("victim@other.example", ACME_PROVIDER), 0);
 }, 200_000);
 
-test("an existing password user on the verified domain is linked and joins the team", async () => {
-  const existing = await signUpUser(harness, "samlold", { email: "old@acme.com" });
+test("an existing verified password user on the verified domain is linked and joins the team", async () => {
+  const existing = await signUpUser(harness, "samlold", {
+    email: "old@acme.com",
+    verified: true,
+  });
   assert.equal(await memberCountIn(orgA, existing.userId), 0, "not a member before SSO");
 
   const { acs, client } = await acmeSignIn(({ acsUrl, audience, inResponseTo }) => ({
@@ -679,6 +684,39 @@ test("an existing password user on the verified domain is linked and joins the t
   assert.equal((await sessionUser(client))?.id, existing.userId, "linked to the same user id");
   assert.equal(await memberRoleIn(orgA, existing.userId), "member");
   assert.equal(await ssoAccountCount("old@acme.com", ACME_PROVIDER), 1);
+}, 200_000);
+
+test("an existing UNVERIFIED password user is never linked (C1 pre-hijack takeover)", async () => {
+  const attacker = await signUpUser(harness, "samlunverified", {
+    email: "unverified@acme.com",
+  });
+  const before = await userRow("unverified@acme.com");
+  assert.equal(before?.emailVerified, false, "the fixture is unverified");
+
+  const { acs, client } = await acmeSignIn(
+    ({ acsUrl, audience, inResponseTo }) => ({
+      acsUrl,
+      audience,
+      inResponseTo,
+      nameId: "unverified@acme.com",
+      email: "unverified@acme.com",
+    }),
+    { email: "unverified@acme.com" },
+  );
+  const error = await assertRejected(acs, client);
+  assert.ok(
+    error?.includes(SSO_ERROR_CODES.accountLinkDenied),
+    `expected ${SSO_ERROR_CODES.accountLinkDenied}, got ${error}`,
+  );
+  assert.equal(
+    await ssoAccountCount("unverified@acme.com", ACME_PROVIDER),
+    0,
+    "no SSO account may attach to the unverified row",
+  );
+  assert.equal(await memberCountIn(orgA, attacker.userId), 0, "must not join the team");
+  const after = await userRow("unverified@acme.com");
+  assert.equal(after?.id, attacker.userId, "the same user row, not a new one");
+  assert.equal(after?.emailVerified, false, "still unverified");
 }, 200_000);
 
 test("a subdomain email signs in through the parent-domain provider", async () => {
@@ -885,4 +923,80 @@ test("updating only idpMetadata.entityID does not drop the stored certificate", 
     `sign-in must still succeed after the idpMetadata update: ${acs.headers.get("location")}`,
   );
   assert.equal((await sessionUser(client))?.id, (await userRow(email))?.id);
+}, 200_000);
+
+// ── R9: the SAML certificate (a trust anchor) locks after an account links ──
+
+test("changing the SAML certificate after a sign-in returns 409 SSO_PROVIDER_IDENTITY_LOCKED", async () => {
+  const p = await freshExplicitProvider({ name: "Lock Cert", cert: fixture.certBase64 });
+  const email = `user@${p.domain}`;
+  const { acs } = await explicitSignIn({ providerId: p.providerId, issuer: p.issuer, email });
+  assert.equal(errorParam(acs), null, "the sign-in links an account first");
+
+  const update = await ownerA.client.withFreshIp().jsonRequest(
+    "/sso/update-provider",
+    { providerId: p.providerId, samlConfig: { cert: fixture.rogueCertBase64 } },
+    { headers: { "x-sw-locale": "zh-CN" } },
+  );
+  assert.equal(update.status, 409, await update.clone().text());
+  const body = (await update.clone().json()) as { code?: string; message?: string };
+  assert.equal(body.code, SSO_ERROR_CODES.providerIdentityLocked);
+  assert.equal(
+    body.message,
+    "已有成员通过该身份源登录后，这些设置不能再修改。如需修改，请删除该身份源后重新添加。",
+  );
+}, 200_000);
+
+test("after a sign-in, updating only the SAML domain still succeeds", async () => {
+  const p = await freshExplicitProvider({ name: "Lock Ok", cert: fixture.certBase64 });
+  const { acs } = await explicitSignIn({
+    providerId: p.providerId,
+    issuer: p.issuer,
+    email: `user@${p.domain}`,
+  });
+  assert.equal(errorParam(acs), null);
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId: p.providerId,
+    domain: `renamed-${p.providerId}.example`,
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+}, 200_000);
+
+// ── R5: a combined SAML update keeps a stored custom mapping ─────────────────
+
+test("a SAML combined update with samlConfig + role attribute keeps a custom mapping.email", async () => {
+  const org = await createOrganization(harness, {
+    ownerUserId: ownerA.userId,
+    kind: "team",
+    name: "R5 SAML",
+  });
+  const providerId = `r5-saml-${randomUUID().slice(0, 8)}`;
+  const register = await ownerA.client.withFreshIp().jsonRequest("/sso/register", {
+    providerId,
+    issuer: `https://sp.sourceweft.test/${providerId}`,
+    domain: `${providerId}.example`,
+    organizationId: org,
+    samlConfig: {
+      entryPoint: fixture.entryPoint,
+      idpMetadata: { metadata: fixture.metadataXml },
+      mapping: { email: "mail", name: "displayName" },
+    },
+  });
+  assert.equal(register.status, 200, await register.clone().text());
+
+  // Combined update: a samlConfig change WITHOUT a mapping, plus a role
+  // attribute. The custom email mapping must survive.
+  const update = await ownerA.client.withFreshIp().jsonRequest("/sso/update-provider", {
+    providerId,
+    samlConfig: { entryPoint: `${fixture.entryPoint}/v2` },
+    roleAttribute: "groups",
+  });
+  assert.equal(update.status, 200, await update.clone().text());
+
+  const stored = await readStoredProvider(harness, providerId);
+  const saml = JSON.parse(stored.samlConfig ?? "{}") as {
+    mapping?: { email?: string; extraFields?: Record<string, unknown> };
+  };
+  assert.equal(saml.mapping?.email, "mail", "the custom email mapping is preserved");
+  assert.equal(saml.mapping?.extraFields?.groups, "groups", "the role claim is carried");
 }, 200_000);

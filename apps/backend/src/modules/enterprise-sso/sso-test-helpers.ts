@@ -157,7 +157,12 @@ export class SsoTestClient {
   async request(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
     headers.set("x-forwarded-for", this.ip);
-    const cookie = this.cookieHeader();
+    // Combine the jar's cookies (the signed-in session) with any cookie the
+    // caller passed (e.g. a locale cookie), rather than letting one clobber the
+    // other — a signed-in client can still carry an sw_locale cookie.
+    const cookie = [headers.get("cookie"), this.cookieHeader()]
+      .filter((part): part is string => Boolean(part))
+      .join("; ");
     if (cookie) {
       headers.set("cookie", cookie);
     }
@@ -188,11 +193,16 @@ export type SsoTestUser = {
  * Sign a fresh user up (email/password) and return an authenticated client.
  * Pass `email` to control the address (e.g. to put the user on an SSO domain);
  * it is lowercased to survive better-auth's email normalization.
+ *
+ * Pass `verified: true` to mark the account's email verified (in SQL, after
+ * sign-up). SSO never links to an *unverified* pre-existing local account, so
+ * every fixture that represents an existing user adopting SSO must be verified;
+ * leave it false to exercise the unverified-rejection path.
  */
 export async function signUpUser(
   harness: SsoTestHarness,
   name: string,
-  options: { email?: string } = {},
+  options: { email?: string; verified?: boolean } = {},
 ): Promise<SsoTestUser> {
   // Lowercase so the generated address survives better-auth's email
   // normalization unchanged and the lookup below matches.
@@ -213,6 +223,12 @@ export async function signUpUser(
   );
   const userId = result.rows[0]?.id;
   assert.ok(userId, `expected a user row for ${email}`);
+  if (options.verified) {
+    await harness.schema.database.query(
+      `update "user" set "emailVerified" = true where id = $1`,
+      [userId],
+    );
+  }
   return { client, userId, email };
 }
 
