@@ -25,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   listDue: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
+  encryptTeamSecret: vi.fn(),
+  decryptTeamSecret: vi.fn(),
+  getTeamSecretCipher: vi.fn(),
 }));
 
 vi.mock("../preview", () => ({
@@ -33,13 +36,19 @@ vi.mock("../preview", () => ({
 vi.mock("../../shared/logger", () => ({
   logger: { info: mocks.info, warn: mocks.warn, error: vi.fn(), debug: vi.fn() },
 }));
+// `encryptTeamSecret`/`decryptTeamSecret` are the database-touching crypto
+// functions; `getTeamSecretCipher` is the in-memory cipher the refresh path
+// must use instead while the row lock is held. Their implementations are wired
+// in `beforeEach` so they can see `insideDecide` and `cipherOrder`.
 vi.mock("../../shared/team-secrets", () => ({
-  encryptTeamSecret: vi.fn(async (value: string) => `enc(${value})`),
-  decryptTeamSecret: vi.fn(
-    async (value: string | null) =>
-      value?.replace(/^enc\((.*)\)$/, "$1") ?? null,
-  ),
+  encryptTeamSecret: mocks.encryptTeamSecret,
+  decryptTeamSecret: mocks.decryptTeamSecret,
+  getTeamSecretCipher: mocks.getTeamSecretCipher,
 }));
+
+// Strips the `enc(...)` wrapper the fake cipher adds, mirroring real decryption.
+const unwrap = (value: string | null) =>
+  value?.replace(/^enc\((.*)\)$/, "$1") ?? "";
 vi.mock("./repository", () => ({
   consumeOAuthStateRecord: vi.fn(),
   createOAuthAccountRecord: vi.fn(),
@@ -98,6 +107,15 @@ let row: Row | null;
 let writes: Write[] = [];
 let queue: Promise<void> = Promise.resolve();
 
+// Records "cipher" when the refresh path resolves the team cipher and "lock"
+// when the lock mock is entered, so a test can assert the cipher is obtained
+// before the lock. `insideDecide` is true only while a `decide` callback runs
+// inside the lock mock; the database-touching crypto functions throw if called
+// then, proving the refresh path does no pooled-connection crypto under the
+// lock (F1).
+let cipherOrder: string[] = [];
+let insideDecide = false;
+
 // Rows for additional accounts (keyed by account id), used by the keep-alive
 // tests that need several accounts locked in one pass. `DEFAULT_ACCOUNT_ID`
 // always resolves through `row`/`queue` above, unchanged from before.
@@ -144,6 +162,31 @@ beforeEach(() => {
   queue = Promise.resolve();
   extraRows = new Map();
   extraQueues = new Map();
+  cipherOrder = [];
+  insideDecide = false;
+
+  // The database-touching crypto functions must never run under the lock
+  // (F1): throw if called while a `decide` callback is on the stack.
+  mocks.encryptTeamSecret.mockImplementation(async (value: string) => {
+    if (insideDecide) {
+      throw new Error("encryptTeamSecret called under the refresh lock");
+    }
+    return `enc(${value})`;
+  });
+  mocks.decryptTeamSecret.mockImplementation(async (value: string | null) => {
+    if (insideDecide) {
+      throw new Error("decryptTeamSecret called under the refresh lock");
+    }
+    return value?.replace(/^enc\((.*)\)$/, "$1") ?? null;
+  });
+  // Resolved before the lock; its encrypt/decrypt are pure in-memory crypto.
+  mocks.getTeamSecretCipher.mockImplementation(async () => {
+    cipherOrder.push("cipher");
+    return {
+      encrypt: (value: string) => (value ? `enc(${value})` : ""),
+      decrypt: (value: string | null) => unwrap(value),
+    };
+  });
 
   mocks.findAccount.mockImplementation(async () =>
     row ? { ...row } : null,
@@ -158,9 +201,17 @@ beforeEach(() => {
     ) => {
       const id = lockInput.accountId;
       const run = async () => {
+        cipherOrder.push("lock");
         const current = getRowFor(id);
         const snapshot = current ? { ...current } : null;
-        const { write, result } = await decide(snapshot);
+        insideDecide = true;
+        let write: Write;
+        let result: unknown;
+        try {
+          ({ write, result } = await decide(snapshot));
+        } finally {
+          insideDecide = false;
+        }
         applyWrite(id, write);
         writes.push(write);
         return result;
@@ -384,8 +435,8 @@ it("a failed refresh does not poison the next call", async () => {
   expect(mocks.refresh).toHaveBeenCalledTimes(2);
 });
 
-// Review Focus 5
-it("an undecryptable refresh token marks the account", async () => {
+// Review Focus 5 + F2: an absent token marks, a decrypt that THROWS does not.
+it("a missing refresh token marks the account", async () => {
   row!.refreshTokenEncrypted = null;
 
   await expect(service.getRuntimeToken(input)).rejects.toMatchObject({
@@ -399,6 +450,65 @@ it("an undecryptable refresh token marks the account", async () => {
       lastError: "Refresh token is unavailable",
     },
   ]);
+});
+
+// F2
+it("a refresh token that cannot be decrypted leaves the account untouched", async () => {
+  row!.expiresAt = stale();
+  mocks.getTeamSecretCipher.mockResolvedValue({
+    encrypt: (value: string) => (value ? `enc(${value})` : ""),
+    decrypt: () => {
+      throw new Error("Unsupported state or unable to authenticate data");
+    },
+  });
+
+  await expect(service.getRuntimeToken(input)).rejects.toThrow(
+    /unable to authenticate data/,
+  );
+  expect(writes).toEqual([]);
+  expect(mocks.refresh).not.toHaveBeenCalled();
+});
+
+// F1
+it("resolves the team cipher before the lock and does no pooled-connection crypto under it", async () => {
+  row!.expiresAt = stale();
+  mocks.refresh.mockResolvedValue({
+    accessToken: "a2",
+    refreshToken: "r2",
+    expiresAt: new Date(Date.now() + 3_600_000),
+  } satisfies OAuthTokenSet);
+
+  expect(await service.getRuntimeToken(input)).toBe("a2");
+
+  // The cipher is resolved for the account's team, before the lock is entered.
+  expect(mocks.getTeamSecretCipher).toHaveBeenCalledWith("team-1");
+  expect(cipherOrder.indexOf("cipher")).toBeGreaterThanOrEqual(0);
+  expect(cipherOrder.indexOf("cipher")).toBeLessThan(
+    cipherOrder.indexOf("lock"),
+  );
+  // The database-touching crypto functions are never used on the refresh path
+  // (the `insideDecide` guard would have thrown had they run under the lock).
+  expect(mocks.encryptTeamSecret).not.toHaveBeenCalled();
+  expect(mocks.decryptTeamSecret).not.toHaveBeenCalled();
+});
+
+// F3
+it("a local failure after the provider answered does not mark the account", async () => {
+  row!.expiresAt = stale();
+  mocks.refresh.mockResolvedValue({
+    accessToken: "a2",
+    expiresAt: new Date(Date.now() + 3_600_000),
+  } satisfies OAuthTokenSet);
+  mocks.getTeamSecretCipher.mockResolvedValue({
+    encrypt: () => {
+      throw new Error("encrypt boom");
+    },
+    decrypt: (value: string | null) => unwrap(value),
+  });
+
+  await expect(service.getRuntimeToken(input)).rejects.toThrow("encrypt boom");
+  expect(writes).toEqual([]);
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
 });
 
 it("an account without an expiry is returned as stored", async () => {

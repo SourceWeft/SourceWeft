@@ -5,6 +5,8 @@ import { logger } from "../../shared/logger";
 import {
   decryptTeamSecret,
   encryptTeamSecret,
+  getTeamSecretCipher,
+  type TeamSecretCipher,
 } from "../../shared/team-secrets";
 import { ConnectorError, toConnectorError } from "./errors";
 import { isRetryableOAuthRefreshError } from "./oauth-refresh-error";
@@ -547,6 +549,11 @@ export class ConnectorOAuthService {
     adapter: ConnectorAdapter,
     isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
   ): Promise<{ accessToken: string; refreshed: boolean }> {
+    // F1: resolve the team's key material before taking the row lock, so every
+    // encrypt/decrypt under the lock is pure in-process crypto that never
+    // needs a second pooled connection on a cold key cache. A failure to load
+    // the keys propagates here, before anything is locked or written.
+    const cipher = await getTeamSecretCipher(account.teamId);
     const outcome = await withOAuthAccountRefreshLock<RefreshDecision>(
       {
         teamId: account.teamId,
@@ -554,7 +561,7 @@ export class ConnectorOAuthService {
         accountId: account.id,
         lockTimeoutMs: REFRESH_LOCK_TIMEOUT_MS,
       },
-      (locked) => this.decideRefresh(locked, adapter, isFresh),
+      (locked) => this.decideRefresh(locked, adapter, isFresh, cipher),
     );
 
     if (!outcome.ok) {
@@ -567,6 +574,7 @@ export class ConnectorOAuthService {
     locked: ConnectorOAuthAccountSecretRecord | null,
     adapter: ConnectorAdapter,
     isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
+    cipher: TeamSecretCipher,
   ): Promise<{ write: OAuthAccountRefreshWrite; result: RefreshDecision }> {
     if (!locked) {
       throw new ConnectorError(
@@ -587,16 +595,18 @@ export class ConnectorOAuthService {
         write: { kind: "none" },
         result: {
           ok: true,
-          accessToken: await decryptTeamSecret(
-            locked.accessTokenEncrypted,
-            locked.teamId,
-          ),
+          accessToken: cipher.decrypt(locked.accessTokenEncrypted),
           refreshed: false,
         },
       };
     }
 
-    const refreshToken = await this.decryptRefreshToken(locked);
+    // F2: only an absent refresh token (null) or one that decrypts to an empty
+    // string marks the account. A decrypt that THROWS (a transient key failure,
+    // a wrong deployment secret) is not a reauthorization problem: it
+    // propagates out of `decide`, the transaction rolls back, and the healthy
+    // account is left untouched.
+    const refreshToken = cipher.decrypt(locked.refreshTokenEncrypted);
     if (!refreshToken) {
       return {
         write: {
@@ -608,16 +618,42 @@ export class ConnectorOAuthService {
       };
     }
 
+    // F3: classify only the provider's own answer. The try wraps the provider
+    // call and its timeout race and nothing else; work after a successful
+    // answer (encrypting the rotated tokens, building the write) throws out of
+    // `decide` unclassified, so a local failure after the provider already
+    // rotated the single-use token never marks the account.
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     const providerCall = adapter.refreshOAuthToken({
       refreshToken,
       scopes: locked.scopes,
     });
+    // F8: the loser of the race (almost always the provider call, when the
+    // timeout wins) may still settle later. If it SUCCEEDS after the timeout,
+    // the provider likely rotated the token and we dropped the result — warn so
+    // the lost rotation is visible. A late rejection stays silent. Either way
+    // the settled promise is observed here so it never surfaces as an unhandled
+    // rejection.
+    providerCall.then(
+      () => {
+        if (timedOut) {
+          logger.warn("connector_token_refresh_late_success", {
+            accountId: locked.id,
+            connectorType: locked.connectorType,
+          });
+        }
+      },
+      () => {},
+    );
+
+    let tokenSet: OAuthTokenSet;
     try {
-      const tokenSet = await Promise.race<OAuthTokenSet>([
+      tokenSet = await Promise.race<OAuthTokenSet>([
         providerCall,
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
+            timedOut = true;
             reject(
               new ConnectorError(
                 503,
@@ -628,29 +664,6 @@ export class ConnectorOAuthService {
           }, REFRESH_PROVIDER_TIMEOUT_MS);
         }),
       ]);
-
-      return {
-        write: {
-          kind: "token",
-          accessTokenEncrypted: await encryptTeamSecret(
-            tokenSet.accessToken,
-            locked.teamId,
-          ),
-          refreshTokenEncrypted:
-            tokenSet.refreshToken === undefined
-              ? undefined
-              : tokenSet.refreshToken
-                ? await encryptTeamSecret(tokenSet.refreshToken, locked.teamId)
-                : null,
-          expiresAt: tokenSet.expiresAt ?? null,
-          scopes: normalizeScopes(tokenSet, locked.scopes),
-        },
-        result: {
-          ok: true,
-          accessToken: tokenSet.accessToken,
-          refreshed: true,
-        },
-      };
     } catch (error) {
       if (isRetryableOAuthRefreshError(error)) {
         // Nothing written: a transport failure or a timeout (itself a 503
@@ -669,23 +682,26 @@ export class ConnectorOAuthService {
       };
     } finally {
       if (timer) clearTimeout(timer);
-      // The loser of the race (almost always the provider call, when the
-      // timeout wins) may still settle later; swallow that so it never
-      // surfaces as an unhandled rejection.
-      providerCall.catch(() => {});
     }
-  }
 
-  private async decryptRefreshToken(
-    locked: ConnectorOAuthAccountSecretRecord,
-  ): Promise<string | null> {
-    try {
-      return await decryptTeamSecret(
-        locked.refreshTokenEncrypted,
-        locked.teamId,
-      );
-    } catch {
-      return null;
-    }
+    return {
+      write: {
+        kind: "token",
+        accessTokenEncrypted: cipher.encrypt(tokenSet.accessToken),
+        refreshTokenEncrypted:
+          tokenSet.refreshToken === undefined
+            ? undefined
+            : tokenSet.refreshToken
+              ? cipher.encrypt(tokenSet.refreshToken)
+              : null,
+        expiresAt: tokenSet.expiresAt ?? null,
+        scopes: normalizeScopes(tokenSet, locked.scopes),
+      },
+      result: {
+        ok: true,
+        accessToken: tokenSet.accessToken,
+        refreshed: true,
+      },
+    };
   }
 }
