@@ -179,6 +179,59 @@ test("remembers the message and the sources the answer cited", async () => {
   );
 });
 
+test("an answer that cited something that is not a source row still saves, and keeps what it cited", async () => {
+  // E.g. a file read from a connector's virtual folder: it has an id and a
+  // title in the answer's citations but no row in `sources`.
+  const virtualId = randomUUID();
+  await schema.db
+    .update(schema.messages)
+    .set({
+      metadata: {
+        retrieval: {
+          citations: [
+            {
+              citation: "c1",
+              sourceId: virtualId,
+              sourceTitle: "Mail: access demo",
+              excerpt: "This test message was sent from SourceWeft.",
+              spanText: "This test message was sent from SourceWeft.",
+            },
+            {
+              citation: "c2",
+              sourceId: citedSourceId,
+              sourceTitle: "Annual report",
+              excerpt: "Revenue grew.",
+              spanText: "Revenue grew.",
+            },
+          ],
+        },
+      },
+      content: "Mail says so [citation:c1]. Revenue grew [citation:c2].",
+    })
+    .where(eq(schema.messages.id, messageId));
+
+  const result = await save();
+
+  assert.equal(result.alreadySaved, false);
+  const linked = await schema.db
+    .select()
+    .from(schema.noteSources)
+    .where(eq(schema.noteSources.noteId, result.noteId));
+  assert.deepEqual(
+    linked.map((row) => row.sourceId),
+    [citedSourceId],
+  );
+  const [note] = await schema.db
+    .select()
+    .from(schema.notes)
+    .where(eq(schema.notes.id, result.noteId));
+  const references = (
+    note?.contentJson as { references: Array<Record<string, unknown>> }
+  ).references;
+  assert.equal(references.length, 2);
+  assert.ok(references.some((reference) => reference.sourceId === virtualId));
+});
+
 test("saving the same message again returns the first note without a second source", async () => {
   const first = await save();
   const second = await save();
