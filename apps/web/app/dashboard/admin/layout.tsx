@@ -64,7 +64,7 @@ export default function AdminLayout({
           // A failed re-check while moving between sections keeps the shell
           // up; the API still refuses anything this user may not do.
           setAccess((current) =>
-            current?.userId === userId && current.status === "allowed"
+            current && current.userId === userId && current.status === "allowed"
               ? current
               : { userId, status: "error" },
           );
@@ -76,7 +76,7 @@ export default function AdminLayout({
     };
   }, [isPending, pathname, retry, router, search, userId]);
 
-  if (userId && !isPending && access?.userId === userId) {
+  if (userId && !isPending && access && access.userId === userId) {
     if (access.status === "allowed") {
       return (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
