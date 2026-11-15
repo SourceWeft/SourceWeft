@@ -1,5 +1,6 @@
 "use client"
 
+import { getAuthLinkURL } from "@better-auth-ui/core"
 import type { SsoAuthClient } from "@better-auth-ui/core/plugins/sso"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
 import { AlertCircle } from "lucide-react"
@@ -27,7 +28,6 @@ import { ssoPlugin } from "@/lib/auth/sso-plugin"
 import { cn } from "@sourceweft/ui-web/lib/utils"
 
 import { useIsHydrated } from "../use-is-hydrated"
-import { withRedirectTo } from "./sso-redirect"
 
 export type SsoSignInProps = {
   className?: string
@@ -46,8 +46,9 @@ type SsoResponse = { error?: { message?: string | null } | null } | null | undef
  * provider; the better-auth client then redirects the browser to the identity
  * provider. When the URL carries `?org=<slug>` the view skips the form and
  * starts the organization's provider directly, falling back to the email form
- * if that fails. Every failure shows the backend's already-localized message
- * (the auth client sends `x-sw-locale`, so `error.message` arrives translated).
+ * if that fails. A failed discovery shows the backend's already-localized
+ * message (the auth client sends `x-sw-locale`, so `error.message` arrives
+ * translated); an unexpected throw shows the generic localized error.
  */
 export function SsoSignIn({ className }: SsoSignInProps) {
   const {
@@ -63,8 +64,9 @@ export function SsoSignIn({ className }: SsoSignInProps) {
   const isHydrated = useIsHydrated()
 
   // Read `?org=` straight from the URL (not `useSearchParams`) so the
-  // statically generated `/auth/sso` page stays build-safe, matching the rest
-  // of the auth UI. Only known after hydration, so the email form renders first.
+  // statically generated `/auth/sso` page stays build-safe — the same pattern
+  // `accept-invitation` uses for `invitationId`. Only known after hydration, so
+  // the email form renders first. `redirectTo` is resolved by `useAuth()`.
   const organizationSlug = useMemo(() => {
     if (!isHydrated || typeof window === "undefined") return null
     const value = new URLSearchParams(window.location.search).get("org")?.trim()
@@ -97,11 +99,8 @@ export function SsoSignIn({ className }: SsoSignInProps) {
         }
         // On success the better-auth client redirects the browser to the IdP.
         return true
-      } catch (error) {
-        setErrorMessage(
-          (error instanceof Error && error.message) ||
-            coreLocalization.errors.generic
-        )
+      } catch {
+        setErrorMessage(coreLocalization.errors.generic)
         return false
       } finally {
         setIsSubmitting(false)
@@ -128,10 +127,7 @@ export function SsoSignIn({ className }: SsoSignInProps) {
     void runSsoSignIn({ email: trimmed })
   }
 
-  const signInHref = withRedirectTo(
-    `${basePaths.auth}/${viewPaths.auth.signIn}`,
-    isHydrated
-  )
+  const signInHref = `${basePaths.auth}/${viewPaths.auth.signIn}`
 
   const isStartingFromOrganization =
     organizationSlug !== null && !organizationStartFailed
@@ -190,7 +186,9 @@ export function SsoSignIn({ className }: SsoSignInProps) {
 
             <FieldDescription className="text-center">
               <Link
-                href={signInHref}
+                href={
+                  redirectTo ? getAuthLinkURL(signInHref, redirectTo) : signInHref
+                }
                 className="underline underline-offset-4"
               >
                 {localization.backToSignIn}
