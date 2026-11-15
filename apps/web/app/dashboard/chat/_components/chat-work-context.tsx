@@ -45,9 +45,12 @@ import {
 import {
   desktopBridge,
   FOLDER_SELECTION_CANCELLED,
+  type LocalHostStatus,
 } from "../../../../lib/desktop-bridge";
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 import { parentOfWirePath, shortenHomePath } from "../../../../lib/local-path";
+import { localSetupNotice } from "../../../../lib/sandbox-setup";
+import { requestDashboardSettings } from "../../_components/dashboard-settings-open";
 
 import { LocalFilesPanel } from "./local-files-panel";
 import { useLocalConversationStatus } from "./local-conversation-status";
@@ -62,6 +65,8 @@ export function useChatCreationContext() {
   const router = useRouter();
   const [devices, setDevices] = useState<LocalDevice[]>([]);
   const [nativeId, setNativeId] = useState<string | null>(null);
+  // What the desktop app says about the computer it runs on. Null in a browser.
+  const [hostStatus, setHostStatus] = useState<LocalHostStatus | null>(null);
   const [readyFor, setReadyFor] = useState<string | null | undefined>(
     undefined,
   );
@@ -136,6 +141,15 @@ export function useChatCreationContext() {
     async (discover = true) => {
       const version = ++refreshVersion.current;
       let cloud = requested === "cloud";
+      // Read apart from the session bootstrap below, which reports a computer that still needs
+      // setup the same way as no computer at all. A failed read keeps what was last known.
+      if (desktopBridge.isAvailable())
+        void desktopBridge.localHostStatus().then(
+          (status) => {
+            if (version === refreshVersion.current) setHostStatus(status);
+          },
+          () => {},
+        );
       try {
         const native =
           !desktopBridge.isAvailable() || (requested === "cloud" && !discover)
@@ -222,6 +236,10 @@ export function useChatCreationContext() {
       ? devices.find((d) => d.id === target.deviceId)
       : null;
   const invalid = ready && target?.kind === "local" && !selectedDevice;
+  const localSetup = useMemo(() => {
+    const notice = localSetupNotice(hostStatus?.readiness);
+    return notice && { ...notice, deviceId: hostStatus?.deviceId ?? null };
+  }, [hostStatus]);
   return {
     draftId,
     userId: session.data?.user.id ?? null,
@@ -230,6 +248,11 @@ export function useChatCreationContext() {
     devicesError,
     devicesLoading,
     nativeId,
+    /**
+     * Set while the computer the desktop app runs on cannot be a run location: it needs setup
+     * or local execution is not supported on it. `deviceId` is its identity when it has one.
+     */
+    localSetup,
     error: invalid
       ? t("work.computerUnavailableChooseAnother")
       : (draftMetadataError ?? error),
@@ -267,6 +290,7 @@ export function ChatWorkContext({
   compact?: boolean;
 }) {
   const t = useTranslations("dashboardChat");
+  const tSettings = useTranslations("dashboardSettings");
   const { setWorkTarget } = useDashboardChatState();
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const info = localStatus.info;
@@ -309,6 +333,17 @@ export function ChatWorkContext({
   const triggerClassName = compact
     ? "-ml-1 flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
     : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
+  const localSetup = creation?.localSetup ?? null;
+  // While this computer cannot run anything, its row is the one that says why: an entry for
+  // the same computer in the connected list would show it twice.
+  const listedDevices = (creation?.devices ?? []).filter(
+    (d) =>
+      d.connected &&
+      !(
+        localSetup &&
+        (d.id === localSetup.deviceId || d.id === creation?.nativeId)
+      ),
+  );
   const icon =
     target?.kind === "cloud" ? (
       <Cloud className="size-3.5 shrink-0" />
@@ -467,9 +502,32 @@ export function ChatWorkContext({
                 </p>
               )}
             <div className="max-h-64 overflow-y-auto">
-              {creation?.devices
-                .filter((d) => d.connected)
-                .map((d) => (
+              {localSetup?.state === "needsSetup" && (
+                <ThisComputerNotice
+                  status={t("work.needsSetup")}
+                  detail={
+                    localSetup.kind === "install"
+                      ? t("work.setupInstallRuntime")
+                      : localSetup.kind === "installing"
+                        ? tSettings("localHost.setup.installingInProgress")
+                        : localSetup.kind === "updateApp"
+                          ? t("work.setupAppUpdate")
+                          : t("work.setupOther")
+                  }
+                  onOpenSettings={() => {
+                    setOpen(false);
+                    requestDashboardSettings("local");
+                  }}
+                />
+              )}
+              {localSetup?.state === "unsupported" && (
+                <ThisComputerNotice
+                  status={t("work.notSupported")}
+                  detail={tSettings("localHost.statusUnsupported")}
+                />
+              )}
+              {creation &&
+                listedDevices.map((d) => (
                   <Button
                     key={d.id}
                     variant="ghost"
@@ -616,6 +674,58 @@ export function ChatWorkContext({
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * The computer the desktop app runs on while it cannot be a run location. With
+ * `onOpenSettings` the row leads to the settings that fix it; without, it is only a statement.
+ * It never selects the computer.
+ */
+function ThisComputerNotice({
+  status,
+  detail,
+  onOpenSettings,
+}: {
+  status: string;
+  detail: string;
+  onOpenSettings?: () => void;
+}) {
+  const t = useTranslations("dashboardChat");
+  const content = (
+    <>
+      <Laptop className="mt-0.5 size-4 shrink-0" />
+      <span className="min-w-0 flex-1 text-left">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            {t("work.thisComputer")}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {status}
+          </span>
+        </span>
+        <span className="block whitespace-normal text-xs font-normal text-muted-foreground">
+          {detail}
+        </span>
+      </span>
+    </>
+  );
+  return onOpenSettings ? (
+    <Button
+      variant="ghost"
+      data-testid="this-computer-setup"
+      className="h-auto w-full items-start justify-start gap-2 py-1.5"
+      onClick={onOpenSettings}
+    >
+      {content}
+    </Button>
+  ) : (
+    <div
+      data-testid="this-computer-setup"
+      className="flex items-start gap-2 px-3 py-1.5 text-sm text-muted-foreground"
+    >
+      {content}
     </div>
   );
 }

@@ -59,6 +59,38 @@ export function sandboxSetupCard(
   };
 }
 
+/**
+ * Why this computer cannot be chosen as a run location, in the terms a one-line notice needs:
+ * `install` (the runtime has to be downloaded), `installing`, `updateApp`, or `other` for every
+ * remaining setup step, including a remedy this web app does not know.
+ */
+export type LocalSetupNotice =
+  | {
+      state: "needsSetup";
+      kind: "install" | "installing" | "updateApp" | "other";
+    }
+  | { state: "unsupported" };
+
+/**
+ * Null when this computer can be used or its readiness is unknown: `ready`, the absent
+ * readiness of older desktop builds, and a state this web app does not know.
+ */
+export function localSetupNotice(
+  readiness: SandboxReadiness | null | undefined,
+): LocalSetupNotice | null {
+  if (readiness?.state === "unsupported") return { state: "unsupported" };
+  const card = sandboxSetupCard(readiness);
+  if (!card) return null;
+  return {
+    state: "needsSetup",
+    kind: card.installing
+      ? "installing"
+      : card.action === "install" || card.action === "updateApp"
+        ? card.action
+        : "other",
+  };
+}
+
 const PLATFORM_LABELS: Record<string, string> = {
   macos: "macOS",
   linux: "Linux",

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { SandboxReadiness, SandboxRemedy } from "./desktop-bridge";
-import { deviceSystemLabel, sandboxSetupCard } from "./sandbox-setup";
+import {
+  deviceSystemLabel,
+  localSetupNotice,
+  sandboxSetupCard,
+} from "./sandbox-setup";
 
 const needs = (
   remedy: SandboxRemedy,
@@ -113,3 +117,36 @@ test("deviceSystemLabel names known platforms and tolerates missing fields", () 
   assert.equal(deviceSystemLabel({ platform: null, arch: "x64" }), null);
   assert.equal(deviceSystemLabel({}), null);
 });
+
+test("only a computer that needs setup or is unsupported gets a notice", () => {
+  assert.equal(localSetupNotice(undefined), null);
+  assert.equal(localSetupNotice(null), null);
+  assert.equal(localSetupNotice({ state: "ready" }), null);
+  assert.equal(
+    localSetupNotice({ state: "somethingNew" } as unknown as SandboxReadiness),
+    null,
+  );
+  assert.deepEqual(localSetupNotice({ state: "unsupported" }), {
+    state: "unsupported",
+  });
+});
+
+test.each([
+  ["downloadRuntime", "bundleMissing", "install"],
+  ["downloadRuntime", "bundleStale", "install"],
+  ["none", "installing", "installing"],
+  ["updateApp", "bundleNewer", "updateApp"],
+  ["reinstallPackage", "bwrapMissing", "other"],
+  ["privilegedSetup", "userNamespaceRestricted", "other"],
+  ["elevatedSetup", "windowsNotInstalled", "other"],
+  ["none", "sandboxFailed", "other"],
+  ["somethingNew", "sandboxFailed", "other"],
+] as const)(
+  "remedy %s with code %s gives the %s notice",
+  (remedy, code, kind) => {
+    assert.deepEqual(
+      localSetupNotice(needs(remedy as SandboxRemedy, { code })),
+      { state: "needsSetup", kind },
+    );
+  },
+);

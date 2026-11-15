@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mountWithIntl, unmountAll, click, button, flush } from "@/test/react";
 
@@ -105,6 +105,7 @@ vi.mock("./dashboard-settings-center-modal", async () => ({
 
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { DashboardSettingsCenterModal } from "./dashboard-settings-center/settings-center-shell";
+import { requestDashboardSettings } from "./dashboard-settings-open";
 
 beforeEach(() => {
   host.available = false;
@@ -195,4 +196,22 @@ test("failed desktop discovery never exposes a local-computer panel", async () =
   const dialog = await settings();
   expect(button("This computer", dialog)).toBeUndefined();
   expect(button("About", dialog)).toBeTruthy();
+});
+
+test("a request from elsewhere on the page opens Settings on the requested section, once", async () => {
+  host.available = true;
+  expect(requestDashboardSettings("local")).toBe(false);
+  // The account menu can be mounted twice; one request must open one dialog.
+  await mountWithIntl(<DashboardAccountMenu />);
+  await mountWithIntl(<DashboardAccountMenu expanded />);
+  let taken = false;
+  await act(async () => {
+    taken = requestDashboardSettings("local");
+  });
+  await flush(10);
+  expect(taken).toBe(true);
+  expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    "Local computer content",
+  );
 });
