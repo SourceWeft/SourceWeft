@@ -430,7 +430,10 @@ export default function SsoPage() {
         <BulletList>
           <li>
             <Code>Role attribute</Code> — the claim (OIDC) or attribute (SAML)
-            that carries the member&rsquo;s role.
+            that carries the member&rsquo;s role. Any claim or attribute name
+            works here, including ones that share a name with a user field such
+            as <Code>email</Code> or <Code>role</Code>; the value is read only to
+            decide the role and is never written to the member&rsquo;s profile.
           </li>
           <li>
             <Code>Admin role value</Code> — members whose role attribute equals
@@ -595,9 +598,11 @@ export default function SsoPage() {
                   different attribute.&rdquo;
                 </>,
                 <>
-                  The role attribute is a reserved field (<Code>id</Code>,{" "}
-                  <Code>email</Code>, <Code>emailVerified</Code>,{" "}
-                  <Code>name</Code> or <Code>image</Code>) or is too long.
+                  The role attribute name is longer than 128 characters or
+                  contains control characters. Any ordinary claim or attribute
+                  name is accepted — including <Code>email</Code> or{" "}
+                  <Code>role</Code> — because it is read into a dedicated key and
+                  never written to a user field.
                 </>,
                 <>
                   Choose a different{" "}
@@ -606,6 +611,20 @@ export default function SsoPage() {
                   </a>{" "}
                   name.
                 </>,
+              ],
+              [
+                <>
+                  <Code key="c">SSO_INVALID_ATTRIBUTE_MAPPING</Code>
+                  <br />
+                  &ldquo;This attribute mapping uses a name that is reserved.
+                  Choose a different field name.&rdquo;
+                </>,
+                <>
+                  An attribute-mapping key collides with a user field (such as{" "}
+                  <Code>email</Code>, <Code>emailVerified</Code> or{" "}
+                  <Code>role</Code>), so applying it would overwrite that field.
+                </>,
+                "Rename the mapping key to one that is not a user field.",
               ],
               [
                 <>
@@ -703,7 +722,8 @@ export default function SsoPage() {
                 <>
                   <Code key="c">SSO_ORGANIZATION_REQUIRED</Code>
                   <br />
-                  &ldquo;Single sign-on can only be set up for a team.&rdquo;
+                  &ldquo;Single sign-on isn&rsquo;t available for this team right
+                  now. Contact your administrator.&rdquo;
                 </>,
                 "The provider's team is no longer a team organization.",
                 "Restore the team, or remove the provider.",
