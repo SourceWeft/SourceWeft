@@ -3,11 +3,14 @@
  * (encrypted tokens, scopes, status) that connectors run against.
  */
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { connectorOAuthAccounts, db, sourceConnectors } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapOAuthAccount, mapOAuthAccountWithSecret } from "../mappers";
-import type { ConnectorOAuthAccountStatus } from "../types";
+import type {
+  ConnectorOAuthAccountSecretRecord,
+  ConnectorOAuthAccountStatus,
+} from "../types";
 
 export async function createOAuthAccountRecord(input: {
   teamId: string;
@@ -223,15 +226,19 @@ export async function deleteOAuthAccountRecord(input: {
   return rows.length > 0;
 }
 
-export async function updateOAuthAccountTokenRecord(input: {
-  teamId: string;
-  workspaceId: string;
-  accountId: string;
+/**
+ * Column values for a successful token refresh: the access token always
+ * changes, an omitted refresh token or scopes list keeps the stored value
+ * (providers do not always reissue them), and the account comes back
+ * `active` with its error cleared. Shared by `updateOAuthAccountTokenRecord`
+ * and the `"token"` write applied under `withOAuthAccountRefreshLock`.
+ */
+function oauthAccountTokenWriteColumns(input: {
   accessTokenEncrypted: string;
   refreshTokenEncrypted?: string | null;
   expiresAt?: Date | null;
   scopes?: string[];
-}) {
+}): Partial<typeof connectorOAuthAccounts.$inferInsert> {
   const updates: Partial<typeof connectorOAuthAccounts.$inferInsert> = {
     accessTokenEncrypted: input.accessTokenEncrypted,
     expiresAt: input.expiresAt ?? null,
@@ -246,10 +253,21 @@ export async function updateOAuthAccountTokenRecord(input: {
   if (input.scopes !== undefined) {
     updates.scopes = input.scopes;
   }
+  return updates;
+}
 
+export async function updateOAuthAccountTokenRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted?: string | null;
+  expiresAt?: Date | null;
+  scopes?: string[];
+}) {
   const [row] = await db
     .update(connectorOAuthAccounts)
-    .set(updates)
+    .set(oauthAccountTokenWriteColumns(input))
     .where(
       and(
         eq(connectorOAuthAccounts.id, input.accountId),
@@ -286,4 +304,159 @@ export async function updateOAuthAccountStatusRecord(input: {
     .returning();
 
   return row ? mapOAuthAccount(row) : null;
+}
+
+export type OAuthAccountRefreshWrite =
+  | { kind: "none" }
+  | {
+      kind: "token";
+      accessTokenEncrypted: string;
+      refreshTokenEncrypted?: string | null; // undefined keeps, null clears
+      expiresAt: Date | null;
+      scopes?: string[];
+    }
+  | { kind: "status"; status: "reauth_required"; lastError: string };
+
+const LOCK_TIMEOUT_PG_ERROR_CODE = "55P03";
+
+/** drizzle wraps the driver error, so the pg fields may sit on `cause`. */
+function isLockTimeoutError(error: unknown): boolean {
+  for (const candidate of [error, (error as { cause?: unknown } | null)?.cause]) {
+    const pg = candidate as { code?: string } | null | undefined;
+    if (pg?.code === LOCK_TIMEOUT_PG_ERROR_CODE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Lock one OAuth account's row for the duration of `decide`, which calls out
+ * to the provider to refresh the token. Providers rotate single-use refresh
+ * tokens, so two processes refreshing the same account at once would
+ * invalidate each other; holding the row lock serializes them instead.
+ * `decide` sees the row as read under the lock (`null` when it no longer
+ * exists), and its returned write is applied and committed in the same
+ * transaction before `result` is returned. If `decide` throws, the
+ * transaction rolls back and nothing is written. A lock wait that exceeds
+ * `lockTimeoutMs` is reported as `ConnectorError(503,
+ * "CONNECTOR_OAUTH_REFRESH_BUSY")` so a caller can retry later instead of
+ * hanging.
+ */
+export async function withOAuthAccountRefreshLock<T>(
+  input: {
+    teamId: string;
+    workspaceId: string;
+    accountId: string;
+    lockTimeoutMs: number;
+  },
+  decide: (
+    account: ConnectorOAuthAccountSecretRecord | null,
+  ) => Promise<{ write: OAuthAccountRefreshWrite; result: T }>,
+): Promise<T> {
+  if (!Number.isInteger(input.lockTimeoutMs) || input.lockTimeoutMs <= 0) {
+    throw new Error(
+      "withOAuthAccountRefreshLock: lockTimeoutMs must be a positive finite integer",
+    );
+  }
+
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('lock_timeout', ${`${input.lockTimeoutMs}ms`}, true)`,
+      );
+
+      const [row] = await tx
+        .select()
+        .from(connectorOAuthAccounts)
+        .where(
+          and(
+            eq(connectorOAuthAccounts.id, input.accountId),
+            eq(connectorOAuthAccounts.teamId, input.teamId),
+            eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+          ),
+        )
+        .for("update");
+
+      const { write, result } = await decide(
+        row ? mapOAuthAccountWithSecret(row) : null,
+      );
+
+      if (write.kind === "token") {
+        await tx
+          .update(connectorOAuthAccounts)
+          .set(oauthAccountTokenWriteColumns(write))
+          .where(
+            and(
+              eq(connectorOAuthAccounts.id, input.accountId),
+              eq(connectorOAuthAccounts.teamId, input.teamId),
+              eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+            ),
+          );
+      } else if (write.kind === "status") {
+        await tx
+          .update(connectorOAuthAccounts)
+          .set({
+            status: write.status,
+            lastError: write.lastError,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(connectorOAuthAccounts.id, input.accountId),
+              eq(connectorOAuthAccounts.teamId, input.teamId),
+              eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+            ),
+          );
+      }
+
+      return result;
+    });
+  } catch (error) {
+    if (isLockTimeoutError(error)) {
+      throw new ConnectorError(
+        503,
+        "CONNECTOR_OAUTH_REFRESH_BUSY",
+        "Connector token refresh is busy",
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Active accounts with a refresh token whose last refresh (or creation, if
+ * never refreshed) is older than `refreshedBefore` — candidates for a
+ * background keep-alive refresh, oldest first.
+ */
+export async function listOAuthAccountsDueForKeepAlive(input: {
+  refreshedBefore: Date;
+  limit: number;
+}): Promise<
+  Array<{
+    id: string;
+    teamId: string;
+    workspaceId: string;
+    connectorType: string;
+  }>
+> {
+  const lastActivityAt = sql`coalesce(${connectorOAuthAccounts.lastRefreshAt}, ${connectorOAuthAccounts.createdAt})`;
+
+  return db
+    .select({
+      id: connectorOAuthAccounts.id,
+      teamId: connectorOAuthAccounts.teamId,
+      workspaceId: connectorOAuthAccounts.workspaceId,
+      connectorType: connectorOAuthAccounts.connectorType,
+    })
+    .from(connectorOAuthAccounts)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.status, "active"),
+        isNotNull(connectorOAuthAccounts.refreshTokenEncrypted),
+        sql`${lastActivityAt} < ${input.refreshedBefore}`,
+      ),
+    )
+    .orderBy(sql`${lastActivityAt} asc`, asc(connectorOAuthAccounts.id))
+    .limit(input.limit);
 }
