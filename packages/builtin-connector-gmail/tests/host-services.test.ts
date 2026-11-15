@@ -46,6 +46,9 @@ test("Gmail capability stays registered, warns, and offers no client id when a c
     assert.equal(result.adapters.length, 1);
     const manifest = result.adapters[0]!.getManifest();
     assert.equal(manifest.type, "gmail");
+    if (manifest.auth.kind !== "oauth2") {
+      throw new Error("expected gmail manifest to use oauth2 auth");
+    }
     // An empty client id makes the platform refuse authorization with
     // CONNECTOR_OAUTH_CONFIG_MISSING before the user is sent to Google.
     assert.equal(manifest.auth.authorizationParams?.client_id, "");
@@ -69,10 +72,11 @@ test("Gmail capability does not warn when switched off or fully configured", asy
     }),
     logger,
   });
-  assert.equal(
-    configured.adapters[0]?.getManifest().auth.authorizationParams?.client_id,
-    "id",
-  );
+  const manifest = configured.adapters[0]?.getManifest();
+  if (!manifest || manifest.auth.kind !== "oauth2") {
+    throw new Error("expected gmail manifest to use oauth2 auth");
+  }
+  assert.equal(manifest.auth.authorizationParams?.client_id, "id");
   assert.deepEqual(warnings, []);
 });
 

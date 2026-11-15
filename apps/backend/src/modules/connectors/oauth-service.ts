@@ -31,6 +31,28 @@ import type {
   OAuthTokenSet,
 } from "./types";
 
+/**
+ * Narrow a connector manifest to its `oauth2` auth variant, for the standard
+ * OAuth2 flow this service implements. A brokered manifest reaching here
+ * means a brokered connector hit the standard OAuth2 start/callback routes;
+ * that is unsupported until the brokered flow (Task 4) replaces these
+ * branches.
+ */
+function assertOAuth2Manifest(
+  manifest: ConnectorManifest,
+): asserts manifest is ConnectorManifest & {
+  auth: Extract<ConnectorManifest["auth"], { kind: "oauth2" }>;
+} {
+  if (manifest.auth.kind !== "oauth2") {
+    throw new ConnectorError(
+      500,
+      "CONNECTOR_AUTH_KIND_UNSUPPORTED",
+      `${manifest.displayName} does not use the standard OAuth2 authorization flow`,
+      { connectorType: manifest.type, authKind: manifest.auth.kind },
+    );
+  }
+}
+
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 const REFRESH_LOCK_TIMEOUT_MS = 30_000;
@@ -145,6 +167,7 @@ export class ConnectorOAuthService {
     });
     await this.access.requireAvailable(input.connectorType, input.userId);
     const manifest = this.registry.getManifest(input.connectorType);
+    assertOAuth2Manifest(manifest);
     assertAuthorizationParamsConfigured({
       connectorType: input.connectorType,
       manifest,
@@ -218,6 +241,7 @@ export class ConnectorOAuthService {
     await this.access.requireAvailable(input.connectorType, stateRow.userId);
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
+    assertOAuth2Manifest(manifest);
     const tokenSet = await adapter.exchangeOAuthCode({
       code: input.code,
       redirectUri: resolveCallbackUrl({
@@ -268,6 +292,7 @@ export class ConnectorOAuthService {
     await this.access.requireAvailable(input.connectorType, stateRow.userId);
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
+    assertOAuth2Manifest(manifest);
     const tokenSet = await adapter.exchangeOAuthCode({
       code: input.code,
       redirectUri: resolveCallbackUrl({

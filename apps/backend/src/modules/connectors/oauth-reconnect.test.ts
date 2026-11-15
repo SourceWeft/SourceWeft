@@ -33,7 +33,7 @@ import { ConnectorOAuthService } from "./oauth-service";
 const manifest = {
   type: "google_drive",
   displayName: "Google Drive",
-  auth: { scopes: ["drive.file"] },
+  auth: { kind: "oauth2" as const, scopes: ["drive.file"] },
 };
 const registry = {
   getManifest: () => manifest,

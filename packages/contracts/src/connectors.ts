@@ -89,7 +89,7 @@ export const connectorWebhookEventStatusSchema = z.enum([
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
-const connectorAuthManifestSchema = z.object({
+const oauth2AuthManifestSchema = z.object({
   kind: z.literal("oauth2"),
   authorizationUrl: z.string().url(),
   tokenUrl: z.string().url(),
@@ -98,6 +98,24 @@ const connectorAuthManifestSchema = z.object({
   authorizationParams: z.record(z.string(), z.string()).optional(),
   sendScope: z.boolean().optional(),
 });
+
+/**
+ * An adapter that brokers its own authorization (start, finish, revoke)
+ * instead of running the platform's standard OAuth2 flow. `broker` names the
+ * brokering integration (e.g. "composio"); the platform treats the resulting
+ * credential as opaque. See `ConnectorAdapter.startAuthorization` /
+ * `finishAuthorization` / `revokeAuthorization`.
+ */
+const brokeredAuthManifestSchema = z.object({
+  kind: z.literal("brokered"),
+  broker: z.string().min(1),
+  scopes: z.array(z.string().min(1)),
+});
+
+const connectorAuthManifestSchema = z.discriminatedUnion("kind", [
+  oauth2AuthManifestSchema,
+  brokeredAuthManifestSchema,
+]);
 
 export const connectorResourceSpecSchema = z.object({
   type: z.string().min(1),
@@ -903,6 +921,12 @@ export type OAuthRefreshInput = {
 };
 
 export type OAuthTokenSet = {
+  /**
+   * Opaque credential for this account. For a standard OAuth2 adapter this is
+   * the provider's access token; for a brokered adapter it is whatever
+   * opaque reference the broker hands back. Either way the platform stores
+   * it encrypted and returns it only to the adapter that produced it.
+   */
   accessToken: string;
   refreshToken?: string | null;
   expiresAt?: Date | null;
@@ -952,11 +976,43 @@ export type ConnectorSyncReadinessResult = {
 export type ConnectorActionSpec = z.infer<typeof connectorActionSpecSchema>;
 export type ConnectorResourceSpec = z.infer<typeof connectorResourceSpecSchema>;
 
+export type ConnectorAuthorizationStartInput = {
+  callbackUrl: string;
+  ownerRef: string;
+};
+
+export type ConnectorAuthorizationStartResult = {
+  authorizationUrl: string;
+  attemptRef: string;
+};
+
+export type ConnectorAuthorizationFinishInput = {
+  callbackParams: Record<string, string>;
+  attemptRef: string;
+  ownerRef: string;
+};
+
 export interface ConnectorAdapter {
   capabilityId?: string;
   getManifest(): ConnectorManifest;
   exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
   refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  /**
+   * Brokered auth only: start a broker-hosted authorization attempt and
+   * return the URL to send the owner to.
+   */
+  startAuthorization?(
+    input: ConnectorAuthorizationStartInput,
+  ): Promise<ConnectorAuthorizationStartResult>;
+  /**
+   * Brokered auth only: complete a broker-hosted authorization attempt and
+   * return the resulting opaque credential.
+   */
+  finishAuthorization?(
+    input: ConnectorAuthorizationFinishInput,
+  ): Promise<OAuthTokenSet>;
+  /** Brokered auth only: revoke a previously brokered credential. */
+  revokeAuthorization?(input: { accessToken: string }): Promise<void>;
   checkSyncReadiness?(
     input: ConnectorDiscoverInput,
   ): Promise<ConnectorSyncReadinessResult>;
