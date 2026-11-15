@@ -76,7 +76,8 @@ runtime for each supported platform, with its `.sig`, to the GitHub Release:
 `sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`,
 `sourceweft-sandbox-aarch64-apple-darwin.tar.gz` and
 `sourceweft-sandbox-x86_64-apple-darwin.tar.gz`. The app downloads the one for its own
-platform from the Release URL derived from its own version when the user clicks Install, and
+platform from the Release URL derived from its own version, by itself when the signed-in app
+opens without a usable runtime (Install in Settings → This computer retries it), and
 verifies the minisign signature (the same updater key as the installers,
 `TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]`) with the public key embedded in the build before
 extracting and checking the manifest. On macOS the binaries inside the bundle are additionally

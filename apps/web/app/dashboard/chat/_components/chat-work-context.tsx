@@ -50,6 +50,10 @@ import {
 import { ensureLocalHostSession } from "../../../../lib/local-host-session";
 import { parentOfWirePath, shortenHomePath } from "../../../../lib/local-path";
 import { localSetupNotice } from "../../../../lib/sandbox-setup";
+import {
+  installSandboxRuntime,
+  useSandboxInstallState,
+} from "../../../../lib/sandbox-runtime-install";
 import { requestDashboardSettings } from "../../_components/dashboard-settings-open";
 
 import { LocalFilesPanel } from "./local-files-panel";
@@ -190,6 +194,15 @@ export function useChatCreationContext() {
     },
     [requested, session.data?.user.id],
   );
+  // An install that finished may have made this computer usable: read it again now, so it
+  // is listed as a connected computer without waiting for the next poll or a reload.
+  const installsFinished = useSandboxInstallState().finished;
+  const installsSeen = useRef(installsFinished);
+  useEffect(() => {
+    if (installsSeen.current === installsFinished) return;
+    installsSeen.current = installsFinished;
+    void refresh();
+  }, [installsFinished, refresh]);
   useEffect(() => {
     const requests = refreshVersion;
     setDevices([]);
@@ -290,7 +303,6 @@ export function ChatWorkContext({
   compact?: boolean;
 }) {
   const t = useTranslations("dashboardChat");
-  const tSettings = useTranslations("dashboardSettings");
   const { setWorkTarget } = useDashboardChatState();
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const info = localStatus.info;
@@ -334,6 +346,11 @@ export function ChatWorkContext({
     ? "-ml-1 flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
     : "flex h-10 min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-xs leading-4 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 sm:-ml-1 sm:h-6";
   const localSetup = creation?.localSetup ?? null;
+  const install = useSandboxInstallState();
+  const openLocalSettings = () => {
+    setOpen(false);
+    requestDashboardSettings("local");
+  };
   // While this computer cannot run anything, its row is the one that says why: an entry for
   // the same computer in the connected list would show it twice.
   const listedDevices = (creation?.devices ?? []).filter(
@@ -502,28 +519,45 @@ export function ChatWorkContext({
                 </p>
               )}
             <div className="max-h-64 overflow-y-auto">
-              {localSetup?.state === "needsSetup" && (
-                <ThisComputerNotice
-                  status={t("work.needsSetup")}
-                  detail={
-                    localSetup.kind === "install"
-                      ? t("work.setupInstallRuntime")
-                      : localSetup.kind === "installing"
-                        ? tSettings("localHost.setup.installingInProgress")
+              {localSetup?.state === "needsSetup" &&
+                // The runtime is installed without being asked. While that runs, in this
+                // page or as the host reports it, the computer is being prepared; when it
+                // failed, the row says why and offers the retry.
+                (install.phase === "installing" ||
+                localSetup.kind === "installing" ? (
+                  <ThisComputerNotice
+                    status={t("work.preparing")}
+                    detail={t("work.setupInstalling")}
+                    onOpenSettings={openLocalSettings}
+                  />
+                ) : localSetup.kind === "install" &&
+                  install.phase === "failed" ? (
+                  <ThisComputerNotice
+                    status={t("work.setupFailed")}
+                    detail={t("work.setupFailedDetail", {
+                      error: install.error ?? "",
+                    })}
+                    failed
+                    onOpenSettings={openLocalSettings}
+                    onRetry={() => void installSandboxRuntime().catch(() => {})}
+                  />
+                ) : (
+                  <ThisComputerNotice
+                    status={t("work.needsSetup")}
+                    detail={
+                      localSetup.kind === "install"
+                        ? t("work.setupInstallRuntime")
                         : localSetup.kind === "updateApp"
                           ? t("work.setupAppUpdate")
                           : t("work.setupOther")
-                  }
-                  onOpenSettings={() => {
-                    setOpen(false);
-                    requestDashboardSettings("local");
-                  }}
-                />
-              )}
+                    }
+                    onOpenSettings={openLocalSettings}
+                  />
+                ))}
               {localSetup?.state === "unsupported" && (
                 <ThisComputerNotice
                   status={t("work.notSupported")}
-                  detail={tSettings("localHost.statusUnsupported")}
+                  detail={t("work.notSupportedDetail")}
                 />
               )}
               {creation &&
@@ -681,16 +715,20 @@ export function ChatWorkContext({
 /**
  * The computer the desktop app runs on while it cannot be a run location. With
  * `onOpenSettings` the row leads to the settings that fix it; without, it is only a statement.
- * It never selects the computer.
+ * `onRetry` adds the retry of a failed install under the row. It never selects the computer.
  */
 function ThisComputerNotice({
   status,
   detail,
+  failed = false,
   onOpenSettings,
+  onRetry,
 }: {
   status: string;
   detail: string;
+  failed?: boolean;
   onOpenSettings?: () => void;
+  onRetry?: () => void;
 }) {
   const t = useTranslations("dashboardChat");
   const content = (
@@ -705,21 +743,37 @@ function ThisComputerNotice({
             {status}
           </span>
         </span>
-        <span className="block whitespace-normal text-xs font-normal text-muted-foreground">
+        <span
+          role={failed ? "alert" : undefined}
+          className={cn(
+            "block whitespace-normal break-words text-xs font-normal",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
           {detail}
         </span>
       </span>
     </>
   );
   return onOpenSettings ? (
-    <Button
-      variant="ghost"
-      data-testid="this-computer-setup"
-      className="h-auto w-full items-start justify-start gap-2 py-1.5"
-      onClick={onOpenSettings}
-    >
-      {content}
-    </Button>
+    <>
+      <Button
+        variant="ghost"
+        data-testid="this-computer-setup"
+        className="h-auto w-full items-start justify-start gap-2 py-1.5"
+        onClick={onOpenSettings}
+      >
+        {content}
+      </Button>
+      {onRetry && (
+        // Under the text of the row: the icon column stays empty.
+        <div className="pb-1.5 pl-9">
+          <Button size="xs" variant="outline" onClick={onRetry}>
+            {t("common.tryAgain")}
+          </Button>
+        </div>
+      )}
+    </>
   ) : (
     <div
       data-testid="this-computer-setup"

@@ -134,10 +134,13 @@ Updating an AppImage does not re-copy bubblewrap. Run the setup again after a
 ## The sandbox runtime download
 
 The runtime (the sandbox helper program, a bundled `ripgrep`, the seccomp helper and a Java
-proxy agent) is not inside the `.deb` or the AppImage. It is downloaded **only when you
-click "Install sandbox runtime"** in **Settings → This computer**. Nothing is downloaded
-automatically. While it installs, the card shows "Installing the sandbox runtime" and only
-one install can run at a time (a second one fails with `SANDBOX_INSTALL_IN_PROGRESS`).
+proxy agent) is not inside the `.deb` or the AppImage. The app downloads it **automatically**
+when it opens while you are signed in and the runtime is missing, out of date or damaged. It
+tries once each time the app's window loads and does not retry by itself. **Settings → This
+computer** shows the progress; if the download fails, the reason is shown there and in the
+run-location menu of a new chat, and **Install sandbox runtime** (or **Try again** in that
+menu) starts it again. While it installs, the card shows "Installing the sandbox runtime" and
+only one install can run at a time (a second one fails with `SANDBOX_INSTALL_IN_PROGRESS`).
 
 - Source: the GitHub Release asset for exactly this app's version,
   `https://github.com/SourceWeft/SourceWeft/releases/download/v<version>/sourceweft-sandbox-x86_64-unknown-linux-gnu.tar.gz`
@@ -164,8 +167,7 @@ one install can run at a time (a second one fails with `SANDBOX_INSTALL_IN_PROGR
   process is stopped, so the next command starts from the files now on disk.
 - Reinstall or repair: click **Install sandbox runtime** again; the existing copy is
   replaced as a whole. Remove: quit the app and delete the `sandbox` directory in the app
-  data folder; the app then shows "Sandbox runtime is not installed" until you install it
-  again.
+  data folder; the app downloads the runtime again the next time it opens.
 - "Out of date": the installed runtime speaks an older internal protocol than this app
   needs (typically left over from an older app version). Install it again.
 - "Newer than this app": the installed runtime is newer than the app understands (for
@@ -201,8 +203,8 @@ unprivileged user namespaces (for example `kernel.unprivileged_userns_clone=0` o
 never edits sysctls; enable user namespaces yourself if you accept that, or use another
 machine.
 
-Errors from the install button are shown verbatim under the button, as a stable code
-followed by the reason:
+Install errors are shown verbatim under the install button and in the run-location menu of a
+new chat, as a stable code followed by the reason:
 
 | Code                           | Meaning                                                                                                                                                                                                                                                    |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

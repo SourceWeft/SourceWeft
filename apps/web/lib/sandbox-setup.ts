@@ -60,6 +60,23 @@ export function sandboxSetupCard(
 }
 
 /**
+ * True for the answer the host gives while its own readiness probe is still running and it has
+ * no earlier result: a `needsSetup` with no remedy that is not a result yet. The wire has no
+ * code for it, so it is recognised by the host's fixed reason (the Rust
+ * `SandboxReadiness::checking()`).
+ */
+export function isSandboxProbePending(
+  readiness: SandboxReadiness | null | undefined,
+) {
+  return (
+    readiness?.state === "needsSetup" &&
+    readiness.code === "sandboxFailed" &&
+    readiness.remedy === "none" &&
+    readiness.reason === "Checking the sandbox runtime"
+  );
+}
+
+/**
  * Why this computer cannot be chosen as a run location, in the terms a one-line notice needs:
  * `install` (the runtime has to be downloaded), `installing`, `updateApp`, or `other` for every
  * remaining setup step, including a remedy this web app does not know.
@@ -73,14 +90,15 @@ export type LocalSetupNotice =
 
 /**
  * Null when this computer can be used or its readiness is unknown: `ready`, the absent
- * readiness of older desktop builds, and a state this web app does not know.
+ * readiness of older desktop builds, a probe that is still running, and a state this web app
+ * does not know.
  */
 export function localSetupNotice(
   readiness: SandboxReadiness | null | undefined,
 ): LocalSetupNotice | null {
   if (readiness?.state === "unsupported") return { state: "unsupported" };
   const card = sandboxSetupCard(readiness);
-  if (!card) return null;
+  if (!card || isSandboxProbePending(readiness)) return null;
   return {
     state: "needsSetup",
     kind: card.installing

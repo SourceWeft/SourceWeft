@@ -124,8 +124,9 @@ pub async fn run_sandbox_privileged_setup(
     Err("UNSUPPORTED_PLATFORM".to_string())
 }
 
-/// Downloads, verifies and installs the sandbox runtime for this app version; the user asked
-/// for it by clicking "Install", nothing downloads on its own. Holds an admission lease like the
+/// Downloads, verifies and installs the sandbox runtime for this app version. The web UI calls
+/// it without a click when the signed-in app opens and the runtime is missing, out of date or
+/// damaged, and again when the user retries. Holds an admission lease like the
 /// other local commands, so a pending app update waits for it. Returns the readiness after the
 /// install. Errors are strings starting with a stable code (`SANDBOX_DOWNLOAD_FAILED`,
 /// `SANDBOX_SIGNATURE_INVALID`, `SANDBOX_BUNDLE_INVALID`, `SANDBOX_UNVERIFIABLE_BUILD`,

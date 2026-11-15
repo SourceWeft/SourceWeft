@@ -26,11 +26,13 @@ const mocks = vi.hoisted(() => ({
   reveal: vi.fn(),
   chooseLocalFolder: vi.fn(),
   hostStatus: vi.fn(),
+  install: vi.fn(),
 }));
 vi.mock("../../../../lib/desktop-bridge", () => ({
   desktopBridge: {
     isAvailable: mocks.isDesktop,
     localHostStatus: mocks.hostStatus,
+    installSandboxRuntime: mocks.install,
     getTaskFolder: mocks.taskFolder,
     info: mocks.desktopInfo,
     revealLocalDirectory: mocks.reveal,
@@ -109,6 +111,10 @@ import {
 import { subscribeDashboardSettingsOpen } from "../../_components/dashboard-settings-open";
 import type { SandboxReadiness } from "../../../../lib/desktop-bridge";
 import {
+  installSandboxRuntime,
+  resetSandboxInstall,
+} from "../../../../lib/sandbox-runtime-install";
+import {
   button,
   buttons,
   click,
@@ -165,6 +171,8 @@ beforeEach(() => {
   mocks.desktopInfo.mockReset().mockResolvedValue({ platform: "macos" });
   mocks.reveal.mockReset().mockResolvedValue(undefined);
   mocks.chooseLocalFolder.mockReset();
+  resetSandboxInstall();
+  mocks.install.mockReset();
   // A desktop build that reports no readiness, as v0.3.0-rc.8 does.
   mocks.hostStatus.mockReset().mockResolvedValue({
     deviceId: null,
@@ -788,31 +796,37 @@ test("a computer that needs its sandbox runtime is listed with the reason and op
 
 test.each([
   [
-    "an install already running",
+    "an install the host reports as running",
     needsSetup("none", "installing"),
     "The sandbox runtime is being installed…",
+    "Preparing…",
   ],
   [
     "an app that must be updated first",
     needsSetup("updateApp", "bundleNewer"),
     "SourceWeft needs an update first. Open Settings for details.",
+    "Needs setup",
   ],
   [
     "an administrator step",
     needsSetup("privilegedSetup", "userNamespaceRestricted"),
     "One-time setup is not finished. Open Settings to complete it.",
+    "Needs setup",
   ],
   [
     "a remedy this web app does not know",
     needsSetup("somethingNewer", "sandboxFailed"),
     "One-time setup is not finished. Open Settings to complete it.",
+    "Needs setup",
   ],
-])("the setup row explains %s", async (_case, readiness, reason) => {
+])("the setup row explains %s", async (_case, readiness, reason, status) => {
   desktopReports(readiness);
   await openRunLocationMenu();
   const text = setupRow()?.textContent ?? "";
-  assert.match(text, /Needs setup/);
+  assert.equal(text.includes(status), true, text);
   assert.equal(text.includes(reason), true, text);
+  // Nothing in the menu installs anything by itself.
+  assert.equal(mocks.install.mock.calls.length, 0);
 });
 
 test("an unsupported computer is listed as such and cannot be chosen", async () => {
@@ -897,4 +911,69 @@ test("a host status that cannot be read leaves the menu unchanged", async () => 
   await openRunLocationMenu();
   assert.equal(setupRow(), null);
   assert.equal(buttons("This computer · Mac AOnline", container).length, 1);
+});
+
+test("while the runtime is being installed the row says this computer is being prepared", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  mocks.install.mockReturnValue(new Promise(() => {}));
+  // The dashboard started the install when it opened.
+  void installSandboxRuntime();
+  await openRunLocationMenu();
+  const text = setupRow()?.textContent ?? "";
+  assert.match(text, /This computer/);
+  assert.match(text, /Preparing…/);
+  assert.match(text, /The sandbox runtime is being installed…/);
+  assert.equal(text.includes("Needs setup"), false);
+  assert.equal(button("Try again", container), undefined);
+});
+
+test("a failed install shows the reason, and Try again installs and lists this computer without a reload", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  mocks.install.mockRejectedValue(
+    new Error("SANDBOX_DOWNLOAD_FAILED: the release asset returned 404"),
+  );
+  await installSandboxRuntime().catch(() => {});
+  await openRunLocationMenu();
+  const row = setupRow()!;
+  assert.match(row.textContent ?? "", /Setup failed/);
+  assert.equal(
+    row.querySelector('[role="alert"]')?.textContent,
+    "The sandbox runtime could not be installed: SANDBOX_DOWNLOAD_FAILED: the release asset returned 404",
+  );
+  // The row still leads to Settings; the retry is a control of its own.
+  assert.equal(row.tagName, "BUTTON");
+  assert.equal(row.contains(button("Try again", container)), false);
+
+  // The retry succeeds: the host is ready and the session bootstrap enrols this computer.
+  let finish: (value: SandboxReadiness) => void = () => {};
+  mocks.install.mockReturnValue(
+    new Promise<SandboxReadiness>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await click(button("Try again", container));
+  assert.equal(mocks.install.mock.calls.length, 2);
+  assert.match(setupRow()?.textContent ?? "", /Preparing…/);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockResolvedValue({
+    deviceId: "a",
+    connected: true,
+    readiness: { state: "ready" },
+  });
+  await act(async () => finish({ state: "ready" }));
+  await flush(8);
+  assert.equal(setupRow(), null);
+  assert.equal(buttons("This computer · Mac AOnline", container).length, 1);
+  assert.equal(mocks.install.mock.calls.length, 2);
+});
+
+test("a failed install is not blamed on a setup step that is not the download", async () => {
+  mocks.install.mockRejectedValue(new Error("SANDBOX_DOWNLOAD_FAILED"));
+  await installSandboxRuntime().catch(() => {});
+  desktopReports(needsSetup("elevatedSetup", "windowsNotInstalled"));
+  await openRunLocationMenu();
+  const text = setupRow()?.textContent ?? "";
+  assert.match(text, /Needs setup/);
+  assert.equal(text.includes("SANDBOX_DOWNLOAD_FAILED"), false);
+  assert.equal(button("Try again", container), undefined);
 });

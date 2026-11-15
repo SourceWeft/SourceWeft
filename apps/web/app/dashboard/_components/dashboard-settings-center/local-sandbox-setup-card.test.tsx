@@ -17,6 +17,10 @@ vi.mock("../../../../lib/desktop-bridge", () => ({
 
 import { LocalSandboxSetupCard } from "./local-sandbox-setup-card";
 import {
+  installSandboxRuntime as sharedInstall,
+  resetSandboxInstall,
+} from "../../../../lib/sandbox-runtime-install";
+import {
   button,
   buttons,
   click,
@@ -45,6 +49,7 @@ async function render(readiness: SandboxReadiness | undefined) {
 }
 
 beforeEach(() => {
+  resetSandboxInstall();
   installSandboxRuntime.mockReset();
   runSandboxPrivilegedSetup.mockReset();
   onChanged.mockReset();
@@ -250,4 +255,51 @@ test("privilegedSetup without a command does not refer to a missing command", as
   assert.equal(container.querySelector("pre"), null);
   assert.match(text, /administrator/);
   assert.ok(button("Run setup", container));
+});
+
+test("an install started by the app shows as running in the card and is not started again", async () => {
+  let finish: (value: SandboxReadiness) => void = () => {};
+  installSandboxRuntime.mockReturnValue(
+    new Promise<SandboxReadiness>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  // What the dashboard does when it opens, before Settings is.
+  void sharedInstall();
+  const container = await render(needs("downloadRuntime"));
+  assert.match(container.textContent ?? "", /being installed/);
+  const running = button("Installing…", container);
+  assert.equal(running.disabled, true);
+  await click(running);
+  assert.equal(installSandboxRuntime.mock.calls.length, 1);
+  assert.equal(onChanged.mock.calls.length, 0);
+  finish({ state: "ready" });
+  await flush(3);
+  // The card applies the result of a run it did not start.
+  assert.deepEqual(onChanged.mock.calls, [[{ state: "ready" }]]);
+});
+
+test("a failed automatic install shows its reason in the card and Install tries again", async () => {
+  installSandboxRuntime.mockRejectedValue(
+    new Error("SANDBOX_DOWNLOAD_FAILED: the release asset returned 404"),
+  );
+  await sharedInstall().catch(() => {});
+  const container = await render(needs("downloadRuntime"));
+  assert.equal(
+    container.querySelector('[role="alert"]')?.textContent,
+    "SANDBOX_DOWNLOAD_FAILED: the release asset returned 404",
+  );
+  installSandboxRuntime.mockResolvedValue({ state: "ready" });
+  await click(button("Install sandbox runtime", container));
+  await flush(3);
+  assert.equal(installSandboxRuntime.mock.calls.length, 2);
+  assert.equal(container.querySelector('[role="alert"]'), null);
+  assert.deepEqual(onChanged.mock.calls, [[{ state: "ready" }]]);
+});
+
+test("a failed install is not shown for a setup step that is not the download", async () => {
+  installSandboxRuntime.mockRejectedValue(new Error("SANDBOX_DOWNLOAD_FAILED"));
+  await sharedInstall().catch(() => {});
+  const container = await render(needs("updateApp", { code: "bundleNewer" }));
+  assert.equal(container.querySelector('[role="alert"]'), null);
 });

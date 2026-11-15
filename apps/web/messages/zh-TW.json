@@ -1347,7 +1347,7 @@
       "setup": {
         "title": "設定本機執行",
         "installingInProgress": "正在安裝沙箱執行環境…",
-        "downloadRuntimeDescription": "本機執行會在沙箱中執行命令，這需要 SourceWeft 沙箱執行環境。它會從目前應用版本對應的 SourceWeft 官方發布下載，並在安裝任何內容之前驗證其簽名。在你點選「安裝」之前不會下載任何內容。",
+        "downloadRuntimeDescription": "本機執行會在沙箱中執行命令，這需要 SourceWeft 沙箱執行環境。應用會從目前應用版本對應的 SourceWeft 官方發布自動下載它，並在安裝之前驗證其簽名。如果未能完成，請點選「安裝」重試。",
         "install": "安裝沙箱執行環境",
         "installing": "正在安裝…",
         "updateAppDescription": "此應用與其沙箱執行環境不符。請更新 SourceWeft（設定 → 關於 → 軟體更新），然後重新檢查。",
@@ -1778,6 +1778,11 @@
       "setupInstallRuntime": "需要先安裝沙箱執行環境。開啟設定即可安裝。",
       "setupAppUpdate": "需要先更新 SourceWeft。開啟設定檢視詳細資訊。",
       "setupOther": "一次性設定尚未完成。開啟設定即可完成。",
+      "preparing": "正在準備…",
+      "setupFailed": "設定失敗",
+      "setupFailedDetail": "無法安裝沙箱執行環境：{error}",
+      "setupInstalling": "正在安裝沙箱執行環境…",
+      "notSupportedDetail": "這臺電腦不支援本機執行",
       "connectComputerEllipsis": "連接電腦…",
       "filesDescription": "此對話工作目錄中的檔案。",
       "connectComputerTitle": "連接電腦",
@@ -5653,7 +5658,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本嗎？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：開啟「設定 → 這臺電腦」並安裝沙箱執行環境（帶簽名的下載，只有在你點選「安裝」後才會開始）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 10 和 11（64 位）在一次性設定後也可使用本機裝置執行：應用會彈出一次標準的 Windows 管理員授權提示，用來安裝沙箱輔助程式和一個受限的沙箱帳戶。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本發布後，其下載連結會出現在上方。下載後需要為檔案新增可執行權限並執行；部分發行版還需要 FUSE 2。AppImage 更新使用與其他平臺相同的正式版和預覽版管道。Linux x64 在一次性設定後即可使用本機裝置執行：應用開啟後會自動下載帶簽名的沙箱執行環境（「設定 → 這臺電腦」會顯示進度，並可重試）。.deb 軟體包會在安裝時設定沙箱輔助程式；使用 AppImage 時，應用會顯示一條需要執行一次的管理員命令。Windows 10 和 11（64 位）在一次性設定後也可使用本機裝置執行：應用會彈出一次標準的 Windows 管理員授權提示，用來安裝沙箱輔助程式和一個受限的沙箱帳戶。"
         }
       }
     }

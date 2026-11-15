@@ -3,6 +3,7 @@ import { test } from "vitest";
 import type { SandboxReadiness, SandboxRemedy } from "./desktop-bridge";
 import {
   deviceSystemLabel,
+  isSandboxProbePending,
   localSetupNotice,
   sandboxSetupCard,
 } from "./sandbox-setup";
@@ -150,3 +151,24 @@ test.each([
     );
   },
 );
+
+test("a probe that is still running is not a setup need", () => {
+  const pending = needs("none", {
+    code: "sandboxFailed",
+    reason: "Checking the sandbox runtime",
+  });
+  assert.equal(isSandboxProbePending(pending), true);
+  assert.equal(localSetupNotice(pending), null);
+  // A real failure with no remedy is one.
+  const failed = needs("none", {
+    code: "sandboxFailed",
+    reason: "sidecar did not reply in time",
+  });
+  assert.equal(isSandboxProbePending(failed), false);
+  assert.deepEqual(localSetupNotice(failed), {
+    state: "needsSetup",
+    kind: "other",
+  });
+  assert.equal(isSandboxProbePending({ state: "ready" }), false);
+  assert.equal(isSandboxProbePending(undefined), false);
+});
