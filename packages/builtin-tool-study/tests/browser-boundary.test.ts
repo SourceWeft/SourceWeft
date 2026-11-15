@@ -16,6 +16,7 @@ const SRC = join(PACKAGE_ROOT, "src");
 const BROWSER_ENTRIES = ["ui/index.tsx", "export/index.ts", "testing/index.ts"];
 const SERVER_ONLY = [
   join(SRC, "engine") + "/",
+  join(SRC, "scheduling") + "/",
   join(SRC, "capability.ts"),
   join(SRC, "index.ts"),
 ];
@@ -80,6 +81,7 @@ for (const entry of BROWSER_ENTRIES) {
     const nodeImports = external.filter(
       ({ specifier }) =>
         specifier.startsWith("node:") ||
+        specifier === "ts-fsrs" ||
         specifier === "@sourceweft/builtin-tool-study",
     );
     assert.deepEqual(
@@ -89,14 +91,23 @@ for (const entry of BROWSER_ENTRIES) {
   });
 }
 
-test("the package exposes no subpath that leads straight to the engine", () => {
+test("the package exposes no subpath that leads straight to the engine or the scheduler", () => {
   const { exports } = JSON.parse(
     readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"),
   ) as { exports: Record<string, string> };
   assert.deepEqual(
     Object.entries(exports)
-      .filter(([, target]) => target.includes("/engine"))
+      .filter(([, target]) => target.includes("/engine") || target.includes("/scheduling"))
       .map(([key]) => key),
     [],
   );
+});
+
+test("only server-only files import ts-fsrs", () => {
+  const { files, external } = reachable(join(SRC, "index.ts"));
+  const users = external
+    .filter(({ specifier }) => specifier === "ts-fsrs")
+    .map(({ from }) => relative(PACKAGE_ROOT, from));
+  assert.deepEqual(users, ["src/scheduling/fsrs.ts"]);
+  assert.ok(files.some((file) => file.endsWith("scheduling/fsrs.ts")));
 });

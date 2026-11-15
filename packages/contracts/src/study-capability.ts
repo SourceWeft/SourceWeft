@@ -215,6 +215,64 @@ export type StudyGenerationMembers = {
   };
 };
 
+/* ------------------------------------------------------------- scheduling */
+
+export type StudyReviewGrade = 1 | 2 | 3 | 4;
+export type StudyReviewCardState = 0 | 1 | 2 | 3;
+
+/** One card's FSRS schedule; the fields map one-to-one onto `study_review_states`. */
+export type StudyReviewCard = {
+  /** 0 New, 1 Learning, 2 Review, 3 Relearning. */
+  state: StudyReviewCardState;
+  dueAt: Date;
+  stability: number;
+  difficulty: number;
+  elapsedDays: number;
+  scheduledDays: number;
+  learningSteps: number;
+  reps: number;
+  lapses: number;
+  lastReviewedAt: Date | null;
+};
+
+/** One grade as it lands in `study_review_logs`: the card as it was before. */
+export type StudyReviewLogEntry = {
+  grade: StudyReviewGrade;
+  stateBefore: StudyReviewCardState;
+  dueBefore: Date;
+  stabilityBefore: number;
+  difficultyBefore: number;
+  elapsedDays: number;
+  scheduledDays: number;
+  reviewedAt: Date;
+};
+
+/** Spaced-repetition scheduling (FSRS). Pure and deterministic. */
+export type StudySchedulingMembers = {
+  /** Applies one grade at `now`; `card` is null for an item never graded. */
+  scheduleReview(
+    card: StudyReviewCard | null,
+    grade: StudyReviewGrade,
+    now: Date,
+    options?: { desiredRetention?: number },
+  ): { state: StudyReviewCard; log: StudyReviewLogEntry };
+  newReviewCard(now: Date): StudyReviewCard;
+  /** The recall rate the schedule targets by default. */
+  desiredRetention: number;
+};
+
+/* ------------------------------------------------------------- derivation */
+
+/** Model-free study content built from other study content. */
+export type StudyDerivationMembers = {
+  /** Chosen quiz questions as a new flashcards content, in quiz order. */
+  deriveFlashcardsFromQuiz(
+    content: Extract<StudyContent, { kind: "quiz" }>,
+    itemIds: readonly string[],
+    options?: { trueFalseLabels?: { true: string; false: string } },
+  ): Extract<StudyContent, { kind: "flashcards" }>;
+};
+
 /* ------------------------------------------------------------------ module */
 
 /**
@@ -223,6 +281,8 @@ export type StudyGenerationMembers = {
  */
 export type StudyCapabilityModule = {
   generation?: StudyGenerationMembers;
+  scheduling?: StudySchedulingMembers;
+  derivation?: StudyDerivationMembers;
 };
 
 /** Name of the entry-module factory that builds the module. */
@@ -248,6 +308,8 @@ const REQUIRED_MEMBERS: {
     "estimateTokens",
     "limits",
   ],
+  scheduling: ["scheduleReview", "newReviewCard", "desiredRetention"],
+  derivation: ["deriveFlashcardsFromQuiz"],
 };
 
 /**

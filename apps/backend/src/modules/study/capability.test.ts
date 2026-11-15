@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
 import { StudyCapabilityUnavailableError } from "@sourceweft/contracts/study-capability";
 import { test, vi } from "vitest";
-import { loadStudyGeneration, STUDY_CAPABILITY_PACKAGE } from "./capability";
+import {
+  loadStudyDerivation,
+  loadStudyGeneration,
+  loadStudyScheduling,
+  STUDY_CAPABILITY_PACKAGE,
+} from "./capability";
+
+test("scheduling and derivation load through the same registry entry", async () => {
+  const scheduling = await loadStudyScheduling();
+  assert.equal(scheduling.desiredRetention, 0.9);
+  assert.equal(scheduling.scheduleReview(null, 3, new Date()).state.reps, 1);
+  const derivation = await loadStudyDerivation();
+  assert.equal(typeof derivation.deriveFlashcardsFromQuiz, "function");
+  await assert.rejects(
+    loadStudyScheduling(() => async () => ({ createStudyCapability: () => ({}) })),
+    /"scheduling"/,
+  );
+  await assert.rejects(
+    loadStudyDerivation(() => async () => ({ createStudyCapability: () => ({}) })),
+    /"derivation"/,
+  );
+});
 
 test("the real study package loads through the registry with its generation members", async () => {
   const generation = await loadStudyGeneration();

@@ -422,11 +422,35 @@ export const reviewStateSchema = z.object({
 });
 export type ReviewState = z.infer<typeof reviewStateSchema>;
 
-export const reviewRequestSchema = z.object({
-  versionNo: z.number().int().positive(),
-  itemId: z.string().min(1),
-  grade: reviewGradeSchema,
-});
+/**
+ * Names one artifact version by exactly one of its number or its id. Clients
+ * hold `artifactVersionId` (what artifact reads return); the server resolves
+ * it to the version number it stores.
+ */
+const versionRefShape = {
+  versionNo: z.number().int().positive().optional(),
+  artifactVersionId: z.string().min(1).optional(),
+};
+function exactlyOneVersionRef(
+  value: { versionNo?: number; artifactVersionId?: string },
+  ctx: z.RefinementCtx,
+) {
+  if ((value.versionNo === undefined) === (value.artifactVersionId === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["artifactVersionId"],
+      message: "Name the version by exactly one of versionNo or artifactVersionId",
+    });
+  }
+}
+
+export const reviewRequestSchema = z
+  .object({
+    ...versionRefShape,
+    itemId: z.string().min(1),
+    grade: reviewGradeSchema,
+  })
+  .superRefine(exactlyOneVersionRef);
 export type ReviewRequest = z.infer<typeof reviewRequestSchema>;
 
 export const reviewQueueItemSchema = z.object({
@@ -454,10 +478,12 @@ export const submitAnswersSchema = z.object({
 });
 export type SubmitAnswers = z.infer<typeof submitAnswersSchema>;
 
-export const startQuizAttemptSchema = z.object({
-  versionNo: z.number().int().positive(),
-  itemIds: z.array(z.string().min(1)).min(1).max(STUDY_LIMITS.maxCount.quiz).optional(),
-});
+export const startQuizAttemptSchema = z
+  .object({
+    ...versionRefShape,
+    itemIds: z.array(z.string().min(1)).min(1).max(STUDY_LIMITS.maxCount.quiz).optional(),
+  })
+  .superRefine(exactlyOneVersionRef);
 export type StartQuizAttempt = z.infer<typeof startQuizAttemptSchema>;
 
 export const quizAttemptSchema = z.object({
@@ -472,6 +498,62 @@ export const quizAttemptSchema = z.object({
   finishedAt: isoTimestampSchema.nullable(),
 });
 export type QuizAttempt = z.infer<typeof quizAttemptSchema>;
+
+/* Learning-state API responses ------------------------------------------- */
+
+/** Progress query: current version by default, or one named version. */
+export const reviewProgressQuerySchema = z
+  .object({
+    versionNo: z.coerce.number().int().positive().optional(),
+    artifactVersionId: z.string().min(1).optional(),
+  })
+  .refine((v) => v.versionNo === undefined || v.artifactVersionId === undefined, {
+    message: "Name the version by at most one of versionNo or artifactVersionId",
+    path: ["artifactVersionId"],
+  });
+
+export const reviewQueueQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  artifactId: z.string().min(1).optional(),
+});
+
+export const reviewQueueResponseSchema = z.object({
+  items: z.array(reviewQueueItemSchema),
+});
+export type ReviewQueueResponse = z.infer<typeof reviewQueueResponseSchema>;
+
+/** The caller's own state for every item of one version that has been graded. */
+export const reviewProgressResponseSchema = z.object({
+  artifactId: z.string().min(1),
+  artifactVersionId: z.string().min(1),
+  versionNo: z.number().int().positive(),
+  items: z.record(z.string(), reviewStateSchema),
+});
+export type ReviewProgressResponse = z.infer<typeof reviewProgressResponseSchema>;
+
+/** How the server graded one question once the attempt is finished. */
+export const quizItemResultSchema = z.enum(["correct", "incorrect", "unanswered"]);
+export type QuizItemResult = z.infer<typeof quizItemResultSchema>;
+
+export const quizAttemptViewSchema = quizAttemptSchema.extend({
+  /** Per-question outcome; null until the attempt is finished. */
+  results: z.record(z.string(), quizItemResultSchema).nullable(),
+});
+export type QuizAttemptView = z.infer<typeof quizAttemptViewSchema>;
+
+export const quizAttemptListResponseSchema = z.object({
+  items: z.array(quizAttemptViewSchema),
+});
+export type QuizAttemptListResponse = z.infer<typeof quizAttemptListResponseSchema>;
+
+export const deriveCardsResponseSchema = z.object({
+  artifactId: z.string().min(1),
+  versionId: z.string().min(1),
+  itemCount: z.number().int().positive(),
+  /** True when a retry returned the deck an earlier call already made. */
+  reused: z.boolean(),
+});
+export type DeriveCardsResponse = z.infer<typeof deriveCardsResponseSchema>;
 
 /** Lower-cases, folds width/compatibility forms, drops punctuation and spaces. */
 function normalizeForFingerprint(text: string): string {
