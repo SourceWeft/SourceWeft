@@ -13,6 +13,7 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { useAdminOverview } from "../../_components/admin-overview-context";
 import {
   AdminEmpty,
   AdminError,
@@ -121,6 +122,7 @@ export function SkillReviewQueue({
   const [items, setItems] = React.useState<QueueItem[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<Set<string>>(new Set());
+  const { refresh: refreshOverview } = useAdminOverview();
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [skillMd, setSkillMd] = React.useState<Record<string, SkillMdState>>(
     {},
@@ -195,6 +197,7 @@ export function SkillReviewQueue({
       setItems((prev) =>
         prev ? prev.filter((entry) => entry.skillVersionId !== key) : prev,
       );
+      refreshOverview();
     } catch {
       setError(tm("review.actionFailed", { slug: item.slug }));
     } finally {

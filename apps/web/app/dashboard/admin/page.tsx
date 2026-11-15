@@ -1,7 +1,10 @@
-import { redirect } from "next/navigation";
-
-import { ADMIN_DEFAULT_HREF } from "./_components/admin-sections";
+import { AdminOverview } from "./_components/admin-overview";
+import { AdminPage } from "./_components/admin-page";
 
 export default function AdminHomePage() {
-  redirect(ADMIN_DEFAULT_HREF);
+  return (
+    <AdminPage>
+      <AdminOverview />
+    </AdminPage>
+  );
 }

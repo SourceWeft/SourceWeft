@@ -3696,6 +3696,7 @@
         "system": "系统"
       },
       "items": {
+        "overview": "概览",
         "mcpReview": "MCP 审核",
         "skillReview": "技能审核",
         "reports": "举报",
@@ -3704,7 +3705,8 @@
         "blog": "博客",
         "marketSettings": "市场设置"
       },
-      "backToApp": "返回应用"
+      "backToApp": "返回应用",
+      "pending": "{count} 项待处理"
     },
     "checkingAccess": "正在检查管理权限…",
     "accessCheckFailed": "无法检查管理权限，请重试。",
@@ -3736,7 +3738,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "内部/元数据地址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的用户才能访问此页面。批准与拒绝操作使用同一份允许名单。",
+    "overview": {
+      "title": "概览",
+      "description": "各分区里等待处理的事项。",
+      "refresh": "重新加载数量",
+      "retry": "重试",
+      "loading": "正在加载数量…",
+      "loadFailed": "无法加载数量，各分区仍可正常使用。",
+      "summary": "{count, plural, =0 {没有等待处理的事项。} other {有 # 项等待处理。}}",
+      "queues": "待办队列",
+      "content": "内容",
+      "hints": {
+        "mcpReview": "被标记的 MCP 提交",
+        "skillReview": "{review} 个新提交 · {listing} 个上架决定",
+        "reports": "未处理的举报"
+      },
+      "blogDrafts": "{count} 个草稿版本",
+      "blogPublished": "{count} 个已发布版本"
+    }
   },
   "dashboardObservability": {
     "notices": {

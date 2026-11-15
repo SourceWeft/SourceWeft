@@ -31,6 +31,21 @@ export type RegistryReviewQueueEntry = {
     | null;
 };
 
+/** How many submitted versions are waiting in the review queue. */
+export async function countRegistryReviewQueue(): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(skillVersions)
+    .innerJoin(skillDefinitions, eq(skillDefinitions.id, skillVersions.skillId))
+    .where(
+      and(
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillVersions.status, "draft"),
+      ),
+    );
+  return row?.total ?? 0;
+}
+
 export async function listRegistryReviewQueue(): Promise<
   RegistryReviewQueueEntry[]
 > {

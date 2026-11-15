@@ -3696,6 +3696,7 @@
         "system": "系統"
       },
       "items": {
+        "overview": "概覽",
         "mcpReview": "MCP 審核",
         "skillReview": "技能審核",
         "reports": "檢舉",
@@ -3704,7 +3705,8 @@
         "blog": "部落格",
         "marketSettings": "市場設定"
       },
-      "backToApp": "返回應用"
+      "backToApp": "返回應用",
+      "pending": "{count} 項待處理"
     },
     "checkingAccess": "正在檢查管理權限…",
     "accessCheckFailed": "無法檢查管理權限，請重試。",
@@ -3736,7 +3738,25 @@
       "chmodExec": "chmod +x",
       "internalAddress": "內部/後設資料位址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。",
+    "overview": {
+      "title": "概覽",
+      "description": "各分區裡等待處理的事項。",
+      "refresh": "重新載入數量",
+      "retry": "重試",
+      "loading": "正在載入數量…",
+      "loadFailed": "無法載入數量，各分區仍可正常使用。",
+      "summary": "{count, plural, =0 {沒有等待處理的事項。} other {有 # 項等待處理。}}",
+      "queues": "待辦佇列",
+      "content": "內容",
+      "hints": {
+        "mcpReview": "被標記的 MCP 提交",
+        "skillReview": "{review} 個新提交 · {listing} 個上架決定",
+        "reports": "未處理的檢舉"
+      },
+      "blogDrafts": "{count} 個草稿版本",
+      "blogPublished": "{count} 個已發布版本"
+    }
   },
   "dashboardObservability": {
     "notices": {

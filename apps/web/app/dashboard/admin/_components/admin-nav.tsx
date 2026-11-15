@@ -5,7 +5,13 @@ import { ArrowLeft } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
-import { ADMIN_SECTION_GROUPS, isAdminSectionActive } from "./admin-sections";
+import { useAdminOverview } from "./admin-overview-context";
+import {
+  ADMIN_OVERVIEW_SECTION,
+  ADMIN_SECTION_GROUPS,
+  isAdminSectionActive,
+  type AdminSection,
+} from "./admin-sections";
 
 const linkClass =
   "flex h-8 shrink-0 items-center gap-2 rounded-md px-2.5 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground";
@@ -16,6 +22,38 @@ const linkClass =
  */
 export function AdminNav({ pathname }: { pathname: string }) {
   const t = useTranslations("dashboardAdmin");
+  const { overview } = useAdminOverview();
+
+  function sectionLink(section: AdminSection) {
+    const active = isAdminSectionActive(pathname, section);
+    const pending = overview && section.pending ? section.pending(overview) : 0;
+    return (
+      <Link
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          linkClass,
+          active &&
+            "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+        )}
+        href={section.href}
+        key={section.href}
+      >
+        <section.icon className="size-4 shrink-0" />
+        <span className="whitespace-nowrap">
+          {t(`nav.items.${section.key}`)}
+        </span>
+        {pending > 0 ? (
+          <span
+            aria-label={t("nav.pending", { count: pending })}
+            className="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-medium leading-5 text-primary-foreground tabular-nums"
+            data-testid="admin-nav-pending"
+          >
+            {pending > 99 ? "99+" : pending}
+          </span>
+        ) : null}
+      </Link>
+    );
+  }
 
   return (
     <nav
@@ -25,6 +63,7 @@ export function AdminNav({ pathname }: { pathname: string }) {
       <p className="hidden px-2.5 pb-2 text-sm font-semibold text-sidebar-foreground md:block">
         {t("nav.title")}
       </p>
+      {sectionLink(ADMIN_OVERVIEW_SECTION)}
       {ADMIN_SECTION_GROUPS.map((group) => (
         <div
           className="flex shrink-0 items-center gap-1 md:flex-col md:items-stretch md:gap-0.5"
@@ -33,26 +72,7 @@ export function AdminNav({ pathname }: { pathname: string }) {
           <p className="hidden px-2.5 pb-1 pt-4 text-xs text-sidebar-foreground/50 md:block">
             {t(`nav.groups.${group.key}`)}
           </p>
-          {group.sections.map((section) => {
-            const active = isAdminSectionActive(pathname, section.href);
-            return (
-              <Link
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  linkClass,
-                  active &&
-                    "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
-                )}
-                href={section.href}
-                key={section.href}
-              >
-                <section.icon className="size-4 shrink-0" />
-                <span className="whitespace-nowrap">
-                  {t(`nav.items.${section.key}`)}
-                </span>
-              </Link>
-            );
-          })}
+          {group.sections.map(sectionLink)}
         </div>
       ))}
       <Link

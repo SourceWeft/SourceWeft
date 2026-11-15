@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, mcpServers, mcpServerVersions } from "@sourceweft/db";
 
 export type ReviewQueueEntry = {
@@ -21,6 +21,15 @@ function readScan(provenance: Record<string, unknown> | null | undefined) {
   const submittedBy =
     typeof provenance?.submittedBy === "string" ? provenance.submittedBy : null;
   return { flags, submittedBy };
+}
+
+/** How many submissions are waiting in the review queue. */
+export async function countReviewQueue(): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(mcpServers)
+    .where(eq(mcpServers.status, "reviewing"));
+  return row?.total ?? 0;
 }
 
 /**

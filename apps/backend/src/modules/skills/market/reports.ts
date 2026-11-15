@@ -396,6 +396,15 @@ export function decodeSkillReportCursor(
   return { createdAt, id };
 }
 
+/** How many reports nobody has resolved yet. */
+export async function countOpenSkillReports(): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(skillReports)
+    .where(eq(skillReports.status, "open"));
+  return row?.total ?? 0;
+}
+
 /**
  * Reports with one status, newest first, with what an admin needs to decide
  * on each: the skill's standing, the review it is about, who sent it, and
