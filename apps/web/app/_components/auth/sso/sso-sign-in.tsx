@@ -37,7 +37,22 @@ export type SsoSignInProps = {
 type SsoDiscovery = { email: string } | { organizationSlug: string }
 
 /** The subset of the `signIn.sso` response this view reads. */
-type SsoResponse = { error?: { message?: string | null } | null } | null | undefined
+type SsoResponse =
+  | {
+      error?:
+        | { message?: string | null; status?: number; code?: string | null }
+        | null
+    }
+  | null
+  | undefined
+
+/** English plugin sign-in messages that must never reach a non-English UI. */
+const PLUGIN_SIGNIN_ENGLISH = [
+  "is required",
+  "No provider found",
+  "Invalid SSO provider",
+  "Provider domain has not been verified"
+]
 
 /**
  * Work-email SSO sign-in view rendered at `/auth/sso`.
@@ -94,19 +109,34 @@ export function SsoSignIn({ className }: SsoSignInProps) {
           errorCallbackURL
         })) as SsoResponse
         if (result?.error) {
-          setErrorMessage(result.error.message || coreLocalization.errors.generic)
+          // 429 → localized rate-limit; a raw English plugin message (or an
+          // empty one, e.g. an unknown ?org= slug) → the localized "no SSO is
+          // set up" message; otherwise the backend's already-localized message.
+          const error = result.error
+          const message = error.message ?? ""
+          setErrorMessage(
+            error.status === 429
+              ? localization.ssoRateLimited
+              : !message ||
+                  PLUGIN_SIGNIN_ENGLISH.some((fragment) =>
+                    message.includes(fragment)
+                  )
+                ? localization.ssoNoSetup
+                : message
+          )
+          setIsSubmitting(false)
           return false
         }
-        // On success the better-auth client redirects the browser to the IdP.
+        // On success the better-auth client redirects the browser to the IdP;
+        // keep the form disabled until that navigation happens.
         return true
       } catch {
         setErrorMessage(coreLocalization.errors.generic)
-        return false
-      } finally {
         setIsSubmitting(false)
+        return false
       }
     },
-    [authClient, callbackURL, errorCallbackURL, coreLocalization]
+    [authClient, callbackURL, errorCallbackURL, coreLocalization, localization]
   )
 
   useEffect(() => {
@@ -121,9 +151,13 @@ export function SsoSignIn({ className }: SsoSignInProps) {
     event.preventDefault()
     if (isSubmitting) return
     const trimmed = email.trim()
-    // The only client-side check: non-empty and contains "@". Everything else
-    // is the backend's answer.
-    if (!trimmed || !trimmed.includes("@")) return
+    // The only client-side check: non-empty and contains "@". An empty or
+    // "@"-less address shows an inline message instead of silently doing
+    // nothing; everything else is the backend's answer.
+    if (!trimmed || !trimmed.includes("@")) {
+      setErrorMessage(localization.ssoEmailRequired)
+      return
+    }
     void runSsoSignIn({ email: trimmed })
   }
 

@@ -18,6 +18,9 @@ const state = vi.hoisted(() => ({
     workEmail: "Work email",
     continue: "Continue",
     backToSignIn: "Back to sign in",
+    ssoEmailRequired: "Enter your work email address.",
+    ssoRateLimited: "Too many attempts. Please wait a minute and try again.",
+    ssoNoSetup: "No single sign-on is set up for this email address.",
   },
 }));
 
@@ -111,7 +114,7 @@ test("shows the backend error message and keeps the email editable", async () =>
   assert.equal(after.value, "a@acme.com");
 });
 
-test("shows the generic error when the backend error has no message", async () => {
+test("shows the localized no-setup message when the backend error has no message", async () => {
   state.sso.mockResolvedValue({ error: { message: "" } });
   const { container } = await mount(createElement(SsoSignIn));
 
@@ -124,8 +127,47 @@ test("shows the generic error when the backend error has no message", async () =
   await flush();
 
   assert(
-    container.textContent?.includes(GENERIC_ERROR),
-    "the generic localized error is shown",
+    container.textContent?.includes(state.localization.ssoNoSetup),
+    "the localized no-setup message is shown for an empty error body",
+  );
+});
+
+test("maps a 429 to the localized rate-limit message, not the raw body", async () => {
+  state.sso.mockResolvedValue({
+    error: { status: 429, message: "Too many requests" },
+  });
+  const { container } = await mount(createElement(SsoSignIn));
+
+  const input = container.querySelector<HTMLInputElement>(
+    'input[type="email"]',
+  );
+  assert(input);
+  typeInto(input, "a@acme.com");
+  button("Continue", container).click();
+  await flush();
+
+  assert(container.textContent?.includes(state.localization.ssoRateLimited));
+  assert(!container.textContent?.includes("Too many requests"));
+});
+
+test("maps a raw English plugin message to the localized no-setup message", async () => {
+  state.sso.mockResolvedValue({
+    error: { message: "providerId, orgId or domain is required" },
+  });
+  const { container } = await mount(createElement(SsoSignIn));
+
+  const input = container.querySelector<HTMLInputElement>(
+    'input[type="email"]',
+  );
+  assert(input);
+  typeInto(input, "a@acme.com");
+  button("Continue", container).click();
+  await flush();
+
+  assert(container.textContent?.includes(state.localization.ssoNoSetup));
+  assert(
+    !container.textContent?.includes("is required"),
+    "no raw English plugin string is shown",
   );
 });
 
@@ -182,12 +224,48 @@ test("auto-starts from ?org exactly once under StrictMode", async () => {
   assert.deepEqual(state.sso.mock.calls[0]?.[0]?.organizationSlug, "acme");
 });
 
-test("does not sign in when the email is empty", async () => {
+test("shows an inline message and does not sign in when the email is empty", async () => {
   const { container } = await mount(createElement(SsoSignIn));
   button("Continue", container).click();
   await flush();
 
   assert.equal(state.sso.mock.calls.length, 0);
+  assert(
+    container.textContent?.includes(state.localization.ssoEmailRequired),
+    "an inline validation message is shown instead of a silent no-op",
+  );
+});
+
+test('shows an inline message for an address without "@"', async () => {
+  const { container } = await mount(createElement(SsoSignIn));
+  const input = container.querySelector<HTMLInputElement>(
+    'input[type="email"]',
+  );
+  assert(input);
+  typeInto(input, "not-an-email");
+  button("Continue", container).click();
+  await flush();
+
+  assert.equal(state.sso.mock.calls.length, 0);
+  assert(container.textContent?.includes(state.localization.ssoEmailRequired));
+});
+
+test("keeps the submit button disabled after a successful response", async () => {
+  state.sso.mockResolvedValue({ error: null });
+  const { container } = await mount(createElement(SsoSignIn));
+  const input = container.querySelector<HTMLInputElement>(
+    'input[type="email"]',
+  );
+  assert(input);
+  typeInto(input, "a@acme.com");
+  button("Continue", container).click();
+  await flush();
+
+  const submit = button("Continue", container);
+  assert(
+    submit.disabled,
+    "the button stays disabled until the browser navigates to the IdP",
+  );
 });
 
 test("the back-to-sign-in link carries the redirect destination", async () => {
