@@ -42,6 +42,16 @@ test("the SSO plugin is registered with the required options, and i18n stays las
     enableSingleLogout: false,
   });
 
+  // The plugin's own deprecated-algorithm rejection is kept as defence in depth:
+  // it DOES fire for the redirect/SimpleSign bindings. It does NOT fire on the
+  // HTTP-POST binding the ACS uses (the plugin never reads the POST response's
+  // signature algorithm), which is why the guard adds its own
+  // `assertSamlAcsAlgorithms` before-hook — see ./saml-algorithm-policy.ts.
+  assert.equal(
+    (o.saml as { algorithms?: { onDeprecated?: string } }).algorithms?.onDeprecated,
+    "reject",
+  );
+
   // i18n is still the last plugin.
   assert.equal(plugins.at(-1)?.id, "i18n");
 });

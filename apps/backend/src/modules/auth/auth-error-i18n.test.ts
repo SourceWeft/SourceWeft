@@ -28,6 +28,8 @@ const SSO_MESSAGES_ZH_CN: Record<string, string> = {
     "该角色属性名不可用，请换一个属性。",
   [SSO_ERROR_CODES.organizationRequired]: "单点登录只能为团队配置。",
   [SSO_ERROR_CODES.providerLimit]: "该团队的身份源数量已达上限（5 个）。",
+  [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
+    "身份源返回的 SAML 响应使用了不支持的签名设置。请联系管理员改用 SHA-256 签名，并发送未加密的断言。",
 };
 
 /**
@@ -49,6 +51,8 @@ const SSO_MESSAGES_ZH_TW: Record<string, string> = {
     "該角色屬性名不可用，請換一個屬性。",
   [SSO_ERROR_CODES.organizationRequired]: "單一登入只能為團隊設定。",
   [SSO_ERROR_CODES.providerLimit]: "該團隊的身分提供者數量已達上限（5 個）。",
+  [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
+    "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，併傳送未加密的斷言。",
 };
 
 /**
@@ -59,7 +63,7 @@ const SSO_MESSAGES_ZH_TW: Record<string, string> = {
  * `身分提供者`, neither of which contains most of these characters anyway).
  */
 const SIMPLIFIED_ONLY_CHARS = [
-  ..."该邮业单点录验证请联员于无将关账号团队满试属换个为数达",
+  ..."该邮业单点录验证请联员于无将关账号团队满试属换个为数达响应签设系并发断",
 ];
 
 describe("auth error i18n", () => {
@@ -117,7 +121,7 @@ describe("auth error i18n", () => {
     assert.equal(read(null), null);
   });
 
-  test("every app locale carries all nine enterprise-SSO codes", () => {
+  test("every app locale carries all ten enterprise-SSO codes", () => {
     const ssoCodes = Object.values(SSO_ERROR_CODES);
     for (const locale of ["en", "zh", "zh-CN", "zh-TW"] as const) {
       for (const code of ssoCodes) {

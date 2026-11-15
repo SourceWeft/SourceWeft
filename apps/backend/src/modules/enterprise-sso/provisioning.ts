@@ -1,6 +1,5 @@
 import { APIError } from "better-auth/api";
 import { billingOrganizationHooks } from "../../billing-host/bindings";
-import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import { parseSourceweftOrganizationKind } from "../auth/organization-metadata";
 import {
@@ -8,7 +7,12 @@ import {
   recordSsoSignInAudit,
   type SsoAuditProtocol,
 } from "./audit";
-import { SSO_ERROR_CODES, SSO_ERROR_MESSAGES_EN, type SsoErrorCode } from "./errors";
+import {
+  SSO_ERROR_CODES,
+  SSO_ERROR_MESSAGES_EN,
+  ssoErrorRedirect,
+  type SsoErrorCode,
+} from "./errors";
 
 /**
  * JIT membership, account-linking rules and role mapping for enterprise SSO.
@@ -479,30 +483,16 @@ async function isSeatRejection(organizationId: string): Promise<boolean> {
 }
 
 /**
- * Build the error-URL redirect for a failed membership step. A `FOUND`
- * `APIError` with a `location` header is exactly what the plugin's own
- * `ctx.redirect(...)` produces for a resolver rejection, so thrown from inside
- * the callback endpoint it yields a clean 302 to the error page carrying the
- * code — never a raw error body. No session cookie is set, because the plugin
- * sets it only after `provisionUser` returns.
+ * Build the error-URL redirect for a failed membership step, delegating to the
+ * shared {@link ssoErrorRedirect} (the same 302-to-error-page construction the
+ * guard's SAML algorithm policy reuses). A membership failure after the session
+ * is committed redirects to the error page carrying `SSO_SEAT_LIMIT` or
+ * `SSO_PROVISIONING_FAILED`, never a raw error body; no session cookie is set,
+ * because the plugin sets it only after `provisionUser` returns.
  */
 function provisioningRedirect(isSeat: boolean, cause: unknown): APIError {
-  const code = isSeat
-    ? SSO_ERROR_CODES.seatLimit
-    : SSO_ERROR_CODES.provisioningFailed;
-  const url = new URL(config.auth.errorUrl);
-  url.searchParams.set("error", code);
-  const error = new APIError(
-    "FOUND",
-    undefined,
-    new Headers({ location: url.toString() }),
+  return ssoErrorRedirect(
+    isSeat ? SSO_ERROR_CODES.seatLimit : SSO_ERROR_CODES.provisioningFailed,
+    cause,
   );
-  // Keep the originating error for diagnostics without leaking it in the
-  // serialized body (a non-enumerable property is skipped by JSON.stringify).
-  Object.defineProperty(error, "cause", {
-    value: cause,
-    enumerable: false,
-    configurable: true,
-  });
-  return error;
 }

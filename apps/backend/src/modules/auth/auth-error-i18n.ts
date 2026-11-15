@@ -34,6 +34,8 @@ const ssoErrorMessagesZhCN: TranslationDictionary = {
     "该角色属性名不可用，请换一个属性。",
   [SSO_ERROR_CODES.organizationRequired]: "单点登录只能为团队配置。",
   [SSO_ERROR_CODES.providerLimit]: "该团队的身份源数量已达上限（5 个）。",
+  [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
+    "身份源返回的 SAML 响应使用了不支持的签名设置。请联系管理员改用 SHA-256 签名，并发送未加密的断言。",
 };
 
 /**
@@ -58,6 +60,8 @@ const ssoErrorMessagesZhTW: TranslationDictionary = {
     "該角色屬性名不可用，請換一個屬性。",
   [SSO_ERROR_CODES.organizationRequired]: "單一登入只能為團隊設定。",
   [SSO_ERROR_CODES.providerLimit]: "該團隊的身分提供者數量已達上限（5 個）。",
+  [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
+    "身分提供者返回的 SAML 回應使用了不支援的簽名設定。請聯絡管理員改用 SHA-256 簽名，併傳送未加密的斷言。",
 };
 
 // Traditional Chinese error messages. The official @better-auth/i18n plugin
@@ -67,9 +71,9 @@ const ssoErrorMessagesZhTW: TranslationDictionary = {
 // glossary — the exact pipeline the web catalogs use
 // (apps/web/scripts/i18n-hant.mjs, design §8 D7 / §16). Regenerate this table
 // from `locales.zh` whenever the plugin's Simplified pack changes; do not
-// hand-edit individual entries. The nine enterprise-SSO codes (task 7) are
-// spread in from `ssoErrorMessagesZhTW`, generated from
-// `ssoErrorMessagesZhCN` the same way.
+// hand-edit individual entries. The ten enterprise-SSO codes (task 7 + the
+// task 6 SAML algorithm policy) are spread in from `ssoErrorMessagesZhTW`,
+// generated from `ssoErrorMessagesZhCN` the same way.
 const zhTW: TranslationDictionary = {
   USER_NOT_FOUND: "使用者未找到",
   FAILED_TO_CREATE_USER: "建立使用者失敗",

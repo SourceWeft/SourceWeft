@@ -1,4 +1,5 @@
 import { APIError } from "better-auth/api";
+import { config } from "../../shared/config";
 
 /**
  * Error codes for enterprise SSO (OIDC + SAML for team organizations).
@@ -21,6 +22,10 @@ export const SSO_ERROR_CODES = {
   // Per-organization provider cap (Task 3's guard); providersLimit on the
   // plugin itself enforces the per-user cap registered in this task.
   providerLimit: "SSO_PROVIDER_LIMIT",
+  // A SAML response declared a signature or digest algorithm outside the
+  // allow-list (SHA-1 and friends), or an encrypted assertion, so the guard's
+  // algorithm policy rejected it before the plugin could verify it (Task 6).
+  samlAlgorithmNotAllowed: "SSO_SAML_ALGORITHM_NOT_ALLOWED",
 } as const;
 
 export type SsoErrorCode = (typeof SSO_ERROR_CODES)[keyof typeof SSO_ERROR_CODES];
@@ -54,6 +59,8 @@ export const SSO_ERROR_MESSAGES_EN: Record<SsoErrorCode, string> = {
     "Single sign-on can only be set up for a team.",
   [SSO_ERROR_CODES.providerLimit]:
     "This team has reached the limit of 5 identity providers.",
+  [SSO_ERROR_CODES.samlAlgorithmNotAllowed]:
+    "Your identity provider's SAML response uses signature settings that aren't supported. Ask your administrator to sign with SHA-256 and to send unencrypted assertions.",
 };
 
 /**
@@ -67,4 +74,34 @@ export function ssoError(
   status: ConstructorParameters<typeof APIError>[0],
 ): APIError {
   return new APIError(status, { code, message: SSO_ERROR_MESSAGES_EN[code] });
+}
+
+/**
+ * Builds the error-URL redirect for a failed SSO sign-in callback. A `FOUND`
+ * `APIError` with a `location` header is exactly what the plugin's own
+ * `ctx.redirect(...)` produces for a resolver rejection, so thrown from inside
+ * (or a before-hook of) a callback endpoint it yields a clean 302 to the error
+ * page carrying the `code` — never a raw error body, and never a session cookie
+ * (the plugin sets that only on a successful sign-in). Used both by
+ * provisioning.ts (a membership step that fails after the session is committed)
+ * and by the guard's SAML algorithm policy (a rejection before the plugin
+ * processes the response). The optional `cause` is kept non-enumerable so it is
+ * skipped by `JSON.stringify` and never leaks into the serialized body.
+ */
+export function ssoErrorRedirect(code: SsoErrorCode, cause?: unknown): APIError {
+  const url = new URL(config.auth.errorUrl);
+  url.searchParams.set("error", code);
+  const error = new APIError(
+    "FOUND",
+    undefined,
+    new Headers({ location: url.toString() }),
+  );
+  if (cause !== undefined) {
+    Object.defineProperty(error, "cause", {
+      value: cause,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  return error;
 }

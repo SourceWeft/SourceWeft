@@ -6,7 +6,7 @@ import {
   SSO_AUDIT_PATHS,
   snapshotSsoProviderForAudit,
 } from "./audit";
-import { SSO_ERROR_CODES, ssoError } from "./errors";
+import { SSO_ERROR_CODES, ssoError, ssoErrorRedirect } from "./errors";
 import {
   assertSsoDomainAllowed,
   assertTeamOrganization,
@@ -15,6 +15,7 @@ import {
   type SsoProviderDomainLookup,
   type SsoProviderDomainRow,
 } from "./policy";
+import { assertSamlResponseAlgorithmsAllowed } from "./saml-algorithm-policy";
 import { validateRoleAttribute } from "./role-mapping";
 
 /**
@@ -49,6 +50,17 @@ const UPDATE_PATH = "/sso/update-provider";
 const DELETE_PATH = "/sso/delete-provider";
 const VERIFY_DOMAIN_PATH = "/sso/verify-domain";
 const SIGN_IN_PATH = "/sign-in/sso";
+/**
+ * The only plugin endpoint that consumes a `SAMLResponse` to SIGN A USER IN, and
+ * so the only one the algorithm policy below guards. Enumerated against the
+ * `@better-auth/sso@1.7.7` dist: the OIDC callbacks (`/sso/callback`,
+ * `/sso/callback/:providerId`) take an authorization `code`, never a SAML POST;
+ * the SLO endpoints (`/sso/saml2/sp/slo/:providerId`, `/sso/saml2/logout/:providerId`)
+ * consume a SAML LogoutRequest/Response for sign-OUT, not sign-in, and Single
+ * Logout is disabled (`enableSingleLogout: false`), so neither can establish a
+ * session — the algorithm gate is a sign-in defence and does not apply there.
+ */
+const SAML_ACS_PATH = "/sso/saml2/sp/acs/:providerId";
 const SSO_PROVIDER_MODEL = "ssoProvider";
 
 /**
@@ -650,6 +662,30 @@ function markSsoCreatedUserVerified(
   return { data: { emailVerified: true } };
 }
 
+/**
+ * SAML ACS before-hook: reject a sign-in whose response declares a signature or
+ * digest algorithm outside the allow-list, or an encrypted assertion, BEFORE the
+ * plugin verifies and accepts it (see ./saml-algorithm-policy.ts for why the
+ * plugin itself does not enforce this on the POST binding). On rejection it
+ * throws the shared 302-to-error-URL redirect carrying
+ * {@link SSO_ERROR_CODES.samlAlgorithmNotAllowed} — exactly how a failed SAML
+ * callback is surfaced — so no session cookie is set and nothing is created. A
+ * request with no `SAMLResponse` (the GET post-auth redirect, or a malformed
+ * POST) is left to the plugin.
+ */
+function assertSamlAcsAlgorithms(ctx: {
+  body?: { SAMLResponse?: unknown } | null;
+}): void {
+  const samlResponse = ctx.body?.SAMLResponse;
+  if (samlResponse === undefined || samlResponse === null) {
+    return;
+  }
+  const result = assertSamlResponseAlgorithmsAllowed(samlResponse);
+  if (!result.ok) {
+    throw ssoErrorRedirect(SSO_ERROR_CODES.samlAlgorithmNotAllowed, result.reason);
+  }
+}
+
 export function sourceweftSsoGuard(): BetterAuthPlugin {
   return {
     id: "sourceweft-sso-guard",
@@ -706,6 +742,15 @@ export function sourceweftSsoGuard(): BetterAuthPlugin {
               return handleSignInRouting(ctx, adapter);
             }),
           ),
+        },
+        {
+          // Reject deprecated SAML signature/digest algorithms (and encrypted
+          // assertions) before the plugin verifies the response, since it does
+          // not enforce the algorithm on the POST binding.
+          matcher: (context) => context.path === SAML_ACS_PATH,
+          handler: createAuthMiddleware(async (ctx) => {
+            assertSamlAcsAlgorithms(ctx as { body?: { SAMLResponse?: unknown } });
+          }),
         },
         {
           // The deleted row is gone by the time an after-hook could read it,
