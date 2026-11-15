@@ -4,7 +4,7 @@ import { act, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { SourceItem } from "../source-types";
-import { mountWithIntl, unmountAll } from "@/test/react";
+import { click, flush, mountWithIntl, unmountAll } from "@/test/react";
 
 // Disable the connector sync-run polling engine entirely: its timers +
 // BroadcastChannel are what made mounting SourcesHub hang under jsdom. The
@@ -39,7 +39,17 @@ const listArtifactSummariesMock = vi.hoisted(() =>
 const listWorkingFilesMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ items: [] }),
 );
+const listSourcesMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+);
+const getSourceMock = vi.hoisted(() => vi.fn());
+const getSourceGuideMock = vi.hoisted(() => vi.fn());
+const routerPush = vi.hoisted(() => vi.fn());
 const localRequestMock = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: routerPush }),
+}));
 vi.mock("../../../../../lib/auth-client", () => ({
   authClient: {
     useSession: () => ({
@@ -68,6 +78,9 @@ vi.mock("../../../../../lib/sdk", () => ({
   apiBaseUrl: "http://localhost",
   connectorsClient: makeStubClient(),
   contentClient: makeStubClient({
+    listSources: listSourcesMock,
+    getSource: getSourceMock,
+    getSourceGuide: getSourceGuideMock,
     listArtifactSummaries: listArtifactSummariesMock,
     listWorkingFiles: listWorkingFilesMock,
   }),
@@ -118,6 +131,8 @@ afterEach(async () => {
   await unmountAll();
   window.sessionStorage.clear();
   vi.clearAllMocks();
+  // jsdom has none; the preview tests install one.
+  delete (window as { matchMedia?: unknown }).matchMedia;
 });
 
 test("mounts in new mode and renders the hub tab strip", async () => {
@@ -241,6 +256,115 @@ test("mounts in thread mode with a threadId", async () => {
 test("mounts as a drawer variant", async () => {
   const el = await renderHub({ variant: "drawer" });
   expect(el.textContent).not.toBe("");
+});
+
+const previewedSource: SourceItem = {
+  id: "s1",
+  title: "Doc One",
+  sourceType: "file_upload",
+  parentSourceId: null,
+  type: "DOC",
+  status: "Indexed",
+  meta: "now",
+  contentText: "",
+  connectorId: null,
+  externalUri: null,
+  storageKey: null,
+  updatedAt: "2024-01-01T00:00:00.000Z",
+};
+
+/** Open the source's preview from its Hub row and ask the guide's question. */
+async function askFromPreview(props: Partial<SourcesHubProps>) {
+  // A narrow screen, where the Hub is a drawer and the guide starts as a bar.
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  })) as unknown as typeof window.matchMedia;
+  // The Hub reloads its list on mount, so the server has to know the source.
+  listSourcesMock.mockResolvedValueOnce({
+    items: [
+      {
+        id: "s1",
+        title: "Doc One",
+        sourceType: "file_upload",
+        parentSourceId: null,
+        status: "indexed",
+        mimeType: "text/plain",
+        contentText: "",
+        connectorId: null,
+        externalUri: null,
+        metadata: null,
+        storageKey: null,
+        updatedAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+    nextCursor: null,
+  });
+  getSourceMock.mockResolvedValue({
+    source: {
+      id: "s1",
+      title: "Doc One",
+      sourceType: "file_upload",
+      mimeType: "text/plain",
+      contentText: "Revenue grew in 2025.",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+    },
+    documents: [{ id: "d1", contentText: "Revenue grew in 2025." }],
+    chunks: [],
+  });
+  getSourceGuideMock.mockResolvedValue({
+    guide: {
+      sourceId: "s1",
+      status: "ready",
+      content: {
+        summary: "Revenue grew in 2025.",
+        topics: ["Revenue"],
+        suggestedQuestions: ["What drove growth?"],
+      },
+      errorCode: null,
+      trigger: "auto",
+      stale: false,
+      updatedAt: "2026-11-14T00:00:00.000Z",
+    },
+  });
+  await renderHub({
+    initialSources: [previewedSource],
+    initialSourcesLoaded: true,
+    ...props,
+  });
+  const buttons = () => [...document.body.querySelectorAll("button")];
+  const row = buttons().find((button) =>
+    button.textContent?.includes("Doc One"),
+  );
+  expect(row).toBeTruthy();
+  await click(row!);
+  await flush();
+  await flush();
+  const guideBar = document.body.querySelector<HTMLElement>(
+    "[data-source-guide-preview]",
+  );
+  expect(guideBar).toBeTruthy();
+  await click(guideBar!);
+  const question = buttons().find((button) =>
+    button.textContent?.includes("What drove growth?"),
+  );
+  expect(question).toBeTruthy();
+  await click(question!);
+  expect(routerPush).toHaveBeenCalledTimes(1);
+}
+
+test("a question asked from the source preview closes the Hub drawer", async () => {
+  const onClose = vi.fn();
+  await askFromPreview({ variant: "drawer", onClose });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test("a question asked from the source preview leaves a docked Hub open", async () => {
+  const onClose = vi.fn();
+  await askFromPreview({ variant: "panel", onClose });
+  expect(onClose).not.toHaveBeenCalled();
 });
 
 test("mounts with initial sources provided", async () => {

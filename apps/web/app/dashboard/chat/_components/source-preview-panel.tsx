@@ -166,6 +166,7 @@ function SourceMetaRow({ label, value }: { label: string; value: string }) {
 
 export function SourcePreviewPanel({
   citation,
+  onAskQuestion,
   onOpenChange,
   onOpenSource,
   onSourceChanged,
@@ -174,6 +175,12 @@ export function SourcePreviewPanel({
   workspaceId,
 }: {
   citation?: CitationRecord | null;
+  /**
+   * A suggested question from the guide was sent to the message box. The
+   * preview closes itself; this lets the surface that opened it get out of the
+   * way too (the Hub drawer on a narrow screen).
+   */
+  onAskQuestion?: () => void;
   onOpenChange: (open: boolean) => void;
   /** Open another source (a note's cited source) in this preview. */
   onOpenSource?: (source: { id: string; title: string }) => void;
@@ -517,7 +524,10 @@ export function SourcePreviewPanel({
           {!citation && source && workspaceId && detail ? (
             <SourceGuideCard
               collapsedByDefault={previewMode === "source-file"}
-              onAsk={() => onOpenChange(false)}
+              onAsk={() => {
+                onOpenChange(false);
+                onAskQuestion?.();
+              }}
               sourceId={source.id}
               workspaceId={workspaceId}
             />
