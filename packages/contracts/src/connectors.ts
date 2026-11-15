@@ -1006,7 +1006,10 @@ export interface ConnectorAdapter {
   ): Promise<ConnectorAuthorizationStartResult>;
   /**
    * Brokered auth only: complete a broker-hosted authorization attempt and
-   * return the resulting opaque credential.
+   * return the resulting opaque credential. The adapter is responsible for
+   * verifying the callback against `attemptRef` (that the broker reports the
+   * same attempt it started, and succeeded); the platform does not inspect
+   * `callbackParams` and only passes through the `attemptRef` it stored.
    */
   finishAuthorization?(
     input: ConnectorAuthorizationFinishInput,

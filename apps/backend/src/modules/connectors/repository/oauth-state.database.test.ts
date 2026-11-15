@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, test } from "vitest";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
 
@@ -58,6 +59,43 @@ test("consuming a state row returns the authorization attempt it was created wit
   });
 
   assert.equal(consumed?.attemptRef, "ca_test");
+});
+
+test("consuming a state row clears its stored attempt reference while still returning the original value", async () => {
+  const scope = await workspace();
+  const created = await states.createOAuthStateRecord({
+    stateHash: randomUUID(),
+    teamId: scope.teamId,
+    workspaceId: scope.workspaceId,
+    userId: "user-1",
+    connectorType: "gmail",
+    expiresAt: futureExpiry(),
+    attemptRef: "ca_secret",
+  });
+
+  const consumed = await states.consumeOAuthStateRecord({
+    stateHash: created.stateHash,
+    connectorType: "gmail",
+    now: new Date(),
+  });
+  // The caller (the adapter) still receives the attempt reference it needs.
+  assert.equal(consumed?.attemptRef, "ca_secret");
+
+  // But the stored row no longer keeps it in plain text after the handshake.
+  const [stored] = await schema.db
+    .select()
+    .from(schema.connectorOAuthStates)
+    .where(eq(schema.connectorOAuthStates.id, created.id));
+  assert.equal(stored?.attemptRef, null);
+  assert.ok(stored?.consumedAt);
+
+  // Single-use still holds: a second consume returns nothing.
+  const again = await states.consumeOAuthStateRecord({
+    stateHash: created.stateHash,
+    connectorType: "gmail",
+    now: new Date(),
+  });
+  assert.equal(again, null);
 });
 
 test("a state row created without an authorization attempt consumes to null", async () => {

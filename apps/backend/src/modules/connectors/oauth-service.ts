@@ -261,6 +261,18 @@ export class ConnectorOAuthService {
     code: string;
     state: string;
   }) {
+    // A brokered connector completes authorization through the global callback
+    // (`finishGlobalCallback`), never this workspace-scoped code-exchange path.
+    // Reject it before the state row is consumed, so a stray hit here does not
+    // burn the single-use handshake, and with a client 400 rather than a 500.
+    if (this.usesBrokeredAuthorization(input.connectorType)) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_OAUTH_CALLBACK_INVALID",
+        "This connector completes authorization through its broker, not the workspace callback",
+        { connectorType: input.connectorType },
+      );
+    }
     const stateRow = await consumeOAuthStateRecord({
       stateHash: hashState(input.state),
       connectorType: input.connectorType,
@@ -373,14 +385,35 @@ export class ConnectorOAuthService {
       });
     }
 
-    const account = await this.storeAuthorization({
-      teamId: stateRow.teamId,
-      workspaceId: stateRow.workspaceId,
-      userId: stateRow.userId,
-      connectorType: input.connectorType,
-      manifest,
-      tokenSet,
-    });
+    let account;
+    try {
+      account = await this.storeAuthorization({
+        teamId: stateRow.teamId,
+        workspaceId: stateRow.workspaceId,
+        userId: stateRow.userId,
+        connectorType: input.connectorType,
+        manifest,
+        tokenSet,
+      });
+    } catch (error) {
+      // A brokered `finishAuthorization` has already created a live connection
+      // at the broker. If persisting it fails, the state row is spent and the
+      // user must start again, so revoke that connection best-effort rather
+      // than leave a grant SourceWeft can no longer see. No account row exists
+      // yet, so only the connector type is logged on failure.
+      if (adapter.finishAuthorization && adapter.revokeAuthorization) {
+        try {
+          await adapter.revokeAuthorization({
+            accessToken: tokenSet.accessToken,
+          });
+        } catch {
+          logger.error("connector_authorization_revoke_failed", {
+            connectorType: input.connectorType,
+          });
+        }
+      }
+      throw error;
+    }
 
     return {
       account,
@@ -450,7 +483,17 @@ export class ConnectorOAuthService {
       });
       if (reauthorized) {
         if (replaced) {
-          await this.revokeReplacedAuthorization(replaced);
+          // When the broker re-links the same mailbox under the same
+          // connected-account id, the "replaced" credential is byte-for-byte
+          // the one just stored; revoking it would delete the connection we
+          // just kept. Only revoke a credential that genuinely differs.
+          const replacedAccessToken = await decryptTeamSecret(
+            replaced.accessTokenEncrypted,
+            replaced.teamId,
+          );
+          if (replacedAccessToken !== tokenSet.accessToken) {
+            await this.revokeReplacedAuthorization(replaced);
+          }
         }
         return reauthorized;
       }
@@ -473,7 +516,7 @@ export class ConnectorOAuthService {
 
   /** Whether a connector's manifest declares the brokered auth flow. */
   usesBrokeredAuthorization(connectorType: string): boolean {
-    return this.registry.getManifest(connectorType).auth.kind === "brokered";
+    return this.registry.getManifest(connectorType).auth?.kind === "brokered";
   }
 
   /**

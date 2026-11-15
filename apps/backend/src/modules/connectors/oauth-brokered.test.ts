@@ -319,6 +319,158 @@ describe("finishGlobalCallback (brokered)", () => {
     });
     expect(mocks.createAccount).not.toHaveBeenCalled();
   });
+
+  it("revokes the just-created broker connection best-effort and rethrows when storing the credential fails", async () => {
+    mocks.consume.mockResolvedValue({
+      workspaceId: "workspace",
+      teamId: "team",
+      userId: "user",
+      connectorType: "composio_gmail",
+      redirectAfter: null,
+      attemptRef: "attempt_1",
+    });
+    mocks.finishAuthorization.mockResolvedValue({
+      accessToken: "broker-credential",
+      providerAccountId: "ca_1",
+      providerAccountEmail: "person@example.com",
+      displayName: "Person",
+    });
+    mocks.findReauthorizable.mockResolvedValue(null);
+    mocks.createAccount.mockRejectedValue(new Error("db down"));
+    mocks.revokeAuthorization.mockResolvedValue(undefined);
+
+    await expect(
+      service.finishGlobalCallback({
+        connectorType: "composio_gmail",
+        state: "state",
+        callbackParams: { status: "success", connected_account_id: "ca_1" },
+      }),
+    ).rejects.toThrow("db down");
+
+    expect(mocks.revokeAuthorization).toHaveBeenCalledWith({
+      accessToken: "broker-credential",
+    });
+  });
+
+  it("still rethrows the original store error when the best-effort broker revoke also fails", async () => {
+    mocks.consume.mockResolvedValue({
+      workspaceId: "workspace",
+      teamId: "team",
+      userId: "user",
+      connectorType: "composio_gmail",
+      redirectAfter: null,
+      attemptRef: "attempt_1",
+    });
+    mocks.finishAuthorization.mockResolvedValue({
+      accessToken: "broker-credential",
+      providerAccountId: "ca_1",
+      providerAccountEmail: "person@example.com",
+      displayName: "Person",
+    });
+    mocks.findReauthorizable.mockResolvedValue(null);
+    mocks.createAccount.mockRejectedValue(new Error("db down"));
+    mocks.revokeAuthorization.mockRejectedValue(new Error("broker down too"));
+
+    await expect(
+      service.finishGlobalCallback({
+        connectorType: "composio_gmail",
+        state: "state",
+        callbackParams: { status: "success", connected_account_id: "ca_1" },
+      }),
+    ).rejects.toThrow("db down");
+
+    expect(mocks.revokeAuthorization).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not revoke the replaced credential when the broker reused the same connected account on reauthorization", async () => {
+    mocks.consume.mockResolvedValue({
+      workspaceId: "workspace",
+      teamId: "team",
+      userId: "user",
+      connectorType: "composio_gmail",
+      redirectAfter: null,
+      attemptRef: "attempt_1",
+    });
+    mocks.finishAuthorization.mockResolvedValue({
+      accessToken: "broker-credential",
+      providerAccountId: "ca_1",
+      providerAccountEmail: "person@example.com",
+      displayName: "Person",
+    });
+    mocks.findReauthorizable.mockResolvedValue({ id: "account_1" });
+    mocks.findAccount.mockResolvedValue({
+      id: "account_1",
+      teamId: "team",
+      workspaceId: "workspace",
+      connectorType: "composio_gmail",
+      accessTokenEncrypted: "enc(broker-credential)",
+      refreshTokenEncrypted: null,
+    });
+    mocks.reauthorize.mockResolvedValue({ id: "account_1" });
+
+    await service.finishGlobalCallback({
+      connectorType: "composio_gmail",
+      state: "state",
+      callbackParams: { status: "success", connected_account_id: "ca_1" },
+    });
+
+    expect(mocks.reauthorize).toHaveBeenCalledTimes(1);
+    expect(mocks.revokeAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("revokes the replaced credential on reauthorization when it differs from the new one", async () => {
+    mocks.consume.mockResolvedValue({
+      workspaceId: "workspace",
+      teamId: "team",
+      userId: "user",
+      connectorType: "composio_gmail",
+      redirectAfter: null,
+      attemptRef: "attempt_1",
+    });
+    mocks.finishAuthorization.mockResolvedValue({
+      accessToken: "broker-credential",
+      providerAccountId: "ca_1",
+      providerAccountEmail: "person@example.com",
+      displayName: "Person",
+    });
+    mocks.findReauthorizable.mockResolvedValue({ id: "account_1" });
+    mocks.findAccount.mockResolvedValue({
+      id: "account_1",
+      teamId: "team",
+      workspaceId: "workspace",
+      connectorType: "composio_gmail",
+      accessTokenEncrypted: "enc(old-credential)",
+      refreshTokenEncrypted: null,
+    });
+    mocks.reauthorize.mockResolvedValue({ id: "account_1" });
+
+    await service.finishGlobalCallback({
+      connectorType: "composio_gmail",
+      state: "state",
+      callbackParams: { status: "success", connected_account_id: "ca_1" },
+    });
+
+    expect(mocks.revokeAuthorization).toHaveBeenCalledWith({
+      accessToken: "old-credential",
+    });
+  });
+});
+
+describe("finish (workspace-scoped callback) with a brokered connector", () => {
+  it("rejects with a 400 before consuming the single-use state row", async () => {
+    await expect(
+      service.finish({
+        workspaceId: "workspace",
+        connectorType: "composio_gmail",
+        code: "code",
+        state: "state",
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      code: "CONNECTOR_OAUTH_CALLBACK_INVALID",
+    });
+    expect(mocks.consume).not.toHaveBeenCalled();
+  });
 });
 
 describe("an adapter without the brokered hooks (e.g. Notion)", () => {
