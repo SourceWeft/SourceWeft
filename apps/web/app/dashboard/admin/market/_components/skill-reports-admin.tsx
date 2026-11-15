@@ -8,6 +8,12 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import {
+  AdminEmpty,
+  AdminError,
+  AdminHeader,
+  AdminLoading,
+} from "../../_components/admin-ui";
+import {
   listSkillReports,
   resolveSkillReport,
   type SkillReportAction,
@@ -327,12 +333,7 @@ export function SkillReportsAdmin() {
 
   return (
     <section className="space-y-4">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold">{t("admin.title")}</h2>
-        <p className="text-sm text-muted-foreground">
-          {t("admin.description")}
-        </p>
-      </div>
+      <AdminHeader description={t("admin.description")} title={t("admin.title")} />
       <div
         className="flex flex-wrap gap-2"
         role="group"
@@ -362,26 +363,24 @@ export function SkillReportsAdmin() {
       ) : null}
 
       {loading ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" aria-hidden />
-          {t("admin.loading")}
-        </p>
+        <AdminLoading>{t("admin.loading")}</AdminLoading>
       ) : error && items.length === 0 ? (
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-destructive">{t("admin.loadError")}</span>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => void load(status)}
-          >
-            {t("admin.retry")}
-          </Button>
-        </div>
+        <AdminError
+          action={
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void load(status)}
+            >
+              {t("admin.retry")}
+            </Button>
+          }
+        >
+          {t("admin.loadError")}
+        </AdminError>
       ) : items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {t(`admin.empty.${status}`)}
-        </p>
+        <AdminEmpty done={status === "open"}>{t(`admin.empty.${status}`)}</AdminEmpty>
       ) : (
         <ul className="space-y-3">
           {items.map((report) => (

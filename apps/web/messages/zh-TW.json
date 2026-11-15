@@ -4718,8 +4718,6 @@
       "noLicense": "無授權條款",
       "capabilityPromptOnly": "僅含指令",
       "capabilityExecutable": "包含腳本",
-      "readSkillMd": "閱讀 SKILL.md",
-      "hideSkillMd": "隱藏 SKILL.md",
       "loadingSkillMd": "正在載入 SKILL.md…",
       "skillMdFailed": "載入 SKILL.md 失敗。",
       "skillMdMissing": "此版本沒有 SKILL.md 文字。",
@@ -4727,7 +4725,8 @@
       "reasonPlaceholder": "將與決定一併記錄",
       "publish": "核准並發布",
       "reject": "拒絕",
-      "footnote": "技能審核與 MCP 市場使用相同的管理員允許清單。"
+      "footnote": "技能審核與 MCP 市場使用相同的管理員允許清單。",
+      "flagCount": "{count, plural, =0 {無標記} other {# 個標記}}"
     },
     "ownerListing": {
       "label": "允許在公開市場上架",
