@@ -166,6 +166,11 @@ const FILE_EXEMPTIONS: readonly {
     reason:
       "The runtime-asset catalog (docs/architecture/sandbox-runtime-assets.md, A3): a feature declares its asset spec beside the dependency pin that makes the version correct — chrome-headless-shell's version and sha live next to the @remotion/renderer pin in the video package — and this file only assembles the lookup table. Importing the spec value is the price of keeping spec and pin adjacent; moving it into contracts would separate them, and the catalog stays a plain data table either way.",
   },
+  {
+    file: "modules/connectors/dropbox-sync.database.test.ts",
+    reason:
+      "Genuinely about a real capability's behaviour (per this guard's own guidance), but the proof it needs — discovery, extraction, reconciliation and the 1,000-file cap driving the real ConnectorSyncOrchestrator against a database — cannot be relocated into the Dropbox package: the orchestrator, the schema and createIsolatedTestDatabase only exist in apps/backend. The fixture this constructs is a fake Dropbox HTTP fetcher, not a synthetic capability (src/test/synthetic-capability.ts tests the host's manifest-driven loading loop itself, which is not what this test is about). createDropboxConnectorAdapter is called directly rather than through registerBuiltinConnectorAdapters()/connectorRegistry so the fake fetcher can be injected before any request is made, instead of racing a process-wide registration singleton that captures the global fetch once at startup.",
+  },
 ];
 
 /**
