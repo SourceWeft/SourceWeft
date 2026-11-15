@@ -4718,8 +4718,6 @@
       "noLicense": "No license",
       "capabilityPromptOnly": "Instructions only",
       "capabilityExecutable": "Includes scripts",
-      "readSkillMd": "Read SKILL.md",
-      "hideSkillMd": "Hide SKILL.md",
       "loadingSkillMd": "Loading SKILL.md…",
       "skillMdFailed": "Failed to load SKILL.md.",
       "skillMdMissing": "This version has no SKILL.md text.",
@@ -4727,7 +4725,8 @@
       "reasonPlaceholder": "Recorded with the decision",
       "publish": "Approve and publish",
       "reject": "Reject",
-      "footnote": "Skill review uses the same admin allowlist as the MCP market."
+      "footnote": "Skill review uses the same admin allowlist as the MCP market.",
+      "flagCount": "{count, plural, =0 {No flags} one {# flag} other {# flags}}"
     },
     "ownerListing": {
       "label": "Allow on the public market",

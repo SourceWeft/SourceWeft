@@ -4718,8 +4718,6 @@
       "noLicense": "无许可证",
       "capabilityPromptOnly": "仅含指令",
       "capabilityExecutable": "包含脚本",
-      "readSkillMd": "阅读 SKILL.md",
-      "hideSkillMd": "隐藏 SKILL.md",
       "loadingSkillMd": "正在加载 SKILL.md…",
       "skillMdFailed": "加载 SKILL.md 失败。",
       "skillMdMissing": "此版本没有 SKILL.md 文本。",
@@ -4727,7 +4725,8 @@
       "reasonPlaceholder": "将与决定一并记录",
       "publish": "批准并发布",
       "reject": "拒绝",
-      "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。"
+      "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。",
+      "flagCount": "{count, plural, =0 {无标记} other {# 个标记}}"
     },
     "ownerListing": {
       "label": "允许在公开市场上架",

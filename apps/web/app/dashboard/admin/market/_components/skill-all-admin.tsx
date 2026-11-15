@@ -19,6 +19,7 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 
+import { AdminHeader } from "../../_components/admin-ui";
 import {
   errorMessage,
   listSkillMarketAdminSkills,
@@ -189,7 +190,7 @@ function RecentMarketEvents() {
   );
 
   return (
-    <section className="rounded-2xl border border-border bg-background p-4 shadow-xs">
+    <section className="rounded-xl border border-border p-4">
       <button
         aria-expanded={open}
         className="flex w-full items-center gap-2 text-left text-sm font-semibold text-foreground"
@@ -325,16 +326,8 @@ export function SkillAllAdmin() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-border bg-background shadow-xs">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">
-              {t("all.title")}
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {t("all.description")}
-            </p>
-          </div>
+      <AdminHeader
+        actions={
           <Button
             disabled={reinferring}
             onClick={() => void reinferAll()}
@@ -349,7 +342,11 @@ export function SkillAllAdmin() {
             )}
             {t("all.reinfer")}
           </Button>
-        </div>
+        }
+        description={t("all.description")}
+        title={t("all.title")}
+      />
+      <section className="rounded-xl border border-border">
         {notice ? (
           <p className="border-b border-border px-4 py-2 text-xs" role="status">
             {notice}
