@@ -10,7 +10,7 @@ export { createDocumentProviderRegistry } from "./providers";
 export { withTempFile } from "./file-buffer";
 export { isSupportedImageMimeType, imageMimeTypes } from "./image-mime";
 export { extractPdf2MarkdownResult } from "./pdf2markdown-result";
-export { createJsonLoader, createTextLoader } from "./langchain-loaders";
+export { createTextLoader } from "./langchain-loaders";
 export { createLoaderParser } from "./loader-parser";
 export {
   createSourceParserRegistry,
