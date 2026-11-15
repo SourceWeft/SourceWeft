@@ -93,6 +93,131 @@ test("validateObjectWithJsonSchema accepts anyOf object variants", () => {
   );
 });
 
+test("a root schema without a type still rejects an extra key", () => {
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: {
+          additionalProperties: false,
+          properties: { folderId: { type: "string" } },
+        },
+        value: { folderId: "root", extra: "nope" },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+});
+
+test("a root schema without a type still enforces required keys", () => {
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "configJson",
+        schema: {
+          required: ["folderId"],
+          properties: { folderId: { type: "string" } },
+        },
+        value: {},
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+});
+
+test("an anyOf variant with its own type is enforced", () => {
+  const schema = {
+    type: "object",
+    anyOf: [
+      { properties: { mode: { type: "string", enum: ["simple"] } } },
+      {
+        properties: {
+          mode: { type: "string", enum: ["advanced"] },
+          detail: { type: "string" },
+        },
+        required: ["detail"],
+      },
+    ],
+    additionalProperties: false,
+    properties: {
+      mode: { type: "string" },
+      detail: { type: "string" },
+    },
+  };
+
+  assert.doesNotThrow(() =>
+    validateObjectWithJsonSchema({
+      label: "requestJson",
+      schema,
+      value: { mode: "advanced", detail: "x" },
+    }),
+  );
+
+  // Matches the "advanced" variant's enum but is missing its required
+  // "detail", and does not match "simple"'s enum either, so no variant
+  // matches overall.
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "requestJson",
+        schema,
+        value: { mode: "advanced" },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+
+  // Fails every variant's own enum check ("simple" vs "advanced"), not just
+  // the root's required/additionalProperties.
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "requestJson",
+        schema,
+        value: { mode: "other" },
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+});
+
+test("an anyOf variant whose own type does not match the value is excluded", () => {
+  // Before this fix, anyOf variants were checked only with
+  // validateObjectConstraints, which never looks at `type`, so a `{ type:
+  // "string" }` variant with no required/properties would silently "match"
+  // any object value. This value matches neither variant's real type/shape,
+  // so it must still be rejected rather than passing on the string variant.
+  const schema = {
+    type: "object",
+    anyOf: [{ type: "string" }, { type: "object", required: ["ok"] }],
+    properties: { ok: { type: "boolean" } },
+  };
+
+  assert.doesNotThrow(() =>
+    validateObjectWithJsonSchema({
+      label: "requestJson",
+      schema,
+      value: { ok: true },
+    }),
+  );
+
+  assert.throws(
+    () =>
+      validateObjectWithJsonSchema({
+        label: "requestJson",
+        schema,
+        value: {},
+      }),
+    (error) =>
+      error instanceof ConnectorError &&
+      error.code === "CONNECTOR_SCHEMA_VALIDATION_FAILED",
+  );
+});
+
 // Shaped exactly like the Google Drive connector's configSchema (spec 3.3,
 // packages/builtin-connector-google-drive/src/contribution.ts). Inlined
 // rather than imported: this host test is about the validator's generic

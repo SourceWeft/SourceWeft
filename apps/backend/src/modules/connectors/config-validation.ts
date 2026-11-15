@@ -152,11 +152,15 @@ function validateObjectConstraints(input: {
     if (variants.length > 0) {
       const matched = variants.some((variant) => {
         try {
-          validateObjectConstraints({
-            schema: variant as JsonSchemaObject,
-            value,
-            path,
-          });
+          const variantSchema = variant as JsonSchemaObject;
+          // Re-run the variant's own type/enum check (a variant may narrow
+          // to a non-object type, or to a different shape than its
+          // siblings), then its object constraints, matching the root's
+          // "no type still enforces object constraints" behavior below.
+          validateValue({ schema: variantSchema, value, path });
+          if (variantSchema.type !== "object") {
+            validateObjectConstraints({ schema: variantSchema, value, path });
+          }
           return true;
         } catch {
           return false;
@@ -206,9 +210,18 @@ export function validateObjectWithJsonSchema(input: {
   value: Record<string, unknown>;
   label: string;
 }) {
-  validateValue({
-    schema: input.schema as JsonSchemaObject,
-    value: input.value,
-    path: input.label,
-  });
+  const schema = input.schema as JsonSchemaObject;
+  validateValue({ schema, value: input.value, path: input.label });
+  // The root schema is validated as an object even when it declares no
+  // `type` (the pre-branch behavior): `validateValue` only reaches
+  // `validateObjectConstraints` through the `type === "object"` branch, so
+  // without an explicit type it would otherwise skip required/
+  // additionalProperties/properties checks entirely.
+  if (schema.type !== "object") {
+    validateObjectConstraints({
+      schema,
+      value: input.value,
+      path: input.label,
+    });
+  }
 }
