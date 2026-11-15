@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   lock: vi.fn(),
   refresh: vi.fn(),
   getAdapter: vi.fn(),
+  listManifests: vi.fn(),
   listDue: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
@@ -90,7 +91,10 @@ function freshRow(): Row {
   };
 }
 
-const registry = { getAdapter: mocks.getAdapter };
+const registry = {
+  getAdapter: mocks.getAdapter,
+  listManifests: mocks.listManifests,
+};
 const service = new ConnectorOAuthService(registry as never);
 
 const input = {
@@ -148,6 +152,9 @@ function applyWrite(id: string, write: Write) {
       expiresAt: write.expiresAt ? write.expiresAt.toISOString() : null,
       scopes: write.scopes ?? current.scopes,
       status: "active",
+      // A token write stamps lastRefreshAt (the repository sets it to now), so
+      // a second caller that reads the row sees it as freshly refreshed.
+      lastRefreshAt: new Date().toISOString(),
       lastError: null,
     });
   } else if (write.kind === "status") {
@@ -192,6 +199,8 @@ beforeEach(() => {
     row ? { ...row } : null,
   );
   mocks.getAdapter.mockReturnValue({ refreshOAuthToken: mocks.refresh });
+  // The registered connector types the keep-alive pass narrows its query to.
+  mocks.listManifests.mockReturnValue([{ type: "google_drive" }]);
   mocks.lock.mockImplementation(
     async (
       lockInput: { accountId: string },
@@ -576,6 +585,15 @@ it("keep-alive refreshes each due account through the locked path and counts out
       throw new TypeError("fetch failed");
     },
   };
+  // type_d has no registered adapter: the pass narrows its query to the four
+  // registered types, yet listDue (mocked) still hands back acct-d so the
+  // per-account safety net is exercised.
+  mocks.listManifests.mockReturnValue([
+    { type: "type_a" },
+    { type: "type_b" },
+    { type: "type_c" },
+    { type: "type_e" },
+  ]);
   mocks.getAdapter.mockImplementation((connectorType: string) => {
     if (connectorType === "type_d") {
       throw new ConnectorError(
@@ -605,6 +623,7 @@ it("keep-alive refreshes each due account through the locked path and counts out
   expect(mocks.listDue).toHaveBeenCalledWith({
     refreshedBefore: new Date(now.getTime() - KEEP_ALIVE_MIN_AGE_MS),
     limit: 50,
+    connectorTypes: ["type_a", "type_b", "type_c", "type_e"],
   });
   expect(mocks.lock).toHaveBeenCalledTimes(4); // not acct-d
   expect(mocks.warn).toHaveBeenCalledTimes(1);
@@ -650,15 +669,20 @@ it("keep-alive never marks an account whose connector is switched off", async ()
   expect(mocks.warn).not.toHaveBeenCalled();
 });
 
-// Review Focus 4
+// Review Focus 4 + F4: keep-alive only ever sees accounts with an expiry
+// (listOAuthAccountsDueForKeepAlive filters `expires_at is not null`), and a
+// provider that answers without a new expiry yields a `expiresAt: null` write.
 it("keep-alive decides freshness by lastRefreshAt, not by expiry", async () => {
   mocks.listDue.mockResolvedValue([
     keepAliveCandidate("acct-f", "type_f"),
     keepAliveCandidate("acct-g", "type_g"),
   ]);
+  // Both have an expiry (the only kind keep-alive processes) but a stale
+  // lastRefreshAt, so both refresh; acct-g's expiry is still in the future,
+  // proving freshness is decided by lastRefreshAt, not expiry.
   extraRows.set(
     "acct-f",
-    keepAliveRow("acct-f", { expiresAt: null, lastRefreshAt: eightDaysAgo }),
+    keepAliveRow("acct-f", { lastRefreshAt: eightDaysAgo }),
   );
   extraRows.set(
     "acct-g",
@@ -681,9 +705,11 @@ it("keep-alive decides freshness by lastRefreshAt, not by expiry", async () => {
     failed: 0,
   });
   expect(refresh).toHaveBeenCalledTimes(2);
+  // The provider answered without an expiry, so each write carries
+  // `expiresAt: null`.
   expect(writes).toEqual([
     expect.objectContaining({ kind: "token", expiresAt: null }),
-    expect.objectContaining({ kind: "token" }),
+    expect.objectContaining({ kind: "token", expiresAt: null }),
   ]);
 });
 
@@ -726,4 +752,54 @@ it("keep-alive does not log a pass when there is nothing to check", async () => 
     failed: 0,
   });
   expect(mocks.info).not.toHaveBeenCalled();
+});
+
+// F6: only getRuntimeToken uses the single-flight map. Keep-alive takes its
+// own lock rather than joining an in-flight getRuntimeToken refresh, so it is
+// never handed a token decided by the other caller's freshness predicate.
+it("keep-alive does not join a getRuntimeToken refresh in flight", async () => {
+  row = {
+    ...freshRow(),
+    expiresAt: stale(),
+    lastRefreshAt: eightDaysAgo,
+  };
+
+  let releaseProvider!: () => void;
+  const providerGate = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  mocks.refresh.mockImplementation(async () => {
+    await providerGate;
+    return {
+      accessToken: "a2",
+      refreshToken: "r2",
+      expiresAt: new Date(now.getTime() + 3_600_000),
+    } satisfies OAuthTokenSet;
+  });
+
+  // getRuntimeToken enters the lock and parks on the held provider call.
+  const runtime = service.getRuntimeToken(input);
+  await vi.waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+
+  // Keep-alive for the same account runs while that refresh is still in flight.
+  mocks.listDue.mockResolvedValue([
+    keepAliveCandidate(DEFAULT_ACCOUNT_ID, "google_drive"),
+  ]);
+  const keepAlive = service.refreshIdleAccounts({ now });
+
+  releaseProvider();
+  expect(await runtime).toBe("a2");
+  // Keep-alive took its own lock turn (two locks total, not one shared) and,
+  // reading the row the first refresh had just stamped, decided freshness by
+  // its own predicate — already fresh, no second provider call.
+  expect(await keepAlive).toEqual({
+    checked: 1,
+    refreshed: 0,
+    alreadyFresh: 1,
+    reauthRequired: 0,
+    skipped: 0,
+    failed: 0,
+  });
+  expect(mocks.lock).toHaveBeenCalledTimes(2);
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
 });

@@ -3,7 +3,7 @@
  * (encrypted tokens, scopes, status) that connectors run against.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { connectorOAuthAccounts, db, sourceConnectors } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapOAuthAccount, mapOAuthAccountWithSecret } from "../mappers";
@@ -425,13 +425,19 @@ export async function withOAuthAccountRefreshLock<T>(
 }
 
 /**
- * Active accounts with a refresh token whose last refresh (or creation, if
- * never refreshed) is older than `refreshedBefore` — candidates for a
- * background keep-alive refresh, oldest first.
+ * Active accounts with a refresh token AND a non-null expiry whose last refresh
+ * (or creation, if never refreshed) is older than `refreshedBefore`, restricted
+ * to the given `connectorTypes` — candidates for a background keep-alive
+ * refresh, oldest first. Accounts without an expiry are never refreshed (spec
+ * B5), and accounts of a connector type not in `connectorTypes` (e.g. a
+ * switched-off connector) are excluded so they cannot occupy the oldest-first
+ * batch forever. An empty `connectorTypes` matches nothing and returns `[]`
+ * without querying.
  */
 export async function listOAuthAccountsDueForKeepAlive(input: {
   refreshedBefore: Date;
   limit: number;
+  connectorTypes: string[];
 }): Promise<
   Array<{
     id: string;
@@ -440,6 +446,10 @@ export async function listOAuthAccountsDueForKeepAlive(input: {
     connectorType: string;
   }>
 > {
+  if (input.connectorTypes.length === 0) {
+    return [];
+  }
+
   const lastActivityAt = sql`coalesce(${connectorOAuthAccounts.lastRefreshAt}, ${connectorOAuthAccounts.createdAt})`;
 
   return db
@@ -454,6 +464,8 @@ export async function listOAuthAccountsDueForKeepAlive(input: {
       and(
         eq(connectorOAuthAccounts.status, "active"),
         isNotNull(connectorOAuthAccounts.refreshTokenEncrypted),
+        isNotNull(connectorOAuthAccounts.expiresAt),
+        inArray(connectorOAuthAccounts.connectorType, input.connectorTypes),
         sql`${lastActivityAt} < ${input.refreshedBefore}`,
       ),
     )

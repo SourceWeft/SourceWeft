@@ -118,12 +118,14 @@ export class ConnectorOAuthService {
   ) {}
 
   /**
-   * One in-flight refresh per account at a time: a later task's keep-alive
-   * sweep and concurrent `getRuntimeToken` callers for the same account share
-   * the same provider call and lock wait instead of racing the provider's
-   * single-use refresh token against each other. An entry is removed as soon
-   * as its promise settles, success or failure, so the next call tries again
-   * rather than reusing a rejected result.
+   * One in-flight `getRuntimeToken` refresh per account at a time: concurrent
+   * runtime callers for the same account share one provider call and lock wait
+   * instead of racing the provider's single-use refresh token against each
+   * other. Only `getRuntimeToken` joins this map; the keep-alive sweep takes
+   * its own lock (the row lock already serializes it against everyone) so it is
+   * never handed a token decided by the runtime caller's freshness predicate.
+   * An entry is removed as soon as its promise settles, success or failure, so
+   * the next call tries again rather than reusing a rejected result.
    */
   private readonly refreshInFlight = new Map<
     string,
@@ -453,6 +455,12 @@ export class ConnectorOAuthService {
     const candidates = await listOAuthAccountsDueForKeepAlive({
       refreshedBefore: new Date(input.now.getTime() - KEEP_ALIVE_MIN_AGE_MS),
       limit: KEEP_ALIVE_BATCH_LIMIT,
+      // F5: only accounts whose connector still has a registered adapter, so a
+      // switched-off connector's accounts never occupy the oldest-first batch
+      // and starve everyone else. The per-account CONNECTOR_ADAPTER_NOT_FOUND
+      // handling below stays as a safety net for a connector switched off
+      // between this query and the lock.
+      connectorTypes: this.registry.listManifests().map((m) => m.type),
     });
 
     const counts = {
@@ -466,7 +474,11 @@ export class ConnectorOAuthService {
 
     for (const candidate of candidates) {
       try {
-        const { refreshed } = await this.refreshAccountToken(
+        // F6: keep-alive goes straight to the locked refresh and never joins
+        // the `getRuntimeToken` single-flight map — the row lock already
+        // serializes it, and this way its result is decided by its own
+        // `lastRefreshAt`-based predicate, never by a runtime caller's.
+        const { refreshed } = await this.lockAndRefresh(
           candidate,
           (locked) =>
             new Date(locked.lastRefreshAt ?? locked.createdAt).getTime() >=
@@ -512,26 +524,22 @@ export class ConnectorOAuthService {
   }
 
   /**
-   * Refresh an OAuth account's access token, one caller at a time per
-   * account. `isFresh` is evaluated on the row read under the lock, not on
-   * `account`: another caller, the keep-alive sweep, or an administrator may
-   * have changed it while this call waited.
+   * The `getRuntimeToken` refresh entry point: at most one refresh in flight
+   * per account, so concurrent runtime callers share one provider call and
+   * lock wait. It delegates to {@link lockAndRefresh}, which does the adapter
+   * lookup and the locked refresh; the keep-alive sweep calls that directly,
+   * without this map.
    */
   private async refreshAccountToken(
     account: OAuthAccountRef,
     isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
   ): Promise<{ accessToken: string; refreshed: boolean }> {
-    // R2: resolve the adapter before touching the lock or the single-flight
-    // map, and outside the retryable/non-retryable classification below, so
-    // an unregistered adapter never marks the account.
-    const adapter = this.registry.getAdapter(account.connectorType);
-
     const inFlight = this.refreshInFlight.get(account.id);
     if (inFlight) {
       return inFlight;
     }
 
-    const task = this.lockAndRefresh(account, adapter, isFresh);
+    const task = this.lockAndRefresh(account, isFresh);
     this.refreshInFlight.set(account.id, task);
     task
       .finally(() => {
@@ -544,15 +552,22 @@ export class ConnectorOAuthService {
     return task;
   }
 
+  /**
+   * Refresh an OAuth account's access token under its row lock. Shared by the
+   * `getRuntimeToken` single-flight path and the keep-alive sweep, which pass
+   * different `isFresh` predicates: `getRuntimeToken`'s decides by `expiresAt`,
+   * keep-alive's by `lastRefreshAt`. `isFresh` is evaluated on the row read
+   * under the lock, not on `account`: another caller, the keep-alive sweep, or
+   * an administrator may have changed it while this call waited. The adapter
+   * (R2) and the team key material (F1) are resolved before the lock, outside
+   * the retryable/non-retryable classification, so an unregistered adapter or a
+   * key-load failure propagates without locking or marking the account.
+   */
   private async lockAndRefresh(
     account: OAuthAccountRef,
-    adapter: ConnectorAdapter,
     isFresh: (locked: ConnectorOAuthAccountSecretRecord) => boolean,
   ): Promise<{ accessToken: string; refreshed: boolean }> {
-    // F1: resolve the team's key material before taking the row lock, so every
-    // encrypt/decrypt under the lock is pure in-process crypto that never
-    // needs a second pooled connection on a cold key cache. A failure to load
-    // the keys propagates here, before anything is locked or written.
+    const adapter = this.registry.getAdapter(account.connectorType);
     const cipher = await getTeamSecretCipher(account.teamId);
     const outcome = await withOAuthAccountRefreshLock<RefreshDecision>(
       {

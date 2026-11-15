@@ -45,6 +45,7 @@ async function account(input: {
   accessTokenEncrypted?: string;
   refreshTokenEncrypted?: string | null;
   lastRefreshAt?: Date | null;
+  expiresAt?: Date | null;
   status?: ConnectorOAuthAccountStatus;
 }) {
   const created = await accounts.createOAuthAccountRecord({
@@ -63,6 +64,7 @@ async function account(input: {
       input.refreshTokenEncrypted === undefined
         ? "enc(refresh-1)"
         : input.refreshTokenEncrypted,
+    expiresAt: input.expiresAt ?? null,
     createdBy: "user-1",
   });
   const overrides: Partial<typeof schema.connectorOAuthAccounts.$inferInsert> =
@@ -498,6 +500,8 @@ test("keep-alive lists active accounts with a refresh token, oldest first", asyn
   const scope = await workspace();
   const refreshedBefore = new Date(Date.now() - 7 * 24 * 60 * 60_000);
   const days = (n: number) => new Date(Date.now() - n * 24 * 60 * 60_000);
+  const soon = new Date(Date.now() + 60 * 60_000);
+  const connectorTypes = ["google_drive"];
 
   // Earlier tests in this shared database-test file leave their own "due"
   // rows behind (old fixed `createdAt` values from other scopes). Capture
@@ -507,31 +511,50 @@ test("keep-alive lists active accounts with a refresh token, oldest first", asyn
     await accounts.listOAuthAccountsDueForKeepAlive({
       refreshedBefore,
       limit: 10_000,
+      connectorTypes,
     })
   ).length;
 
-  const a = await account({ ...scope, lastRefreshAt: days(10) });
+  const a = await account({
+    ...scope,
+    lastRefreshAt: days(10),
+    expiresAt: soon,
+  });
   const b = await account({
     ...scope,
     lastRefreshAt: null,
     createdAt: days(9),
+    expiresAt: soon,
   });
-  const c = await account({ ...scope, lastRefreshAt: days(2) });
+  const c = await account({
+    ...scope,
+    lastRefreshAt: days(2),
+    expiresAt: soon,
+  });
   const d = await account({
     ...scope,
     lastRefreshAt: days(10),
+    expiresAt: soon,
     status: "reauth_required",
   });
   const e = await account({
     ...scope,
     lastRefreshAt: days(10),
+    expiresAt: soon,
     refreshTokenEncrypted: null,
   });
-  const ids = new Set([a.id, b.id, c.id, d.id, e.id]);
+  // F4: old and otherwise due, but no expiry — never refreshed, so excluded.
+  const f = await account({
+    ...scope,
+    lastRefreshAt: days(10),
+    expiresAt: null,
+  });
+  const ids = new Set([a.id, b.id, c.id, d.id, e.id, f.id]);
 
   const due = await accounts.listOAuthAccountsDueForKeepAlive({
     refreshedBefore,
     limit: 10_000,
+    connectorTypes,
   });
   const mine = due.filter((row) => ids.has(row.id));
   assert.deepEqual(mine.map((row) => row.id), [a.id, b.id]);
@@ -539,9 +562,49 @@ test("keep-alive lists active accounts with a refresh token, oldest first", asyn
   const limited = await accounts.listOAuthAccountsDueForKeepAlive({
     refreshedBefore,
     limit: beforeCount + 1,
+    connectorTypes,
   });
   assert.deepEqual(
     limited.filter((row) => ids.has(row.id)).map((row) => row.id),
     [a.id],
   );
+});
+
+// F5
+test("keep-alive filters by connector type and returns nothing for an empty list", async () => {
+  const scope = await workspace();
+  const refreshedBefore = new Date(Date.now() - 7 * 24 * 60 * 60_000);
+  const days = (n: number) => new Date(Date.now() - n * 24 * 60 * 60_000);
+  const soon = new Date(Date.now() + 60 * 60_000);
+
+  const drive = await account({
+    ...scope,
+    connectorType: "google_drive",
+    providerAccountId: "drive-1",
+    lastRefreshAt: days(10),
+    expiresAt: soon,
+  });
+  const gmail = await account({
+    ...scope,
+    connectorType: "gmail",
+    providerAccountId: "gmail-1",
+    lastRefreshAt: days(10),
+    expiresAt: soon,
+  });
+
+  const driveOnly = await accounts.listOAuthAccountsDueForKeepAlive({
+    refreshedBefore,
+    limit: 10_000,
+    connectorTypes: ["google_drive"],
+  });
+  const driveIds = driveOnly.map((row) => row.id);
+  assert.ok(driveIds.includes(drive.id));
+  assert.ok(!driveIds.includes(gmail.id));
+
+  const none = await accounts.listOAuthAccountsDueForKeepAlive({
+    refreshedBefore,
+    limit: 10_000,
+    connectorTypes: [],
+  });
+  assert.deepEqual(none, []);
 });
