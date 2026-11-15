@@ -1531,6 +1531,9 @@ export function SourcesHub({
       />
 
       <SourcePreviewPanel
+        // Only the drawer has something to close: it covers the message box
+        // the question was just put into.
+        onAskQuestion={variant === "drawer" ? onClose : undefined}
         onOpenChange={(open) => {
           if (!open) {
             setPreviewSource(null);

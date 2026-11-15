@@ -189,7 +189,7 @@ test("a span whose text no longer matches the chunk is not highlighted", async (
   assert.equal(document.body.querySelector("[data-citation-passage]"), null);
 });
 
-test("asking a suggested question from the guide closes the preview", async () => {
+test("asking a suggested question from the guide closes the preview and tells the surface that opened it", async () => {
   window.matchMedia = ((query: string) => ({
     matches: true,
     media: query,
@@ -213,16 +213,19 @@ test("asking a suggested question from the guide closes the preview", async () =
     },
   });
   const onOpenChange = vi.fn();
+  const onAskQuestion = vi.fn();
   await mountWithIntl(
     createElement(SourcePreviewPanel, {
       source: { id: "source-1", title: "Annual report" } as never,
       open: true,
+      onAskQuestion,
       onOpenChange,
       workspaceId: "workspace-1",
     }),
   );
   await flush();
   await flush();
+  assert.equal(onAskQuestion.mock.calls.length, 0);
 
   const question = [...document.body.querySelectorAll("button")].find(
     (button) => button.textContent?.includes("What drove growth?"),
@@ -232,4 +235,5 @@ test("asking a suggested question from the guide closes the preview", async () =
 
   assert.equal(push.mock.calls.length, 1);
   assert.deepEqual(onOpenChange.mock.calls.at(-1), [false]);
+  assert.equal(onAskQuestion.mock.calls.length, 1);
 });
