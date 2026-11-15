@@ -12,3 +12,4 @@ export {
   isDropboxFileSupported,
 } from "./file-types";
 export type { DropboxFileHandling } from "./file-types";
+export { DropboxAdapterError } from "./dropbox-client";
