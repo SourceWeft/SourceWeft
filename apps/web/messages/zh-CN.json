@@ -1347,7 +1347,7 @@
       "setup": {
         "title": "设置本机执行",
         "installingInProgress": "正在安装沙箱运行时…",
-        "downloadRuntimeDescription": "本机执行会在沙箱中运行命令，这需要 SourceWeft 沙箱运行时。它会从当前应用版本对应的 SourceWeft 官方发布下载，并在安装任何内容之前校验其签名。在你点击“安装”之前不会下载任何内容。",
+        "downloadRuntimeDescription": "本机执行会在沙箱中运行命令，这需要 SourceWeft 沙箱运行时。应用会从当前应用版本对应的 SourceWeft 官方发布自动下载它，并在安装之前校验其签名。如果未能完成，请点击“安装”重试。",
         "install": "安装沙箱运行时",
         "installing": "正在安装…",
         "updateAppDescription": "此应用与其沙箱运行时不匹配。请更新 SourceWeft（设置 → 关于 → 软件更新），然后重新检查。",
@@ -1773,6 +1773,16 @@
       "loadingComputers": "正在加载电脑…",
       "couldNotLoadComputers": "无法加载电脑：{error}",
       "thisComputer": "这台电脑",
+      "needsSetup": "需要设置",
+      "notSupported": "不支持",
+      "setupInstallRuntime": "需要先安装沙箱运行时。打开设置即可安装。",
+      "setupAppUpdate": "需要先更新 SourceWeft。打开设置查看详情。",
+      "setupOther": "一次性设置尚未完成。打开设置即可完成。",
+      "preparing": "正在准备…",
+      "setupFailed": "设置失败",
+      "setupFailedDetail": "无法安装沙箱运行时：{error}",
+      "setupInstalling": "正在安装沙箱运行时…",
+      "notSupportedDetail": "这台电脑不支持本机执行",
       "connectComputerEllipsis": "连接电脑…",
       "filesDescription": "此对话工作目录中的文件。",
       "connectComputerTitle": "连接电脑",
@@ -5647,7 +5657,7 @@
         },
         "linuxBuild": {
           "question": "有 Linux 版本吗？",
-          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。Linux x64 在一次性设置后即可使用本地设备执行：打开“设置 → 这台电脑”并安装沙箱运行时（带签名的下载，只有在你点击“安装”后才会开始）。.deb 软件包会在安装时配置沙箱辅助程序；使用 AppImage 时，应用会显示一条需要运行一次的管理员命令。Windows 10 和 11（64 位）在一次性设置后也可使用本地设备执行：应用会弹出一次标准的 Windows 管理员授权提示，用来安装沙箱辅助程序和一个受限的沙箱账户。"
+          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。Linux x64 在一次性设置后即可使用本地设备执行：应用打开后会自动下载带签名的沙箱运行时（“设置 → 这台电脑”会显示进度，并可重试）。.deb 软件包会在安装时配置沙箱辅助程序；使用 AppImage 时，应用会显示一条需要运行一次的管理员命令。Windows 10 和 11（64 位）在一次性设置后也可使用本地设备执行：应用会弹出一次标准的 Windows 管理员授权提示，用来安装沙箱辅助程序和一个受限的沙箱账户。"
         }
       }
     }

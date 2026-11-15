@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -7,6 +7,10 @@ import {
   type SandboxReadiness,
 } from "../../../../lib/desktop-bridge";
 import { sandboxSetupCard } from "../../../../lib/sandbox-setup";
+import {
+  installSandboxRuntime,
+  useSandboxInstallState,
+} from "../../../../lib/sandbox-runtime-install";
 
 type Props = {
   readiness: SandboxReadiness | undefined;
@@ -18,15 +22,32 @@ type Props = {
 export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
   const t = useTranslations("dashboardSettings");
   const card = sandboxSetupCard(readiness);
-  const [busy, setBusy] = useState<"install" | "setup" | "check" | null>(null);
+  const [busy, setBusy] = useState<"setup" | "check" | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // An install started elsewhere (another window, before a restart) must not be started twice.
-  const locked = busy !== null || Boolean(card?.installing);
+  // The runtime install is shared by the page: it also starts by itself when the app opens,
+  // and this card shows that run, its failure and its result the same as its own.
+  const install = useSandboxInstallState();
+  const installsSeen = useRef(install.finished);
+  useEffect(() => {
+    if (installsSeen.current === install.finished) return;
+    installsSeen.current = install.finished;
+    void onChanged(install.readiness ?? undefined);
+  }, [install.finished, install.readiness, onChanged]);
+  // An install running here, or started elsewhere (another window, before a restart), must
+  // not be started twice.
+  const installing =
+    install.phase === "installing" || Boolean(card?.installing);
+  const locked = busy !== null || installing;
   if (!card) return null;
+  const shownError =
+    error ??
+    (card.action === "install" && install.phase === "failed"
+      ? install.error
+      : null);
 
   const run = async (
-    kind: "install" | "setup" | "check",
+    kind: "setup" | "check",
     work: () => Promise<SandboxReadiness | void>,
   ) => {
     setBusy(kind);
@@ -60,7 +81,7 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
     >
       <h3 className="font-medium">{t("localHost.setup.title")}</h3>
       <p className="text-sm">{card.reason}</p>
-      {card.installing && (
+      {installing && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("localHost.setup.installingInProgress")}
         </p>
@@ -72,11 +93,13 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
           </p>
           <Button
             disabled={locked}
-            onClick={() =>
-              void run("install", () => desktopBridge.installSandboxRuntime())
-            }
+            onClick={() => {
+              setError(null);
+              // A failure is kept by the shared install and shown below.
+              void installSandboxRuntime().catch(() => {});
+            }}
           >
-            {busy === "install"
+            {install.phase === "installing"
               ? t("localHost.setup.installing")
               : t("localHost.setup.install")}
           </Button>
@@ -143,7 +166,7 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
           </Button>
         </>
       )}
-      {card.action !== "install" && !card.installing && (
+      {card.action !== "install" && !installing && (
         <Button
           size="sm"
           variant="outline"
@@ -153,9 +176,9 @@ export function LocalSandboxSetupCard({ readiness, onChanged }: Props) {
           {t("localHost.setup.checkAgain")}
         </Button>
       )}
-      {error && (
+      {shownError && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {shownError}
         </p>
       )}
     </div>

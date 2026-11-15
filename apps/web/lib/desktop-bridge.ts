@@ -205,8 +205,9 @@ export const desktopBridge = {
     return invokeDesktop<LocalHostStatus>("local_host_status");
   },
   /**
-   * Downloads, verifies and installs the sandbox runtime (explicit user consent: only ever
-   * called from an Install button). Resolves with the readiness after the install.
+   * Downloads, verifies and installs the sandbox runtime. Resolves with the readiness after the
+   * install. Call it through `installSandboxRuntime` in `sandbox-runtime-install.ts`, which
+   * starts it automatically when the dashboard opens and keeps the page to one run at a time.
    */
   installSandboxRuntime() {
     return invokeDesktop<SandboxReadiness>("install_sandbox_runtime");

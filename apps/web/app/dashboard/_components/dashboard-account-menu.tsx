@@ -43,6 +43,7 @@ import {
 import { toast } from "sonner";
 import { authClient } from "../../../lib/auth-client";
 import type { SettingsCenterTab } from "./dashboard-settings-center-modal";
+import { subscribeDashboardSettingsOpen } from "./dashboard-settings-open";
 import {
   DashboardTeamDisplay,
   type DashboardTeamItem,
@@ -115,6 +116,15 @@ export function DashboardAccountMenu({
 
     openSettings(settingsRequest.tab);
   }, [openSettings, settingsRequest]);
+
+  React.useEffect(
+    () =>
+      subscribeDashboardSettingsOpen((tab) => {
+        openSettings(tab);
+        return true;
+      }),
+    [openSettings],
+  );
 
   async function handleSwitchTeam(item: DashboardTeamItem) {
     try {

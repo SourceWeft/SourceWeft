@@ -1,6 +1,7 @@
 "use client";
 
 import { synchronizeLocalHostScope } from "../../lib/local-host-session";
+import { installSandboxRuntimeAutomatically } from "../../lib/sandbox-runtime-install";
 import { registerBuiltinAgentTools } from "../../lib/register-builtin-agent-tools";
 import type * as React from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -123,6 +124,12 @@ export function DashboardLayoutClient({
       console.error("Local host initialization unavailable", error),
     );
   }, [hasSession, isPending, userId, sessionId, isAuxiliaryWindow]);
+  // The sandbox runtime is fetched as soon as the signed-in dashboard is open, not when a menu
+  // or Settings happens to be opened. The main window owns it, as it owns the host session.
+  useEffect(() => {
+    if (isPending || isAuxiliaryWindow || !hasSession) return;
+    void installSandboxRuntimeAutomatically();
+  }, [hasSession, isPending, isAuxiliaryWindow]);
   const routePathname = pathname || "/dashboard";
   const redirectTo = useMemo(() => {
     const query = searchParams.toString();

@@ -31,6 +31,7 @@ vi.mock("../../../../lib/auth-client", () => ({
 }));
 
 import { LocalHostPanel } from "./local-host-panel";
+import { resetSandboxInstall } from "../../../../lib/sandbox-runtime-install";
 import {
   button,
   buttons,
@@ -64,6 +65,7 @@ const customTaskFolder = {
 beforeEach(() => {
   bridge.isAvailable.mockReset().mockReturnValue(true);
   bridge.localHostStatus.mockReset();
+  resetSandboxInstall();
   bridge.installSandboxRuntime.mockReset();
   bridge.getTaskFolder.mockReset().mockResolvedValue(defaultTaskFolder);
   bridge.chooseTaskFolder.mockReset();

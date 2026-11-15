@@ -1347,7 +1347,7 @@
       "setup": {
         "title": "Set up local execution",
         "installingInProgress": "The sandbox runtime is being installed…",
-        "downloadRuntimeDescription": "Local execution runs commands inside a sandbox that needs the SourceWeft sandbox runtime. It is downloaded from the official SourceWeft release for this app version, and its signature is verified before anything is installed. Nothing is downloaded until you click Install.",
+        "downloadRuntimeDescription": "Local execution runs commands inside a sandbox that needs the SourceWeft sandbox runtime. The app downloads it automatically from the official SourceWeft release for this app version and verifies its signature before installing it. If that did not finish, click Install to try again.",
         "install": "Install sandbox runtime",
         "installing": "Installing…",
         "updateAppDescription": "This app and its sandbox runtime do not match. Update SourceWeft (Settings → About → Software update), then check again.",
@@ -1773,6 +1773,16 @@
       "loadingComputers": "Loading computers…",
       "couldNotLoadComputers": "Could not load computers: {error}",
       "thisComputer": "This computer",
+      "needsSetup": "Needs setup",
+      "notSupported": "Not supported",
+      "setupInstallRuntime": "The sandbox runtime needs to be installed. Open Settings to install it.",
+      "setupAppUpdate": "SourceWeft needs an update first. Open Settings for details.",
+      "setupOther": "One-time setup is not finished. Open Settings to complete it.",
+      "preparing": "Preparing…",
+      "setupFailed": "Setup failed",
+      "setupFailedDetail": "The sandbox runtime could not be installed: {error}",
+      "setupInstalling": "The sandbox runtime is being installed…",
+      "notSupportedDetail": "Local execution is not available on this computer",
       "connectComputerEllipsis": "Connect a computer…",
       "filesDescription": "Files in this conversation’s working directory.",
       "connectComputerTitle": "Connect a computer",
@@ -5647,7 +5657,7 @@
         },
         "linuxBuild": {
           "question": "Is there a Linux build?",
-          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: open Settings → This computer and install the sandbox runtime (a signed download that starts only when you click Install). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution also works on Windows 10 and 11 (64-bit) after a one-time setup: the app asks for administrator approval once, through the standard Windows prompt, to install its sandbox helper and a restricted sandbox account."
+          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution works on Linux x64 after a one-time setup: the app downloads the signed sandbox runtime by itself when it opens (Settings → This computer shows the progress and can retry it). The .deb package sets up the sandbox helper during installation; with the AppImage, the app shows a one-time administrator command to run. Local device execution also works on Windows 10 and 11 (64-bit) after a one-time setup: the app asks for administrator approval once, through the standard Windows prompt, to install its sandbox helper and a restricted sandbox account."
         }
       }
     }

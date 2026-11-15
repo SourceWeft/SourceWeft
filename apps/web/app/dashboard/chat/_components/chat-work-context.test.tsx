@@ -25,10 +25,14 @@ const mocks = vi.hoisted(() => ({
   desktopInfo: vi.fn(),
   reveal: vi.fn(),
   chooseLocalFolder: vi.fn(),
+  hostStatus: vi.fn(),
+  install: vi.fn(),
 }));
 vi.mock("../../../../lib/desktop-bridge", () => ({
   desktopBridge: {
     isAvailable: mocks.isDesktop,
+    localHostStatus: mocks.hostStatus,
+    installSandboxRuntime: mocks.install,
     getTaskFolder: mocks.taskFolder,
     info: mocks.desktopInfo,
     revealLocalDirectory: mocks.reveal,
@@ -104,6 +108,12 @@ import {
   WorkingFolderPicker,
   type ChatCreationContext,
 } from "./chat-work-context";
+import { subscribeDashboardSettingsOpen } from "../../_components/dashboard-settings-open";
+import type { SandboxReadiness } from "../../../../lib/desktop-bridge";
+import {
+  installSandboxRuntime,
+  resetSandboxInstall,
+} from "../../../../lib/sandbox-runtime-install";
 import {
   button,
   buttons,
@@ -161,6 +171,13 @@ beforeEach(() => {
   mocks.desktopInfo.mockReset().mockResolvedValue({ platform: "macos" });
   mocks.reveal.mockReset().mockResolvedValue(undefined);
   mocks.chooseLocalFolder.mockReset();
+  resetSandboxInstall();
+  mocks.install.mockReset();
+  // A desktop build that reports no readiness, as v0.3.0-rc.8 does.
+  mocks.hostStatus.mockReset().mockResolvedValue({
+    deviceId: null,
+    connected: false,
+  });
 });
 afterEach(async () => {
   await reset();
@@ -703,4 +720,260 @@ test("conversation details without a working directory offer no path actions", a
   );
   assert.equal(buttons("Copy path").length, 0);
   assert.equal(buttons("Show in Finder").length, 0);
+});
+
+/** A new chat's run-location control, driven by the real creation context. */
+function RunLocation() {
+  context = useChatCreationContext();
+  return createElement(ChatWorkContext, {
+    workspaceId: "workspace",
+    creation: context,
+  });
+}
+async function openRunLocationMenu() {
+  await render(createElement(RunLocation));
+  await click(
+    container.querySelector<HTMLButtonElement>(
+      '[aria-label="Choose cloud or computer"]',
+    )!,
+  );
+  await flush(8);
+}
+const setupRow = () =>
+  container.querySelector<HTMLElement>('[data-testid="this-computer-setup"]');
+const needsSetup = (remedy: string, code = "bundleMissing"): SandboxReadiness =>
+  ({
+    state: "needsSetup",
+    code,
+    reason: "host wording that the menu does not repeat",
+    remedy,
+  }) as SandboxReadiness;
+/** This computer cannot run anything yet, so the native bootstrap yields no session. */
+function desktopReports(
+  readiness: SandboxReadiness,
+  deviceId: string | null = null,
+) {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue(null);
+  mocks.hostStatus.mockResolvedValue({ deviceId, connected: false, readiness });
+}
+
+test("a computer that needs its sandbox runtime is listed with the reason and opens its settings", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  const requests: string[] = [];
+  const unsubscribe = subscribeDashboardSettingsOpen((tab) => {
+    requests.push(tab);
+    return true;
+  });
+  try {
+    await openRunLocationMenu();
+    const row = setupRow()!;
+    assert.equal(row.tagName, "BUTTON");
+    assert.match(row.textContent ?? "", /This computer/);
+    assert.match(row.textContent ?? "", /Needs setup/);
+    assert.match(
+      row.textContent ?? "",
+      /The sandbox runtime needs to be installed\. Open Settings to install it\./,
+    );
+    // The trigger keeps saying where the conversation will run.
+    assert.equal(
+      container
+        .querySelector('[aria-label="Choose cloud or computer"]')
+        ?.textContent?.trim(),
+      "Cloud",
+    );
+    mocks.push.mockClear();
+    await click(row);
+    assert.deepEqual(requests, ["local"]);
+    // Choosing the row is not a run-location choice, and the menu closes behind it.
+    assert.equal(mocks.push.mock.calls.length, 0);
+    assert.deepEqual(context.target, { kind: "cloud" });
+    assert.equal(setupRow(), null);
+  } finally {
+    unsubscribe();
+  }
+});
+
+test.each([
+  [
+    "an install the host reports as running",
+    needsSetup("none", "installing"),
+    "The sandbox runtime is being installed…",
+    "Preparing…",
+  ],
+  [
+    "an app that must be updated first",
+    needsSetup("updateApp", "bundleNewer"),
+    "SourceWeft needs an update first. Open Settings for details.",
+    "Needs setup",
+  ],
+  [
+    "an administrator step",
+    needsSetup("privilegedSetup", "userNamespaceRestricted"),
+    "One-time setup is not finished. Open Settings to complete it.",
+    "Needs setup",
+  ],
+  [
+    "a remedy this web app does not know",
+    needsSetup("somethingNewer", "sandboxFailed"),
+    "One-time setup is not finished. Open Settings to complete it.",
+    "Needs setup",
+  ],
+])("the setup row explains %s", async (_case, readiness, reason, status) => {
+  desktopReports(readiness);
+  await openRunLocationMenu();
+  const text = setupRow()?.textContent ?? "";
+  assert.equal(text.includes(status), true, text);
+  assert.equal(text.includes(reason), true, text);
+  // Nothing in the menu installs anything by itself.
+  assert.equal(mocks.install.mock.calls.length, 0);
+});
+
+test("an unsupported computer is listed as such and cannot be chosen", async () => {
+  desktopReports({ state: "unsupported" });
+  const requests: string[] = [];
+  const unsubscribe = subscribeDashboardSettingsOpen((tab) => {
+    requests.push(tab);
+    return true;
+  });
+  try {
+    await openRunLocationMenu();
+    const row = setupRow()!;
+    assert.notEqual(row.tagName, "BUTTON");
+    assert.equal(row.querySelector("button"), null);
+    assert.match(row.textContent ?? "", /This computer/);
+    assert.match(row.textContent ?? "", /Not supported/);
+    assert.match(
+      row.textContent ?? "",
+      /Local execution is not available on this computer/,
+    );
+    await click(row);
+    assert.deepEqual(requests, []);
+    assert.equal(mocks.push.mock.calls.length, 0);
+  } finally {
+    unsubscribe();
+  }
+});
+
+test("a ready computer is listed as before, without a setup row", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockResolvedValue({
+    deviceId: "a",
+    connected: true,
+    readiness: { state: "ready" },
+  });
+  await openRunLocationMenu();
+  assert.equal(setupRow(), null);
+  assert.equal(buttons("This computer · Mac AOnline", container).length, 1);
+  assert.equal(container.textContent?.includes("Needs setup"), false);
+});
+
+test("a desktop build that reports no readiness gets the menu it always had", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  await openRunLocationMenu();
+  assert.equal(setupRow(), null);
+  assert.equal(buttons("This computer · Mac AOnline", container).length, 1);
+  assert.equal(buttons("Mac BOffline", container).length, 1);
+});
+
+test("a browser never asks for the host status and shows no setup row", async () => {
+  await openRunLocationMenu();
+  assert.equal(mocks.hostStatus.mock.calls.length, 0);
+  assert.equal(setupRow(), null);
+  assert.equal(buttons("Mac AOnline", container).length, 1);
+  assert.equal(container.textContent?.includes("This computer"), false);
+});
+
+test("a computer that needs setup appears once even when it is also a connected computer", async () => {
+  desktopReports(needsSetup("downloadRuntime"), "a");
+  await openRunLocationMenu();
+  assert.ok(setupRow());
+  assert.equal(
+    (container.textContent ?? "").split("This computer").length - 1,
+    1,
+  );
+  // The listed entry for the same computer gives way to the row that explains it.
+  assert.equal(
+    [...container.querySelectorAll("button")].some((node) =>
+      node.textContent?.includes("Mac A"),
+    ),
+    false,
+  );
+  assert.equal(buttons("Mac BOffline", container).length, 1);
+});
+
+test("a host status that cannot be read leaves the menu unchanged", async () => {
+  mocks.isDesktop.mockReturnValue(true);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockRejectedValue(new Error("IPC unavailable"));
+  await openRunLocationMenu();
+  assert.equal(setupRow(), null);
+  assert.equal(buttons("This computer · Mac AOnline", container).length, 1);
+});
+
+test("while the runtime is being installed the row says this computer is being prepared", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  mocks.install.mockReturnValue(new Promise(() => {}));
+  // The dashboard started the install when it opened.
+  void installSandboxRuntime();
+  await openRunLocationMenu();
+  const text = setupRow()?.textContent ?? "";
+  assert.match(text, /This computer/);
+  assert.match(text, /Preparing…/);
+  assert.match(text, /The sandbox runtime is being installed…/);
+  assert.equal(text.includes("Needs setup"), false);
+  assert.equal(button("Try again", container), undefined);
+});
+
+test("a failed install shows the reason, and Try again installs and lists this computer without a reload", async () => {
+  desktopReports(needsSetup("downloadRuntime"));
+  mocks.install.mockRejectedValue(
+    new Error("SANDBOX_DOWNLOAD_FAILED: the release asset returned 404"),
+  );
+  await installSandboxRuntime().catch(() => {});
+  await openRunLocationMenu();
+  const row = setupRow()!;
+  assert.match(row.textContent ?? "", /Setup failed/);
+  assert.equal(
+    row.querySelector('[role="alert"]')?.textContent,
+    "The sandbox runtime could not be installed: SANDBOX_DOWNLOAD_FAILED: the release asset returned 404",
+  );
+  // The row still leads to Settings; the retry is a control of its own.
+  assert.equal(row.tagName, "BUTTON");
+  assert.equal(row.contains(button("Try again", container)), false);
+
+  // The retry succeeds: the host is ready and the session bootstrap enrols this computer.
+  let finish: (value: SandboxReadiness) => void = () => {};
+  mocks.install.mockReturnValue(
+    new Promise<SandboxReadiness>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await click(button("Try again", container));
+  assert.equal(mocks.install.mock.calls.length, 2);
+  assert.match(setupRow()?.textContent ?? "", /Preparing…/);
+  mocks.native.mockResolvedValue({ deviceId: "a" });
+  mocks.hostStatus.mockResolvedValue({
+    deviceId: "a",
+    connected: true,
+    readiness: { state: "ready" },
+  });
+  await act(async () => finish({ state: "ready" }));
+  await flush(8);
+  assert.equal(setupRow(), null);
+  assert.equal(buttons("This computer · Mac AOnline", container).length, 1);
+  assert.equal(mocks.install.mock.calls.length, 2);
+});
+
+test("a failed install is not blamed on a setup step that is not the download", async () => {
+  mocks.install.mockRejectedValue(new Error("SANDBOX_DOWNLOAD_FAILED"));
+  await installSandboxRuntime().catch(() => {});
+  desktopReports(needsSetup("elevatedSetup", "windowsNotInstalled"));
+  await openRunLocationMenu();
+  const text = setupRow()?.textContent ?? "";
+  assert.match(text, /Needs setup/);
+  assert.equal(text.includes("SANDBOX_DOWNLOAD_FAILED"), false);
+  assert.equal(button("Try again", container), undefined);
 });
