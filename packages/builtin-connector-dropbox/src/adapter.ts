@@ -51,7 +51,7 @@ const DESCRIBE_CONCURRENCY = 8;
  * (matches the `cursor` field's `maxLength` in contribution.ts). */
 const CURSOR_MAX_LENGTH = 4096;
 /** Past this many unique ids, discovery stops counting precisely and the cap
- * message reports "more than 20,000" instead of an exact count (R6). */
+ * message reports "more than 20,000" instead of an exact count. */
 const COUNT_CEILING = 20000;
 // Derived from the single pattern contribution.ts also uses for configSchema.
 const SELECTION_ITEM_ID = new RegExp(DROPBOX_ITEM_ID_PATTERN);
@@ -65,42 +65,80 @@ export type DropboxAdapterConfig = {
 
 export type DropboxSelectionEntry = { id: string; kind: "file" | "folder" };
 
+/*
+ * Browse-dialog action contract. These results are returned unchanged by the
+ * backend routes `POST /connectors/:connectorId/dropbox/{browse,search,describe}`
+ * and redeclared in packages/sdk/src/connectors-client.ts; keep the three in
+ * step. They carry metadata only, never a token. Ids are Dropbox file ids
+ * (`id:…`), stable across renames and moves, and are what the connector config
+ * stores.
+ */
+
 /** One file or folder row in a `dropbox.browse`/`dropbox.search` result. */
 export type DropboxBrowseEntry = {
   id: string;
   kind: "file" | "folder";
   name: string;
+  /** Path as Dropbox displays it, relative to the account's root namespace
+   * (the team space root for team accounts). */
   pathDisplay: string;
+  /** Bytes; null for folders. */
   size: number | null;
+  /** ISO 8601 timestamp; null for folders. */
   serverModified: string | null;
+  /** Whether the connector can index it. Always true for folders. */
   supported: boolean;
 };
 
 export type DropboxBrowseFolder = { id: string; name: string; pathDisplay: string };
 
+/**
+ * `dropbox.browse` request `{ folderId?: "id:…" | null, cursor?: string }`.
+ * Without `folderId` it lists the root. A first page carries the listed
+ * folder (null for the root) and its breadcrumbs: the ancestors between the
+ * root and that folder, both excluded, outermost first. A page fetched with
+ * `cursor` only continues the listing, so it returns `folder: null` and
+ * `breadcrumbs: []`; callers keep those from the first page and append
+ * `entries`. Entries are sorted folders first, then by name, within a page.
+ */
 export type DropboxBrowseResult = {
   folder: DropboxBrowseFolder | null;
   breadcrumbs: Array<{ id: string; name: string }>;
   entries: DropboxBrowseEntry[];
+  /** Pass back as `cursor` while `hasMore` is true. */
   cursor: string;
   hasMore: boolean;
 };
 
+/**
+ * `dropbox.search` request `{ query: string (1–200 chars after trimming),
+ * cursor?: string }`. Matches active files and folders by name only.
+ */
 export type DropboxSearchResult = {
   entries: DropboxBrowseEntry[];
   cursor: string;
   hasMore: boolean;
 };
 
+/**
+ * One item of a `dropbox.describe` result. When the id no longer resolves
+ * (deleted, moved out of reach, or access lost), `exists` is false and every
+ * other field except `id` is null.
+ */
 export type DropboxDescribeItem = {
   id: string;
   kind: "file" | "folder" | null;
   name: string | null;
   pathDisplay: string | null;
+  /** Lower-cased path; matches the `pathLower` stored on synced sources. */
   pathLower: string | null;
   exists: boolean;
 };
 
+/**
+ * `dropbox.describe` request `{ ids: string[] }` with 1–100 ids. Items come
+ * back in request order.
+ */
 export type DropboxDescribeResult = {
   items: DropboxDescribeItem[];
 };
@@ -218,7 +256,7 @@ function toBrowseEntries(entries: DropboxEntry[]): DropboxBrowseEntry[] {
 }
 
 /** Reads `handling`/`pathRoot`/`dropboxFileId` back out of the metadata
- * `toItem` (below) wrote onto a discovered `ConnectorItem` (R3). An
+ * `toItem` (below) wrote onto a discovered `ConnectorItem`. An
  * unrecognized `handling.kind` (e.g. corrupted or future-versioned metadata)
  * is treated the same as `"unsupported"` rather than failing the extraction
  * outright. */
@@ -278,7 +316,7 @@ export function parseDropboxSelection(
 
 /** `pathDisplay`'s parent directory as a list of its own path segments
  * (the file/folder name itself is dropped), for building the `dropbox.com`
- * deep link in `toItem` (spec 3.5). */
+ * deep link in `toItem`. */
 function parentPathSegments(pathDisplay: string): string[] {
   const segments = pathDisplay.split("/").filter((segment) => segment.length > 0);
   segments.pop();
@@ -294,8 +332,8 @@ function externalUriFor(pathDisplay: string, name: string): string {
 }
 
 /**
- * Builds the discovered `ConnectorItem` for one Dropbox file entry (spec 3.5,
- * R3). `metadata` carries everything `extract` will need so it never has to
+ * Builds the discovered `ConnectorItem` for one Dropbox file entry.
+ * `metadata` carries everything `extract` will need so it never has to
  * look the file up again: `handling` and `pathRoot` in particular.
  */
 function toItem(
@@ -339,9 +377,9 @@ function toItem(
   };
 }
 
-/** Ruling A: the exact count is formatted with en-US grouping; past the
+/** The exact count is formatted with en-US grouping; past the
  * counting ceiling the message gives the literal text "more than 20,000"
- * instead (R6). */
+ * instead. */
 function cappedSelectionMessage(count: number): string {
   const n =
     count > COUNT_CEILING ? "more than 20,000" : count.toLocaleString("en-US");
@@ -398,7 +436,7 @@ export function createDropboxConnectorAdapter(
           cappedSelectionMessage(seenIds.size),
         );
       }
-      // Past the cap, stop building items but keep counting ids (R6).
+      // Past the cap, stop building items but keep counting ids.
       if (itemsById.size < DROPBOX_MAX_FILES) {
         const handling = resolveDropboxFileHandling(
           entry.name ?? "",
@@ -410,7 +448,7 @@ export function createDropboxConnectorAdapter(
 
     for (const selected of selection) {
       if (selected.kind === "file") {
-        // A file selected on its own is always emitted (R4), regardless of
+        // A file selected on its own is always emitted, regardless of
         // whether it is a supported type.
         const entry = await client.getMetadata(
           input.accessToken,
@@ -429,7 +467,7 @@ export function createDropboxConnectorAdapter(
       while (true) {
         for (const entry of listing.entries) {
           // Inside a selected folder, unsupported or non-downloadable files
-          // are dropped silently (R4).
+          // are dropped silently.
           if (
             entry[".tag"] === "file" &&
             isDropboxFileSupported(entry.name ?? "", entry.is_downloadable ?? true)
@@ -495,7 +533,7 @@ export function createDropboxConnectorAdapter(
   /**
    * `dropbox.browse`: lists one folder (or continues a prior listing page).
    * A `cursor` page and the root page both report `folder: null,
-   * breadcrumbs: []` (R7); only a first page for a specific `folderId`
+   * breadcrumbs: []`; only a first page for a specific `folderId`
    * resolves the folder itself and its breadcrumb ancestors.
    */
   async function browseAction(input: ConnectorActionInput): Promise<DropboxBrowseResult> {
@@ -577,7 +615,7 @@ export function createDropboxConnectorAdapter(
 
   /** `dropbox.describe`: looks up each requested id independently (order
    * preserved) and reports whether it still exists, for the settings list's
-   * folder names, file counts and "no longer exists" mark (R2). */
+   * folder names, file counts and "no longer exists" mark. */
   async function describeAction(input: ConnectorActionInput): Promise<DropboxDescribeResult> {
     const { ids } = parseDescribeRequest(input.request);
     const account = await client.getCurrentAccount(input.accessToken);

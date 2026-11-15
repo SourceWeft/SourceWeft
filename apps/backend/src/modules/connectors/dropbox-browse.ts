@@ -12,7 +12,7 @@ export type DropboxBrowseActionName = "browse" | "search" | "describe";
  * describe) with a freshly resolved runtime OAuth token.
  *
  * Mirrors `createGoogleDrivePickerSession`: the connector must exist, be a
- * `dropbox` connector, and be `active` or `error` (R8) — `error` means the
+ * `dropbox` connector, and be `active` or `error` — `error` means the
  * last sync failed, not that the connection itself is unusable, and an admin
  * may need the browse dialog to repair the selection. `paused` and
  * `disabled` connectors get nothing.

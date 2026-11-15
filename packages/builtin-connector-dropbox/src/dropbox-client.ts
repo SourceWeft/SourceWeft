@@ -3,7 +3,7 @@ import { ConnectorItemSkipError, type OAuthTokenSet } from "@sourceweft/contract
 import { DROPBOX_ITEM_ID_PATTERN } from "./contribution";
 
 // Dropbox-specific HTTP client. Kept independent of Drive's own copy on
-// purpose (packages are independent; see Ruling B): this file owns its own
+// purpose (capability packages are independent): this file owns its own
 // token exchange, request wrapper and `readCapped`, mirroring Drive's
 // structure and conventions without importing from it.
 const API_URL = "https://api.dropboxapi.com";
@@ -166,7 +166,7 @@ async function contentError(response: Response): Promise<Error> {
  * Reads a response body into a Buffer without ever holding more than
  * `maxBytes`: the declared `Content-Length` short-circuits, and the stream
  * is abandoned the moment the running total passes the cap. Dropbox's own
- * copy of Drive's `readCapped` (Ruling B: packages are independent).
+ * copy of Drive's `readCapped` (capability packages are independent).
  */
 async function readCapped(response: Response, maxBytes: number): Promise<Buffer> {
   const declared = response.headers.get("content-length");

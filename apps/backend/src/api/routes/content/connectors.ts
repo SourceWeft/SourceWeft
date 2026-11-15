@@ -86,9 +86,13 @@ function buildConnectorWebhookUrl(input: {
 
 /**
  * Registers `POST /connectors/:connectorId/dropbox/:action`, one route per
- * internal Dropbox browse-dialog action (R2, R8). The three routes share
- * everything but the action name, so this is called once per action rather
- * than written out three times.
+ * internal Dropbox browse-dialog action (`dropbox.browse`, `dropbox.search`,
+ * `dropbox.describe`). Each needs `connector.manage` on the workspace and an
+ * active or errored Dropbox connector, takes a JSON object body that the
+ * adapter validates, and returns the adapter's metadata-only result unchanged
+ * (types in packages/builtin-connector-dropbox/src/adapter.ts). The three
+ * routes share everything but the action name, so this is called once per
+ * action rather than written out three times.
  */
 function registerDropboxBrowseRoute(app: Hono, action: DropboxBrowseActionName) {
   app.post(`/connectors/:connectorId/dropbox/${action}`, async (c) => {
