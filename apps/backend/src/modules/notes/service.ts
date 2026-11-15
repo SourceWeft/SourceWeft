@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
-import { db, noteSources, notes } from "@sourceweft/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, noteSources, notes, sources } from "@sourceweft/db";
 import type { SavedAnswerNote } from "@sourceweft/contracts/sources";
 import { ContentError } from "../content/errors";
 import { normalizeContentTitle } from "../../shared/strings";
@@ -84,6 +84,27 @@ async function findSavedNote(input: { teamId: string; messageId: string }) {
   return row ?? null;
 }
 
+/**
+ * The cited sources that are real source rows in this workspace. An answer can
+ * cite things that are not (a file read from a connector's virtual folder, a
+ * source deleted since): linking those would break the foreign key and lose the
+ * whole save. They stay in the note's saved references, shown as unavailable.
+ */
+async function existingCitedSourceIds(
+  workspaceId: string,
+  ids: Array<string | null | undefined>,
+) {
+  const wanted = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  if (wanted.length === 0) return [];
+  const rows = await db
+    .select({ id: sources.id })
+    .from(sources)
+    .where(
+      and(eq(sources.workspaceId, workspaceId), inArray(sources.id, wanted)),
+    );
+  return rows.map((row) => row.id);
+}
+
 function toResult(
   row: { id: string; sourceId: string | null; title: string | null },
   alreadySaved: boolean,
@@ -147,6 +168,10 @@ export async function saveAnswerAsNote(input: {
     citations,
   });
   const title = noteTitle(message.content);
+  const citedSourceIds = await existingCitedSourceIds(
+    workspace.id,
+    rewritten.references.map((reference) => reference.sourceId),
+  );
 
   const source = await createSourceRecord({
     teamId: workspace.organizationId,
@@ -183,13 +208,6 @@ export async function saveAnswerAsNote(input: {
   }
 
   const noteId = randomUUID();
-  const citedSourceIds = [
-    ...new Set(
-      rewritten.references
-        .map((reference) => reference.sourceId)
-        .filter((id): id is string => Boolean(id)),
-    ),
-  ];
   try {
     await db.transaction(async (tx) => {
       await tx.insert(notes).values({
