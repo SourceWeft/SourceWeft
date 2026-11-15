@@ -3621,7 +3621,6 @@
     }
   },
   "dashboardBlogAdmin": {
-    "eyebrow": "博客 · 管理",
     "heading": "博客文章",
     "description": "导入 Markdown 文章，预览每个语言版本，并决定哪些公开。",
     "refresh": "重新加载列表",
@@ -3674,7 +3673,17 @@
       "minutes": "约 {count} 分钟",
       "excerpt": "摘要",
       "preview": "预览",
-      "loadingPreview": "正在加载预览…"
+      "loadingPreview": "正在加载预览…",
+      "back": "全部文章",
+      "languages": "语言版本",
+      "notFound": "没有 ID 为 {articleId} 的文章。"
+    },
+    "count": "共 {total} 篇，显示 {shown} 篇",
+    "columns": {
+      "article": "文章",
+      "category": "分类",
+      "languages": "语言版本",
+      "imported": "上次导入"
     }
   },
   "dashboardAdmin": {
