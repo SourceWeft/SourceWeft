@@ -125,6 +125,8 @@ function extractMessageFromBody(body: unknown, fallback: string): string {
       typeof body.error.message === "string" &&
       body.error.message) ||
     (typeof body.message === "string" && body.message) ||
+    // FastAPI-style providers (DeepInfra) put the reason in `detail`.
+    (typeof body.detail === "string" && body.detail) ||
     fallback;
 
   return bodyMessage;

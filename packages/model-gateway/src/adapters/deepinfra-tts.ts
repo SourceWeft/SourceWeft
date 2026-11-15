@@ -8,8 +8,31 @@ import {
   throwIfTtsHttpError,
 } from "./tts-utils";
 
+/**
+ * Built-in voices per hosted model, exact and case-sensitive. DeepInfra
+ * answers any other voice with HTTP 500 "TTS request failed". Models not
+ * listed here take whatever voice the caller gives.
+ */
+const VOICES_BY_MODEL: Readonly<Record<string, readonly string[]>> = {
+  "XiaomiMiMo/MiMo-V2.5-tts": [
+    "mimo_default",
+    "Mia",
+    "Chloe",
+    "Milo",
+    "Dean",
+    "冰糖",
+    "茉莉",
+    "苏打",
+    "白桦",
+  ],
+};
+
 export class DeepInfraTtsTransport implements TtsTransport {
   readonly kind = "deepinfra" as const;
+
+  voices(target: Parameters<NonNullable<TtsTransport["voices"]>>[0]) {
+    return VOICES_BY_MODEL[target.providerModel];
+  }
 
   async execute(input: Parameters<TtsTransport["execute"]>[0]) {
     const responseFormat = normalizeTtsResponseFormat(

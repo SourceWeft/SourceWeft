@@ -11,6 +11,7 @@ export {
   toGatewayErrorData,
 } from "./errors";
 
+export { TTS_UNSUPPORTED_VOICE_REASON } from "./bridge/tts";
 export { DEFAULT_IMAGE_GENERATION_REQUEST } from "./types";
 export {
   isImageGenerationEndpoint,
