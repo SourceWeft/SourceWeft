@@ -302,6 +302,15 @@ test("a failed describe falls back to ids", async () => {
   expect(rows(group(container, "Folders"))).toEqual(["id:f1"]);
 });
 
+test("loads sources without their content", async () => {
+  await mountItems({ connector: dropboxConnector([]) });
+
+  expect(listSources).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ includeContent: false }),
+  );
+});
+
 test("describes folders in chunks of at most 100", async () => {
   const items = Array.from({ length: 150 }, (_, index) => ({
     id: `id:f${index}`,

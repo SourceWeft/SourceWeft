@@ -306,6 +306,7 @@ function DropboxBrowserBody({
           <Input
             aria-label={t("connectors.dropbox.browser.searchLabel")}
             className="h-8 pl-8 text-xs"
+            maxLength={200}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("connectors.dropbox.browser.searchPlaceholder")}
             type="search"
@@ -415,6 +416,7 @@ function DropboxBrowserBody({
                           icon={Icon}
                           name={entry.name}
                           path={searching ? entry.pathDisplay : null}
+                          reason={title}
                         />
                       </button>
                     ) : (
@@ -423,6 +425,7 @@ function DropboxBrowserBody({
                           icon={Icon}
                           name={entry.name}
                           path={searching ? entry.pathDisplay : null}
+                          reason={title}
                         />
                       </div>
                     )}
@@ -521,10 +524,12 @@ function EntryLabel({
   icon: Icon,
   name,
   path,
+  reason,
 }: {
   icon: LucideIcon;
   name: string;
   path: string | null;
+  reason?: string;
 }) {
   return (
     <>
@@ -534,6 +539,11 @@ function EntryLabel({
         {path ? (
           <span className="block truncate text-[10px] text-muted-foreground">
             {path}
+          </span>
+        ) : null}
+        {reason ? (
+          <span className="block truncate text-[10px] text-muted-foreground">
+            {reason}
           </span>
         ) : null}
       </span>

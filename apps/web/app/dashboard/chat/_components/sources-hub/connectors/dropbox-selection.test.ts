@@ -207,7 +207,7 @@ describe("dropboxSkipReasonKey", () => {
 });
 
 describe("dropboxErrorKey", () => {
-  test("maps reconnect, notFound, tryLater, generic", () => {
+  test("maps reconnect, notFound, tryLater, reopen, generic", () => {
     expect(dropboxErrorKey("CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE")).toBe(
       "connectors.dropbox.error.reconnect",
     );
@@ -220,6 +220,9 @@ describe("dropboxErrorKey", () => {
     expect(dropboxErrorKey("DROPBOX_CONNECTOR_NOT_FOUND")).toBe(
       "connectors.dropbox.error.notFound",
     );
+    expect(dropboxErrorKey("DROPBOX_NOT_FOUND")).toBe(
+      "connectors.dropbox.error.notFoundItem",
+    );
     expect(dropboxErrorKey("DROPBOX_RATE_LIMITED")).toBe(
       "connectors.dropbox.error.tryLater",
     );
@@ -227,7 +230,10 @@ describe("dropboxErrorKey", () => {
       "connectors.dropbox.error.tryLater",
     );
     expect(dropboxErrorKey("DROPBOX_CURSOR_RESET")).toBe(
-      "connectors.dropbox.error.tryLater",
+      "connectors.dropbox.error.reopen",
+    );
+    expect(dropboxErrorKey("DROPBOX_INVALID_REQUEST")).toBe(
+      "connectors.dropbox.error.generic",
     );
     expect(dropboxErrorKey(undefined)).toBe("connectors.dropbox.error.generic");
     expect(dropboxErrorKey("SOMETHING_ELSE")).toBe(

@@ -199,6 +199,16 @@ test("breadcrumb returns to parent", async () => {
   expect(currentCrumb()).toBe("Dropbox");
 });
 
+test("the search input caps input length at 200", async () => {
+  browseByFolder({ root: rootPage });
+  await open();
+
+  const search = dialog().querySelector<HTMLInputElement>(
+    'input[type="search"]',
+  )!;
+  expect(search.maxLength).toBe(200);
+});
+
 test("search replaces the list and clearing restores it", async () => {
   browseByFolder({ root: rootPage });
   dropboxSearch.mockResolvedValue({
@@ -275,11 +285,9 @@ test("an item already in the selection shows as added and cannot be picked again
   const box = checkbox("readme.md");
   expect(box.getAttribute("aria-checked")).toBe("true");
   expect(box.disabled).toBe(true);
-  expect(
-    dialog()
-      .querySelector('[data-dropbox-entry="readme.md"]')!
-      .getAttribute("title"),
-  ).toBe("Already added");
+  const row = dialog().querySelector('[data-dropbox-entry="readme.md"]')!;
+  expect(row.getAttribute("title")).toBe("Already added");
+  expect(row.textContent).toContain("Already added");
   expect(dialog().textContent).toContain("0 selected");
 });
 
@@ -307,6 +315,7 @@ test("unsupported files cannot be selected", async () => {
     '[data-dropbox-entry="archive.zip"]',
   )!;
   expect(row.getAttribute("title")).toBe("This file type cannot be indexed");
+  expect(row.textContent).toContain("This file type cannot be indexed");
   expect(row.getAttribute("aria-disabled")).toBe("true");
   const box = checkbox("archive.zip");
   expect(box.disabled).toBe(true);

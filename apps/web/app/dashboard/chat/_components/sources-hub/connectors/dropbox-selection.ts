@@ -186,12 +186,21 @@ export function dropboxErrorKey(code: string | undefined): string {
   if (code === "DROPBOX_CONNECTOR_NOT_FOUND") {
     return "connectors.dropbox.error.notFound";
   }
-  if (
-    code === "DROPBOX_RATE_LIMITED" ||
-    code === "DROPBOX_UNAVAILABLE" ||
-    code === "DROPBOX_CURSOR_RESET"
-  ) {
+  // The specific folder or file looked up is gone, as opposed to the
+  // connector itself (DROPBOX_CONNECTOR_NOT_FOUND above).
+  if (code === "DROPBOX_NOT_FOUND") {
+    return "connectors.dropbox.error.notFoundItem";
+  }
+  if (code === "DROPBOX_RATE_LIMITED" || code === "DROPBOX_UNAVAILABLE") {
     return "connectors.dropbox.error.tryLater";
+  }
+  // The listing's cursor was reset server-side; paging from it can no
+  // longer continue, so the folder must be reopened from scratch.
+  if (code === "DROPBOX_CURSOR_RESET") {
+    return "connectors.dropbox.error.reopen";
+  }
+  if (code === "DROPBOX_INVALID_REQUEST") {
+    return "connectors.dropbox.error.generic";
   }
   return "connectors.dropbox.error.generic";
 }

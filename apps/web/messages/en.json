@@ -3298,7 +3298,9 @@
         "error": {
           "reconnect": "Your Dropbox account needs reconnecting. Reconnect it, then try again.",
           "notFound": "This Dropbox connector is unavailable. Refresh and try again.",
+          "notFoundItem": "This folder or file no longer exists in Dropbox.",
           "tryLater": "Dropbox is busy right now. Try again in a moment.",
+          "reopen": "The Dropbox listing changed. Reopen the folder to continue.",
           "generic": "Dropbox could not be reached. Try again."
         },
         "state": {

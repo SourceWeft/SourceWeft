@@ -126,7 +126,7 @@ export function DropboxItems({
     let active = true;
     setIsLoadingSources(true);
     contentClient
-      .listSources(workspaceId, { connectorId })
+      .listSources(workspaceId, { connectorId, includeContent: false })
       .then((result) => {
         if (active) setSources(result.items);
       })

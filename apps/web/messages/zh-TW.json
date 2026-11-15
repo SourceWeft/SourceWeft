@@ -3298,7 +3298,9 @@
         "error": {
           "reconnect": "你的 Dropbox 帳號需要重新連接。重新連接後再試。",
           "notFound": "此 Dropbox 連接器不可用。請重新整理後重試。",
+          "notFoundItem": "該資料夾或檔案在 Dropbox 中已不存在。",
           "tryLater": "Dropbox 暫時繁忙。請稍後再試。",
+          "reopen": "Dropbox 列表已變化，請重新開啟該資料夾。",
           "generic": "無法連接到 Dropbox。請重試。"
         },
         "state": {
