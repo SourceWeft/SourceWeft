@@ -142,9 +142,11 @@ export default function SsoPage() {
             <Code>Single sign-on</Code> tab and choose{" "}
             <Code>Add identity provider</Code>. Pick the sign-in protocol and
             fill in the fields for it. You also give the provider a{" "}
-            <Code>Provider ID</Code> (3–47 lowercase letters, digits or hyphens)
-            and the <Code>Email domain</Code> it serves. A team can have up to
-            five providers.
+            <Code>Provider ID</Code> (3–47 lowercase letters, digits or hyphens,
+            and not the name of a built-in sign-in method such as{" "}
+            <Code>google</Code> or <Code>github</Code>) and the{" "}
+            <Code>Email domain</Code> it serves. A team can have up to five
+            providers.
           </p>
           <DataTable
             head={["Protocol", "What you enter"]}
@@ -544,10 +546,11 @@ export default function SsoPage() {
                   <Code key="c">SSO_INVALID_PROVIDER_ID</Code>
                   <br />
                   &ldquo;Provider IDs use 3–47 lowercase letters, digits and
-                  hyphens.&rdquo;
+                  hyphens, and can&rsquo;t be the name of a built-in sign-in
+                  method.&rdquo;
                 </>,
-                "The provider ID is empty, too long, or has characters other than lowercase letters, digits and hyphens.",
-                "Use a shorter, simpler provider ID (3–47 lowercase letters, digits or hyphens).",
+                "The provider ID is empty, too long, has characters other than lowercase letters, digits and hyphens, or collides with a built-in sign-in method (e.g. google, github, credential).",
+                "Use a shorter, simpler provider ID (3–47 lowercase letters, digits or hyphens) that isn't the name of a built-in sign-in method.",
               ],
               [
                 <>
