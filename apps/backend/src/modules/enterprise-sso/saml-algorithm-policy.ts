@@ -17,21 +17,33 @@ import { DOMParser } from "@xmldom/xmldom";
  * verifier resolves can escape a scanner. Instead this policy inspects the DOM
  * produced by the SAME parser, version and input as the signature verifier
  * (`@xmldom/xmldom` 0.8.15 resolves to the same module `samlify`/`xml-crypto`
- * use), and rejects every document that parser reports any problem with. The
- * core guarantee: a document that parses with no reported problem yields the
+ * use — a unit test pins this), and rejects every document that parser reports
+ * any problem with. A document that parses with no reported problem yields the
  * exact tree the verifier inspects, and every element the verifier could see is
  * walked and checked here; a document the parser would have to RECOVER is
  * rejected, because the parser is given an error handler that throws at every
  * level (warning, error, fatalError).
  *
+ * The whole document is inspected in a SINGLE linear pass, with no re-traversal
+ * of any subtree and no per-node array allocation, so cost is bounded by document
+ * size (not by, e.g., the number of signatures times the tree size). The parse
+ * and the walk run inside one try/catch, so any unexpected error becomes a
+ * rejection result — this function never throws.
+ *
  * Invariant: the policy inspects the DOM produced by the same parser, version and
  * input as the signature verifier, and rejects every document that parser reports
  * any problem with; every element whose local name is `SignatureMethod` or
  * `DigestMethod` (any namespace) in that tree carries exactly one unprefixed
- * `Algorithm` whose parsed value is an allow-listed URI.
+ * `Algorithm` whose parsed value is an allow-listed URI, every `Signature` has a
+ * `SignatureMethod` descendant, and every `Reference` a `DigestMethod` descendant.
  *
- * Documented limitations: comments, CDATA sections, processing instructions
- * (other than a leading XML declaration), DOCTYPE/entities and encrypted
+ * Documented limits (a real SAML response has one or two signatures, one
+ * reference each and a shallow tree, so these never bind legitimate traffic):
+ * at most {@link MAX_SIGNATURES} `Signature` elements, no `Signature` nested
+ * inside another `Signature`, at most {@link MAX_REFERENCES} `Reference`
+ * elements, element nesting depth at most {@link MAX_DEPTH}, and at most
+ * {@link MAX_NODES} nodes. Comments, CDATA sections, processing instructions
+ * (other than a single leading XML declaration), DOCTYPE/entities and encrypted
  * assertions are refused; and only RSA-SHA256/512 signatures and SHA-256/512
  * digests are allow-listed — RSA-PSS, RSA-SHA384, ECDSA and HMAC are rejected,
  * matching what xml-crypto 6.4.0 can both verify and we consider strong.
@@ -58,6 +70,13 @@ const MAX_RESPONSE_SIZE = 262144;
  * has a few hundred, so this is generous while still reachable by a stress test.
  */
 const MAX_NODES = 30000;
+
+/** A real SAML response carries one or two signatures; cap it well above that. */
+const MAX_SIGNATURES = 8;
+/** One Reference per signature is normal; cap the whole document generously. */
+const MAX_REFERENCES = 32;
+/** SAML trees are shallow; reject anything implausibly deep. */
+const MAX_DEPTH = 64;
 
 /** DOM node types (per the DOM spec; stable in @xmldom/xmldom 0.8.15). */
 const ELEMENT_NODE = 1;
@@ -91,6 +110,10 @@ export type SamlAlgorithmRejectionReason =
   | "text_outside_root"
   | "multiple_roots"
   | "too_many_nodes"
+  | "too_deeply_nested"
+  | "too_many_signatures"
+  | "too_many_references"
+  | "nested_signature"
   | "encrypted_assertion"
   | "suspicious_element_variant"
   | "algorithm_declaration_unreadable"
@@ -111,7 +134,6 @@ interface DomNode {
   readonly nodeType: number;
   readonly nodeName: string;
   readonly localName?: string | null;
-  readonly namespaceURI?: string | null;
   readonly data?: string | null;
   readonly childNodes?: ArrayLike<DomNode> | null;
   readonly attributes?: ArrayLike<DomNode> | null;
@@ -129,20 +151,6 @@ function reject(
   return { ok: false, reason };
 }
 
-function toArray(list: ArrayLike<DomNode> | null | undefined): DomNode[] {
-  if (!list) {
-    return [];
-  }
-  const result: DomNode[] = [];
-  for (let i = 0; i < list.length; i += 1) {
-    const node = list[i];
-    if (node) {
-      result.push(node);
-    }
-  }
-  return result;
-}
-
 /** The local name the verifier's XPath `local-name()` would see. */
 function localNameOf(node: DomNode): string {
   if (node.localName) {
@@ -153,61 +161,35 @@ function localNameOf(node: DomNode): string {
   return colon === -1 ? name : name.slice(colon + 1);
 }
 
-/** Whether `element` has any descendant element with the given local name. */
-function hasDescendantLocalName(element: DomNode, localName: string): boolean {
-  const stack = toArray(element.childNodes);
-  while (stack.length > 0) {
-    const node = stack.pop()!;
-    if (node.nodeType === ELEMENT_NODE) {
-      if (localNameOf(node) === localName) {
-        return true;
-      }
-      for (const child of toArray(node.childNodes)) {
-        stack.push(child);
-      }
-    }
-  }
-  return false;
-}
-
-/** Descendant elements of `element` with the given local name. */
-function descendantsWithLocalName(element: DomNode, localName: string): DomNode[] {
-  const found: DomNode[] = [];
-  const stack = toArray(element.childNodes);
-  while (stack.length > 0) {
-    const node = stack.pop()!;
-    if (node.nodeType === ELEMENT_NODE) {
-      if (localNameOf(node) === localName) {
-        found.push(node);
-      }
-      for (const child of toArray(node.childNodes)) {
-        stack.push(child);
-      }
-    }
-  }
-  return found;
-}
-
 /**
  * Validate a `SignatureMethod`/`DigestMethod` element's `Algorithm`. The element
  * must carry exactly one attribute whose local name is `Algorithm`, and it must
  * be the unprefixed one the verifier's `@Algorithm` reads; the value (as the
  * parser returns it, after entity/reference decoding) must be printable ASCII
- * with no whitespace and equal an allow-listed URI.
+ * with no whitespace and equal an allow-listed URI. Iterates attributes by index
+ * (no array allocation).
  */
 function checkMethod(
   element: DomNode,
   allowed: ReadonlySet<string>,
   notAllowed: SamlAlgorithmRejectionReason,
 ): SamlAlgorithmPolicyResult {
-  const algorithmAttributes = toArray(element.attributes).filter(
-    (attr) => localNameOf(attr) === "Algorithm",
-  );
-  if (algorithmAttributes.length !== 1) {
+  const attributes = element.attributes;
+  const length = attributes ? attributes.length : 0;
+  let algorithmCount = 0;
+  let algorithmNodeName = "";
+  for (let i = 0; i < length; i += 1) {
+    const attr = attributes![i]!;
+    if (localNameOf(attr) === "Algorithm") {
+      algorithmCount += 1;
+      algorithmNodeName = attr.nodeName;
+    }
+  }
+  if (algorithmCount !== 1) {
     return reject("algorithm_declaration_unreadable");
   }
   // `@Algorithm` / getAttribute("Algorithm") reads the UNPREFIXED attribute only.
-  if (algorithmAttributes[0]!.nodeName !== "Algorithm") {
+  if (algorithmNodeName !== "Algorithm") {
     return reject("algorithm_declaration_unreadable");
   }
   const value = element.getAttribute?.("Algorithm") ?? null;
@@ -224,18 +206,48 @@ function checkMethod(
   return { ok: true };
 }
 
-/** Walk the parsed tree and enforce the allow-list and structural rules. */
+/** Records whether a `Signature` subtree has yet seen its own `SignatureMethod`. */
+interface SignatureContext {
+  sawMethod: boolean;
+}
+/** Records whether a `Reference` subtree has yet seen its own `DigestMethod`. */
+interface ReferenceContext {
+  sawDigest: boolean;
+}
+
+/** A frame on the explicit traversal stack: a node to visit, or a subtree close. */
+type WalkFrame =
+  | {
+      kind: "node";
+      node: DomNode;
+      depth: number;
+      signature: SignatureContext | null;
+      reference: ReferenceContext | null;
+    }
+  | { kind: "closeSignature"; context: SignatureContext }
+  | { kind: "closeReference"; context: ReferenceContext };
+
+/**
+ * Walk the parsed tree once, enforcing the allow-list, the structural rules and
+ * the hard limits. Iterative (no recursion, so depth cannot overflow the stack)
+ * and single-pass: the per-`Signature`/`Reference` "has a method/digest" checks
+ * are folded into the walk via close-markers and the nearest-enclosing context
+ * carried on each stack frame, so no subtree is re-traversed.
+ */
 function walkDocument(document: DomDocument): SamlAlgorithmPolicyResult {
   if (!document.documentElement) {
     return reject("no_document_element");
   }
 
-  // Document-level children: at most the leading XML declaration (a PI whose
-  // target is "xml"), exactly one root element, and only whitespace text — reject
-  // comments, CDATA, other PIs, a DOCTYPE, non-whitespace text (content outside
-  // the root) and any second root element.
+  // Document-level children: a single leading XML declaration (a PI whose target
+  // is "xml", and only as the very first node), exactly one root element, and
+  // only whitespace text — reject comments, CDATA, any other PI, a DOCTYPE,
+  // non-whitespace text (content outside the root) and a second root element.
+  const documentChildren = document.childNodes;
+  const documentChildCount = documentChildren ? documentChildren.length : 0;
   let roots = 0;
-  for (const child of toArray(document.childNodes)) {
+  for (let i = 0; i < documentChildCount; i += 1) {
+    const child = documentChildren![i]!;
     switch (child.nodeType) {
       case ELEMENT_NODE:
         roots += 1;
@@ -244,7 +256,7 @@ function walkDocument(document: DomDocument): SamlAlgorithmPolicyResult {
         }
         break;
       case PROCESSING_INSTRUCTION_NODE:
-        if (child.nodeName !== "xml") {
+        if (i !== 0 || child.nodeName !== "xml") {
           return reject("processing_instruction");
         }
         break;
@@ -269,16 +281,40 @@ function walkDocument(document: DomDocument): SamlAlgorithmPolicyResult {
 
   let signatureMethods = 0;
   let digestMethods = 0;
+  let signatureCount = 0;
+  let referenceCount = 0;
   let nodeCount = 0;
-  const signatures: DomNode[] = [];
 
-  const stack: DomNode[] = [document.documentElement];
+  const stack: WalkFrame[] = [
+    { kind: "node", node: document.documentElement, depth: 0, signature: null, reference: null },
+  ];
   while (stack.length > 0) {
-    const node = stack.pop()!;
+    const frame = stack.pop()!;
+    if (frame.kind === "closeSignature") {
+      if (!frame.context.sawMethod) {
+        return reject("signature_without_method");
+      }
+      continue;
+    }
+    if (frame.kind === "closeReference") {
+      if (!frame.context.sawDigest) {
+        return reject("reference_without_digest");
+      }
+      continue;
+    }
+
     nodeCount += 1;
     if (nodeCount > MAX_NODES) {
       return reject("too_many_nodes");
     }
+    if (frame.depth > MAX_DEPTH) {
+      return reject("too_deeply_nested");
+    }
+
+    const node = frame.node;
+    let signature = frame.signature;
+    let reference = frame.reference;
+
     switch (node.nodeType) {
       case COMMENT_NODE:
         return reject("comment");
@@ -287,10 +323,8 @@ function walkDocument(document: DomDocument): SamlAlgorithmPolicyResult {
       case DOCUMENT_TYPE_NODE:
         return reject("document_type");
       case PROCESSING_INSTRUCTION_NODE:
-        if (node.nodeName !== "xml") {
-          return reject("processing_instruction");
-        }
-        break;
+        // No processing instruction may appear inside the root element.
+        return reject("processing_instruction");
       case ELEMENT_NODE: {
         const localName = localNameOf(node);
         if (localName === "EncryptedAssertion" || localName === "EncryptedData") {
@@ -306,6 +340,9 @@ function walkDocument(document: DomDocument): SamlAlgorithmPolicyResult {
             return result;
           }
           signatureMethods += 1;
+          if (signature) {
+            signature.sawMethod = true;
+          }
         } else if (localName === "DigestMethod") {
           const result = checkMethod(
             node,
@@ -316,31 +353,49 @@ function walkDocument(document: DomDocument): SamlAlgorithmPolicyResult {
             return result;
           }
           digestMethods += 1;
+          if (reference) {
+            reference.sawDigest = true;
+          }
         } else if (SENSITIVE_LOCAL_NAMES.has(localName.toLowerCase())) {
           return reject("suspicious_element_variant");
         } else if (localName === "Signature") {
-          signatures.push(node);
+          if (signature) {
+            return reject("nested_signature");
+          }
+          signatureCount += 1;
+          if (signatureCount > MAX_SIGNATURES) {
+            return reject("too_many_signatures");
+          }
+          const context: SignatureContext = { sawMethod: false };
+          stack.push({ kind: "closeSignature", context });
+          signature = context;
+        } else if (localName === "Reference") {
+          referenceCount += 1;
+          if (referenceCount > MAX_REFERENCES) {
+            return reject("too_many_references");
+          }
+          const context: ReferenceContext = { sawDigest: false };
+          stack.push({ kind: "closeReference", context });
+          reference = context;
         }
-        for (const child of toArray(node.childNodes)) {
-          stack.push(child);
+
+        // Push children by index (no array allocation), reversed so they pop in
+        // document order, carrying the nearest enclosing Signature/Reference.
+        const children = node.childNodes;
+        const childCount = children ? children.length : 0;
+        for (let i = childCount - 1; i >= 0; i -= 1) {
+          stack.push({
+            kind: "node",
+            node: children![i]!,
+            depth: frame.depth + 1,
+            signature,
+            reference,
+          });
         }
         break;
       }
       default:
         break;
-    }
-  }
-
-  // Every Signature must declare its own method, and every Reference its own
-  // digest, so a signature cannot ride on an allow-listed decoy elsewhere.
-  for (const signature of signatures) {
-    if (!hasDescendantLocalName(signature, "SignatureMethod")) {
-      return reject("signature_without_method");
-    }
-    for (const reference of descendantsWithLocalName(signature, "Reference")) {
-      if (!hasDescendantLocalName(reference, "DigestMethod")) {
-        return reject("reference_without_digest");
-      }
     }
   }
 
@@ -443,15 +498,16 @@ export function assertSamlResponseAlgorithmsAllowed(
     return reject("text_outside_root");
   }
 
-  // Parse with the SAME parser the verifier uses, throwing on any reported problem.
-  let document: DomDocument;
+  // Parse with the SAME parser the verifier uses, throwing on any reported
+  // problem, and inspect the tree. Both run inside one try/catch so any
+  // unexpected error (a reported problem, or a hostile DOM object) becomes a
+  // rejection — this function never throws past here.
   try {
-    document = new DOMParser({
+    const document = new DOMParser({
       errorHandler: THROWING_ERROR_HANDLER,
     }).parseFromString(text, "text/xml") as unknown as DomDocument;
+    return walkDocument(document);
   } catch {
     return reject("parser_reported_problem");
   }
-
-  return walkDocument(document);
 }

@@ -70,17 +70,27 @@ describe("assertSamlResponseAlgorithmsAllowed (parsed-document policy)", () => {
   // (samlify/xml-crypto) inspects, which only holds while both resolve the same
   // @xmldom/xmldom. If a dependency change makes them differ, the policy's
   // guarantee is void and this test fails loudly.
-  test("the @xmldom/xmldom the backend imports is the same version samlify resolves", () => {
+  test("every parser in the verifier stack resolves the same @xmldom/xmldom the backend imports", () => {
     const here = createRequire(import.meta.url);
+    const xmldomVersionFrom = (fromPath: string): string =>
+      createRequire(fromPath)("@xmldom/xmldom/package.json").version as string;
     const backendVersion = here("@xmldom/xmldom/package.json").version as string;
-    const fromSamlify = createRequire(here.resolve("samlify"));
-    const samlifyVersion = fromSamlify("@xmldom/xmldom/package.json").version as string;
-    expect(
-      samlifyVersion,
-      "The policy inspects the DOM produced by @xmldom/xmldom; if samlify/xml-crypto " +
-        "resolve a DIFFERENT @xmldom/xmldom version, the policy no longer inspects the " +
-        "same tree the signature verifier does and its guarantee is void.",
-    ).toBe(backendVersion);
+
+    const samlifyEntry = here.resolve("samlify");
+    const xmlCryptoEntry = createRequire(samlifyEntry).resolve("xml-crypto");
+    const ssoEntry = here.resolve("@better-auth/sso");
+    const message =
+      "The policy inspects the DOM produced by @xmldom/xmldom; if any parser in the " +
+      "signature-verifier stack resolves a DIFFERENT @xmldom/xmldom version, the policy " +
+      "no longer inspects the same tree the verifier does and its guarantee is void.";
+
+    for (const [name, entry] of [
+      ["samlify", samlifyEntry],
+      ["xml-crypto (via samlify)", xmlCryptoEntry],
+      ["@better-auth/sso", ssoEntry],
+    ] as const) {
+      expect(xmldomVersionFrom(entry), `${name}: ${message}`).toBe(backendVersion);
+    }
     expect(backendVersion.startsWith("0.8.")).toBe(true);
   });
 
@@ -293,7 +303,143 @@ describe("assertSamlResponseAlgorithmsAllowed (parsed-document policy)", () => {
       `</samlp:Response>`;
     const started = Date.now();
     const result = assertSamlResponseAlgorithmsAllowed(base64(deep));
-    expect(result.ok).toBe(false); // no SignatureMethod → rejected, but must not crash
+    expect(result.ok).toBe(false); // too deeply nested → rejected, but must not crash
     expect(Date.now() - started).toBeLessThan(2000);
   });
+
+  // ── Fix round 3: hard structural limits + linear cost ───────────────────────
+
+  test("rejects a Signature nested inside another Signature", () =>
+    assertReason(
+      wrap(
+        `<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:SignatureMethod Algorithm="${SIG_SHA256}"/>` +
+          `<ds:Signature><ds:SignedInfo><ds:SignatureMethod Algorithm="${SIG_SHA256}"/></ds:SignedInfo></ds:Signature>` +
+          `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference></ds:SignedInfo></ds:Signature>`,
+      ),
+      "nested_signature",
+    ));
+  test("rejects more than 8 sibling Signature elements", () =>
+    assertReason(wrap(signatureFragment().repeat(9)), "too_many_signatures"));
+  test("accepts exactly 8 sibling Signature elements", () =>
+    assertOk(wrap(signatureFragment().repeat(8))));
+  test("rejects more than 32 Reference elements", () => {
+    const refs = `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>`.repeat(33);
+    assertReason(
+      wrap(`<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:SignatureMethod Algorithm="${SIG_SHA256}"/>${refs}</ds:SignedInfo></ds:Signature>`),
+      "too_many_references",
+    );
+  });
+  test("rejects element nesting deeper than 64", () =>
+    assertReason(
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+        "<a>".repeat(70) +
+        "</a>".repeat(70) +
+        `</samlp:Response>`,
+      "too_deeply_nested",
+    ));
+
+  // Minimum over several runs: the least-preempted run is closest to true CPU
+  // cost, so this stays meaningful even when the machine is loaded (e.g. another
+  // full test suite running in parallel). Thresholds are deliberately generous —
+  // a few seconds for an operation that is a few tens of milliseconds unloaded —
+  // because the point is to catch a catastrophic (e.g. quadratic) regression, not
+  // to measure wall-clock precisely; the linearity-ratio test below is the real
+  // regression guard, and the structural limits above bound the work regardless.
+  const timeMin = (xml: string, runs = 9): number => {
+    const input = base64(xml);
+    assertSamlResponseAlgorithmsAllowed(input); // warm up
+    let best = Infinity;
+    for (let i = 0; i < runs; i += 1) {
+      const started = process.hrtime.bigint();
+      assertSamlResponseAlgorithmsAllowed(input);
+      best = Math.min(best, Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    return best;
+  };
+  const PROMPT_MS = 6000;
+
+  // 8 valid signatures sharing 32 references, plus filler to approach the size cap
+  // — the heaviest shape the limits permit; the single linear pass must stay fast.
+  function limitedHeavy(filler: number): string {
+    let signatures = "";
+    for (let s = 0; s < 8; s += 1) {
+      let references = "";
+      for (let r = 0; r < 4; r += 1) {
+        references += `<ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>`;
+      }
+      signatures += `<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:SignatureMethod Algorithm="${SIG_SHA256}"/>${references}</ds:SignedInfo></ds:Signature>`;
+    }
+    return (
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+      signatures +
+      "<x/>".repeat(filler) +
+      `</samlp:Response>`
+    );
+  }
+
+  test("the 764-nested-signatures DoS input is rejected promptly", () => {
+    const nested =
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+      `<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignatureMethod Algorithm="${SIG_SHA256}"/><ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference>`.repeat(764) +
+      `</ds:Signature>`.repeat(764) +
+      `</samlp:Response>`;
+    expect(assertSamlResponseAlgorithmsAllowed(base64(nested))).toEqual({
+      ok: false,
+      reason: "nested_signature",
+    });
+    expect(timeMin(nested)).toBeLessThan(PROMPT_MS);
+  });
+
+  test("the heaviest limit-respecting accepted shape returns promptly", () => {
+    const heavy = limitedHeavy(12000); // ~12k filler nodes, under the node + size caps
+    expect(assertSamlResponseAlgorithmsAllowed(base64(heavy))).toEqual({ ok: true });
+    expect(timeMin(heavy)).toBeLessThan(PROMPT_MS);
+  });
+
+  test("max sibling signatures, deepest tree and max tiny elements all return promptly", () => {
+    const maxSiblings = wrap(signatureFragment().repeat(9)); // rejected too_many_signatures
+    const deepest =
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+      "<a>".repeat(5000) +
+      "</a>".repeat(5000) +
+      `</samlp:Response>`; // rejected too_deeply_nested (deep parse, early reject)
+    const manyTiny =
+      `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">` +
+      "<x/>".repeat(31000) +
+      `</samlp:Response>`; // rejected too_many_nodes
+    const manyAttributes = (() => {
+      let attrs = "";
+      for (let i = 0; i < 6000; i += 1) {
+        attrs += ` a${i}="x"`;
+      }
+      return wrap(
+        `<ds:Signature xmlns:ds="${DSIG_NS}"><ds:SignedInfo><ds:SignatureMethod${attrs} Algorithm="${SIG_SHA256}"/><ds:Reference><ds:DigestMethod Algorithm="${DIG_SHA256}"/></ds:Reference></ds:SignedInfo></ds:Signature>`,
+      );
+    })();
+    for (const xml of [maxSiblings, deepest, manyTiny]) {
+      expect(assertSamlResponseAlgorithmsAllowed(base64(xml)).ok).toBe(false);
+      expect(timeMin(xml)).toBeLessThan(PROMPT_MS);
+    }
+    // Many attributes on one SignatureMethod is a VALID (accepted) signature; the
+    // bounded attribute scan must still stay fast.
+    expect(assertSamlResponseAlgorithmsAllowed(base64(manyAttributes))).toEqual({ ok: true });
+    expect(timeMin(manyAttributes)).toBeLessThan(PROMPT_MS);
+  });
+
+  test("cost scales roughly linearly (N vs 2N well below quadratic)", () => {
+    const small = limitedHeavy(5000);
+    const large = limitedHeavy(10000);
+    expect(assertSamlResponseAlgorithmsAllowed(base64(small))).toEqual({ ok: true });
+    expect(assertSamlResponseAlgorithmsAllowed(base64(large))).toEqual({ ok: true });
+    // min-over-runs keeps the ratio meaningful under load; linear ≈ 2×, quadratic ≈ 4×.
+    const ratio = timeMin(large) / Math.max(timeMin(small), 0.5);
+    expect(ratio).toBeLessThan(4);
+  });
+
+  // ── Fix round 3 (b): a single leading XML declaration only ──────────────────
+
+  test("rejects a second XML declaration", () =>
+    assertReason(`<?xml version="1.0"?><?xml version="1.0"?>${signedResponse()}`, "processing_instruction"));
+  test("rejects a mid-document XML declaration", () =>
+    assertReason(signedResponse(`<?xml version="1.0"?>`), "processing_instruction"));
 });
