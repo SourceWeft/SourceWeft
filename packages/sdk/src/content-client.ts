@@ -19,6 +19,10 @@ import type {
 } from "@sourceweft/contracts/sources";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
+  StudyGenerateRequest,
+  StudyOptions,
+} from "@sourceweft/contracts/study";
+import type {
   MarketMcpLocale,
   MarketSkillLocale,
 } from "@sourceweft/market-contracts";
@@ -210,6 +214,44 @@ function artifactRecordsDataPath(
 function encode(value: string) {
   return encodeURIComponent(value);
 }
+
+/* ---- Study artifact generation ---------------------------------------- */
+
+export type StudyEstimateResponse = {
+  mode: "single" | "mapreduce";
+  inputTokensEstimate: number;
+  groups: number;
+  maxItems: number;
+  exceedsLimit: boolean;
+};
+
+export type StudyGenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+  /** Follows the thread; the requested visibility is not a separate control. */
+  visibility: "private" | "workspace";
+  /** True when an identical request in the last minutes already opened it. */
+  reused: boolean;
+};
+
+export type StudyRegenerateRequest = {
+  /** Omitted fields come from the current version's recipe. */
+  options?: StudyOptions;
+  focus?: string;
+};
+
+export type StudyRegenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+};
+
+export type StudyFreshnessResponse = {
+  state: "fresh" | "stale" | "source_deleted";
+  changedSourceIds: string[];
+  deletedSourceIds: string[];
+};
 
 export class ContentClient {
   constructor(private readonly http: HttpClient) {}
@@ -1587,6 +1629,43 @@ export class ContentClient {
         mode: "edit",
         stream: false,
       },
+    );
+  }
+
+  /* ---- Study artifact generation -------------------------------------- */
+
+  /** Size of a study generation, without calling a model. */
+  estimateStudy(workspaceId: string, input: StudyGenerateRequest) {
+    return this.http.post<StudyEstimateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/estimate`,
+      input,
+    );
+  }
+
+  /** Opens a pending study artifact and queues its generation (202). */
+  generateStudyArtifact(workspaceId: string, input: StudyGenerateRequest) {
+    return this.http.post<StudyGenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts`,
+      input,
+    );
+  }
+
+  /** Queues the next version of a ready study artifact (202). */
+  regenerateStudyArtifact(
+    workspaceId: string,
+    artifactId: string,
+    input: StudyRegenerateRequest = {},
+  ) {
+    return this.http.post<StudyRegenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/regenerate`,
+      input,
+    );
+  }
+
+  /** Whether the sources of the current version changed since it was made. */
+  getStudyFreshness(workspaceId: string, artifactId: string) {
+    return this.http.get<StudyFreshnessResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/freshness`,
     );
   }
 }

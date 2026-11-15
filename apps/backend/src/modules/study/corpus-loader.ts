@@ -21,6 +21,52 @@ export type StudyCorpus = {
 };
 
 /**
+ * The cheap check a request makes before anything is queued: every source is
+ * in this workspace (`SOURCE_NOT_READABLE` otherwise) and at least one is
+ * indexed (`NO_INDEXED_SOURCES`). Returns the titles in selection order.
+ */
+export async function checkStudySources(input: {
+  teamId: string;
+  workspaceId: string;
+  sourceIds: readonly string[];
+}): Promise<{ sourceId: string; title: string; indexed: boolean }[]> {
+  const sourceIds = [...new Set(input.sourceIds)];
+  const rows = sourceIds.length
+    ? await db
+        .select({ id: sources.id, title: sources.title, status: sources.status })
+        .from(sources)
+        .where(
+          and(
+            eq(sources.teamId, input.teamId),
+            eq(sources.workspaceId, input.workspaceId),
+            inArray(sources.id, sourceIds),
+          ),
+        )
+    : [];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const missing = sourceIds.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    throw new StudyGenerationError(
+      "SOURCE_NOT_READABLE",
+      "Some selected sources do not exist in this workspace",
+      { sourceIds: missing },
+    );
+  }
+  const result = sourceIds.map((id) => ({
+    sourceId: id,
+    title: byId.get(id)!.title,
+    indexed: byId.get(id)!.status === "indexed",
+  }));
+  if (!result.some((source) => source.indexed)) {
+    throw new StudyGenerationError(
+      "NO_INDEXED_SOURCES",
+      "None of the selected sources is indexed yet",
+    );
+  }
+  return result;
+}
+
+/**
  * Loads the current document's chunks of every selected source, in selection
  * order. Every source must belong to this workspace (sources carry no
  * visibility of their own; the workspace is the boundary), otherwise
