@@ -189,10 +189,6 @@ test("the page is self-contained: it has to render with no network", () => {
     assert(html.includes(`id="${id}"`), `index.html has #${id}`);
   }
   assert.match(html, /<div class="notice" id="notice" role="status" hidden>/);
-  assert(
-    html.includes("data-tauri-drag-region"),
-    "the window can be moved from this page",
-  );
 
   const references = [...html.matchAll(/\b(?:src|href)="([^"]+)"/g)].map(
     ([, url]) => url,
@@ -205,6 +201,20 @@ test("the page is self-contained: it has to render with no network", () => {
     html + script,
     /https?:\/\//,
     "nothing is fetched from a server",
+  );
+});
+
+test("the window can be moved from this page", () => {
+  assert.match(html, /<div class="drag" data-tauri-drag-region><\/div>/);
+
+  // `main` fills the window and comes after the strip in the document, so a strip with
+  // no stacking order of its own never receives the pointer.
+  const rule = html.match(/\.drag \{([^}]*)\}/)?.[1] ?? "";
+  assert.match(rule, /position: fixed;/);
+  assert.match(
+    rule,
+    /z-index: [1-9]/,
+    "the strip sits above the content that fills the window",
   );
 });
 

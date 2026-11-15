@@ -6,21 +6,22 @@
     <meta name="color-scheme" content="light dark" />
     <title>SourceWeft</title>
     <style>
-      /* Colours mirror the web app's light and dark tokens (packages/ui/src/styles/globals.css),
-         so the window does not change colour when the web app takes over. */
+      /* Colours mirror the web app's light and dark tokens (apps/web/app/globals.css), so
+         the window does not change colour when the web app takes over. They are written
+         as hex because the oldest supported WebKit does not know oklch(). */
       :root {
         --background: #ffffff;
-        --foreground: #09090b;
-        --muted-foreground: #71717a;
-        --border: #e4e4e7;
-        --track: #e4e4e7;
+        --foreground: #0a0a0a;
+        --muted-foreground: #737373;
+        --border: #e5e5e5;
+        --track: #e5e5e5;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --background: #09090b;
+          --background: #171717;
           --foreground: #fafafa;
-          --muted-foreground: #a1a1aa;
+          --muted-foreground: #a1a1a1;
           --border: rgba(255, 255, 255, 0.16);
           --track: rgba(255, 255, 255, 0.12);
         }
@@ -52,9 +53,11 @@
         cursor: default;
       }
 
-      /* The macOS window has no title bar of its own; this strip lets it be moved. */
+      /* The macOS window has no title bar of its own; this strip lets it be moved. It sits
+         above `main`, which fills the window and would otherwise take the pointer. */
       .drag {
         position: fixed;
+        z-index: 1;
         inset: 0 0 auto 0;
         height: 48px;
       }
