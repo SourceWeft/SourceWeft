@@ -1,5 +1,7 @@
 import { describe, expect, it, test, vi } from "vitest";
 import type { ConnectorSelectionSpec } from "@sourceweft/sdk";
+import { connectorItemSkipReasons } from "@sourceweft/contracts";
+import enMessages from "../../../../../../messages/en.json";
 import {
   commitSelection,
   mergeSelection,
@@ -50,6 +52,8 @@ describe("readSelection", () => {
             { id: "", kind: "file" },
             "x",
             { id: 5, kind: "file" },
+            { kind: "file" },
+            { id: "id:abc" },
           ],
         },
         spec,
@@ -157,6 +161,18 @@ describe("removeSelectionItem", () => {
 });
 
 describe("selectionSkipReasonKey", () => {
+  test("maps every skip reason to a message key and unknown ones to a fallback", () => {
+    const keys = connectorItemSkipReasons.map((reason) =>
+      selectionSkipReasonKey(reason),
+    );
+    expect(connectorItemSkipReasons).toContain("unreadable");
+    expect(new Set(keys).size).toBe(connectorItemSkipReasons.length);
+    expect(selectionSkipReasonKey("weird")).toMatch(/\.unknown$/);
+    expect(selectionSkipReasonKey("too_large")).toBe(
+      "connectors.selection.skipReason.too_large",
+    );
+  });
+
   test("maps known reasons and falls back to unknown", () => {
     expect(selectionSkipReasonKey("too_large")).toBe(
       "connectors.selection.skipReason.too_large",
@@ -167,6 +183,19 @@ describe("selectionSkipReasonKey", () => {
     expect(selectionSkipReasonKey("weird")).toBe(
       "connectors.selection.skipReason.unknown",
     );
+  });
+
+  test("every canonical reason's key has English copy", () => {
+    const skipReasonMessages: Record<string, unknown> =
+      enMessages.dashboardSourcesHub.connectors.selection.skipReason;
+    for (const reason of connectorItemSkipReasons) {
+      const key = selectionSkipReasonKey(reason);
+      const segment = key.split(".").pop() as string;
+      expect(typeof skipReasonMessages[segment]).toBe("string");
+      expect((skipReasonMessages[segment] as string).length).toBeGreaterThan(
+        0,
+      );
+    }
   });
 });
 
