@@ -17,3 +17,4 @@ export * from "./schema/artifact-records";
 export * from "./schema/study";
 export * from "./schema/personas";
 export * from "./schema/local-execution";
+export * from "./schema/notifications";

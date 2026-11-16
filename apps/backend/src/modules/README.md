@@ -31,6 +31,7 @@ service interface via its `index.ts` barrel export.
 | `billing` | Team-scoped credits and pages metering |
 | `llm-observability` | LLM call tracing and observability |
 | `mail` | Provider-agnostic mail service (Plunk adapter) |
+| `notifications` | Per-person inbox with throttled email (`notify(kind, ...)`) |
 | `ops` | Alerting and operational notifications |
 
 ## Shared kernel

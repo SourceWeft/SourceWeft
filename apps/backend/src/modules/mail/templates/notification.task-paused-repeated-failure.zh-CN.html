@@ -1,0 +1,17 @@
+---
+subject: 定时任务连续失败，已暂停：{{taskName}}
+heading: 你的定时任务已暂停
+preview: {{taskName}} 连续失败多次，已暂停。
+action: 打开任务
+url: {{url}}
+---
+
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  你的定时任务 <strong>{{taskName}}</strong> 连续失败多次，为避免持续消耗额度，已自动暂停。打开查看原因，处理后再重新启用。
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  在你重新启用之前，它会一直保持暂停。
+</p>
