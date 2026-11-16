@@ -74,6 +74,48 @@ vi.mock("sonner", () => ({
   },
 }));
 
+// Add a tools-only connector type (no indexing, hidden behind rollout) to the
+// catalog so a selection-spec connect can be driven through the OAuth return.
+vi.mock("./catalog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./catalog")>();
+  const { Box } = await import("lucide-react");
+  return {
+    ...actual,
+    connectorCatalog: [
+      ...actual.connectorCatalog,
+      {
+        id: "x-tools",
+        name: "X Tools",
+        category: "Knowledge & Docs",
+        description: "",
+        capabilities: [],
+        postOAuthMode: "auto_create",
+        requiresBackendRegistration: true,
+        isIndexable: false,
+        supportsPeriodicSync: false,
+        supportsActions: true,
+        supportsWebhook: false,
+        icon: Box,
+      },
+    ],
+  };
+});
+
+const dropboxSelectionSpec = {
+  actions: {
+    browse: "dropbox.browse",
+    search: "dropbox.search",
+    describe: "dropbox.describe",
+  },
+  kinds: ["folder", "file"],
+  maxItems: 500,
+};
+const toolsSelectionSpec = {
+  actions: { browse: "x.browse", describe: "x.describe" },
+  kinds: ["item"],
+  maxItems: 100,
+};
+
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
     await Promise.resolve();
@@ -165,7 +207,12 @@ beforeEach(() => {
   // Sensible defaults; individual tests override as needed.
   list.mockResolvedValue({ items: [] });
   listAccounts.mockResolvedValue({ items: [] });
-  listManifests.mockResolvedValue({ items: [{ type: "notion" }] });
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+    ],
+  });
   listActivity.mockResolvedValue({ items: [] });
   getWebhookConfig.mockResolvedValue(null);
   listWebhookEvents.mockResolvedValue({ items: [] });
@@ -554,6 +601,56 @@ test("dropbox connect creates an empty selection and opens settings", async () =
   expect(sync).not.toHaveBeenCalled();
   expect(api().connectorSettingsConnector?.id).toBe("dropbox-1");
   expect(toastSuccess).toHaveBeenCalledWith("Dropbox connected.");
+});
+
+test("a tools-only selection connector connects with an empty selection and no periodic sync", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "x-tools", selection: toolsSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-x",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "x-1",
+    connectorType: "x-tools",
+    name: "Person",
+    oauthAccountId: "acc-x",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-x-tools",
+    connectorType: "x-tools",
+    accountId: "acc-x",
+  });
+
+  await mountHook(baseInput("ws-x-tools"));
+
+  // A type with a selection spec but not in the periodic-index list creates an
+  // empty selection, stays off periodic indexing, and opens settings.
+  expect(create).toHaveBeenCalledWith("ws-x-tools", {
+    connectorType: "x-tools",
+    name: "Person",
+    oauthAccountId: "acc-x",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("x-1");
 });
 
 test("handleReconnectConnector starts authorization for the connector's provider", async () => {

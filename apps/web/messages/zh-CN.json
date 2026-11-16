@@ -3285,44 +3285,36 @@
           "unknown": "因未知原因被跳过"
         }
       },
-      "dropbox": {
-        "itemsTitle": "文件和文件夹",
-        "itemsDescription": "选择要索引的 Dropbox 文件和文件夹。所选内容都会按连接器的同步计划保持同步。",
-        "chooseFiles": "选择文件",
+      "selection": {
         "count": "{count} / {limit}",
-        "empty": "尚未选择任何内容。选择文件或文件夹以进行索引。",
-        "foldersGroup": "文件夹",
-        "filesGroup": "文件",
-        "folderIndexedCount": "{count, plural, other {已索引 # 个文件}}",
-        "folderMissing": "已不存在",
+        "missing": "已不存在",
         "remove": "移除 {name}",
         "lastSynced": "{date} 已同步",
-        "limitReached": "最多可选择 {limit} 个文件和文件夹。请先移除部分内容再添加。",
+        "limitReached": "最多可选择 {limit} 项。请先移除部分内容再添加。",
+        "containerIndexedCount": "{count, plural, other {已索引 # 个文件}}",
+        "untitled": "未命名",
         "browser": {
-          "title": "从 Dropbox 选择",
-          "description": "打开文件夹查看其中内容，然后勾选要索引的文件和文件夹。",
-          "root": "Dropbox",
-          "breadcrumbLabel": "文件夹路径",
-          "searchLabel": "按文件名搜索 Dropbox",
-          "searchPlaceholder": "搜索 Dropbox",
-          "emptyFolder": "此文件夹为空。",
-          "noResults": "没有与搜索匹配的文件或文件夹。",
+          "title": "从 {provider} 选择",
+          "breadcrumbLabel": "路径",
+          "searchLabel": "按名称搜索 {provider}",
+          "searchPlaceholder": "搜索 {provider}",
+          "emptyContainer": "这里没有内容。",
+          "noResults": "没有与搜索匹配的内容。",
           "loadMore": "加载更多",
+          "refresh": "刷新",
           "select": "选择 {name}",
-          "unsupported": "此文件类型无法索引",
           "alreadyAdded": "已添加",
           "selectedCount": "已选择 {count} 项",
-          "folderNote": "文件夹合计最多同步 {limit, number} 个文件",
           "cancel": "取消",
           "add": "添加"
         },
         "error": {
-          "reconnect": "你的 Dropbox 账号需要重新连接。重新连接后再试。",
-          "notFound": "此 Dropbox 连接器不可用。请刷新后重试。",
-          "notFoundItem": "该文件夹或文件在 Dropbox 中已不存在。",
-          "tryLater": "Dropbox 暂时繁忙。请稍后再试。",
-          "reopen": "Dropbox 列表已变化，请重新打开该文件夹。",
-          "generic": "无法连接到 Dropbox。请重试。"
+          "reconnect": "你的 {provider} 账号需要重新连接。重新连接后再试。",
+          "notFound": "此连接器不可用。请刷新后重试。",
+          "notFoundItem": "该项目在 {provider} 中已不存在。",
+          "tryLater": "{provider} 暂时繁忙。请稍后再试。",
+          "reopen": "列表已变化，请重新打开后继续。",
+          "generic": "无法连接到 {provider}。请重试。"
         },
         "state": {
           "skipped": "已跳过",
@@ -3330,7 +3322,7 @@
           "processing": "同步中",
           "failed": "失败",
           "waiting": "等待同步",
-          "unavailable": "已在 Dropbox 中删除或失去访问权限"
+          "unavailable": "已在 {provider} 中删除或失去访问权限"
         },
         "skipReason": {
           "unsupported_type": "不支持的文件类型",
@@ -3340,6 +3332,38 @@
           "empty_content": "没有可读内容",
           "unreadable": "无法读取文件",
           "unknown": "因未知原因被跳过"
+        },
+        "disabledReason": {
+          "unknown": "无法选择此项目"
+        },
+        "default": {
+          "itemsTitle": "已选项目",
+          "itemsDescription": "选择此连接器可以访问的内容。",
+          "choose": "选择",
+          "empty": "尚未选择任何内容。",
+          "browser": {
+            "description": "打开某一项查看其中内容，然后勾选要包含的内容。"
+          }
+        },
+        "byType": {
+          "dropbox": {
+            "itemsTitle": "文件和文件夹",
+            "itemsDescription": "选择要索引的 Dropbox 文件和文件夹。所选内容都会按连接器的同步计划保持同步。",
+            "choose": "选择文件",
+            "empty": "尚未选择任何内容。选择文件或文件夹以进行索引。",
+            "kinds": {
+              "folder": "文件夹",
+              "file": "文件"
+            },
+            "disabledReason": {
+              "unsupported": "此文件类型无法索引"
+            },
+            "browser": {
+              "description": "打开文件夹查看其中内容，然后勾选要索引的文件和文件夹。",
+              "root": "Dropbox",
+              "note": "文件夹合计最多同步 1,000 个文件"
+            }
+          }
         }
       },
       "settingsTab": {

@@ -7,7 +7,7 @@ import {
 } from "./selection-presenters";
 
 describe("selectionPresenters.dropbox", () => {
-  const presenter = selectionPresenters.dropbox;
+  const presenter = selectionPresenters.dropbox!;
 
   test("kindIcons map folder and file", () => {
     expect(presenter.kindIcons.folder).toBe(Folder);
@@ -170,7 +170,7 @@ describe("selectionPresenterFor", () => {
 
 describe("selectionIconFor", () => {
   test("returns the presenter's icon for a known kind", () => {
-    const presenter = selectionPresenters.dropbox;
+    const presenter = selectionPresenters.dropbox!;
     expect(selectionIconFor(presenter, "file", false)).toBe(File);
     expect(selectionIconFor(presenter, "folder", true)).toBe(Folder);
   });
