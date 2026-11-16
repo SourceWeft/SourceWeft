@@ -216,7 +216,7 @@ Model gateway catalog sync:
     "gatewaySlug": "deepinfra-default",
     "providerName": "deepinfra",
     "targetModel": "Qwen/Qwen3-ASR-0.6B",
-    "pricing": { "inputCostPerSecond": 0.000002 },
+    "pricing": { "inputCostPerSecond": 0.00000333 },
     "isActive": true
   }
   ```

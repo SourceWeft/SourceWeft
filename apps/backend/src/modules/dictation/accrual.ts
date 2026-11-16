@@ -2,9 +2,11 @@
  * Dictation segments are cheap and frequent, so each one is not settled on
  * its own. Instead the audio seconds it cost accrue in the shared Redis
  * against the team+user that spoke them, and a single settlement charges the
- * running total once it crosses `DICTATION_SETTLE_THRESHOLD_SECONDS` (or the
- * session ends). This keeps the billing ledger from writing one entry per
- * segment while still charging for every second spoken.
+ * running total once it crosses `DICTATION_SETTLE_THRESHOLD_SECONDS`. There is
+ * no settlement when a session ends: seconds below the threshold stay accrued
+ * (and are lost rather than charged if Redis drops them). This keeps the
+ * billing ledger from writing one entry per segment while still charging for
+ * every second spoken.
  */
 
 const SEEN_TTL_SECONDS = 30 * 60; // 30 minutes: long enough to outlast a retry.
@@ -13,8 +15,13 @@ const ACCRUAL_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days from the last add.
 export const DICTATION_SETTLE_THRESHOLD_SECONDS = 300;
 
 export type DictationAccrual = {
-  /** True the first time a (session, seq) is seen; false for a repeat. Remembered for 30 minutes. */
-  markSegment(sessionId: string, seq: number): Promise<boolean>;
+  /**
+   * True the first time a (session, seq, audio digest) is seen; false for a
+   * repeat. The digest is a SHA-256 of the segment's bytes, so a genuine retry
+   * (same bytes) is counted once while different audio reusing one (session,
+   * seq) accrues its own seconds. Remembered for 30 minutes.
+   */
+  markSegment(sessionId: string, seq: number, digest: string): Promise<boolean>;
   /** Adds seconds and returns the new total. The key expires 30 days after the last add. */
   add(accountKey: string, seconds: number): Promise<number>;
   /** Returns the accrued seconds and clears them, as one atomic step. 0 when empty. */
@@ -89,9 +96,9 @@ export function createDictationAccrual(
   }
 
   return {
-    async markSegment(sessionId, seq) {
+    async markSegment(sessionId, seq, digest) {
       const redis = await getRedis();
-      const key = `dictation:seen:${sessionId}:${seq}`;
+      const key = `dictation:seen:${sessionId}:${seq}:${digest}`;
       const result = await redis.set(key, "1", "EX", SEEN_TTL_SECONDS, "NX");
       return result === "OK";
     },

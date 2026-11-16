@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   DICTATION_ERROR_CODES,
 } from "@sourceweft/contracts/dictation";
@@ -214,27 +215,50 @@ export async function transcribeDictationSegment(
     // Charged work accrues; observation-only modes (disabled) never do.
     if (decision.billingMode !== "disabled") {
       const accrual = deps.accrual ?? dictationAccrual;
-      const first = await accrual.markSegment(input.sessionId, input.seq);
-      if (first) {
-        const key = dictationAccountKey({ teamId, userId: input.userId });
-        const total = await accrual.add(key, durationSec);
-        if (total >= DICTATION_SETTLE_THRESHOLD_SECONDS) {
-          const taken = await accrual.take(key);
-          if (taken > 0) {
-            await settleAccruedSeconds({
-              taken,
-              key,
-              teamId,
-              workspaceId: workspace.id,
-              userId: input.userId,
-              sessionId: input.sessionId,
-              profile,
-              accrual,
-              settle: deps.settle ?? settleModelCall,
-              billing: deps.billing,
-            });
+      // The digest keys the idempotency marker so a genuine retry (same bytes
+      // under the same session and sequence) is counted once, while different
+      // audio reusing that pair accrues its own seconds.
+      const digest = createHash("sha256").update(input.audio).digest("hex");
+      try {
+        const first = await accrual.markSegment(
+          input.sessionId,
+          input.seq,
+          digest,
+        );
+        if (first) {
+          const key = dictationAccountKey({ teamId, userId: input.userId });
+          const total = await accrual.add(key, durationSec);
+          if (total >= DICTATION_SETTLE_THRESHOLD_SECONDS) {
+            const taken = await accrual.take(key);
+            if (taken > 0) {
+              await settleAccruedSeconds({
+                taken,
+                key,
+                teamId,
+                workspaceId: workspace.id,
+                userId: input.userId,
+                sessionId: input.sessionId,
+                profile,
+                accrual,
+                settle: deps.settle ?? settleModelCall,
+                billing: deps.billing,
+              });
+            }
           }
         }
+      } catch (error) {
+        // A Redis failure after a successful transcription must not fail the
+        // request or lose the text. Like a failed settlement, the seconds are
+        // simply not counted this time; no transcript is ever logged.
+        logger.warn("dictation accrual failed; segment not counted", {
+          teamId,
+          workspaceId: workspace.id,
+          userId: input.userId,
+          sessionId: input.sessionId,
+          seq: input.seq,
+          durationSec,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 

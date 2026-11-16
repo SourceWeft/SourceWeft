@@ -48,12 +48,22 @@ function createFakeRedis(): AccrualRedisPort {
   };
 }
 
-test("a segment is counted once", async () => {
+test("a segment with the same digest is counted once", async () => {
   const redis = createFakeRedis();
   const accrual = createDictationAccrual(async () => redis);
 
-  expect(await accrual.markSegment("session-1", 0)).toBe(true);
-  expect(await accrual.markSegment("session-1", 0)).toBe(false);
+  expect(await accrual.markSegment("session-1", 0, "digest-a")).toBe(true);
+  expect(await accrual.markSegment("session-1", 0, "digest-a")).toBe(false);
+});
+
+test("different audio digests under one (session, seq) are each counted", async () => {
+  const redis = createFakeRedis();
+  const accrual = createDictationAccrual(async () => redis);
+
+  expect(await accrual.markSegment("session-1", 0, "digest-a")).toBe(true);
+  // Different bytes reusing the same pair: a fresh sighting, not a retry.
+  expect(await accrual.markSegment("session-1", 0, "digest-b")).toBe(true);
+  expect(await accrual.markSegment("session-1", 0, "digest-b")).toBe(false);
 });
 
 test("add returns the running total", async () => {

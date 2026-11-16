@@ -75,8 +75,8 @@ function memoryAccrual(initial: Record<string, number> = {}) {
   const store = new Map<string, number>(Object.entries(initial));
   const seen = new Set<string>();
   const accrual: DictationAccrual = {
-    async markSegment(sessionId, seq) {
-      const k = `${sessionId}:${seq}`;
+    async markSegment(sessionId, seq, digest) {
+      const k = `${sessionId}:${seq}:${digest}`;
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
@@ -426,6 +426,52 @@ test("the same session and sequence sent twice accrues once", async () => {
 
   assert.equal(store.get(KEY), 10);
   assert.equal(settle.mock.calls.length, 0);
+});
+
+test("different audio under a reused session and sequence accrues twice", async () => {
+  const { accrual, store } = memoryAccrual();
+  const d = deps({ accrual });
+
+  const first = makeWav(10);
+  const second = makeWav(10);
+  // Same duration, different bytes: a reused (session, seq) with new audio.
+  second[100] = second[100]! ^ 0xff;
+
+  await transcribeDictationSegment(
+    input({ sessionId: "reuse", seq: 4, audio: first }),
+    d,
+  );
+  await transcribeDictationSegment(
+    input({ sessionId: "reuse", seq: 4, audio: second }),
+    d,
+  );
+
+  assert.equal(store.get(KEY), 20);
+});
+
+test("a Redis error during accrual keeps the text and logs no transcript", async () => {
+  const SECRET = "redis-secret-must-not-be-logged";
+  transcribe.mockResolvedValue({ text: `  ${SECRET}  ` });
+  const failing: DictationAccrual = {
+    async markSegment() {
+      throw new Error("redis down");
+    },
+    async add() {
+      return 0;
+    },
+    async take() {
+      return 0;
+    },
+    async restore() {},
+  };
+
+  const r = await transcribeDictationSegment(input(), deps({ accrual: failing }));
+
+  assert.equal(r.kind, "ok");
+  assert.equal(r.kind === "ok" && r.text, SECRET);
+  const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls;
+  assert.equal(warnCalls.length >= 1, true);
+  assert.equal(JSON.stringify(warnCalls).includes(SECRET), false);
 });
 
 test("billing not installed: no accrual, no settlement", async () => {

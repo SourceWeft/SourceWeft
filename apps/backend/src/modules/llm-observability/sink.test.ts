@@ -30,11 +30,33 @@ vi.mock(".", () => ({
 }));
 
 const { createLlmObservabilitySink } = await import("./sink");
+const { applyPayloadPolicyToRecord } = await import("./payload-policy");
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockFindWorkspaceInOrg.mockResolvedValue({ id: "workspace-1" });
 });
+
+// A transcript string that must never reach any stored column for dictation.
+const SECRET = "xyzzy-secret-transcript-should-never-be-stored";
+
+// Mirrors writer.policyText / policyRecord: the exact JSON a column would hold
+// for the given payload mode, so a test can assert what would be persisted.
+function storedText(value: unknown, mode: unknown): string {
+  const record = applyPayloadPolicyToRecord(
+    value,
+    mode as "metadata_only" | "preview" | "full" | undefined,
+  );
+  return record ? JSON.stringify(record) : "";
+}
+function storedRecord(value: unknown, mode: unknown): string {
+  return JSON.stringify(
+    applyPayloadPolicyToRecord(
+      value,
+      mode as "metadata_only" | "preview" | "full" | undefined,
+    ) ?? null,
+  );
+}
 
 function baseGeneration(
   overrides: Partial<ObserveGenerationEnd> = {},
@@ -122,4 +144,100 @@ test("uses the observed cost directly when it already carries an effectiveUsd", 
   assert.ok(call);
   assert.equal(call.providerCostUsd, 0.0123);
   assert.equal(call.metadata.costSource, "provider_inline");
+});
+
+test("a dictation generation stores metadata only: no transcript, no raw response", async () => {
+  const sink = createLlmObservabilitySink();
+  await sink.onGenerationEnd?.(
+    baseGeneration({
+      attributes: {
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        feature: "chat.dictation",
+        gatewayConfigId: "gateway-1",
+        profileAlias: "asr-dictation",
+        modelKind: "asr",
+      },
+      outputText: SECRET,
+      providerResponse: { text: SECRET, raw: { transcript: SECRET } },
+    }),
+  );
+
+  assert.equal(mockEndGeneration.mock.calls.length, 1);
+  const call = mockEndGeneration.mock.calls[0]?.[0];
+  assert.ok(call);
+  assert.equal(call.payloadMode, "metadata_only");
+  // What the outputText and providerResponse columns would hold carries no
+  // transcript and no raw provider response.
+  assert.equal(storedText(call.outputText, call.payloadMode).includes(SECRET), false);
+  assert.equal(
+    storedRecord(call.providerResponse, call.payloadMode).includes(SECRET),
+    false,
+  );
+});
+
+test("dictation start and error also select metadata_only", async () => {
+  const sink = createLlmObservabilitySink();
+  const attributes = {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    feature: "chat.dictation",
+    gatewayConfigId: "gateway-1",
+    profileAlias: "asr-dictation",
+    modelKind: "asr",
+  };
+
+  await sink.onGenerationStart?.({
+    spanId: "span-1",
+    traceId: "trace-1",
+    startedAt: new Date().toISOString(),
+    operation: "asr.transcribe",
+    input: { transcript: SECRET },
+    attributes,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+  await sink.onGenerationError?.({
+    spanId: "span-1",
+    traceId: "trace-1",
+    endedAt: new Date().toISOString(),
+    errorMessage: "boom",
+    providerResponse: { text: SECRET },
+    attributes,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+
+  assert.equal(mockStartGeneration.mock.calls[0]?.[0].payloadMode, "metadata_only");
+  assert.equal(
+    mockRecordGenerationError.mock.calls[0]?.[0].payloadMode,
+    "metadata_only",
+  );
+  const startCall = mockStartGeneration.mock.calls[0]?.[0];
+  assert.equal(
+    storedRecord(startCall.input, startCall.payloadMode).includes(SECRET),
+    false,
+  );
+});
+
+test("a non-dictation ASR generation is still stored as before", async () => {
+  const sink = createLlmObservabilitySink();
+  await sink.onGenerationEnd?.(
+    baseGeneration({
+      attributes: {
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+        feature: "source_ingestion",
+        gatewayConfigId: "gateway-1",
+        profileAlias: "asr-default",
+        modelKind: "asr",
+      },
+      outputText: SECRET,
+      providerResponse: { text: SECRET },
+    }),
+  );
+
+  const call = mockEndGeneration.mock.calls[0]?.[0];
+  assert.ok(call);
+  // Unchanged: no metadata-only override, and the text is still captured.
+  assert.equal(call.payloadMode, undefined);
+  assert.equal(storedText(call.outputText, call.payloadMode).includes(SECRET), true);
 });
