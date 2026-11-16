@@ -73,6 +73,38 @@ function selectionSpecsFromManifests(
   return byType;
 }
 
+/**
+ * The selection specs of a successful manifest load, tagged with the workspace
+ * and actor they belong to. Mirrors how `availableManifests` is keyed: the
+ * specs are visible only for the current workspace and actor, so they never
+ * leak across a workspace or actor switch. `loaded` records that a manifest
+ * load has succeeded for this workspace/actor — an empty `byType` with
+ * `loaded: true` means "no type declares a selection", not "not loaded yet".
+ */
+type SelectionSpecsSnapshot = {
+  workspaceId: string | null;
+  actorId: string | undefined;
+  loaded: boolean;
+  byType: Record<string, ConnectorSelectionSpec>;
+};
+
+const EMPTY_SELECTION_SPECS: SelectionSpecsSnapshot = {
+  workspaceId: null,
+  actorId: undefined,
+  loaded: false,
+  byType: {},
+};
+
+const EMPTY_SELECTION_SPEC_MAP: Record<string, ConnectorSelectionSpec> = {};
+
+function selectionSpecsMatch(
+  snapshot: SelectionSpecsSnapshot,
+  workspaceId: string | null,
+  actorId: string | undefined,
+): boolean {
+  return snapshot.workspaceId === workspaceId && snapshot.actorId === actorId;
+}
+
 type WorkspaceConnectorsCacheValue = {
   accounts: ConnectorAccountItem[];
   connectors: ConnectorItem[];
@@ -215,28 +247,32 @@ export function useConnectors(input: {
   }>({ actorId: undefined, types: [] });
   const availableConnectorTypes =
     availableManifests.actorId === actorId ? availableManifests.types : [];
-  const [selectionSpecByType, setSelectionSpecByType] = useState<
-    Record<string, ConnectorSelectionSpec>
-  >({});
+  const [selectionSpecsSnapshot, setSelectionSpecsSnapshot] =
+    useState<SelectionSpecsSnapshot>(EMPTY_SELECTION_SPECS);
   // Mirrors the state so a just-authorised connect can read the latest specs
   // even from inside a callback that closed over an earlier render's state
   // (for example when a fresh manifest fetch fails and we fall back to it).
-  // Kept in step with the state by `applySelectionSpecByType` below.
-  const selectionSpecByTypeRef = useRef<Record<string, ConnectorSelectionSpec>>(
-    {},
+  // Kept in step with the state by `applySelectionSpecs` below.
+  const selectionSpecsSnapshotRef = useRef<SelectionSpecsSnapshot>(
+    EMPTY_SELECTION_SPECS,
   );
-  // True once a manifest load has succeeded in this hook instance. An empty
-  // `selectionSpecByTypeRef` only means "no type declares a selection" once
-  // this is true; before that it means "not loaded yet / load failed", which
-  // is not the same as "this type has no selection".
-  const manifestsLoadedRef = useRef(false);
-  const applySelectionSpecByType = useCallback(
-    (next: Record<string, ConnectorSelectionSpec>) => {
-      selectionSpecByTypeRef.current = next;
-      setSelectionSpecByType(next);
+  const applySelectionSpecs = useCallback(
+    (snapshot: SelectionSpecsSnapshot) => {
+      selectionSpecsSnapshotRef.current = snapshot;
+      setSelectionSpecsSnapshot(snapshot);
     },
     [],
   );
+  // The specs the settings UI consumes: the loaded map only when it belongs to
+  // the current workspace and actor (so a failed refresh keeps them, while a
+  // workspace or actor switch hides them until the new context loads).
+  const selectionSpecByType = selectionSpecsMatch(
+    selectionSpecsSnapshot,
+    workspaceId ?? null,
+    actorId,
+  )
+    ? selectionSpecsSnapshot.byType
+    : EMPTY_SELECTION_SPEC_MAP;
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
   >([]);
@@ -310,7 +346,7 @@ export function useConnectors(input: {
       setConnectors([]);
       setConnectorAccounts([]);
       setAvailableManifests({ actorId, types: [] });
-      applySelectionSpecByType({});
+      applySelectionSpecs(EMPTY_SELECTION_SPECS);
       setConnectorWebhookEventsById({});
       setConnectorWebhookConfigsById({});
       setConnectorsLoadingError(null);
@@ -364,10 +400,12 @@ export function useConnectors(input: {
         actorId,
         types: manifests.items.map((manifest) => manifest.type),
       });
-      applySelectionSpecByType(
-        selectionSpecsFromManifests(manifests.items),
-      );
-      manifestsLoadedRef.current = true;
+      applySelectionSpecs({
+        workspaceId: activeWorkspaceId,
+        actorId,
+        loaded: true,
+        byType: selectionSpecsFromManifests(manifests.items),
+      });
       const webhookConnectors = uiConnectors.filter((connector) => {
         const catalogItem = connectorCatalog.find(
           (item) => item.id === connector.raw.connectorType,
@@ -427,7 +465,10 @@ export function useConnectors(input: {
     } catch (error) {
       if (actorIdRef.current !== actorId) return;
       setAvailableManifests({ actorId, types: [] });
-      applySelectionSpecByType({});
+      // A failed refresh keeps the last good selection specs (state and ref):
+      // the settings list and any open picker depend on them, and a refresh
+      // runs after every save and sync. They are cleared only when the
+      // workspace or actor changes (the keyed read above hides them then).
       setConnectorsLoadingError(
         getErrorMessage(error, t("toasts.connectors.loadFailed")),
       );
@@ -441,7 +482,7 @@ export function useConnectors(input: {
     }
   }, [
     actorId,
-    applySelectionSpecByType,
+    applySelectionSpecs,
     connectorCacheBucket,
     currentWorkspaceIdRef,
     onConnectorsChange,
@@ -646,9 +687,18 @@ export function useConnectors(input: {
       // Which connector types declare a shared selection UI, and whether that
       // is known at all. Deciding a new connector's initial config and whether
       // to open settings turns on this; an empty map from a *failed* load is
-      // "unknown", not "this type has no selection" (see manifestsLoadedRef).
-      let knownSelectionSpecByType = selectionSpecByTypeRef.current;
-      let selectionCapabilityKnown = manifestsLoadedRef.current;
+      // "unknown", not "this type has no selection" (see the snapshot's
+      // `loaded`). Specs from another workspace/actor do not count.
+      const snapshotActorId = actorIdRef.current;
+      const currentSnapshot = selectionSpecsMatch(
+        selectionSpecsSnapshotRef.current,
+        workspaceId,
+        snapshotActorId,
+      )
+        ? selectionSpecsSnapshotRef.current
+        : null;
+      let knownSelectionSpecByType = currentSnapshot?.byType ?? {};
+      let selectionCapabilityKnown = currentSnapshot?.loaded ?? false;
       if (accountId) {
         // An authorization just completed. After the provider redirects back
         // this runs before the connector list and manifests have loaded, so
@@ -681,14 +731,24 @@ export function useConnectors(input: {
         // than guess.
         try {
           const manifests = await connectorsClient.listManifests(workspaceId);
-          knownSelectionSpecByType = selectionSpecsFromManifests(
-            manifests.items,
-          );
-          manifestsLoadedRef.current = true;
+          const byType = selectionSpecsFromManifests(manifests.items);
+          knownSelectionSpecByType = byType;
           selectionCapabilityKnown = true;
+          // Apply the fresh specs to both state and ref so the settings list
+          // (state) and any later fallback (ref) see them.
+          applySelectionSpecs({
+            workspaceId,
+            actorId: actorIdRef.current,
+            loaded: true,
+            byType,
+          });
         } catch {
-          if (manifestsLoadedRef.current) {
-            knownSelectionSpecByType = selectionSpecByTypeRef.current;
+          const snapshot = selectionSpecsSnapshotRef.current;
+          if (
+            selectionSpecsMatch(snapshot, workspaceId, actorIdRef.current) &&
+            snapshot.loaded
+          ) {
+            knownSelectionSpecByType = snapshot.byType;
             selectionCapabilityKnown = true;
           } else {
             selectionCapabilityKnown = false;
@@ -987,6 +1047,7 @@ export function useConnectors(input: {
       return request;
     },
     [
+      applySelectionSpecs,
       clearConnectorReadiness,
       connectors,
       markConnectorNotReady,

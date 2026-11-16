@@ -696,7 +696,7 @@ test("when manifests cannot be loaded at all after OAuth return, nothing is crea
   expect(api().connectorWaitingByType.dropbox).toBeFalsy();
 });
 
-test("a type the loaded manifests say has no selection still follows its existing path", async () => {
+test("an explicitly handled type without a selection spec keeps its own path", async () => {
   // Manifests load successfully but carry no selection for Google Drive, so the
   // capability is known-and-absent: Google Drive keeps its own create path
   // (empty file selection, settings opened), never the setup-incomplete exit.
@@ -735,6 +735,137 @@ test("a type the loaded manifests say has no selection still follows its existin
   );
   expect(toastSuccess).toHaveBeenCalledWith("Google Drive connected.");
   expect(toastError).not.toHaveBeenCalled();
+});
+
+test("a type without a selection spec that is not specially handled gets the configure-next path", async () => {
+  // x-tools declares no selection and is not one of the explicitly handled
+  // types (notion / gmail / google_drive), so with the manifests known the
+  // connect takes the configure-next path: nothing created, an info toast.
+  listManifests.mockResolvedValue({
+    items: [{ type: "notion" }, { type: "x-tools" }],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-x",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-x-nosel",
+    connectorType: "x-tools",
+    accountId: "acc-x",
+  });
+
+  await mountHook(baseInput("ws-x-nosel"));
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastInfo).toHaveBeenCalledWith(
+    "X Tools is connected. Configure syncing next.",
+  );
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("a failed refresh keeps the selection specs", async () => {
+  await mountHook(baseInput("ws-keep-specs"));
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+
+  // A refresh whose manifest load rejects must not drop the last good spec.
+  listManifests.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => {
+    await api().refreshConnectors();
+  });
+
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+});
+
+test("after a good load and a failed refresh, an OAuth return with a failing manifests fetch still creates the connector", async () => {
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "dropbox-keep",
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+
+  // Mount: a successful manifest load records the spec in state.
+  await mountHook(baseInput("ws-db-keep"));
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+
+  // A failed refresh. Previously this wiped the specs while keeping the loaded
+  // flag, so the later fallback read them as "no selection".
+  listManifests.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => {
+    await api().refreshConnectors();
+  });
+
+  // The OAuth return now arrives and its own manifest fetch also fails: the
+  // connect falls back to the spec kept in state rather than creating nothing.
+  listManifests.mockRejectedValueOnce(new Error("offline again"));
+  await act(async () => {
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "sourceweft:connectors:oauth",
+        newValue: JSON.stringify({
+          id: "dropbox:acc-db",
+          workspaceId: "ws-db-keep",
+          connectorType: "dropbox",
+          accountId: "acc-db",
+          status: "success",
+          createdAt: new Date().toISOString(),
+        }),
+      }),
+    );
+    await flushMicrotasks();
+  });
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-db-keep",
+    expect.objectContaining({
+      connectorType: "dropbox",
+      configJson: { items: [] },
+    }),
+  );
+  expect(api().connectorSettingsConnector?.id).toBe("dropbox-keep");
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("switching workspace clears the selection specs", async () => {
+  const input = baseInput("ws-a");
+  function Harness() {
+    latest = useConnectors(input);
+    return null;
+  }
+  const view = await mountWithIntl(createElement(Harness));
+  await flush(25);
+  expect(api().selectionSpecByType.dropbox).toBeTruthy();
+
+  // Switch to workspace B; its manifests have not loaded yet (the fetch hangs),
+  // so A's specs must not be visible under B.
+  listManifests.mockImplementationOnce(() => new Promise(() => {}));
+  input.workspaceId = "ws-b";
+  input.currentWorkspaceIdRef.current = "ws-b";
+  await view.render(withIntl(createElement(Harness)));
+  expect(api().selectionSpecByType.dropbox).toBeUndefined();
 });
 
 test("a tools-only selection connector connects with an empty selection and no periodic sync", async () => {
