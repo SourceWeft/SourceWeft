@@ -404,6 +404,20 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
   return option.valueType === "boolean" ? false : undefined;
 }
 
+/**
+ * Thrown from the submit handler when send is pressed while dictation is still
+ * active. PromptInput discards a submit whose `onSubmit` throws, leaving the
+ * editor text, attachments and saved draft exactly as they were; a normal
+ * return would be treated as a successful send and would clear them. PromptInput
+ * catches this inside its own submit handler, so it never surfaces as an error.
+ */
+class DictationActiveSubmitError extends Error {
+  constructor() {
+    super("submit ignored while dictation is active");
+    this.name = "DictationActiveSubmitError";
+  }
+}
+
 function ComposerBody({
   onRegisterContinuationInput,
   draftKey,
@@ -1488,8 +1502,10 @@ function ComposerBody({
           onSubmit={(message) => {
             if (dictationControlRef.current.active) {
               // Send while dictating: stop and keep the pending text, don't send.
+              // Throw so PromptInput leaves the editor text, attachments and the
+              // saved draft untouched (a normal return would clear them).
               void dictationControlRef.current.stop();
-              return;
+              throw new DictationActiveSubmitError();
             }
             if (submitDisabled) {
               return;

@@ -45,6 +45,8 @@ export type DictationSession = {
   /** Closes the microphone, flushes the open segment and resolves when pending text has been inserted. */
   stop(notice?: DictationNotice): Promise<void>;
   dispose(): void;
+  /** True once disposed; a disposed session is never reused. */
+  isDisposed(): boolean;
 };
 
 export type DictationSessionDeps = {
@@ -77,13 +79,39 @@ const TRANSPORT_ERROR_NOTICE: Record<
   failed: "failed",
 };
 
+/**
+ * A RFC 4122 version-4 UUID built from `crypto.getRandomValues` (falling back
+ * to `Math.random` only when that too is missing). The dictation route requires
+ * a UUID session id, so the fallback for an environment without
+ * `crypto.randomUUID` must still produce a valid one.
+ */
+export function fallbackSessionId(): string {
+  const bytes = new Uint8Array(16);
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.getRandomValues === "function"
+  ) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80; // variant 10xx
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"));
+  return (
+    `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-` +
+    `${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-` +
+    `${hex.slice(10, 16).join("")}`
+  );
+}
+
 function defaultSessionId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
-  // A good-enough fallback where crypto.randomUUID is missing; the id only
-  // needs to be unique per run so a retried segment is not double counted.
-  return `dictation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return fallbackSessionId();
 }
 
 type Run = {
@@ -98,10 +126,20 @@ type Run = {
   pending: number;
   lastLevelAt: number;
   closed: boolean;
-  // Text waits here while an earlier run is still inserting its own.
-  gate: Promise<void> | null;
+  // True once this run may insert: its predecessor has finished inserting all
+  // of its own text. Until then text waits in `buffer`.
   gatePassed: boolean;
   buffer: Array<{ text: string; endedBy: SpeechSegment["endedBy"] }>;
+  // Resolves once this run has inserted all its text (or ended in an error) and
+  // its predecessor has done the same. Runs chain on it so text lands run by
+  // run, segment by segment, in order and exactly once.
+  done: Promise<void>;
+  resolveDone: () => void;
+  doneResolved: boolean;
+  // The notice to show when this run is the last to finish.
+  stopNotice: DictationNotice | null;
+  // The 10-minute cap timer, armed while this run holds the microphone.
+  sessionTimer: ReturnType<typeof setTimeout> | null;
 };
 
 export function createDictationSession(
@@ -116,8 +154,39 @@ export function createDictationSession(
 
   // The run that currently holds the microphone (status starting/listening).
   let activeRun: Run | null = null;
-  // A stopped run whose segments are still being transcribed.
-  let pendingFinish: Run | null = null;
+  // The most recently created run (active or finishing); the tail of the chain.
+  let lastRun: Run | null = null;
+  // Stopped runs whose segments are still being transcribed and inserted.
+  const finishingRuns = new Set<Run>();
+
+  function finishingPending(): number {
+    let total = 0;
+    for (const run of finishingRuns) {
+      total += run.transport.pending();
+    }
+    return total;
+  }
+
+  // The newest run that has not finished inserting; a new run chains on it.
+  function unfinishedTail(): Run | null {
+    return lastRun && !lastRun.doneResolved ? lastRun : null;
+  }
+
+  function clearSessionTimer(run: Run): void {
+    if (run.sessionTimer !== null) {
+      clearTimeout(run.sessionTimer);
+      run.sessionTimer = null;
+    }
+  }
+
+  function armSessionTimer(run: Run): void {
+    clearSessionTimer(run);
+    // A timer is needed as well as the per-frame check: if frames stop arriving
+    // while the track is still live, the microphone would otherwise stay open.
+    run.sessionTimer = setTimeout(() => {
+      void stop("max-duration");
+    }, SESSION_LIMIT_MS);
+  }
 
   function setSnapshot(next: DictationSnapshot): void {
     snapshot = next;
@@ -154,8 +223,8 @@ export function createDictationSession(
     }
     const inserted = deps.insertText(toInsert);
     if (!inserted) {
-      // The editor is gone: abort this run without a notice.
-      abortRunSilently(run);
+      // The editor is gone: tear this run down without a notice.
+      teardownRun(run, null);
       return;
     }
     run.tail = toInsert[toInsert.length - 1]!;
@@ -170,6 +239,7 @@ export function createDictationSession(
     for (const item of buffered) {
       insertOne(run, item.text, item.endedBy);
     }
+    maybeFinishRun(run);
   }
 
   function onRunText(
@@ -191,9 +261,10 @@ export function createDictationSession(
     run.pending = pending;
     if (run === activeRun) {
       refreshListening(run);
-    } else if (run === pendingFinish && snapshot.status === "finishing") {
-      setSnapshot({ status: "finishing", pending });
+    } else if (snapshot.status === "finishing") {
+      setSnapshot({ status: "finishing", pending: finishingPending() });
     }
+    maybeFinishRun(run);
   }
 
   function onRunError(run: Run, error: SegmentTransportError): void {
@@ -201,11 +272,44 @@ export function createDictationSession(
       return;
     }
     // The transport has already aborted itself; close the microphone and show
-    // why. Text inserted before the failure stays in the composer.
-    endRunWithNotice(run, TRANSPORT_ERROR_NOTICE[error.reason]);
+    // why. Text inserted before the failure stays in the composer, and the
+    // run's `done` resolves so any successor is never blocked by the failure.
+    teardownRun(run, TRANSPORT_ERROR_NOTICE[error.reason]);
+  }
+
+  // A closed run is done once its predecessor has finished inserting (so its own
+  // gate is open and its buffer is flushed) and its transport has delivered
+  // everything. An active run is never finished here — it still holds the mic.
+  function maybeFinishRun(run: Run): void {
+    if (run.doneResolved || disposed) {
+      return;
+    }
+    if (!run.closed || !run.gatePassed) {
+      return;
+    }
+    if (run.transport.pending() !== 0) {
+      return;
+    }
+    resolveRunDone(run);
+  }
+
+  function resolveRunDone(run: Run): void {
+    if (run.doneResolved) {
+      return;
+    }
+    run.doneResolved = true;
+    finishingRuns.delete(run);
+    run.resolveDone();
+    if (!activeRun && !disposed && finishingRuns.size === 0) {
+      setSnapshot({ status: "idle", notice: run.stopNotice });
+    }
   }
 
   function createRun(predecessor: Run | null): Run {
+    let resolveDone!: () => void;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
     const run: Run = {
       id: newSessionId(),
       segmenter: deps.createSegmenter(),
@@ -218,9 +322,13 @@ export function createDictationSession(
       pending: 0,
       lastLevelAt: 0,
       closed: false,
-      gate: predecessor ? predecessor.transport.whenIdle() : null,
       gatePassed: predecessor === null,
       buffer: [],
+      done,
+      resolveDone,
+      doneResolved: false,
+      stopNotice: null,
+      sessionTimer: null,
     };
     run.transport = createSegmentTransport({
       send: (wav, seq, signal) => deps.send(wav, seq, run.id, signal),
@@ -228,8 +336,10 @@ export function createDictationSession(
       onError: (error) => onRunError(run, error),
       onPendingChange: (pending) => onRunPending(run, pending),
     });
-    if (run.gate) {
-      void run.gate.then(() => passGate(run));
+    if (predecessor) {
+      // This run may only insert once its predecessor has finished inserting
+      // all of its own text, so the chain stays in order.
+      void predecessor.done.then(() => passGate(run));
     }
     return run;
   }
@@ -262,48 +372,34 @@ export function createDictationSession(
     if (run !== activeRun || disposed) {
       return;
     }
-    endRunWithNotice(run, "device-lost");
+    teardownRun(run, "device-lost");
   }
 
-  function abortRunSilently(run: Run): void {
+  // Closes a run's microphone, abandons its undelivered segments and resolves
+  // its `done` so successors are never blocked. With a notice it is shown when
+  // this run turns out to be the last to finish.
+  function teardownRun(run: Run, notice: DictationNotice | null): void {
+    clearSessionTimer(run);
     run.capture?.stop();
     run.capture = null;
     run.closed = true;
     run.transport.abort();
+    if (notice !== null) {
+      run.stopNotice = notice;
+    }
     if (run === activeRun) {
       activeRun = null;
     }
-    if (run === pendingFinish) {
-      pendingFinish = null;
-    }
-    if (!activeRun && !disposed) {
-      setSnapshot({ status: "idle", notice: null });
-    }
-  }
-
-  function endRunWithNotice(run: Run, notice: DictationNotice): void {
-    run.capture?.stop();
-    run.capture = null;
-    run.closed = true;
-    run.transport.abort();
-    if (run === activeRun) {
-      activeRun = null;
-    }
-    if (run === pendingFinish) {
-      pendingFinish = null;
-    }
-    // Only reflect the notice when no newer run has taken the microphone.
-    if (!activeRun && !disposed) {
-      setSnapshot({ status: "idle", notice });
-    }
+    resolveRunDone(run);
   }
 
   async function start(): Promise<void> {
     if (disposed || activeRun) {
       return;
     }
-    const run = createRun(pendingFinish);
+    const run = createRun(unfinishedTail());
     activeRun = run;
+    lastRun = run;
     setSnapshot({ status: "starting" });
 
     let capture: PcmCapture;
@@ -317,11 +413,11 @@ export function createDictationSession(
         activeRun = null;
       }
       run.transport.abort();
-      const notice: DictationNotice =
+      run.stopNotice =
         error instanceof PcmCaptureFailure ? error.reason : "failed";
-      if (!activeRun && !disposed) {
-        setSnapshot({ status: "idle", notice });
-      }
+      // Resolve `done` (unblocking any successor) and, when nothing else is
+      // finishing, surface the notice.
+      resolveRunDone(run);
       return;
     }
 
@@ -329,12 +425,14 @@ export function createDictationSession(
       // Stopped or disposed while the permission prompt was open.
       capture.stop();
       run.transport.abort();
+      resolveRunDone(run);
       return;
     }
 
     run.capture = capture;
     run.startedAt = now();
     run.lastLevelAt = run.startedAt - LEVEL_THROTTLE_MS;
+    armSessionTimer(run);
     setSnapshot({
       status: "listening",
       startedAt: run.startedAt,
@@ -349,34 +447,32 @@ export function createDictationSession(
     }
     const run = activeRun;
     if (!run) {
-      // Nothing is capturing; wait for a finishing run's text to land.
-      if (pendingFinish) {
-        await pendingFinish.transport.whenIdle();
+      // Nothing is capturing; wait for the finishing chain's text to land.
+      const tail = unfinishedTail();
+      if (tail) {
+        await tail.done;
       }
       return;
     }
 
+    clearSessionTimer(run);
     activeRun = null;
     run.capture?.stop();
     run.capture = null;
     run.closed = true;
+    run.stopNotice = notice ?? null;
 
     const flushed = run.segmenter.flush();
     if (flushed) {
       run.transport.enqueue(flushed);
     }
 
-    pendingFinish = run;
-    setSnapshot({ status: "finishing", pending: run.transport.pending() });
+    finishingRuns.add(run);
+    setSnapshot({ status: "finishing", pending: finishingPending() });
+    // The run may already be done (no pending segments, e.g. a silence stop).
+    maybeFinishRun(run);
 
-    await run.transport.whenIdle();
-
-    if (run === pendingFinish && !disposed) {
-      pendingFinish = null;
-      if (!activeRun) {
-        setSnapshot({ status: "idle", notice: notice ?? null });
-      }
-    }
+    await run.done;
   }
 
   function dispose(): void {
@@ -384,15 +480,23 @@ export function createDictationSession(
       return;
     }
     disposed = true;
-    for (const run of [activeRun, pendingFinish]) {
-      if (run) {
-        run.capture?.stop();
-        run.capture = null;
-        run.transport.abort();
+    const runs = new Set<Run>(finishingRuns);
+    if (activeRun) {
+      runs.add(activeRun);
+    }
+    for (const run of runs) {
+      clearSessionTimer(run);
+      run.capture?.stop();
+      run.capture = null;
+      run.transport.abort();
+      if (!run.doneResolved) {
+        run.doneResolved = true;
+        run.resolveDone();
       }
     }
     activeRun = null;
-    pendingFinish = null;
+    lastRun = null;
+    finishingRuns.clear();
     setSnapshot({ status: "idle", notice: null });
   }
 
@@ -407,5 +511,6 @@ export function createDictationSession(
     start,
     stop,
     dispose,
+    isDisposed: () => disposed,
   };
 }

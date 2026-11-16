@@ -211,8 +211,19 @@ export function createSegmentTransport(input: {
         try {
           const retryResult = await input.send(wav, item.seq, controller.signal);
           settle({ text: retryResult.text });
-        } catch {
-          settle({ reason: "rate-limited" });
+        } catch (retryError) {
+          const retryStatus =
+            retryError instanceof SegmentSendError ? retryError.status : null;
+          // A retry that fails with a terminal status reports that status's
+          // reason; any other failure (network, another 429, 5xx) stays
+          // rate-limited.
+          const reason: SegmentTransportError["reason"] =
+            retryStatus === 402
+              ? "insufficient-credits"
+              : retryStatus === 404
+                ? "unavailable"
+                : "rate-limited";
+          settle({ reason });
         }
         return;
       }

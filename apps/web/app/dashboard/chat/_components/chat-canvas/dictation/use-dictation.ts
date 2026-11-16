@@ -28,6 +28,11 @@ import { SegmentSendError } from "./segment-transport";
 
 const IDLE_SNAPSHOT: DictationSnapshot = { status: "idle", notice: null };
 
+// A segment request that never answers would keep "Transcribing…" and hold send
+// forever, so each one is given its own deadline: the request is aborted and
+// surfaced to the transport as a network failure, which applies its one retry.
+export const SEGMENT_REQUEST_TIMEOUT_MS = 30_000;
+
 function retryAfterSecondsOf(error: HttpClientError): number | undefined {
   const value = error.details?.retryAfterSeconds;
   return typeof value === "number" ? value : undefined;
@@ -36,28 +41,49 @@ function retryAfterSecondsOf(error: HttpClientError): number | undefined {
 /**
  * Sends one segment through the content client and turns its HTTP error into
  * the {@link SegmentSendError} the transport understands. Errors are classified
- * by status only, never by their message text.
+ * by status only, never by their message text. A request that does not answer
+ * within {@link SEGMENT_REQUEST_TIMEOUT_MS} is aborted and reported as a
+ * network failure (`SegmentSendError(null)`), so the transport retries it once.
  */
-async function sendSegment(
+export async function sendSegment(
   workspaceId: string,
   sessionId: string,
   seq: number,
   wav: Uint8Array,
   signal: AbortSignal,
 ): Promise<{ text: string }> {
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  if (signal.aborted) {
+    controller.abort();
+  } else {
+    signal.addEventListener("abort", abortFromCaller, { once: true });
+  }
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, SEGMENT_REQUEST_TIMEOUT_MS);
+
   try {
     const result = await contentClient.transcribeDictationSegment(workspaceId, {
       sessionId,
       seq,
       wav,
-      signal,
+      signal: controller.signal,
     });
     return { text: result.text };
   } catch (error) {
+    if (timedOut) {
+      throw new SegmentSendError(null);
+    }
     if (error instanceof HttpClientError) {
       throw new SegmentSendError(error.status, retryAfterSecondsOf(error));
     }
     throw new SegmentSendError(null);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -86,33 +112,60 @@ export function useDictation(input: {
   workspaceIdRef.current = workspaceId;
 
   const sessionRef = useRef<DictationSession | null>(null);
+
+  const createSession = useCallback(
+    () =>
+      createDictationSession({
+        startCapture: startPcmCapture,
+        createSegmenter: createSpeechSegmenter,
+        send: (wav, seq, sessionId, signal) => {
+          const id = workspaceIdRef.current;
+          if (!id) {
+            return Promise.reject(new SegmentSendError(null));
+          }
+          return sendSegment(id, sessionId, seq, wav, signal);
+        },
+        insertText: (text) => insertTextRef.current(text),
+      }),
+    [],
+  );
+
+  // Returns the live session, building a fresh one whenever the previous was
+  // disposed by an effect cleanup. StrictMode mounts, cleans up, then mounts
+  // again; without this the disposed session would be reused and `start()`
+  // would return at its `disposed` check forever.
+  const ensureSession = useCallback((): DictationSession => {
+    const existing = sessionRef.current;
+    if (existing && !existing.isDisposed()) {
+      return existing;
+    }
+    const next = createSession();
+    sessionRef.current = next;
+    return next;
+  }, [createSession]);
+
   if (sessionRef.current === null) {
-    sessionRef.current = createDictationSession({
-      startCapture: startPcmCapture,
-      createSegmenter: createSpeechSegmenter,
-      send: (wav, seq, sessionId, signal) => {
-        const id = workspaceIdRef.current;
-        if (!id) {
-          return Promise.reject(new SegmentSendError(null));
-        }
-        return sendSegment(id, sessionId, seq, wav, signal);
-      },
-      insertText: (text) => insertTextRef.current(text),
-    });
+    sessionRef.current = createSession();
   }
 
   useEffect(() => {
-    const session = sessionRef.current;
-    return () => session?.dispose();
-  }, []);
+    const session = ensureSession();
+    return () => {
+      session.dispose();
+      // Drop the disposed session so the next render builds a new one.
+      if (sessionRef.current === session) {
+        sessionRef.current = null;
+      }
+    };
+  }, [ensureSession]);
 
   const subscribe = useCallback(
-    (listener: () => void) => sessionRef.current!.subscribe(listener),
-    [],
+    (listener: () => void) => ensureSession().subscribe(listener),
+    [ensureSession],
   );
   const snapshot = useSyncExternalStore(
     subscribe,
-    () => sessionRef.current!.snapshot(),
+    () => ensureSession().snapshot(),
     () => IDLE_SNAPSHOT,
   );
 
@@ -156,19 +209,39 @@ export function useDictation(input: {
     host.kind !== "unknown";
 
   const toggle = useCallback(() => {
-    const session = sessionRef.current!;
+    const session = ensureSession();
     const status = session.snapshot().status;
     if (status === "listening" || status === "starting") {
       void session.stop();
     } else {
       void session.start();
     }
-  }, []);
+  }, [ensureSession]);
 
-  const stop = useCallback(() => sessionRef.current!.stop(), []);
+  const stop = useCallback(() => ensureSession().stop(), [ensureSession]);
 
   const active =
     snapshot.status === "listening" || snapshot.status === "finishing";
+
+  // While dictation is active, Escape stops it wherever focus is on the page
+  // (the microphone button, for one, is not inside the editor). The editor's
+  // own Escape handler runs first and marks the event handled, so an Escape in
+  // the editor is not acted on twice. No listener exists when inactive, so
+  // Escape for edit-mode cancel, dialogs and menus is untouched.
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        void ensureSession().stop();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [active, ensureSession]);
 
   return { visible, snapshot, toggle, stop, active };
 }

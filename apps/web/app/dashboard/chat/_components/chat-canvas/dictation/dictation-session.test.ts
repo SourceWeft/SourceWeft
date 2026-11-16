@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, test } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 import { PcmCaptureFailure } from "@sourceweft/ui-web/lib/audio/pcm-capture";
 import { createSpeechSegmenter } from "@sourceweft/ui-web/lib/audio/speech-segmenter";
 
-import { createDictationSession, type DictationSession } from "./dictation-session";
+import {
+  createDictationSession,
+  fallbackSessionId,
+  type DictationSession,
+} from "./dictation-session";
 import { SegmentSendError } from "./segment-transport";
 
 const SAMPLES_PER_FRAME = 320;
@@ -344,4 +348,131 @@ test("dispose closes the microphone and inserts nothing afterwards", async () =>
   await tick();
   await tick();
   assert.deepEqual(inserted, []);
+});
+
+test("overlapping finishes insert run by run, in order, and hold until done", async () => {
+  const cap = fakeCapture();
+  const snd = fakeSend();
+  const inserted: string[] = [];
+  const s = build(cap, snd, inserted);
+
+  await s.start();
+  sentence(cap); // run 1, seq 0 => pending[0]
+  const stop1 = s.stop();
+  assert.equal(s.snapshot().status, "finishing");
+
+  await s.start(); // run 2 begins while run 1 is still finishing
+  sentence(cap); // run 2, seq 0 => pending[1]
+  const stop2 = s.stop();
+  assert.equal(s.snapshot().status, "finishing");
+  assert.equal(snd.calls.length, 2);
+
+  // Run 2's text arrives first; it must wait for run 1, and the snapshot stays
+  // finishing so send is still held.
+  snd.pending[1]!.resolve("Second.");
+  await tick();
+  assert.deepEqual(inserted, []);
+  assert.equal(s.snapshot().status, "finishing");
+
+  // Run 1's text lands, then run 2's, in that order.
+  snd.pending[0]!.resolve("First.");
+  await tick();
+  await tick();
+  assert.deepEqual(inserted, ["First.", "Second."]);
+
+  await stop2;
+  await stop1;
+  assert.deepEqual(s.snapshot(), { status: "idle", notice: null });
+});
+
+test("three overlapping runs insert in run order", async () => {
+  const cap = fakeCapture();
+  const snd = fakeSend();
+  const inserted: string[] = [];
+  const s = build(cap, snd, inserted);
+
+  await s.start();
+  sentence(cap); // pending[0]
+  const stop1 = s.stop();
+  await s.start();
+  sentence(cap); // pending[1]
+  const stop2 = s.stop();
+  await s.start();
+  sentence(cap); // pending[2]
+  const stop3 = s.stop();
+  assert.equal(snd.calls.length, 3);
+
+  // Resolve in reverse order; the chain must still insert run 1, 2, 3.
+  snd.pending[2]!.resolve("three");
+  await tick();
+  snd.pending[1]!.resolve("two");
+  await tick();
+  assert.deepEqual(inserted, []);
+
+  snd.pending[0]!.resolve("one");
+  await tick();
+  await tick();
+  await tick();
+  // Each run starts a fresh tail, so there is no inter-run spacing; the point
+  // is the order: run 1, then run 2, then run 3.
+  assert.deepEqual(inserted, ["one", "two", "three"]);
+
+  await Promise.all([stop1, stop2, stop3]);
+  assert.deepEqual(s.snapshot(), { status: "idle", notice: null });
+});
+
+test("a predecessor that ends in an error does not block its successor", async () => {
+  const cap = fakeCapture();
+  const snd = fakeSend();
+  const inserted: string[] = [];
+  const s = build(cap, snd, inserted);
+
+  await s.start();
+  sentence(cap); // run 1, seq 0 => pending[0]
+  const stop1 = s.stop();
+
+  await s.start();
+  sentence(cap); // run 2, seq 0 => pending[1]
+  const stop2 = s.stop();
+
+  // Run 1 fails terminally (402 is not retried); its successor must not wait.
+  snd.pending[0]!.reject(new SegmentSendError(402));
+  await tick();
+  await tick();
+
+  snd.pending[1]!.resolve("Kept.");
+  await tick();
+  await tick();
+  assert.deepEqual(inserted, ["Kept."]);
+
+  await stop2;
+  await stop1;
+});
+
+test("no frames for ten minutes stops with max-duration", async () => {
+  vi.useFakeTimers();
+  try {
+    const cap = fakeCapture();
+    const snd = fakeSend();
+    const inserted: string[] = [];
+    const s = build(cap, snd, inserted);
+
+    await s.start();
+    assert.equal(s.snapshot().status, "listening");
+    // No frames arrive, but the track stays live: only a timer can stop it.
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    assert.deepEqual(s.snapshot(), { status: "idle", notice: "max-duration" });
+    assert.ok(cap.isStopped());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("fallbackSessionId is a valid v4 UUID", () => {
+  const uuidV4 =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  for (let i = 0; i < 50; i += 1) {
+    assert.match(fallbackSessionId(), uuidV4);
+  }
 });

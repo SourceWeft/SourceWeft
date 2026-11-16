@@ -92,7 +92,63 @@ test("the button sits after the image button and toggles dictation", async () =>
   assert.equal((dictation.state.toggle as ReturnType<typeof vi.fn>).mock.calls.length, 1);
 });
 
-test("pressing send while dictation is active stops dictation and does not submit", async () => {
+function pressEnter(editor: Element) {
+  return act(async () => {
+    editor.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+}
+
+test("pressing send while dictation is active stops dictation and keeps the composer", async () => {
+  dictation.state.active = true;
+  const onSubmit = vi.fn();
+  const view = await mountWithIntl(
+    createElement(Composer, {
+      onSubmit,
+      dictationWorkspaceId: "ws1",
+      initialInput: "hello",
+      initialAttachments: [
+        {
+          id: "att1",
+          type: "file",
+          mediaType: "image/png",
+          filename: "shot.png",
+          url: "data:image/png;base64,iVBORw0KGgo=",
+        },
+      ],
+    }),
+  );
+
+  const editor = view.container.querySelector(
+    '[data-prompt-input-editor="true"]',
+  );
+  assert.ok(editor, "editor rendered");
+  assert.ok(
+    view.container.querySelector("[data-composer-attachments]"),
+    "attachment shown before submit",
+  );
+
+  await submitForm(view.container);
+
+  assert.equal(onSubmit.mock.calls.length, 0);
+  assert.equal(
+    (dictation.state.stop as ReturnType<typeof vi.fn>).mock.calls.length,
+    1,
+  );
+  // The editor text and the attachment are left exactly as they were.
+  assert.equal(editor!.textContent, "hello");
+  assert.ok(
+    view.container.querySelector("[data-composer-attachments]"),
+    "attachment still shown after submit",
+  );
+});
+
+test("pressing Enter while dictation is active stops dictation and keeps the text", async () => {
   dictation.state.active = true;
   const onSubmit = vi.fn();
   const view = await mountWithIntl(
@@ -103,10 +159,20 @@ test("pressing send while dictation is active stops dictation and does not submi
     }),
   );
 
-  await submitForm(view.container);
+  const editor = view.container.querySelector(
+    '[data-prompt-input-editor="true"]',
+  );
+  assert.ok(editor, "editor rendered");
+
+  await pressEnter(editor!);
+  await flush();
 
   assert.equal(onSubmit.mock.calls.length, 0);
-  assert.equal((dictation.state.stop as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+  assert.equal(
+    (dictation.state.stop as ReturnType<typeof vi.fn>).mock.calls.length,
+    1,
+  );
+  assert.equal(editor!.textContent, "hello");
 });
 
 test("Escape while dictation is active stops it", async () => {

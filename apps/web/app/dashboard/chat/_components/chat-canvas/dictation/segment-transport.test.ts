@@ -383,3 +383,48 @@ test("a 429 whose retry also fails ends as rate-limited", async () => {
   assert.deepEqual(waitCalls, [5000]);
   assert.deepEqual(errors, [{ reason: "rate-limited" }]);
 });
+
+test("a 429 whose retry fails with 402 reports insufficient-credits", async () => {
+  let callCount = 0;
+  const errors: SegmentTransportError[] = [];
+
+  const transport = createSegmentTransport({
+    send: async () => {
+      callCount += 1;
+      // First attempt is a 429; the one retry hits a hard credit wall.
+      throw new SegmentSendError(callCount === 1 ? 429 : 402, 20);
+    },
+    onText: () => {},
+    onError: (error) => errors.push(error),
+    wait: async () => {},
+  });
+
+  transport.enqueue(segment());
+  await tick();
+  await tick();
+
+  assert.equal(callCount, 2);
+  assert.deepEqual(errors, [{ reason: "insufficient-credits" }]);
+});
+
+test("a 429 whose retry fails with 404 reports unavailable", async () => {
+  let callCount = 0;
+  const errors: SegmentTransportError[] = [];
+
+  const transport = createSegmentTransport({
+    send: async () => {
+      callCount += 1;
+      throw new SegmentSendError(callCount === 1 ? 429 : 404, 20);
+    },
+    onText: () => {},
+    onError: (error) => errors.push(error),
+    wait: async () => {},
+  });
+
+  transport.enqueue(segment());
+  await tick();
+  await tick();
+
+  assert.equal(callCount, 2);
+  assert.deepEqual(errors, [{ reason: "unavailable" }]);
+});
