@@ -3293,6 +3293,7 @@
         "limitReached": "最多可選擇 {limit} 項。請先移除部分內容再新增。",
         "containerIndexedCount": "{count, plural, other {已索引 # 個檔案}}",
         "untitled": "未命名",
+        "nameUnavailable": "名稱不可用",
         "browser": {
           "title": "從 {provider} 選擇",
           "breadcrumbLabel": "路徑",
@@ -3311,7 +3312,7 @@
         "error": {
           "reconnect": "你的 {provider} 帳號需要重新連接。重新連接後再試。",
           "notFound": "此連接器不可用。請重新整理後重試。",
-          "notFoundItem": "該項目在 {provider} 中已不存在。",
+          "notFoundItem": "此項在 {provider} 中已不存在。",
           "tryLater": "{provider} 暫時繁忙。請稍後再試。",
           "reopen": "列表已變化，請重新開啟後繼續。",
           "generic": "無法連接到 {provider}。請重試。"
@@ -3334,10 +3335,10 @@
           "unknown": "因未知原因被跳過"
         },
         "disabledReason": {
-          "unknown": "無法選擇此項目"
+          "unknown": "無法選擇此項"
         },
         "default": {
-          "itemsTitle": "已選項目",
+          "itemsTitle": "已選內容",
           "itemsDescription": "選擇此連接器可以存取的內容。",
           "choose": "選擇",
           "empty": "尚未選擇任何內容。",

@@ -3293,6 +3293,7 @@
         "limitReached": "最多可选择 {limit} 项。请先移除部分内容再添加。",
         "containerIndexedCount": "{count, plural, other {已索引 # 个文件}}",
         "untitled": "未命名",
+        "nameUnavailable": "名称不可用",
         "browser": {
           "title": "从 {provider} 选择",
           "breadcrumbLabel": "路径",
@@ -3311,7 +3312,7 @@
         "error": {
           "reconnect": "你的 {provider} 账号需要重新连接。重新连接后再试。",
           "notFound": "此连接器不可用。请刷新后重试。",
-          "notFoundItem": "该项目在 {provider} 中已不存在。",
+          "notFoundItem": "此项在 {provider} 中已不存在。",
           "tryLater": "{provider} 暂时繁忙。请稍后再试。",
           "reopen": "列表已变化，请重新打开后继续。",
           "generic": "无法连接到 {provider}。请重试。"
@@ -3334,10 +3335,10 @@
           "unknown": "因未知原因被跳过"
         },
         "disabledReason": {
-          "unknown": "无法选择此项目"
+          "unknown": "无法选择此项"
         },
         "default": {
-          "itemsTitle": "已选项目",
+          "itemsTitle": "已选内容",
           "itemsDescription": "选择此连接器可以访问的内容。",
           "choose": "选择",
           "empty": "尚未选择任何内容。",

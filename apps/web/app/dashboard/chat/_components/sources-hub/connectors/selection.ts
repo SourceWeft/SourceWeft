@@ -133,20 +133,34 @@ export function selectionErrorKey(code: string | undefined): string {
   if (code === undefined) {
     return "connectors.selection.error.generic";
   }
-  // The account is marked unusable, its token refresh failed, or the
-  // provider refused the stored token (access revoked upstream).
-  if (
-    code === "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE" ||
-    code === "CONNECTOR_REAUTH_REQUIRED" ||
-    code.endsWith("_REAUTH_REQUIRED")
-  ) {
+  // Platform codes (`CONNECTOR_*`) are the backend's own; they do not follow
+  // the adapter suffix convention, so an adapter-style suffix rule must never
+  // read one (e.g. `CONNECTOR_ADAPTER_NOT_FOUND` is not a missing item, and
+  // `CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND` means reconnect, not a missing item).
+  // Map platform codes only through this explicit list; everything else
+  // platform-side is generic.
+  if (code.startsWith("CONNECTOR_")) {
+    switch (code) {
+      case "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE":
+      case "CONNECTOR_REAUTH_REQUIRED":
+      case "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND":
+        return "connectors.selection.error.reconnect";
+      case "CONNECTOR_SELECTION_NOT_FOUND":
+        return "connectors.selection.error.notFound";
+      case "CONNECTOR_OAUTH_REFRESH_BUSY":
+      case "CONNECTOR_OAUTH_REFRESH_TIMEOUT":
+        return "connectors.selection.error.tryLater";
+      default:
+        return "connectors.selection.error.generic";
+    }
+  }
+  // Adapter codes (`<TYPE>_…`) follow the suffix convention.
+  // The account's token refresh failed or the provider refused the stored
+  // token (access revoked upstream).
+  if (code.endsWith("_REAUTH_REQUIRED")) {
     return "connectors.selection.error.reconnect";
   }
-  if (code === "CONNECTOR_SELECTION_NOT_FOUND") {
-    return "connectors.selection.error.notFound";
-  }
-  // The specific item looked up is gone, as opposed to the connector itself
-  // (CONNECTOR_SELECTION_NOT_FOUND above).
+  // The specific item looked up is gone, as opposed to the connector itself.
   if (code.endsWith("_NOT_FOUND")) {
     return "connectors.selection.error.notFoundItem";
   }

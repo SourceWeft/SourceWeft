@@ -213,6 +213,14 @@ describe("selectionErrorKey", () => {
       "CONNECTOR_SELECTION_NOT_FOUND",
       "connectors.selection.error.notFound",
     ],
+    [
+      "CONNECTOR_OAUTH_ACCOUNT_NOT_FOUND",
+      "connectors.selection.error.reconnect",
+    ],
+    ["CONNECTOR_OAUTH_REFRESH_BUSY", "connectors.selection.error.tryLater"],
+    ["CONNECTOR_OAUTH_REFRESH_TIMEOUT", "connectors.selection.error.tryLater"],
+    // A platform code ending in _NOT_FOUND must not be mistaken for an item.
+    ["CONNECTOR_ADAPTER_NOT_FOUND", "connectors.selection.error.generic"],
     ["DROPBOX_NOT_FOUND", "connectors.selection.error.notFoundItem"],
     ["JIRA_RATE_LIMITED", "connectors.selection.error.tryLater"],
     ["DROPBOX_UNAVAILABLE", "connectors.selection.error.tryLater"],

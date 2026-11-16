@@ -3293,6 +3293,7 @@
         "limitReached": "You can select at most {limit} items. Remove some before adding more.",
         "containerIndexedCount": "{count, plural, one {# file indexed} other {# files indexed}}",
         "untitled": "Untitled",
+        "nameUnavailable": "Name unavailable",
         "browser": {
           "title": "Choose from {provider}",
           "breadcrumbLabel": "Path",
