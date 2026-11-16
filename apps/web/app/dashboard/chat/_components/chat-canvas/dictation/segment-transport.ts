@@ -73,7 +73,9 @@ export function createSegmentTransport(input: {
   let aborted = false;
 
   function pending(): number {
-    return enqueuedCount - deliveredCount;
+    // Once aborted — by an explicit abort() or a terminal failure — nothing
+    // undelivered will ever be delivered, so there is nothing left pending.
+    return aborted ? 0 : enqueuedCount - deliveredCount;
   }
 
   function notifyPending(): void {
@@ -98,12 +100,25 @@ export function createSegmentTransport(input: {
     queue.length = 0;
   }
 
+  /** Marks the transport aborted (idempotent) and settles everything that was waiting on it. */
+  function enterAborted(): void {
+    if (aborted) {
+      return;
+    }
+    const hadPending = enqueuedCount - deliveredCount !== 0;
+    aborted = true;
+    cancelRemaining();
+    if (hadPending) {
+      notifyPending();
+    }
+    settleIdleIfDone();
+  }
+
   function fail(error: SegmentTransportError): void {
     if (aborted) {
       return;
     }
-    aborted = true;
-    cancelRemaining();
+    enterAborted();
     input.onError(error);
   }
 
@@ -232,11 +247,7 @@ export function createSegmentTransport(input: {
       return new Promise((resolve) => idleWaiters.push(resolve));
     },
     abort(): void {
-      if (aborted) {
-        return;
-      }
-      aborted = true;
-      cancelRemaining();
+      enterAborted();
     },
   };
 }

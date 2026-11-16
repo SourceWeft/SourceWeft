@@ -287,3 +287,99 @@ test("pending counts enqueued minus delivered", async () => {
 
   assert.equal(transport.pending(), 1);
 });
+
+test("whenIdle resolves after abort with a segment in flight", { timeout: 2000 }, async () => {
+  const pendingChanges: number[] = [];
+
+  const transport = createSegmentTransport({
+    send: () => new Promise<{ text: string }>(() => {}),
+    onText: () => {},
+    onError: failingErrorHandler(),
+    onPendingChange: (count) => pendingChanges.push(count),
+  });
+
+  transport.enqueue(segment());
+  const idle = transport.whenIdle();
+  transport.abort();
+
+  await idle;
+
+  assert.equal(transport.pending(), 0);
+  assert.deepEqual(pendingChanges, [1, 0]);
+});
+
+test(
+  "whenIdle resolves after a terminal failure with a second segment still in flight",
+  { timeout: 2000 },
+  async () => {
+    const errors: SegmentTransportError[] = [];
+
+    const transport = createSegmentTransport({
+      send: async (_wav, seq) => {
+        if (seq === 0) {
+          throw new SegmentSendError(402);
+        }
+        return new Promise<{ text: string }>(() => {});
+      },
+      onText: () => {},
+      onError: (error) => errors.push(error),
+    });
+
+    transport.enqueue(segment());
+    transport.enqueue(segment());
+
+    await transport.whenIdle();
+
+    assert.deepEqual(errors, [{ reason: "insufficient-credits" }]);
+    assert.equal(transport.pending(), 0);
+  },
+);
+
+test("enqueue after abort sends nothing", async () => {
+  const sends: number[] = [];
+
+  const transport = createSegmentTransport({
+    send: (_wav, seq) => {
+      sends.push(seq);
+      return new Promise<{ text: string }>(() => {});
+    },
+    onText: () => {},
+    onError: failingErrorHandler(),
+  });
+
+  transport.enqueue(segment());
+  assert.deepEqual(sends, [0]);
+
+  transport.abort();
+  transport.enqueue(segment());
+  await tick();
+
+  assert.deepEqual(sends, [0]);
+  assert.equal(transport.pending(), 0);
+});
+
+test("a 429 whose retry also fails ends as rate-limited", async () => {
+  let callCount = 0;
+  const waitCalls: number[] = [];
+  const errors: SegmentTransportError[] = [];
+
+  const transport = createSegmentTransport({
+    send: async () => {
+      callCount += 1;
+      throw new SegmentSendError(429, 20);
+    },
+    onText: () => {},
+    onError: (error) => errors.push(error),
+    wait: async (ms) => {
+      waitCalls.push(ms);
+    },
+  });
+
+  transport.enqueue(segment());
+  await tick();
+  await tick();
+
+  assert.equal(callCount, 2);
+  assert.deepEqual(waitCalls, [5000]);
+  assert.deepEqual(errors, [{ reason: "rate-limited" }]);
+});
