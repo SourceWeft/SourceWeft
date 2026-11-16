@@ -165,19 +165,19 @@ export const connectorSelectionSpecSchema = z.object({
 const connectorSelectionContainerSchema = z.object({
   id: z.string().min(1).max(512),
   kind: connectorSelectionKindSchema,
-  name: z.string().min(1).max(1024),
+  name: z.string().max(1024),
   detail: z.string().max(2048).nullable(),
 });
 
 const connectorSelectionBreadcrumbSchema = z.object({
   id: z.string().min(1).max(512),
-  name: z.string().min(1).max(1024),
+  name: z.string().max(1024),
 });
 
 export const connectorSelectionEntrySchema = z.object({
   id: z.string().min(1).max(512),
   kind: connectorSelectionKindSchema,
-  name: z.string().min(1).max(1024),
+  name: z.string().max(1024),
   detail: z.string().max(2048).nullable(),
   selectable: z.boolean(),
   expandable: z.boolean(),

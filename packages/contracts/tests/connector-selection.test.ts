@@ -65,6 +65,31 @@ test("helpLink must be https", () => {
   }
 });
 
+test("an empty name is accepted on entries, the container and breadcrumbs", () => {
+  const parsed = connectorSelectionBrowseResultSchema.parse({
+    container: { id: "root", kind: "folder", name: "", detail: null },
+    breadcrumbs: [{ id: "b1", name: "" }],
+    entries: [{ ...entry, name: "" }],
+    cursor: "",
+    hasMore: false,
+  });
+  assert.equal(parsed.container?.name, "");
+  assert.equal(parsed.breadcrumbs[0]?.name, "");
+  assert.equal(parsed.entries[0]?.name, "");
+
+  const emptyEntryId = {
+    container: null,
+    breadcrumbs: [],
+    entries: [{ ...entry, id: "" }],
+    cursor: "",
+    hasMore: false,
+  };
+  assert.equal(
+    connectorSelectionBrowseResultSchema.safeParse(emptyEntryId).success,
+    false,
+  );
+});
+
 test("bounds are enforced", () => {
   const base = {
     container: null,
