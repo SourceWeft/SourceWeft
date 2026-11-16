@@ -17,6 +17,10 @@ const auth = vi.hoisted(() => ({
   getSession: vi.fn(),
   refetch: vi.fn(),
 }));
+const host = vi.hoisted(() => ({
+  pathname: "/dashboard/chat",
+  installAutomatically: vi.fn(),
+}));
 
 vi.mock("../../lib/auth-client", () => ({
   authClient: {
@@ -25,7 +29,7 @@ vi.mock("../../lib/auth-client", () => ({
   },
 }));
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/chat",
+  usePathname: () => host.pathname,
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ replace: vi.fn() }),
 }));
@@ -34,6 +38,9 @@ vi.mock("../../lib/register-builtin-agent-tools", () => ({
 }));
 vi.mock("../../lib/local-host-session", () => ({
   synchronizeLocalHostScope: () => Promise.resolve(),
+}));
+vi.mock("../../lib/sandbox-runtime-install", () => ({
+  installSandboxRuntimeAutomatically: host.installAutomatically,
 }));
 vi.mock("../../lib/desktop-bridge", () => ({
   desktopBridge: { isAvailable: () => false },
@@ -94,6 +101,8 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   auth.state = { data: null, isPending: true };
+  host.pathname = "/dashboard/chat";
+  host.installAutomatically.mockReset().mockResolvedValue(undefined);
   container = document.createElement("div");
   document.body.append(container);
 });
@@ -137,3 +146,34 @@ test("a client-side mount with a known session skips the skeleton", async () => 
   expect(container.querySelector("[data-testid=shell-skeleton]")).toBeNull();
   expect(container.querySelector("main")?.textContent).toBe("Chat page");
 });
+
+async function mountLayout() {
+  root = createRoot(container);
+  const mounted = root;
+  await act(async () => mounted.render(tree));
+}
+
+test("the signed-in dashboard asks for the sandbox runtime as soon as it opens", async () => {
+  auth.state = signedIn;
+  await mountLayout();
+  expect(host.installAutomatically).toHaveBeenCalledTimes(1);
+});
+
+test("nothing is asked for while the session is unknown or absent", async () => {
+  await mountLayout();
+  expect(host.installAutomatically).not.toHaveBeenCalled();
+  await act(async () => root?.unmount());
+  auth.state = { data: null, isPending: false };
+  await mountLayout();
+  expect(host.installAutomatically).not.toHaveBeenCalled();
+});
+
+test.each(["/dashboard/hub-window", "/dashboard/preview-window"])(
+  "the auxiliary window %s leaves the sandbox runtime to the main window",
+  async (pathname) => {
+    auth.state = signedIn;
+    host.pathname = pathname;
+    await mountLayout();
+    expect(host.installAutomatically).not.toHaveBeenCalled();
+  },
+);

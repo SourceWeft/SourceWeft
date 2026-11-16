@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
+import { ToolMessage } from "@langchain/core/messages";
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import {
@@ -90,6 +91,57 @@ test("generic artifact command failure uses the publisher error", () => {
     ),
     "Command failed because publish_report reported: Provider returned invalid JSON content.",
   );
+});
+
+test("committed-artifact receipt is recognised inside the tool message the running turn holds", () => {
+  const criteria = {
+    kind: "artifact" as const,
+    artifactType: "test_artifact",
+    toolName: committedPublisher.name,
+  };
+  const receipt = {
+    status: "ready",
+    type: "committed_artifact_result",
+    artifactType: "test_artifact",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    artifactOutputBlockId: "artifact-output:run-1:artifact-1:version-1",
+    workflowVersion: "test-workflow",
+  };
+  const message = new ToolMessage({
+    content: JSON.stringify(receipt),
+    name: committedPublisher.name,
+    tool_call_id: "committed-call",
+  });
+  const callWith = (output: unknown) => ({
+    id: "committed-call",
+    input: {},
+    output,
+    status: "completed" as const,
+    tool: committedPublisher.name,
+    latencyMs: 10,
+    error: null,
+    sequence: 1,
+  });
+  const satisfied = (output: unknown) =>
+    isCommandSuccessSatisfied({ criteria, toolCalls: [callWith(output)] });
+
+  assert.equal(satisfied(message), true);
+  assert.equal(satisfied(JSON.parse(JSON.stringify(message))), true);
+  assert.equal(satisfied(JSON.stringify(receipt)), true);
+
+  const wrongType = new ToolMessage({
+    content: JSON.stringify({ ...receipt, artifactType: "wrong_artifact" }),
+    name: committedPublisher.name,
+    tool_call_id: "committed-call",
+  });
+  assert.equal(satisfied(wrongType), false);
+  const incomplete = new ToolMessage({
+    content: JSON.stringify({ status: "ready", artifactId: "artifact-1" }),
+    name: committedPublisher.name,
+    tool_call_id: "committed-call",
+  });
+  assert.equal(satisfied(incomplete), false);
 });
 
 test("registered committed-artifact result satisfies capability-owned success", () => {

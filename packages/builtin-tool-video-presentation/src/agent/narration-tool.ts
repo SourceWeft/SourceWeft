@@ -1,6 +1,10 @@
 import { tool, type ToolRuntime } from "langchain";
 import { z } from "zod";
-import type { ModelGateway } from "@sourceweft/model-gateway";
+import {
+  normalizeGatewayError,
+  TTS_UNSUPPORTED_VOICE_REASON,
+  type ModelGateway,
+} from "@sourceweft/model-gateway";
 import type {
   AgentToolLlmExecutionConfig,
   AgentToolMediaServices,
@@ -40,7 +44,15 @@ const narrationRequestSchema = z
 const generateVideoNarrationSchema = z
   .object({
     projectRoot: z.string().trim().min(1).max(1000),
-    voice: z.string().trim().min(1).max(120).optional(),
+    voice: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .optional()
+      .describe(
+        "Exact voice id of the narration provider. Omit it to use the default voice. It is not a style description: an unknown id is rejected with the list of available voices.",
+      ),
     tracks: z.array(narrationRequestSchema).min(1).max(12),
   })
   .strict();
@@ -89,6 +101,24 @@ function narrationOutput(
     ...rest,
     sandboxPath: narrationSandboxPath(projectRoot, observation.fileName),
   };
+}
+
+/**
+ * The gateway refused the voice before reaching the provider. Its message
+ * names the voices that exist, which is what the agent needs to correct the
+ * call, so it is passed on instead of a generic provider rejection.
+ */
+export function unsupportedVoiceFailure(
+  error: unknown,
+): VideoSemanticFailureObservation | null {
+  const normalized = normalizeGatewayError(error);
+  if (normalized.metadata?.reason !== TTS_UNSUPPORTED_VOICE_REASON) {
+    return null;
+  }
+  return videoSemanticFailure(
+    "VIDEO_NARRATION_VOICE_UNSUPPORTED",
+    normalized.message,
+  );
 }
 
 function failureDiagnostic(
@@ -347,11 +377,13 @@ export function createGenerateVideoNarrationTool(input: {
             await markPendingUnknown("NARRATION_TOOL_ABORTED");
             throwVideoToolAbortReason(abortSignal);
           }
-          const known = knownVideoProviderFailure({
-            error,
-            codePrefix: "VIDEO_NARRATION",
-            providerLabel: "narration",
-          });
+          const known =
+            unsupportedVoiceFailure(error) ??
+            knownVideoProviderFailure({
+              error,
+              codePrefix: "VIDEO_NARRATION",
+              providerLabel: "narration",
+            });
           if (known && (await completeFailure(item, known))) {
             diagnostics.push(failureDiagnostic(request.slideNumber, known));
           } else {

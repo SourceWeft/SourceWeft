@@ -3,6 +3,7 @@ import { videoPresentationRenderableProjectSchema } from "@sourceweft/contracts/
 import { createSandboxVideoPresentationRenderPort } from "./agent/render-port";
 import { materializeVideoPresentationAssetUris } from "./pipeline/asset-uris";
 import { buildValidationProjectCodePayload } from "./pipeline/project-code";
+import { VIDEO_PROJECT_INSTALL_COMMAND } from "./pipeline/project-validation";
 
 type BenchmarkCommandResult = {
   exitCode: number | null;
@@ -216,7 +217,7 @@ export const sandboxCapabilityBenchmark = {
       assertSuccess(
         "install",
         await execute(
-          `cd ${root} && pnpm install --frozen-lockfile --ignore-scripts --prefer-offline --store-dir "\${SOURCEWEFT_PNPM_STORE:-.pnpm-store}" && pnpm run build && pnpm run render-smoke`,
+          `cd ${root} && ${VIDEO_PROJECT_INSTALL_COMMAND} && pnpm run build && pnpm run render-smoke`,
           limits.batchCommandTimeoutMs,
         ),
       );

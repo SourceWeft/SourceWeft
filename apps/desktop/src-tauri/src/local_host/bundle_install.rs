@@ -1,10 +1,12 @@
 //! Downloads, verifies and installs the sandbox runtime bundle (`<app data>/sandbox/current`).
 //!
 //! The bundle is a release asset of the exact app version (`sourceweft-sandbox-<target>.tar.gz`
-//! plus its `.sig`, see `scripts/ci/sandbox-bundle.mjs` for the archive contract). It is only
-//! ever fetched because the user asked for it, and nothing here is configurable at run time: the
-//! URL is derived from the app version, the signer is the updater key embedded in the build, and
-//! the platform comes from the build target.
+//! plus its `.sig`, see `scripts/ci/sandbox-bundle.mjs` for the archive contract). The web UI
+//! asks for it without a click when the signed-in app opens and the runtime is missing, out of
+//! date or damaged, and again when the user retries; nothing in this module starts a download
+//! by itself. Nothing here is configurable at run time: the URL is derived from the app version,
+//! the signer is the updater key embedded in the build, and the platform comes from the build
+//! target.
 //!
 //! The flow, in order, with the first failure ending it (a stale or partial result is never
 //! left behind; the previous `current` is only replaced by a fully verified one):

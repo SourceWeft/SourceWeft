@@ -1,0 +1,35 @@
+{
+  "name": "@sourceweft/builtin-tool-study",
+  "license": "Apache-2.0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./export": "./src/export/index.ts",
+    "./testing": "./src/testing/index.ts",
+    "./ui": "./src/ui/index.tsx"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/ui-web": "workspace:*",
+    "lucide-react": "^0.562.0",
+    "ts-fsrs": "5.4.2",
+    "typescript": "5.9.2",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@sourceweft/model-gateway": "workspace:*",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
+    "tsx": "^4.23.12"
+  },
+  "peerDependencies": {
+    "react": "^19.2.1"
+  }
+}

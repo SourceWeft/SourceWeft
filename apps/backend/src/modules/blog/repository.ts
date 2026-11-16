@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { blogAssets, blogPosts, db } from "@sourceweft/db";
 import type { BlogLocale } from "./locales";
 import type { UploadedBlogAsset } from "./public-storage";
@@ -340,6 +340,26 @@ export async function listBlogPostsForAdmin() {
     .from(blogPosts)
     .orderBy(desc(blogPosts.syncedAt), blogPosts.articleId, blogPosts.locale);
   return rows.map(toAdminSummary);
+}
+
+/** How many language versions are drafts and how many readers can see. */
+export async function countBlogPostsForAdmin() {
+  const rows = await db
+    .select({
+      status: blogPosts.status,
+      syncEnabled: blogPosts.syncEnabled,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(blogPosts)
+    .groupBy(blogPosts.status, blogPosts.syncEnabled);
+  let drafts = 0;
+  let published = 0;
+  for (const row of rows) {
+    if (row.status === "draft") drafts += row.total;
+    // A published row with sync turned off is hidden from readers.
+    if (row.status === "published" && row.syncEnabled) published += row.total;
+  }
+  return { drafts, published };
 }
 
 /** One post with its rendered body, for the admin's preview. */

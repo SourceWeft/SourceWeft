@@ -85,6 +85,15 @@ export interface TtsTransport {
    */
   readonly outputFormats?: readonly string[];
 
+  /**
+   * Voice ids the target's model accepts, when it has a closed list. Returns
+   * undefined when the list is not known, and the voice is then passed through
+   * as given. A request naming a voice outside the list is rejected before
+   * the provider is called: providers answer an unknown voice with an opaque
+   * server error, which callers cannot tell from an outage.
+   */
+  voices?(target: ResolvedRequestTarget): readonly string[] | undefined;
+
   execute(input: {
     target: ResolvedRequestTarget;
     payload: TtsSpeechInput;

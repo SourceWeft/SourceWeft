@@ -8,8 +8,15 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 
 import { authClient } from "../../../lib/auth-client";
 import { useDesktopTitlebar } from "../../../lib/desktop-titlebar";
+import type { AdminOverviewResponse } from "@sourceweft/contracts";
+
+import { getAdminOverview } from "../../../lib/admin-overview";
 import { getSkillMarketAdminMe } from "../../../lib/skill-market-audit";
 import { AdminNav } from "./_components/admin-nav";
+import {
+  AdminOverviewProvider,
+  type AdminOverviewState,
+} from "./_components/admin-overview-context";
 
 type AccessState = {
   userId: string;
@@ -76,6 +83,45 @@ export default function AdminLayout({
     };
   }, [isPending, pathname, retry, router, search, userId]);
 
+  const allowed =
+    !isPending &&
+    !!userId &&
+    access?.userId === userId &&
+    access?.status === "allowed";
+  const [overview, setOverview] = React.useState<AdminOverviewResponse | null>(
+    null,
+  );
+  const [overviewFailed, setOverviewFailed] = React.useState(false);
+  const [overviewTick, setOverviewTick] = React.useState(0);
+
+  // The pending numbers, read again on every section and whenever a page says
+  // a queue changed. A failure only hides the numbers.
+  React.useEffect(() => {
+    if (!allowed) return;
+    let cancelled = false;
+    void getAdminOverview()
+      .then((result) => {
+        if (cancelled) return;
+        setOverview(result);
+        setOverviewFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setOverviewFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allowed, overviewTick, pathname]);
+
+  const overviewState = React.useMemo<AdminOverviewState>(
+    () => ({
+      overview,
+      failed: overviewFailed,
+      refresh: () => setOverviewTick((value) => value + 1),
+    }),
+    [overview, overviewFailed],
+  );
+
   if (userId && !isPending && access && access.userId === userId) {
     if (access.status === "allowed") {
       return (
@@ -86,12 +132,14 @@ export default function AdminLayout({
               data-desktop-drag-region
             />
           ) : null}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
-            <AdminNav pathname={pathname} />
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {children}
+          <AdminOverviewProvider value={overviewState}>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+              <AdminNav pathname={pathname} />
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {children}
+              </div>
             </div>
-          </div>
+          </AdminOverviewProvider>
         </div>
       );
     }

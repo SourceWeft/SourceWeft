@@ -37,6 +37,29 @@ function withTtsCharacters(
   };
 }
 
+/** Reason code on the error raised for a voice the target does not have. */
+export const TTS_UNSUPPORTED_VOICE_REASON = "unsupported_voice";
+
+function assertVoiceIsAvailable(
+  voices: readonly string[] | undefined,
+  input: { target: ResolvedRequestTarget; payload: TtsSpeechInput },
+) {
+  const voice = input.payload.voice?.trim();
+  if (!voice || !voices || voices.includes(voice)) {
+    return;
+  }
+  throw new ModelGatewayError({
+    code: "BAD_REQUEST",
+    message: `Voice '${voice.slice(0, 60)}' is not available for ${input.target.providerModel}. Available voices: ${voices.join(", ")}. Leave the voice out to use the default.`,
+    retryable: false,
+    provider: input.target.provider,
+    metadata: {
+      reason: TTS_UNSUPPORTED_VOICE_REASON,
+      supportedVoices: [...voices],
+    },
+  });
+}
+
 export async function runBridgeTtsSpeech(input: {
   config: ResolvedModelGatewayConfig;
   target: ResolvedRequestTarget;
@@ -54,6 +77,7 @@ async function synthesizeSpeech(input: {
 }): Promise<TtsSpeechResult> {
   try {
     const transport = getTtsTransport(input.target.providerKind);
+    assertVoiceIsAvailable(transport.voices?.(input.target), input);
     const requested = input.payload.responseFormat?.trim().toLowerCase();
     const native = transport.outputFormats;
     // Only an explicit request for a format the provider lacks is converted;

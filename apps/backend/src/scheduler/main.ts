@@ -11,7 +11,11 @@ import { durableChatRunService } from "../modules/threads";
 import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
 import { resumePausedGuides } from "../modules/sources/guide-service";
-import { scheduleConnectorSyncs } from "./schedules/connectors";
+import {
+  KEEP_ALIVE_INTERVAL_MS,
+  refreshIdleConnectorTokens,
+  scheduleConnectorSyncs,
+} from "./schedules/connectors";
 import { connectorAdaptersReady } from "../modules/connectors";
 import {
   GITHUB_REGISTRY_INTERVAL_MS,
@@ -259,6 +263,18 @@ const githubRegistryTimer = setInterval(() => {
   void githubRegistryTick();
 }, GITHUB_REGISTRY_INTERVAL_MS);
 
+// OAuth keep-alive refreshes a batch of idle connector accounts so their
+// refresh token does not silently expire from disuse. It is not pushed into
+// `tick`'s jobs: one pass over a full batch against a slow provider can
+// legitimately run far longer than tick's STUCK_TICK_MS budget, which would
+// make the scheduler report itself unhealthy. It runs on its own timer
+// instead and guards itself against overlapping passes (see
+// `refreshIdleConnectorTokens`).
+void refreshIdleConnectorTokens();
+const connectorTokenKeepAliveTimer = setInterval(() => {
+  void refreshIdleConnectorTokens();
+}, KEEP_ALIVE_INTERVAL_MS);
+
 // Liveness for `launch.js health scheduler`: the event loop runs this timer
 // and no tick is stuck. A tick that is slow because a dependency is down still
 // ends within STUCK_TICK_MS through its own timeouts.
@@ -284,6 +300,7 @@ async function shutdown() {
   clearInterval(mcpStdioValidationTimer);
   clearInterval(skillMarketTimer);
   clearInterval(githubRegistryTimer);
+  clearInterval(connectorTokenKeepAliveTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
   process.exit(0);

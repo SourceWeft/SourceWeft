@@ -61,7 +61,8 @@ Open **Settings → This computer**. It shows what is missing; on a fresh instal
 two steps, in this order:
 
 1. **Install the sandbox runtime** — a signed download (`sourceweft-sandbox-<triple>.tar.gz` and
-   its signature) that starts only when you click Install. It unpacks into the app's data folder
+   its signature) that the app starts by itself when it opens; **Install sandbox runtime**
+   retries it if it did not finish. It unpacks into the app's data folder
    (`%APPDATA%\nicelab.sourceweft\sandbox\current`) and holds the sidecar, `rg.exe`, the proxy
    agent and `srt-win.exe`. That folder is yours to write, so nothing in it ever runs with
    elevated rights or as the sandbox account.

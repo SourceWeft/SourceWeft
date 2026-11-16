@@ -9,6 +9,7 @@ import {
   clearTeamDataKeyCache,
   decryptTeamSecret,
   encryptTeamSecret,
+  getTeamSecretCipher,
   rotateTeamDataKey,
 } from "./team-secrets";
 
@@ -260,6 +261,75 @@ test("a stale-cache write under the old key stays readable after rotation", asyn
     await decryptTeamSecret(staleWrite, teamId),
     "stale-cache-write",
   );
+});
+
+test("getTeamSecretCipher round-trips and interoperates with encrypt/decryptTeamSecret", async () => {
+  const teamId = newTeamId();
+
+  const cipher = await getTeamSecretCipher(teamId);
+  const payload = cipher.encrypt("sk-super-secret");
+
+  assert.ok(payload.startsWith("v2:"));
+  assert.equal(cipher.decrypt(payload), "sk-super-secret");
+  // A payload the cipher wrote decrypts through decryptTeamSecret, and one
+  // encryptTeamSecret wrote decrypts through the cipher: same key, same format.
+  assert.equal(await decryptTeamSecret(payload, teamId), "sk-super-secret");
+  const viaTeamSecret = await encryptTeamSecret("other-secret", teamId);
+  assert.equal(cipher.decrypt(viaTeamSecret), "other-secret");
+});
+
+test("getTeamSecretCipher keeps empty/null and v1 fallback semantics", async () => {
+  const teamId = newTeamId();
+  const cipher = await getTeamSecretCipher(teamId);
+
+  assert.equal(cipher.encrypt(""), "");
+  assert.equal(cipher.decrypt(""), "");
+  assert.equal(cipher.decrypt(null), "");
+
+  // Pre-envelope v1 payloads fall back to the deployment master secret.
+  const v1Payload = encryptSecret(
+    "legacy-token",
+    config.modelGatewayEncryptionSecret,
+  );
+  assert.equal(cipher.decrypt(v1Payload), "legacy-token");
+
+  // Malformed v2 payloads fail with the same shape as decryptTeamSecret.
+  assert.throws(
+    () => cipher.decrypt("v2:aaaa:bbbb:cccc"),
+    /Invalid encrypted secret payload/,
+  );
+});
+
+test("getTeamSecretCipher does no database access after it is resolved", async () => {
+  const teamId = newTeamId();
+  const payload = await encryptTeamSecret("pre-existing", teamId);
+
+  const cipher = await getTeamSecretCipher(teamId);
+
+  // Remove every database trace of the team's key and drop the cache: the
+  // cipher still works purely from the key set it captured in memory.
+  clearTeamDataKeyCache();
+  await db.delete(teamDataKeys).where(eq(teamDataKeys.teamId, teamId));
+
+  assert.equal(cipher.decrypt(payload), "pre-existing");
+  const roundTrip = cipher.encrypt("fresh-under-lock");
+  assert.equal(cipher.decrypt(roundTrip), "fresh-under-lock");
+
+  // Prove the row really is gone — decryptTeamSecret (which reads the DB) now
+  // fails for the same payload the in-memory cipher just decrypted.
+  await assert.rejects(() => decryptTeamSecret(payload, teamId));
+});
+
+test("getTeamSecretCipher decrypts a payload written under the retiring key", async () => {
+  const teamId = newTeamId();
+  const preRotation = await encryptTeamSecret("rotate-me", teamId);
+
+  await rotateTeamDataKey(teamId, async () => {});
+
+  // After one rotation the pre-rotation payload is under the retiring key; the
+  // cipher falls back to it just as decryptTeamSecret does.
+  const cipher = await getTeamSecretCipher(teamId);
+  assert.equal(cipher.decrypt(preRotation), "rotate-me");
 });
 
 test("decrypting a v2 payload for a keyless team fails without minting a key row", async () => {

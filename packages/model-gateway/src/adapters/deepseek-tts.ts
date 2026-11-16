@@ -14,6 +14,7 @@ import { buildTtsSpeechResult, throwIfTtsHttpError } from "./tts-utils";
  * text is the caller's job.
  */
 const DEFAULT_VOICE = "stella";
+const VOICES = [DEFAULT_VOICE, "tide"] as const;
 const DEFAULT_FORMAT = "wav";
 const SUPPORTED_FORMATS = new Set(["wav", "pcm"]);
 const MAX_BILLED_UNITS = 10_000;
@@ -45,6 +46,10 @@ export class DeepSeekTtsTransport implements TtsTransport {
   readonly kind = "deepseek" as const;
 
   readonly outputFormats = ["wav", "pcm"] as const;
+
+  voices() {
+    return VOICES;
+  }
 
   async execute(input: Parameters<TtsTransport["execute"]>[0]) {
     const { payload, target } = input;

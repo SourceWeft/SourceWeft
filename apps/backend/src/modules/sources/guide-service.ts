@@ -4,8 +4,8 @@ import {
 } from "@sourceweft/contracts/sources";
 import { logger } from "../../shared/logger";
 import { BillingAdmissionError } from "../../shared/model-gateway/index";
-import { workspaceService } from "../workspace";
 import type { ContentBillingPort } from "../content/billing-port";
+import { defaultPayerPorts } from "../content/payer-ports";
 import {
   enqueueSourceGuideGenerateJob,
   type SourceGuideGenerateJobPayload,
@@ -27,14 +27,6 @@ const AUTO_GUIDE_INGEST_KINDS = new Set([
   "web_url",
   "youtube",
 ]);
-
-const defaultPayerPorts: GuidePayerPorts = {
-  resolveAccess: (input) => workspaceService.resolveAccess(input),
-  resolveResponsibleUserId: (input) =>
-    workspaceService.resolveResponsibleUserId(input),
-  resolveBillingOrganizationId: (input) =>
-    workspaceService.resolveBillingOrganizationId(input),
-};
 
 type GuideSource = {
   id: string;

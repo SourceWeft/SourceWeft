@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   setVersionStatus: vi.fn(),
   getVersionForAudit: vi.fn(),
   recordVersionModeration: vi.fn(),
+  listReviewQueue: vi.fn(),
+  countReviewQueue: vi.fn(),
+  findUserIdentities: vi.fn(),
 }));
 
 vi.mock("../middleware/auth-session", async () =>
@@ -28,7 +31,8 @@ vi.mock("../../modules/market/admin", () => ({
   isMarketAdmin: () => mocks.admin,
 }));
 vi.mock("../../modules/skills/registry/review", () => ({
-  listRegistryReviewQueue: vi.fn(),
+  listRegistryReviewQueue: mocks.listReviewQueue,
+  countRegistryReviewQueue: mocks.countReviewQueue,
   setRegistrySkillVersionStatus: mocks.setVersionStatus,
 }));
 vi.mock("../../modules/skills/market/events", () => ({
@@ -409,4 +413,44 @@ test("review-queue decisions are audited as what they were: publish, reject, rev
     404,
   );
   assert.equal(mocks.recordVersionModeration.mock.calls.length, 0);
+});
+
+test("the review queue is read a page at a time and says how many are waiting in all", async () => {
+  const app = createTestApp();
+  const path = "/v1/skills/registry/admin/submissions";
+  const item = { skillVersionId: "v_1", submittedBy: null };
+  mocks.listReviewQueue.mockResolvedValue({
+    items: [item],
+    nextCursor: "next",
+  });
+  mocks.countReviewQueue.mockResolvedValue(38126);
+
+  const first = await app.request(path);
+  assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), {
+    items: [{ ...item, submittedByName: null }],
+    nextCursor: "next",
+    total: 38126,
+  });
+  assert.deepEqual(mocks.listReviewQueue.mock.calls.at(-1), [
+    { limit: undefined, cursor: null },
+  ]);
+
+  const createdAt = new Date("2026-11-15T08:00:00.123Z");
+  const cursor = Buffer.from(
+    JSON.stringify([createdAt.toISOString(), "v_9"]),
+  ).toString("base64url");
+  assert.equal(
+    (await app.request(`${path}?limit=20&cursor=${cursor}`)).status,
+    200,
+  );
+  assert.deepEqual(mocks.listReviewQueue.mock.calls.at(-1), [
+    { limit: 20, cursor: { createdAt, id: "v_9" } },
+  ]);
+
+  const calls = mocks.listReviewQueue.mock.calls.length;
+  for (const query of ["limit=0", "limit=abc", "limit=1.5", "cursor=nope"]) {
+    assert.equal((await app.request(`${path}?${query}`)).status, 400, query);
+  }
+  assert.equal(mocks.listReviewQueue.mock.calls.length, calls);
 });

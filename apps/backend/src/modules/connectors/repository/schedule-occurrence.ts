@@ -7,6 +7,11 @@ import {
   sourceConnectors,
   taskSchedules,
 } from "@sourceweft/db";
+import {
+  markOccurrenceQueued,
+  markOccurrenceSkipped,
+  retryOccurrence,
+} from "../../schedules";
 
 export async function attachScheduleOccurrenceRun(input: {
   occurrenceId: string;
@@ -18,61 +23,12 @@ export async function attachScheduleOccurrenceRun(input: {
     .where(eq(scheduleOccurrences.id, input.occurrenceId));
 }
 
-export async function markScheduleOccurrenceQueued(occurrenceId: string) {
-  const now = new Date();
-  await db.transaction(async (tx) => {
-    const [row] = await tx
-      .update(scheduleOccurrences)
-      .set({ status: "queued", leaseUntil: null, updatedAt: now })
-      .where(
-        and(
-          eq(scheduleOccurrences.id, occurrenceId),
-          eq(scheduleOccurrences.status, "dispatching"),
-        ),
-      )
-      .returning({ scheduleId: scheduleOccurrences.scheduleId });
-    if (row) {
-      await tx
-        .update(taskSchedules)
-        .set({ lastAttemptAt: now, retryAt: null, updatedAt: now })
-        .where(eq(taskSchedules.id, row.scheduleId));
-    }
-  });
-}
-
-export async function markScheduleOccurrenceSkipped(input: {
-  occurrenceId: string;
-  reason: string;
-}) {
-  const now = new Date();
-  await db.transaction(async (tx) => {
-    const [row] = await tx
-      .update(scheduleOccurrences)
-      .set({
-        status: "skipped",
-        leaseUntil: null,
-        lastError: input.reason.slice(0, 500),
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(scheduleOccurrences.id, input.occurrenceId),
-          eq(scheduleOccurrences.status, "dispatching"),
-        ),
-      )
-      .returning({ scheduleId: scheduleOccurrences.scheduleId });
-    if (row) {
-      await tx
-        .update(taskSchedules)
-        .set({
-          lastAttemptAt: now,
-          lastErrorCode: input.reason.slice(0, 200),
-          updatedAt: now,
-        })
-        .where(eq(taskSchedules.id, row.scheduleId));
-    }
-  });
-}
+// The lifecycle transitions are the shared engine's; the connector names stay
+// as aliases so callers and tests keep one vocabulary.
+export {
+  markOccurrenceQueued as markScheduleOccurrenceQueued,
+  markOccurrenceSkipped as markScheduleOccurrenceSkipped,
+};
 
 export async function listQueuedConnectorOccurrences(limit: number) {
   return db
@@ -220,28 +176,12 @@ export async function retryScheduleOccurrence(input: {
   error: string;
   attempts: number;
 }) {
-  const delayMs = Math.min(
-    60 * 60_000,
-    30_000 * 2 ** Math.min(input.attempts, 7),
-  );
-  await db.transaction(async (tx) => {
-    const [row] = await tx
-      .update(scheduleOccurrences)
-      .set({
-        status: input.attempts >= 5 ? "failed" : "pending",
-        retryAt: input.attempts >= 5 ? null : new Date(Date.now() + delayMs),
-        leaseUntil: null,
-        lastError: input.error.slice(0, 500),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(scheduleOccurrences.id, input.occurrenceId),
-          eq(scheduleOccurrences.status, "dispatching"),
-        ),
-      )
-      .returning();
-    if (row?.syncRunId && input.attempts >= 5) {
+  await retryOccurrence({
+    ...input,
+    errorCode: "CONNECTOR_DISPATCH_FAILED",
+    // The last attempt failed, so the sync run created for the slot fails too.
+    onFinalFailure: async (tx, occurrence) => {
+      if (!occurrence.syncRunId) return;
       await tx
         .update(connectorSyncRuns)
         .set({
@@ -252,22 +192,11 @@ export async function retryScheduleOccurrence(input: {
         })
         .where(
           and(
-            eq(connectorSyncRuns.id, row.syncRunId),
+            eq(connectorSyncRuns.id, occurrence.syncRunId),
             eq(connectorSyncRuns.status, "queued"),
           ),
         );
-    }
-    if (row) {
-      await tx
-        .update(taskSchedules)
-        .set({
-          lastAttemptAt: new Date(),
-          retryAt: row.retryAt,
-          lastErrorCode: "CONNECTOR_DISPATCH_FAILED",
-          updatedAt: new Date(),
-        })
-        .where(eq(taskSchedules.id, row.scheduleId));
-    }
+    },
   });
 }
 

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { SandboxReadiness, SandboxRemedy } from "./desktop-bridge";
-import { deviceSystemLabel, sandboxSetupCard } from "./sandbox-setup";
+import {
+  deviceSystemLabel,
+  isSandboxProbePending,
+  localSetupNotice,
+  sandboxSetupCard,
+} from "./sandbox-setup";
 
 const needs = (
   remedy: SandboxRemedy,
@@ -112,4 +117,58 @@ test("deviceSystemLabel names known platforms and tolerates missing fields", () 
   );
   assert.equal(deviceSystemLabel({ platform: null, arch: "x64" }), null);
   assert.equal(deviceSystemLabel({}), null);
+});
+
+test("only a computer that needs setup or is unsupported gets a notice", () => {
+  assert.equal(localSetupNotice(undefined), null);
+  assert.equal(localSetupNotice(null), null);
+  assert.equal(localSetupNotice({ state: "ready" }), null);
+  assert.equal(
+    localSetupNotice({ state: "somethingNew" } as unknown as SandboxReadiness),
+    null,
+  );
+  assert.deepEqual(localSetupNotice({ state: "unsupported" }), {
+    state: "unsupported",
+  });
+});
+
+test.each([
+  ["downloadRuntime", "bundleMissing", "install"],
+  ["downloadRuntime", "bundleStale", "install"],
+  ["none", "installing", "installing"],
+  ["updateApp", "bundleNewer", "updateApp"],
+  ["reinstallPackage", "bwrapMissing", "other"],
+  ["privilegedSetup", "userNamespaceRestricted", "other"],
+  ["elevatedSetup", "windowsNotInstalled", "other"],
+  ["none", "sandboxFailed", "other"],
+  ["somethingNew", "sandboxFailed", "other"],
+] as const)(
+  "remedy %s with code %s gives the %s notice",
+  (remedy, code, kind) => {
+    assert.deepEqual(
+      localSetupNotice(needs(remedy as SandboxRemedy, { code })),
+      { state: "needsSetup", kind },
+    );
+  },
+);
+
+test("a probe that is still running is not a setup need", () => {
+  const pending = needs("none", {
+    code: "sandboxFailed",
+    reason: "Checking the sandbox runtime",
+  });
+  assert.equal(isSandboxProbePending(pending), true);
+  assert.equal(localSetupNotice(pending), null);
+  // A real failure with no remedy is one.
+  const failed = needs("none", {
+    code: "sandboxFailed",
+    reason: "sidecar did not reply in time",
+  });
+  assert.equal(isSandboxProbePending(failed), false);
+  assert.deepEqual(localSetupNotice(failed), {
+    state: "needsSetup",
+    kind: "other",
+  });
+  assert.equal(isSandboxProbePending({ state: "ready" }), false);
+  assert.equal(isSandboxProbePending(undefined), false);
 });

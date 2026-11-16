@@ -11,6 +11,7 @@ import {
   type SkillOverviewStatusResponse,
 } from "../../../../../lib/skill-overviews";
 import { useTranslations } from "next-intl";
+import { AdminHeader } from "../../_components/admin-ui";
 
 function errorMessage(error: unknown, fallback: string) {
   const message = (error as { message?: unknown } | null)?.message;
@@ -105,7 +106,7 @@ export function SkillOverviewSettings() {
   return (
     <section
       aria-label={t("title")}
-      className="space-y-4 rounded-2xl border border-border bg-background p-4 shadow-xs"
+      className="space-y-4 rounded-xl border border-border p-4"
     >
       <div>
         <div className="flex items-center gap-2">
@@ -151,7 +152,13 @@ export function SkillOverviewSettings() {
 
 /** Market settings: AI overviews and their system model (§17.4). */
 export function SkillMarketSettingsAdmin() {
-  return <SkillOverviewSettings />;
+  const t = useTranslations("dashboardAdmin.nav.items");
+  return (
+    <div className="space-y-6">
+      <AdminHeader title={t("marketSettings")} />
+      <SkillOverviewSettings />
+    </div>
+  );
 }
 
 /** Preview each bounded batch before explicitly scheduling paid analysis. */

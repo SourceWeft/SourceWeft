@@ -60,6 +60,21 @@ describe("resolveArtifactPreviewRenderer", () => {
     ).toBe("video-presentation");
   });
 
+  it("hands study artifacts to the study package, whatever their status", () => {
+    for (const artifactType of ["flashcards", "quiz", "mindmap"] as const) {
+      expect(
+        resolveArtifactPreviewRenderer(
+          context({ artifactType, storageKey: null }, {}),
+        )?.id,
+      ).toBe("study");
+      expect(
+        resolveArtifactPreviewRenderer(
+          context({ artifactType, status: "pending", storageKey: null }),
+        )?.id,
+      ).toBe("study");
+    }
+  });
+
   it("uses the shared file viewer when no capability owns the preview", () => {
     expect(
       resolveArtifactPreviewRenderer(context({ artifactType: "file" }))?.id,

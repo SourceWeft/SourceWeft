@@ -1,9 +1,13 @@
-import { connectorSyncOrchestrator } from "../../modules/connectors";
+import {
+  connectorOAuthService,
+  connectorSyncOrchestrator,
+} from "../../modules/connectors";
 import {
   enqueueConnectorSyncJob,
   getConnectorSyncJobState,
 } from "../../modules/content/queue";
 import { logger } from "../../shared/logger";
+import { runScheduleTick, type ScheduleAdapter } from "../../modules/schedules";
 import { toConnectorError } from "../../modules/connectors/errors";
 import {
   claimDispatchableConnectorOccurrences,
@@ -48,85 +52,73 @@ export async function resumeQuotaBlockedConnectors(now = new Date()) {
   }
 }
 
-export async function scheduleConnectorSyncs() {
-  const now = new Date();
-  await materializeDueConnectorSchedules({
-    now,
-    limit: SCHEDULED_CONNECTOR_LIMIT,
-  });
+/**
+ * The connector kind of the shared schedule engine: what to queue, how a
+ * queued sync is reconciled against its run, and how a lost run is recovered.
+ */
+const connectorScheduleAdapter: ScheduleAdapter<
+  Awaited<ReturnType<typeof listQueuedConnectorOccurrences>>[number],
+  Awaited<ReturnType<typeof listStaleRunningConnectorOccurrences>>[number],
+  Awaited<ReturnType<typeof claimDispatchableConnectorOccurrences>>[number]
+> = {
+  label: "connector",
+  limit: SCHEDULED_CONNECTOR_LIMIT,
+  staleAfterMs: 10 * 60_000,
+
+  materialize: ({ now, limit }) =>
+    materializeDueConnectorSchedules({ now, limit }),
 
   // A DB occurrence is the outbox. Queue entries may be lost independently of
   // the transaction that created them, so replaying the same run ID is safe.
-  const queued = await listQueuedConnectorOccurrences(
-    SCHEDULED_CONNECTOR_LIMIT * 2,
-  );
-  for (const { occurrence, schedule, run } of queued) {
-    if (!schedule.connectorId) continue;
-    try {
-      if (
-        run.status === "succeeded" ||
-        run.status === "failed" ||
-        run.status === "skipped" ||
-        run.status === "blocked"
-      ) {
-        await completeScheduleOccurrence({
-          runId: run.id,
-          succeeded: run.status === "succeeded" && run.failedCount === 0,
-          errorCode: run.errorCode,
-        });
-      } else if (run.status === "queued" && schedule.enabled) {
-        await enqueueConnectorSyncJob({
-          runId: run.id,
-          teamId: schedule.teamId,
-          workspaceId: schedule.workspaceId,
-          connectorId: schedule.connectorId,
-          userId: "system",
-        });
-      }
-    } catch (error) {
-      logger.error("Failed to reconcile queued connector sync", {
-        occurrenceId: occurrence.id,
-        connectorId: schedule.connectorId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+  listQueued: listQueuedConnectorOccurrences,
 
-  const stale = await listStaleRunningConnectorOccurrences({
-    cutoff: new Date(now.getTime() - 10 * 60_000),
-    limit: SCHEDULED_CONNECTOR_LIMIT,
-  });
-  for (const { occurrence, schedule, run } of stale) {
-    if (!schedule.connectorId) continue;
-    try {
-      const jobState = await getConnectorSyncJobState({
-        connectorId: schedule.connectorId,
+  async reconcileQueued({ schedule, run }) {
+    if (!schedule.connectorId) return;
+    if (
+      run.status === "succeeded" ||
+      run.status === "failed" ||
+      run.status === "skipped" ||
+      run.status === "blocked"
+    ) {
+      await completeScheduleOccurrence({
         runId: run.id,
+        succeeded: run.status === "succeeded" && run.failedCount === 0,
+        errorCode: run.errorCode,
       });
-      if (!jobState || jobState === "failed" || jobState === "completed") {
-        await recoverLostScheduleOccurrence({
-          occurrenceId: occurrence.id,
-          runId: run.id,
-          teamId: schedule.teamId,
-          workspaceId: schedule.workspaceId,
-          connectorId: schedule.connectorId,
-        });
-      }
-    } catch (error) {
-      logger.error("Failed to inspect stale connector sync", {
-        occurrenceId: occurrence.id,
+    } else if (run.status === "queued" && schedule.enabled) {
+      await enqueueConnectorSyncJob({
+        runId: run.id,
+        teamId: schedule.teamId,
+        workspaceId: schedule.workspaceId,
         connectorId: schedule.connectorId,
-        message: error instanceof Error ? error.message : String(error),
+        userId: "system",
       });
     }
-  }
+  },
 
-  const due = await claimDispatchableConnectorOccurrences({
-    now,
-    limit: SCHEDULED_CONNECTOR_LIMIT,
-  });
-  for (const { occurrence, schedule } of due) {
-    if (!schedule.connectorId) continue;
+  listStale: listStaleRunningConnectorOccurrences,
+
+  async recoverStale({ occurrence, schedule, run }) {
+    if (!schedule.connectorId) return;
+    const jobState = await getConnectorSyncJobState({
+      connectorId: schedule.connectorId,
+      runId: run.id,
+    });
+    if (!jobState || jobState === "failed" || jobState === "completed") {
+      await recoverLostScheduleOccurrence({
+        occurrenceId: occurrence.id,
+        runId: run.id,
+        teamId: schedule.teamId,
+        workspaceId: schedule.workspaceId,
+        connectorId: schedule.connectorId,
+      });
+    }
+  },
+
+  claim: claimDispatchableConnectorOccurrences,
+
+  async dispatch({ occurrence, schedule }) {
+    if (!schedule.connectorId) return;
     try {
       const result = await connectorSyncOrchestrator.enqueueScheduledRun({
         teamId: schedule.teamId,
@@ -180,7 +172,59 @@ export async function scheduleConnectorSyncs() {
         });
       }
     }
-  }
+  },
 
-  await resumeQuotaBlockedConnectors(now);
+  afterTick: (now) => resumeQuotaBlockedConnectors(now),
+
+  onError(phase, { occurrence, schedule }, error) {
+    logger.error(
+      phase === "reconcile"
+        ? "Failed to reconcile queued connector sync"
+        : "Failed to inspect stale connector sync",
+      {
+        occurrenceId: occurrence.id,
+        connectorId: (schedule as { connectorId?: string | null }).connectorId,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    );
+  },
+};
+
+export async function scheduleConnectorSyncs() {
+  await runScheduleTick(connectorScheduleAdapter, new Date());
+}
+
+/** How often the OAuth keep-alive sweep runs; see `refreshIdleConnectorTokens`. */
+export const KEEP_ALIVE_INTERVAL_MS = 60 * 60_000;
+
+// Not one of tick()'s jobs: a pass over a full batch of idle accounts against
+// a slow provider can legitimately run far longer than tick's STUCK_TICK_MS
+// budget, so scheduler/main.ts starts this on its own timer instead. The
+// in-flight guard below stands in for that interval timer's own overlap
+// protection, since a pass can outlive the hour between ticks of its timer.
+let keepAliveInFlight = false;
+
+/**
+ * Refresh OAuth accounts idle long enough that their refresh token risks
+ * silently expiring from disuse. Returns immediately, without calling
+ * `refreshIdleAccounts`, while a previous pass in this process is still
+ * running. Never rejects: a failed pass is logged and the guard is still
+ * released, so the next interval tries again.
+ */
+export async function refreshIdleConnectorTokens(
+  now: Date = new Date(),
+): Promise<void> {
+  if (keepAliveInFlight) {
+    return;
+  }
+  keepAliveInFlight = true;
+  try {
+    await connectorOAuthService.refreshIdleAccounts({ now });
+  } catch (error) {
+    logger.error("Failed to refresh idle connector OAuth tokens", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    keepAliveInFlight = false;
+  }
 }

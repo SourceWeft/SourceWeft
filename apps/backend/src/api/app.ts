@@ -35,6 +35,7 @@ import { registerSkillRegistryAdminRoutes } from "./routes/skills-registry";
 import { registerSkillMarketAdminRoutes } from "./routes/skills-market-admin";
 import { registerSkillCollectionAdminRoutes } from "./routes/skills-collections-admin";
 import { registerBlogAdminRoutes } from "./routes/blog-admin";
+import { registerAdminOverviewRoutes } from "./routes/admin-overview";
 import { registerSkillReportRoutes } from "./routes/skills-reports";
 import { registerSkillReviewRoutes } from "./routes/skills-reviews";
 import { registerSkillOverviewRoutes } from "./routes/skills-overviews";
@@ -110,6 +111,7 @@ export function createApp() {
   registerSkillMarketAdminRoutes(app);
   registerSkillCollectionAdminRoutes(app);
   registerBlogAdminRoutes(app);
+  registerAdminOverviewRoutes(app);
   registerSkillReportRoutes(app);
   registerSkillReviewRoutes(app);
   registerSkillOverviewRoutes(app);
