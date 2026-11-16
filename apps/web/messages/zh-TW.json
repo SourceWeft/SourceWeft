@@ -3285,6 +3285,63 @@
           "unknown": "因未知原因被跳過"
         }
       },
+      "dropbox": {
+        "itemsTitle": "檔案和資料夾",
+        "itemsDescription": "選擇要索引的 Dropbox 檔案和資料夾。所選內容都會按連接器的同步排程保持同步。",
+        "chooseFiles": "選擇檔案",
+        "count": "{count} / {limit}",
+        "empty": "尚未選擇任何內容。選擇檔案或資料夾以進行索引。",
+        "foldersGroup": "資料夾",
+        "filesGroup": "檔案",
+        "folderIndexedCount": "{count, plural, other {已索引 # 個檔案}}",
+        "folderMissing": "已不存在",
+        "remove": "移除 {name}",
+        "lastSynced": "{date} 已同步",
+        "limitReached": "最多可選擇 {limit} 個檔案和資料夾。請先移除部分內容再新增。",
+        "browser": {
+          "title": "從 Dropbox 選擇",
+          "description": "開啟資料夾檢視其中內容，然後勾選要索引的檔案和資料夾。",
+          "root": "Dropbox",
+          "breadcrumbLabel": "資料夾路徑",
+          "searchLabel": "按檔名搜尋 Dropbox",
+          "searchPlaceholder": "搜尋 Dropbox",
+          "emptyFolder": "此資料夾為空。",
+          "noResults": "沒有與搜尋符合的檔案或資料夾。",
+          "loadMore": "載入更多",
+          "select": "選擇 {name}",
+          "unsupported": "此檔案類型無法索引",
+          "alreadyAdded": "已新增",
+          "selectedCount": "已選擇 {count} 項",
+          "folderNote": "資料夾合計最多同步 {limit, number} 個檔案",
+          "cancel": "取消",
+          "add": "新增"
+        },
+        "error": {
+          "reconnect": "你的 Dropbox 帳號需要重新連接。重新連接後再試。",
+          "notFound": "此 Dropbox 連接器不可用。請重新整理後重試。",
+          "notFoundItem": "該資料夾或檔案在 Dropbox 中已不存在。",
+          "tryLater": "Dropbox 暫時繁忙。請稍後再試。",
+          "reopen": "Dropbox 列表已變化，請重新開啟該資料夾。",
+          "generic": "無法連接到 Dropbox。請重試。"
+        },
+        "state": {
+          "skipped": "已跳過",
+          "indexed": "已索引",
+          "processing": "同步中",
+          "failed": "失敗",
+          "waiting": "等待同步",
+          "unavailable": "已在 Dropbox 中刪除或失去存取權限"
+        },
+        "skipReason": {
+          "unsupported_type": "不支援的檔案類型",
+          "too_large": "檔案過大，無法索引",
+          "needs_ocr": "掃描版 PDF 暫不支援",
+          "export_too_large": "匯出內容過大，無法索引",
+          "empty_content": "沒有可讀內容",
+          "unreadable": "無法讀取檔案",
+          "unknown": "因未知原因被跳過"
+        }
+      },
       "settingsTab": {
         "overview": "概覽",
         "configuration": "設定",

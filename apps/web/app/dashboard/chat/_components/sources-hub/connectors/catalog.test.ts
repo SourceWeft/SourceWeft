@@ -5,10 +5,13 @@ import { getCatalogStatus } from "./components";
 
 test("catalog lists only implemented connectors", () => {
   expect(
-    connectorCatalogForAvailableTypes(["notion", "gmail", "google_drive"]).map(
-      (i) => i.id,
-    ),
-  ).toEqual(["notion", "gmail", "google_drive"]);
+    connectorCatalogForAvailableTypes([
+      "notion",
+      "gmail",
+      "google_drive",
+      "dropbox",
+    ]).map((i) => i.id),
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
 });
 
 test("Gmail stays hidden in the catalog until the backend registers it", () => {
@@ -21,6 +24,28 @@ test("Google Drive stays hidden until the backend registers it", () => {
   expect(
     connectorCatalogForAvailableTypes(["notion", "gmail"]).map((i) => i.id),
   ).toEqual(["notion", "gmail"]);
+});
+
+test("dropbox hidden until registered", () => {
+  expect(
+    connectorCatalogForAvailableTypes(["notion", "gmail", "google_drive"]).map(
+      (i) => i.id,
+    ),
+  ).toEqual(["notion", "gmail", "google_drive"]);
+  const dropbox = connectorCatalog.find((item) => item.id === "dropbox");
+  expect(dropbox).toMatchObject({
+    name: "Dropbox",
+    category: "Knowledge & Docs",
+    description:
+      "Choose Dropbox files and folders to index and keep them in sync.",
+    capabilities: ["Files & folders", "Scheduled sync"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+  });
 });
 
 test("Notion never depends on backend registration", () => {

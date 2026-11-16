@@ -179,6 +179,30 @@ export function fakeAdapter(
 }
 
 /**
+ * Wraps a real adapter (e.g. Dropbox's) with `vi.fn` around `extract` and
+ * `discoverPages`, so a test driving a real adapter through `makeSetup`'s
+ * `adapter` input gets the same `{ adapter, extract, discoverPages }` shape
+ * `fakeAdapter` returns — call-recording included — instead of a different,
+ * optional-fields shape that would force every existing caller's non-null
+ * `t.fake.extract`/`t.fake.discoverPages` access to start tolerating
+ * `undefined`.
+ */
+function fromAdapter(adapter: ConnectorAdapter) {
+  if (!adapter.discoverPages) {
+    throw new Error(
+      "makeSetup's `adapter` input must implement discoverPages",
+    );
+  }
+  const extract = vi.fn(adapter.extract);
+  const discoverPages = vi.fn(adapter.discoverPages);
+  return {
+    adapter: { ...adapter, extract, discoverPages } as ConnectorAdapter,
+    extract,
+    discoverPages,
+  };
+}
+
+/**
  * Stands in for embedding + settlement: charges the fake balance like
  * `meterIngestion` would, or rejects at settlement when `raceOnce` is set.
  */
@@ -237,10 +261,20 @@ export function makeSetup(ctx: ConnectorTestContext) {
     billing?: Partial<Pages>;
     owner?: string | null;
     reconcile?: boolean;
+    /** A real adapter to drive the orchestrator with, instead of the fake.
+     * When set, `pagesOf` is ignored for discovery (the adapter owns it). */
+    adapter?: ConnectorAdapter;
+    /** Matches the adapter's own manifest type so the registry resolves it;
+     * also the `source_connectors.connector_type` stored for the run. */
+    connectorType?: string;
+    /** Stored as the connector's `configJson`, read back by the adapter as
+     * `discoverPages`/`extract`'s `config` input. */
+    configJson?: Record<string, unknown>;
   }) {
     const teamId = randomUUID();
     const workspaceId = randomUUID();
     const connectorId = randomUUID();
+    const connectorType = input.connectorType ?? "fake_quota";
     await schema.db.insert(schema.workspaces).values({
       id: workspaceId,
       organizationId: teamId,
@@ -251,12 +285,15 @@ export function makeSetup(ctx: ConnectorTestContext) {
       id: connectorId,
       teamId,
       workspaceId,
-      connectorType: "fake_quota",
+      connectorType,
       name: connectorId,
+      configJson: input.configJson ?? {},
       createdBy: input.owner === undefined ? OWNER : input.owner,
     });
     const billing = fakeBilling(input.billing);
-    const fake = fakeAdapter(input.pagesOf, { reconcile: input.reconcile });
+    const fake = input.adapter
+      ? fromAdapter(input.adapter)
+      : fakeAdapter(input.pagesOf, { reconcile: input.reconcile });
     const index = stubIndexing(ctx, billing);
     const resolveActor = vi.fn(
       async (actor: { ownerUserId: string | null }) => actor.ownerUserId,
@@ -272,26 +309,71 @@ export function makeSetup(ctx: ConnectorTestContext) {
       resolveActor,
     );
     const target = { teamId, workspaceId, connectorId };
-    async function sync(
-      triggerType: "manual" | "scheduled" | "webhook" = "manual",
-      targetExternalIds?: string[],
-    ) {
-      const run = await syncRunRepo.createSyncRunRecord({
+    async function createRun(triggerType: "manual" | "scheduled" | "webhook") {
+      return syncRunRepo.createSyncRunRecord({
         ...target,
         triggerType,
         status: "queued",
       });
+    }
+    async function runRow(runId: string) {
+      const [row] = await schema.db
+        .select()
+        .from(schema.connectorSyncRuns)
+        .where(eq(schema.connectorSyncRuns.id, runId));
+      return row!;
+    }
+    /**
+     * Runs the orchestrator and returns the persisted run row. Propagates a
+     * rejection exactly as `orchestrator.run()` throws it — a non-blocked
+     * failure is persisted to the run (and connector/source rows) before
+     * `sync-orchestrator.ts`'s outer catch re-throws to its caller, so a
+     * caller expecting success must see that rejection, not a silent
+     * swallow that would hide a real regression. Use `syncExpectingFailure`
+     * for a case that is expected to end in such a failure.
+     */
+    async function sync(
+      triggerType: "manual" | "scheduled" | "webhook" = "manual",
+      targetExternalIds?: string[],
+    ) {
+      const run = await createRun(triggerType);
       await orchestrator.run({
         ...target,
         runId: run.id,
         userId: TRIGGER,
         ...(targetExternalIds ? { targetExternalIds } : {}),
       });
-      const [row] = await schema.db
-        .select()
-        .from(schema.connectorSyncRuns)
-        .where(eq(schema.connectorSyncRuns.id, run.id));
-      return row!;
+      return runRow(run.id);
+    }
+    /**
+     * For a case that is expected to end in a non-blocked failure (see
+     * `sync`'s doc comment). Awaits that rejection, asserts it actually
+     * happened, and returns both the persisted run row and the thrown error
+     * so the caller can assert on the error itself (e.g. its `code`) in
+     * addition to `run.status`/`run.errorCode`.
+     */
+    async function syncExpectingFailure(
+      triggerType: "manual" | "scheduled" | "webhook" = "manual",
+      targetExternalIds?: string[],
+    ) {
+      const run = await createRun(triggerType);
+      let caught: unknown;
+      try {
+        await orchestrator.run({
+          ...target,
+          runId: run.id,
+          userId: TRIGGER,
+          ...(targetExternalIds ? { targetExternalIds } : {}),
+        });
+      } catch (error) {
+        caught = error;
+      }
+      if (caught === undefined) {
+        throw new Error(
+          "syncExpectingFailure: orchestrator.run() did not throw",
+        );
+      }
+      return { run: await runRow(run.id), error: caught };
     }
     async function connectorRow() {
       const [row] = await schema.db
@@ -321,6 +403,7 @@ export function makeSetup(ctx: ConnectorTestContext) {
       index,
       resolveActor,
       sync,
+      syncExpectingFailure,
       connectorRow,
       sourceRows,
       cursor,
