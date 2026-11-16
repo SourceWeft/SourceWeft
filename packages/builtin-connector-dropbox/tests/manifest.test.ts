@@ -37,4 +37,13 @@ test("backend manifest exposes the Dropbox scopes, client id and redirect uri", 
   for (const action of manifest.actions) {
     assert.equal(action.visibility, "internal");
   }
+  assert.deepEqual(manifest.selection, {
+    actions: {
+      browse: "dropbox.browse",
+      search: "dropbox.search",
+      describe: "dropbox.describe",
+    },
+    kinds: ["folder", "file"],
+    maxItems: 500,
+  });
 });

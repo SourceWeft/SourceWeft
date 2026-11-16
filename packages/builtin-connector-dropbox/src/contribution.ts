@@ -62,7 +62,7 @@ export const dropboxConnectorContribution = {
         type: "object",
         additionalProperties: false,
         properties: {
-          folderId: {
+          containerId: {
             type: ["string", "null"],
             pattern: DROPBOX_ITEM_ID_PATTERN,
           },
@@ -156,5 +156,14 @@ export const dropboxConnectorContribution = {
       },
     },
     default: { items: [] },
+  },
+  selection: {
+    actions: {
+      browse: "dropbox.browse",
+      search: "dropbox.search",
+      describe: "dropbox.describe",
+    },
+    kinds: ["folder", "file"],
+    maxItems: DROPBOX_MAX_SELECTED_ITEMS,
   },
 } as const satisfies ConnectorContribution;
