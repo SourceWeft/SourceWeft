@@ -200,6 +200,27 @@ Model gateway catalog sync:
   }
   ```
 
+- An `asr` profile whose `profileAlias` is `asr-dictation` turns on composer
+  voice dictation. Dictation is routed only through this profile, never the
+  default `asr` profile, so the feature stays off until the profile is added.
+  The shipped config declares none. Price it by audio duration with
+  `inputCostPerSecond`, since segments are charged by the seconds they
+  transcribe. Example:
+
+  ```json
+  {
+    "profileId": "global:asr:dictation",
+    "profileAlias": "asr-dictation",
+    "modelAlias": "asr-dictation",
+    "kind": "asr",
+    "gatewaySlug": "deepinfra-default",
+    "providerName": "deepinfra",
+    "targetModel": "Qwen/Qwen3-ASR-0.6B",
+    "pricing": { "inputCostPerSecond": 0.000002 },
+    "isActive": true
+  }
+  ```
+
 - Hand-written profiles in the JSON remain available when catalog sync is
   disabled. Global dynamic catalog import skips models that cannot be matched
   to LiteLLM pricing/capabilities; BYOK still allows manual unknown models.
