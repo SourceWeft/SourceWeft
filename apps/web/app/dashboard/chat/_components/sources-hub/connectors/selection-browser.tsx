@@ -297,8 +297,12 @@ function SelectionBrowserBody({
   }
 
   function refresh() {
-    if (searching && searchView) {
-      void runSearch(searchView.query);
+    // While a search is active, Refresh re-runs the current query through the
+    // same request-counter guard — even when the first search is still in
+    // flight or failed (so `searchView` is null) — rather than reloading the
+    // hidden container and leaving a blank list.
+    if (searching) {
+      void runSearch(searchQuery);
     } else {
       void openContainer(currentContainerIdRef.current);
     }
@@ -477,17 +481,33 @@ function SelectionBrowserBody({
                 const name = displayName(t, entry.name, entry.id);
                 const alreadyAdded = initialIds.has(entry.id);
                 const checked = alreadyAdded || pickedIds.has(entry.id);
+                // A pure container (not selectable, expandable, with no reason)
+                // is a plain navigable row: no dimming, no reason, no checkbox.
+                // GitHub accounts and Jira/Confluence sites look like this.
+                const plainContainer =
+                  !entry.selectable &&
+                  entry.expandable &&
+                  entry.disabledReason === null;
                 // A non-selectable entry shows why it cannot be selected even
                 // when its id is already in the selection (old priority order).
-                const reason = !entry.selectable
-                  ? disabledReasonText(
-                      t,
-                      connectorType,
-                      entry.disabledReason ?? "unknown",
-                    )
-                  : alreadyAdded
-                    ? t("connectors.selection.browser.alreadyAdded")
-                    : undefined;
+                const reason = plainContainer
+                  ? undefined
+                  : !entry.selectable
+                    ? disabledReasonText(
+                        t,
+                        connectorType,
+                        entry.disabledReason ?? "unknown",
+                      )
+                    : alreadyAdded
+                      ? t("connectors.selection.browser.alreadyAdded")
+                      : undefined;
+                const dimmed = !entry.selectable && !plainContainer;
+                // `detail` is the second line; shown in both modes by default,
+                // and only while searching for a type that opts out (Dropbox).
+                const detail =
+                  searching || !presenter.hideDetailWhileBrowsing
+                    ? entry.detail
+                    : null;
                 const Icon = selectionIconFor(
                   presenter,
                   entry.kind,
@@ -495,27 +515,31 @@ function SelectionBrowserBody({
                 );
                 return (
                   <li
-                    aria-disabled={!entry.selectable || undefined}
-                    className={`flex items-center gap-3 px-3 py-1.5 ${!entry.selectable ? "opacity-50" : ""}`}
+                    aria-disabled={dimmed || undefined}
+                    className={`flex items-center gap-3 px-3 py-1.5 ${dimmed ? "opacity-50" : ""}`}
                     data-selection-entry={entry.name}
                     key={entry.id}
                     title={reason}
                   >
-                    <Checkbox
-                      aria-label={t("connectors.selection.browser.select", {
-                        name,
-                      })}
-                      checked={checked}
-                      disabled={!entry.selectable || alreadyAdded || confirming}
-                      onCheckedChange={() =>
-                        setPicked((current) =>
-                          toggleSelection(current, {
-                            id: entry.id,
-                            kind: entry.kind,
-                          }),
-                        )
-                      }
-                    />
+                    {plainContainer ? null : (
+                      <Checkbox
+                        aria-label={t("connectors.selection.browser.select", {
+                          name,
+                        })}
+                        checked={checked}
+                        disabled={
+                          !entry.selectable || alreadyAdded || confirming
+                        }
+                        onCheckedChange={() =>
+                          setPicked((current) =>
+                            toggleSelection(current, {
+                              id: entry.id,
+                              kind: entry.kind,
+                            }),
+                          )
+                        }
+                      />
+                    )}
                     {entry.expandable ? (
                       <button
                         className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left hover:underline focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
@@ -523,7 +547,7 @@ function SelectionBrowserBody({
                         type="button"
                       >
                         <EntryLabel
-                          detail={searching ? entry.detail : null}
+                          detail={detail}
                           icon={Icon}
                           name={name}
                           reason={reason}
@@ -532,7 +556,7 @@ function SelectionBrowserBody({
                     ) : (
                       <div className="flex min-w-0 flex-1 items-center gap-2">
                         <EntryLabel
-                          detail={searching ? entry.detail : null}
+                          detail={detail}
                           icon={Icon}
                           name={name}
                           reason={reason}

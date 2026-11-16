@@ -16,6 +16,11 @@ import type {
 
 export type SelectionPresenter = {
   kindIcons: Record<string, LucideIcon>;
+  /** When true, an entry's `detail` second line is shown only while searching,
+   * not while browsing (Dropbox, where the path is redundant inside its own
+   * folder). Omitted/false means `detail` shows in both modes, so connectors
+   * whose `detail` disambiguates same-named items keep it visible. */
+  hideDetailWhileBrowsing?: boolean;
   indexing?: {
     /** externalId of the source a selected item maps to; null for
      * containers (nothing to look up a source by). */
@@ -46,6 +51,9 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
     // glyph they had before the shared picker; the generic fallback in
     // `selectionIconFor` stays `File` for connectors with no icon of their own.
     kindIcons: { folder: Folder, file: FileText },
+    // A Dropbox path repeats the folder the user is already looking inside, so
+    // it is shown only while searching (unchanged from before the shared picker).
+    hideDetailWhileBrowsing: true,
     indexing: {
       externalIdFor(item) {
         if (item.kind !== "file") {

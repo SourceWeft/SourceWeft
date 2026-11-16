@@ -396,8 +396,17 @@ test("an empty Dropbox folder keeps its own text, and a type without the key sho
   expect(dialog().textContent).toContain("This folder is empty.");
   await unmountAll();
 
-  // A type that defines no per-type container text shows the generic text.
-  browseByContainer(pages);
+  // A type that defines no per-type container text shows the generic text. Its
+  // folder carries no detail, so a generic connector's second line stays empty.
+  const genericPages = {
+    root: page({
+      entries: [
+        entry("id:f", "F", { kind: "folder", expandable: true, detail: null }),
+      ],
+    }),
+    "id:f": page({ container: container("id:f", "F", "/F"), entries: [] }),
+  };
+  browseByContainer(genericPages);
   await open({ connectorType: "x-tools", providerName: "X Tools" });
   await click(button("F", dialog()));
   await flush(5);
@@ -450,6 +459,113 @@ test("an entry that is not expandable cannot be entered, and one that is not sel
   await click(box);
   expect(box.getAttribute("aria-checked")).toBe("false");
   expect(dialog().textContent).toContain("0 selected");
+});
+
+test("a container that cannot be selected is a normal row without a checkbox or a reason", async () => {
+  browseByContainer({
+    root: page({
+      entries: [
+        entry("id:acct", "Acme Inc", {
+          kind: "folder",
+          selectable: false,
+          expandable: true,
+          disabledReason: null,
+          detail: null,
+        }),
+      ],
+    }),
+    "id:acct": page({
+      container: container("id:acct", "Acme Inc", "/Acme Inc"),
+      entries: [entry("id:doc", "doc.pdf")],
+    }),
+  });
+  await open();
+
+  const row = dialog().querySelector<HTMLElement>(
+    '[data-selection-entry="Acme Inc"]',
+  )!;
+  // A pure container: no checkbox, no disabled styling, no reason line.
+  expect(row.querySelector('[role="checkbox"]')).toBeNull();
+  expect(row.getAttribute("aria-disabled")).toBeNull();
+  expect(row.textContent).not.toContain("This item cannot be selected");
+
+  // Clicking the row enters it, like any expandable container.
+  await click(button("Acme Inc", dialog()));
+  await flush(5);
+  expect(selectionBrowse).toHaveBeenLastCalledWith("ws-1", "c-1", {
+    containerId: "id:acct",
+  });
+  expect(rowNames()).toEqual(["doc.pdf"]);
+});
+
+test("detail is shown while browsing for a type that does not hide it", async () => {
+  browseByContainer({
+    root: page({ entries: [entry("id:a", "Alpha", { detail: "TEAM-1" })] }),
+  });
+  // A generic connector (no presenter entry) shows the second-line detail even
+  // while browsing, so sites/teams with the same name can be told apart.
+  await open({ connectorType: "x-tools", providerName: "X Tools" });
+  expect(dialog().textContent).toContain("TEAM-1");
+});
+
+test("Dropbox still shows the path only while searching", async () => {
+  browseByContainer({ root: rootPage });
+  selectionSearch.mockResolvedValue({
+    entries: [
+      entry("id:report", "report.docx", { detail: "/Projects/report.docx" }),
+    ],
+    cursor: "s-1",
+    hasMore: false,
+  });
+  await open();
+  vi.useFakeTimers();
+  // Browsing Dropbox: the file's path is not rendered as a second line.
+  expect(dialog().textContent).not.toContain("/readme.md");
+
+  const search = dialog().querySelector<HTMLInputElement>(
+    'input[type="search"]',
+  )!;
+  await act(async () => typeInto(search, "rep"));
+  await act(async () => vi.advanceTimersByTime(300));
+  await flush(5);
+  // Searching: the path appears.
+  expect(dialog().textContent).toContain("/Projects/report.docx");
+});
+
+test("Refresh while searching re-runs the search, and a failed search can be retried with it", async () => {
+  browseByContainer({ root: rootPage });
+  selectionSearch
+    .mockRejectedValueOnce(new Error("search failed"))
+    .mockResolvedValueOnce({
+      entries: [entry("id:found", "found.pdf", { detail: "/found.pdf" })],
+      cursor: "s-1",
+      hasMore: false,
+    });
+  await open();
+  vi.useFakeTimers();
+
+  const search = dialog().querySelector<HTMLInputElement>(
+    'input[type="search"]',
+  )!;
+  await act(async () => typeInto(search, "fin"));
+  await act(async () => vi.advanceTimersByTime(300));
+  await flush(5);
+
+  // The first search failed: the error shows and the list did not silently
+  // fall back to the hidden container listing.
+  expect(dialog().textContent).toContain("could not be reached");
+  expect(rowNames()).toEqual([]);
+
+  // Refresh re-runs the current search rather than reloading the container.
+  vi.useRealTimers();
+  await click(
+    dialog().querySelector<HTMLElement>('button[aria-label="Refresh"]')!,
+  );
+  await flush(5);
+
+  expect(selectionSearch).toHaveBeenCalledTimes(2);
+  expect(selectionBrowse).toHaveBeenCalledTimes(1);
+  expect(rowNames()).toEqual(["found.pdf"]);
 });
 
 test("a non-selectable entry with no known reason falls back to the generic text", async () => {

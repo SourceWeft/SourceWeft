@@ -110,3 +110,33 @@ export function displayName(
   const trimmed = name.trim();
   return trimmed.length > 0 ? trimmed : t(`${ROOT}.untitled`);
 }
+
+/**
+ * The placeholder a settings row shows when the connector could not tell us an
+ * item's real name (describe not answered, failed, or the item is gone): the
+ * localized kind label and a generic "name unavailable" note. Never the raw id,
+ * which for some connectors is an opaque, meaningless identifier. */
+export function unavailableItemName(
+  t: Translate,
+  connectorType: string,
+  kind: string,
+): string {
+  return `${kindHeading(t, connectorType, kind)} · ${t(
+    `${ROOT}.nameUnavailable`,
+  )}`;
+}
+
+/**
+ * The name a settings row shows: the real name when known, the untitled label
+ * for an explicitly empty name, or — instead of the raw id — the localized
+ * kind-based placeholder when the name is not known. */
+export function itemRowName(
+  t: Translate,
+  name: string | null | undefined,
+  connectorType: string,
+  kind: string,
+): string {
+  if (name == null) return unavailableItemName(t, connectorType, kind);
+  const trimmed = name.trim();
+  return trimmed.length > 0 ? trimmed : t(`${ROOT}.untitled`);
+}

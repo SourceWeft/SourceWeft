@@ -321,18 +321,36 @@ test("missing folder shows no longer exists", async () => {
     connector: dropboxConnector([{ id: "id:gone", kind: "folder" }]),
   });
 
-  // No name from describe: the row falls back to the id.
-  expect(rows(group(container, "Folders"))).toEqual(["id:goneNo longer exists"]);
+  // No name from describe: the row shows the kind placeholder, never the raw
+  // id, and keeps the "no longer exists" mark.
+  expect(rows(group(container, "Folders"))).toEqual([
+    "Folders · Name unavailableNo longer exists",
+  ]);
+  expect(container.textContent).not.toContain("id:gone");
   expect(group(container, "Files")).toBeNull();
 });
 
-test("a failed describe falls back to ids", async () => {
+test("a row whose details could not be loaded shows a placeholder, not its id", async () => {
   selectionDescribe.mockRejectedValue(new Error("network"));
   const { container } = await mountItems({
     connector: dropboxConnector([{ id: "id:f1", kind: "folder" }]),
   });
 
-  expect(rows(group(container, "Folders"))).toEqual(["id:f1"]);
+  expect(rows(group(container, "Folders"))).toEqual([
+    "Folders · Name unavailable",
+  ]);
+  expect(container.textContent).not.toContain("id:f1");
+});
+
+test("an id containing a comma is described intact", async () => {
+  // A connector id may contain any character; it must reach describe whole,
+  // not split on the separator a joined key would have used.
+  await mountItems({
+    connector: dropboxConnector([{ id: "id:a,b", kind: "folder" }]),
+  });
+
+  expect(selectionDescribe).toHaveBeenCalledTimes(1);
+  expect(selectionDescribe.mock.calls[0]![2].ids).toEqual(["id:a,b"]);
 });
 
 test("loads sources without their content", async () => {
@@ -399,12 +417,13 @@ test("a failed describe keeps previously known names", async () => {
     null,
   );
 
-  // Only the new folder is described; its failure leaves the known name.
+  // Only the new folder is described; its failure leaves the known name and the
+  // new row shows the placeholder rather than its id.
   expect(selectionDescribe).toHaveBeenCalledTimes(2);
   expect(selectionDescribe.mock.calls[1]![2].ids).toEqual(["id:f2"]);
   expect(rows(group(mounted.container, "Folders"))).toEqual([
     "Q30 files indexed",
-    "id:f2",
+    "Folders · Name unavailable",
   ]);
 });
 
@@ -447,7 +466,7 @@ test("a failed chunk is not retried when a later chunk succeeds", async () => {
 
   expect(selectionDescribe).toHaveBeenCalledTimes(2);
   const shown = rows(group(container, "Folders"));
-  expect(shown[0]).toBe("id:f0");
+  expect(shown[0]).toBe("Folders · Name unavailable");
   expect(shown[100]).toBe("Last0 files indexed");
 });
 
@@ -476,7 +495,10 @@ test("tools-only connectors list names from describe and no state badges", async
   expect(selectionDescribe.mock.calls[0]![2].ids).toEqual(["t1", "t2"]);
 
   const section = group(container, "item");
-  expect(rows(section)).toEqual(["Alphapath/alpha", "t2No longer exists"]);
+  expect(rows(section)).toEqual([
+    "Alphapath/alpha",
+    "item · Name unavailableNo longer exists",
+  ]);
   // No index-state badges for a tools-only connector.
   expect(container.textContent).not.toContain("Waiting for sync");
   expect(container.textContent).not.toContain("Indexed");

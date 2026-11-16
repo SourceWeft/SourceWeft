@@ -29,7 +29,7 @@ import {
   removeSelectionItem,
   selectionSkipReasonKey,
 } from "./selection";
-import { byTypeOrDefault, displayName, kindHeading } from "./selection-copy";
+import { byTypeOrDefault, itemRowName, kindHeading } from "./selection-copy";
 import {
   selectionIconFor,
   selectionPresenterFor,
@@ -219,13 +219,17 @@ export function SelectionItems({
         ]
       : items.map((item) => item.id)
   ).filter((id) => !described.has(id));
-  const describeKey = describeIds.join(",");
+  // A connector id may contain any character, so a joined string could not be
+  // split back into ids safely. Use a JSON array as the effect key and recover
+  // the ids from a ref holding the actual array — never by splitting the key.
+  const describeKey = JSON.stringify(describeIds);
+  const describeIdsRef = useRef<string[]>(describeIds);
+  describeIdsRef.current = describeIds;
 
   useEffect(() => {
-    if (!describeKey) return;
-    const idsToDescribe = describeKey
-      .split(",")
-      .filter((id) => !askedRef.current.has(id));
+    const idsToDescribe = describeIdsRef.current.filter(
+      (id) => !askedRef.current.has(id),
+    );
     if (idsToDescribe.length === 0) return;
     const generation = describeGenerationRef.current;
     const isCurrent = () => generation === describeGenerationRef.current;
@@ -255,7 +259,7 @@ export function SelectionItems({
     })();
   }, [workspaceId, connectorId, describeKey]);
 
-  const awaitingNames = describeKey !== "" && !describeSettled;
+  const awaitingNames = describeIds.length > 0 && !describeSettled;
   const isLoading = (isLoadingSources || awaitingNames) && items.length > 0;
 
   const handleConfirm = useCallback(
@@ -315,7 +319,7 @@ export function SelectionItems({
       const externalId = indexing.externalIdFor(item);
       if (externalId === null) {
         // Container row: name and the count of its indexed sources.
-        const name = displayName(t, info?.name, item.id);
+        const name = itemRowName(t, info?.name, connectorType, item.kind);
         const count = missing
           ? null
           : indexing.containerIndexedCount({ item, described: info, sources });
@@ -351,12 +355,13 @@ export function SelectionItems({
         latestRun,
         selectionChangedAt,
       });
-      const name = displayName(
+      const name = itemRowName(
         t,
         source?.title?.trim() ||
           skippedTitleByExternalId.get(externalId) ||
           info?.name,
-        item.id,
+        connectorType,
+        item.kind,
       );
       const detail =
         state.kind === "skipped" ? t(selectionSkipReasonKey(state.reason)) : null;
@@ -399,7 +404,7 @@ export function SelectionItems({
     }
 
     // Tools-only row: name, detail and the "no longer exists" mark only.
-    const name = displayName(t, info?.name, item.id);
+    const name = itemRowName(t, info?.name, connectorType, item.kind);
     const detail = info?.detail?.trim() || null;
     return (
       <li className="flex items-center gap-3 px-3 py-2" key={item.id}>
