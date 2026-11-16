@@ -27,6 +27,7 @@
     "./user-settings": "./src/user-settings.ts",
     "./api-response": "./src/api-response.ts",
     "./sources": "./src/sources.ts",
+    "./dictation": "./src/dictation.ts",
     "./study": "./src/study.ts",
     "./study-capability": "./src/study-capability.ts",
     "./artifacts": "./src/artifacts.ts",
