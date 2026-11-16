@@ -725,6 +725,7 @@ export function ChatCanvas({
       <EmptyState
         workingFolderSlot={workingFolderSlot}
         composerDraftKey={composerDraftKey}
+        workspaceId={workspaceId}
         composerInitialInput={composerInitialInput}
         composerResetKey={composerResetKey}
         allSources={allSources}
@@ -1002,6 +1003,7 @@ export function ChatCanvas({
           <Composer
             onRegisterContinuationInput={registerContinuationInput}
             draftKey={composerDraftKey}
+            dictationWorkspaceId={workspaceId}
             placeholder={
               localStatus.blocked
                 ? `${localStatus.message ?? t("chatRoot.computerUnavailable")} ${t("chatRoot.keepWritingDraft")}`
