@@ -223,6 +223,19 @@ function directConnectorActionMeta(input: {
   };
 }
 
+// Gmail results and, more broadly, any connector read result can carry a
+// person's private content (message bodies, issue/ticket text, …). Keep that
+// content out of the debug logs for every connector type, not just Gmail.
+function shouldOmitConnectorActionResponseContent(input: {
+  action: ConnectorActionSpec;
+  connector: SourceConnectorRecord;
+}) {
+  return (
+    input.connector.connectorType === "gmail" ||
+    input.action.capabilities?.includes("connector_read") === true
+  );
+}
+
 export function createConnectorActionInterruptConfigs(
   options: ConnectorActionToolsetOptions = {},
 ) {
@@ -632,6 +645,11 @@ export async function createConnectorActionTools(
                   context,
                   idempotencyKey,
                 });
+                const omitResponseContent =
+                  shouldOmitConnectorActionResponseContent({
+                    action,
+                    connector,
+                  });
                 logger.debug("Connector action direct execution selected", {
                   ...logMeta,
                   connectorName: connector.name,
@@ -663,7 +681,7 @@ export async function createConnectorActionTools(
                         errorCode: connectorError.code,
                         errorMessage: connectorError.message,
                         latencyMs: Date.now() - startedAt,
-                        ...(connector.connectorType === "gmail"
+                        ...(omitResponseContent
                           ? {}
                           : {
                               rawResponseJson:
@@ -679,7 +697,7 @@ export async function createConnectorActionTools(
                     ...logMeta,
                     externalId: result.externalId ?? null,
                     latencyMs: Date.now() - startedAt,
-                    ...(connector.connectorType === "gmail"
+                    ...(omitResponseContent
                       ? {}
                       : {
                           rawResponseJson: result.rawResponseJson,
