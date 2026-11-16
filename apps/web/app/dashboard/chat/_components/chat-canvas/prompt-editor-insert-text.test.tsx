@@ -81,11 +81,39 @@ function setCaret(node: Node, start: number, end = start) {
   document.dispatchEvent(new Event("selectionchange"));
 }
 
+/** The editor text that precedes the live, collapsed caret. */
+function textBeforeCaret(editor: HTMLElement) {
+  const selection = document.getSelection();
+  assert.ok(selection && selection.rangeCount > 0, "live selection present");
+  const caret = selection.getRangeAt(0);
+  assert.equal(caret.collapsed, true, "caret is collapsed");
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.setEnd(caret.startContainer, caret.startOffset);
+  return range.toString();
+}
+
+/** Fire a paste of plain text at the live caret, the way the browser would. */
+async function pasteText(editor: HTMLElement, text: string) {
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: {
+      items: [],
+      getData: (type: string) => (type === "text/plain" ? text : ""),
+    },
+  });
+  await act(async () => {
+    editor.dispatchEvent(event);
+  });
+  await flush();
+}
+
 async function insert(text: string) {
-  assert.ok(controller, "controller captured");
+  const captured = getController();
+  assert.ok(captured, "controller captured");
   let returned = false;
   await act(async () => {
-    returned = controller!.insertText(text);
+    returned = captured.insertText(text);
   });
   await flush();
   return returned;
@@ -192,6 +220,65 @@ test("the submitted text contains the inserted text", async () => {
 
   assert.equal(onSubmit.mock.calls.length, 1);
   assert.equal(onSubmit.mock.calls[0]?.[0]?.text, "dictated words");
+});
+
+test("restores the caret after the pasted text", async () => {
+  const { editor } = await renderEditor({ initialValue: "abcd" });
+
+  const textNode = editor.firstChild;
+  assert.ok(textNode, "initial text node");
+  setCaret(textNode, 2);
+
+  await pasteText(editor, "X");
+
+  assert.equal(editor.textContent, "abXcd");
+  assert.equal(textBeforeCaret(editor), "abX");
+});
+
+test("advances the live caret to after the inserted text", async () => {
+  const { editor } = await renderEditor({ initialValue: "abcd" });
+
+  const textNode = editor.firstChild;
+  assert.ok(textNode, "initial text node");
+  setCaret(textNode, 2);
+
+  await insert("X");
+
+  assert.equal(editor.textContent, "abXcd");
+  assert.equal(textBeforeCaret(editor), "abX");
+});
+
+test("leaves an outside selection untouched when inserting at the remembered caret", async () => {
+  const { editor, view } = await renderEditor({ initialValue: "abcd" });
+
+  const textNode = editor.firstChild;
+  assert.ok(textNode, "initial text node");
+  setCaret(textNode, 2);
+
+  // Move the live selection to a toolbar button outside the editor.
+  const micButton = view.container.querySelector("button");
+  assert.ok(micButton?.firstChild, "mic button text");
+  const selection = document.getSelection();
+  selection?.removeAllRanges();
+  const outside = document.createRange();
+  outside.setStart(micButton.firstChild, 0);
+  outside.collapse(true);
+  selection?.addRange(outside);
+
+  await insert("X");
+
+  assert.equal(editor.textContent, "abXcd");
+  const after = document.getSelection();
+  assert.ok(after?.anchorNode, "selection still present");
+  assert.equal(
+    editor.contains(after.anchorNode),
+    false,
+    "selection was not pulled into the editor",
+  );
+  assert.ok(
+    micButton.contains(after.anchorNode),
+    "selection stayed on the outside element",
+  );
 });
 
 test("insertText returns false when no mention editor is mounted", async () => {

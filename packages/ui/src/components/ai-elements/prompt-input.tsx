@@ -2290,12 +2290,14 @@ export const PromptInputMentionEditor = ({
       }
 
       let range: Range | null = null;
+      let liveSelectionInEditor = false;
       if (!isComposingRef.current) {
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
           const live = selection.getRangeAt(0);
           if (editor.contains(live.commonAncestorContainer)) {
             range = live;
+            liveSelectionInEditor = true;
           }
         }
         if (
@@ -2307,7 +2309,18 @@ export const PromptInputMentionEditor = ({
         }
       }
 
-      lastRangeRef.current = insertTextAtRange(editor, range, text);
+      const result = insertTextAtRange(editor, range, text);
+      lastRangeRef.current = result;
+      // Only move the on-screen caret when the user's live caret was already in
+      // the editor; if focus is elsewhere on the page we leave their selection
+      // and focus alone and only advance the remembered range.
+      if (liveSelectionInEditor) {
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(result.cloneRange());
+        }
+      }
       syncAndUpdateMention();
     },
     [syncAndUpdateMention],
@@ -2706,7 +2719,14 @@ export const PromptInputMentionEditor = ({
           selection && selection.rangeCount > 0
             ? selection.getRangeAt(0)
             : null;
-        lastRangeRef.current = insertTextAtRange(editor, range, plainText);
+        const result = insertTextAtRange(editor, range, plainText);
+        lastRangeRef.current = result;
+        // preventDefault() stops the browser's own caret move, so place the
+        // caret just after the pasted text ourselves.
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(result.cloneRange());
+        }
         syncAndUpdateMention();
       }
     },
