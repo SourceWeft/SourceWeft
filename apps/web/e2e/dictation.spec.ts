@@ -234,15 +234,21 @@ test("send during dictation stops it and sends nothing", async ({
 
   await page.goto("/dashboard/chat");
   await dictationButton(page).click();
-  await expect(editor(page)).toHaveText(SEGMENT_TEXT[0]!, { timeout: 20_000 });
+  // Wait until the first result is in the editor, then send while dictation is
+  // still active. More segments may still be arriving, so match on "contains".
+  await expect(editor(page)).toContainText(SEGMENT_TEXT[0]!, { timeout: 20_000 });
 
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
+  // Send during dictation stops it and sends nothing; the composer is kept.
+  // The second burst can still be landing, so do not race an exact text match:
+  // assert no thread was started, the button is back to Dictate, and the first
+  // result is still present.
   await expect(dictationButton(page)).toHaveAttribute("aria-label", "Dictate", {
     timeout: 20_000,
   });
-  await expect(editor(page)).toHaveText(SEGMENT_TEXT[0]!);
   expect(threadRequests).toEqual([]);
+  await expect(editor(page)).toContainText(SEGMENT_TEXT[0]!);
 
   await context.close();
 });
