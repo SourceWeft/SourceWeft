@@ -3285,6 +3285,63 @@
           "unknown": "Skipped for an unknown reason"
         }
       },
+      "dropbox": {
+        "itemsTitle": "Files and folders",
+        "itemsDescription": "Choose Dropbox files and folders to index. Everything selected is kept in sync on the connector's schedule.",
+        "chooseFiles": "Choose files",
+        "count": "{count} / {limit}",
+        "empty": "Nothing selected yet. Choose files or folders to index them.",
+        "foldersGroup": "Folders",
+        "filesGroup": "Files",
+        "folderIndexedCount": "{count, plural, one {# file indexed} other {# files indexed}}",
+        "folderMissing": "No longer exists",
+        "remove": "Remove {name}",
+        "lastSynced": "Synced {date}",
+        "limitReached": "You can select at most {limit} files and folders. Remove some before adding more.",
+        "browser": {
+          "title": "Choose from Dropbox",
+          "description": "Open a folder to look inside, then tick the files and folders to index.",
+          "root": "Dropbox",
+          "breadcrumbLabel": "Folder path",
+          "searchLabel": "Search Dropbox by file name",
+          "searchPlaceholder": "Search Dropbox",
+          "emptyFolder": "This folder is empty.",
+          "noResults": "No files or folders match your search.",
+          "loadMore": "Load more",
+          "select": "Select {name}",
+          "unsupported": "This file type cannot be indexed",
+          "alreadyAdded": "Already added",
+          "selectedCount": "{count} selected",
+          "folderNote": "Folders sync up to {limit, number} files in total",
+          "cancel": "Cancel",
+          "add": "Add"
+        },
+        "error": {
+          "reconnect": "Your Dropbox account needs reconnecting. Reconnect it, then try again.",
+          "notFound": "This Dropbox connector is unavailable. Refresh and try again.",
+          "notFoundItem": "This folder or file no longer exists in Dropbox.",
+          "tryLater": "Dropbox is busy right now. Try again in a moment.",
+          "reopen": "The Dropbox listing changed. Reopen the folder to continue.",
+          "generic": "Dropbox could not be reached. Try again."
+        },
+        "state": {
+          "skipped": "Skipped",
+          "indexed": "Indexed",
+          "processing": "Syncing",
+          "failed": "Failed",
+          "waiting": "Waiting for sync",
+          "unavailable": "Deleted in Dropbox or access was lost"
+        },
+        "skipReason": {
+          "unsupported_type": "Unsupported file type",
+          "too_large": "File is too large to index",
+          "needs_ocr": "Scanned PDFs are not supported yet",
+          "export_too_large": "Export is too large to index",
+          "empty_content": "No readable content",
+          "unreadable": "File could not be read",
+          "unknown": "Skipped for an unknown reason"
+        }
+      },
       "settingsTab": {
         "overview": "Overview",
         "configuration": "Configuration",

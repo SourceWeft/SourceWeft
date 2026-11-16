@@ -1,4 +1,4 @@
-import { FileText, HardDrive, Mail } from "lucide-react";
+import { Box, FileText, HardDrive, Mail } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -44,6 +44,21 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     postOAuthMode: "auto_create",
     requiresBackendRegistration: true,
     icon: HardDrive,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+  },
+  {
+    id: "dropbox",
+    name: "Dropbox",
+    category: "Knowledge & Docs",
+    description:
+      "Choose Dropbox files and folders to index and keep them in sync.",
+    capabilities: ["Files & folders", "Scheduled sync"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: Box,
     isIndexable: true,
     supportsActions: false,
     supportsPeriodicSync: true,
