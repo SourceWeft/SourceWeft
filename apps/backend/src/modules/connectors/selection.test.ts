@@ -274,76 +274,253 @@ test.each([[null], ["text"], [[1]]])(
   },
 );
 
-test("the adapter's own input error keeps its status and code", async () => {
-  class PackageError extends Error {
-    constructor(
-      readonly statusCode: number,
-      readonly code: string,
-      message: string,
-    ) {
-      super(message);
-    }
+class PackageError extends Error {
+  constructor(
+    readonly statusCode: number,
+    readonly code: string,
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
   }
-  const d = deps({
-    executeAction: vi
-      .fn()
-      .mockRejectedValue(
-        new PackageError(400, "DROPBOX_INVALID_REQUEST", "Invalid request"),
-      ),
-  });
+}
 
-  await assert.rejects(
-    runConnectorSelectionAction({
-      connector: connector(),
-      teamId: "team_1",
-      workspaceId: "workspace_1",
-      action: "browse",
-      request: {},
-      deps: d,
-    }),
-    (error: unknown) =>
-      error instanceof ConnectorError &&
-      error.statusCode === 400 &&
-      error.code === "DROPBOX_INVALID_REQUEST",
-  );
+test("the adapter's own input error keeps its status and code", async () => {
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const d = deps({
+      executeAction: vi
+        .fn()
+        .mockRejectedValue(
+          new PackageError(400, "DROPBOX_INVALID_REQUEST", "Invalid request"),
+        ),
+    });
+
+    await assert.rejects(
+      runConnectorSelectionAction({
+        connector: connector(),
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        action: "browse",
+        request: {},
+        deps: d,
+      }),
+      (error: unknown) =>
+        error instanceof ConnectorError &&
+        error.statusCode === 400 &&
+        error.code === "DROPBOX_INVALID_REQUEST" &&
+        // The adapter's own message is replaced and its details dropped.
+        error.message === "Connector selection request failed" &&
+        error.details === undefined,
+    );
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 test("a refused token reaches the caller as a reauthorization error", async () => {
-  class PackageError extends Error {
-    constructor(
-      readonly statusCode: number,
-      readonly code: string,
-      message: string,
-    ) {
-      super(message);
-    }
-  }
-  const d = deps({
-    executeAction: vi
-      .fn()
-      .mockRejectedValue(
-        new PackageError(
-          401,
-          "DROPBOX_REAUTH_REQUIRED",
-          "Dropbox request failed (401)",
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const d = deps({
+      executeAction: vi
+        .fn()
+        .mockRejectedValue(
+          new PackageError(
+            401,
+            "DROPBOX_REAUTH_REQUIRED",
+            "Dropbox request failed (401)",
+          ),
         ),
-      ),
-  });
+    });
 
-  await assert.rejects(
-    runConnectorSelectionAction({
+    await assert.rejects(
+      runConnectorSelectionAction({
+        connector: connector(),
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        action: "browse",
+        request: {},
+        deps: d,
+      }),
+      (error: unknown) =>
+        error instanceof ConnectorError &&
+        error.statusCode === 401 &&
+        error.code === "DROPBOX_REAUTH_REQUIRED" &&
+        error.message === "Connector selection request failed" &&
+        error.details === undefined,
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("an adapter error's message and details do not reach the caller", async () => {
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const d = deps({
+      executeAction: vi.fn().mockRejectedValue(
+        new PackageError(429, "DROPBOX_RATE_LIMITED", "secret provider text", {
+          rawResponseJson: { body: "secret" },
+          retryAfterSeconds: 30,
+        }),
+      ),
+    });
+
+    await assert.rejects(
+      runConnectorSelectionAction({
+        connector: connector(),
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        action: "browse",
+        request: {},
+        deps: d,
+      }),
+      (error: unknown) =>
+        error instanceof ConnectorError &&
+        error.statusCode === 429 &&
+        error.code === "DROPBOX_RATE_LIMITED" &&
+        error.message === "Connector selection request failed" &&
+        JSON.stringify(error.details) ===
+          JSON.stringify({ retryAfterSeconds: 30 }),
+    );
+
+    assert.equal(warn.mock.calls.length, 1);
+    const [message, meta] = warn.mock.calls[0] ?? [];
+    assert.equal(message, "connector_selection_action_failed");
+    assert.deepEqual(Object.keys(meta as Record<string, unknown>).sort(), [
+      "action",
+      "code",
+      "connectorType",
+      "statusCode",
+    ]);
+    assert.equal((meta as Record<string, unknown>).code, "DROPBOX_RATE_LIMITED");
+    assert.equal((meta as Record<string, unknown>).statusCode, 429);
+    // Nothing the provider said reaches the log.
+    assert.equal(JSON.stringify(warn.mock.calls).includes("secret"), false);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("an unexpected exception becomes CONNECTOR_SELECTION_FAILED without its message", async () => {
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const d = deps({
+      executeAction: vi.fn().mockRejectedValue(new Error("boom secret")),
+    });
+
+    await assert.rejects(
+      runConnectorSelectionAction({
+        connector: connector(),
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        action: "browse",
+        request: {},
+        deps: d,
+      }),
+      (error: unknown) =>
+        error instanceof ConnectorError &&
+        error.statusCode === 502 &&
+        error.code === "CONNECTOR_SELECTION_FAILED" &&
+        error.message === "Connector selection request failed",
+    );
+
+    assert.equal(JSON.stringify(warn.mock.calls).includes("boom secret"), false);
+    const [, meta] = warn.mock.calls[0] ?? [];
+    assert.equal(
+      (meta as Record<string, unknown>).code,
+      "CONNECTOR_SELECTION_FAILED",
+    );
+    assert.equal((meta as Record<string, unknown>).statusCode, 502);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("a selectable entry of an unlisted kind is an invalid result; a non-selectable one is allowed", async () => {
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    const entryFields = {
+      id: "id:1",
+      name: "x",
+      detail: null,
+      disabledReason: null,
+      size: null,
+      modifiedAt: null,
+    };
+    // A selectable entry whose kind is not in the manifest's selection.kinds
+    // (["folder", "file"]) is an invalid result.
+    const selectableUnlisted = deps({
+      executeAction: vi.fn().mockResolvedValue({
+        result: {
+          container: null,
+          breadcrumbs: [],
+          entries: [
+            { ...entryFields, kind: "page", selectable: true, expandable: false },
+          ],
+          cursor: "",
+          hasMore: false,
+        },
+      }),
+    });
+
+    await assert.rejects(
+      runConnectorSelectionAction({
+        connector: connector(),
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        action: "browse",
+        request: {},
+        deps: selectableUnlisted,
+      }),
+      { statusCode: 502, code: "CONNECTOR_SELECTION_INVALID_RESULT" },
+    );
+    const [message, meta] = warn.mock.calls[0] ?? [];
+    assert.equal(message, "connector_selection_invalid_result");
+    const issues = (meta as { issues: Array<Record<string, unknown>> }).issues;
+    assert.ok(issues.length > 0);
+    assert.equal(issues[0]?.code, "unlisted_kind");
+    for (const issue of issues) {
+      assert.deepEqual(Object.keys(issue).sort(), ["code", "path"]);
+    }
+
+    // A non-selectable entry of an unlisted kind (for example an account or
+    // site) is allowed through.
+    const nonSelectableUnlisted = deps({
+      executeAction: vi.fn().mockResolvedValue({
+        result: {
+          container: null,
+          breadcrumbs: [],
+          entries: [
+            {
+              ...entryFields,
+              kind: "account",
+              selectable: false,
+              expandable: true,
+            },
+          ],
+          cursor: "",
+          hasMore: false,
+        },
+      }),
+    });
+
+    const result = await runConnectorSelectionAction({
       connector: connector(),
       teamId: "team_1",
       workspaceId: "workspace_1",
       action: "browse",
       request: {},
-      deps: d,
-    }),
-    (error: unknown) =>
-      error instanceof ConnectorError &&
-      error.statusCode === 401 &&
-      error.code === "DROPBOX_REAUTH_REQUIRED",
-  );
+      deps: nonSelectableUnlisted,
+    });
+    assert.ok("entries" in result);
+    assert.equal(
+      (result as { entries: unknown[] }).entries.length,
+      1,
+    );
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 test("strips fields the contract does not name", async () => {
