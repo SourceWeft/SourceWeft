@@ -182,3 +182,32 @@ test("Sign in with Apple is permitted to the page and entitled in the app", () =
     /^tauri-plugin-apple-sign-in = \{ path = "plugins\/apple-sign-in" \}$/m,
   );
 });
+
+// The Tauri CLI applies CI signing by editing these settings. It only edits a
+// setting in place when the project already declares it; a setting it has to
+// add ends up outside the build settings, and the archive then has no profile.
+test("the iOS target declares every signing setting the Tauri CLI edits", () => {
+  const project = read(
+    resolve(apple, "sourceweft-mobile.xcodeproj/project.pbxproj"),
+  );
+  const targetConfigs = project
+    .split("isa = XCBuildConfiguration;")
+    .filter((block) => block.includes("CODE_SIGN_ENTITLEMENTS"));
+  assert.equal(targetConfigs.length, 2, "expected debug and release");
+  const spec = read(resolve(apple, "project.yml"));
+  for (const key of [
+    "CODE_SIGN_STYLE",
+    "CODE_SIGN_IDENTITY",
+    "CODE_SIGN_IDENTITY[sdk=iphoneos*]",
+    "DEVELOPMENT_TEAM",
+    "DEVELOPMENT_TEAM[sdk=iphoneos*]",
+    "PROVISIONING_PROFILE_SPECIFIER",
+    "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]",
+  ]) {
+    const line = key.includes("[") ? `\t"${key}" = ` : `\t${key} = `;
+    for (const config of targetConfigs)
+      assert(config.includes(line), `${key} is not declared in the project`);
+    if (key !== "CODE_SIGN_IDENTITY")
+      assert(spec.includes(`${key}: `), `${key} is not in project.yml`);
+  }
+});
