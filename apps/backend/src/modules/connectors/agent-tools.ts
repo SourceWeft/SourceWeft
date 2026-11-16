@@ -226,6 +226,11 @@ function directConnectorActionMeta(input: {
 // Gmail results and, more broadly, any connector read result can carry a
 // person's private content (message bodies, issue/ticket text, …). Keep that
 // content out of the debug logs for every connector type, not just Gmail.
+// This also governs the failure log's `errorMessage`: an adapter's error class
+// may pass a provider's own error text straight through (for example Notion's
+// `parseNotionResponse` builds its message from the parsed response body), so
+// a read action's error message can carry the same private content as its
+// result.
 function shouldOmitConnectorActionResponseContent(input: {
   action: ConnectorActionSpec;
   connector: SourceConnectorRecord;
@@ -679,11 +684,12 @@ export async function createConnectorActionTools(
                       {
                         ...logMeta,
                         errorCode: connectorError.code,
-                        errorMessage: connectorError.message,
+                        statusCode: connectorError.statusCode,
                         latencyMs: Date.now() - startedAt,
                         ...(omitResponseContent
                           ? {}
                           : {
+                              errorMessage: connectorError.message,
                               rawResponseJson:
                                 connectorError.details?.rawResponseJson,
                             }),

@@ -341,18 +341,22 @@ test("does not log the result of a read action for any connector type", async ()
   );
 });
 
+function findDebugCall(message: string) {
+  const call = loggerMocks.debug.mock.calls.find(
+    (entry) => entry[0] === message,
+  );
+  return call as [string, Record<string, unknown>] | undefined;
+}
+
 test("does not log the provider response of a failed read action", async () => {
   loggerMocks.debug.mockClear();
   connectorRegistry.register({
     ...adapter,
     getManifest: () => githubReadManifest,
     executeAction: async () => {
-      throw new ConnectorError(
-        502,
-        "GITHUB_UNAVAILABLE",
-        "GitHub request failed",
-        { rawResponseJson: { body: "secret body" } },
-      );
+      throw new ConnectorError(502, "GITHUB_UNAVAILABLE", "secret provider text", {
+        rawResponseJson: { body: "secret body" },
+      });
     },
   });
   vi.mocked(listSourceConnectorRecords).mockResolvedValue([githubConnector]);
@@ -366,10 +370,69 @@ test("does not log the provider response of a failed read action", async () => {
 
   const logged = JSON.stringify(loggerMocks.debug.mock.calls);
   assert.equal(logged.includes("secret body"), false);
+  assert.equal(logged.includes("secret provider text"), false);
   assert.equal(
     logged.includes("Connector action direct adapter execution failed"),
     true,
   );
+  const failureCall = findDebugCall(
+    "Connector action direct adapter execution failed",
+  );
+  assert.ok(failureCall);
+  const [, failureMeta] = failureCall!;
+  assert.equal(failureMeta.errorCode, "GITHUB_UNAVAILABLE");
+  assert.equal(failureMeta.statusCode, 502);
+  assert.equal("errorMessage" in failureMeta, false);
+});
+
+test("still logs the error message of a failed non-read action on a non-Gmail connector", async () => {
+  loggerMocks.debug.mockClear();
+  const githubWriteFailManifest: ConnectorManifest = {
+    ...manifest,
+    type: "github",
+    displayName: "GitHub",
+    actions: [
+      {
+        type: "github.issue.create",
+        displayName: "Create GitHub issue",
+        agentToolName: "create_github_issue",
+        description: "Create a GitHub issue.",
+        visibility: "agent",
+        capabilities: ["connector_write"],
+        riskLevel: "medium",
+        requiresApproval: false,
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+  };
+  connectorRegistry.register({
+    ...adapter,
+    getManifest: () => githubWriteFailManifest,
+    executeAction: async () => {
+      throw new ConnectorError(
+        500,
+        "GITHUB_WRITE_FAILED",
+        "write failed: quota",
+      );
+    },
+  });
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([githubConnector]);
+
+  const tools = await createConnectorActionTools(context);
+  const writeTool = tools.find(
+    (item) => item.name === "create_github_issue",
+  ) as unknown as { invoke(input: Record<string, unknown>): Promise<unknown> };
+  assert.ok(writeTool);
+  await writeTool.invoke({});
+
+  const failureCall = findDebugCall(
+    "Connector action direct adapter execution failed",
+  );
+  assert.ok(failureCall);
+  const [, failureMeta] = failureCall!;
+  assert.equal(failureMeta.errorMessage, "write failed: quota");
+  assert.equal(failureMeta.errorCode, "GITHUB_WRITE_FAILED");
+  assert.equal(failureMeta.statusCode, 500);
 });
 
 test("still logs the result of a non-read action on a non-Gmail connector", async () => {
