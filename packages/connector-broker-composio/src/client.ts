@@ -5,6 +5,10 @@ import type { ComposioBrokerErrorCode } from "./errors";
 // Composio docs saved for this task (custom-tools.md, read 2026-11-15).
 const BASE_URL = "https://backend.composio.dev/api/v3.1";
 const REQUEST_TIMEOUT_MS = 15_000;
+const AUTH_CONFIG_PAGE_SIZE = 100;
+// A project holds a handful of auth configs per toolkit; this only bounds a
+// runaway cursor.
+const AUTH_CONFIG_MAX_PAGES = 20;
 
 export type ComposioLogger = {
   info?(message: string, meta?: Record<string, unknown>): void;
@@ -21,6 +25,14 @@ export type CreateLinkInput = {
   toolkit: string;
   ownerRef: string;
   callbackUrl: string;
+  /**
+   * The provider scopes the consent screen may ask for, and nothing more.
+   * Composio's managed apps ask for a wide default set (for Gmail: profile,
+   * contacts, addresses, birthday and phone numbers on top of the mailbox),
+   * so every caller states its scopes and the link is pinned to an auth
+   * config that carries exactly these.
+   */
+  scopes: string[];
 };
 
 export type CreateLinkResult = {
@@ -217,8 +229,159 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
     return value;
   }
 
+  type AuthConfigRecord = {
+    id?: string;
+    is_composio_managed?: boolean;
+    status?: string;
+    created_at?: string;
+    credentials?: { scopes?: unknown };
+  };
+
+  // True only for an enabled auth config on Composio's managed app whose
+  // scope list is exactly the requested one: a config with an extra scope
+  // would widen the consent, one with a missing scope would break a call.
+  function authConfigMatches(record: AuthConfigRecord, scopes: string[]): boolean {
+    if (record.is_composio_managed !== true || record.status !== "ENABLED") {
+      return false;
+    }
+    const actual = record.credentials?.scopes;
+    if (!Array.isArray(actual) || actual.length !== scopes.length) return false;
+    const wanted = new Set(scopes);
+    return actual.every((scope) => typeof scope === "string" && wanted.has(scope));
+  }
+
+  async function findAuthConfig(toolkit: string, scopes: string[]): Promise<string | null> {
+    const matches: Array<{ id: string; createdAt: string }> = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < AUTH_CONFIG_MAX_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        toolkit_slug: toolkit,
+        is_composio_managed: "true",
+        limit: String(AUTH_CONFIG_PAGE_SIZE),
+      });
+      if (cursor) query.set("cursor", cursor);
+      const result = await send({
+        operation: "list_auth_configs",
+        toolkit,
+        method: "GET",
+        path: `/auth_configs?${query.toString()}`,
+      });
+      if (!isSuccess(result.status)) {
+        throwForStatus("list_auth_configs", toolkit, result.status, result.text);
+      }
+      const body = result.json as
+        | { items?: AuthConfigRecord[]; next_cursor?: string | null }
+        | undefined;
+      const items = requireField(
+        Array.isArray(body?.items) ? body.items : undefined,
+        "items",
+        result.status,
+        "list_auth_configs",
+        toolkit,
+      );
+      for (const item of items) {
+        if (typeof item.id === "string" && authConfigMatches(item, scopes)) {
+          matches.push({ id: item.id, createdAt: item.created_at ?? "" });
+        }
+      }
+      cursor = typeof body?.next_cursor === "string" && body.next_cursor ? body.next_cursor : null;
+      if (!cursor) break;
+    }
+    if (matches.length === 0) return null;
+    // Several matching configs are equivalent; take the oldest so every
+    // process settles on the same one.
+    matches.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    return matches[0]?.id ?? null;
+  }
+
+  async function createAuthConfig(toolkit: string, scopes: string[]): Promise<string> {
+    const created = await send({
+      operation: "create_auth_config",
+      toolkit,
+      method: "POST",
+      path: "/auth_configs",
+      body: {
+        toolkit: { slug: toolkit },
+        auth_config: {
+          type: "use_composio_managed_auth",
+          name: `sourceweft-${toolkit}`,
+          // Composio takes the scope list as one comma-separated string.
+          credentials: { scopes: scopes.join(",") },
+        },
+      },
+    });
+    if (!isSuccess(created.status)) {
+      throwForStatus("create_auth_config", toolkit, created.status, created.text);
+    }
+    const createdBody = created.json as { auth_config?: { id?: string } } | undefined;
+    const id = requireField(
+      createdBody?.auth_config?.id,
+      "auth_config.id",
+      created.status,
+      "create_auth_config",
+      toolkit,
+    );
+    // The create answer does not echo the scopes. Read the config back and
+    // refuse to use it unless it carries exactly the requested ones, so a
+    // create that Composio accepted but did not apply can never widen a
+    // consent screen unnoticed.
+    const check = await send({
+      operation: "get_auth_config",
+      toolkit,
+      method: "GET",
+      path: `/auth_configs/${encodeURIComponent(id)}`,
+    });
+    if (!isSuccess(check.status)) {
+      throwForStatus("get_auth_config", toolkit, check.status, check.text);
+    }
+    if (!authConfigMatches((check.json ?? {}) as AuthConfigRecord, scopes)) {
+      return fail(
+        "get_auth_config",
+        toolkit,
+        "COMPOSIO_REQUEST_FAILED",
+        check.status,
+        "Composio auth config does not carry the requested scopes",
+      );
+    }
+    return id;
+  }
+
+  // One lookup per toolkit and scope set for the life of the process. A
+  // failed lookup is not remembered, and a session that Composio refuses
+  // forgets the id (the config may have been deleted or disabled since).
+  const authConfigIds = new Map<string, Promise<string>>();
+
+  function authConfigKey(toolkit: string, scopes: string[]): string {
+    return `${toolkit}\n${[...scopes].sort().join("\n")}`;
+  }
+
+  function resolveAuthConfig(toolkit: string, scopes: string[]): Promise<string> {
+    const key = authConfigKey(toolkit, scopes);
+    const cached = authConfigIds.get(key);
+    if (cached) return cached;
+    const pending = (async () => {
+      const existing = await findAuthConfig(toolkit, scopes);
+      return existing ?? (await createAuthConfig(toolkit, scopes));
+    })();
+    authConfigIds.set(key, pending);
+    pending.catch(() => {
+      if (authConfigIds.get(key) === pending) authConfigIds.delete(key);
+    });
+    return pending;
+  }
+
   return {
     async createLink(input) {
+      if (input.scopes.length === 0 || input.scopes.some((scope) => !scope || scope.includes(","))) {
+        return fail(
+          "create_link_session",
+          input.toolkit,
+          "COMPOSIO_REQUEST_FAILED",
+          0,
+          "A Composio link needs a non-empty list of provider scopes",
+        );
+      }
+      const authConfigId = await resolveAuthConfig(input.toolkit, input.scopes);
       const sessionResult = await send({
         operation: "create_link_session",
         toolkit: input.toolkit,
@@ -227,12 +390,23 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
         body: {
           user_id: input.ownerRef,
           toolkits: { enable: [input.toolkit] },
+          auth_configs: { [input.toolkit]: authConfigId },
+          // The session exists only to mint a connect link. Its sandbox
+          // (Workbench, remote shell, large-answer offloading) is never
+          // used, so it stays off.
+          workbench: { enable: false },
         },
       });
       if (!isSuccess(sessionResult.status)) {
+        authConfigIds.delete(authConfigKey(input.toolkit, input.scopes));
         throwForStatus("create_link_session", input.toolkit, sessionResult.status, sessionResult.text);
       }
-      const sessionBody = sessionResult.json as { session_id?: string } | undefined;
+      const sessionBody = sessionResult.json as
+        | {
+            session_id?: string;
+            config?: { auth_configs?: Record<string, unknown> };
+          }
+        | undefined;
       const sessionId = requireField(
         sessionBody?.session_id,
         "session_id",
@@ -240,6 +414,18 @@ export function createComposioBroker(config: ComposioBrokerConfig): ComposioBrok
         "create_link_session",
         input.toolkit,
       );
+      // The session must confirm it is pinned to our auth config. Without
+      // that the link would fall back to the managed app's default scopes.
+      if (sessionBody?.config?.auth_configs?.[input.toolkit] !== authConfigId) {
+        authConfigIds.delete(authConfigKey(input.toolkit, input.scopes));
+        return fail(
+          "create_link_session",
+          input.toolkit,
+          "COMPOSIO_REQUEST_FAILED",
+          sessionResult.status,
+          "Composio session is not pinned to the requested auth config",
+        );
+      }
 
       const linkResult = await send({
         operation: "create_link",

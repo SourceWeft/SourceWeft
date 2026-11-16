@@ -16,18 +16,33 @@ export class ComposioBrokerError extends Error {
   }
 }
 
-// Composio's exact response bodies for a "quota exhausted" error and for a
-// "connected account not found / not active" error are not documented on the
-// pages saved for this task (custom-tools.md, proxy.md, manual-auth.md,
-// auth.md — read 2026-11-15). This body-text heuristic is an unverified
-// best guess, used only after HTTP status has not already classified the
-// response; it will be confirmed against the real Composio service in
-// Task 8 and may need to change then.
+// Composio's error body is `{"error":{"slug":…,"message":…,"status":…}}`.
+// Seen on the real service 2026-11-16: any call that names a connected
+// account Composio does not hold (deleted or never created) answers HTTP 404
+// with slug `ConnectedAccount_ResourceNotFound`. The slug decides; the
+// message match below stays for a not-active account, whose body was not
+// observed. The quota body was not observed either (the test project never
+// reached its limit), so that match is still a best guess used only after
+// the HTTP status has not classified the answer.
+const INACTIVE_CONNECTION_SLUGS = new Set(["ConnectedAccount_ResourceNotFound"]);
+
+function errorSlug(rawBody: string): string | undefined {
+  try {
+    const parsed = JSON.parse(rawBody) as { error?: { slug?: unknown } } | null;
+    const slug = parsed?.error?.slug;
+    return typeof slug === "string" ? slug : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function bodyIndicatesQuotaExhausted(rawBody: string): boolean {
   return /quota|plan limit/i.test(rawBody);
 }
 
 function bodyIndicatesInactiveConnection(rawBody: string): boolean {
+  const slug = errorSlug(rawBody);
+  if (slug !== undefined && INACTIVE_CONNECTION_SLUGS.has(slug)) return true;
   return /no connected account|connected account[^.]*(not found|not active|inactive|unknown)/i.test(
     rawBody,
   );
@@ -36,8 +51,9 @@ function bodyIndicatesInactiveConnection(rawBody: string): boolean {
 /**
  * Classifies a non-2xx Composio response into a ComposioBrokerErrorCode.
  * HTTP status is authoritative where Composio's own semantics are
- * documented; the undocumented quota / inactive-connection cases fall back
- * to a body-text heuristic (see the comment above).
+ * documented; an unknown connected account is recognised by its error slug,
+ * and the remaining quota / inactive-connection cases by body text (see the
+ * comment above).
  */
 export function classifyComposioError(
   status: number,

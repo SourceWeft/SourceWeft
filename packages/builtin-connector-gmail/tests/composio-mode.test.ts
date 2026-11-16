@@ -259,10 +259,13 @@ test("startAuthorization opens a Composio link for the gmail toolkit and returns
     authorizationUrl: "https://composio.example/authorize/abc",
     attemptRef: "ca_1",
   });
+  // Only the mailbox scope: without it Composio's managed Gmail app would
+  // also ask for contacts, addresses, birthday and phone numbers.
   assert.deepEqual(captured, {
     toolkit: "gmail",
     ownerRef: "ws_workspace",
     callbackUrl: "https://sourceweft.example/callback?state=s",
+    scopes: ["https://mail.google.com/"],
   });
 });
 

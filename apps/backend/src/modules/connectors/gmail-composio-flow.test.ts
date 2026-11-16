@@ -111,7 +111,11 @@ function gmailProxyResponse(url: string): FakeProxyResult {
 }
 
 function makeBroker() {
-  const createLinkCalls: Array<{ ownerRef: string; toolkit: string }> = [];
+  const createLinkCalls: Array<{
+    ownerRef: string;
+    toolkit: string;
+    scopes: string[];
+  }> = [];
   const getAccountCalls: string[] = [];
   const proxyCalls: FakeProxyInput[] = [];
   const deleteCalls: string[] = [];
@@ -120,6 +124,7 @@ function makeBroker() {
       ownerRef: string;
       toolkit: string;
       callbackUrl: string;
+      scopes: string[];
     }) {
       createLinkCalls.push(input);
       return {
@@ -178,6 +183,7 @@ it("drives connect, callback, runtime token, a search action, and revoke through
   expect(createLinkCalls).toHaveLength(1);
   expect(createLinkCalls[0]?.ownerRef).toBe("ws_workspace");
   expect(createLinkCalls[0]?.toolkit).toBe("gmail");
+  expect(createLinkCalls[0]?.scopes).toEqual(["https://mail.google.com/"]);
   const issuedAttemptRef = mocks.createState.mock.calls[0]?.[0]?.attemptRef;
   expect(issuedAttemptRef).toBe(ISSUED_ID);
 

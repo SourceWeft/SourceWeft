@@ -29,6 +29,12 @@ import {
 } from "./transport";
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
+// The one Google scope requested through Composio. Composio's managed Gmail
+// app is not approved for `gmail.readonly` / `gmail.send`; its mailbox scope
+// is the full-access one. Asking for it alone keeps the consent screen to the
+// mailbox: the managed app's default set also asks for contacts, addresses,
+// birthday and phone numbers, which SourceWeft never uses.
+const GMAIL_COMPOSIO_SCOPE = "https://mail.google.com/";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const MESSAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -653,6 +659,7 @@ export function createGmailConnectorAdapter(
             toolkit: "gmail",
             ownerRef: input.ownerRef,
             callbackUrl: input.callbackUrl,
+            scopes: [GMAIL_COMPOSIO_SCOPE],
           });
         } catch (error) {
           throw translateComposioAuthError(error);

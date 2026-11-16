@@ -60,45 +60,320 @@ function collectingLogger() {
   };
 }
 
-test("createLink sends both requests with x-api-key and returns the link", async () => {
+const MAIL_SCOPE = "https://mail.google.com/";
+
+function authConfigItem(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "ac_existing",
+    is_composio_managed: true,
+    status: "ENABLED",
+    created_at: "2026-11-16T00:00:00.000Z",
+    credentials: { scopes: [MAIL_SCOPE] },
+    ...overrides,
+  };
+}
+
+function isAuthConfigList(call: FakeCall): boolean {
+  return call.method === "GET" && call.url.includes("/auth_configs?");
+}
+
+const AUTH_CONFIG_LIST = { status: 200, json: { items: [authConfigItem()], next_cursor: null } };
+
+function pinnedSession(authConfigId = "ac_existing") {
+  return {
+    status: 201,
+    json: { session_id: "sess_1", config: { auth_configs: { gmail: authConfigId } } },
+  };
+}
+
+const LINK_ANSWER = {
+  status: 201,
+  json: {
+    redirect_url: "https://connect.composio.dev/link/ln_abc123",
+    connected_account_id: "ca_abc123",
+  },
+};
+
+const LINK_INPUT = {
+  toolkit: "gmail",
+  ownerRef: "org_1:user_1",
+  callbackUrl: "https://app.example.com/callback",
+  scopes: [MAIL_SCOPE],
+};
+
+test("createLink pins the session to the matching auth config, sends x-api-key and returns the link", async () => {
   const calls: FakeCall[] = [];
   const fetcher = fakeFetcher((call) => {
-    if (call.url.endsWith("/tool_router/session")) {
-      return { status: 200, json: { session_id: "sess_1" } };
-    }
-    if (call.url.endsWith("/tool_router/session/sess_1/link")) {
-      return {
-        status: 200,
-        json: {
-          redirect_url: "https://connect.composio.dev/link/ln_abc123",
-          connected_account_id: "ca_abc123",
-        },
-      };
-    }
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession();
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) return LINK_ANSWER;
     throw new Error(`unexpected url ${call.url}`);
   }, calls);
 
   const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
-  const result = await broker.createLink({
-    toolkit: "gmail",
-    ownerRef: "org_1:user_1",
-    callbackUrl: "https://app.example.com/callback",
-  });
+  const result = await broker.createLink(LINK_INPUT);
 
   assert.equal(result.authorizationUrl, "https://connect.composio.dev/link/ln_abc123");
   assert.equal(result.connectedAccountId, "ca_abc123");
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   for (const call of calls) {
     assert.equal(call.headers["x-api-key"], "sk_test_key");
   }
-  assert.deepEqual(calls[0]?.body, {
+  const listUrl = new URL(calls[0]!.url);
+  assert.equal(listUrl.searchParams.get("toolkit_slug"), "gmail");
+  assert.equal(listUrl.searchParams.get("is_composio_managed"), "true");
+  assert.deepEqual(calls[1]?.body, {
     user_id: "org_1:user_1",
     toolkits: { enable: ["gmail"] },
+    auth_configs: { gmail: "ac_existing" },
+    workbench: { enable: false },
   });
-  assert.deepEqual(calls[1]?.body, {
+  assert.deepEqual(calls[2]?.body, {
     toolkit: "gmail",
     callback_url: "https://app.example.com/callback",
   });
+});
+
+test("createLink creates a managed auth config with exactly the requested scopes when none matches", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) {
+      return {
+        status: 200,
+        json: {
+          items: [
+            // The managed app's default config: the mailbox plus profile data.
+            authConfigItem({
+              id: "ac_wide",
+              credentials: { scopes: [MAIL_SCOPE, "https://www.googleapis.com/auth/contacts.readonly"] },
+            }),
+            authConfigItem({ id: "ac_disabled", status: "DISABLED" }),
+            authConfigItem({ id: "ac_own_app", is_composio_managed: false }),
+          ],
+          next_cursor: null,
+        },
+      };
+    }
+    if (call.method === "POST" && call.url.endsWith("/auth_configs")) {
+      return { status: 201, json: { toolkit: { slug: "gmail" }, auth_config: { id: "ac_new" } } };
+    }
+    if (call.method === "GET" && call.url.endsWith("/auth_configs/ac_new")) {
+      return { status: 200, json: authConfigItem({ id: "ac_new" }) };
+    }
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession("ac_new");
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) return LINK_ANSWER;
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+  const result = await broker.createLink(LINK_INPUT);
+
+  assert.equal(result.connectedAccountId, "ca_abc123");
+  assert.equal(calls.length, 5);
+  assert.deepEqual(calls[1]?.body, {
+    toolkit: { slug: "gmail" },
+    auth_config: {
+      type: "use_composio_managed_auth",
+      name: "sourceweft-gmail",
+      credentials: { scopes: MAIL_SCOPE },
+    },
+  });
+  assert.deepEqual((calls[3]?.body as { auth_configs?: unknown }).auth_configs, { gmail: "ac_new" });
+});
+
+test("createLink refuses a created auth config whose scopes are not the requested ones, and never opens a session", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) return { status: 200, json: { items: [], next_cursor: null } };
+    if (call.method === "POST" && call.url.endsWith("/auth_configs")) {
+      return { status: 201, json: { auth_config: { id: "ac_new" } } };
+    }
+    if (call.method === "GET" && call.url.endsWith("/auth_configs/ac_new")) {
+      return {
+        status: 200,
+        json: authConfigItem({
+          id: "ac_new",
+          credentials: { scopes: [MAIL_SCOPE, "https://www.googleapis.com/auth/userinfo.profile"] },
+        }),
+      };
+    }
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.createLink(LINK_INPUT),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /requested scopes/);
+      return true;
+    },
+  );
+  assert.equal(calls.length, 3);
+});
+
+test("createLink fails with COMPOSIO_AUTH when the key may not create an auth config, and never opens a session", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) return { status: 200, json: { items: [], next_cursor: null } };
+    if (call.method === "POST" && call.url.endsWith("/auth_configs")) {
+      return { status: 403, json: { error: { slug: "APIKey_InsufficientPermissions", status: 403 } } };
+    }
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.createLink(LINK_INPUT),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_AUTH" satisfies ComposioBrokerErrorCode);
+      return true;
+    },
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("createLink looks the auth config up once per process and reuses it", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession();
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) return LINK_ANSWER;
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await Promise.all([broker.createLink(LINK_INPUT), broker.createLink(LINK_INPUT)]);
+  await broker.createLink(LINK_INPUT);
+
+  assert.equal(calls.filter(isAuthConfigList).length, 1);
+  assert.equal(calls.length, 7);
+});
+
+test("createLink forgets the auth config after a refused session and looks it up again", async () => {
+  const calls: FakeCall[] = [];
+  let sessions = 0;
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
+    if (call.url.endsWith("/tool_router/session")) {
+      sessions += 1;
+      return sessions === 1 ? { status: 400, json: { error: { slug: "AuthConfig_NotFound" } } } : pinnedSession();
+    }
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) return LINK_ANSWER;
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(() => broker.createLink(LINK_INPUT));
+  await broker.createLink(LINK_INPUT);
+
+  assert.equal(calls.filter(isAuthConfigList).length, 2);
+});
+
+test("createLink does not remember a failed auth config lookup", async () => {
+  const calls: FakeCall[] = [];
+  let lists = 0;
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) {
+      lists += 1;
+      return lists === 1 ? { status: 503 } : AUTH_CONFIG_LIST;
+    }
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession();
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) return LINK_ANSWER;
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.createLink(LINK_INPUT),
+    (err: unknown) => err instanceof ComposioBrokerError && err.code === "COMPOSIO_UNAVAILABLE",
+  );
+  const result = await broker.createLink(LINK_INPUT);
+  assert.equal(result.connectedAccountId, "ca_abc123");
+});
+
+test("createLink reads every page of auth configs and takes the oldest match", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) {
+      const cursor = new URL(call.url).searchParams.get("cursor");
+      return cursor === "page-2"
+        ? {
+            status: 200,
+            json: {
+              items: [authConfigItem({ id: "ac_older", created_at: "2026-11-01T00:00:00.000Z" })],
+              next_cursor: null,
+            },
+          }
+        : { status: 200, json: { items: [authConfigItem({ id: "ac_newer" })], next_cursor: "page-2" } };
+    }
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession("ac_older");
+    if (call.url.endsWith("/tool_router/session/sess_1/link")) return LINK_ANSWER;
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await broker.createLink(LINK_INPUT);
+
+  assert.equal(calls.filter(isAuthConfigList).length, 2);
+  assert.deepEqual((calls[2]?.body as { auth_configs?: unknown }).auth_configs, { gmail: "ac_older" });
+});
+
+test("createLink refuses a session that is not pinned to the auth config, and never sends the link request", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
+    if (call.url.endsWith("/tool_router/session")) {
+      return { status: 201, json: { session_id: "sess_1", config: { auth_configs: {} } } };
+    }
+    throw new Error(`unexpected url ${call.url}`);
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.createLink(LINK_INPUT),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
+      assert.match(err.message, /not pinned/);
+      return true;
+    },
+  );
+  assert.equal(calls.length, 2);
+  // The id is not kept after an unpinned session: the next attempt looks again.
+  await assert.rejects(() => broker.createLink(LINK_INPUT));
+  assert.equal(calls.filter(isAuthConfigList).length, 2);
+});
+
+test("createLink sends nothing when no scopes are given", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => {
+    throw new Error("no request expected");
+  }, calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.createLink({ ...LINK_INPUT, scopes: [] }),
+    (err: unknown) => err instanceof ComposioBrokerError && err.code === "COMPOSIO_REQUEST_FAILED",
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("an unknown connected account is recognised by Composio's error slug", async () => {
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 404,
+    json: { error: { message: "Resource missing", slug: "ConnectedAccount_ResourceNotFound", status: 404 } },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () => broker.getConnectedAccount("ca_gone"),
+    (err: unknown) =>
+      err instanceof ComposioBrokerError && err.code === "COMPOSIO_CONNECTION_INACTIVE",
+  );
 });
 
 test("proxy maps query/headers into parameters and returns upstream status/data/headers", async () => {
@@ -398,6 +673,7 @@ test("a quota-exhausted body on a non-402 status still maps to COMPOSIO_QUOTA vi
 test("createLink throws COMPOSIO_REQUEST_FAILED when the session answer has no session_id, and never sends the link request", async () => {
   const calls: FakeCall[] = [];
   const fetcher = fakeFetcher((call) => {
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
     if (call.url.endsWith("/tool_router/session")) {
       return { status: 200, json: {} };
     }
@@ -407,11 +683,7 @@ test("createLink throws COMPOSIO_REQUEST_FAILED when the session answer has no s
 
   await assert.rejects(
     () =>
-      broker.createLink({
-        toolkit: "gmail",
-        ownerRef: "org_1:user_1",
-        callbackUrl: "https://app.example.com/callback",
-      }),
+      broker.createLink(LINK_INPUT),
     (err: unknown) => {
       assert.ok(err instanceof ComposioBrokerError);
       assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
@@ -419,15 +691,14 @@ test("createLink throws COMPOSIO_REQUEST_FAILED when the session answer has no s
       return true;
     },
   );
-  assert.equal(calls.length, 1, "the link request must never be sent without a session_id");
+  assert.equal(calls.length, 2, "the link request must never be sent without a session_id");
 });
 
 test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no connected_account_id", async () => {
   const calls: FakeCall[] = [];
   const fetcher = fakeFetcher((call) => {
-    if (call.url.endsWith("/tool_router/session")) {
-      return { status: 200, json: { session_id: "sess_1" } };
-    }
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession();
     if (call.url.endsWith("/tool_router/session/sess_1/link")) {
       return {
         status: 200,
@@ -440,11 +711,7 @@ test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no conn
 
   await assert.rejects(
     () =>
-      broker.createLink({
-        toolkit: "gmail",
-        ownerRef: "org_1:user_1",
-        callbackUrl: "https://app.example.com/callback",
-      }),
+      broker.createLink(LINK_INPUT),
     (err: unknown) => {
       assert.ok(err instanceof ComposioBrokerError);
       assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
@@ -457,9 +724,8 @@ test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no conn
 test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no redirect_url", async () => {
   const calls: FakeCall[] = [];
   const fetcher = fakeFetcher((call) => {
-    if (call.url.endsWith("/tool_router/session")) {
-      return { status: 200, json: { session_id: "sess_1" } };
-    }
+    if (isAuthConfigList(call)) return AUTH_CONFIG_LIST;
+    if (call.url.endsWith("/tool_router/session")) return pinnedSession();
     if (call.url.endsWith("/tool_router/session/sess_1/link")) {
       return {
         status: 200,
@@ -472,11 +738,7 @@ test("createLink throws COMPOSIO_REQUEST_FAILED when the link answer has no redi
 
   await assert.rejects(
     () =>
-      broker.createLink({
-        toolkit: "gmail",
-        ownerRef: "org_1:user_1",
-        callbackUrl: "https://app.example.com/callback",
-      }),
+      broker.createLink(LINK_INPUT),
     (err: unknown) => {
       assert.ok(err instanceof ComposioBrokerError);
       assert.equal(err.code, "COMPOSIO_REQUEST_FAILED" satisfies ComposioBrokerErrorCode);
