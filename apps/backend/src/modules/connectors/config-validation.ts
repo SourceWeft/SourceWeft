@@ -113,25 +113,36 @@ function validateValue(input: {
       });
     }
   }
+
+  // `type: "object"` is valid here for any nested occurrence (an array's
+  // `items`, a property's own schema, …), not just the document root, so
+  // `required`/`additionalProperties`/`properties` are enforced wherever an
+  // object schema appears, with the same error codes as the top level.
+  if (type === "object") {
+    validateObjectConstraints({
+      schema: input.schema,
+      value: input.value as Record<string, unknown>,
+      path: input.path,
+    });
+  }
 }
 
-export function validateObjectWithJsonSchema(input: {
-  schema: Record<string, unknown>;
+function validateObjectConstraints(input: {
+  schema: JsonSchemaObject;
   value: Record<string, unknown>;
-  label: string;
+  path: string;
 }) {
-  const schema = input.schema as JsonSchemaObject;
-  validateValue({ schema, value: input.value, path: input.label });
+  const { schema, value, path } = input;
 
   const required = Array.isArray(schema.required)
     ? schema.required.filter((item): item is string => typeof item === "string")
     : [];
   for (const key of required) {
-    if (!(key in input.value)) {
+    if (!(key in value)) {
       throw new ConnectorError(
         400,
         "CONNECTOR_SCHEMA_VALIDATION_FAILED",
-        `${input.label}.${key} is required`,
+        `${path}.${key} is required`,
       );
     }
   }
@@ -141,11 +152,15 @@ export function validateObjectWithJsonSchema(input: {
     if (variants.length > 0) {
       const matched = variants.some((variant) => {
         try {
-          validateObjectWithJsonSchema({
-            schema: variant,
-            value: input.value,
-            label: input.label,
-          });
+          const variantSchema = variant as JsonSchemaObject;
+          // Re-run the variant's own type/enum check (a variant may narrow
+          // to a non-object type, or to a different shape than its
+          // siblings), then its object constraints, matching the root's
+          // "no type still enforces object constraints" behavior below.
+          validateValue({ schema: variantSchema, value, path });
+          if (variantSchema.type !== "object") {
+            validateObjectConstraints({ schema: variantSchema, value, path });
+          }
           return true;
         } catch {
           return false;
@@ -155,7 +170,7 @@ export function validateObjectWithJsonSchema(input: {
         throw new ConnectorError(
           400,
           "CONNECTOR_SCHEMA_VALIDATION_FAILED",
-          `${input.label} must match at least one allowed shape`,
+          `${path} must match at least one allowed shape`,
         );
       }
     }
@@ -167,25 +182,46 @@ export function validateObjectWithJsonSchema(input: {
 
   if (schema.additionalProperties === false) {
     const allowed = new Set(Object.keys(schema.properties));
-    for (const key of Object.keys(input.value)) {
+    for (const key of Object.keys(value)) {
       if (!allowed.has(key)) {
         throw new ConnectorError(
           400,
           "CONNECTOR_SCHEMA_VALIDATION_FAILED",
-          `${input.label}.${key} is not allowed`,
+          `${path}.${key} is not allowed`,
         );
       }
     }
   }
 
   for (const [key, childSchema] of Object.entries(schema.properties)) {
-    if (!(key in input.value) || !isRecord(childSchema)) {
+    if (!(key in value) || !isRecord(childSchema)) {
       continue;
     }
     validateValue({
       schema: childSchema as JsonSchemaObject,
-      value: input.value[key],
-      path: `${input.label}.${key}`,
+      value: value[key],
+      path: `${path}.${key}`,
+    });
+  }
+}
+
+export function validateObjectWithJsonSchema(input: {
+  schema: Record<string, unknown>;
+  value: Record<string, unknown>;
+  label: string;
+}) {
+  const schema = input.schema as JsonSchemaObject;
+  validateValue({ schema, value: input.value, path: input.label });
+  // The root schema is validated as an object even when it declares no
+  // `type` (the pre-branch behavior): `validateValue` only reaches
+  // `validateObjectConstraints` through the `type === "object"` branch, so
+  // without an explicit type it would otherwise skip required/
+  // additionalProperties/properties checks entirely.
+  if (schema.type !== "object") {
+    validateObjectConstraints({
+      schema,
+      value: input.value,
+      path: input.label,
     });
   }
 }

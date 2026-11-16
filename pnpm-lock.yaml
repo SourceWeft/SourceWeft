@@ -169,6 +169,9 @@ importers:
       '@sourceweft/billing':
         specifier: workspace:*
         version: link:../../enterprise/billing
+      '@sourceweft/builtin-connector-dropbox':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-dropbox
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-gmail
@@ -904,6 +907,9 @@ importers:
 
   packages/agent-tool-registry:
     dependencies:
+      '@sourceweft/builtin-connector-dropbox':
+        specifier: workspace:*
+        version: link:../builtin-connector-dropbox
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../builtin-connector-gmail
@@ -973,6 +979,28 @@ importers:
         version: 5.9.2
 
   packages/anydoc: {}
+
+  packages/builtin-connector-dropbox:
+    dependencies:
+      '@sourceweft/builtin-document-parsers':
+        specifier: workspace:*
+        version: link:../builtin-document-parsers
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
 
   packages/builtin-connector-gmail:
     dependencies:

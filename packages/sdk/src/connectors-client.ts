@@ -55,6 +55,52 @@ export type GoogleDrivePickerSession = {
   mimeTypes: string[];
 };
 
+// Redeclared rather than imported: the SDK must not depend on the Dropbox
+// capability package (packages/builtin-connector-dropbox/src/adapter.ts
+// defines the originals). Keep these in sync with that file.
+export type DropboxBrowseEntry = {
+  id: string;
+  kind: "file" | "folder";
+  name: string;
+  pathDisplay: string;
+  size: number | null;
+  serverModified: string | null;
+  supported: boolean;
+};
+
+export type DropboxBrowseFolder = {
+  id: string;
+  name: string;
+  pathDisplay: string;
+};
+
+export type DropboxBrowseResult = {
+  folder: DropboxBrowseFolder | null;
+  breadcrumbs: Array<{ id: string; name: string }>;
+  entries: DropboxBrowseEntry[];
+  cursor: string;
+  hasMore: boolean;
+};
+
+export type DropboxSearchResult = {
+  entries: DropboxBrowseEntry[];
+  cursor: string;
+  hasMore: boolean;
+};
+
+export type DropboxDescribeItem = {
+  id: string;
+  kind: "file" | "folder" | null;
+  name: string | null;
+  pathDisplay: string | null;
+  pathLower: string | null;
+  exists: boolean;
+};
+
+export type DropboxDescribeResult = {
+  items: DropboxDescribeItem[];
+};
+
 export class ConnectorsClient {
   listGmailLabels(workspaceId: string, connectorId: string) {
     return this.http.get<{
@@ -69,6 +115,40 @@ export class ConnectorsClient {
       `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/google-drive/picker-session`,
     );
   }
+
+  dropboxBrowse(
+    workspaceId: string,
+    connectorId: string,
+    input: { folderId?: string | null; cursor?: string } = {},
+  ) {
+    return this.http.post<DropboxBrowseResult>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/dropbox/browse`,
+      input,
+    );
+  }
+
+  dropboxSearch(
+    workspaceId: string,
+    connectorId: string,
+    input: { query: string; cursor?: string },
+  ) {
+    return this.http.post<DropboxSearchResult>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/dropbox/search`,
+      input,
+    );
+  }
+
+  dropboxDescribe(
+    workspaceId: string,
+    connectorId: string,
+    input: { ids: string[] },
+  ) {
+    return this.http.post<DropboxDescribeResult>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/dropbox/describe`,
+      input,
+    );
+  }
+
   constructor(private readonly http: HttpClient) {}
 
   listManifests(workspaceId: string) {

@@ -761,7 +761,8 @@ export function useConnectors(input: {
           if (
             item.id !== "notion" &&
             item.id !== "gmail" &&
-            item.id !== "google_drive"
+            item.id !== "google_drive" &&
+            item.id !== "dropbox"
           ) {
             toast.info(
               t("toasts.connectors.connectedConfigureNext", {
@@ -773,7 +774,9 @@ export function useConnectors(input: {
           }
 
           const periodicIndexingEnabled =
-            item.id === "notion" || item.id === "google_drive";
+            item.id === "notion" ||
+            item.id === "google_drive" ||
+            item.id === "dropbox";
           const created = await connectorsClient.create(workspaceId, {
             connectorType: item.id,
             name: account.displayName || item.name,
@@ -783,7 +786,9 @@ export function useConnectors(input: {
                 ? gmailConfigForMode(options.gmailMode ?? "tools")
                 : item.id === "google_drive"
                   ? { fileIds: [] }
-                  : { includePages: true },
+                  : item.id === "dropbox"
+                    ? { items: [] }
+                    : { includePages: true },
             periodicIndexingEnabled,
             ...(periodicIndexingEnabled
               ? { indexingFrequencyMinutes: 360 }
@@ -794,7 +799,7 @@ export function useConnectors(input: {
             gmailMode:
               item.id === "gmail" ? (options.gmailMode ?? "tools") : undefined,
           });
-          if (item.id === "google_drive") {
+          if (item.id === "google_drive" || item.id === "dropbox") {
             // No files are selected yet, so there is nothing to sync; open
             // settings so the admin can pick files from the Files section.
             await refreshConnectors();

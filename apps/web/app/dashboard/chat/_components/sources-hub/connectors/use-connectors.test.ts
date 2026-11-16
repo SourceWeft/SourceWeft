@@ -509,6 +509,53 @@ test("a first authorization still creates the connector", async () => {
   expect(toastSuccess).toHaveBeenCalledWith("Google Drive connected.");
 });
 
+test("dropbox connect creates an empty selection and opens settings", async () => {
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "dropbox-1",
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  // The new connector is listed once it exists.
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-dropbox",
+    connectorType: "dropbox",
+    accountId: "acc-db",
+  });
+
+  await mountHook(baseInput("ws-dropbox"));
+
+  expect(create).toHaveBeenCalledWith("ws-dropbox", {
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  // Nothing is selected yet, so nothing is synced; settings open instead.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("dropbox-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Dropbox connected.");
+});
+
 test("handleReconnectConnector starts authorization for the connector's provider", async () => {
   list.mockResolvedValue({ items: [driveConnector()] });
   const assign = vi.fn();

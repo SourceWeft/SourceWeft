@@ -66,6 +66,11 @@ import {
   getConnectorDisplayName,
   getConnectorReadinessFromConfig,
 } from "./components";
+import { DropboxItems } from "./dropbox-items";
+import {
+  commitDropboxSelection,
+  type DropboxSelectionItem,
+} from "./dropbox-selection";
 import { GoogleDriveFiles } from "./google-drive-files";
 import { isGoogleDrivePickerElement } from "./google-drive-picker";
 import { commitGoogleDriveSelection } from "./google-drive-selection";
@@ -267,7 +272,8 @@ export function ConnectorSettingsDialog({
   const parsedCustomFrequency = Number(customFrequencyMinutes);
   const minFrequency =
     connector.raw.connectorType === "gmail" ||
-    connector.raw.connectorType === "google_drive"
+    connector.raw.connectorType === "google_drive" ||
+    connector.raw.connectorType === "dropbox"
       ? 60
       : 1;
   const hasValidCustomFrequency =
@@ -331,6 +337,29 @@ export function ConnectorSettingsDialog({
           indexingFrequencyMinutes:
             currentConnector.raw.indexingFrequencyMinutes,
           configJson: { fileIds },
+        }),
+      sync: () => onSyncConnector(currentConnector),
+    });
+  }
+
+  function handleChangeDropboxItems(
+    items: DropboxSelectionItem[],
+  ): Promise<boolean> {
+    const currentConnector = connector;
+    if (!currentConnector) {
+      return Promise.resolve(false);
+    }
+    // Same contract as handleChangeGoogleDriveFiles: only the selection
+    // changes, and the sync runs only after the save succeeded, so the backend
+    // reconciles against a selection it has stored.
+    return commitDropboxSelection({
+      save: () =>
+        onSaveSettings(currentConnector, {
+          name: currentConnector.name,
+          periodicIndexingEnabled: currentConnector.raw.periodicIndexingEnabled,
+          indexingFrequencyMinutes:
+            currentConnector.raw.indexingFrequencyMinutes,
+          configJson: { items },
         }),
       sync: () => onSyncConnector(currentConnector),
     });
@@ -589,6 +618,14 @@ export function ConnectorSettingsDialog({
                     disabled={isSavingSettings}
                     latestSyncRun={latestSyncRun}
                     onChangeFileIds={handleChangeGoogleDriveFiles}
+                  />
+                ) : null}
+                {connectorType === "dropbox" ? (
+                  <DropboxItems
+                    connector={connector}
+                    disabled={isSavingSettings}
+                    latestSyncRun={latestSyncRun}
+                    onChangeItems={handleChangeDropboxItems}
                   />
                 ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
