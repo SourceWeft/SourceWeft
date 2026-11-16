@@ -119,6 +119,120 @@ export const connectorActionSpecSchema = z.object({
   capabilities: z.array(connectorActionCapabilitySchema).optional(),
 });
 
+// ---------------------------------------------------------------------------
+// Selection contract — browse, search and describe over a connector's items
+// ---------------------------------------------------------------------------
+//
+// Bounds enforced here mirror the equivalent, independently-defined rules in
+// `packages/capability-contracts/src/index.ts` (`connectorContributionSchema`);
+// the two packages have no dependency on each other, so the field-level rules
+// are duplicated on purpose. Only the cross-check against a contribution's
+// declared actions lives on the capability-contracts side.
+
+export const connectorSelectionKindSchema = z.string().min(1).max(64);
+
+export const connectorSelectionItemSchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema,
+});
+
+export const connectorSelectionSpecSchema = z.object({
+  actions: z.object({
+    browse: z.string().min(1),
+    search: z.string().min(1).optional(),
+    describe: z.string().min(1),
+  }),
+  kinds: z
+    .array(connectorSelectionKindSchema)
+    .min(1)
+    .max(20)
+    .superRefine((kinds, context) => {
+      const seen = new Set<string>();
+      kinds.forEach((kind, index) => {
+        if (seen.has(kind)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Duplicate kind '${kind}'`,
+            path: [index],
+          });
+        }
+        seen.add(kind);
+      });
+    }),
+  maxItems: z.number().int().min(1).max(500),
+});
+
+const connectorSelectionContainerSchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema,
+  name: z.string().min(1).max(1024),
+  detail: z.string().max(2048).nullable(),
+});
+
+const connectorSelectionBreadcrumbSchema = z.object({
+  id: z.string().min(1).max(512),
+  name: z.string().min(1).max(1024),
+});
+
+export const connectorSelectionEntrySchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema,
+  name: z.string().min(1).max(1024),
+  detail: z.string().max(2048).nullable(),
+  selectable: z.boolean(),
+  expandable: z.boolean(),
+  disabledReason: z.string().max(64).nullable(),
+  size: z.number().finite().nonnegative().nullable(),
+  modifiedAt: z.string().max(64).nullable(),
+});
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+const connectorSelectionHelpLinkSchema = z.object({
+  code: z.string().min(1).max(64),
+  url: z.string().refine(isHttpsUrl, "helpLink.url must be an https:// URL"),
+});
+
+export const connectorSelectionBrowseResultSchema = z.object({
+  container: connectorSelectionContainerSchema.nullable(),
+  breadcrumbs: z.array(connectorSelectionBreadcrumbSchema).max(50),
+  entries: z.array(connectorSelectionEntrySchema).max(500),
+  cursor: z.string().max(4096),
+  hasMore: z.boolean(),
+  helpLink: connectorSelectionHelpLinkSchema.nullable().default(null),
+});
+
+export const connectorSelectionSearchResultSchema = z.object({
+  entries: z.array(connectorSelectionEntrySchema).max(500),
+  cursor: z.string().max(4096),
+  hasMore: z.boolean(),
+});
+
+export const connectorSelectionDescribeItemSchema = z.object({
+  id: z.string().min(1).max(512),
+  kind: connectorSelectionKindSchema.nullable(),
+  name: z.string().max(1024).nullable(),
+  detail: z.string().max(2048).nullable(),
+  exists: z.boolean(),
+  meta: z
+    .record(z.string(), z.union([z.string().max(2048), z.number(), z.null()]))
+    .refine(
+      (meta) => Object.keys(meta).length <= 20,
+      "meta must have at most 20 keys",
+    )
+    .default({}),
+});
+
+export const connectorSelectionDescribeResultSchema = z.object({
+  items: z.array(connectorSelectionDescribeItemSchema).max(100),
+});
+
 export const connectorManifestSchema = z.object({
   type: z.string().min(1),
   displayName: z.string().min(1),
@@ -131,6 +245,7 @@ export const connectorManifestSchema = z.object({
   }),
   actions: z.array(connectorActionSpecSchema),
   configSchema: jsonObjectSchema,
+  selection: connectorSelectionSpecSchema.optional(),
 });
 
 export const connectorOAuthAccountSchema = z.object({
@@ -425,6 +540,27 @@ export const connectorWebhookConfigResponseSchema = z.object({
 });
 
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
+export type ConnectorSelectionItem = z.infer<
+  typeof connectorSelectionItemSchema
+>;
+export type ConnectorSelectionSpec = z.infer<
+  typeof connectorSelectionSpecSchema
+>;
+export type ConnectorSelectionEntry = z.infer<
+  typeof connectorSelectionEntrySchema
+>;
+export type ConnectorSelectionBrowseResult = z.infer<
+  typeof connectorSelectionBrowseResultSchema
+>;
+export type ConnectorSelectionSearchResult = z.infer<
+  typeof connectorSelectionSearchResultSchema
+>;
+export type ConnectorSelectionDescribeItem = z.infer<
+  typeof connectorSelectionDescribeItemSchema
+>;
+export type ConnectorSelectionDescribeResult = z.infer<
+  typeof connectorSelectionDescribeResultSchema
+>;
 export type ConnectorOAuthAccount = z.infer<typeof connectorOAuthAccountSchema>;
 export type SourceConnector = z.infer<typeof sourceConnectorSchema>;
 export type ConnectorSyncRun = z.infer<typeof connectorSyncRunSchema>;

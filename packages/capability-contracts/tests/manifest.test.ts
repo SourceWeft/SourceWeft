@@ -552,6 +552,170 @@ test("capability-manifest.pipeline parses a deliverable pipeline declaration", (
   assert.equal(pipeline?.queue, "deliverables");
 });
 
+const selectionTestConnectorContribution = {
+  id: "notion",
+  title: "Notion",
+  auth: {
+    kind: "oauth2",
+    authorizationUrl: "https://www.notion.so/install-integration",
+    tokenUrl: "https://api.notion.com/v1/oauth/token",
+    scopes: [],
+    authorizationParams: { owner: "user" },
+    sendScope: false,
+  },
+  sync: {
+    supportsIncremental: true,
+    defaultFrequencyMinutes: 360,
+    resources: [
+      {
+        type: "notion_page",
+        title: "Notion page",
+        supportsDeleteDetection: false,
+      },
+    ],
+  },
+  actions: [
+    {
+      id: "notion.browse",
+      title: "Browse",
+      risk: "low",
+      requiresApproval: false,
+      visibility: "internal",
+      inputSchema: { type: "object" },
+    },
+    {
+      id: "notion.search",
+      title: "Search",
+      risk: "low",
+      requiresApproval: false,
+      visibility: "internal",
+      inputSchema: { type: "object" },
+    },
+    {
+      id: "notion.describe",
+      title: "Describe",
+      risk: "low",
+      requiresApproval: false,
+      visibility: "internal",
+      inputSchema: { type: "object" },
+    },
+  ],
+  configSchema: { type: "object" },
+};
+
+function selectionTestManifest(connectorOverrides: Record<string, unknown>) {
+  return {
+    schemaVersion: 1,
+    id: "sourceweft/notion",
+    kind: "connector",
+    name: "Notion Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        ...selectionTestConnectorContribution,
+        ...connectorOverrides,
+      },
+    ],
+  };
+}
+
+test("selection must name declared internal actions", () => {
+  const manifest = capabilityManifestSchema.parse(
+    selectionTestManifest({
+      selection: {
+        actions: {
+          browse: "notion.browse",
+          search: "notion.search",
+          describe: "notion.describe",
+        },
+        kinds: ["page", "database"],
+        maxItems: 500,
+      },
+    }),
+  );
+
+  assert.deepEqual(manifest.contributes.connectors[0]?.selection, {
+    actions: {
+      browse: "notion.browse",
+      search: "notion.search",
+      describe: "notion.describe",
+    },
+    kinds: ["page", "database"],
+    maxItems: 500,
+  });
+
+  const describesUndeclaredAction = parseCapabilityManifest(
+    selectionTestManifest({
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.missing" },
+        kinds: ["page"],
+        maxItems: 500,
+      },
+    }),
+  );
+  assert.equal(describesUndeclaredAction.ok, false);
+
+  const browseNamesAgentVisibleAction = capabilityManifestSchema.safeParse(
+    selectionTestManifest({
+      actions: selectionTestConnectorContribution.actions.map((action) =>
+        action.id === "notion.browse"
+          ? { ...action, visibility: "agent" }
+          : action,
+      ),
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.describe" },
+        kinds: ["page"],
+        maxItems: 500,
+      },
+    }),
+  );
+  assert.equal(browseNamesAgentVisibleAction.success, false);
+
+  const emptyKinds = capabilityManifestSchema.safeParse(
+    selectionTestManifest({
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.describe" },
+        kinds: [],
+        maxItems: 500,
+      },
+    }),
+  );
+  assert.equal(emptyKinds.success, false);
+
+  const duplicateKinds = capabilityManifestSchema.safeParse(
+    selectionTestManifest({
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.describe" },
+        kinds: ["page", "page"],
+        maxItems: 500,
+      },
+    }),
+  );
+  assert.equal(duplicateKinds.success, false);
+
+  const zeroMaxItems = capabilityManifestSchema.safeParse(
+    selectionTestManifest({
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.describe" },
+        kinds: ["page"],
+        maxItems: 0,
+      },
+    }),
+  );
+  assert.equal(zeroMaxItems.success, false);
+
+  const tooManyMaxItems = capabilityManifestSchema.safeParse(
+    selectionTestManifest({
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.describe" },
+        kinds: ["page"],
+        maxItems: 501,
+      },
+    }),
+  );
+  assert.equal(tooManyMaxItems.success, false);
+});
+
 test("capability-manifest.pipeline rejects invalid job names", () => {
   const result = capabilityManifestSchema.safeParse({
     schemaVersion: 1,
