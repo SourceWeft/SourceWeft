@@ -27,6 +27,38 @@ test("readStudyCapability returns the module the entry factory builds", () => {
   assert.equal(capability.generation, generation);
 });
 
+test("scheduling and derivation are groups of their own, each checked by name", () => {
+  const scheduling = {
+    scheduleReview: () => ({}) as never,
+    newReviewCard: () => ({}) as never,
+    desiredRetention: 0.9,
+  };
+  const derivation = { deriveFlashcardsFromQuiz: () => ({}) as never };
+  const entry = {
+    [STUDY_CAPABILITY_FACTORY]: () => ({ scheduling, derivation }),
+  };
+  const capability = readStudyCapability(entry, "scheduling", "derivation");
+  assert.equal(capability.scheduling, scheduling);
+  assert.equal(capability.derivation, derivation);
+  assert.throws(() => readStudyCapability(entry, "generation"), /generation/);
+  assert.throws(
+    () =>
+      readStudyCapability(
+        { [STUDY_CAPABILITY_FACTORY]: () => ({ scheduling: { scheduleReview: () => 0 } }) },
+        "scheduling",
+      ),
+    /newReviewCard, desiredRetention/,
+  );
+  assert.throws(
+    () =>
+      readStudyCapability(
+        { [STUDY_CAPABILITY_FACTORY]: () => ({ derivation: {} }) },
+        "derivation",
+      ),
+    /deriveFlashcardsFromQuiz/,
+  );
+});
+
 test("a missing or malformed factory is a deployment fault, not a degraded feature", () => {
   for (const entry of [
     null,

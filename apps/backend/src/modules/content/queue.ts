@@ -230,6 +230,61 @@ export async function enqueueSourceGuideGenerateJob(
   });
 }
 
+export const STUDY_GENERATE_JOB = "study-generate";
+/** Queue attempts of one study generation; the engine resumes from its checkpoint. */
+export const STUDY_GENERATE_JOB_ATTEMPTS = 2;
+
+/**
+ * One study artifact version to generate. Built by the server from an
+ * authorized request; the processor still re-reads the artifact and takes its
+ * tenancy from the row it finds there.
+ */
+export type StudyGenerateJobPayload = {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  artifactId: string;
+  versionNo: number;
+  userId: string;
+  artifactType: "flashcards" | "quiz" | "mindmap";
+  sourceIds: string[];
+  options?: {
+    size?: "fewer" | "standard" | "more";
+    count?: number;
+    difficulty?: "easy" | "mixed" | "hard";
+    language?: string;
+    focus?: string;
+  };
+  uiLocale: string;
+};
+
+export function studyGenerateJobId(artifactId: string, versionNo: number) {
+  return `study_${artifactId}_${versionNo}`;
+}
+
+/**
+ * Queues the generation of one version. The job id is the version, so a second
+ * request for the same version finds the first job instead of adding another:
+ * `created: false` tells the caller it was already queued.
+ */
+export async function enqueueStudyGenerateJob(
+  payload: StudyGenerateJobPayload,
+) {
+  const jobId = studyGenerateJobId(payload.artifactId, payload.versionNo);
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return { created: false as const };
+  }
+  await jobsQueue.add(STUDY_GENERATE_JOB, payload, {
+    jobId,
+    attempts: STUDY_GENERATE_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
+  return { created: true as const };
+}
+
 const THREAD_CHAT_RUN_JOB_ID_PREFIX = `${THREAD_CHAT_RUN_JOB}_`;
 
 /** The deterministic queue job id of a durable chat run. */

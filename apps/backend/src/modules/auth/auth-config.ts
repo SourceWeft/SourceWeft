@@ -235,6 +235,19 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                   });
                   throw error;
                 }
+                // Same reason: notifications name their owner as plain text.
+                const { deleteUserNotifications } =
+                  await import("../notifications");
+                try {
+                  await deleteUserNotifications(user.id);
+                } catch (error) {
+                  logger.error("notification_user_cleanup_failed", {
+                    userId: user.id,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  });
+                  throw error;
+                }
               },
               async sendDeleteAccountVerification(data, request) {
                 const { mailService } = await import("../mail");

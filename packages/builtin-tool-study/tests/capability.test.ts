@@ -36,3 +36,18 @@ test("measureCorpus reports mode, groups and the size limit without a model", ()
   assert.equal(huge.exceedsLimit, true);
   assert.equal(huge.groups, 0);
 });
+
+test("the entry module provides scheduling and derivation as the host requires them", () => {
+  const { scheduling, derivation } = readStudyCapability(
+    entry,
+    "scheduling",
+    "derivation",
+  );
+  assert.equal(scheduling!.desiredRetention, 0.9);
+  const now = new Date("2026-01-01T00:00:00Z");
+  assert.equal(scheduling!.newReviewCard(now).state, 0);
+  const { state, log } = scheduling!.scheduleReview(null, 3, now);
+  assert.equal(state.reps, 1);
+  assert.equal(log.grade, 3);
+  assert.equal(typeof derivation!.deriveFlashcardsFromQuiz, "function");
+});

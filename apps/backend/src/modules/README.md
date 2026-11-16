@@ -13,6 +13,7 @@ service interface via its `index.ts` barrel export.
 | `catalog-overview` | AI overview engine shared by catalog kinds (skills; MCP next): system-model calls, fenced all-locale publication, jobs |
 | `artifacts` | Generated artifacts (images, slides, presentations) |
 | `connectors` | External data source connectors and sync orchestration |
+| `schedules` | Generic schedule engine (materialize, claim, lease, retry) that connector sync plugs into |
 | `mcp` | MCP (Model Context Protocol) server management |
 | `invocations` | Invocation pipeline: slash commands, tools, skills, MCP |
 | `byok` | Bring Your Own Key credential management |
@@ -31,6 +32,7 @@ service interface via its `index.ts` barrel export.
 | `billing` | Team-scoped credits and pages metering |
 | `llm-observability` | LLM call tracing and observability |
 | `mail` | Provider-agnostic mail service (Plunk adapter) |
+| `notifications` | Per-person inbox with throttled email (`notify(kind, ...)`) |
 | `ops` | Alerting and operational notifications |
 
 ## Shared kernel
