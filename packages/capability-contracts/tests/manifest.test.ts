@@ -716,6 +716,19 @@ test("selection must name declared internal actions", () => {
   assert.equal(tooManyMaxItems.success, false);
 });
 
+test("selection kinds must be safe i18n key segments", () => {
+  const unsafeKind = capabilityManifestSchema.safeParse(
+    selectionTestManifest({
+      selection: {
+        actions: { browse: "notion.browse", describe: "notion.describe" },
+        kinds: ["page.child"],
+        maxItems: 500,
+      },
+    }),
+  );
+  assert.equal(unsafeKind.success, false);
+});
+
 test("capability-manifest.pipeline rejects invalid job names", () => {
   const result = capabilityManifestSchema.safeParse({
     schemaVersion: 1,

@@ -60,6 +60,19 @@ const CURSOR_MAX_LENGTH = 4096;
 const COUNT_CEILING = 20000;
 // Derived from the single pattern contribution.ts also uses for configSchema.
 const SELECTION_ITEM_ID = new RegExp(DROPBOX_ITEM_ID_PATTERN);
+/** Contract bounds (packages/contracts selection schema) a real Dropbox path
+ * could exceed: a very long `path_display` or a very deeply nested folder must
+ * be trimmed to fit rather than fail result validation with a 502. */
+const MAX_DETAIL_LENGTH = 2048;
+const MAX_BREADCRUMBS = 50;
+
+/** Truncate a `detail` (a Dropbox path) to the contract's 2,048-character
+ * bound; shorter values are returned unchanged. */
+function truncateDetail(detail: string): string {
+  return detail.length > MAX_DETAIL_LENGTH
+    ? detail.slice(0, MAX_DETAIL_LENGTH)
+    : detail;
+}
 
 export type DropboxAdapterConfig = {
   baseUrl: string;
@@ -198,7 +211,7 @@ function toSelectionEntry(entry: DropboxEntry): ConnectorSelectionEntry | null {
     id: entry.id,
     kind: tag,
     name,
-    detail: entry.path_display ?? "",
+    detail: truncateDetail(entry.path_display ?? ""),
     selectable,
     expandable,
     disabledReason: selectable ? null : "unsupported",
@@ -550,17 +563,25 @@ export function createDropboxConnectorAdapter(
       id: containerMetadata.id,
       kind: "folder",
       name: containerMetadata.name ?? "",
-      detail: pathDisplay,
+      detail: truncateDetail(pathDisplay),
     };
 
     // Breadcrumbs are the ancestors strictly between the root and the
     // current container; each id comes from a `getMetadata` lookup on the
     // ancestor's own path (not an id), because the discovered container's
     // path_display is the only source of its ancestry.
+    const segments = parentPathSegments(pathDisplay);
+    // Keep at most the innermost MAX_BREADCRUMBS ancestors so a very deep
+    // folder does not exceed the contract's breadcrumb bound; the outermost
+    // ancestors are dropped. The full path is still walked to build each kept
+    // ancestor's own path.
+    const firstKept = Math.max(0, segments.length - MAX_BREADCRUMBS);
     const breadcrumbs: Array<{ id: string; name: string }> = [];
     let ancestorPath = "";
-    for (const segment of parentPathSegments(pathDisplay)) {
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!;
       ancestorPath += `/${segment}`;
+      if (index < firstKept) continue;
       const ancestorMetadata = await client.getMetadata(input.accessToken, pathRoot, ancestorPath);
       if (ancestorMetadata && typeof ancestorMetadata.id === "string") {
         breadcrumbs.push({ id: ancestorMetadata.id, name: ancestorMetadata.name ?? segment });
@@ -619,7 +640,10 @@ export function createDropboxConnectorAdapter(
           id,
           kind: entry[".tag"],
           name: entry.name ?? null,
-          detail: entry.path_display ?? null,
+          detail:
+            entry.path_display != null
+              ? truncateDetail(entry.path_display)
+              : null,
           exists: true,
           meta: { pathLower: entry.path_lower ?? null },
         };

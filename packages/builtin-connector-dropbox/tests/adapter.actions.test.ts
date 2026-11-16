@@ -494,6 +494,77 @@ test("every action result satisfies the selection contract unchanged", async () 
   );
 });
 
+test("an over-long path is truncated to the contract bound", async () => {
+  const longPath = `/${"a".repeat(3000)}`;
+  const { fetcher } = router({
+    listFolder: () =>
+      json({
+        entries: [
+          fileEntry({
+            id: "id:longpath0001",
+            name: "deep.pdf",
+            path_display: longPath,
+          }),
+        ],
+        cursor: "",
+        has_more: false,
+      }),
+  });
+  const dbx = adapter(fetcher);
+  const result = await dbx.executeAction(actionInput("dropbox.browse", {}));
+  const detail = (result.result.entries as Array<{ detail: string }>)[0]!.detail;
+  assert.equal(detail.length, 2048);
+  assert.equal(detail, longPath.slice(0, 2048));
+  // The truncated result still satisfies the contract (would 502 otherwise).
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(result.result),
+    result.result,
+  );
+});
+
+test("more than 50 ancestors keeps the 50 nearest", async () => {
+  const ancestors = Array.from({ length: 60 }, (_, index) => `a${index + 1}`);
+  const containerPath = `/${ancestors.join("/")}/C`;
+  const { fetcher } = router({
+    listFolder: () => json({ entries: [], cursor: "", has_more: false }),
+    getMetadata: (call) => {
+      const path = (call.body as { path: string }).path;
+      if (path === "id:ancestordeep1") {
+        return json(
+          folderEntry({
+            id: "id:ancestordeep1",
+            name: "C",
+            path_display: containerPath,
+          }),
+        );
+      }
+      // Ancestor lookups come in by path; derive a stable id/name from the
+      // path's last segment.
+      const segment = path.split("/").filter(Boolean).pop()!;
+      return json(
+        folderEntry({ id: `id:${segment}`, name: segment, path_display: path }),
+      );
+    },
+  });
+  const dbx = adapter(fetcher);
+  const result = await dbx.executeAction(
+    actionInput("dropbox.browse", { containerId: "id:ancestordeep1" }),
+  );
+  const breadcrumbs = result.result.breadcrumbs as Array<{
+    id: string;
+    name: string;
+  }>;
+  // Outermost ancestors (a1..a10) are dropped; the 50 nearest are kept.
+  assert.equal(breadcrumbs.length, 50);
+  assert.deepEqual(breadcrumbs[0], { id: "id:a11", name: "a11" });
+  assert.deepEqual(breadcrumbs[49], { id: "id:a60", name: "a60" });
+  // The capped result still satisfies the contract (would 502 otherwise).
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(result.result),
+    result.result,
+  );
+});
+
 test("browse rejects the old folderId field", async () => {
   const { fetcher, calls } = router({});
   const dbx = adapter(fetcher);

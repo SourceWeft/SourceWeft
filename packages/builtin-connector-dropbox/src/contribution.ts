@@ -20,7 +20,7 @@ export const DROPBOX_MAX_FILES = 1000;
 
 /** Shape of every Dropbox item id this connector hands out or accepts back:
  * the `id:` prefix from Dropbox's own file/folder ids. Keep in sync with the
- * pattern baked into dropbox.browse's `folderId`, dropbox.search's result
+ * pattern baked into dropbox.browse's `containerId`, dropbox.search's result
  * ids and dropbox.describe's `ids`. */
 export const DROPBOX_ITEM_ID_PATTERN = "^id:[A-Za-z0-9_-]{1,200}$";
 

@@ -190,6 +190,73 @@ test("describe keeps nulls for a missing item and defaults meta", () => {
   );
 });
 
+test("helpLink.url is capped at 2,048 characters", () => {
+  const base = {
+    container: null,
+    breadcrumbs: [],
+    entries: [],
+    cursor: "",
+    hasMore: false,
+  };
+  const longUrl = `https://example.com/${"a".repeat(2048)}`;
+  assert.equal(
+    connectorSelectionBrowseResultSchema.safeParse({
+      ...base,
+      helpLink: { code: "add", url: longUrl },
+    }).success,
+    false,
+  );
+});
+
+test("helpLink.code must be a safe i18n key segment", () => {
+  const base = {
+    container: null,
+    breadcrumbs: [],
+    entries: [],
+    cursor: "",
+    hasMore: false,
+  };
+  assert.equal(
+    connectorSelectionBrowseResultSchema.safeParse({
+      ...base,
+      helpLink: { code: "needs.reauth", url: "https://example.com/help" },
+    }).success,
+    false,
+  );
+});
+
+test("disabledReason must be a safe i18n key segment", () => {
+  const base = {
+    container: null,
+    breadcrumbs: [],
+    cursor: "",
+    hasMore: false,
+  };
+  assert.equal(
+    connectorSelectionBrowseResultSchema.safeParse({
+      ...base,
+      entries: [{ ...entry, disabledReason: "not-selectable" }],
+    }).success,
+    false,
+  );
+});
+
+test("a kind must be a safe i18n key segment", () => {
+  const base = {
+    container: null,
+    breadcrumbs: [],
+    cursor: "",
+    hasMore: false,
+  };
+  assert.equal(
+    connectorSelectionBrowseResultSchema.safeParse({
+      ...base,
+      entries: [{ ...entry, kind: "Mixed.Case" }],
+    }).success,
+    false,
+  );
+});
+
 test("manifest accepts and omits selection", () => {
   const minimalManifest = {
     type: "dropbox",

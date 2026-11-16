@@ -129,7 +129,16 @@ export const connectorActionSpecSchema = z.object({
 // are duplicated on purpose. Only the cross-check against a contribution's
 // declared actions lives on the capability-contracts side.
 
-export const connectorSelectionKindSchema = z.string().min(1).max(64);
+// Kinds, disabled-reason codes and help-link codes become i18n key segments
+// (`…kinds.<kind>`, `…disabledReason.<code>`, `…helpLink.<code>`), so a dot or
+// any other separator would walk the message tree. Restrict them to lowercase
+// word characters. Existing values (`folder`, `file`, `unsupported`) satisfy it.
+const SELECTION_KEY_SEGMENT = /^[a-z0-9_]+$/;
+
+export const connectorSelectionKindSchema = z
+  .string()
+  .max(64)
+  .regex(SELECTION_KEY_SEGMENT);
 
 export const connectorSelectionItemSchema = z.object({
   id: z.string().min(1).max(512),
@@ -181,7 +190,11 @@ export const connectorSelectionEntrySchema = z.object({
   detail: z.string().max(2048).nullable(),
   selectable: z.boolean(),
   expandable: z.boolean(),
-  disabledReason: z.string().max(64).nullable(),
+  disabledReason: z
+    .string()
+    .max(64)
+    .regex(SELECTION_KEY_SEGMENT)
+    .nullable(),
   size: z.number().finite().nonnegative().nullable(),
   modifiedAt: z.string().max(64).nullable(),
 });
@@ -195,8 +208,11 @@ function isHttpsUrl(value: string): boolean {
 }
 
 const connectorSelectionHelpLinkSchema = z.object({
-  code: z.string().min(1).max(64),
-  url: z.string().refine(isHttpsUrl, "helpLink.url must be an https:// URL"),
+  code: z.string().max(64).regex(SELECTION_KEY_SEGMENT),
+  url: z
+    .string()
+    .max(2048)
+    .refine(isHttpsUrl, "helpLink.url must be an https:// URL"),
 });
 
 export const connectorSelectionBrowseResultSchema = z.object({

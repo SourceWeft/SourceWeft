@@ -436,7 +436,14 @@ export const connectorActionSchema = z.object({
 // dependency on each other, so this is deliberately duplicated. Only the
 // cross-check against this contribution's declared `actions` (R4) is
 // specific to this package.
-const connectorSelectionKindSchema = z.string().min(1).max(64);
+// A kind becomes an i18n key segment (`…kinds.<kind>`) in the web, so a dot or
+// other separator would walk the message tree; restrict it to lowercase word
+// characters. Same rule as `connectorSelectionKindSchema` in
+// `packages/contracts/src/connectors.ts` (the two packages are independent).
+const connectorSelectionKindSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9_]+$/);
 
 export const connectorSelectionSpecSchema = z.object({
   actions: z.object({
