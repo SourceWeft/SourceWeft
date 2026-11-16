@@ -3692,6 +3692,7 @@
         "disabledConflict": "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
         "enableFailed": "Failed to enable {name} connector.",
         "authFailed": "{name} authorization failed.",
+        "setupIncomplete": "{name} was authorized, but setup could not finish. Connect it again.",
         "connectionCanceled": "{name} connection canceled.",
         "webhookCopied": "Webhook URL copied.",
         "webhookCopyFailed": "Could not copy webhook URL.",

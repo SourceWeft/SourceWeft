@@ -3692,6 +3692,7 @@
         "disabledConflict": "已存在同名的已停用連接器。請先啟用或刪除後再重新連接。",
         "enableFailed": "啟用 {name} 連接器失敗。",
         "authFailed": "{name} 授權失敗。",
+        "setupIncomplete": "{name} 已授權，但設定未能完成。請重新連接。",
         "connectionCanceled": "{name} 連接已取消。",
         "webhookCopied": "Webhook URL 已複製。",
         "webhookCopyFailed": "無法複製 webhook URL。",

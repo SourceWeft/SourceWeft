@@ -225,6 +225,11 @@ export function useConnectors(input: {
   const selectionSpecByTypeRef = useRef<Record<string, ConnectorSelectionSpec>>(
     {},
   );
+  // True once a manifest load has succeeded in this hook instance. An empty
+  // `selectionSpecByTypeRef` only means "no type declares a selection" once
+  // this is true; before that it means "not loaded yet / load failed", which
+  // is not the same as "this type has no selection".
+  const manifestsLoadedRef = useRef(false);
   const applySelectionSpecByType = useCallback(
     (next: Record<string, ConnectorSelectionSpec>) => {
       selectionSpecByTypeRef.current = next;
@@ -362,6 +367,7 @@ export function useConnectors(input: {
       applySelectionSpecByType(
         selectionSpecsFromManifests(manifests.items),
       );
+      manifestsLoadedRef.current = true;
       const webhookConnectors = uiConnectors.filter((connector) => {
         const catalogItem = connectorCatalog.find(
           (item) => item.id === connector.raw.connectorType,
@@ -637,11 +643,12 @@ export function useConnectors(input: {
         return null;
       }
       let knownConnectors = connectors;
-      // Which connector types declare a shared selection UI. Deciding the new
-      // connector's initial config and whether to open settings turns on this,
-      // so read it from a fresh manifest fetch below rather than from state the
-      // mount-time refresh may not have populated yet.
+      // Which connector types declare a shared selection UI, and whether that
+      // is known at all. Deciding a new connector's initial config and whether
+      // to open settings turns on this; an empty map from a *failed* load is
+      // "unknown", not "this type has no selection" (see manifestsLoadedRef).
       let knownSelectionSpecByType = selectionSpecByTypeRef.current;
+      let selectionCapabilityKnown = manifestsLoadedRef.current;
       if (accountId) {
         // An authorization just completed. After the provider redirects back
         // this runs before the connector list and manifests have loaded, so
@@ -667,16 +674,25 @@ export function useConnectors(input: {
           );
           return null;
         }
-        // The manifest fetch only decides selection config, so a transient
-        // failure there must not fail a connect whose authorization succeeded:
-        // fall back to the specs already in state (the mount-time refresh).
+        // The manifest fetch decides selection config. A transient failure
+        // falls back to the specs already in state, but only when a manifest
+        // load has succeeded before (manifestsLoadedRef); otherwise the
+        // capability is genuinely unknown and the create path must stop rather
+        // than guess.
         try {
           const manifests = await connectorsClient.listManifests(workspaceId);
           knownSelectionSpecByType = selectionSpecsFromManifests(
             manifests.items,
           );
+          manifestsLoadedRef.current = true;
+          selectionCapabilityKnown = true;
         } catch {
-          knownSelectionSpecByType = selectionSpecByTypeRef.current;
+          if (manifestsLoadedRef.current) {
+            knownSelectionSpecByType = selectionSpecByTypeRef.current;
+            selectionCapabilityKnown = true;
+          } else {
+            selectionCapabilityKnown = false;
+          }
         }
       }
       const current = knownConnectors.find(
@@ -818,23 +834,36 @@ export function useConnectors(input: {
           }
 
           // A connector type with a selection spec is configured through the
-          // shared selection list, exactly as Dropbox is.
-          const hasSelectionSpec = Boolean(knownSelectionSpecByType[item.id]);
-
+          // shared selection list, exactly as Dropbox is. The three types
+          // below have their own config, so their creation does not depend on
+          // whether the manifests are known.
           if (
             item.id !== "notion" &&
             item.id !== "gmail" &&
-            item.id !== "google_drive" &&
-            !hasSelectionSpec
+            item.id !== "google_drive"
           ) {
-            toast.info(
-              t("toasts.connectors.connectedConfigureNext", {
-                name: item.name,
-              }),
-            );
-            await refreshConnectors();
-            return null;
+            if (!selectionCapabilityKnown) {
+              // Authorization succeeded but we could not load the manifests, so
+              // we cannot tell whether this type is configured through a
+              // selection list. Do not create and do not report success; ask
+              // the person to connect again. The IIFE's finally clears the
+              // waiting state, as it does for the other early returns here.
+              toast.error(
+                t("toasts.connectors.setupIncomplete", { name: item.name }),
+              );
+              return null;
+            }
+            if (!knownSelectionSpecByType[item.id]) {
+              toast.info(
+                t("toasts.connectors.connectedConfigureNext", {
+                  name: item.name,
+                }),
+              );
+              await refreshConnectors();
+              return null;
+            }
           }
+          const hasSelectionSpec = Boolean(knownSelectionSpecByType[item.id]);
 
           // Periodic indexing stays keyed on the explicit type list: a
           // tools-only selection connector has nothing to index on a schedule.

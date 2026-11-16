@@ -604,9 +604,10 @@ test("dropbox connect creates an empty selection and opens settings", async () =
 });
 
 test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {
-  // The mount-time refresh populates the spec in state; the just-authorised
-  // manifest fetch then fails. The connect must not abort or show an auth
-  // error — it falls back to the spec already in state.
+  // Call #1 is the mount-time refresh: it SUCCEEDS, so the spec is in state and
+  // a manifest load has been recorded as successful. Call #2 is the
+  // just-authorised fetch: it fails. The connect must not abort or show an auth
+  // error — it falls back to the spec already loaded into state.
   listManifests
     .mockResolvedValueOnce({
       items: [
@@ -653,7 +654,86 @@ test("a manifest fetch that fails after OAuth return still creates the connector
       configJson: { items: [] },
     }),
   );
+  // The mount-time manifest load applied, so the spec was in state to fall
+  // back to.
+  expect(api().availableConnectorTypes).toContain("dropbox");
   expect(api().connectorSettingsConnector?.id).toBe("dropbox-2");
+  expect(toastError).not.toHaveBeenCalled();
+});
+
+test("when manifests cannot be loaded at all after OAuth return, nothing is created and the person is told to connect again", async () => {
+  // Every manifest load fails — the mount-time one and the just-authorised
+  // one — so the selection capability is genuinely unknown. The connector must
+  // not be created and no success-toned toast may appear.
+  listManifests.mockRejectedValue(new Error("manifests offline"));
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-db-unknown",
+    connectorType: "dropbox",
+    accountId: "acc-db",
+  });
+
+  await mountHook(baseInput("ws-db-unknown"));
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith(
+    "Dropbox was authorized, but setup could not finish. Connect it again.",
+  );
+  // No success toast of any kind, and the configure-next info toast is not
+  // shown either.
+  expect(toastSuccess).not.toHaveBeenCalled();
+  expect(toastInfo).not.toHaveBeenCalled();
+  // The waiting state is cleared, like the block's other failure exits.
+  expect(api().connectorWaitingByType.dropbox).toBeFalsy();
+});
+
+test("a type the loaded manifests say has no selection still follows its existing path", async () => {
+  // Manifests load successfully but carry no selection for Google Drive, so the
+  // capability is known-and-absent: Google Drive keeps its own create path
+  // (empty file selection, settings opened), never the setup-incomplete exit.
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "google_drive" },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-1",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  create.mockResolvedValue({ connector: driveConnector() });
+  returnFromAuthorization({
+    workspaceId: "ws-drive-nosel",
+    connectorType: "google_drive",
+    accountId: "acc-1",
+  });
+
+  await mountHook(baseInput("ws-drive-nosel"));
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-drive-nosel",
+    expect.objectContaining({
+      connectorType: "google_drive",
+      configJson: { fileIds: [] },
+    }),
+  );
+  expect(toastSuccess).toHaveBeenCalledWith("Google Drive connected.");
   expect(toastError).not.toHaveBeenCalled();
 });
 
