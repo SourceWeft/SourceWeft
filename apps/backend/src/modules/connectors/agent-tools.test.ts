@@ -1,13 +1,18 @@
 vi.mock("../preview", () => ({
   previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
 }));
-const loggerMocks = vi.hoisted(() => ({ debug: vi.fn() }));
+const loggerMocks = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 vi.mock("../../shared/logger", () => ({
   logger: {
     debug: loggerMocks.debug,
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
+    info: loggerMocks.info,
+    warn: loggerMocks.warn,
+    error: loggerMocks.error,
   },
 }));
 // Only `getRuntimeToken` is stubbed; every other export (notably
@@ -350,6 +355,9 @@ function findDebugCall(message: string) {
 
 test("does not log the provider response of a failed read action", async () => {
   loggerMocks.debug.mockClear();
+  loggerMocks.info.mockClear();
+  loggerMocks.warn.mockClear();
+  loggerMocks.error.mockClear();
   connectorRegistry.register({
     ...adapter,
     getManifest: () => githubReadManifest,
@@ -368,11 +376,20 @@ test("does not log the provider response of a failed read action", async () => {
   assert.ok(readTool);
   await readTool.invoke({});
 
-  const logged = JSON.stringify(loggerMocks.debug.mock.calls);
-  assert.equal(logged.includes("secret body"), false);
-  assert.equal(logged.includes("secret provider text"), false);
+  // The provider text must appear at NO logger level — the error-level log in
+  // `connectorToolResult` used to leak it through `message`/`stack`.
+  const everyLevel = JSON.stringify([
+    loggerMocks.debug.mock.calls,
+    loggerMocks.info.mock.calls,
+    loggerMocks.warn.mock.calls,
+    loggerMocks.error.mock.calls,
+  ]);
+  assert.equal(everyLevel.includes("secret body"), false);
+  assert.equal(everyLevel.includes("secret provider text"), false);
   assert.equal(
-    logged.includes("Connector action direct adapter execution failed"),
+    JSON.stringify(loggerMocks.debug.mock.calls).includes(
+      "Connector action direct adapter execution failed",
+    ),
     true,
   );
   const failureCall = findDebugCall(
@@ -383,10 +400,22 @@ test("does not log the provider response of a failed read action", async () => {
   assert.equal(failureMeta.errorCode, "GITHUB_UNAVAILABLE");
   assert.equal(failureMeta.statusCode, 502);
   assert.equal("errorMessage" in failureMeta, false);
+
+  // The error-level line still records the shape of the failure, by code/name.
+  const errorCall = loggerMocks.error.mock.calls.find(
+    (entry) => entry[0] === "Connector agent tool failed",
+  );
+  assert.ok(errorCall);
+  const errorMeta = errorCall![1] as Record<string, unknown>;
+  assert.equal(errorMeta.code, "GITHUB_UNAVAILABLE");
+  assert.equal(errorMeta.errorName, "ConnectorError");
+  assert.equal("error" in errorMeta, false);
+  assert.equal("stack" in errorMeta, false);
 });
 
 test("still logs the error message of a failed non-read action on a non-Gmail connector", async () => {
   loggerMocks.debug.mockClear();
+  loggerMocks.error.mockClear();
   const githubWriteFailManifest: ConnectorManifest = {
     ...manifest,
     type: "github",
@@ -433,6 +462,17 @@ test("still logs the error message of a failed non-read action on a non-Gmail co
   assert.equal(failureMeta.errorMessage, "write failed: quota");
   assert.equal(failureMeta.errorCode, "GITHUB_WRITE_FAILED");
   assert.equal(failureMeta.statusCode, 500);
+
+  // A non-read action is not subject to the omit rule, so the error-level log
+  // still carries the error message.
+  const errorCall = loggerMocks.error.mock.calls.find(
+    (entry) => entry[0] === "Connector agent tool failed",
+  );
+  assert.ok(errorCall);
+  assert.equal(
+    (errorCall![1] as Record<string, unknown>).error,
+    "write failed: quota",
+  );
 });
 
 test("still logs the result of a non-read action on a non-Gmail connector", async () => {

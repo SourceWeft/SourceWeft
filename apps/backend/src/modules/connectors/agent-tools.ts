@@ -233,10 +233,10 @@ function directConnectorActionMeta(input: {
 // result.
 function shouldOmitConnectorActionResponseContent(input: {
   action: ConnectorActionSpec;
-  connector: SourceConnectorRecord;
+  connectorType: string;
 }) {
   return (
-    input.connector.connectorType === "gmail" ||
+    input.connectorType === "gmail" ||
     input.action.capabilities?.includes("connector_read") === true
   );
 }
@@ -653,7 +653,7 @@ export async function createConnectorActionTools(
                 const omitResponseContent =
                   shouldOmitConnectorActionResponseContent({
                     action,
-                    connector,
+                    connectorType: connector.connectorType,
                   });
                 logger.debug("Connector action direct execution selected", {
                   ...logMeta,
@@ -721,6 +721,14 @@ export async function createConnectorActionTools(
               {
                 connectorType: manifest.type,
                 toolName: agentToolName,
+                // The error-level failure log follows the same omit rule as the
+                // debug logs: a Gmail or `connector_read` action's error can
+                // carry provider response text. The connector resolves to this
+                // manifest's type, so this matches the per-connector decision.
+                omitResponseContent: shouldOmitConnectorActionResponseContent({
+                  action,
+                  connectorType: manifest.type,
+                }),
               },
             ),
           {
