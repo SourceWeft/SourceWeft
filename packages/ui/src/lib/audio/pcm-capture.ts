@@ -52,9 +52,6 @@ function mapGetUserMediaError(error: unknown): PcmCaptureFailureReason {
     case "NotFoundError":
     case "OverconstrainedError":
       return "no-device";
-    case "NotSupportedError":
-    case "TypeError":
-      return "unsupported";
     default:
       return "failed";
   }
@@ -139,56 +136,66 @@ export async function startPcmCapture(input: {
     for (const track of stream.getTracks()) track.stop();
   };
 
-  const context = new AudioContext();
-
-  let workletUrl: string | null = null;
+  // Everything from here on must release the microphone (and the context, if
+  // it got created) on any failure, and never let a raw DOMException escape.
+  let context: AudioContext | null = null;
   try {
-    workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "application/javascript" }));
-    await context.audioWorklet.addModule(workletUrl);
+    context = new AudioContext();
+    const audioContext = context;
+
+    let workletUrl: string | null = null;
+    try {
+      workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "application/javascript" }));
+      await audioContext.audioWorklet.addModule(workletUrl);
+    } finally {
+      if (workletUrl) URL.revokeObjectURL(workletUrl);
+    }
+
+    const sourceNode = audioContext.createMediaStreamSource(stream);
+    const workletNode = new AudioWorkletNode(audioContext, PROCESSOR_NAME);
+    // The worklet's output carries no audio we want played back, but a node
+    // with nothing connected downstream of it is not guaranteed to be pulled
+    // by the engine, so `process()` may never run. A muted path to the
+    // destination keeps the graph (and the worklet) alive without being heard.
+    const silenceNode = audioContext.createGain();
+    silenceNode.gain.value = 0;
+    sourceNode.connect(workletNode);
+    workletNode.connect(silenceNode);
+    silenceNode.connect(audioContext.destination);
+
+    // A context created right after the permission prompt can start
+    // suspended; nothing is rendered, so no frame, until it is resumed.
+    if (audioContext.state === "suspended") await audioContext.resume();
+
+    const assembler = createFrameAssembler(audioContext.sampleRate);
+    let stopped = false;
+
+    workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
+      if (stopped) return;
+      for (const frame of assembler.push(event.data)) input.onFrame(frame);
+    };
+
+    const [track] = stream.getAudioTracks();
+    track?.addEventListener("ended", () => {
+      if (stopped) return;
+      input.onEnded?.();
+    });
+
+    function stop(): void {
+      if (stopped) return;
+      stopped = true;
+      stopTracks();
+      workletNode.port.onmessage = null;
+      workletNode.disconnect();
+      sourceNode.disconnect();
+      silenceNode.disconnect();
+      void audioContext.close();
+    }
+
+    return { stop };
   } catch {
     stopTracks();
-    await context.close().catch(() => {});
-    throw new PcmCaptureFailure("failed", "Failed to load the capture audio worklet.");
-  } finally {
-    if (workletUrl) URL.revokeObjectURL(workletUrl);
+    if (context) await context.close().catch(() => {});
+    throw new PcmCaptureFailure("failed", "Failed to start the capture audio graph.");
   }
-
-  let sourceNode: MediaStreamAudioSourceNode;
-  let workletNode: AudioWorkletNode;
-  try {
-    sourceNode = context.createMediaStreamSource(stream);
-    workletNode = new AudioWorkletNode(context, PROCESSOR_NAME);
-  } catch {
-    stopTracks();
-    await context.close().catch(() => {});
-    throw new PcmCaptureFailure("failed", "Failed to build the capture audio graph.");
-  }
-
-  const assembler = createFrameAssembler(context.sampleRate);
-  let stopped = false;
-
-  workletNode.port.onmessage = (event: MessageEvent<Float32Array>) => {
-    if (stopped) return;
-    for (const frame of assembler.push(event.data)) input.onFrame(frame);
-  };
-
-  const [track] = stream.getAudioTracks();
-  track?.addEventListener("ended", () => {
-    if (stopped) return;
-    input.onEnded?.();
-  });
-
-  sourceNode.connect(workletNode);
-
-  function stop(): void {
-    if (stopped) return;
-    stopped = true;
-    stopTracks();
-    workletNode.port.onmessage = null;
-    workletNode.disconnect();
-    sourceNode.disconnect();
-    void context.close();
-  }
-
-  return { stop };
 }
