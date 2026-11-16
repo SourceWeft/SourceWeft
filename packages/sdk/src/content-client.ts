@@ -19,8 +19,17 @@ import type {
 } from "@sourceweft/contracts/sources";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
+  DeriveCardsResponse,
+  QuizAttemptListResponse,
+  QuizAttemptView,
+  ReviewProgressResponse,
+  ReviewQueueResponse,
+  ReviewRequest,
+  ReviewState,
+  StartQuizAttempt,
   StudyGenerateRequest,
   StudyOptions,
+  SubmitAnswers,
 } from "@sourceweft/contracts/study";
 import type {
   MarketMcpLocale,
@@ -1666,6 +1675,82 @@ export class ContentClient {
   getStudyFreshness(workspaceId: string, artifactId: string) {
     return this.http.get<StudyFreshnessResponse>(
       `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/freshness`,
+    );
+  }
+
+  /* Study learning state (flashcard review, quiz attempts) --------------- */
+
+  getStudyReviewQueue(
+    workspaceId: string,
+    input: { limit?: number; artifactId?: string } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (input.limit !== undefined) query.set("limit", String(input.limit));
+    if (input.artifactId) query.set("artifactId", input.artifactId);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.http.get<ReviewQueueResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/review/queue${suffix}`,
+    );
+  }
+
+  /** Current version by default; name one with `artifactVersionId` or `versionNo`. */
+  getStudyReviewProgress(
+    workspaceId: string,
+    artifactId: string,
+    version: { artifactVersionId?: string; versionNo?: number } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (version.artifactVersionId) {
+      query.set("artifactVersionId", version.artifactVersionId);
+    }
+    if (version.versionNo !== undefined) {
+      query.set("versionNo", String(version.versionNo));
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.http.get<ReviewProgressResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/progress${suffix}`,
+    );
+  }
+
+  gradeStudyCard(workspaceId: string, artifactId: string, input: ReviewRequest) {
+    return this.http.post<ReviewState>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/review`,
+      input,
+    );
+  }
+
+  startStudyQuizAttempt(
+    workspaceId: string,
+    artifactId: string,
+    input: StartQuizAttempt,
+  ) {
+    return this.http.post<QuizAttemptView>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/quiz/attempts`,
+      input,
+    );
+  }
+
+  listStudyQuizAttempts(workspaceId: string, artifactId: string) {
+    return this.http.get<QuizAttemptListResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/quiz/attempts`,
+    );
+  }
+
+  saveStudyQuizAnswers(
+    workspaceId: string,
+    attemptId: string,
+    input: SubmitAnswers,
+  ) {
+    return this.http.put<QuizAttemptView>(
+      `/v1/workspaces/${encode(workspaceId)}/study/quiz/attempts/${encode(attemptId)}`,
+      input,
+    );
+  }
+
+  deriveStudyCardsFromAttempt(workspaceId: string, attemptId: string) {
+    return this.http.post<DeriveCardsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/study/quiz/attempts/${encode(attemptId)}/derive-cards`,
+      {},
     );
   }
 }

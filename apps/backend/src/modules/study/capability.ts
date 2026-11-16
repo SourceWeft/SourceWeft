@@ -4,7 +4,9 @@ import {
   STUDY_CAPABILITY_FACTORY,
   StudyCapabilityUnavailableError,
   type StudyCapabilityModule,
+  type StudyDerivationMembers,
   type StudyGenerationMembers,
+  type StudySchedulingMembers,
 } from "@sourceweft/contracts/study-capability";
 
 /**
@@ -33,10 +35,11 @@ async function loadModule(loader: ModuleLoader) {
   return readStudyCapability(await load());
 }
 
-/** Loads (once per process) and returns the generation members. */
-export async function loadStudyGeneration(
-  loader: ModuleLoader = loadBuiltinCapabilityModule,
-): Promise<StudyGenerationMembers> {
+/** Loads the module once per process and returns one required group. */
+async function loadStudyGroup<G extends keyof StudyCapabilityModule>(
+  group: G,
+  loader: ModuleLoader,
+): Promise<NonNullable<StudyCapabilityModule[G]>> {
   const usesDefault = loader === loadBuiltinCapabilityModule;
   const pending = usesDefault ? (cached ??= loadModule(loader)) : loadModule(loader);
   try {
@@ -45,11 +48,32 @@ export async function loadStudyGeneration(
     // named in the error.
     return readStudyCapability(
       { [STUDY_CAPABILITY_FACTORY]: () => capability },
-      "generation",
-    ).generation!;
+      group,
+    )[group]!;
   } catch (error) {
     // A failed load is never cached: the next call tries again.
     if (usesDefault) cached = null;
     throw error;
   }
+}
+
+/** The generation engine members. */
+export function loadStudyGeneration(
+  loader: ModuleLoader = loadBuiltinCapabilityModule,
+): Promise<StudyGenerationMembers> {
+  return loadStudyGroup("generation", loader);
+}
+
+/** FSRS review scheduling, for grading flashcards. */
+export function loadStudyScheduling(
+  loader: ModuleLoader = loadBuiltinCapabilityModule,
+): Promise<StudySchedulingMembers> {
+  return loadStudyGroup("scheduling", loader);
+}
+
+/** Model-free derivations, such as quiz mistakes to flashcards. */
+export function loadStudyDerivation(
+  loader: ModuleLoader = loadBuiltinCapabilityModule,
+): Promise<StudyDerivationMembers> {
+  return loadStudyGroup("derivation", loader);
 }

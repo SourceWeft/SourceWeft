@@ -1,8 +1,16 @@
 import type {
   CreateStudyCapability,
   StudyCorpusMeasure,
+  StudyDerivationMembers,
   StudyGenerationMembers,
+  StudySchedulingMembers,
 } from "@sourceweft/contracts/study-capability";
+import { deriveFlashcardsFromQuiz } from "./derive/cards-from-quiz";
+import {
+  DESIRED_RETENTION,
+  newReviewCard,
+  scheduleReview,
+} from "./scheduling/fsrs";
 import {
   MAX_TOTAL_INPUT_TOKENS,
   SINGLE_PASS_MAX_INPUT_TOKENS,
@@ -18,7 +26,8 @@ import { generateStudyContent } from "./engine/generate";
 import { resolveStudyOptions } from "./engine/options";
 
 /**
- * Server-only: the generation engine imports `node:crypto`. Reached by the
+ * Server-only: the generation engine imports `node:crypto` and scheduling
+ * imports `ts-fsrs`. Reached by the
  * host through the registry's server entry, never from a browser graph (the
  * web imports `./ui` and `./export` only).
  */
@@ -61,6 +70,16 @@ const generation: StudyGenerationMembers = {
 };
 
 /** The host factory: everything this package offers the backend, by group. */
+const scheduling: StudySchedulingMembers = {
+  scheduleReview,
+  newReviewCard,
+  desiredRetention: DESIRED_RETENTION,
+};
+
+const derivation: StudyDerivationMembers = { deriveFlashcardsFromQuiz };
+
 export const createStudyCapability: CreateStudyCapability = () => ({
   generation,
+  scheduling,
+  derivation,
 });

@@ -259,3 +259,57 @@ test("listThreadMessages restores tool-call outputs compacted by the API", async
   assert.deepEqual(page.items[1]?.metadata, {});
   assert.equal(page.nextCursor, null);
 });
+
+test("study learning-state methods address the study routes with encoded ids", async () => {
+  const calls: [string, string, unknown?][] = [];
+  const record = (method: string) => async (path: string, body?: unknown) => {
+    calls.push(body === undefined ? [method, path] : [method, path, body]);
+    return {};
+  };
+  const client = new ContentClient({
+    get: record("GET"),
+    post: record("POST"),
+    put: record("PUT"),
+  } as never);
+
+  await client.getStudyReviewQueue("ws / 1");
+  await client.getStudyReviewQueue("ws", { limit: 20, artifactId: "a/1" });
+  await client.getStudyReviewProgress("ws", "a/1");
+  await client.getStudyReviewProgress("ws", "a/1", { artifactVersionId: "v/2" });
+  await client.gradeStudyCard("ws", "a/1", {
+    artifactVersionId: "v1",
+    itemId: "c_1",
+    grade: 3,
+  });
+  await client.startStudyQuizAttempt("ws", "a/1", { artifactVersionId: "v1" });
+  await client.listStudyQuizAttempts("ws", "a/1");
+  await client.saveStudyQuizAnswers("ws", "t/1", {
+    answers: { q_1: { selected: [0] } },
+    finish: true,
+  });
+  await client.deriveStudyCardsFromAttempt("ws", "t/1");
+
+  assert.deepEqual(calls, [
+    ["GET", "/v1/workspaces/ws%20%2F%201/study/review/queue"],
+    ["GET", "/v1/workspaces/ws/study/review/queue?limit=20&artifactId=a%2F1"],
+    ["GET", "/v1/workspaces/ws/study/artifacts/a%2F1/progress"],
+    ["GET", "/v1/workspaces/ws/study/artifacts/a%2F1/progress?artifactVersionId=v%2F2"],
+    [
+      "POST",
+      "/v1/workspaces/ws/study/artifacts/a%2F1/review",
+      { artifactVersionId: "v1", itemId: "c_1", grade: 3 },
+    ],
+    [
+      "POST",
+      "/v1/workspaces/ws/study/artifacts/a%2F1/quiz/attempts",
+      { artifactVersionId: "v1" },
+    ],
+    ["GET", "/v1/workspaces/ws/study/artifacts/a%2F1/quiz/attempts"],
+    [
+      "PUT",
+      "/v1/workspaces/ws/study/quiz/attempts/t%2F1",
+      { answers: { q_1: { selected: [0] } }, finish: true },
+    ],
+    ["POST", "/v1/workspaces/ws/study/quiz/attempts/t%2F1/derive-cards", {}],
+  ]);
+});
