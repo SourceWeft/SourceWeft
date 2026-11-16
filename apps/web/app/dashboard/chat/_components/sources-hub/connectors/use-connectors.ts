@@ -218,6 +218,20 @@ export function useConnectors(input: {
   const [selectionSpecByType, setSelectionSpecByType] = useState<
     Record<string, ConnectorSelectionSpec>
   >({});
+  // Mirrors the state so a just-authorised connect can read the latest specs
+  // even from inside a callback that closed over an earlier render's state
+  // (for example when a fresh manifest fetch fails and we fall back to it).
+  // Kept in step with the state by `applySelectionSpecByType` below.
+  const selectionSpecByTypeRef = useRef<Record<string, ConnectorSelectionSpec>>(
+    {},
+  );
+  const applySelectionSpecByType = useCallback(
+    (next: Record<string, ConnectorSelectionSpec>) => {
+      selectionSpecByTypeRef.current = next;
+      setSelectionSpecByType(next);
+    },
+    [],
+  );
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
   >([]);
@@ -291,7 +305,7 @@ export function useConnectors(input: {
       setConnectors([]);
       setConnectorAccounts([]);
       setAvailableManifests({ actorId, types: [] });
-      setSelectionSpecByType({});
+      applySelectionSpecByType({});
       setConnectorWebhookEventsById({});
       setConnectorWebhookConfigsById({});
       setConnectorsLoadingError(null);
@@ -345,7 +359,9 @@ export function useConnectors(input: {
         actorId,
         types: manifests.items.map((manifest) => manifest.type),
       });
-      setSelectionSpecByType(selectionSpecsFromManifests(manifests.items));
+      applySelectionSpecByType(
+        selectionSpecsFromManifests(manifests.items),
+      );
       const webhookConnectors = uiConnectors.filter((connector) => {
         const catalogItem = connectorCatalog.find(
           (item) => item.id === connector.raw.connectorType,
@@ -405,7 +421,7 @@ export function useConnectors(input: {
     } catch (error) {
       if (actorIdRef.current !== actorId) return;
       setAvailableManifests({ actorId, types: [] });
-      setSelectionSpecByType({});
+      applySelectionSpecByType({});
       setConnectorsLoadingError(
         getErrorMessage(error, t("toasts.connectors.loadFailed")),
       );
@@ -419,6 +435,7 @@ export function useConnectors(input: {
     }
   }, [
     actorId,
+    applySelectionSpecByType,
     connectorCacheBucket,
     currentWorkspaceIdRef,
     onConnectorsChange,
@@ -624,23 +641,21 @@ export function useConnectors(input: {
       // connector's initial config and whether to open settings turns on this,
       // so read it from a fresh manifest fetch below rather than from state the
       // mount-time refresh may not have populated yet.
-      let knownSelectionSpecByType = selectionSpecByType;
+      let knownSelectionSpecByType = selectionSpecByTypeRef.current;
       if (accountId) {
         // An authorization just completed. After the provider redirects back
         // this runs before the connector list and manifests have loaded, so
         // read them itself: deciding from the empty state would take an
         // existing connector for a first connection, or miss the selection
         // spec that a just-registered type declares.
+        //
+        // The connector list is required — its failure is the auth failure.
         try {
-          const [fresh, manifests] = await Promise.all([
-            connectorsClient.list(workspaceId, { includeDisabled: true }),
-            connectorsClient.listManifests(workspaceId),
-          ]);
+          const fresh = await connectorsClient.list(workspaceId, {
+            includeDisabled: true,
+          });
           knownConnectors = fresh.items.map((connector) =>
             mapConnectorToUi(connector, t, displayLocale),
-          );
-          knownSelectionSpecByType = selectionSpecsFromManifests(
-            manifests.items,
           );
         } catch (error) {
           setConnectorWaiting(item.id, false);
@@ -651,6 +666,17 @@ export function useConnectors(input: {
             ),
           );
           return null;
+        }
+        // The manifest fetch only decides selection config, so a transient
+        // failure there must not fail a connect whose authorization succeeded:
+        // fall back to the specs already in state (the mount-time refresh).
+        try {
+          const manifests = await connectorsClient.listManifests(workspaceId);
+          knownSelectionSpecByType = selectionSpecsFromManifests(
+            manifests.items,
+          );
+        } catch {
+          knownSelectionSpecByType = selectionSpecByTypeRef.current;
         }
       }
       const current = knownConnectors.find(
@@ -937,7 +963,6 @@ export function useConnectors(input: {
       markConnectorNotReady,
       openConnectorSettings,
       refreshConnectors,
-      selectionSpecByType,
       trackConnectorSyncRun,
       trackManualConnectorSync,
       workspaceId,

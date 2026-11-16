@@ -360,6 +360,50 @@ test("an item already in the selection shows as added and cannot be picked again
   expect(dialog().textContent).toContain("0 selected");
 });
 
+test("a non-selectable reason wins over 'already added'", async () => {
+  browseByContainer({
+    root: page({
+      entries: [
+        entry("id:zip", "archive.zip", {
+          selectable: false,
+          disabledReason: "unsupported",
+        }),
+      ],
+    }),
+  });
+  // The id is already in the selection, yet the row shows why it cannot be
+  // selected rather than "Already added" (the old priority order).
+  await open({ initialSelection: [{ id: "id:zip", kind: "file" }] });
+
+  const row = dialog().querySelector<HTMLElement>(
+    '[data-selection-entry="archive.zip"]',
+  )!;
+  expect(row.getAttribute("title")).toBe("This file type cannot be indexed");
+  expect(row.textContent).toContain("This file type cannot be indexed");
+  expect(row.textContent).not.toContain("Already added");
+});
+
+test("an empty Dropbox folder keeps its own text, and a type without the key shows the generic text", async () => {
+  const pages = {
+    root: page({ entries: [folderEntry("id:f", "F")] }),
+    "id:f": page({ container: container("id:f", "F", "/F"), entries: [] }),
+  };
+  browseByContainer(pages);
+  await open();
+  await click(button("F", dialog()));
+  await flush(5);
+  // Dropbox keeps its own empty-folder wording for an opened container.
+  expect(dialog().textContent).toContain("This folder is empty.");
+  await unmountAll();
+
+  // A type that defines no per-type container text shows the generic text.
+  browseByContainer(pages);
+  await open({ connectorType: "x-tools", providerName: "X Tools" });
+  await click(button("F", dialog()));
+  await flush(5);
+  expect(dialog().textContent).toContain("Nothing here.");
+});
+
 test("a failed confirm keeps the dialog open", async () => {
   browseByContainer({ root: rootPage });
   const { onOpenChange } = await open({ onConfirm: vi.fn(async () => false) });

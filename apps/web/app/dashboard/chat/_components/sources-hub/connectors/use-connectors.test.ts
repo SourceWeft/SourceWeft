@@ -603,6 +603,60 @@ test("dropbox connect creates an empty selection and opens settings", async () =
   expect(toastSuccess).toHaveBeenCalledWith("Dropbox connected.");
 });
 
+test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {
+  // The mount-time refresh populates the spec in state; the just-authorised
+  // manifest fetch then fails. The connect must not abort or show an auth
+  // error — it falls back to the spec already in state.
+  listManifests
+    .mockResolvedValueOnce({
+      items: [
+        { type: "notion" },
+        { type: "dropbox", selection: dropboxSelectionSpec },
+      ],
+    })
+    .mockRejectedValueOnce(new Error("manifests offline"));
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-db",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "dropbox-2",
+    connectorType: "dropbox",
+    name: "Person",
+    oauthAccountId: "acc-db",
+    configJson: { items: [] },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-db-fail",
+    connectorType: "dropbox",
+    accountId: "acc-db",
+  });
+
+  await mountHook(baseInput("ws-db-fail"));
+
+  expect(create).toHaveBeenCalledWith(
+    "ws-db-fail",
+    expect.objectContaining({
+      connectorType: "dropbox",
+      configJson: { items: [] },
+    }),
+  );
+  expect(api().connectorSettingsConnector?.id).toBe("dropbox-2");
+  expect(toastError).not.toHaveBeenCalled();
+});
+
 test("a tools-only selection connector connects with an empty selection and no periodic sync", async () => {
   listManifests.mockResolvedValue({
     items: [

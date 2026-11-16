@@ -53,6 +53,7 @@ import {
   byTypeOrDefault,
   disabledReasonText,
   displayName,
+  emptyContainerText,
   emptyRootText,
   helpLinkLabel,
   rootLabel,
@@ -466,7 +467,7 @@ function SelectionBrowserBody({
             {searching
               ? t("connectors.selection.browser.noResults")
               : container
-                ? t("connectors.selection.browser.emptyContainer")
+                ? emptyContainerText(t, connectorType)
                 : emptyRootText(t, connectorType)}
           </p>
         ) : (
@@ -476,14 +477,16 @@ function SelectionBrowserBody({
                 const name = displayName(t, entry.name, entry.id);
                 const alreadyAdded = initialIds.has(entry.id);
                 const checked = alreadyAdded || pickedIds.has(entry.id);
-                const reason = alreadyAdded
-                  ? t("connectors.selection.browser.alreadyAdded")
-                  : !entry.selectable
-                    ? disabledReasonText(
-                        t,
-                        connectorType,
-                        entry.disabledReason ?? "unknown",
-                      )
+                // A non-selectable entry shows why it cannot be selected even
+                // when its id is already in the selection (old priority order).
+                const reason = !entry.selectable
+                  ? disabledReasonText(
+                      t,
+                      connectorType,
+                      entry.disabledReason ?? "unknown",
+                    )
+                  : alreadyAdded
+                    ? t("connectors.selection.browser.alreadyAdded")
                     : undefined;
                 const Icon = selectionIconFor(
                   presenter,

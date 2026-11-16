@@ -78,6 +78,14 @@ export function emptyRootText(t: Translate, connectorType: string): string {
   return t.has(key) ? t(key) : t(`${ROOT}.browser.emptyContainer`);
 }
 
+/** The text for an opened container (not the root, not a search) with no
+ * entries: `byType.<type>.browser.emptyContainer` when the type defines one,
+ * else the generic `browser.emptyContainer`. */
+export function emptyContainerText(t: Translate, connectorType: string): string {
+  const key = `${ROOT}.byType.${connectorType}.browser.emptyContainer`;
+  return t.has(key) ? t(key) : t(`${ROOT}.browser.emptyContainer`);
+}
+
 /** The help-link button label, or null when the type declares no label for
  * this code; the button is rendered only when this is non-null. */
 export function helpLinkLabel(

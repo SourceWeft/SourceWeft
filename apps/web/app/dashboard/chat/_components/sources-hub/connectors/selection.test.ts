@@ -167,6 +167,8 @@ describe("selectionSkipReasonKey", () => {
     );
     expect(connectorItemSkipReasons).toContain("unreadable");
     expect(new Set(keys).size).toBe(connectorItemSkipReasons.length);
+    // No canonical reason may collapse into the unknown fallback key.
+    expect(keys).not.toContain("connectors.selection.skipReason.unknown");
     expect(selectionSkipReasonKey("weird")).toMatch(/\.unknown$/);
     expect(selectionSkipReasonKey("too_large")).toBe(
       "connectors.selection.skipReason.too_large",

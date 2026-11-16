@@ -8,7 +8,7 @@
  * and no indexing (a tools-only connector has nothing to count or map).
  */
 
-import { File, Folder, type LucideIcon } from "lucide-react";
+import { File, FileText, Folder, type LucideIcon } from "lucide-react";
 import type {
   ConnectorSelectionDescribeItem,
   ConnectorSelectionItem,
@@ -42,7 +42,10 @@ const DROPBOX_FILE_EXTERNAL_PREFIX = "file:";
 
 export const selectionPresenters: Record<string, SelectionPresenter> = {
   dropbox: {
-    kindIcons: { folder: Folder, file: File },
+    // `FileText` (not the generic `File`) so Dropbox file rows keep the exact
+    // glyph they had before the shared picker; the generic fallback in
+    // `selectionIconFor` stays `File` for connectors with no icon of their own.
+    kindIcons: { folder: Folder, file: FileText },
     indexing: {
       externalIdFor(item) {
         if (item.kind !== "file") {

@@ -3361,7 +3361,8 @@
             "browser": {
               "description": "Open a folder to look inside, then tick the files and folders to index.",
               "root": "Dropbox",
-              "note": "Folders sync up to 1,000 files in total"
+              "note": "Folders sync up to 1,000 files in total",
+              "emptyContainer": "This folder is empty."
             }
           }
         }

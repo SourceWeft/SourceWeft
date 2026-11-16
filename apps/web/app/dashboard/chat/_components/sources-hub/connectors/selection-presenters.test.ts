@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { File, Folder } from "lucide-react";
+import { File, FileText, Folder } from "lucide-react";
 import {
   selectionIconFor,
   selectionPresenterFor,
@@ -11,7 +11,7 @@ describe("selectionPresenters.dropbox", () => {
 
   test("kindIcons map folder and file", () => {
     expect(presenter.kindIcons.folder).toBe(Folder);
-    expect(presenter.kindIcons.file).toBe(File);
+    expect(presenter.kindIcons.file).toBe(FileText);
   });
 
   describe("externalIdFor", () => {
@@ -171,7 +171,7 @@ describe("selectionPresenterFor", () => {
 describe("selectionIconFor", () => {
   test("returns the presenter's icon for a known kind", () => {
     const presenter = selectionPresenters.dropbox!;
-    expect(selectionIconFor(presenter, "file", false)).toBe(File);
+    expect(selectionIconFor(presenter, "file", false)).toBe(FileText);
     expect(selectionIconFor(presenter, "folder", true)).toBe(Folder);
   });
 
