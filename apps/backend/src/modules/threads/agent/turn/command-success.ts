@@ -10,7 +10,10 @@ import {
   isArtifactProgressResultOutputType,
 } from "@sourceweft/agent-tool-registry";
 import { committedArtifactToolResultSchema } from "@sourceweft/contracts/agent-tools";
-import { extractToolOutputField } from "./output-normalizer";
+import {
+  collectToolOutputRecords,
+  extractToolOutputField,
+} from "./output-normalizer";
 import {
   looksLikeArtifactUrlLeakText,
   looksLikeRawToolCallText,
@@ -35,14 +38,18 @@ export function isCommandSuccessSatisfied(input: {
         }
         const definition = getAgentToolDefinition(criteria.toolName);
         if (definition?.terminalResult?.kind === "committed_artifact") {
-          const parsed = committedArtifactToolResultSchema.safeParse(
-            call.output,
-          );
-          return (
-            parsed.success &&
-            parsed.data.artifactType === criteria.artifactType &&
-            parsed.data.artifactType === definition.terminalResult.artifactType
-          );
+          const expectedArtifactType = definition.terminalResult.artifactType;
+          // The running turn holds the tool's result inside its message
+          // wrapper (the receipt is a JSON string in the message content);
+          // only the persisted trace carries the bare receipt.
+          return collectToolOutputRecords(call.output).some((record) => {
+            const parsed = committedArtifactToolResultSchema.safeParse(record);
+            return (
+              parsed.success &&
+              parsed.data.artifactType === criteria.artifactType &&
+              parsed.data.artifactType === expectedArtifactType
+            );
+          });
         }
         const outputType = extractToolOutputField(call.output, "type");
         if (definition?.artifactProgress && outputType) {
