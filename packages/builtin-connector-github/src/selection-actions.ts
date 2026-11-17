@@ -47,6 +47,12 @@ const SEARCH_MAX_REPOSITORY_PAGES = 10;
 const SEARCH_MAX_RESULTS = 50;
 const CURSOR_MAX_LENGTH = 4096;
 const HELP_LINK_CODE = "add_repositories";
+/** Cap on `findInstallation`'s own walk of `listInstallations` pages. A
+ * `containerId` comes from the manifest-validated pattern, but a browse
+ * `cursor`'s installation id is caller-supplied text (`i:<id>:<page>`) that
+ * reaches this check too, so the walk itself must be bounded regardless of
+ * how many pages `listInstallations` claims to have. */
+const FIND_INSTALLATION_MAX_PAGES = 10;
 
 function invalidRequest(): never {
   throw new GithubAdapterError(400, "GITHUB_INVALID_REQUEST", "Invalid GitHub request");
@@ -157,19 +163,24 @@ function toRepositoryEntry(repository: GithubInstallationRepository): ConnectorS
 /** Finds the installation with `installationId` by walking `listInstallations`
  * pages; the id is never trusted on its own (the brief: "never trust the
  * id"), so a container that is not actually one of the user's installations
- * 404s instead of silently listing nothing. */
+ * 404s instead of silently listing nothing. Bounded at
+ * `FIND_INSTALLATION_MAX_PAGES` pages — the id checked here can come from a
+ * caller-supplied cursor, not only the manifest-validated `containerId`
+ * pattern, so the walk must not be driven solely by `listInstallations`'
+ * own `hasMore`. */
 async function findInstallation(
   api: GithubApi,
   installationId: number,
 ): Promise<GithubInstallation | null> {
   let page = 1;
-  while (true) {
+  while (page <= FIND_INSTALLATION_MAX_PAGES) {
     const { installations, hasMore } = await api.listInstallations(page);
     const found = installations.find((installation) => installation.id === installationId);
     if (found) return found;
     if (!hasMore) return null;
     page += 1;
   }
+  return null;
 }
 
 export async function browseAction(
@@ -192,6 +203,10 @@ export async function browseAction(
         hasMore,
         helpLink,
       };
+    }
+    const cursorInstallation = await findInstallation(api, parsedCursor.installationId);
+    if (!cursorInstallation) {
+      throw new GithubAdapterError(404, "GITHUB_NOT_FOUND", "GitHub installation not found");
     }
     const { repositories, hasMore } = await api.listInstallationRepositories(
       parsedCursor.installationId,

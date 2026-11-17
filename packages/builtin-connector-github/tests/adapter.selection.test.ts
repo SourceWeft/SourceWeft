@@ -251,6 +251,8 @@ test("browse rejects an installation the user does not have", async () => {
 
 test("browse continuation returns no container", async () => {
   const { fetcher, calls } = router({
+    installations: () =>
+      json({ total_count: 1, installations: [installationAccount(5, "acme", "Organization")] }),
     repositories: (installationId, page) => {
       assert.equal(installationId, 5);
       assert.equal(page, 2);
@@ -269,7 +271,54 @@ test("browse continuation returns no container", async () => {
   assert.deepEqual(result.result.breadcrumbs, []);
   assert.equal((result.result.entries as unknown[]).length, 1);
   assert.deepEqual(result.result.helpLink, HELP_LINK);
-  assert.equal(calls.some((call) => call.url.includes("/user/installations") && !call.url.includes("repositories")), false);
+  // The cursor's installation id is verified against listInstallations
+  // (same check as the containerId path) before the repositories are listed.
+  assert.equal(
+    calls.filter(
+      (call) => call.url.includes("/user/installations") && !call.url.includes("repositories"),
+    ).length,
+    1,
+  );
+});
+
+test("browse continuation rejects an installation the user does not have", async () => {
+  const { fetcher, calls } = router({
+    installations: () =>
+      json({ total_count: 1, installations: [installationAccount(5, "acme", "Organization")] }),
+  });
+  const gh = adapter(fetcher);
+  await assert.rejects(
+    gh.executeAction(actionInput("github.browse", { cursor: "i:99:2" })),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 404 &&
+      error.code === "GITHUB_NOT_FOUND",
+  );
+  assert.equal(calls.some((call) => call.url.includes("/repositories")), false);
+});
+
+test("installation lookup stops after ten pages", async () => {
+  const { fetcher, calls } = router({
+    // Always reports another page, and never contains the requested id, so
+    // an unbounded walk would never terminate on its own.
+    installations: (page) =>
+      json({
+        total_count: Number.MAX_SAFE_INTEGER,
+        installations: [installationAccount(page, "acme", "Organization")],
+      }),
+  });
+  const gh = adapter(fetcher);
+  await assert.rejects(
+    gh.executeAction(actionInput("github.browse", { containerId: "installation:999999" })),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 404 &&
+      error.code === "GITHUB_NOT_FOUND",
+  );
+  const installationCalls = calls.filter(
+    (call) => call.url.includes("/user/installations") && !call.url.includes("repositories"),
+  );
+  assert.equal(installationCalls.length, 10);
 });
 
 test("browse rejects containerId together with cursor", async () => {
