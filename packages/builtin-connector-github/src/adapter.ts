@@ -47,6 +47,19 @@ export function createGithubConnectorAdapter(config: GithubAdapterConfig): Conne
   });
   const redirectUri = `${config.baseUrl}/v1/connectors/oauth/github/callback`;
 
+  // Without both OAuth credentials a token request can only fail at GitHub (an
+  // empty secret reads as a wrong deployment secret), so fail fast and make no
+  // request. 503 keeps the platform from marking the account reconnect.
+  function assertCredentialsConfigured(): void {
+    if (!config.clientId || !config.clientSecret) {
+      throw new GithubAdapterError(
+        503,
+        "GITHUB_UNAVAILABLE",
+        "GitHub could not be reached. Try again shortly.",
+      );
+    }
+  }
+
   return {
     capabilityId: "sourceweft/github",
     getManifest() {
@@ -61,6 +74,7 @@ export function createGithubConnectorAdapter(config: GithubAdapterConfig): Conne
       });
     },
     async exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet> {
+      assertCredentialsConfigured();
       const token = await client.exchangeAuthorizationCode(input.code, input.redirectUri);
       const api = client.forToken(token.accessToken);
       const user = await api.getUser();
@@ -71,7 +85,8 @@ export function createGithubConnectorAdapter(config: GithubAdapterConfig): Conne
         providerAccountEmail: user.email,
       };
     },
-    refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+    async refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+      assertCredentialsConfigured();
       return client.refreshAccessToken(input.refreshToken);
     },
     async *discover(_input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem> {

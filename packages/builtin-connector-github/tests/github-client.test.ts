@@ -168,6 +168,162 @@ test("token endpoint 503 is GITHUB_UNAVAILABLE with statusCode 503", async () =>
   );
 });
 
+// --- token endpoint failure classification (one case per row) --------------
+
+test("refresh: bad_refresh_token is reauth-required", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: { error: "bad_refresh_token" } }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_REAUTH_REQUIRED", 400);
+});
+
+test("refresh: invalid_grant is reauth-required", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: { error: "invalid_grant" } }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_REAUTH_REQUIRED", 400);
+});
+
+test("refresh: a wrong client secret is unavailable, not reauth-required", async () => {
+  const { fetcher } = makeFetcher(() => ({
+    status: 200,
+    body: { error: "incorrect_client_credentials" },
+  }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_UNAVAILABLE", 503);
+});
+
+test("refresh: any other error value is unavailable", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: { error: "sso_required" } }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_UNAVAILABLE", 503);
+});
+
+test("refresh: an unparseable body is unavailable", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: "<html>not json</html>" }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_UNAVAILABLE", 503);
+});
+
+test("refresh: a 2xx without an access token is unavailable", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: { token_type: "bearer" } }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_UNAVAILABLE", 503);
+});
+
+test("refresh: a non-429 4xx is unavailable", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 400, body: { error: "bad_request" } }));
+  await assertRejects(() => client(fetcher).refreshAccessToken("rt"), "GITHUB_UNAVAILABLE", 503);
+});
+
+test("token endpoint 429 is GITHUB_RATE_LIMITED with retryAfterSeconds", async () => {
+  const { fetcher } = makeFetcher(() => ({
+    status: 429,
+    headers: { "retry-after": "42" },
+    body: { message: "slow down" },
+  }));
+  await assertRejects(
+    () => client(fetcher).refreshAccessToken("rt"),
+    "GITHUB_RATE_LIMITED",
+    429,
+    (details) => assert.equal(details?.retryAfterSeconds, 42),
+  );
+});
+
+test("exchange: a wrong client secret is unavailable", async () => {
+  const { fetcher } = makeFetcher(() => ({
+    status: 200,
+    body: { error: "incorrect_client_credentials" },
+  }));
+  await assertRejects(
+    () => client(fetcher).exchangeAuthorizationCode("c", "u"),
+    "GITHUB_UNAVAILABLE",
+    503,
+  );
+});
+
+test("exchange: unusable bodies are unavailable", async () => {
+  const unparseable = makeFetcher(() => ({ status: 200, body: "nonsense" }));
+  await assertRejects(
+    () => client(unparseable.fetcher).exchangeAuthorizationCode("c", "u"),
+    "GITHUB_UNAVAILABLE",
+    503,
+  );
+  const noToken = makeFetcher(() => ({ status: 200, body: { token_type: "bearer" } }));
+  await assertRejects(
+    () => client(noToken.fetcher).exchangeAuthorizationCode("c", "u"),
+    "GITHUB_UNAVAILABLE",
+    503,
+  );
+});
+
+test("exchange: another error value stays GITHUB_OAUTH_EXCHANGE_FAILED", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: { error: "bad_verification_code" } }));
+  await assertRejects(
+    () => client(fetcher).exchangeAuthorizationCode("c", "u"),
+    "GITHUB_OAUTH_EXCHANGE_FAILED",
+    400,
+  );
+});
+
+test("token requests carry an abort signal", async () => {
+  const { fetcher, calls } = makeFetcher(() => ({
+    status: 200,
+    body: { access_token: "at", expires_in: 3600 },
+  }));
+  await client(fetcher).refreshAccessToken("rt");
+  const call = calls[0];
+  assert.ok(call);
+  assert.ok(call.init.signal instanceof AbortSignal);
+});
+
+// --- unusable 2xx bodies ----------------------------------------------------
+
+test("GraphQL null data is unavailable, not an empty selection", async () => {
+  const nullData = makeFetcher(() => ({ status: 200, body: { data: null } }));
+  await assertRejects(
+    () => client(nullData.fetcher).forToken("t").resolveRepositories(["R_1"]),
+    "GITHUB_UNAVAILABLE",
+    503,
+  );
+  const badNodes = makeFetcher(() => ({ status: 200, body: { data: { nodes: "oops" } } }));
+  await assertRejects(
+    () => client(badNodes.fetcher).forToken("t").resolveRepositories(["R_1"]),
+    "GITHUB_UNAVAILABLE",
+    503,
+  );
+});
+
+test("discussion search failure is an error, not an empty page", async () => {
+  const { fetcher } = makeFetcher(() => ({ status: 200, body: { data: { search: null } } }));
+  await assertRejects(
+    () => client(fetcher).forToken("t").searchDiscussions("q", 10, null),
+    "GITHUB_UNAVAILABLE",
+    503,
+  );
+});
+
+test("a malformed user profile is rejected", async () => {
+  const noId = makeFetcher(() => ({ status: 200, body: { id: 0, login: "octocat" } }));
+  await assertRejects(() => client(noId.fetcher).forToken("t").getUser(), "GITHUB_UNAVAILABLE", 503);
+  const noLogin = makeFetcher(() => ({ status: 200, body: { id: 5, login: "" } }));
+  await assertRejects(() => client(noLogin.fetcher).forToken("t").getUser(), "GITHUB_UNAVAILABLE", 503);
+});
+
+test("a failing request writes nothing to the console", async () => {
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const warnCalls: unknown[][] = [];
+  const errorCalls: unknown[][] = [];
+  console.warn = (...args: unknown[]) => {
+    warnCalls.push(args);
+  };
+  console.error = (...args: unknown[]) => {
+    errorCalls.push(args);
+  };
+  try {
+    const { fetcher } = makeFetcher(() => ({ status: 500, body: { message: "Server Error" } }));
+    await assert.rejects(() => client(fetcher).forToken("gho_secret").getUser());
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+  assert.deepEqual(warnCalls, []);
+  assert.deepEqual(errorCalls, []);
+});
+
 test("401 is GITHUB_REAUTH_REQUIRED", async () => {
   const { api } = apiError({ status: 401, body: { message: "Bad credentials" } });
   await assertRejects(() => api.getUser(), "GITHUB_REAUTH_REQUIRED", 401);
@@ -298,7 +454,10 @@ test("error messages carry no token", async () => {
     () => client(fetcher).forToken(token).getUser(),
     (error: unknown) => {
       assert.ok(error instanceof GithubAdapterError);
-      assert.equal(error.message, "GitHub request failed (401)");
+      assert.equal(
+        error.message,
+        "GitHub no longer accepts this connection. Ask the user to reconnect GitHub in the connector settings.",
+      );
       assert.ok(!error.message.includes(token), "message must not contain the token");
       assert.ok(!(error.stack ?? "").includes(token), "stack must not contain the token");
       return true;

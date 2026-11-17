@@ -19,6 +19,9 @@ import { GithubAdapterError } from "./errors";
 
 const TOKEN_URL = "https://github.com/login/oauth/access_token";
 const REQUEST_TIMEOUT_MS = 30_000;
+/** Token exchange/refresh is a short, user-blocking round trip, so it is held
+ * to a tighter deadline than ordinary API calls. */
+const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
 /** Production multiplier (ms) for retry/throttle back-offs; tests pass 0. */
 const DEFAULT_RETRY_BASE_MS = 1_000;
 /** At most one retry, and only on 5xx (every mapped 4xx sits in `doNotRetry`). */
@@ -369,6 +372,36 @@ function mapDiscussionSearchNode(node: DiscussionNode): GithubDiscussionSearchIt
 
 // --- error mapping ------------------------------------------------------------
 
+/** Fixed, agent-facing failure messages. The platform forwards a connector
+ * package's message to the agent, so these never carry a token, a header, the
+ * query text, a response body or an `error_description`. */
+const GITHUB_REAUTH_REQUIRED_MESSAGE =
+  "GitHub no longer accepts this connection. Ask the user to reconnect GitHub in the connector settings.";
+const GITHUB_NOT_FOUND_MESSAGE = "Not found on GitHub, or this connection cannot access it.";
+const GITHUB_INVALID_REQUEST_MESSAGE =
+  "GitHub rejected the request. Check the search text and parameters.";
+const GITHUB_UNAVAILABLE_MESSAGE = "GitHub could not be reached. Try again shortly.";
+
+function rateLimitedMessage(seconds: number): string {
+  return `GitHub's rate limit was reached. Try again in ${seconds} seconds.`;
+}
+
+function reauthRequiredError(): GithubAdapterError {
+  return new GithubAdapterError(400, "GITHUB_REAUTH_REQUIRED", GITHUB_REAUTH_REQUIRED_MESSAGE);
+}
+
+function oauthExchangeFailedError(): GithubAdapterError {
+  return new GithubAdapterError(
+    400,
+    "GITHUB_OAUTH_EXCHANGE_FAILED",
+    "GitHub authorization could not be completed",
+  );
+}
+
+function unavailableError(): GithubAdapterError {
+  return new GithubAdapterError(503, "GITHUB_UNAVAILABLE", GITHUB_UNAVAILABLE_MESSAGE);
+}
+
 function headerValue(headers: Record<string, unknown> | undefined, name: string): string | undefined {
   const value = headers?.[name];
   if (typeof value === "string") return value;
@@ -400,25 +433,27 @@ function mapOctokitError(error: unknown): GithubAdapterError {
     | undefined;
   const status = typeof candidate?.status === "number" ? candidate.status : 0;
   const headers = candidate?.response?.headers;
-  const message = `GitHub request failed (${status})`;
 
-  if (status === 401) return new GithubAdapterError(401, "GITHUB_REAUTH_REQUIRED", message);
+  if (status === 401) {
+    return new GithubAdapterError(401, "GITHUB_REAUTH_REQUIRED", GITHUB_REAUTH_REQUIRED_MESSAGE);
+  }
 
   const remaining = headerValue(headers, "x-ratelimit-remaining");
   const hasRetryAfter = headerValue(headers, "retry-after") !== undefined;
   if (status === 429 || (status === 403 && (remaining === "0" || hasRetryAfter))) {
-    return new GithubAdapterError(429, "GITHUB_RATE_LIMITED", message, {
-      retryAfterSeconds: rateLimitRetryAfter(headers),
+    const seconds = rateLimitRetryAfter(headers);
+    return new GithubAdapterError(429, "GITHUB_RATE_LIMITED", rateLimitedMessage(seconds), {
+      retryAfterSeconds: seconds,
     });
   }
   if (status === 403 || status === 404 || status === 410) {
-    return new GithubAdapterError(404, "GITHUB_NOT_FOUND", message);
+    return new GithubAdapterError(404, "GITHUB_NOT_FOUND", GITHUB_NOT_FOUND_MESSAGE);
   }
-  if (status === 422) return new GithubAdapterError(400, "GITHUB_INVALID_REQUEST", message);
-  if (status === 0 || status >= 500) {
-    return new GithubAdapterError(503, "GITHUB_UNAVAILABLE", message);
+  if (status === 422) {
+    return new GithubAdapterError(400, "GITHUB_INVALID_REQUEST", GITHUB_INVALID_REQUEST_MESSAGE);
   }
-  return new GithubAdapterError(status, "GITHUB_REQUEST_FAILED", message);
+  if (status === 0 || status >= 500) return unavailableError();
+  return new GithubAdapterError(status, "GITHUB_REQUEST_FAILED", `GitHub request failed (${status})`);
 }
 
 // --- OAuth token endpoint (plain fetch) --------------------------------------
@@ -434,18 +469,22 @@ async function requestToken(
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
     });
   } catch {
-    throw new GithubAdapterError(503, "GITHUB_UNAVAILABLE", "GitHub request failed (0)");
+    throw unavailableError();
   }
 
-  if (response.status >= 500) {
-    throw new GithubAdapterError(
-      503,
-      "GITHUB_UNAVAILABLE",
-      `GitHub request failed (${response.status})`,
-    );
+  if (response.status === 429) {
+    const seconds = rateLimitRetryAfter(Object.fromEntries(response.headers));
+    throw new GithubAdapterError(429, "GITHUB_RATE_LIMITED", rateLimitedMessage(seconds), {
+      retryAfterSeconds: seconds,
+    });
+  }
+  // A server error or any other non-success status is transient from the
+  // platform's point of view and never a revoked grant.
+  if (response.status >= 400) {
+    throw unavailableError();
   }
 
   let payload: {
@@ -458,23 +497,33 @@ async function requestToken(
   try {
     payload = (await response.json()) as typeof payload;
   } catch {
-    payload = {};
+    // An unparseable body is not usable; treat it as unavailable.
+    throw unavailableError();
+  }
+
+  if (payload.error !== undefined) {
+    const code = typeof payload.error === "string" ? payload.error : "";
+    if (flow === "refresh") {
+      // Only a genuinely revoked grant asks the user to reconnect. A wrong
+      // deployment secret (`incorrect_client_credentials`) or any other error
+      // is reported as unavailable so the account is not marked reconnect.
+      if (code === "bad_refresh_token" || code === "invalid_grant") {
+        throw reauthRequiredError();
+      }
+      throw unavailableError();
+    }
+    // Exchange: a wrong deployment secret is unavailable; every other error
+    // value is a failed authorization.
+    if (code === "incorrect_client_credentials") {
+      throw unavailableError();
+    }
+    throw oauthExchangeFailedError();
   }
 
   const accessToken = typeof payload.access_token === "string" ? payload.access_token : "";
-  if (payload.error !== undefined || accessToken === "") {
-    if (flow === "exchange") {
-      throw new GithubAdapterError(
-        400,
-        "GITHUB_OAUTH_EXCHANGE_FAILED",
-        "GitHub authorization could not be completed",
-      );
-    }
-    throw new GithubAdapterError(
-      400,
-      "GITHUB_REAUTH_REQUIRED",
-      "GitHub re-authorization is required",
-    );
+  if (accessToken === "") {
+    // A success status with no usable access token is an unusable body.
+    throw unavailableError();
   }
 
   const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 0;
@@ -508,6 +557,9 @@ function createGithubApi(
   const octokit = new GithubOctokit({
     auth: accessToken,
     request: { fetch: timedFetch },
+    // Silence Octokit's own logger (its `warn`/`error` default to the console)
+    // so no plugin can ever print a request URL.
+    log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     retry: {
       retries: MAX_RETRIES,
       retryAfterBaseValue: retryBaseMs,
@@ -554,7 +606,14 @@ function createGithubApi(
     async getUser() {
       const response = await rest(() => octokit.request("GET /user"));
       const data = response.data as { id?: unknown; login?: unknown; email?: unknown };
-      return { id: num(data.id), login: str(data.login), email: strOrNull(data.email) };
+      const id = num(data.id);
+      const login = str(data.login);
+      // A success response that carries no real account id or login is a
+      // malformed answer, not a usable identity.
+      if (!Number.isInteger(id) || id < 1 || login === "") {
+        throw unavailableError();
+      }
+      return { id, login, email: strOrNull(data.email) };
     },
 
     async listInstallations(page) {
@@ -604,7 +663,12 @@ function createGithubApi(
       const data = await graphql<{ nodes?: RepositoryNode[] }>(RESOLVE_REPOSITORIES_QUERY, {
         ids: [...ids],
       });
-      const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      // A missing/null `data`, or a `nodes` that is not an array, is a failed
+      // answer; it must never be read as "every repository is gone".
+      if (!data || !Array.isArray(data.nodes)) {
+        throw unavailableError();
+      }
+      const nodes = data.nodes;
       return ids.map((_, index) => mapRepositoryNode(nodes[index]));
     },
 
@@ -627,16 +691,20 @@ function createGithubApi(
         };
       }>(SEARCH_DISCUSSIONS_QUERY, { q, first, after });
       const search = data?.search;
-      const nodes = Array.isArray(search?.nodes) ? search.nodes : [];
+      // A missing/null answer, or a `nodes` that is not an array, is a failed
+      // search; it must never be read as a legitimately empty page.
+      if (!search || !Array.isArray(search.nodes)) {
+        throw unavailableError();
+      }
       const items: GithubDiscussionSearchItem[] = [];
-      for (const node of nodes) {
+      for (const node of search.nodes) {
         const mapped = mapDiscussionSearchNode(node);
         if (mapped) items.push(mapped);
       }
       return {
         items,
-        endCursor: strOrNull(search?.pageInfo?.endCursor),
-        hasNextPage: search?.pageInfo?.hasNextPage === true,
+        endCursor: strOrNull(search.pageInfo?.endCursor),
+        hasNextPage: search.pageInfo?.hasNextPage === true,
       };
     },
 
@@ -685,7 +753,7 @@ function createGithubApi(
       }>(GET_DISCUSSION_QUERY, { owner, repo, number: discussionNumber, comments: commentCount });
       const discussion = data?.repository?.discussion;
       if (!discussion) {
-        throw new GithubAdapterError(404, "GITHUB_NOT_FOUND", "GitHub request failed (404)");
+        throw new GithubAdapterError(404, "GITHUB_NOT_FOUND", GITHUB_NOT_FOUND_MESSAGE);
       }
       const commentNodes = Array.isArray(discussion.comments?.nodes)
         ? (discussion.comments?.nodes as Array<Parameters<typeof mapComment>[0]>)

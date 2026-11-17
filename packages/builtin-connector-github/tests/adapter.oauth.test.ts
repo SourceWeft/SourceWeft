@@ -107,6 +107,37 @@ test("refresh delegates and returns the rotated token", async () => {
   assert.equal(calls.length, 1);
 });
 
+test("refresh without a configured secret makes no request", async () => {
+  const { fetcher, calls } = router({});
+  await assert.rejects(
+    adapter(fetcher, { clientSecret: "" }).refreshOAuthToken({
+      refreshToken: "rt",
+      scopes: [],
+    }),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 503 &&
+      error.code === "GITHUB_UNAVAILABLE",
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("exchange without a configured client id makes no request", async () => {
+  const { fetcher, calls } = router({});
+  await assert.rejects(
+    adapter(fetcher, { clientId: "" }).exchangeOAuthCode({
+      code: "c",
+      redirectUri: "u",
+      scopes: [],
+    }),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 503 &&
+      error.code === "GITHUB_UNAVAILABLE",
+  );
+  assert.equal(calls.length, 0);
+});
+
 test("manifest client_id is empty without a slug", () => {
   const { fetcher } = router({});
   const withoutSlug = adapter(fetcher, { appSlug: "" }).getManifest();
