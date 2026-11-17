@@ -13,6 +13,11 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@octokit/core": "^7.0.8",
+    "@octokit/plugin-paginate-graphql": "^6.0.0",
+    "@octokit/plugin-paginate-rest": "^16.0.0",
+    "@octokit/plugin-retry": "^8.1.1",
+    "@octokit/plugin-throttling": "^11.0.5",
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/contracts": "workspace:*"
   },
