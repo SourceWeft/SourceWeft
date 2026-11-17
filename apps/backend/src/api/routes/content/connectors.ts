@@ -30,9 +30,9 @@ import {
 } from "../../../modules/connectors/repository";
 import { enqueueConnectorSyncJob } from "../../../modules/content/queue";
 import {
-  runDropboxBrowseAction,
-  type DropboxBrowseActionName,
-} from "../../../modules/connectors/dropbox-browse";
+  parseConnectorSelectionAction,
+  runConnectorSelectionAction,
+} from "../../../modules/connectors/selection";
 import { createGoogleDrivePickerSession } from "../../../modules/connectors/picker-session";
 import { logger } from "../../../shared/logger";
 import {
@@ -82,55 +82,6 @@ function buildConnectorWebhookUrl(input: {
     url.searchParams.set("connectorId", input.connectorId);
   }
   return url.toString();
-}
-
-/**
- * Registers `POST /connectors/:connectorId/dropbox/:action`, one route per
- * internal Dropbox browse-dialog action (`dropbox.browse`, `dropbox.search`,
- * `dropbox.describe`). Each needs `connector.manage` on the workspace and an
- * active or errored Dropbox connector, takes a JSON object body that the
- * adapter validates, and returns the adapter's metadata-only result unchanged
- * (types in packages/builtin-connector-dropbox/src/adapter.ts). The three
- * routes share everything but the action name, so this is called once per
- * action rather than written out three times.
- */
-function registerDropboxBrowseRoute(app: Hono, action: DropboxBrowseActionName) {
-  app.post(`/connectors/:connectorId/dropbox/${action}`, async (c) => {
-    const session = await requireSession(c);
-    if (!session) throw ApiError.unauthorized();
-    const workspaceId = requireRouteParam(c, "workspaceId");
-    const connectorId = requireRouteParam(c, "connectorId");
-    const { workspace } = await requireConnectorWorkspace({
-      workspaceId,
-      userId: getSessionUserId(session),
-      permission: "connector.manage",
-    });
-    const connector = await findSourceConnectorRecord({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      connectorId,
-    });
-    await connectorAccessPolicy.requireConnection(
-      { connectorType: "dropbox", createdBy: connector?.createdBy },
-      getSessionUserId(session),
-    );
-    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
-    const result = await runDropboxBrowseAction({
-      connector,
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      action,
-      request: body as Record<string, unknown>,
-      deps: {
-        getRuntimeToken: connectorOAuthService.getRuntimeToken.bind(
-          connectorOAuthService,
-        ),
-        getAdapter: (type) => connectorRegistry.getAdapter(type),
-      },
-    });
-    c.header("Cache-Control", "no-store");
-    return ApiResponse.success(c, result);
-  });
 }
 
 export function registerConnectorRoutes(app: Hono) {
@@ -238,9 +189,48 @@ export function registerConnectorRoutes(app: Hono) {
     },
   );
 
-  registerDropboxBrowseRoute(app, "browse");
-  registerDropboxBrowseRoute(app, "search");
-  registerDropboxBrowseRoute(app, "describe");
+  app.post("/connectors/:connectorId/selection/:action", async (c) => {
+    const session = await requireSession(c);
+    if (!session) throw ApiError.unauthorized();
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const connectorId = requireRouteParam(c, "connectorId");
+    const action = parseConnectorSelectionAction(
+      requireRouteParam(c, "action"),
+    );
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId,
+      userId: getSessionUserId(session),
+      permission: "connector.manage",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+    });
+    if (connector) {
+      await connectorAccessPolicy.requireConnection(
+        { connectorType: connector.connectorType, createdBy: connector.createdBy },
+        getSessionUserId(session),
+      );
+    }
+    const body = await c.req.json().catch(() => null);
+    const result = await runConnectorSelectionAction({
+      connector,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      action,
+      request: body,
+      deps: {
+        getRuntimeToken: connectorOAuthService.getRuntimeToken.bind(
+          connectorOAuthService,
+        ),
+        getAdapter: (type) => connectorRegistry.getAdapter(type),
+        getManifest: (type) => connectorRegistry.getManifest(type),
+      },
+    });
+    c.header("Cache-Control", "no-store");
+    return ApiResponse.success(c, result);
+  });
 
   app.post("/connectors/oauth/:connectorType/start", async (c) => {
     const session = await requireSession(c);

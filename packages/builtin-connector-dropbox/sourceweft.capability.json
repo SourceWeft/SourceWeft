@@ -48,7 +48,7 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "folderId": {
+              "containerId": {
                 "type": ["string", "null"],
                 "pattern": "^id:[A-Za-z0-9_-]{1,200}$"
               },
@@ -136,6 +136,15 @@
           }
         },
         "default": { "items": [] }
+      },
+      "selection": {
+        "actions": {
+          "browse": "dropbox.browse",
+          "search": "dropbox.search",
+          "describe": "dropbox.describe"
+        },
+        "kinds": ["folder", "file"],
+        "maxItems": 500
       }
     }
   ]

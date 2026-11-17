@@ -431,20 +431,96 @@ export const connectorActionSchema = z.object({
   agentToolName: z.string().min(1).optional(),
 });
 
-export const connectorContributionSchema = z.object({
-  id: contributionIdSchema,
-  title: z.string().min(1),
-  auth: connectorAuthSchema,
-  sync: z.object({
-    supportsIncremental: z.boolean().default(false),
-    defaultFrequencyMinutes: z.number().int().positive(),
-    minFrequencyMinutes: z.number().int().positive().optional(),
-    resources: z.array(connectorResourceSchema).default([]),
+// Same field-level rules as `connectorSelectionSpecSchema` in
+// `packages/contracts/src/connectors.ts` — the two packages have no
+// dependency on each other, so this is deliberately duplicated. Only the
+// cross-check against this contribution's declared `actions` (R4) is
+// specific to this package.
+// A kind becomes an i18n key segment (`…kinds.<kind>`) in the web, so a dot or
+// other separator would walk the message tree; restrict it to lowercase word
+// characters. Same rule as `connectorSelectionKindSchema` in
+// `packages/contracts/src/connectors.ts` (the two packages are independent).
+const connectorSelectionKindSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9_]+$/);
+
+export const connectorSelectionSpecSchema = z.object({
+  actions: z.object({
+    browse: z.string().min(1),
+    search: z.string().min(1).optional(),
+    describe: z.string().min(1),
   }),
-  actions: z.array(connectorActionSchema).default([]),
-  configSchema: jsonObjectSchema.default({}),
-  command: capabilityCommandSchema.optional(),
+  kinds: z
+    .array(connectorSelectionKindSchema)
+    .min(1)
+    .max(20)
+    .superRefine((kinds, context) => {
+      const seen = new Set<string>();
+      kinds.forEach((kind, index) => {
+        if (seen.has(kind)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Duplicate kind '${kind}'`,
+            path: [index],
+          });
+        }
+        seen.add(kind);
+      });
+    }),
+  maxItems: z.number().int().min(1).max(500),
 });
+
+export const connectorContributionSchema = z
+  .object({
+    id: contributionIdSchema,
+    title: z.string().min(1),
+    auth: connectorAuthSchema,
+    sync: z.object({
+      supportsIncremental: z.boolean().default(false),
+      defaultFrequencyMinutes: z.number().int().positive(),
+      minFrequencyMinutes: z.number().int().positive().optional(),
+      resources: z.array(connectorResourceSchema).default([]),
+    }),
+    actions: z.array(connectorActionSchema).default([]),
+    configSchema: jsonObjectSchema.default({}),
+    command: capabilityCommandSchema.optional(),
+    selection: connectorSelectionSpecSchema.optional(),
+  })
+  .superRefine((contribution, context) => {
+    const selection = contribution.selection;
+    if (!selection) return;
+    const namedActions: Array<{
+      key: "browse" | "search" | "describe";
+      name: string;
+    }> = [
+      { key: "browse", name: selection.actions.browse },
+      { key: "describe", name: selection.actions.describe },
+      ...(selection.actions.search
+        ? [{ key: "search" as const, name: selection.actions.search }]
+        : []),
+    ];
+    for (const { key, name } of namedActions) {
+      const declared = contribution.actions.find(
+        (action) => action.id === name,
+      );
+      if (!declared) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Selection action '${name}' is not declared in this contribution's actions`,
+          path: ["selection", "actions", key],
+        });
+        continue;
+      }
+      if (declared.visibility !== "internal") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Selection action '${name}' must be declared with visibility 'internal'`,
+          path: ["selection", "actions", key],
+        });
+      }
+    }
+  });
 
 export const capabilityContributesSchema = z.object({
   skills: z.array(skillContributionSchema).default([]),
@@ -567,6 +643,9 @@ export type DocumentParserContribution = z.infer<
   typeof documentParserContributionSchema
 >;
 export type ConnectorContribution = z.infer<typeof connectorContributionSchema>;
+export type ConnectorSelectionSpec = z.infer<
+  typeof connectorSelectionSpecSchema
+>;
 export type ConnectorActionContribution = z.infer<typeof connectorActionSchema>;
 export type ConnectorActionRisk = z.infer<typeof connectorActionRiskSchema>;
 export type CapabilityHostService = z.infer<typeof capabilityHostServiceSchema>;
