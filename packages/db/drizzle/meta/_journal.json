@@ -547,6 +547,13 @@
       "when": 1794746759452,
       "tag": "0077_sso_verified_domain_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794930289718,
+      "tag": "0078_agent_tasks",
+      "breakpoints": true
     }
   ]
 }

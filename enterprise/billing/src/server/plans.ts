@@ -1,4 +1,5 @@
 import type { PlanFamily } from "@sourceweft/contracts";
+import type { ScheduledTaskLimits } from "@sourceweft/contracts/billing-runtime";
 import type { BillingRuntimeConfig } from "./types";
 
 export type PlanQuota = {
@@ -42,6 +43,25 @@ export function getPerSeatQuota(
     case "enterprise_usage":
       return ENTERPRISE_USAGE_QUOTA;
   }
+}
+
+/**
+ * Scheduled tasks one member may have enabled at once, by plan. Per member,
+ * like credits: a team seat gets the full number, not a share of a pool.
+ * The tiers above the team plan are not sold yet and share the top number.
+ */
+const SCHEDULED_TASK_LIMITS: Record<PlanFamily, ScheduledTaskLimits> = {
+  individual_free: { maxActiveTasks: 3 },
+  individual_pro: { maxActiveTasks: 10 },
+  team_standard: { maxActiveTasks: 15 },
+  team_premium: { maxActiveTasks: 25 },
+  enterprise_usage: { maxActiveTasks: 25 },
+};
+
+export function getScheduledTaskLimits(
+  planFamily: PlanFamily,
+): ScheduledTaskLimits {
+  return { ...SCHEDULED_TASK_LIMITS[planFamily] };
 }
 
 export function getPlanQuota(

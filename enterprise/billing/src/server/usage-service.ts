@@ -33,6 +33,7 @@ import {
   getTotalPagesBalance,
   grantAddOnPages,
 } from "./page-ledger";
+import { getScheduledTaskLimits } from "./plans";
 import type { BillingStore } from "./store-port";
 import type { BillingAccountState, BillingRuntimeConfig } from "./types";
 import {
@@ -125,6 +126,15 @@ export class BillingUsageService {
           this.runtimeConfig,
         ),
       }),
+    );
+  }
+
+  /** The scheduled-task ceilings of the plan this member's account is on. */
+  async getScheduledTaskLimits(teamId: string, userId: string) {
+    return this.accountService.withLockedAccount(
+      teamId,
+      userId,
+      async ({ account }) => getScheduledTaskLimits(account.planFamily),
     );
   }
 

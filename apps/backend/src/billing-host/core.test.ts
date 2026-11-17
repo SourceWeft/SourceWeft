@@ -42,6 +42,17 @@ test("core executions carry an explicit unmetered outcome, never a synthetic acc
   );
 });
 
+test("core names one fixed scheduled-task ceiling without consulting a plan", async () => {
+  const billing = createCoreBillingRuntime();
+  const limits = await billing.getScheduledTaskLimits("team_1", "user_1");
+  assert.deepEqual(limits, { maxActiveTasks: 25 });
+  // A caller cannot change the ceiling for the next one.
+  limits.maxActiveTasks = 1000;
+  assert.deepEqual(await billing.getScheduledTaskLimits("team_2", "user_2"), {
+    maxActiveTasks: 25,
+  });
+});
+
 test("core organization hooks do not require payment configuration or an account", async () => {
   const hooks = createCoreBillingOrganizationHooks();
   await hooks.provisionAccount("team_1", "user_1");

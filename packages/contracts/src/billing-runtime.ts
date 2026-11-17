@@ -40,6 +40,12 @@ export type IngestionPageAdmissionState = {
   cycleCapacity: number;
 };
 
+/** Ceilings on one member's scheduled tasks, decided by the member's plan. */
+export type ScheduledTaskLimits = {
+  /** Scheduled tasks the member may have enabled at the same time. */
+  maxActiveTasks: number;
+};
+
 export type BillingSkipped = {
   status: "skipped";
   reason: "billing_not_installed" | "byok" | "model_kind_not_user_billed";
@@ -102,6 +108,11 @@ export interface BillingRuntime {
     input: MeterIngestionRequest,
     actorUserId: string,
   ): Promise<IngestionSettlement>;
+  /** Read only: the host enforces the limits, billing just names them. */
+  getScheduledTaskLimits(
+    teamId: string,
+    actorUserId: string,
+  ): Promise<ScheduledTaskLimits>;
   reconcileProviderCost(input: ReconcileBillingProviderCostInput): Promise<
     | BillingSkipped
     | {
