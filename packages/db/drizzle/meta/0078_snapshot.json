@@ -1,5 +1,5 @@
 {
-  "id": "6465af8f-e6df-408b-8eff-0d328d69df04",
+  "id": "4aede728-32be-41f8-bd07-e1f2a1cfe763",
   "prevId": "cbfe5c44-6c79-4cea-82cc-b31a481c807f",
   "version": "7",
   "dialect": "postgresql",
@@ -6065,258 +6065,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.agent_tasks": {
-      "name": "agent_tasks",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_json": {
-          "name": "request_json",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "status_reason": {
-          "name": "status_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status_changed_at": {
-          "name": "status_changed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "consecutive_failures": {
-          "name": "consecutive_failures",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "trial_run_at": {
-          "name": "trial_run_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notify_on_success": {
-          "name": "notify_on_success",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "notify_email": {
-          "name": "notify_email",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "result_target": {
-          "name": "result_target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'new_thread'"
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "agent_tasks_owner_name_uq": {
-          "name": "agent_tasks_owner_name_uq",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "lower(\"name\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"agent_tasks\".\"archived_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_tasks_owner_status_idx": {
-          "name": "agent_tasks_owner_status_idx",
-          "columns": [
-            {
-              "expression": "team_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agent_tasks_workspace_team_fk": {
-          "name": "agent_tasks_workspace_team_fk",
-          "tableFrom": "agent_tasks",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id",
-            "team_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "agent_tasks_id_workspace_team_owner_uq": {
-          "name": "agent_tasks_id_workspace_team_owner_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "workspace_id",
-            "team_id",
-            "owner_user_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "agent_tasks_status_check": {
-          "name": "agent_tasks_status_check",
-          "value": "\"agent_tasks\".\"status\" in ('draft', 'active', 'paused', 'blocked', 'completed', 'archived')"
-        },
-        "agent_tasks_status_reason_check": {
-          "name": "agent_tasks_status_reason_check",
-          "value": "\"agent_tasks\".\"status_reason\" is null or \"agent_tasks\".\"status_reason\" in ('user_paused', 'owner_left', 'repeated_failure', 'insufficient_credits', 'tools_unavailable', 'auth_expired')"
-        },
-        "agent_tasks_result_target_check": {
-          "name": "agent_tasks_result_target_check",
-          "value": "\"agent_tasks\".\"result_target\" in ('new_thread')"
-        },
-        "agent_tasks_name_length_check": {
-          "name": "agent_tasks_name_length_check",
-          "value": "char_length(\"agent_tasks\".\"name\") between 1 and 80"
-        },
-        "agent_tasks_prompt_length_check": {
-          "name": "agent_tasks_prompt_length_check",
-          "value": "char_length(\"agent_tasks\".\"prompt\") between 1 and 20000"
-        },
-        "agent_tasks_request_object_check": {
-          "name": "agent_tasks_request_object_check",
-          "value": "jsonb_typeof(\"agent_tasks\".\"request_json\") = 'object'"
-        },
-        "agent_tasks_consecutive_failures_check": {
-          "name": "agent_tasks_consecutive_failures_check",
-          "value": "\"agent_tasks\".\"consecutive_failures\" >= 0"
-        },
-        "agent_tasks_version_check": {
-          "name": "agent_tasks_version_check",
-          "value": "\"agent_tasks\".\"version\" >= 1"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.agent_tool_trust_rules": {
       "name": "agent_tool_trust_rules",
       "schema": "",
@@ -7106,6 +6854,12 @@
         "consumed_at": {
           "name": "consumed_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_ref": {
+          "name": "attempt_ref",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -8345,18 +8099,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "team_id": {
-          "name": "team_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "scheduled_for": {
           "name": "scheduled_for",
           "type": "timestamp with time zone",
@@ -8370,49 +8112,11 @@
           "notNull": true,
           "default": "'pending'"
         },
-        "trigger_kind": {
-          "name": "trigger_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'schedule'"
-        },
-        "skip_reason": {
-          "name": "skip_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "sync_run_id": {
           "name": "sync_run_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "chat_run_id": {
-          "name": "chat_run_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "thread_id": {
-          "name": "thread_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "task_version": {
-          "name": "task_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_catch_up": {
-          "name": "is_catch_up",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "retry_at": {
           "name": "retry_at",
@@ -8524,47 +8228,6 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "schedule_occurrences_chat_run_id_chat_thread_runs_id_fk": {
-          "name": "schedule_occurrences_chat_run_id_chat_thread_runs_id_fk",
-          "tableFrom": "schedule_occurrences",
-          "tableTo": "chat_thread_runs",
-          "columnsFrom": [
-            "chat_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "schedule_occurrences_thread_id_threads_id_fk": {
-          "name": "schedule_occurrences_thread_id_threads_id_fk",
-          "tableFrom": "schedule_occurrences",
-          "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "schedule_occurrences_workspace_team_fk": {
-          "name": "schedule_occurrences_workspace_team_fk",
-          "tableFrom": "schedule_occurrences",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id",
-            "team_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8574,22 +8237,6 @@
         "schedule_occurrences_attempts_check": {
           "name": "schedule_occurrences_attempts_check",
           "value": "\"schedule_occurrences\".\"attempts\" >= 0"
-        },
-        "schedule_occurrences_status_check": {
-          "name": "schedule_occurrences_status_check",
-          "value": "\"schedule_occurrences\".\"status\" in ('pending', 'dispatching', 'queued', 'succeeded', 'failed', 'skipped', 'blocked', 'cancelled')"
-        },
-        "schedule_occurrences_trigger_kind_check": {
-          "name": "schedule_occurrences_trigger_kind_check",
-          "value": "\"schedule_occurrences\".\"trigger_kind\" in ('schedule', 'manual', 'api', 'event')"
-        },
-        "schedule_occurrences_skip_reason_check": {
-          "name": "schedule_occurrences_skip_reason_check",
-          "value": "\"schedule_occurrences\".\"skip_reason\" is null or (\"schedule_occurrences\".\"status\" in ('skipped', 'blocked') and \"schedule_occurrences\".\"skip_reason\" in ('missed_platform_down', 'previous_run_active', 'user_concurrency_limit', 'user_daily_cap', 'insufficient_credits', 'owner_left', 'tools_unavailable', 'auth_expired', 'rate_limited'))"
-        },
-        "schedule_occurrences_task_version_check": {
-          "name": "schedule_occurrences_task_version_check",
-          "value": "\"schedule_occurrences\".\"task_version\" is null or \"schedule_occurrences\".\"task_version\" >= 1"
         }
       },
       "isRLSEnabled": false
@@ -8943,12 +8590,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "agent_task_id": {
-          "name": "agent_task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "enabled": {
           "name": "enabled",
           "type": "boolean",
@@ -9051,21 +8692,6 @@
           "method": "btree",
           "with": {}
         },
-        "task_schedules_agent_task_uq": {
-          "name": "task_schedules_agent_task_uq",
-          "columns": [
-            {
-              "expression": "agent_task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "task_schedules_due_idx": {
           "name": "task_schedules_due_idx",
           "columns": [
@@ -9146,25 +8772,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "task_schedules_agent_task_owner_fk": {
-          "name": "task_schedules_agent_task_owner_fk",
-          "tableFrom": "task_schedules",
-          "tableTo": "agent_tasks",
-          "columnsFrom": [
-            "agent_task_id",
-            "workspace_id",
-            "team_id",
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id",
-            "workspace_id",
-            "team_id",
-            "owner_user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9177,7 +8784,7 @@
         },
         "task_schedules_target_check": {
           "name": "task_schedules_target_check",
-          "value": "(\"task_schedules\".\"task_kind\" = 'connector_sync' and \"task_schedules\".\"owner_kind\" = 'workspace' and \"task_schedules\".\"connector_id\" is not null and \"task_schedules\".\"agent_task_id\" is null and \"task_schedules\".\"interval_minutes\" > 0) or (\"task_schedules\".\"task_kind\" = 'agent_task' and \"task_schedules\".\"owner_kind\" = 'user' and \"task_schedules\".\"owner_user_id\" is not null and \"task_schedules\".\"agent_task_id\" is not null and \"task_schedules\".\"connector_id\" is null)"
+          "value": "(\"task_schedules\".\"task_kind\" = 'connector_sync' and \"task_schedules\".\"owner_kind\" = 'workspace' and \"task_schedules\".\"connector_id\" is not null and \"task_schedules\".\"interval_minutes\" > 0) or (\"task_schedules\".\"task_kind\" = 'agent_task' and \"task_schedules\".\"owner_kind\" = 'user' and \"task_schedules\".\"owner_user_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -13089,7 +12696,7 @@
         },
         "threads_origin_check": {
           "name": "threads_origin_check",
-          "value": "\"threads\".\"origin\" in ('user', 'subagent', 'scheduled')"
+          "value": "\"threads\".\"origin\" in ('user', 'subagent')"
         }
       },
       "isRLSEnabled": false

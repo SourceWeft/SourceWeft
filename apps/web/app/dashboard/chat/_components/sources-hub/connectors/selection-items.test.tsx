@@ -198,6 +198,7 @@ async function mountSettings(
       activityError: null,
       connector,
       connectorBusyById: {},
+      connectorManifestInfoByType: {},
       connectorReadinessById: {},
       isLoadingActivity: false,
       onCopyWebhook: vi.fn(),

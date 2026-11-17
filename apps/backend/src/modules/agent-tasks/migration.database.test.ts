@@ -12,7 +12,7 @@ const drizzleFile = (name: string) =>
 // drizzle qualifies foreign-key targets with "public"; point them at the
 // throwaway schema so the tables below are the ones referenced.
 async function migrate(client: Client, schema: string) {
-  const sql = await drizzleFile("0078_agent_tasks.sql");
+  const sql = await drizzleFile("0079_agent_tasks.sql");
   await client.query(sql.replaceAll('"public".', `"${schema}".`));
 }
 
@@ -97,7 +97,7 @@ async function rejected(client: Client, sql: string, values: unknown[] = []) {
   }
 }
 
-describe("0078_agent_tasks", () => {
+describe("0079_agent_tasks", () => {
   test("existing occurrences inherit their schedule's team and workspace", async () => {
     await migrated("at_backfill", async (client) => {
       expect(
