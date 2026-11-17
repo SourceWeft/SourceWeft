@@ -1,3 +1,4 @@
+export { adfToMarkdown } from "./adf";
 export { AtlassianApiError, type AtlassianErrorPrefix } from "./errors";
 export {
   ATLASSIAN_AUTHORIZE_URL,
