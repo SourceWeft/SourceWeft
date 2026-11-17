@@ -739,6 +739,11 @@ export function useConnectors(input: {
         : null;
       let knownSelectionSpecByType = currentSnapshot?.byType ?? {};
       let selectionCapabilityKnown = currentSnapshot?.loaded ?? false;
+      // What the just-fetched manifests say about Gmail, for the create path
+      // below: `undefined` until that fetch answers, `null` when it answered
+      // without a Gmail manifest.
+      let freshGmailManifestInfo: ConnectorManifestInfo | null | undefined;
+      let manifestFetchError: unknown = null;
       if (accountId) {
         // An authorization just completed. After the provider redirects back
         // this runs before the connector list and manifests have loaded, so
@@ -774,6 +779,12 @@ export function useConnectors(input: {
           const byType = selectionSpecsFromManifests(manifests.items);
           knownSelectionSpecByType = byType;
           selectionCapabilityKnown = true;
+          const gmailManifest = manifests.items.find(
+            (entry) => entry.type === "gmail",
+          );
+          freshGmailManifestInfo = gmailManifest
+            ? deriveConnectorManifestInfo(gmailManifest)
+            : null;
           // Apply the fresh specs to both state and ref so the settings list
           // (state) and any later fallback (ref) see them.
           applySelectionSpecs({
@@ -782,7 +793,8 @@ export function useConnectors(input: {
             loaded: true,
             byType,
           });
-        } catch {
+        } catch (error) {
+          manifestFetchError = error;
           const snapshot = selectionSpecsSnapshotRef.current;
           if (
             selectionSpecsMatch(snapshot, workspaceId, actorIdRef.current) &&
@@ -973,28 +985,28 @@ export function useConnectors(input: {
             item.id === "dropbox";
           // A tools-only Gmail manifest (no sync resources, e.g. a
           // Composio-brokered deployment) accepts only `liveSearchEnabled` in
-          // its config; indexing fields would be rejected by validation. This
-          // auto-create path runs right after the OAuth return, which can be
-          // a fresh page load whose own manifest fetch (`refreshConnectors`)
-          // has not resolved yet; ask directly rather than defaulting to
-          // today's shape on a guess. Never guess in either direction: if
-          // this request fails, let it throw into the catch below, the same
-          // error path any other failed connector creation already uses,
-          // instead of creating the connector with an unconfirmed config.
+          // its config; indexing fields would be rejected by validation. The
+          // manifests fetched above, right after the authorization, decide;
+          // if that fetch failed, the manifests already loaded for this actor
+          // do. Never guess in either direction: with neither answer, throw
+          // into the catch below, the same error path any other failed
+          // connector creation already uses, instead of creating the connector
+          // with an unconfirmed config.
           let gmailSupportsIndexing = true;
           if (item.id === "gmail") {
-            const cachedGmailInfo = connectorManifestInfoByTypeRef.current.gmail;
-            if (cachedGmailInfo) {
-              gmailSupportsIndexing = cachedGmailInfo.supportsIndexing;
+            if (freshGmailManifestInfo !== undefined) {
+              gmailSupportsIndexing =
+                freshGmailManifestInfo?.supportsIndexing ?? true;
             } else {
-              const manifests =
-                await connectorsClient.listManifests(workspaceId);
-              const gmailManifest = manifests.items.find(
-                (entry) => entry.type === "gmail",
-              );
-              gmailSupportsIndexing = gmailManifest
-                ? deriveConnectorManifestInfo(gmailManifest).supportsIndexing
-                : true;
+              const cachedGmailInfo =
+                connectorManifestInfoByTypeRef.current.gmail;
+              if (!cachedGmailInfo) {
+                throw (
+                  manifestFetchError ??
+                  new Error(t("toasts.connectors.loadFailed"))
+                );
+              }
+              gmailSupportsIndexing = cachedGmailInfo.supportsIndexing;
             }
           }
           const effectiveGmailMode =

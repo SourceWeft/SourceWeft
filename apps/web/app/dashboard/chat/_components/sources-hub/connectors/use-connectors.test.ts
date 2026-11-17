@@ -808,8 +808,8 @@ test("a manifest fetch that fails after OAuth return still creates the connector
   listManifests
     .mockResolvedValueOnce({
       items: [
-        { type: "notion" },
-        { type: "dropbox", selection: dropboxSelectionSpec },
+        fakeManifest("notion"),
+        { ...fakeManifest("dropbox"), selection: dropboxSelectionSpec },
       ],
     })
     .mockRejectedValueOnce(new Error("manifests offline"));
@@ -899,9 +899,9 @@ test("an explicitly handled type without a selection spec keeps its own path", a
   // (empty file selection, settings opened), never the setup-incomplete exit.
   listManifests.mockResolvedValue({
     items: [
-      { type: "notion" },
-      { type: "dropbox", selection: dropboxSelectionSpec },
-      { type: "google_drive" },
+      fakeManifest("notion"),
+      { ...fakeManifest("dropbox"), selection: dropboxSelectionSpec },
+      fakeManifest("google_drive"),
     ],
   });
   listAccounts.mockResolvedValue({
@@ -939,7 +939,7 @@ test("a type without a selection spec that is not specially handled gets the con
   // types (notion / gmail / google_drive), so with the manifests known the
   // connect takes the configure-next path: nothing created, an info toast.
   listManifests.mockResolvedValue({
-    items: [{ type: "notion" }, { type: "x-tools" }],
+    items: [fakeManifest("notion"), fakeManifest("x-tools")],
   });
   listAccounts.mockResolvedValue({
     items: [
@@ -1068,8 +1068,8 @@ test("switching workspace clears the selection specs", async () => {
 test("a tools-only selection connector connects with an empty selection and no periodic sync", async () => {
   listManifests.mockResolvedValue({
     items: [
-      { type: "notion" },
-      { type: "x-tools", selection: toolsSelectionSpec },
+      fakeManifest("notion"),
+      { ...fakeManifest("x-tools"), selection: toolsSelectionSpec },
     ],
   });
   listAccounts.mockResolvedValue({
