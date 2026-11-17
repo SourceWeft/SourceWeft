@@ -38,6 +38,13 @@ const SEARCH_RESULT_LIMIT = 25;
  * the contribution's `linear.describe` input schema and the selection
  * contract's `items`/`DescribeResult` bound). */
 const DESCRIBE_MAX_IDS = 100;
+/** `linear.describe`'s cap on `TEAMS_QUERY` requests when paging through a
+ * describe's team half. `TEAMS_QUERY` is fixed at `first: 50` in the
+ * document (not editable here), so a describe request for up to
+ * `DESCRIBE_MAX_IDS` (100) ids can need a second page; three requests is
+ * more than enough for 100 ids and bounds the worst case if Linear keeps
+ * reporting `hasNextPage: true`. */
+const DESCRIBE_TEAM_PAGE_LIMIT = 3;
 /** A request cursor is opaque to this adapter; only its size is bounded
  * (matches the `cursor` field's `maxLength` in contribution.ts). */
 const CURSOR_MAX_LENGTH = 4096;
@@ -362,6 +369,32 @@ export function createLinearConnectorAdapter(
     };
   }
 
+  /** `TEAMS_QUERY` is fixed at `first: 50` in the document, so describing up
+   * to `DESCRIBE_MAX_IDS` ids pages through it with the same `id in ids`
+   * filter, following `pageInfo.hasNextPage`/`endCursor` via `after`, up to
+   * `DESCRIBE_TEAM_PAGE_LIMIT` requests. If a page at that limit still
+   * reports `hasNextPage: true`, paging stops and only what was fetched so
+   * far is used (100 ids cannot need more than the limit allows). */
+  async function fetchDescribeTeamNodes(
+    accessToken: string,
+    filter: { id: { in: string[] } },
+  ): Promise<LinearTeamNode[]> {
+    const nodes: LinearTeamNode[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < DESCRIBE_TEAM_PAGE_LIMIT; page += 1) {
+      const data = await client.query<{
+        teams: {
+          nodes: LinearTeamNode[];
+          pageInfo: { hasNextPage: boolean; endCursor: string };
+        };
+      }>(accessToken, TEAMS_QUERY, { after, filter });
+      nodes.push(...data.teams.nodes);
+      if (!data.teams.pageInfo.hasNextPage) break;
+      after = data.teams.pageInfo.endCursor;
+    }
+    return nodes;
+  }
+
   /** `linear.describe`: looks up every requested id as a team or a project,
    * in parallel, and reports each in request order. An id matching neither
    * comes back `exists: false` with every other field `null`. */
@@ -370,18 +403,15 @@ export function createLinearConnectorAdapter(
   ): Promise<ConnectorSelectionDescribeResult> {
     const { ids } = parseDescribeRequest(input.request);
     const idFilter = { id: { in: ids } };
-    const [teamsData, projectsData] = await Promise.all([
-      client.query<{ teams: { nodes: LinearTeamNode[] } }>(input.accessToken, TEAMS_QUERY, {
-        after: undefined,
-        filter: idFilter,
-      }),
+    const [teamNodes, projectsData] = await Promise.all([
+      fetchDescribeTeamNodes(input.accessToken, idFilter),
       client.query<{ projects: { nodes: LinearProjectNode[] } }>(
         input.accessToken,
         PROJECTS_QUERY,
         { first: DESCRIBE_MAX_IDS, filter: idFilter },
       ),
     ]);
-    const teamsById = new Map(teamsData.teams.nodes.map((team) => [team.id, team]));
+    const teamsById = new Map(teamNodes.map((team) => [team.id, team]));
     const projectsById = new Map(projectsData.projects.nodes.map((project) => [project.id, project]));
     const items: ConnectorSelectionDescribeItem[] = ids.map((id) => {
       const team = teamsById.get(id);

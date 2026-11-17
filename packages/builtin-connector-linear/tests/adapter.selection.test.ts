@@ -466,7 +466,14 @@ test("describe marks missing ids", async () => {
         TEAMS_QUERY,
         (variables) => {
           assert.deepEqual(variables.filter, { id: { in: ids } });
-          return json({ data: { teams: { nodes: [{ id: TEAM_A, name: "Acme", key: "ACM" }] } } });
+          return json({
+            data: {
+              teams: {
+                nodes: [{ id: TEAM_A, name: "Acme", key: "ACM" }],
+                pageInfo: { hasNextPage: false, endCursor: "team-cursor" },
+              },
+            },
+          });
         },
       ],
       [
@@ -513,6 +520,75 @@ test("describe rejects 101 ids and a non-UUID id", async () => {
       error instanceof LinearAdapterError && error.code === "LINEAR_INVALID_REQUEST",
   );
   assert.equal(calls.length, 0);
+});
+
+test("describe finds teams beyond the first page", async () => {
+  const ids = Array.from(
+    { length: 60 },
+    (_, i) => `cccccccc-0000-0000-0000-${String(i).padStart(12, "0")}`,
+  );
+  const page1 = ids.slice(0, 50).map((id) => ({ id, name: `Team ${id}`, key: "T" }));
+  const page2 = ids.slice(50, 60).map((id) => ({ id, name: `Team ${id}`, key: "T" }));
+  let teamsCalls = 0;
+  const { fetcher } = router({
+    documents: new Map([
+      [
+        TEAMS_QUERY,
+        (variables) => {
+          teamsCalls += 1;
+          assert.deepEqual(variables.filter, { id: { in: ids } });
+          if (variables.after === undefined) {
+            return json({
+              data: {
+                teams: { nodes: page1, pageInfo: { hasNextPage: true, endCursor: "team-cursor-1" } },
+              },
+            });
+          }
+          assert.equal(variables.after, "team-cursor-1");
+          return json({
+            data: {
+              teams: { nodes: page2, pageInfo: { hasNextPage: false, endCursor: "team-cursor-2" } },
+            },
+          });
+        },
+      ],
+      [PROJECTS_QUERY, () => json({ data: { projects: { nodes: [] } } })],
+    ]),
+  });
+  const result = await adapter(fetcher).executeAction(
+    actionInput("linear.describe", { ids }),
+  );
+  const items = result.result.items as Array<{ id: string; exists: boolean }>;
+  assert.equal(items.length, 60);
+  assert.deepEqual(items.map((item) => item.id), ids);
+  assert.ok(items.every((item) => item.exists === true));
+  assert.equal(teamsCalls, 2);
+});
+
+test("describe stops paging teams after three requests", async () => {
+  const ids = Array.from(
+    { length: 3 },
+    (_, i) => `dddddddd-0000-0000-0000-${String(i).padStart(12, "0")}`,
+  );
+  let teamsCalls = 0;
+  const { fetcher } = router({
+    documents: new Map([
+      [
+        TEAMS_QUERY,
+        () => {
+          teamsCalls += 1;
+          return json({
+            data: {
+              teams: { nodes: [], pageInfo: { hasNextPage: true, endCursor: `cursor-${teamsCalls}` } },
+            },
+          });
+        },
+      ],
+      [PROJECTS_QUERY, () => json({ data: { projects: { nodes: [] } } })],
+    ]),
+  });
+  await adapter(fetcher).executeAction(actionInput("linear.describe", { ids }));
+  assert.equal(teamsCalls, 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -568,7 +644,18 @@ test("selection results satisfy the shared contract", async () => {
 
   const describeFetcher = router({
     documents: new Map([
-      [TEAMS_QUERY, () => json({ data: { teams: { nodes: [{ id: TEAM_A, name: "Acme", key: "ACM" }] } } })],
+      [
+        TEAMS_QUERY,
+        () =>
+          json({
+            data: {
+              teams: {
+                nodes: [{ id: TEAM_A, name: "Acme", key: "ACM" }],
+                pageInfo: { hasNextPage: false, endCursor: "team-cursor" },
+              },
+            },
+          }),
+      ],
       [PROJECTS_QUERY, () => json({ data: { projects: { nodes: [] } } })],
     ]),
   }).fetcher;
