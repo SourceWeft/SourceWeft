@@ -27,6 +27,7 @@ import type {
 import { toBackendJiraManifest } from "./backend-manifest";
 import { parseProjectId, parseSiteId, projectItemId, siteItemId } from "./ids";
 import { createJiraClient, type JiraProject } from "./jira-client";
+import { executeJiraLiveTool } from "./live-tools";
 
 export type JiraAdapterConfig = {
   baseUrl: string;
@@ -220,10 +221,10 @@ function toProjectEntry(
 }
 
 /**
- * Stub adapter for Task 4 of the Jira connector plan replaced here with the
- * real Jira client and selection actions (Task 6). Agent tools (`discover`
- * stays empty, `extract` stays unsupported: this is a tools-only connector)
- * are added in Task 7.
+ * Jira connector adapter: OAuth and the selection actions (Task 6) plus the
+ * three agent-visible live tools (Task 7, in `live-tools.ts`). This is a
+ * tools-only connector, so `discover` stays empty and `extract` stays
+ * unsupported.
  */
 export function createJiraConnectorAdapter(
   config: JiraAdapterConfig,
@@ -466,6 +467,13 @@ export function createJiraConnectorAdapter(
       if (input.actionType === "jira.describe") {
         return { result: await describeAction(input) };
       }
+      // The three agent-visible live tools (`jira.issue.search`,
+      // `jira.issue.read`, `jira.project.list`): `null` means not one of them.
+      const liveResult = await executeJiraLiveTool(
+        { client, atlassianConfig },
+        input,
+      );
+      if (liveResult) return liveResult;
       throw unsupportedAction();
     },
   };
