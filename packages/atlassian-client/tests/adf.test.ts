@@ -81,6 +81,22 @@ test("codeBlock without a language: empty info string", () => {
   assert.equal(adfToMarkdown(input), "```\nplain\n```");
 });
 
+test("code block keeps consecutive blank lines", () => {
+  const input = doc({ type: "codeBlock", content: [text("line1\n\n\nline2")] });
+  assert.equal(adfToMarkdown(input), "```\nline1\n\n\nline2\n```");
+});
+
+test("code block nested in a blockquote keeps its blank lines", () => {
+  const input = doc({
+    type: "blockquote",
+    content: [{ type: "codeBlock", content: [text("line1\n\n\nline2")] }],
+  });
+  assert.equal(
+    adfToMarkdown(input),
+    "> ```\n> line1\n>\n>\n> line2\n> ```",
+  );
+});
+
 test("blockquote: each line prefixed '> '", () => {
   const input = doc({ type: "blockquote", content: [paragraph(text("Quoted text."))] });
   assert.equal(adfToMarkdown(input), "> Quoted text.");
@@ -185,7 +201,7 @@ test("emoji: attrs.text, or attrs.shortName when text is absent", () => {
   );
 });
 
-test("inlineCard / blockCard: attrs.url", () => {
+test("inlineCard / blockCard: attrs.url for an http(s) url", () => {
   assert.equal(
     adfToMarkdown(doc(paragraph({ type: "inlineCard", attrs: { url: "https://example.com/x" } }))),
     "https://example.com/x",
@@ -194,6 +210,18 @@ test("inlineCard / blockCard: attrs.url", () => {
     adfToMarkdown(doc({ type: "blockCard", attrs: { url: "https://example.com/y" } })),
     "https://example.com/y",
   );
+});
+
+test("card with a non-http url renders nothing", () => {
+  assert.equal(
+    adfToMarkdown(doc(paragraph({ type: "inlineCard", attrs: { url: "javascript:alert(1)" } }))),
+    "",
+  );
+  assert.equal(
+    adfToMarkdown(doc({ type: "blockCard", attrs: { url: "data:text/html,x" } })),
+    "",
+  );
+  assert.equal(adfToMarkdown(doc(paragraph({ type: "inlineCard", attrs: {} }))), "");
 });
 
 test("mediaSingle / media / mediaGroup: render nothing", () => {

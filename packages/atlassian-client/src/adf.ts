@@ -29,12 +29,12 @@ function collectText(node: unknown): string {
   return getContent(node).map(collectText).join("");
 }
 
-function collapseBlankLines(value: string): string {
-  return value.replace(/\n{3,}/g, "\n\n");
-}
-
 /** Renders a list of block-level nodes, each trimmed, joined with exactly one
- * blank line between non-empty blocks. */
+ * blank line between non-empty blocks. Trimming each block before joining is
+ * what keeps sibling blocks to at most one blank line apart, at every nesting
+ * level, without ever touching a leaf's own content (e.g. a fenced code
+ * block's literal blank lines) — so there is no separate, document-wide
+ * blank-line collapse that could rewrite a code block's body. */
 function renderBlocks(nodes: unknown[], depth: number): string {
   return nodes
     .filter(isNode)
@@ -202,7 +202,8 @@ function renderNode(node: AdfNode, depth: number): string {
     case "inlineCard":
     case "blockCard": {
       const attrs = getAttrs(node);
-      return typeof attrs.url === "string" ? attrs.url : "";
+      const url = typeof attrs.url === "string" ? attrs.url : "";
+      return url.startsWith("http://") || url.startsWith("https://") ? url : "";
     }
     case "mediaSingle":
     case "media":
@@ -224,7 +225,7 @@ export function adfToMarkdown(doc: unknown): string {
   try {
     if (!isNode(doc)) return "";
     if (!Array.isArray(doc.content)) return "";
-    return collapseBlankLines(renderBlocks(doc.content, 1)).trim();
+    return renderBlocks(doc.content, 1).trim();
   } catch {
     return "";
   }
