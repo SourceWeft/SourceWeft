@@ -6,12 +6,12 @@ import { GithubAdapterError } from "../src/errors";
 import { decodeSearchCursor, encodeSearchCursor } from "../src/scope";
 
 /*
- * Task 5 live tools. The fake fetcher routes GitHub's REST search/item
- * endpoints and the GraphQL endpoint (resolve, discussion search, discussion
- * read) and records every call, so a test can assert both the provider query
- * (scope limited to the selected repositories) and that every returned record
- * is re-checked against the selection. `retryBaseMs: 0` keeps retry/throttle
- * back-offs out of real time, as Task 4's tests do.
+ * Live-tool tests. The fake fetcher routes GitHub's REST search/item endpoints
+ * and the GraphQL endpoint (resolve, discussion search, discussion read) and
+ * records every call, so a test can assert both the provider query (scope
+ * limited to the selected repositories) and that every returned record is
+ * re-checked against the selection. `retryBaseMs: 0` keeps retry/throttle
+ * back-offs out of real time.
  */
 
 type RecordedCall = {
@@ -946,6 +946,7 @@ test("discussion is read through GraphQL", async () => {
               createdAt: "2026-01-03T00:00:00Z",
               updatedAt: "2026-01-04T00:00:00Z",
               author: { login: "octocat" },
+              repository: { id: "R_aa" },
               labels: { nodes: [{ name: "idea" }] },
               comments: {
                 totalCount: 1,
@@ -975,6 +976,46 @@ test("discussion is read through GraphQL", async () => {
   assert.equal(result.result.commentCount, 1);
   // No REST issue endpoint was used for the discussion.
   assert.equal(calls.some((call) => call.pathname.startsWith("/repos/")), false);
+});
+
+test("a discussion whose repository node id differs is GITHUB_NOT_FOUND", async () => {
+  const { fetcher } = router({
+    resolve: resolveFrom({ R_aa: "acme/one" }),
+    getDiscussion: () =>
+      json({
+        data: {
+          repository: {
+            discussion: {
+              number: 7,
+              title: "a discussion",
+              url: "https://github.com/acme/one/discussions/7",
+              body: "x",
+              createdAt: "2026-01-03T00:00:00Z",
+              updatedAt: "2026-01-04T00:00:00Z",
+              author: { login: "octocat" },
+              // A repository node id that is not the resolved R_aa.
+              repository: { id: "R_other" },
+              labels: { nodes: [] },
+              comments: { totalCount: 0, nodes: [] },
+            },
+          },
+        },
+      }),
+  });
+  const gh = adapter(fetcher);
+  await assert.rejects(
+    gh.executeAction(
+      actionInput(
+        "github.item.read",
+        { repository: "acme/one", number: 7, type: "discussion" },
+        selection("R_aa"),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 404 &&
+      error.code === "GITHUB_NOT_FOUND",
+  );
 });
 
 test("repository outside the selection is GITHUB_NOT_FOUND without an item request", async () => {

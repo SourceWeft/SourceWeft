@@ -11,7 +11,7 @@ import { GithubAdapterError } from "./errors";
  * `fetch`, and REST/GraphQL calls through `@octokit/core` with the retry,
  * throttling and pagination plugins. Every provider failure is mapped onto a
  * `GithubAdapterError` whose message never carries a token, a header, the
- * query text or a response body (constraints A4, spec §error handling).
+ * query text or a response body.
  *
  * Tests inject a fake `fetch` through `fetcher` and pass `retryBaseMs: 0` so
  * neither a retry nor a throttle back-off waits in real time.
@@ -43,12 +43,13 @@ const DO_NOT_RETRY = [400, 401, 402, 403, 404, 405, 406, 409, 410, 422, 429, 451
 const GithubOctokit = Octokit.plugin(paginateRest, paginateGraphQL, retry, throttling);
 
 /**
- * Isolates the throttling plugin's module-global Bottleneck groups per client
- * instance. The groups (`search` 2s, `write`/GraphQL 1s) space requests by a
- * throttle `id`; a shared id would make one instance's calls wait behind
- * another's. A distinct id per instance keeps GitHub's recommended spacing
- * within a single connection while letting separate connections — and every
- * test — run without blocking one another.
+ * Gives each Octokit instance its own throttle `id`. The throttling plugin's
+ * Bottleneck groups (`search` 2s, `write`/GraphQL 1s) are module-global and
+ * partition their request spacing by this id. A fresh instance is built for
+ * every tool call, so the spacing only ever applies within a single tool call,
+ * never across concurrent connections or across tests. One consequence: a
+ * five-query search spaces its five search requests about two seconds apart
+ * and so takes roughly eight seconds.
  */
 let throttleInstanceSeq = 0;
 
@@ -74,7 +75,7 @@ export type GithubInstallationRepository = {
   updatedAt: string | null;
 };
 
-/** Fields Task 5 needs for an issue or pull request, mapped defensively. */
+/** Fields the live tools need for an issue or pull request, mapped defensively. */
 export type GithubIssue = {
   number: number;
   title: string;
@@ -90,7 +91,8 @@ export type GithubIssue = {
   isPullRequest: boolean;
 };
 
-/** A `GET /search/issues` row: an issue/PR plus its `repository_url` (R3). */
+/** A `GET /search/issues` row: an issue/PR plus its `repository_url`, used to
+ * re-check which repository the row belongs to. */
 export type GithubIssueSearchItem = GithubIssue & { repositoryUrl: string | null };
 
 export type GithubPull = GithubIssue & {
@@ -112,7 +114,6 @@ export type GithubComment = {
 
 export type GithubDiscussionSearchItem = {
   repositoryId: string | null;
-  repositoryNameWithOwner: string | null;
   number: number;
   title: string;
   url: string;
@@ -121,7 +122,6 @@ export type GithubDiscussionSearchItem = {
   commentCount: number;
   createdAt: string | null;
   updatedAt: string | null;
-  body: string | null;
 };
 
 export type GithubDiscussion = {
@@ -135,6 +135,7 @@ export type GithubDiscussion = {
   updatedAt: string | null;
   body: string | null;
   comments: GithubComment[];
+  repositoryId: string | null;
 };
 
 export type GithubApi = {
@@ -357,7 +358,6 @@ function mapDiscussionSearchNode(node: DiscussionNode): GithubDiscussionSearchIt
   if (!node || typeof node.number !== "number") return null;
   return {
     repositoryId: strOrNull(node.repository?.id),
-    repositoryNameWithOwner: strOrNull(node.repository?.nameWithOwner),
     number: node.number,
     title: str(node.title),
     url: str(node.url),
@@ -366,7 +366,6 @@ function mapDiscussionSearchNode(node: DiscussionNode): GithubDiscussionSearchIt
     commentCount: num(node.comments?.totalCount),
     createdAt: strOrNull(node.createdAt),
     updatedAt: strOrNull(node.updatedAt),
-    body: strOrNull(node.body),
   };
 }
 
@@ -530,8 +529,8 @@ async function requestToken(
   const scope = typeof payload.scope === "string" ? payload.scope : "";
   return {
     accessToken,
-    // Absent on a non-rotating refresh response and when token expiry is off
-    // (R11): the caller keeps the token it already stored.
+    // Absent on a non-rotating refresh response and when token expiry is off;
+    // the caller then keeps the token it already stored.
     refreshToken: typeof payload.refresh_token === "string" ? payload.refresh_token : undefined,
     expiresAt: expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000) : null,
     scopes: scope ? scope.split(/[\s,]+/).filter(Boolean) : undefined,
@@ -588,9 +587,9 @@ function createGithubApi(
   }
 
   /** One GraphQL call. A response carrying partial `data` alongside `errors`
-   * is surfaced by Octokit as a `GraphqlResponseError`; the plan requires the
-   * data to be used, so that error's `.data` is returned rather than thrown
-   * (and its message, which would echo the GraphQL errors, is never leaked). */
+   * is surfaced by Octokit as a `GraphqlResponseError`; that partial data must
+   * still be used, so the error's `.data` is returned rather than thrown (and
+   * its message, which would echo the GraphQL errors, is never leaked). */
   async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     try {
       return await octokit.graphql<T>(query, variables);
@@ -769,6 +768,7 @@ function createGithubApi(
         updatedAt: strOrNull(discussion.updatedAt),
         body: strOrNull(discussion.body),
         comments: commentNodes.map(mapComment),
+        repositoryId: strOrNull(discussion.repository?.id),
       };
     },
   };
@@ -834,11 +834,10 @@ const SEARCH_DISCUSSIONS_QUERY = `
           number
           title
           url
-          body
           createdAt
           updatedAt
           author { login }
-          repository { id nameWithOwner }
+          repository { id }
           comments { totalCount }
           labels(first: 20) { nodes { name } }
         }
@@ -858,6 +857,7 @@ const GET_DISCUSSION_QUERY = `
         createdAt
         updatedAt
         author { login }
+        repository { id }
         labels(first: 20) { nodes { name } }
         comments(first: $comments) {
           totalCount

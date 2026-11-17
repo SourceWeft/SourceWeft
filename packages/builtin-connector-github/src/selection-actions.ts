@@ -10,7 +10,7 @@ import { GithubAdapterError } from "./errors";
 import type { GithubApi, GithubInstallation, GithubInstallationRepository } from "./github-client";
 
 /*
- * Browse-dialog action contract (ruling R1): `github.browse`, `github.search`
+ * Browse-dialog action contract: `github.browse`, `github.search`
  * and `github.describe` return the generic selection-contract result types
  * (`ConnectorSelectionBrowseResult`, `ConnectorSelectionSearchResult`,
  * `ConnectorSelectionDescribeResult`) defined and validated in
@@ -25,9 +25,9 @@ import type { GithubApi, GithubInstallation, GithubInstallationRepository } from
  * installation list, `i:<installationId>:<page>` for one installation's
  * repositories. `containerId` together with `cursor`, or a cursor of another
  * shape, is rejected. Every result carries a `helpLink` pointing at the
- * GitHub App's installation page (ruling R9/contribution `add_repositories`).
+ * GitHub App's installation page (help link code `add_repositories`).
  *
- * `github.search` (R5): a single shot across installed repositories, at most
+ * `github.search`: a single shot across installed repositories, at most
  * 10 pages of 100, matching `full_name` case-insensitively against the
  * query, returning the first 50 matches with `cursor: ""`, `hasMore: false`.
  * A request `cursor` is rejected.
@@ -44,6 +44,7 @@ const INSTALLATION_CURSOR_REGEX = /^i:([1-9][0-9]{0,19}):([1-9][0-9]*)$/;
 
 const DESCRIBE_MAX_IDS = 100;
 const SEARCH_MAX_REPOSITORY_PAGES = 10;
+const SEARCH_MAX_INSTALLATION_PAGES = 10;
 const SEARCH_MAX_RESULTS = 50;
 const CURSOR_MAX_LENGTH = 4096;
 const HELP_LINK_CODE = "add_repositories";
@@ -58,7 +59,10 @@ function invalidRequest(): never {
   throw new GithubAdapterError(400, "GITHUB_INVALID_REQUEST", "Invalid GitHub request");
 }
 
-function helpLinkFor(appSlug: string): { code: string; url: string } {
+function helpLinkFor(appSlug: string): { code: string; url: string } | null {
+  // Without a configured slug the install URL would be broken
+  // (`.../apps//installations/new`), so offer no link at all.
+  if (!appSlug) return null;
   return {
     code: HELP_LINK_CODE,
     url: `https://github.com/apps/${encodeURIComponent(appSlug)}/installations/new`,
@@ -161,13 +165,12 @@ function toRepositoryEntry(repository: GithubInstallationRepository): ConnectorS
 }
 
 /** Finds the installation with `installationId` by walking `listInstallations`
- * pages; the id is never trusted on its own (the brief: "never trust the
- * id"), so a container that is not actually one of the user's installations
- * 404s instead of silently listing nothing. Bounded at
- * `FIND_INSTALLATION_MAX_PAGES` pages — the id checked here can come from a
- * caller-supplied cursor, not only the manifest-validated `containerId`
- * pattern, so the walk must not be driven solely by `listInstallations`'
- * own `hasMore`. */
+ * pages; the id is never trusted on its own, so a container that is not
+ * actually one of the user's installations 404s instead of silently listing
+ * nothing. Bounded at `FIND_INSTALLATION_MAX_PAGES` pages — the id checked
+ * here can come from a caller-supplied cursor, not only the manifest-validated
+ * `containerId` pattern, so the walk must not be driven solely by
+ * `listInstallations`' own `hasMore`. */
 async function findInstallation(
   api: GithubApi,
   installationId: number,
@@ -267,10 +270,11 @@ function parseSearchRequest(request: Record<string, unknown>): { query: string }
   return { query };
 }
 
-/** R5: walks installed repositories (across every installation, in
- * installation-page order), at most 10 total repository-list page requests,
- * and returns the first 50 whose `full_name` contains the query
- * case-insensitively. Always a single shot: `cursor: ""`, `hasMore: false`. */
+/** Walks installed repositories (across every installation, in
+ * installation-page order), at most 10 total repository-list page requests and
+ * at most 10 installation-list page requests, and returns the first 50 whose
+ * `full_name` contains the query case-insensitively. Always a single shot:
+ * `cursor: ""`, `hasMore: false`. */
 export async function searchAction(
   api: GithubApi,
   request: Record<string, unknown>,
@@ -281,7 +285,7 @@ export async function searchAction(
   let repositoryPagesFetched = 0;
   let installationPage = 1;
 
-  outer: while (true) {
+  outer: while (installationPage <= SEARCH_MAX_INSTALLATION_PAGES) {
     const { installations, hasMore: moreInstallations } = await api.listInstallations(
       installationPage,
     );

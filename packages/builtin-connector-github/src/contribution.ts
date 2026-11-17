@@ -64,7 +64,7 @@ export const githubConnectorContribution = {
       id: "github.search",
       title: "Search GitHub repositories",
       description:
-        "Search the repositories this installation can access by name so the user can choose repositories for this connector.",
+        "Search the repositories across all of the user's GitHub App installations by name so the user can choose repositories for this connector.",
       capabilities: ["connector_read"],
       risk: "low",
       requiresApproval: false,
@@ -113,7 +113,7 @@ export const githubConnectorContribution = {
       title: "Search GitHub issues, pull requests and discussions",
       agentToolName: "search_github",
       description:
-        "Search issues, pull requests, and discussions. Results cover only the repositories chosen in this connector's settings. `repository`, if given, must be one of those chosen repositories. Do not put `repo:`, `org:`, or `user:` qualifiers in `query` — results are already scoped to the chosen repositories. Returns metadata and links; read a selected item with `read_github_item` for its full body.",
+        "Search issues, pull requests or discussions (one type per call, issue by default) in the repositories chosen in the connector settings. Results cover only the repositories chosen in this connector's settings. `repository`, if given, must be one of those chosen repositories. Do not put `repo:`, `org:`, or `user:` qualifiers in `query` — results are already scoped to the chosen repositories. Returns metadata and links; read a selected item with `read_github_item` for its full body.",
       capabilities: ["connector_read"],
       risk: "low",
       requiresApproval: false,
@@ -125,23 +125,32 @@ export const githubConnectorContribution = {
         properties: {
           query: {
             type: "string",
+            description:
+              "Words to search for. GitHub search qualifiers such as label:bug, in:title or author:name are allowed; repo:, org:, user: and owner: are not.",
             minLength: 1,
             maxLength: 120,
           },
           type: {
             type: "string",
+            description:
+              "What to search: issue (default), pull_request or discussion. One call searches one type.",
             enum: ["issue", "pull_request", "discussion"],
           },
           repository: {
             type: "string",
+            description:
+              "Limit the search to one of the selected repositories, as owner/name. Use it to reach repositories listed in skippedRepositories.",
             pattern: GITHUB_REPOSITORY_NAME_PATTERN,
           },
           state: {
             type: "string",
+            description: "open or closed. Only for issue and pull_request.",
             enum: ["open", "closed"],
           },
           cursor: {
             type: "string",
+            description:
+              "Pass the previous result's nextCursor with the same other parameters to get the next page.",
             maxLength: 4096,
           },
         },
@@ -164,14 +173,18 @@ export const githubConnectorContribution = {
         properties: {
           repository: {
             type: "string",
+            description: "One of the selected repositories, as owner/name.",
             pattern: GITHUB_REPOSITORY_NAME_PATTERN,
           },
           number: {
             type: "integer",
+            description: "The issue, pull request or discussion number.",
             minimum: 1,
           },
           type: {
             type: "string",
+            description:
+              "issue, pull_request or discussion. issue and pull_request are interchangeable: the result says what the item is.",
             enum: ["issue", "pull_request", "discussion"],
           },
         },
@@ -194,11 +207,11 @@ export const githubConnectorContribution = {
       },
     },
   ],
-  // Spec 2.2 (ruling R2): the only configuration is the fixed set of
-  // repository node ids the user picked. Each is tagged "repository" — the
-  // other selectable kind, "account", is a browse-only container and never a
-  // config item. Capped, deduplicated and shape-checked so the server never
-  // has to trust an unbounded or malformed selection from the client.
+  // The only configuration is the fixed set of repository node ids the user
+  // picked. Each is tagged "repository"; an "account" is only a browse
+  // container to expand, never a selectable entry or a config item. Capped,
+  // deduplicated and shape-checked so the server never has to trust an
+  // unbounded or malformed selection from the client.
   configSchema: {
     type: "object",
     additionalProperties: false,

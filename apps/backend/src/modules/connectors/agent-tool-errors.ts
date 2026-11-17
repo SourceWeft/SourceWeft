@@ -19,9 +19,11 @@ const MAX_PACKAGE_ERROR_MESSAGE_LENGTH = 500;
 
 // Connector packages throw their own structured errors (a numeric
 // `statusCode`, a string `code`, a string `message`, optional `details`).
-// Their message is written by the connector author for a human or an agent
-// to read, so it is safe to forward as-is, after stripping control
-// characters and bounding its length.
+// A package's message is forwarded to the caller as-is, after stripping
+// control characters and bounding its length. It is not always a fixed string
+// the connector author wrote: some adapters (for example Notion) build it from
+// the provider's own answer, so each adapter owns keeping tokens, headers and
+// response bodies out of the message it throws.
 function sanitizePackageErrorMessage(message: string): string {
   // eslint-disable-next-line no-control-regex
   const cleaned = message.replace(/[\x00-\x1F\x7F]/g, " ").trim();

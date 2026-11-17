@@ -25,7 +25,7 @@ import {
  * The three agent-visible GitHub tools: search issues/PRs/discussions, read one
  * item, and list the selected repositories. Scope is enforced twice — every
  * provider query is limited to the selected repositories, and every returned
- * record is re-checked against them (ruling R3: issues/PRs by `repository_url`
+ * record is re-checked against them (issues/PRs by `repository_url`
  * owner/name, discussions by repository node id) before it is returned. A
  * record whose repository cannot be determined is out of scope and dropped.
  */
@@ -47,7 +47,7 @@ function perQueryPageSize(queryCount: number): number {
     : Math.floor(SEARCH_MERGE_LIMIT / queryCount);
 }
 const BODY_MAX = 20_000;
-/** R7: the spec fixes only the item body; comment bodies are cut here. */
+/** The item body has its own limit; comment bodies are cut at this one. */
 const COMMENT_MAX = 4_000;
 const READ_COMMENT_COUNT = 20;
 const COMMENTS_TRUNCATED_THRESHOLD = 20;
@@ -94,7 +94,7 @@ function requireSelection(config: Record<string, unknown>): GithubSelectionItem[
 }
 
 /** Guard 2: resolve the selected node ids. All gone → 404; otherwise keep the
- * ones that still resolve (R4: a removed private repository stops resolving). */
+ * ones that still resolve (a removed private repository stops resolving). */
 async function resolveSelection(
   api: GithubApi,
   items: readonly GithubSelectionItem[],
@@ -198,7 +198,7 @@ export async function searchItemsTool(
   const kind = parseSearchKind(request.type);
   const state = parseState(request.state);
   if (state !== undefined && kind === "discussion") {
-    // R6: state applies to issues and pull requests only.
+    // state applies to issues and pull requests only.
     invalidRequest("state applies to issues and pull requests only");
   }
   const cursor = decodeSearchCursor(request.cursor);
@@ -214,11 +214,9 @@ export async function searchItemsTool(
   const { available } = await resolveSelection(api, items);
   const canonicalByName = new Map<string, string>();
   const canonicalById = new Map<string, string>();
-  const selectedIds = new Set<string>();
   for (const repository of available) {
     canonicalByName.set(repositoryName(repository.nameWithOwner), repository.nameWithOwner);
     canonicalById.set(repository.id, repository.nameWithOwner);
-    selectedIds.add(repository.id);
   }
 
   let targets: string[];
@@ -247,7 +245,6 @@ export async function searchItemsTool(
       searchedRepositories,
       skipped,
       canonicalById,
-      selectedIds,
     });
   }
 
@@ -290,10 +287,8 @@ async function searchDiscussionItems(input: {
   searchedRepositories: string[];
   skipped: string[];
   canonicalById: Map<string, string>;
-  selectedIds: Set<string>;
 }): Promise<Record<string, unknown>> {
-  const { api, queries, perPage, cursor, searchedRepositories, skipped, canonicalById, selectedIds } =
-    input;
+  const { api, queries, perPage, cursor, searchedRepositories, skipped, canonicalById } = input;
   const afters = cursor?.after;
   const isContinuation = afters !== undefined;
   const batches: SearchResultItem[][] = [];
@@ -317,11 +312,11 @@ async function searchDiscussionItems(input: {
     );
     const batch: SearchResultItem[] = [];
     for (const item of items) {
-      const repositoryId = item.repositoryId;
-      // Re-check by repository node id; drop anything out of scope or whose
-      // repository cannot be determined.
-      if (!repositoryId || !selectedIds.has(repositoryId)) continue;
-      const canonical = canonicalById.get(repositoryId) ?? item.repositoryNameWithOwner ?? "";
+      // Re-check by repository node id: a discussion is in scope only if its
+      // repository is one of the resolved selected repositories. A row whose
+      // repository cannot be determined or is out of scope is dropped.
+      const canonical = item.repositoryId ? canonicalById.get(item.repositoryId) : undefined;
+      if (canonical === undefined) continue;
       batch.push(mapSearchDiscussion(item, canonical));
     }
     batches.push(batch);
@@ -372,17 +367,25 @@ export async function readItemTool(
 
   const { available } = await resolveSelection(api, items);
   const canonicalByName = new Map<string, string>();
+  const idByName = new Map<string, string>();
   for (const repository of available) {
     canonicalByName.set(repositoryName(repository.nameWithOwner), repository.nameWithOwner);
+    idByName.set(repositoryName(repository.nameWithOwner), repository.id);
   }
   const canonical = canonicalByName.get(repositoryName(request.repository));
   if (!canonical) {
     notFound("The requested repository is not one of the selected repositories.");
   }
+  const resolvedId = idByName.get(repositoryName(canonical));
   const { owner, repo } = splitOwnerRepo(canonical);
 
   if (type === "discussion") {
     const discussion = await api.getDiscussion(owner, repo, number, READ_COMMENT_COUNT);
+    // Re-check the item's own repository node id against the selected
+    // repository, the same scope guard the search and issue paths apply.
+    if (!discussion.repositoryId || discussion.repositoryId !== resolvedId) {
+      notFound("The requested item is not in the selected repository.");
+    }
     const body = truncateText(discussion.body, BODY_MAX);
     return {
       type: "discussion",
@@ -405,7 +408,7 @@ export async function readItemTool(
   }
 
   const issue = await api.getIssue(owner, repo, number);
-  // R3: a rename redirect can answer from a different repository; the item's
+  // A rename redirect can answer from a different repository; the item's
   // own repository must still be the selected one, else it is out of scope.
   const answered = repositoryNameFromHtmlUrl(issue.htmlUrl);
   if (!answered || repositoryName(answered) !== repositoryName(canonical)) {

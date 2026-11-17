@@ -398,6 +398,37 @@ test("blank query is rejected without a request", async () => {
   assert.equal(calls.length, 0);
 });
 
+test("browse with an empty app slug omits the help link", async () => {
+  const { fetcher } = router({
+    installations: () =>
+      json({ total_count: 1, installations: [installationAccount(1, "acme", "User")] }),
+  });
+  const gh = adapter(fetcher, { appSlug: "" });
+  const result = await gh.executeAction(actionInput("github.browse", {}));
+
+  assert.equal(result.result.helpLink, null);
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(result.result),
+    result.result,
+  );
+});
+
+test("search stops walking installation pages after ten", async () => {
+  const { fetcher, calls } = router({
+    // Always another page, never any installations, so an unbounded walk would
+    // never terminate on its own.
+    installations: () => json({ total_count: Number.MAX_SAFE_INTEGER, installations: [] }),
+  });
+  const gh = adapter(fetcher);
+  const result = await gh.executeAction(actionInput("github.search", { query: "widget" }));
+
+  const installationCalls = calls.filter(
+    (call) => call.url.includes("/user/installations") && !call.url.includes("repositories"),
+  );
+  assert.equal(installationCalls.length, 10);
+  assert.deepEqual(result.result.entries, []);
+});
+
 function repoNode(id: string, nameWithOwner: string) {
   return {
     id,
