@@ -6,7 +6,12 @@ import {
   connectorSelectionSearchResultSchema,
   type ConnectorActionInput,
 } from "@sourceweft/contracts";
-import { IDENTITY_QUERY, PROJECTS_QUERY, TEAMS_QUERY, TEAM_PROJECTS_QUERY } from "../src/documents";
+import {
+  IDENTITY_QUERY,
+  PROJECTS_LOOKUP_QUERY,
+  TEAMS_QUERY,
+  TEAM_PROJECTS_QUERY,
+} from "../src/documents";
 import {
   LinearAdapterError,
   createLinearConnectorAdapter,
@@ -125,8 +130,8 @@ test("exchange maps organization and viewer to the account", async () => {
         () =>
           json({
             data: {
-              viewer: { id: "user-1", name: "Viewer", email: "viewer@example.com" },
-              organization: { id: "org-1", name: "Acme Co", urlKey: "acme" },
+              viewer: { id: "user-1", email: "viewer@example.com" },
+              organization: { id: "org-1", name: "Acme Co" },
             },
           }),
       ],
@@ -433,7 +438,7 @@ test("search returns teams then projects without paging", async () => {
         },
       ],
       [
-        PROJECTS_QUERY,
+        PROJECTS_LOOKUP_QUERY,
         (variables) => {
           assert.equal(variables.first, 25);
           assert.deepEqual(variables.filter, { name: { containsIgnoreCase: "eng" } });
@@ -506,7 +511,7 @@ test("describe marks missing ids", async () => {
         },
       ],
       [
-        PROJECTS_QUERY,
+        PROJECTS_LOOKUP_QUERY,
         (variables) => {
           assert.equal(variables.first, 100);
           assert.deepEqual(variables.filter, { id: { in: ids } });
@@ -581,7 +586,7 @@ test("describe finds teams beyond the first page", async () => {
           });
         },
       ],
-      [PROJECTS_QUERY, () => json({ data: { projects: { nodes: [] } } })],
+      [PROJECTS_LOOKUP_QUERY, () => json({ data: { projects: { nodes: [] } } })],
     ]),
   });
   const result = await adapter(fetcher).executeAction(
@@ -613,7 +618,7 @@ test("describe stops paging teams after three requests", async () => {
           });
         },
       ],
-      [PROJECTS_QUERY, () => json({ data: { projects: { nodes: [] } } })],
+      [PROJECTS_LOOKUP_QUERY, () => json({ data: { projects: { nodes: [] } } })],
     ]),
   });
   await adapter(fetcher).executeAction(actionInput("linear.describe", { ids }));
@@ -653,7 +658,7 @@ test("selection results satisfy the shared contract", async () => {
     documents: new Map([
       [TEAMS_QUERY, () => json({ data: { teams: { nodes: [{ id: TEAM_A, name: "Acme", key: "ACM" }] } } })],
       [
-        PROJECTS_QUERY,
+        PROJECTS_LOOKUP_QUERY,
         () =>
           json({
             data: {
@@ -685,7 +690,7 @@ test("selection results satisfy the shared contract", async () => {
             },
           }),
       ],
-      [PROJECTS_QUERY, () => json({ data: { projects: { nodes: [] } } })],
+      [PROJECTS_LOOKUP_QUERY, () => json({ data: { projects: { nodes: [] } } })],
     ]),
   }).fetcher;
   const describeResult = await adapter(describeFetcher).executeAction(

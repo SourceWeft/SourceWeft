@@ -1,6 +1,6 @@
 /**
  * Scope: the one source of truth for which Linear issues and projects the
- * selection lets the agent tools (Task 4) reach. Scope is enforced twice —
+ * selection lets the agent tools reach. Scope is enforced twice —
  * once as the GraphQL `filter` variable sent to Linear (so the server does the
  * narrowing), and again on every record that comes back (so a record Linear
  * returns outside the selection is still dropped). These functions are pure:
@@ -10,8 +10,8 @@
  * team OR its project id is a selected project; a project is in scope when its
  * id is selected OR one of its teams is selected.
  *
- * The filter shapes were verified against Linear's current published schema in
- * Task 2 (see `documents.ts`'s header comment and the task-2 report):
+ * The filter shapes were verified against Linear's published GraphQL schema
+ * (see `documents.ts`'s header):
  * `IssueFilter.team/project` take `{ id: { in: [...] } }`; `IssueFilter.or`
  * takes an array of `IssueFilter`; `ProjectFilter.id` takes `{ in: [...] }`
  * and `ProjectFilter.accessibleTeams` takes `{ some: { id: { in: [...] } } }`.

@@ -13,7 +13,9 @@ const common = {
   domain: "connector",
   activation,
   configuration,
-  slash: { iconName: "linear", iconTone: "brand", supportsCommand: true },
+  // A Linear mark can replace this once the artwork is in the repository;
+  // `apps/web/public/icons/tool.svg` ships today, a Linear icon does not.
+  slash: { iconName: "tool", iconTone: "mono", supportsCommand: true },
 } as const;
 
 export const linearAgentToolDefs = [

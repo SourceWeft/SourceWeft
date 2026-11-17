@@ -176,10 +176,9 @@ export function createLinearClient(options: LinearClientOptions) {
       );
     },
     /** Issues one GraphQL request and maps the response onto
-     * `LinearAdapterError` (see the mapping table in the task brief).
-     * `document` is always one of the constants in `documents.ts`; every
-     * caller-supplied value travels only through `variables`. Returns
-     * `data` on success. */
+     * `LinearAdapterError`. `document` is always one of the constants in
+     * `documents.ts`; every caller-supplied value travels only through
+     * `variables`. Returns `data` on success. */
     async query<T>(token: string, document: string, variables: Record<string, unknown>): Promise<T> {
       let response: Response;
       try {

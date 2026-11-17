@@ -422,7 +422,10 @@ test("truncated comments carry the note", async () => {
     toolInput("linear.issue.read", { id: "ENG-1" }, SELECTION),
   );
   assert.equal(result.result.commentsTruncated, true);
-  assert.equal(result.result.commentsNote, "Showing the 20 most recent comments.");
+  assert.equal(
+    result.result.commentsNote,
+    "Showing 20 of this issue's comments; it has more. Open the issue link for the full thread.",
+  );
 });
 
 test("out-of-scope, missing and forbidden issues give the same LINEAR_NOT_FOUND message", async () => {

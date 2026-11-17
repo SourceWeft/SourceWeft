@@ -20,6 +20,7 @@ import { LINEAR_ITEM_ID_PATTERN, LINEAR_MAX_SELECTED_ITEMS } from "./contributio
 import {
   IDENTITY_QUERY,
   ISSUE_QUERY,
+  PROJECTS_LOOKUP_QUERY,
   PROJECTS_QUERY,
   SEARCH_ISSUES_QUERY,
   TEAMS_QUERY,
@@ -75,9 +76,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 /** `read_linear_issue` accepts a human-readable identifier such as `ENG-123`
  * (1-10 leading letters/digits, a dash, 1-9 digits) or a Linear UUID. */
 const ISSUE_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,9}-[0-9]{1,9}$/;
-/** R4 (controller ruling): Linear returns the newest 20 comments, so a
- * truncated set is the *most recent* 20, not the first 20. */
-const COMMENTS_TRUNCATED_NOTE = "Showing the 20 most recent comments.";
+/** Note attached when an issue has more comments than the 20 fetched; it does
+ * not claim which 20, only that the thread continues at the issue link. */
+const COMMENTS_TRUNCATED_NOTE =
+  "Showing 20 of this issue's comments; it has more. Open the issue link for the full thread.";
 
 export type LinearAdapterConfig = {
   baseUrl: string;
@@ -611,7 +613,7 @@ export function createLinearConnectorAdapter(
       }),
       client.query<{ projects: { nodes: LinearProjectNode[] } }>(
         input.accessToken,
-        PROJECTS_QUERY,
+        PROJECTS_LOOKUP_QUERY,
         { first: SEARCH_RESULT_LIMIT, filter: nameFilter },
       ),
     ]);
@@ -662,7 +664,7 @@ export function createLinearConnectorAdapter(
       fetchDescribeTeamNodes(input.accessToken, idFilter),
       client.query<{ projects: { nodes: LinearProjectNode[] } }>(
         input.accessToken,
-        PROJECTS_QUERY,
+        PROJECTS_LOOKUP_QUERY,
         { first: DESCRIBE_MAX_IDS, filter: idFilter },
       ),
     ]);
@@ -781,8 +783,8 @@ export function createLinearConnectorAdapter(
           .filter((name): name is string => typeof name === "string")
       : [];
     const commentNodes = Array.isArray(issue.comments?.nodes) ? issue.comments.nodes : [];
-    // Linear returns the newest 20 comments in an unspecified order; sort them
-    // oldest-first so the agent reads the thread in sequence (R4 ruling).
+    // Linear returns at most 20 comments in an unspecified order; sort them
+    // oldest-first so the agent reads the thread in sequence.
     const comments = [...commentNodes]
       .sort(
         (a, b) =>
@@ -846,8 +848,8 @@ export function createLinearConnectorAdapter(
       requireConfiguredClient();
       const token = await client.exchangeAuthorizationCode(input.code, input.redirectUri);
       const identity = await client.query<{
-        viewer: { id: string; name: string; email: string };
-        organization: { id: string; name: string; urlKey: string };
+        viewer: { id: string; email: string };
+        organization: { id: string; name: string };
       }>(token.accessToken, IDENTITY_QUERY, {});
       return {
         ...token,
@@ -861,7 +863,7 @@ export function createLinearConnectorAdapter(
       return client.refreshAccessToken(input.refreshToken);
     },
     // Tools-only connector: nothing is ever discovered or indexed. The
-    // selection chosen in the dialog only scopes the agent tools (Task 4).
+    // selection chosen in the dialog only scopes the agent tools.
     // `discoverPages` is intentionally not defined.
     async *discover(_input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem> {
       // Yields nothing.
