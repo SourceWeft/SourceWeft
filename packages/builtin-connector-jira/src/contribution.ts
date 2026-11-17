@@ -95,6 +95,10 @@ export const jiraConnectorContribution = {
             minLength: 1,
             maxLength: 200,
           },
+          cursor: {
+            type: "string",
+            maxLength: 4096,
+          },
         },
       },
     },
