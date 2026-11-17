@@ -410,45 +410,39 @@ export async function updateThreadChatPreferencesRecord(input: {
   workspaceId: string;
   chatPreferences: ThreadChatPreferencesPatch;
 }) {
-  const current = await findThreadRecord({
-    threadId: input.threadId,
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-  });
-  if (!current) return null;
-
   const updatedAt = new Date();
-  const nextPreferences = mergeThreadChatPreferences(
-    current.chatPreferences,
-    input.chatPreferences,
-  );
-  const result = await database.query<RawThreadRow>(
-    `
+  // The patch is merged into the stored preferences, so the read and the
+  // write must not interleave with another patch: a new chat saves several
+  // preferences at once, and an unlocked read lets the later write restore
+  // the fields the earlier one just changed. The row lock makes concurrent
+  // patches apply one after another.
+  const result = await db.transaction(async (tx) => {
+    const current = await tx.execute<{ chat_preferences_json: unknown }>(sql`
+      select chat_preferences_json
+      from threads
+      where id = ${input.threadId}
+        and team_id = ${input.teamId}
+        and workspace_id = ${input.workspaceId}
+      for update
+    `);
+    const currentRow = current.rows[0];
+    if (!currentRow) return null;
+
+    const nextPreferences = mergeThreadChatPreferences(
+      normalizeThreadChatPreferences(currentRow.chat_preferences_json),
+      input.chatPreferences,
+    );
+    return tx.execute<RawThreadRow>(sql`
       update threads
-      set chat_preferences_json = $4::jsonb,
-          updated_at = greatest(updated_at, $5::timestamptz)
-      where id = $1
-        and team_id = $2
-        and workspace_id = $3
-      returning
-        id,
-        team_id,
-        workspace_id,
-        title,
-        model_settings_json,
-        chat_preferences_json,
-        created_by,
-        created_at,
-        updated_at
-    `,
-    [
-      input.threadId,
-      input.teamId,
-      input.workspaceId,
-      JSON.stringify(nextPreferences),
-      updatedAt.toISOString(),
-    ],
-  );
+      set chat_preferences_json = ${JSON.stringify(nextPreferences)}::jsonb,
+          updated_at = greatest(updated_at, ${updatedAt.toISOString()}::timestamptz)
+      where id = ${input.threadId}
+        and team_id = ${input.teamId}
+        and workspace_id = ${input.workspaceId}
+      returning ${sql.raw(THREAD_RETURNING_SQL)}
+    `);
+  });
+  if (!result) return null;
 
   const row = result.rows[0];
   if (!row) return null;
