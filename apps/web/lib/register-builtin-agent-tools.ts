@@ -1,6 +1,7 @@
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import { notionAgentToolDefs } from "@sourceweft/builtin-connector-notion/agent-tool-defs";
 import { gmailAgentToolDefs } from "@sourceweft/builtin-connector-gmail/agent-tool-defs";
+import { linearAgentToolDefs } from "@sourceweft/builtin-connector-linear/agent-tool-defs";
 
 /**
  * Runtime-registered tools only. Everything statically known lives in the
@@ -16,4 +17,5 @@ import { gmailAgentToolDefs } from "@sourceweft/builtin-connector-gmail/agent-to
 export function registerBuiltinAgentTools() {
   registerAgentTools(notionAgentToolDefs);
   registerAgentTools(gmailAgentToolDefs);
+  registerAgentTools(linearAgentToolDefs);
 }

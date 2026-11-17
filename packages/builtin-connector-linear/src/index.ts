@@ -7,3 +7,5 @@ export {
 } from "./contribution";
 export { builtinLinearConnectorCapabilityManifest } from "./manifest";
 export { toBackendLinearManifest } from "./backend-manifest";
+export { createLinearConnectorAdapter, LinearAdapterError } from "./adapter";
+export { createConnectorAdapters } from "./host-services";

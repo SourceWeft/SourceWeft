@@ -181,6 +181,9 @@ importers:
       '@sourceweft/builtin-connector-google-drive':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-google-drive
+      '@sourceweft/builtin-connector-linear':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-linear
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
@@ -601,6 +604,9 @@ importers:
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-gmail
+      '@sourceweft/builtin-connector-linear':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-linear
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
@@ -928,6 +934,9 @@ importers:
       '@sourceweft/builtin-connector-google-drive':
         specifier: workspace:*
         version: link:../builtin-connector-google-drive
+      '@sourceweft/builtin-connector-linear':
+        specifier: workspace:*
+        version: link:../builtin-connector-linear
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../builtin-connector-notion
