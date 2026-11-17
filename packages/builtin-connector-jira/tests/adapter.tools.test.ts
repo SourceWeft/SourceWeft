@@ -15,6 +15,7 @@ type RecordedCall = {
   method: string;
   cloudId?: string;
   jql?: string;
+  nextPageToken?: string;
 };
 
 type Handlers = {
@@ -80,6 +81,8 @@ function buildFetcher(handlers: Handlers) {
     if (jqlMatch) {
       call.cloudId = jqlMatch[1]!;
       call.jql = typeof body?.jql === "string" ? body.jql : undefined;
+      call.nextPageToken =
+        typeof body?.nextPageToken === "string" ? body.nextPageToken : undefined;
       calls.push(call);
       if (!handlers.searchJql) throw new Error(`Unexpected search/jql: ${value}`);
       return handlers.searchJql(jqlMatch[1]!, body ?? {}, new URL(value));
@@ -664,6 +667,8 @@ test("search pages each site independently", async () => {
     .filter((c) => c.jql !== undefined);
   assert.equal(followUpJql.length, 1);
   assert.equal(followUpJql[0]!.cloudId, CLOUD_A);
+  // The follow-up request carries the page token the first page returned.
+  assert.equal(followUpJql[0]!.nextPageToken, "tokA");
   // CLOUD_A finished this round: no further pages.
   assert.equal(second.result.nextCursor, null);
 });
@@ -1028,10 +1033,16 @@ test("results contain no token", async () => {
   const list = await jira.executeAction(
     actionInput("jira.project.list", {}, selection),
   );
-  for (const result of [search.result, read.result, list.result]) {
-    assert.equal(JSON.stringify(result).includes(ACCESS_TOKEN), false);
+  // Check the whole action result each tool returns, not only its `result`
+  // payload: no token anywhere, and no raw-response field on the envelope.
+  for (const actionResult of [search, read, list]) {
+    assert.equal(JSON.stringify(actionResult).includes(ACCESS_TOKEN), false);
     assert.equal(
-      Object.prototype.hasOwnProperty.call(result, "rawResponseJson"),
+      Object.prototype.hasOwnProperty.call(actionResult, "rawResponseJson"),
+      false,
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(actionResult, "resultJson"),
       false,
     );
   }

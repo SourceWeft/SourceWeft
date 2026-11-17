@@ -86,46 +86,48 @@ test("blank text adds no clause", () => {
   assert.equal(jql, "project in (10000) ORDER BY updated DESC");
 });
 
-const INJECTION_PAYLOADS = [
-  '") OR project = SECRET OR ("',
-  'foo" OR text ~ "bar',
-  "a) OR (b",
-  'x\\" OR 1=1',
+// Exact expected JQL for each injection payload, so an implementation that
+// escapes quotes but not backslashes (see the backslash payload) fails rather
+// than merely counting quotes. `String.raw` keeps the backslashes literal.
+const INJECTION_CASES = [
+  {
+    payload: String.raw`") OR project = SECRET OR ("`,
+    text: String.raw`project in (10000) AND text ~ "OR project = SECRET OR" ORDER BY updated DESC`,
+    status: String.raw`project in (10000) AND status = "\") OR project = SECRET OR (\"" ORDER BY updated DESC`,
+    issueType: String.raw`project in (10000) AND issuetype = "\") OR project = SECRET OR (\"" ORDER BY updated DESC`,
+  },
+  {
+    payload: String.raw`foo" OR text ~ "bar`,
+    text: String.raw`project in (10000) AND text ~ "foo OR text bar" ORDER BY updated DESC`,
+    status: String.raw`project in (10000) AND status = "foo\" OR text ~ \"bar" ORDER BY updated DESC`,
+    issueType: String.raw`project in (10000) AND issuetype = "foo\" OR text ~ \"bar" ORDER BY updated DESC`,
+  },
+  {
+    payload: String.raw`a) OR (b`,
+    text: String.raw`project in (10000) AND text ~ "a OR b" ORDER BY updated DESC`,
+    status: String.raw`project in (10000) AND status = "a) OR (b" ORDER BY updated DESC`,
+    issueType: String.raw`project in (10000) AND issuetype = "a) OR (b" ORDER BY updated DESC`,
+  },
+  {
+    payload: String.raw`x\" OR 1=1`,
+    text: String.raw`project in (10000) AND text ~ "x OR 1=1" ORDER BY updated DESC`,
+    status: String.raw`project in (10000) AND status = "x\\\" OR 1=1" ORDER BY updated DESC`,
+    issueType: String.raw`project in (10000) AND issuetype = "x\\\" OR 1=1" ORDER BY updated DESC`,
+  },
 ];
 
-for (const payload of INJECTION_PAYLOADS) {
-  test(`jql builders neutralise injection via text (${payload})`, () => {
-    const jql = buildIssueJql(input({ text: payload }));
-    assert.ok(jql.startsWith("project in (10000) AND "));
-    assertExactlyOneQuotedClause(jql);
-    assertNoInjectionChars(jqlTextTerm(payload));
+for (const { payload, text, status, issueType } of INJECTION_CASES) {
+  test(`text injection lands in one string literal (${payload})`, () => {
+    assert.equal(buildIssueJql(input({ text: payload })), text);
   });
 
-  test(`jql builders neutralise injection via status (${payload})`, () => {
-    const jql = buildIssueJql(input({ status: payload }));
-    assert.ok(jql.startsWith("project in (10000) AND "));
-    assertExactlyOneQuotedClause(jql);
+  test(`status injection lands in one string literal (${payload})`, () => {
+    assert.equal(buildIssueJql(input({ status: payload })), status);
   });
 
-  test(`jql builders neutralise injection via issueType (${payload})`, () => {
-    const jql = buildIssueJql(input({ issueType: payload }));
-    assert.ok(jql.startsWith("project in (10000) AND "));
-    assertExactlyOneQuotedClause(jql);
+  test(`issueType injection lands in one string literal (${payload})`, () => {
+    assert.equal(buildIssueJql(input({ issueType: payload })), issueType);
   });
-}
-
-/** Exactly one unescaped opening quote (and therefore exactly one closing
- * quote) means the payload produced a single well-formed string literal —
- * it could not inject an extra clause or an extra quoted literal. */
-function assertExactlyOneQuotedClause(jql: string): void {
-  const unescapedQuotes = jql.match(/(?<!\\)"/g) ?? [];
-  assert.equal(unescapedQuotes.length, 2);
-}
-
-function assertNoInjectionChars(term: string): void {
-  for (const char of ['"', "(", ")", "\\"]) {
-    assert.ok(!term.includes(char), `jqlTextTerm output must not contain ${char}`);
-  }
 }
 
 test("jqlString escapes backslashes before quotes", () => {
