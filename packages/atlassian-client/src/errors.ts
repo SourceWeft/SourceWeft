@@ -72,12 +72,20 @@ export function mapApiError(response: Response, prefix: AtlassianErrorPrefix): A
   return requestFailed(prefix, status, "REQUEST_FAILED", `Atlassian request failed (${status})`);
 }
 
-/** Maps a non-2xx status from the token endpoint. Every failure other than a
- * rate limit or an outage collapses to `_REAUTH_REQUIRED` with status 400 so the
- * platform's refresh path treats it as non-retryable. */
-export function mapTokenError(response: Response, prefix: AtlassianErrorPrefix): AtlassianApiError {
-  const status = response.status;
-  if (status === 429) {
+/** Maps a non-2xx response from the token endpoint. Only a body whose OAuth
+ * `error` is `invalid_grant` means the stored refresh token is no longer valid
+ * (Atlassian answers 403 invalid_grant for an unknown, expired or revoked
+ * token): that is the one case mapped to `_REAUTH_REQUIRED`. A rate limit is
+ * `_RATE_LIMITED`. Everything else — a wrong client secret, any other error, a
+ * 401, any other 4xx or a 5xx — is `_UNAVAILABLE`, so a bad deployment secret is
+ * never reported to the user as a revoked grant. `errorCode` is the parsed
+ * `error` field only; the body is never placed in a message. */
+export function mapTokenError(
+  response: Response,
+  prefix: AtlassianErrorPrefix,
+  errorCode: string | null,
+): AtlassianApiError {
+  if (response.status === 429) {
     const retryAfterSeconds = parseRetryAfterSeconds(response);
     return requestFailed(
       prefix,
@@ -87,10 +95,15 @@ export function mapTokenError(response: Response, prefix: AtlassianErrorPrefix):
       { retryAfterSeconds },
     );
   }
-  if (status >= 500) {
-    return requestFailed(prefix, 503, "UNAVAILABLE", `Atlassian request failed (${status})`);
+  if (errorCode === "invalid_grant") {
+    return requestFailed(
+      prefix,
+      400,
+      "REAUTH_REQUIRED",
+      "Atlassian refresh token is no longer valid",
+    );
   }
-  return requestFailed(prefix, 400, "REAUTH_REQUIRED", `Atlassian request failed (${status})`);
+  return requestFailed(prefix, 503, "UNAVAILABLE", "Atlassian is unavailable");
 }
 
 /** Network error / timeout, normalized the same way for every endpoint. */

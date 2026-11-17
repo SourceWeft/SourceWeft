@@ -189,6 +189,22 @@ test("a thrown fetch maps to JIRA_UNAVAILABLE with status 503", async () => {
   });
 });
 
+test("a 2xx body that cannot be parsed is JIRA_UNAVAILABLE", async () => {
+  const client = config(
+    async () =>
+      new Response("<html>not json</html>", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  await assert.rejects(requestProjectSearch(client), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
 test("array query values repeat the parameter", async () => {
   let capturedUrl = "";
   const client = config(async (url) => {

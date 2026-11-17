@@ -1,7 +1,7 @@
 // The accessible-sites list and identity lookup, both plain `api.atlassian.com`
 // endpoints shared by Jira and Confluence (see Global Constraints / task brief).
 
-import { AtlassianApiError } from "./errors";
+import { AtlassianApiError, unavailableError } from "./errors";
 import { atlassianApiGet, isCloudId, type AtlassianClientConfig } from "./http";
 
 export type AtlassianSite = {
@@ -25,12 +25,16 @@ export async function listAccessibleResources(
   config: AtlassianClientConfig,
   accessToken: string,
 ): Promise<AtlassianSite[]> {
-  const payload = (await atlassianApiGet(
+  const payload = await atlassianApiGet(
     config,
     "/oauth/token/accessible-resources",
     accessToken,
-  )) as AccessibleResource[];
-  return payload
+  );
+  if (!Array.isArray(payload)) {
+    // A non-array answer is an outage or an unexpected shape, not "no sites".
+    throw unavailableError(config.errorPrefix);
+  }
+  return (payload as AccessibleResource[])
     .filter(
       (item): item is AccessibleResource & { id: string } =>
         typeof item.id === "string" && isCloudId(item.id),
@@ -62,7 +66,12 @@ export async function getMe(
   config: AtlassianClientConfig,
   accessToken: string,
 ): Promise<AtlassianIdentity> {
-  const payload = (await atlassianApiGet(config, "/me", accessToken)) as MePayload;
+  const raw = await atlassianApiGet(config, "/me", accessToken);
+  if (raw === null || typeof raw !== "object") {
+    // A null or non-object identity payload is an outage, not a known user.
+    throw unavailableError(config.errorPrefix);
+  }
+  const payload = raw as MePayload;
   if (typeof payload.account_id !== "string" || payload.account_id.length === 0) {
     throw new AtlassianApiError(
       401,

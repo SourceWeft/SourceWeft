@@ -51,6 +51,17 @@ test("accessible resources are mapped, filtered and sorted", async () => {
   assert.equal(sites[1]?.cloudId, "bbbbbbbb-2222-3333-4444-555555555555");
 });
 
+test("accessible resources that are not an array are UNAVAILABLE", async () => {
+  const client = config(async () => json({ not: "an array" }));
+
+  await assert.rejects(listAccessibleResources(client, "access-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
 test("me maps the identity fields", async () => {
   let capturedUrl = "";
   const client = config(async (url) => {
@@ -75,6 +86,17 @@ test("me without account_id requires reauthorization", async () => {
     assert.ok(error instanceof AtlassianApiError);
     assert.equal(error.statusCode, 401);
     assert.equal(error.code, "JIRA_REAUTH_REQUIRED");
+    return true;
+  });
+});
+
+test("a null identity payload is UNAVAILABLE", async () => {
+  const client = config(async () => json(null));
+
+  await assert.rejects(getMe(client, "access-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
     return true;
   });
 });

@@ -96,8 +96,10 @@ test("refresh without a new refresh token returns undefined", async () => {
   assert.equal(token.refreshToken, undefined);
 });
 
-test("token endpoint 403 is REAUTH_REQUIRED with status 400", async () => {
-  const client = config(async () => json({ error: "forbidden" }, 403));
+test("invalid_grant is REAUTH_REQUIRED with status 400", async () => {
+  // Atlassian answers 403 invalid_grant for an unknown, expired or revoked
+  // refresh token: that one case means the user must reconnect.
+  const client = config(async () => json({ error: "invalid_grant" }, 403));
 
   await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
     assert.ok(error instanceof AtlassianApiError);
@@ -105,6 +107,109 @@ test("token endpoint 403 is REAUTH_REQUIRED with status 400", async () => {
     assert.equal(error.code, "JIRA_REAUTH_REQUIRED");
     return true;
   });
+});
+
+test("invalid_client is UNAVAILABLE", async () => {
+  // A wrong deployment secret must not look like a revoked grant.
+  const client = config(async () => json({ error: "invalid_client" }, 401));
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("a 403 without invalid_grant is UNAVAILABLE", async () => {
+  const client = config(async () => json({ error: "access_denied" }, 403));
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("a 429 at the token endpoint is RATE_LIMITED", async () => {
+  const client = config(
+    async () =>
+      new Response(JSON.stringify({ error: "slow down" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "11" },
+      }),
+  );
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 429);
+    assert.equal(error.code, "JIRA_RATE_LIMITED");
+    assert.equal(error.details?.retryAfterSeconds, 11);
+    return true;
+  });
+});
+
+test("a 2xx token response that is not JSON is UNAVAILABLE", async () => {
+  const client = config(
+    async () =>
+      new Response("<html>not json</html>", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("a 2xx token response without an access_token is UNAVAILABLE", async () => {
+  const client = config(async () => json({ expires_in: 3600 }));
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("a 2xx token response with an empty access_token is UNAVAILABLE", async () => {
+  const client = config(async () => json({ access_token: "", expires_in: 3600 }));
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("a 2xx token response without a positive expires_in is UNAVAILABLE", async () => {
+  const client = config(async () => json({ access_token: "access-token", expires_in: 0 }));
+
+  await assert.rejects(refreshAtlassianToken(client, "old-refresh-token"), (error) => {
+    assert.ok(error instanceof AtlassianApiError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "JIRA_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("token requests pass an abort signal to fetch", async () => {
+  let capturedInit: RequestInit | undefined;
+  const client = config(async (_url, init) => {
+    capturedInit = init;
+    return json({ access_token: "access-token", expires_in: 3600 });
+  });
+
+  await refreshAtlassianToken(client, "old-refresh-token");
+
+  assert.ok(capturedInit?.signal instanceof AbortSignal);
 });
 
 test("token endpoint 503 is UNAVAILABLE 503", async () => {

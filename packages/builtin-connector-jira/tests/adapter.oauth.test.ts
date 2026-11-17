@@ -107,7 +107,7 @@ test("exchange falls back displayName to email, then account id", async () => {
   const fetcher = (async (url: string | URL | Request) => {
     const value = String(url);
     if (value === "https://auth.atlassian.com/oauth/token") {
-      return json({ access_token: "access-token" });
+      return json({ access_token: "access-token", expires_in: 3600 });
     }
     if (value === "https://api.atlassian.com/me") {
       return json({ account_id: "account-1" });
@@ -152,6 +152,32 @@ test("refresh delegates and returns the rotated token", async () => {
   assert.equal(token.refreshToken, "new-refresh-token");
   // Refresh delegates verbatim: it does not call /me or add identity fields.
   assert.equal("providerAccountId" in token, false);
+});
+
+test("refresh without a configured secret makes no request", async () => {
+  const jira = adapter(neverCalledFetcher(), { clientSecret: "" });
+  await assert.rejects(
+    jira.refreshOAuthToken({ refreshToken: "old-refresh-token", scopes: [] }),
+    (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 503 &&
+      error.code === "JIRA_UNAVAILABLE",
+  );
+});
+
+test("exchange without a configured client id makes no request", async () => {
+  const jira = adapter(neverCalledFetcher(), { clientId: "" });
+  await assert.rejects(
+    jira.exchangeOAuthCode({
+      code: "auth-code",
+      redirectUri: "https://sourceweft.example/v1/connectors/oauth/jira/callback",
+      scopes: [],
+    }),
+    (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 503 &&
+      error.code === "JIRA_UNAVAILABLE",
+  );
 });
 
 test("discover yields nothing", async () => {

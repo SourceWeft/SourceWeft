@@ -75,6 +75,10 @@ function siteNotFound(): AtlassianApiError {
   return new AtlassianApiError(404, "JIRA_NOT_FOUND", "Jira site not found");
 }
 
+function unconfigured(): AtlassianApiError {
+  return new AtlassianApiError(503, "JIRA_UNAVAILABLE", "Jira is not configured");
+}
+
 function hasJiraScope(site: AtlassianSite): boolean {
   return site.scopes.includes(JIRA_READ_SCOPE);
 }
@@ -430,6 +434,9 @@ export function createJiraConnectorAdapter(
     async exchangeOAuthCode(
       input: OAuthCodeExchangeInput,
     ): Promise<OAuthTokenSet> {
+      // Without both credentials no token request can succeed, so fail before
+      // sending a code that cannot be exchanged.
+      if (!config.clientId || !config.clientSecret) throw unconfigured();
       const token = await exchangeAtlassianCode(atlassianConfig, {
         code: input.code,
         redirectUri: input.redirectUri,
@@ -442,7 +449,8 @@ export function createJiraConnectorAdapter(
         displayName: identity.name ?? identity.email ?? identity.accountId,
       };
     },
-    refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+    async refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+      if (!config.clientId || !config.clientSecret) throw unconfigured();
       return refreshAtlassianToken(atlassianConfig, input.refreshToken);
     },
     async *discover(

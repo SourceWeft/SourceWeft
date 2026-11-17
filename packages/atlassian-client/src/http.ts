@@ -77,7 +77,12 @@ export async function atlassianApiGet(
   if (!response.ok) {
     throw mapApiError(response, config.errorPrefix);
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    // A 2xx whose body cannot be parsed is an outage, not valid data.
+    throw unavailableError(config.errorPrefix);
+  }
 }
 
 export async function atlassianRequest<T>(
@@ -129,5 +134,10 @@ export async function atlassianRequest<T>(
   if (!response.ok) {
     throw mapApiError(response, config.errorPrefix);
   }
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    // A 2xx whose body cannot be parsed is an outage, not valid data.
+    throw unavailableError(config.errorPrefix);
+  }
 }
