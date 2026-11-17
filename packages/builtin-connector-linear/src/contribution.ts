@@ -49,7 +49,7 @@ export const linearConnectorContribution = {
       title: "Search Linear issues",
       agentToolName: "search_linear_issues",
       description:
-        "Search issues in the Linear teams and projects selected for this connector. Returns matching issues with state, assignee and link; read one issue for its description and comments.",
+        "Search issues in the Linear teams and projects selected for this connector. Returns matching issues with state, assignee and link; read one issue for its description and comments. Results are ordered by relevance; use nextCursor for more.",
       capabilities: ["connector_read"],
       risk: "low",
       requiresApproval: false,
@@ -59,11 +59,38 @@ export const linearConnectorContribution = {
         required: ["query"],
         additionalProperties: false,
         properties: {
-          query: { type: "string", minLength: 1, maxLength: 200 },
-          state: { type: "string", minLength: 1, maxLength: 100 },
-          assignee: { type: "string", minLength: 1, maxLength: 100 },
-          updatedWithinDays: { type: "integer", minimum: 1, maximum: 365 },
-          cursor: { type: "string", maxLength: 4096 },
+          query: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            description: "Words to search for in issue titles, descriptions and comments.",
+          },
+          state: {
+            type: "string",
+            minLength: 1,
+            maxLength: 100,
+            description:
+              'Exact name of a workflow state as it appears in Linear, for example "In Progress" or "Done". It is matched case-insensitively against the whole name, so "open" matches nothing unless a state is literally called Open. Leave it out to search every state.',
+          },
+          assignee: {
+            type: "string",
+            minLength: 1,
+            maxLength: 100,
+            description:
+              'A person\'s name, or "me". "me" means the Linear user who connected this connector, which may not be the person you are talking to.',
+          },
+          updatedWithinDays: {
+            type: "integer",
+            minimum: 1,
+            maximum: 365,
+            description: "Only issues updated in the last N days (1 to 365).",
+          },
+          cursor: {
+            type: "string",
+            maxLength: 4096,
+            description:
+              "Pass the previous result's nextCursor to get the next page. Leave it out for the first page.",
+          },
         },
       },
     },
@@ -82,7 +109,12 @@ export const linearConnectorContribution = {
         required: ["id"],
         additionalProperties: false,
         properties: {
-          id: { type: "string", minLength: 1, maxLength: 64 },
+          id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            description: "An issue identifier such as ENG-123, or the issue's UUID from a search result.",
+          },
         },
       },
     },
