@@ -1,5 +1,5 @@
 // The product-scoped request wrapper (`/ex/<product>/<cloudId>/...`) plus the
-// OAuth constants Jira and Confluence both read verbatim (Global Constraints).
+// OAuth constants Jira and Confluence both read verbatim.
 
 import { AtlassianApiError, mapApiError, unavailableError, type AtlassianErrorPrefix } from "./errors";
 

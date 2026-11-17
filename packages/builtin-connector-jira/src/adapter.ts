@@ -28,6 +28,12 @@ import { toBackendJiraManifest } from "./backend-manifest";
 import { parseProjectId, parseSiteId, projectItemId, siteItemId } from "./ids";
 import { createJiraClient, type JiraProject } from "./jira-client";
 import { executeJiraLiveTool } from "./live-tools";
+import {
+  CURSOR_MAX_LENGTH,
+  MAX_FANOUT_SITES,
+  hasJiraScope,
+  invalidRequest,
+} from "./shared";
 
 export type JiraAdapterConfig = {
   baseUrl: string;
@@ -37,22 +43,17 @@ export type JiraAdapterConfig = {
   fetcher?: typeof fetch;
 };
 
-/** Selection fan-out cap (Global Constraints: at most 5 sites per call,
- * sites sorted by cloud id — `listAccessibleResources` already returns them
- * in that order). */
-const MAX_FANOUT_SITES = 5;
-/** `jira.search` (R4): one bounded page, at most 20 matches per site. */
+/** One bounded page of project-name search results, at most 20 matches per site. */
 const SEARCH_PAGE_SIZE = 20;
 /** `jira.browse` page size for the projects within a site. */
 const BROWSE_PAGE_SIZE = 50;
-/** Matches the `cursor` field's `maxLength` declared in contribution.ts. */
-const CURSOR_MAX_LENGTH = 4096;
-/** The OAuth scope that marks a site as a Jira site this connector may read
- * (R3: a site is included only if its scopes contain this). */
-const JIRA_READ_SCOPE = "read:jira-work";
 
 function unsupported(): AtlassianApiError {
-  return new AtlassianApiError(400, "JIRA_UNSUPPORTED", "Not yet implemented");
+  return new AtlassianApiError(
+    400,
+    "JIRA_UNSUPPORTED",
+    "The Jira connector does not index content.",
+  );
 }
 
 function unsupportedAction(): AtlassianApiError {
@@ -63,24 +64,12 @@ function unsupportedAction(): AtlassianApiError {
   );
 }
 
-function invalidRequest(): AtlassianApiError {
-  return new AtlassianApiError(
-    400,
-    "JIRA_INVALID_REQUEST",
-    "Invalid Jira request",
-  );
-}
-
 function siteNotFound(): AtlassianApiError {
   return new AtlassianApiError(404, "JIRA_NOT_FOUND", "Jira site not found");
 }
 
 function unconfigured(): AtlassianApiError {
   return new AtlassianApiError(503, "JIRA_UNAVAILABLE", "Jira is not configured");
-}
-
-function hasJiraScope(site: AtlassianSite): boolean {
-  return site.scopes.includes(JIRA_READ_SCOPE);
 }
 
 /** The site's host (e.g. `example.atlassian.net`) for a selection entry's
@@ -154,9 +143,9 @@ function parseBrowseRequest(
 }
 
 /** Validates `jira.search`'s request. The query is trimmed and bounded to
- * 1-200 chars; `jira.search` is one bounded page (R4), so an empty cursor is
- * accepted (and ignored) while a non-empty one is rejected before any
- * request reaches Jira — this is the Task 4 finding I1 rule. */
+ * 1-200 chars; the selection search returns one bounded page, so an empty
+ * cursor is accepted (and ignored) while a non-empty one is rejected before any
+ * request reaches Jira. */
 function parseSearchRequest(
   request: Record<string, unknown>,
 ): { query: string } {
@@ -225,10 +214,9 @@ function toProjectEntry(
 }
 
 /**
- * Jira connector adapter: OAuth and the selection actions (Task 6) plus the
- * three agent-visible live tools (Task 7, in `live-tools.ts`). This is a
- * tools-only connector, so `discover` stays empty and `extract` stays
- * unsupported.
+ * Jira connector adapter: OAuth, the selection actions, and the three
+ * agent-visible live tools (in `live-tools.ts`). This is a tools-only
+ * connector, so `discover` stays empty and `extract` stays unsupported.
  */
 export function createJiraConnectorAdapter(
   config: JiraAdapterConfig,
@@ -244,7 +232,7 @@ export function createJiraConnectorAdapter(
   const client = createJiraClient(atlassianConfig);
 
   /**
-   * `jira.browse`: root lists Jira sites (R3); a first page for a
+   * `jira.browse`: root lists Jira sites; a first page for a
    * `site:<cloudId>` container lists that site's projects; a page fetched
    * with `cursor` continues that listing without re-resolving the
    * container or breadcrumbs.
@@ -321,9 +309,9 @@ export function createJiraConnectorAdapter(
     };
   }
 
-  /** `jira.search` (R4): the first {@link MAX_FANOUT_SITES} sites with the
-   * Jira read scope, up to {@link SEARCH_PAGE_SIZE} matches each, one bounded
-   * page (`hasMore: false`, `cursor: ""`). */
+  /** `jira.search`: the first {@link MAX_FANOUT_SITES} sites with the Jira read
+   * scope, up to {@link SEARCH_PAGE_SIZE} matches each, one bounded page
+   * (`hasMore: false`, `cursor: ""`). */
   async function searchAction(
     input: ConnectorActionInput,
   ): Promise<ConnectorSelectionSearchResult> {
@@ -462,7 +450,7 @@ export function createJiraConnectorAdapter(
     async *discover(
       _input: ConnectorDiscoverInput,
     ): AsyncIterable<ConnectorItem> {
-      // Tools-only connector (Global Constraints): nothing is indexed.
+      // Tools-only connector: nothing is indexed.
     },
     async extract(
       _input: ConnectorExtractInput,

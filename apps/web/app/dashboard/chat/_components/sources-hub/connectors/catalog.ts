@@ -74,8 +74,8 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     postOAuthMode: "auto_create",
     requiresBackendRegistration: true,
     icon: SquareKanban,
-    // R13/C3: no Atlassian artwork is shipped, so this entry has no
-    // logoIconName (unlike Notion/Dropbox's logoIconName/logoIconTone).
+    // No Atlassian artwork is shipped, so this entry has no logoIconName
+    // (unlike Notion/Dropbox's logoIconName/logoIconTone).
     isIndexable: false,
     supportsActions: true,
     supportsPeriodicSync: false,

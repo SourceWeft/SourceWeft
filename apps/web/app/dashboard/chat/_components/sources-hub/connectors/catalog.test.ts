@@ -71,7 +71,7 @@ test("jira hidden until registered", () => {
     supportsPeriodicSync: false,
     supportsWebhook: false,
   });
-  // R13/C3: no Atlassian artwork is shipped, so no logoIconName.
+  // No Atlassian artwork is shipped, so no logoIconName.
   expect(jira?.logoIconName).toBeUndefined();
 });
 

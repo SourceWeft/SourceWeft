@@ -24,6 +24,12 @@ import {
   type JiraIssueSummary,
   type JiraProject,
 } from "./jira-client";
+import {
+  CURSOR_MAX_LENGTH,
+  MAX_FANOUT_SITES,
+  hasJiraScope,
+  invalidRequest,
+} from "./shared";
 
 type JiraClient = ReturnType<typeof createJiraClient>;
 
@@ -32,33 +38,20 @@ export type JiraLiveToolDeps = {
   atlassianConfig: AtlassianClientConfig;
 };
 
-/** Selection fan-out cap (Global Constraints: at most 5 sites per call, sites
- * sorted by cloud id — `groupByCloudId` already yields them in that order). */
-const MAX_FANOUT_SITES = 5;
-/** Issues per site per page (task brief: `searchIssues({ maxResults: 20 })`). */
+/** Issues requested per site per page. */
 const ISSUE_PAGE_SIZE = 20;
-/** Comments kept per issue read (Global Constraints: the first 20 by creation
- * time plus the total count). */
+/** Comments kept per issue read: the first 20 by creation time plus the total. */
 const COMMENT_LIMIT = 20;
-/** The one-body truncation cap for the issue description (Global Constraints). */
+/** The truncation cap for the one issue description body. */
 const DESCRIPTION_LIMIT = 20000;
-/** Per-comment body truncation cap (R10). */
+/** Per-comment body truncation cap. */
 const COMMENT_BODY_LIMIT = 2000;
-/** Account ids resolved per site for an assignee name (R8). */
+/** Account ids resolved per site for an assignee name. */
 const ASSIGNEE_MATCH_LIMIT = 5;
-/** The OAuth scope that marks a site as a Jira site this connector may read
- * (R3: a site is included only if its scopes contain this). */
-const JIRA_READ_SCOPE = "read:jira-work";
-/** Matches the `cursor` field's `maxLength` declared in contribution.ts. */
-const CURSOR_MAX_LENGTH = 4096;
-/** Validated upper-cased issue key (task brief). */
+/** Validated upper-cased issue key. */
 const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,31}-[1-9][0-9]{0,9}$/;
 /** A Jira project key the agent may narrow by (contribution.ts input schema). */
 const PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,31}$/;
-
-function invalidRequest(message = "Invalid Jira request"): AtlassianApiError {
-  return new AtlassianApiError(400, "JIRA_INVALID_REQUEST", message);
-}
 
 function nothingSelected(): AtlassianApiError {
   return new AtlassianApiError(
@@ -103,10 +96,6 @@ function buildSitesNote(
     );
   }
   return facts.length > 0 ? facts.join(" ") : undefined;
-}
-
-function hasJiraScope(site: AtlassianSite): boolean {
-  return site.scopes.includes(JIRA_READ_SCOPE);
 }
 
 /** One selected site kept for this call, with the numeric project ids selected
@@ -296,10 +285,10 @@ function toSearchIssue(
   };
 }
 
-/** Resolves the assignee filter for one site (R8): `me` becomes
- * `currentUser()`; any other value is resolved through the user-search endpoint
- * to at most {@link ASSIGNEE_MATCH_LIMIT} account ids. No match leaves an empty
- * id list, which `buildIssueJql` turns into a match-nothing clause. */
+/** Resolves the assignee filter for one site: `me` becomes `currentUser()`;
+ * any other value is resolved through the user-search endpoint to at most
+ * {@link ASSIGNEE_MATCH_LIMIT} account ids. No match leaves an empty id list,
+ * which `buildIssueJql` turns into a match-nothing clause. */
 async function resolveAssignee(
   deps: JiraLiveToolDeps,
   accessToken: string,
@@ -496,7 +485,7 @@ async function searchIssuesTool(
   return { result };
 }
 
-/** `jira.issue.read` (R7): the key prefix is validated but not looked up; each
+/** `jira.issue.read`: the key prefix is validated but not looked up; each
  * selected site (≤5, sorted) is asked for the issue and the first whose
  * `fields.project.id` is selected there is returned — out-of-scope matches and
  * not-found sites are passed over. */

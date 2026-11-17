@@ -1,5 +1,5 @@
 // Total (never-throwing) converter from Atlassian Document Format (ADF) to
-// Markdown, shared by Jira and Confluence (task brief: Task 2). `adfToMarkdown`
+// Markdown, shared by Jira and Confluence. `adfToMarkdown`
 // never throws: anything it cannot make sense of renders as "" or as the
 // concatenated text of its descendants, and the whole call is wrapped so a
 // defensive bug here never breaks an issue/comment/page read.

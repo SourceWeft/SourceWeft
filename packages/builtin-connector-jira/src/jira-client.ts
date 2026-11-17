@@ -1,8 +1,7 @@
 // Jira REST client on top of `@sourceweft/atlassian-client`'s product-scoped
-// request wrapper. Every endpoint, parameter name and response shape here
-// was checked against Atlassian's own Jira Cloud platform REST API v3
-// reference before this file was written (see the task report's "Endpoint
-// verification" section).
+// request wrapper. The endpoint paths, parameters and scopes used here were
+// checked against Atlassian's published Jira Cloud platform REST API v3
+// description on 2026-11-18.
 
 import {
   atlassianRequest,

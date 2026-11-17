@@ -1,5 +1,5 @@
 // The accessible-sites list and identity lookup, both plain `api.atlassian.com`
-// endpoints shared by Jira and Confluence (see Global Constraints / task brief).
+// endpoints shared by Jira and Confluence.
 
 import { AtlassianApiError, unavailableError } from "./errors";
 import { atlassianApiGet, isCloudId, type AtlassianClientConfig } from "./http";
@@ -19,8 +19,8 @@ type AccessibleResource = {
 };
 
 /** `GET /oauth/token/accessible-resources`, mapped, with entries whose id is
- * not a well-formed cloud id dropped, sorted by cloudId (R3 / R6: callers rely
- * on a stable site order). */
+ * not a well-formed cloud id dropped, sorted by cloudId so callers get a stable
+ * site order. */
 export async function listAccessibleResources(
   config: AtlassianClientConfig,
   accessToken: string,

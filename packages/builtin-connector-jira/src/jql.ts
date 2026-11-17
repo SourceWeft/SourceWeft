@@ -1,28 +1,24 @@
-// JQL builders for the Jira agent tools. The agent never supplies JQL itself
-// (Global Constraints): every free-text input the agent passes (`text`,
-// `status`, `issueType`, account ids) is escaped through `jqlString`, and
-// `text` is additionally cleaned through `jqlTextTerm` before being quoted,
-// so user-controlled text can only ever land inside one string literal and
-// can never change the query's clause structure.
+// JQL builders for the Jira agent tools. The agent never supplies JQL itself:
+// every free-text input the agent passes (`text`, `status`, `issueType`,
+// account ids) is escaped through `jqlString`, and `text` is additionally
+// cleaned through `jqlTextTerm` before being quoted, so user-controlled text
+// can only ever land inside one string literal and can never change the
+// query's clause structure.
 
-import { AtlassianApiError } from "@sourceweft/atlassian-client";
+import { invalidRequest } from "./shared";
 
 const PROJECT_ID = /^[0-9]{1,20}$/;
 
-function invalidRequest(message: string): AtlassianApiError {
-  return new AtlassianApiError(400, "JIRA_INVALID_REQUEST", message);
-}
-
 /** Wraps `value` as a double-quoted JQL string literal, escaping backslashes
- * before quotes so the value can never close the literal early. Fixed
- * escaping (task brief): implement exactly this. */
+ * before quotes so the value can never close the literal early. The escaping is
+ * fixed; implement exactly this. */
 export function jqlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 /** Strips JQL-significant characters out of a free-text search term before
- * it is wrapped with {@link jqlString} for a `text ~ "..."` clause. Fixed
- * cleaning (task brief): implement exactly this. */
+ * it is wrapped with {@link jqlString} for a `text ~ "..."` clause. The
+ * cleaning is fixed; implement exactly this. */
 export function jqlTextTerm(value: string): string {
   return value
     .replace(/[\u0000-\u001f\u007f]/g, " ")
@@ -81,7 +77,7 @@ export function buildIssueJql(input: JqlInput): string {
       clauses.push("assignee = currentUser()");
     } else if (input.assignee.accountIds.length === 0) {
       // No site matched the requested assignee: match nothing rather than
-      // silently dropping the filter (Ruling R8).
+      // silently dropping the filter and returning everything.
       clauses.push("assignee is EMPTY AND assignee is not EMPTY");
     } else {
       clauses.push(`assignee in (${input.assignee.accountIds.map(jqlString).join(", ")})`);

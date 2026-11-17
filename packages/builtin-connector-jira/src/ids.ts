@@ -80,8 +80,7 @@ export function parseJiraSelection(
 
 /** Groups a parsed selection's project ids by cloud id, in sorted
  * (ascending) cloud-id order — the order every multi-site fan-out iterates
- * sites in (Global Constraints: at most 5 sites per call, sorted by cloud
- * id). */
+ * sites in (at most 5 sites per call, sorted by cloud id). */
 export function groupByCloudId(
   selection: readonly JiraSelectionEntry[],
 ): Map<string, string[]> {

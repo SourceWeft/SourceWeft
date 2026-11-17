@@ -117,36 +117,55 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Words to search for in issue summaries, descriptions and comments."
+              },
               "projectKeys": {
                 "type": "array",
                 "maxItems": 20,
                 "items": {
                   "type": "string",
                   "pattern": "^[A-Z][A-Z0-9_]{0,31}$"
-                }
+                },
+                "description": "Limit the search to these project keys (for example [\"ENG\"]). Use keys from list_jira_projects; a key that is not selected matches nothing."
               },
-              "status": { "type": "string", "minLength": 1, "maxLength": 100 },
+              "status": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Exact status name as shown in Jira, for example \"In Progress\"."
+              },
               "assignee": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200
+                "maxLength": 200,
+                "description": "A person's display name, or \"me\". \"me\" means the Atlassian account that connected this connector, which may not be the person you are talking to."
               },
               "issueType": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 100
+                "maxLength": 100,
+                "description": "Exact issue type name as shown in Jira, for example \"Bug\"."
               },
               "updatedWithinDays": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 365
+                "maximum": 365,
+                "description": "Only issues updated in the last N days (1 to 365)."
               },
               "orderBy": {
                 "type": "string",
-                "enum": ["updated", "created", "priority"]
+                "enum": ["updated", "created", "priority"],
+                "description": "Sort field: updated (default), created or priority. Newest or highest first, per site."
               },
-              "cursor": { "type": "string", "maxLength": 4096 }
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096,
+                "description": "Pass the previous result's nextCursor with the same other parameters to get the next page."
+              }
             }
           }
         },
@@ -164,7 +183,12 @@
             "additionalProperties": false,
             "required": ["issueKey"],
             "properties": {
-              "issueKey": { "type": "string", "minLength": 1, "maxLength": 64 }
+              "issueKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "The issue key, for example ENG-123."
+              }
             }
           }
         },

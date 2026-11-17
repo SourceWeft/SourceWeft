@@ -6,8 +6,7 @@ import {
   CLOUD_ID_PATTERN,
 } from "@sourceweft/atlassian-client";
 
-/** OAuth scopes requested from Atlassian for Jira (Global Constraints: no
- * attachment scope). */
+/** OAuth scopes requested from Atlassian for Jira (no attachment scope). */
 export const JIRA_SCOPES = [
   "read:jira-work",
   "read:jira-user",
@@ -20,12 +19,11 @@ export const JIRA_SCOPES = [
 export const JIRA_MAX_SELECTED_ITEMS = 100;
 
 /** Shape of a Jira site id: `site:<cloudId>`, browse-only, never stored in a
- * connector's selection (Global Constraints). */
+ * connector's selection. */
 export const JIRA_SITE_ID_PATTERN = `^site:${CLOUD_ID_PATTERN}$`;
 
 /** Shape of a Jira project id this connector hands out or accepts back:
- * `project:<cloudId>:<numeric project id>` (Global Constraints). Keep in sync
- * with `ids.ts`. */
+ * `project:<cloudId>:<numeric project id>`. Keep in sync with `ids.ts`. */
 export const JIRA_PROJECT_ID_PATTERN = `^project:${CLOUD_ID_PATTERN}:[0-9]{1,20}$`;
 
 export const jiraConnectorContribution = {
@@ -42,9 +40,9 @@ export const jiraConnectorContribution = {
   sync: {
     supportsIncremental: false,
     defaultFrequencyMinutes: 360,
-    // Tools-only connector (Global Constraints): nothing is indexed. Typed
-    // explicitly so `resources.map(...)` in backend-manifest.ts does not
-    // collapse to `never[]` under the `as const` on this whole object.
+    // Tools-only connector: nothing is indexed. Typed explicitly so
+    // `resources.map(...)` in backend-manifest.ts does not collapse to
+    // `never[]` under the `as const` on this whole object.
     resources: [] as Array<{
       type: string;
       title: string;
@@ -141,7 +139,13 @@ export const jiraConnectorContribution = {
         type: "object",
         additionalProperties: false,
         properties: {
-          text: { type: "string", minLength: 1, maxLength: 200 },
+          text: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            description:
+              "Words to search for in issue summaries, descriptions and comments.",
+          },
           projectKeys: {
             type: "array",
             maxItems: 20,
@@ -149,16 +153,46 @@ export const jiraConnectorContribution = {
               type: "string",
               pattern: "^[A-Z][A-Z0-9_]{0,31}$",
             },
+            description:
+              'Limit the search to these project keys (for example ["ENG"]). Use keys from list_jira_projects; a key that is not selected matches nothing.',
           },
-          status: { type: "string", minLength: 1, maxLength: 100 },
-          assignee: { type: "string", minLength: 1, maxLength: 200 },
-          issueType: { type: "string", minLength: 1, maxLength: 100 },
-          updatedWithinDays: { type: "integer", minimum: 1, maximum: 365 },
+          status: {
+            type: "string",
+            minLength: 1,
+            maxLength: 100,
+            description: 'Exact status name as shown in Jira, for example "In Progress".',
+          },
+          assignee: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            description:
+              'A person\'s display name, or "me". "me" means the Atlassian account that connected this connector, which may not be the person you are talking to.',
+          },
+          issueType: {
+            type: "string",
+            minLength: 1,
+            maxLength: 100,
+            description: 'Exact issue type name as shown in Jira, for example "Bug".',
+          },
+          updatedWithinDays: {
+            type: "integer",
+            minimum: 1,
+            maximum: 365,
+            description: "Only issues updated in the last N days (1 to 365).",
+          },
           orderBy: {
             type: "string",
             enum: ["updated", "created", "priority"],
+            description:
+              "Sort field: updated (default), created or priority. Newest or highest first, per site.",
           },
-          cursor: { type: "string", maxLength: 4096 },
+          cursor: {
+            type: "string",
+            maxLength: 4096,
+            description:
+              "Pass the previous result's nextCursor with the same other parameters to get the next page.",
+          },
         },
       },
     },
@@ -177,7 +211,12 @@ export const jiraConnectorContribution = {
         additionalProperties: false,
         required: ["issueKey"],
         properties: {
-          issueKey: { type: "string", minLength: 1, maxLength: 64 },
+          issueKey: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            description: "The issue key, for example ENG-123.",
+          },
         },
       },
     },
@@ -198,8 +237,8 @@ export const jiraConnectorContribution = {
       },
     },
   ],
-  // Global Constraints 2.2: the only configuration is the fixed set of Jira
-  // project ids the user picked, each tagged with its kind. Capped,
+  // The only configuration is the fixed set of Jira project ids the user
+  // picked, each tagged with its kind. Capped,
   // deduplicated and shape-checked so the server never has to trust an
   // unbounded or malformed selection from the client.
   configSchema: {

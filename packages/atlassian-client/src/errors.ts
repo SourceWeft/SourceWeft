@@ -1,7 +1,8 @@
 // Shared error type and status mapping for every Atlassian client call. Jira and
 // Confluence each pass their own `errorPrefix` so the same mapping logic produces
-// `JIRA_*` or `CONFLUENCE_*` codes (see Global Constraints: error codes are
-// prefixed per product and end with the spec A4 suffixes).
+// `JIRA_*` or `CONFLUENCE_*` codes: error codes are prefixed per product and end
+// with the standard reauth/not-found/rate-limited/unavailable/invalid-request
+// suffixes.
 
 export type AtlassianErrorPrefix = "JIRA" | "CONFLUENCE";
 

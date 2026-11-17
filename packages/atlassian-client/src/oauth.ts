@@ -1,5 +1,5 @@
 // Authorization-code exchange and refresh against Atlassian's single OAuth
-// token endpoint (shared by Jira and Confluence; see Global Constraints).
+// token endpoint, shared by Jira and Confluence.
 
 import type { OAuthTokenSet } from "@sourceweft/contracts";
 import { mapTokenError, unavailableError } from "./errors";
