@@ -19,11 +19,20 @@ import { toBackendLinearManifest } from "./backend-manifest";
 import { LINEAR_ITEM_ID_PATTERN, LINEAR_MAX_SELECTED_ITEMS } from "./contribution";
 import {
   IDENTITY_QUERY,
+  ISSUE_QUERY,
   PROJECTS_QUERY,
+  SEARCH_ISSUES_QUERY,
   TEAMS_QUERY,
   TEAM_PROJECTS_QUERY,
 } from "./documents";
 import { LinearAdapterError, createLinearClient } from "./linear-client";
+import {
+  type LinearScope,
+  issueInScope,
+  issueScopeFilter,
+  projectInScope,
+  projectScopeFilter,
+} from "./scope";
 
 export { LinearAdapterError } from "./linear-client";
 
@@ -52,6 +61,23 @@ const CURSOR_MAX_LENGTH = 4096;
  * the contribution's `linear.search` input schema). */
 const SEARCH_QUERY_MAX_LENGTH = 200;
 const SELECTION_ITEM_ID = new RegExp(LINEAR_ITEM_ID_PATTERN);
+
+/** Agent-tool limits (spec "Limits"): every issue description and comment body
+ * is cut at this many characters, and a tool flags when it did so. */
+const MAX_TEXT_LENGTH = 20000;
+/** `list_linear_projects` fetches at most this many projects in one page
+ * (spec: 100 projects per list). `truncated` reports when more exist. */
+const PROJECTS_LIST_LIMIT = 100;
+/** Bounds on the optional `state`/`assignee` filters of `search_linear_issues`
+ * (matches the contribution's `linear.issue.search` input schema). */
+const ISSUE_FILTER_FIELD_MAX_LENGTH = 100;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** `read_linear_issue` accepts a human-readable identifier such as `ENG-123`
+ * (1-10 leading letters/digits, a dash, 1-9 digits) or a Linear UUID. */
+const ISSUE_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,9}-[0-9]{1,9}$/;
+/** R4 (controller ruling): Linear returns the newest 20 comments, so a
+ * truncated set is the *most recent* 20, not the first 20. */
+const COMMENTS_TRUNCATED_NOTE = "Showing the 20 most recent comments.";
 
 export type LinearAdapterConfig = {
   baseUrl: string;
@@ -98,6 +124,61 @@ function invalidSelection(): LinearAdapterError {
 
 function notFound(): LinearAdapterError {
   return new LinearAdapterError(404, "LINEAR_NOT_FOUND", "Linear team not found");
+}
+
+/** Gate shared by all three agent tools: no team and no project selected means
+ * the tools would have nothing to read. Thrown before any request is built. */
+function nothingSelected(): LinearAdapterError {
+  return new LinearAdapterError(
+    409,
+    "LINEAR_NOTHING_SELECTED",
+    "No Linear teams or projects are selected for this connector. Ask the user to choose them in the connector settings.",
+  );
+}
+
+/** R7: an issue that does not exist, one the token cannot see, and one outside
+ * the selection all surface the same not-found, so the agent cannot probe for
+ * the existence of issues outside its scope. */
+function issueNotFound(): LinearAdapterError {
+  return new LinearAdapterError(404, "LINEAR_NOT_FOUND", "Linear issue not found");
+}
+
+/** `client.query` can resolve `undefined` (HTTP 200 with an unparseable body)
+ * or a shape missing the field a tool selected. Either is a failure, never an
+ * empty result: a tool must not report `{ issues: [] }` for a response that did
+ * not arrive. */
+function requestFailed(): LinearAdapterError {
+  return new LinearAdapterError(502, "LINEAR_REQUEST_FAILED", "Linear request failed");
+}
+
+/** Parses the stored selection and refuses an empty one (`LINEAR_NOTHING_SELECTED`,
+ * before any request). The returned shape is the agent tools' `LinearScope`. */
+function requireScope(config: Record<string, unknown>): LinearScope {
+  const scope = parseLinearSelection(config);
+  if (scope.teamIds.length === 0 && scope.projectIds.length === 0) {
+    throw nothingSelected();
+  }
+  return scope;
+}
+
+/** Validates a GraphQL connection returned to a tool: it must be an object
+ * carrying a `nodes` array and a `pageInfo` object. A missing or malformed
+ * shape is `502 LINEAR_REQUEST_FAILED`, not an empty page. */
+function requireConnection<N>(
+  connection: { nodes?: unknown; pageInfo?: unknown } | null | undefined,
+): { nodes: N[]; pageInfo: { hasNextPage?: boolean; endCursor?: string | null } } {
+  if (
+    !connection ||
+    !Array.isArray(connection.nodes) ||
+    typeof connection.pageInfo !== "object" ||
+    connection.pageInfo === null
+  ) {
+    throw requestFailed();
+  }
+  return connection as {
+    nodes: N[];
+    pageInfo: { hasNextPage?: boolean; endCursor?: string | null };
+  };
 }
 
 /**
@@ -210,6 +291,166 @@ function parseDescribeRequest(request: Record<string, unknown>): { ids: string[]
     ids.push(id);
   }
   return { ids };
+}
+
+/** Validates a `search_linear_issues` request (defence in depth: the backend
+ * already checks it against the contribution's input schema). The query is
+ * bounded after trimming; every optional filter is bounds-checked; the cursor
+ * reuses the shared `parseActionCursor`. */
+function parseSearchIssuesRequest(request: Record<string, unknown>): {
+  query: string;
+  state?: string;
+  assignee?: string;
+  updatedWithinDays?: number;
+  after?: string;
+} {
+  const rawQuery = request.query;
+  if (typeof rawQuery !== "string") throw invalidRequest();
+  const query = rawQuery.trim();
+  if (query.length < 1 || query.length > SEARCH_QUERY_MAX_LENGTH) throw invalidRequest();
+
+  let state: string | undefined;
+  if (request.state !== undefined) {
+    if (typeof request.state !== "string") throw invalidRequest();
+    state = request.state.trim();
+    if (state.length < 1 || state.length > ISSUE_FILTER_FIELD_MAX_LENGTH) throw invalidRequest();
+  }
+
+  let assignee: string | undefined;
+  if (request.assignee !== undefined) {
+    if (typeof request.assignee !== "string") throw invalidRequest();
+    assignee = request.assignee.trim();
+    if (assignee.length < 1 || assignee.length > ISSUE_FILTER_FIELD_MAX_LENGTH) {
+      throw invalidRequest();
+    }
+  }
+
+  let updatedWithinDays: number | undefined;
+  if (request.updatedWithinDays !== undefined) {
+    const value = request.updatedWithinDays;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 365) {
+      throw invalidRequest();
+    }
+    updatedWithinDays = value;
+  }
+
+  return { query, state, assignee, updatedWithinDays, after: parseActionCursor(request.cursor) };
+}
+
+/** Validates a `read_linear_issue` request: the id must be a human-readable
+ * identifier (`ENG-123`) or a Linear UUID. Anything else — a value with a
+ * space or a slash — is rejected before any request. */
+function parseReadIssueRequest(request: Record<string, unknown>): { id: string } {
+  const rawId = request.id;
+  if (typeof rawId !== "string") throw invalidRequest();
+  if (!ISSUE_IDENTIFIER_PATTERN.test(rawId) && !SELECTION_ITEM_ID.test(rawId)) {
+    throw invalidRequest();
+  }
+  return { id: rawId };
+}
+
+/** Cuts text at `MAX_TEXT_LENGTH` and reports whether it did. */
+function cutText(text: string): { value: string; truncated: boolean } {
+  if (text.length > MAX_TEXT_LENGTH) {
+    return { value: text.slice(0, MAX_TEXT_LENGTH), truncated: true };
+  }
+  return { value: text, truncated: false };
+}
+
+/** The issue fields `SEARCH_ISSUES_QUERY` selects (also the summary half of
+ * `ISSUE_QUERY`). `team` is non-null so the record satisfies `issueInScope`;
+ * the mappers below still read every nullable field defensively. */
+type RawIssueNode = {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  priorityLabel: string;
+  updatedAt: string;
+  state: { name: string; type: string } | null;
+  assignee: { name: string } | null;
+  team: { id: string; key: string; name: string };
+  project: { id: string; name: string } | null;
+};
+
+type RawIssueDetail = RawIssueNode & {
+  description: string | null;
+  createdAt: string;
+  labels: { nodes: Array<{ name: string } | null> };
+  comments: {
+    nodes: Array<{ body: string | null; createdAt: string; user: { name: string } | null }>;
+    pageInfo: { hasNextPage?: boolean };
+  };
+};
+
+type LinearIssueSummary = {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  state: { name: string; type: string } | null;
+  assignee: string | null;
+  priority: string;
+  team: { key: string; name: string };
+  project: string | null;
+  updatedAt: string;
+};
+
+function toIssueSummary(node: RawIssueNode): LinearIssueSummary {
+  return {
+    id: node.id,
+    identifier: node.identifier,
+    title: node.title,
+    url: node.url,
+    state: node.state ? { name: node.state.name, type: node.state.type } : null,
+    assignee: node.assignee?.name ?? null,
+    priority: node.priorityLabel,
+    team: { key: node.team?.key, name: node.team?.name },
+    project: node.project?.name ?? null,
+    updatedAt: node.updatedAt,
+  };
+}
+
+/** The project fields `PROJECTS_QUERY` selects. `teams.nodes` is non-null so
+ * the record satisfies `projectInScope`; the mapper reads keys defensively. */
+type RawProjectNode = {
+  id: string;
+  name: string;
+  url: string;
+  progress: number | null;
+  targetDate: string | null;
+  status: { name: string } | null;
+  lead: { name: string } | null;
+  teams: { nodes: Array<{ id: string; name: string; key: string }> };
+};
+
+type LinearProjectSummary = {
+  id: string;
+  name: string;
+  status: string | null;
+  lead: string | null;
+  progress: number | null;
+  targetDate: string | null;
+  url: string;
+  teams: string[];
+};
+
+function toProjectSummary(node: RawProjectNode): LinearProjectSummary {
+  const teams = Array.isArray(node.teams?.nodes)
+    ? node.teams.nodes
+        .map((team) => team?.key)
+        .filter((key): key is string => typeof key === "string")
+    : [];
+  return {
+    id: node.id,
+    name: node.name,
+    status: node.status?.name ?? null,
+    lead: node.lead?.name ?? null,
+    progress: typeof node.progress === "number" ? node.progress : null,
+    targetDate: node.targetDate ?? null,
+    url: node.url,
+    teams,
+  };
 }
 
 type LinearTeamNode = { id: string; name: string; key: string };
@@ -434,6 +675,140 @@ export function createLinearConnectorAdapter(
     return { items };
   }
 
+  /** `search_linear_issues`: full-text search narrowed to the selection. The
+   * scope filter is sent to Linear *and* re-applied to every returned node, so
+   * a record Linear returns outside the selection is dropped, never surfaced.
+   * Checks run in order: selection gate, then request validation. */
+  async function searchIssuesAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorActionResult> {
+    const scope = requireScope(input.config);
+    const { query, state, assignee, updatedWithinDays, after } = parseSearchIssuesRequest(
+      input.request,
+    );
+    const filterParts: Array<Record<string, unknown>> = [issueScopeFilter(scope)];
+    if (state !== undefined) {
+      filterParts.push({ state: { name: { eqIgnoreCase: state } } });
+    }
+    if (assignee !== undefined) {
+      filterParts.push(
+        assignee.toLowerCase() === "me"
+          ? { assignee: { isMe: { eq: true } } }
+          : { assignee: { name: { containsIgnoreCase: assignee } } },
+      );
+    }
+    if (updatedWithinDays !== undefined) {
+      const since = new Date(Date.now() - updatedWithinDays * MS_PER_DAY).toISOString();
+      filterParts.push({ updatedAt: { gte: since } });
+    }
+    const data = await client.query<
+      | {
+          searchIssues?: {
+            nodes?: unknown;
+            pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+          };
+        }
+      | undefined
+    >(input.accessToken, SEARCH_ISSUES_QUERY, {
+      term: query,
+      after,
+      filter: { and: filterParts },
+    });
+    const connection = requireConnection<RawIssueNode>(data?.searchIssues);
+    const issues: LinearIssueSummary[] = [];
+    for (const node of connection.nodes) {
+      if (!issueInScope(node, scope)) continue;
+      issues.push(toIssueSummary(node));
+    }
+    const nextCursor = connection.pageInfo.hasNextPage
+      ? connection.pageInfo.endCursor ?? null
+      : null;
+    return { result: { issues, nextCursor } };
+  }
+
+  /** `read_linear_issue`: one issue by identifier or UUID, with description,
+   * labels and the 20 most recent comments. A null issue, a not-found from the
+   * client, or an issue outside the selection all collapse to the same R7
+   * not-found. */
+  async function readIssueAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorActionResult> {
+    const scope = requireScope(input.config);
+    const { id } = parseReadIssueRequest(input.request);
+    let data: { issue?: RawIssueDetail | null } | undefined;
+    try {
+      data = await client.query<{ issue?: RawIssueDetail | null } | undefined>(
+        input.accessToken,
+        ISSUE_QUERY,
+        { id },
+      );
+    } catch (error) {
+      if (error instanceof LinearAdapterError && error.code === "LINEAR_NOT_FOUND") {
+        throw issueNotFound();
+      }
+      throw error;
+    }
+    if (!data) throw requestFailed();
+    const issue = data.issue;
+    if (!issue || !issueInScope(issue, scope)) throw issueNotFound();
+
+    const description = cutText(typeof issue.description === "string" ? issue.description : "");
+    const labels = Array.isArray(issue.labels?.nodes)
+      ? issue.labels.nodes
+          .map((label) => label?.name)
+          .filter((name): name is string => typeof name === "string")
+      : [];
+    const commentNodes = Array.isArray(issue.comments?.nodes) ? issue.comments.nodes : [];
+    // Linear returns the newest 20 comments in an unspecified order; sort them
+    // oldest-first so the agent reads the thread in sequence (R4 ruling).
+    const comments = [...commentNodes]
+      .sort(
+        (a, b) =>
+          new Date(a?.createdAt ?? 0).getTime() - new Date(b?.createdAt ?? 0).getTime(),
+      )
+      .map((comment) => ({
+        author: comment?.user?.name ?? null,
+        createdAt: comment?.createdAt,
+        body: cutText(typeof comment?.body === "string" ? comment.body : "").value,
+      }));
+    const commentsTruncated = issue.comments?.pageInfo?.hasNextPage === true;
+
+    return {
+      externalId: issue.id,
+      result: {
+        ...toIssueSummary(issue),
+        description: description.value,
+        descriptionTruncated: description.truncated,
+        labels,
+        createdAt: issue.createdAt,
+        comments,
+        commentsTruncated,
+        commentsNote: commentsTruncated ? COMMENTS_TRUNCATED_NOTE : null,
+      },
+    };
+  }
+
+  /** `list_linear_projects`: the projects inside the selection. The scope
+   * filter is sent to Linear and re-applied to every returned node. */
+  async function listProjectsAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorActionResult> {
+    const scope = requireScope(input.config);
+    const data = await client.query<
+      { projects?: { nodes?: unknown; pageInfo?: { hasNextPage?: boolean } } } | undefined
+    >(input.accessToken, PROJECTS_QUERY, {
+      first: PROJECTS_LIST_LIMIT,
+      filter: projectScopeFilter(scope),
+    });
+    const connection = requireConnection<RawProjectNode>(data?.projects);
+    const projects: LinearProjectSummary[] = [];
+    for (const node of connection.nodes) {
+      if (!projectInScope(node, scope)) continue;
+      projects.push(toProjectSummary(node));
+    }
+    return { result: { projects, truncated: connection.pageInfo.hasNextPage === true } };
+  }
+
   return {
     capabilityId: "sourceweft/linear",
     getManifest() {
@@ -483,6 +858,15 @@ export function createLinearConnectorAdapter(
       }
       if (input.actionType === "linear.describe") {
         return { result: await describeAction(input) };
+      }
+      if (input.actionType === "linear.issue.search") {
+        return searchIssuesAction(input);
+      }
+      if (input.actionType === "linear.issue.read") {
+        return readIssueAction(input);
+      }
+      if (input.actionType === "linear.project.list") {
+        return listProjectsAction(input);
       }
       throw new LinearAdapterError(400, "LINEAR_UNSUPPORTED_ACTION", "Unsupported Linear action");
     },
