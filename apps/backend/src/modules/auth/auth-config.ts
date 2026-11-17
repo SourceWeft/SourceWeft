@@ -15,6 +15,7 @@ import { apiKey } from "@better-auth/api-key";
 import { billingOrganizationHooks } from "../../billing-host/bindings";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
+import { buildSsoPlugins } from "../enterprise-sso";
 import { APIError } from "better-auth/api";
 import { config } from "../../shared/config";
 import { database } from "@sourceweft/db";
@@ -203,6 +204,15 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           ? {
               async beforeDelete(user) {
                 await assertUserHardDeleteAllowed(user.id);
+                // Hand this user's team SSO providers to a surviving owner/admin
+                // before the `ssoProvider.userId` ON DELETE CASCADE would take
+                // the team's identity source down with the departing account.
+                // Runs after the sole-owner guard, so a team whose only owner is
+                // leaving has already blocked the delete.
+                const { reassignSsoProvidersOnUserDelete } = await import(
+                  "../enterprise-sso/lifecycle"
+                );
+                await reassignSsoProvidersOnUserDelete(user.id);
                 // Before any data is erased: a failed revocation must leave the
                 // account exactly as it was, so deleting can be retried.
                 const { revokeAppleTokensBeforeDelete } =
@@ -350,6 +360,31 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           window: 60,
           max: 10,
         },
+        // better-auth matches a custom rule's key against the request path
+        // with the `/api/auth` base path already stripped (confirmed against
+        // better-auth@1.7.7's `resolveRateLimitConfig`/`normalizePathname`),
+        // so these three are keyed without it — unlike the (pre-existing,
+        // and as a result never-matching) `/api/auth/...` keys above. Without
+        // its own rule, `/sign-in/sso` would fall under the built-in
+        // `/sign-in/*` special rule (3 per 10s), too tight for a page that
+        // retries IdP discovery.
+        //
+        // `/sign-in/sso` is keyed by client IP, and a whole office shares one
+        // egress IP; the endpoint itself only computes/returns a redirect URL
+        // (no credential check, no IdP round-trip), so a much higher ceiling
+        // still blocks a real flood without punishing a shared-IP office.
+        "/sign-in/sso": {
+          window: 60,
+          max: 100,
+        },
+        "/sso/register": {
+          window: 60,
+          max: 10,
+        },
+        "/sso/verify-domain": {
+          window: 60,
+          max: 6,
+        },
       },
     },
     plugins: [
@@ -475,12 +510,24 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                     organization.id,
                   );
                 },
-                async beforeDeleteOrganization({ organization }) {
+                async beforeDeleteOrganization({ organization, user }) {
                   if (isPersonalOrganizationMetadata(organization.metadata)) {
                     throw new APIError("BAD_REQUEST", {
                       message: "Personal workspace cannot be deleted.",
                     });
                   }
+                  // Remove the team's SSO providers and their linked `account`
+                  // rows: otherwise a verified provider keeps blocking its domain
+                  // for every other team, and no one can delete it once its org
+                  // is gone. Runs here (before the org row goes) so the audit
+                  // sink still exists.
+                  const { deleteSsoProvidersForOrganization } = await import(
+                    "../enterprise-sso/lifecycle"
+                  );
+                  await deleteSsoProvidersForOrganization({
+                    organizationId: organization.id,
+                    actorUserId: user?.id ?? null,
+                  });
                 },
                 async afterCreateOrganization({ organization, user }) {
                   const { onboardingService } = await import("../onboarding");
@@ -725,6 +772,9 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
           config.auth.extensionEnabled ? [config.auth.extensionClientId] : [],
         ),
       }),
+      // Registered outside the isRuntimeMode branching below so that
+      // `auth migrate` (mode: "migration") still creates its table.
+      ...buildSsoPlugins(),
       // Localizes better-auth error messages for the request locale. Registered
       // last so its `after` hook runs after every other plugin's and can
       // translate errors surfaced by any of them (design §16, D11).

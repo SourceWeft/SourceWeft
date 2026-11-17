@@ -123,6 +123,20 @@ test("iOS offers Apple and Google when the API accepts both, and signs in with t
   assert.deepEqual(state.replace.mock.calls.at(-1), ["/dashboard/chat"]);
 });
 
+test("offers an SSO sign-in link pointing at /auth/sso", async () => {
+  answerAuthConfig({ apple: false, googleIosClientId: IOS_CLIENT });
+  await mount();
+
+  const link = [...document.querySelectorAll("a")].find(
+    (element) => element.textContent?.trim() === "Sign in with SSO",
+  );
+  assert(link, "the SSO sign-in link is rendered");
+  assert(
+    link.getAttribute("href")?.endsWith("/auth/sso"),
+    "the SSO link points at /auth/sso",
+  );
+});
+
 test("iOS shows no Google button without Sign in with Apple", async () => {
   answerAuthConfig({ apple: false, googleIosClientId: IOS_CLIENT });
   await mount();
