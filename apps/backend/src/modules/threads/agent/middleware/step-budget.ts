@@ -17,6 +17,7 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { createMiddleware, type AgentMiddleware } from "langchain";
 import { createPatchToolCallsMiddleware } from "deepagents";
 import { z } from "zod/v4";
+import { isUserRequestMessage } from "./pinned-skill-message";
 import {
   committedDeliveryPrompt,
   isCommittedDeliveryExhausted,
@@ -537,7 +538,8 @@ function checkedSummary(message: unknown, entry: ScopeBudget): string {
 export function buildAgentStepSummaryInput(
   messages: BaseMessage[],
 ): BaseMessage[] {
-  const human = [...messages].reverse().find(HumanMessage.isInstance);
+  // The request is what the user wrote, not skill instructions pinned after it.
+  const human = [...messages].reverse().find(isUserRequestMessage);
   const records = messages
     .filter(ToolMessage.isInstance)
     .slice(-24)

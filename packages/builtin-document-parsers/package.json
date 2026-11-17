@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@langchain/classic": "^1.0.42",
-    "@langchain/core": "^1.2.9",
+    "@langchain/core": "1.2.17",
     "@langchain/textsplitters": "^1.0.1",
     "@sourceweft/anydoc": "workspace:*",
     "@sourceweft/capability-contracts": "workspace:*",

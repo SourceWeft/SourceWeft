@@ -126,7 +126,7 @@ package does not replace modules already loaded in memory.
 
 ## Deep Agents child approval middleware composition
 
-`deepagents@1.13.1` reuses an explicitly supplied
+`deepagents@1.15.1` reuses an explicitly supplied
 `HumanInTheLoopMiddleware` when constructing custom and implicit general-purpose
 children, instead of appending a second middleware with the same name. Root
 agent construction already supports replacing this named native middleware;
@@ -140,7 +140,7 @@ permissions, accept an undocumented disable sentinel, or alter subagent tools.
 Review/remove the patch when adopting an upstream version with equivalent
 child middleware composition.
 
-Use the standard `pnpm patch deepagents@1.13.1` workflow followed by explicit
+Use the standard `pnpm patch deepagents@1.15.1` workflow followed by explicit
 non-frozen and frozen installs with `--ignore-scripts`. Verify the installed
 SDK's actual general-purpose child approval fixture in
 `step-budget-full-stack.test.ts`, including the last normal preparation step,
@@ -150,15 +150,19 @@ root agent or replace approval with an unconditional allow.
 
 ## Deep Agents filesystem failure receipts
 
-The same `deepagents@1.13.1` patch makes `read_file`, `write_file` and `edit_file` use
+The same `deepagents@1.15.1` patch makes `write_file` and `edit_file` use
 the SDK's existing `toolError` helper when their backend returns `error`.
-Returning the error as an ordinary text block or bare string causes the native ToolNode to
+Returning the error as a bare string causes the native ToolNode to
 label a failed operation `status: success`; this was reproduced by the
 real report loop and by installed-SDK regression tests.
 
+`read_file` needed the same change on 1.13.1; upstream has marked its backend
+failures since 1.15.0, so that hunk is gone. Upstream marks `write_file` and
+`edit_file` (and `glob`, `grep`) from 1.16.2; drop this section when adopting it.
+
 Both ESM and CommonJS preserve the exact error content, tool name and call ID
 while returning `status: error`, matching the existing permission and delete
-error branches. Successful reads/writes/edits and their state updates are unchanged.
+error branches. Successful writes/edits and their state updates are unchanged.
 Run `filesystem-backend-errors-sdk.test.ts`, the full budget/governance SDK
 fixtures, and the sandbox backend tests before refreshing this patch.
 
