@@ -300,6 +300,30 @@ test("http 400 RATELIMITED is rate limited", async () => {
   });
 });
 
+test("rate limit wait falls back to X-RateLimit-Requests-Reset", async () => {
+  const FIXED = Date.parse("2026-11-18T12:00:00.000Z");
+  const realNow = Date.now;
+  Date.now = () => FIXED;
+  try {
+    const resetAt = FIXED + 90_000; // epoch ms, 90 seconds from the frozen now
+    const client = linear(async () =>
+      json(graphqlError("Too many requests", "RATELIMITED"), 429, {
+        "X-RateLimit-Requests-Reset": String(resetAt),
+      }),
+    );
+
+    await assert.rejects(client.query("token", IDENTITY_QUERY, {}), (error) => {
+      assert.ok(error instanceof LinearAdapterError);
+      assert.equal(error.code, "LINEAR_RATE_LIMITED");
+      assert.deepEqual(error.details, { retryAfterSeconds: 90 });
+      assert.match(error.message, /90 seconds/);
+      return true;
+    });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test("http 429 without a Retry-After header falls back to 60 seconds", async () => {
   const client = linear(async () => json(graphqlError("Too many requests"), 429));
 
@@ -413,7 +437,11 @@ test("other 4xx GraphQL error is LINEAR_REQUEST_FAILED", async () => {
 test("error messages carry no token or variables", async () => {
   const secretToken = "super-secret-access-token-value";
   const searchText = "confidential search text";
-  const client = linear(async () => json(graphqlError("Entity not found"), 200));
+  // The provider itself echoes both secrets in its error message, so this test
+  // fails if the client ever lets provider error text through.
+  const client = linear(async () =>
+    json(graphqlError(`Entity not found for ${secretToken} searching ${searchText}`), 200),
+  );
 
   await assert.rejects(
     client.query(secretToken, SEARCH_ISSUES_QUERY, { term: searchText, after: null }),

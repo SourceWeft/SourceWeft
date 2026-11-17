@@ -270,19 +270,94 @@ test("blank query is rejected without a request", async () => {
 });
 
 test("stale selection returns empty results", async () => {
+  // The selection names a team id the workspace no longer has. Linear matches
+  // nothing, but the request must still carry the stale id in its filter, and
+  // the tool must return an empty result rather than widening the scope.
+  const STALE_TEAM = "99999999-9999-9999-9999-999999999999";
+  const staleSelection = { items: [{ id: STALE_TEAM, kind: "team" }] };
+
+  const search = router({
+    documents: new Map([
+      [
+        SEARCH_ISSUES_QUERY,
+        (variables) => {
+          assert.deepEqual(variables.filter, { and: [{ team: { id: { in: [STALE_TEAM] } } }] });
+          return json({ data: { searchIssues: { nodes: [], pageInfo: { hasNextPage: false } } } });
+        },
+      ],
+    ]),
+  });
+  const searchResult = await adapter(search.fetcher).executeAction(
+    toolInput("linear.issue.search", { query: "x" }, staleSelection),
+  );
+  assert.deepEqual(searchResult.result, { issues: [], nextCursor: null });
+  assert.equal(search.calls.length, 1);
+
+  const projects = router({
+    documents: new Map([
+      [
+        PROJECTS_QUERY,
+        (variables) => {
+          assert.deepEqual(variables.filter, {
+            accessibleTeams: { some: { id: { in: [STALE_TEAM] } } },
+          });
+          return json({ data: { projects: { nodes: [], pageInfo: { hasNextPage: false } } } });
+        },
+      ],
+    ]),
+  });
+  const projectsResult = await adapter(projects.fetcher).executeAction(
+    toolInput("linear.project.list", {}, staleSelection),
+  );
+  assert.deepEqual(projectsResult.result, { projects: [], truncated: false });
+  assert.equal(projects.calls.length, 1);
+});
+
+test("hostile search text travels only in variables", async () => {
+  for (const text of ['") { viewer { id } } #', '引号"测试']) {
+    let recordedQuery = "";
+    let recordedTerm: unknown;
+    const { fetcher } = router({
+      documents: new Map([
+        [
+          SEARCH_ISSUES_QUERY,
+          (_variables, call) => {
+            const body = JSON.parse(String(call.body)) as {
+              query: string;
+              variables: { term: unknown };
+            };
+            recordedQuery = body.query;
+            recordedTerm = body.variables.term;
+            return json({
+              data: { searchIssues: { nodes: [], pageInfo: { hasNextPage: false } } },
+            });
+          },
+        ],
+      ]),
+    });
+    await adapter(fetcher).executeAction(
+      toolInput("linear.issue.search", { query: text }, SELECTION),
+    );
+    assert.equal(recordedQuery, SEARCH_ISSUES_QUERY);
+    assert.equal(recordedTerm, text);
+  }
+});
+
+test("search passes the cursor as after", async () => {
   const { fetcher } = router({
     documents: new Map([
       [
         SEARCH_ISSUES_QUERY,
-        () =>
-          json({ data: { searchIssues: { nodes: [], pageInfo: { hasNextPage: false } } } }),
+        (variables) => {
+          assert.equal(variables.after, "cursor-xyz");
+          return json({ data: { searchIssues: { nodes: [], pageInfo: { hasNextPage: false } } } });
+        },
       ],
     ]),
   });
-  const result = await adapter(fetcher).executeAction(
-    toolInput("linear.issue.search", { query: "x" }, SELECTION),
+  await adapter(fetcher).executeAction(
+    toolInput("linear.issue.search", { query: "x", cursor: "cursor-xyz" }, SELECTION),
   );
-  assert.deepEqual(result.result, { issues: [], nextCursor: null });
 });
 
 test("malformed response is a failure, not an empty result", async () => {

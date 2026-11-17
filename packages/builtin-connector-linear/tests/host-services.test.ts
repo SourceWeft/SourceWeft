@@ -64,6 +64,18 @@ test("Linear capability registers one adapter and three tool defs without warnin
   assert.deepEqual(warnings, []);
 });
 
+test("host services accept activation value 1", async () => {
+  const result = await createConnectorAdapters({
+    env: environment({
+      LINEAR_CONNECTOR_ENABLED: "1",
+      LINEAR_CLIENT_ID: "id",
+      LINEAR_CLIENT_SECRET: "secret",
+    }),
+  });
+  assert.equal(result.adapters.length, 1);
+  assert.equal(result.agentToolDefs.length, 3);
+});
+
 test("Linear capability rejects malformed activation", () => {
   assert.throws(
     () =>
