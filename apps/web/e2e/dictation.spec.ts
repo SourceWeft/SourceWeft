@@ -42,6 +42,10 @@ test.use({
   },
 });
 
+// The fixture is 11.4 s of audio and opening the fake microphone can take
+// several seconds on a busy machine, so waits on dictation results are generous.
+const DICTATION_WAIT_MS = 60_000;
+
 // The text each stubbed segment answers with, indexed by its seq.
 const SEGMENT_TEXT = ["第一句。", "second sentence.", "third one."];
 
@@ -186,7 +190,7 @@ test("three spoken bursts appear in the composer in order", async ({
   await dictationButton(page).click();
   await expect(editor(page)).toHaveText(
     "第一句。second sentence. third one.",
-    { timeout: 20_000 },
+    { timeout: DICTATION_WAIT_MS },
   );
 
   // Stop dictation so the test does not leave the fake capture running.
@@ -236,16 +240,16 @@ test("send during dictation stops it and sends nothing", async ({
   await dictationButton(page).click();
   // Wait until the first result is in the editor, then send while dictation is
   // still active. More segments may still be arriving, so match on "contains".
-  await expect(editor(page)).toContainText(SEGMENT_TEXT[0]!, { timeout: 20_000 });
+  await expect(editor(page)).toContainText(SEGMENT_TEXT[0]!, { timeout: DICTATION_WAIT_MS });
 
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
 
   // Send during dictation stops it and sends nothing; the composer is kept.
   // The second burst can still be landing, so do not race an exact text match:
   // assert no thread was started, the button is back to Dictate, and the first
   // result is still present.
   await expect(dictationButton(page)).toHaveAttribute("aria-label", "Dictate", {
-    timeout: 20_000,
+    timeout: DICTATION_WAIT_MS,
   });
   expect(threadRequests).toEqual([]);
   await expect(editor(page)).toContainText(SEGMENT_TEXT[0]!);
@@ -264,7 +268,7 @@ test("without the profile there is no microphone button", async ({
   // Give the composer a chance to render before asserting absence.
   await expect(
     page.getByRole("button", { name: "Add image", exact: true }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: DICTATION_WAIT_MS });
   await expect(dictationButton(page)).toHaveCount(0);
 
   await context.close();
@@ -291,7 +295,7 @@ test("a 402 stops dictation and shows the credits notice", async ({
 
   await expect(
     page.getByText("Not enough credits to keep dictating.", { exact: true }),
-  ).toBeVisible({ timeout: 20_000 });
+  ).toBeVisible({ timeout: DICTATION_WAIT_MS });
   await expect(dictationButton(page)).toHaveAttribute("aria-label", "Dictate");
 
   await context.close();
