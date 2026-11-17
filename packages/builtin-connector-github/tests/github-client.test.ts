@@ -342,7 +342,7 @@ test("429 is GITHUB_RATE_LIMITED with retryAfterSeconds from retry-after", async
 });
 
 test("secondary rate limit 403 with retry-after is GITHUB_RATE_LIMITED", async () => {
-  const { api } = apiError({
+  const { api, calls } = apiError({
     status: 403,
     headers: { "retry-after": "60" },
     body: { message: "You have exceeded a secondary rate limit. Please wait a few minutes." },
@@ -350,6 +350,29 @@ test("secondary rate limit 403 with retry-after is GITHUB_RATE_LIMITED", async (
   await assertRejects(() => api.getUser(), "GITHUB_RATE_LIMITED", 429, (details) => {
     assert.equal(details?.retryAfterSeconds, 60);
   });
+  // A wait longer than ten seconds is not retried.
+  assert.equal(calls.length, 1);
+});
+
+test("a short secondary rate limit is retried once, then succeeds", async () => {
+  let call = 0;
+  const { fetcher, calls } = makeFetcher(() => {
+    call += 1;
+    if (call === 1) {
+      return {
+        status: 403,
+        headers: { "retry-after": "1" },
+        body: {
+          message: "You have exceeded a secondary rate limit. Please wait a few minutes.",
+        },
+      };
+    }
+    return { status: 200, body: { id: 7, login: "octocat", email: null } };
+  });
+  // retryBaseMs: 0 means the one-second wait takes no real time.
+  const user = await client(fetcher).forToken("t").getUser();
+  assert.equal(user.login, "octocat");
+  assert.equal(calls.length, 2);
 });
 
 test("403 without rate-limit headers is GITHUB_NOT_FOUND", async () => {

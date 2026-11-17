@@ -1098,11 +1098,27 @@ test("lists selected repositories and counts unavailable ones", async () => {
 
 test("results never contain the access token", async () => {
   const token = "ghs_SUPERSECRETTOKENvalue0123456789abcd";
+  // The fake echoes the token in fields the tools never map (an extra property
+  // on every node/row and at the top of each response), so a raw passthrough
+  // of any provider response would surface it in the result.
   const { fetcher } = router({
-    resolve: resolveFrom({ R_aa: "acme/one" }),
-    searchIssues: () => json({ total_count: 1, items: [issueSearchRow("acme/one")] }),
-    getIssue: () => json(issueResponse("acme/one")),
-    getComments: () => json([commentRow("hello")]),
+    resolve: (ids) =>
+      json({
+        data: {
+          nodes: ids.map((id) =>
+            id === "R_aa" ? { ...repoNode("R_aa", "acme/one"), secretEcho: token } : null,
+          ),
+        },
+        secretEcho: token,
+      }),
+    searchIssues: () =>
+      json({
+        total_count: 1,
+        items: [issueSearchRow("acme/one", { secretEcho: token })],
+        secretEcho: token,
+      }),
+    getIssue: () => json(issueResponse("acme/one", { secretEcho: token })),
+    getComments: () => json([commentRow("hello", { secretEcho: token })]),
   });
   const gh = adapter(fetcher);
 
@@ -1120,6 +1136,28 @@ test("results never contain the access token", async () => {
   });
 
   for (const result of [search.result, read.result, list.result]) {
-    assert.ok(!JSON.stringify(result).includes(token));
+    assert.ok(!JSON.stringify(result).includes(token), "a provider field leaked the token");
   }
+});
+
+test("an error body never carries the access token into the thrown error", async () => {
+  const token = "ghs_SUPERSECRETTOKENvalue0123456789abcd";
+  const { fetcher } = router({
+    resolve: resolveFrom({ R_aa: "acme/one" }),
+    // The provider error body echoes the token; the mapped error must not.
+    searchIssues: () => json({ message: `bad token ${token}`, secretEcho: token }, 422),
+  });
+  const gh = adapter(fetcher);
+  await assert.rejects(
+    gh.executeAction({
+      ...actionInput("github.items.search", { query: "bug" }, selection("R_aa")),
+      accessToken: token,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof GithubAdapterError);
+      const serialized = `${error.message} ${JSON.stringify(error.details ?? {})} ${error.stack ?? ""}`;
+      assert.ok(!serialized.includes(token), "the thrown error leaked the token");
+      return true;
+    },
+  );
 });
