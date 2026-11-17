@@ -71,6 +71,16 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
   );
 });
 
+test("both jobs build with Xcode 26, which App Store Connect requires", () => {
+  for (const name of ["verify", "testflight"]) {
+    assert.match(
+      jobBlock(name),
+      /xcode-select -s \/Applications\/Xcode_26\.\d+\.app/,
+      `${name} does not select Xcode 26`,
+    );
+  }
+});
+
 test("the workflow only calls subcommands the helper script defines", () => {
   const source = readFileSync(script, "utf8");
   for (const [, name] of workflow.matchAll(/ios-build\.mjs ([a-z-]+)/g)) {
