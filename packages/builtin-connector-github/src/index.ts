@@ -8,3 +8,7 @@ export {
 } from "./contribution";
 export { builtinGithubConnectorCapabilityManifest } from "./manifest";
 export { toBackendGithubManifest } from "./backend-manifest";
+export { createGithubConnectorAdapter } from "./adapter";
+export type { GithubAdapterConfig } from "./adapter";
+export { GithubAdapterError } from "./errors";
+export { createConnectorAdapters } from "./host-services";

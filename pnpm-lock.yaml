@@ -160,6 +160,21 @@ importers:
       '@modelcontextprotocol/client':
         specifier: 2.4.0
         version: 2.4.0
+      '@octokit/core':
+        specifier: ^7.0.8
+        version: 7.0.8
+      '@octokit/plugin-paginate-graphql':
+        specifier: ^6.0.0
+        version: 6.0.0(@octokit/core@7.0.8)
+      '@octokit/plugin-paginate-rest':
+        specifier: ^16.0.0
+        version: 16.0.0(@octokit/core@7.0.8)
+      '@octokit/plugin-retry':
+        specifier: ^8.1.1
+        version: 8.1.1(@octokit/core@7.0.8)
+      '@octokit/plugin-throttling':
+        specifier: ^11.0.5
+        version: 11.0.5(@octokit/core@7.0.8)
       '@sourceweft/agent-interpreter':
         specifier: workspace:*
         version: link:../../packages/agent-interpreter
@@ -175,6 +190,9 @@ importers:
       '@sourceweft/builtin-connector-dropbox':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-dropbox
+      '@sourceweft/builtin-connector-github':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-github
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-gmail
@@ -922,6 +940,9 @@ importers:
       '@sourceweft/builtin-connector-dropbox':
         specifier: workspace:*
         version: link:../builtin-connector-dropbox
+      '@sourceweft/builtin-connector-github':
+        specifier: workspace:*
+        version: link:../builtin-connector-github
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../builtin-connector-gmail
