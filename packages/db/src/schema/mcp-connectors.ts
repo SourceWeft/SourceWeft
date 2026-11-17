@@ -520,7 +520,7 @@ export const taskSchedules = pgTable(
     ),
     check(
       "task_schedules_target_check",
-      sql`(${table.taskKind} = 'connector_sync' and ${table.ownerKind} = 'workspace' and ${table.connectorId} is not null and ${table.agentTaskId} is null and ${table.intervalMinutes} > 0) or (${table.taskKind} = 'agent_task' and ${table.ownerKind} = 'user' and ${table.ownerUserId} is not null and ${table.connectorId} is null)`,
+      sql`(${table.taskKind} = 'connector_sync' and ${table.ownerKind} = 'workspace' and ${table.connectorId} is not null and ${table.agentTaskId} is null and ${table.intervalMinutes} > 0) or (${table.taskKind} = 'agent_task' and ${table.ownerKind} = 'user' and ${table.ownerUserId} is not null and ${table.agentTaskId} is not null and ${table.connectorId} is null)`,
     ),
     uniqueIndex("task_schedules_connector_uq").on(table.connectorId),
     uniqueIndex("task_schedules_agent_task_uq").on(table.agentTaskId),
@@ -544,8 +544,10 @@ export const scheduleOccurrences = pgTable(
     scheduleId: text("schedule_id")
       .notNull()
       .references(() => taskSchedules.id, { onDelete: "cascade" }),
-    teamId: text("team_id").notNull(),
-    workspaceId: text("workspace_id").notNull(),
+    // Nullable for one release so a writer from before these columns existed
+    // can still insert during a deploy; the engine always fills them.
+    teamId: text("team_id"),
+    workspaceId: text("workspace_id"),
     // The slot's nominal time; a task's fixed offset is not part of it.
     scheduledFor: timestamp("scheduled_for", {
       withTimezone: true,

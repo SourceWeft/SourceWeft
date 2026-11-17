@@ -125,20 +125,20 @@ describe("0078_agent_tasks", () => {
           status,
         })),
       );
-      // The columns are mandatory from now on.
+      // A writer from before the migration can still insert its old shape.
       expect(
         await rejected(
           client,
           "INSERT INTO schedule_occurrences(id, schedule_id, scheduled_for) VALUES ('occ-x', 'sched-a', now())",
         ),
-      ).toBe("error");
+      ).toBeNull();
       expect(
         (
           await client.query(
             "SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'schedule_occurrences' AND column_name IN ('team_id', 'workspace_id')",
           )
         ).rows,
-      ).toEqual([{ is_nullable: "NO" }, { is_nullable: "NO" }]);
+      ).toEqual([{ is_nullable: "YES" }, { is_nullable: "YES" }]);
     });
   });
 

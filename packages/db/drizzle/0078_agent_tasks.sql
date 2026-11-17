@@ -34,8 +34,6 @@ ALTER TABLE "threads" DROP CONSTRAINT "threads_origin_check";--> statement-break
 ALTER TABLE "schedule_occurrences" ADD COLUMN "team_id" text;--> statement-breakpoint
 ALTER TABLE "schedule_occurrences" ADD COLUMN "workspace_id" text;--> statement-breakpoint
 UPDATE "schedule_occurrences" AS o SET "team_id" = s."team_id", "workspace_id" = s."workspace_id" FROM "task_schedules" AS s WHERE s."id" = o."schedule_id";--> statement-breakpoint
-ALTER TABLE "schedule_occurrences" ALTER COLUMN "team_id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "schedule_occurrences" ALTER COLUMN "workspace_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "schedule_occurrences" ADD COLUMN "trigger_kind" text DEFAULT 'schedule' NOT NULL;--> statement-breakpoint
 ALTER TABLE "schedule_occurrences" ADD COLUMN "skip_reason" text;--> statement-breakpoint
 ALTER TABLE "schedule_occurrences" ADD COLUMN "chat_run_id" text;--> statement-breakpoint
@@ -55,5 +53,5 @@ ALTER TABLE "schedule_occurrences" ADD CONSTRAINT "schedule_occurrences_status_c
 ALTER TABLE "schedule_occurrences" ADD CONSTRAINT "schedule_occurrences_trigger_kind_check" CHECK ("schedule_occurrences"."trigger_kind" in ('schedule', 'manual', 'api', 'event'));--> statement-breakpoint
 ALTER TABLE "schedule_occurrences" ADD CONSTRAINT "schedule_occurrences_skip_reason_check" CHECK ("schedule_occurrences"."skip_reason" is null or ("schedule_occurrences"."status" in ('skipped', 'blocked') and "schedule_occurrences"."skip_reason" in ('missed_platform_down', 'previous_run_active', 'user_concurrency_limit', 'user_daily_cap', 'insufficient_credits', 'owner_left', 'tools_unavailable', 'auth_expired', 'rate_limited')));--> statement-breakpoint
 ALTER TABLE "schedule_occurrences" ADD CONSTRAINT "schedule_occurrences_task_version_check" CHECK ("schedule_occurrences"."task_version" is null or "schedule_occurrences"."task_version" >= 1);--> statement-breakpoint
-ALTER TABLE "task_schedules" ADD CONSTRAINT "task_schedules_target_check" CHECK (("task_schedules"."task_kind" = 'connector_sync' and "task_schedules"."owner_kind" = 'workspace' and "task_schedules"."connector_id" is not null and "task_schedules"."agent_task_id" is null and "task_schedules"."interval_minutes" > 0) or ("task_schedules"."task_kind" = 'agent_task' and "task_schedules"."owner_kind" = 'user' and "task_schedules"."owner_user_id" is not null and "task_schedules"."connector_id" is null));--> statement-breakpoint
+ALTER TABLE "task_schedules" ADD CONSTRAINT "task_schedules_target_check" CHECK (("task_schedules"."task_kind" = 'connector_sync' and "task_schedules"."owner_kind" = 'workspace' and "task_schedules"."connector_id" is not null and "task_schedules"."agent_task_id" is null and "task_schedules"."interval_minutes" > 0) or ("task_schedules"."task_kind" = 'agent_task' and "task_schedules"."owner_kind" = 'user' and "task_schedules"."owner_user_id" is not null and "task_schedules"."agent_task_id" is not null and "task_schedules"."connector_id" is null));--> statement-breakpoint
 ALTER TABLE "threads" ADD CONSTRAINT "threads_origin_check" CHECK ("threads"."origin" in ('user', 'subagent', 'scheduled'));

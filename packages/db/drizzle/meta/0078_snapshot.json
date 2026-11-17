@@ -1,5 +1,5 @@
 {
-  "id": "62d38850-e85c-4a04-b63f-5530e0e012d7",
+  "id": "6465af8f-e6df-408b-8eff-0d328d69df04",
   "prevId": "cbfe5c44-6c79-4cea-82cc-b31a481c807f",
   "version": "7",
   "dialect": "postgresql",
@@ -8349,13 +8349,13 @@
           "name": "team_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "workspace_id": {
           "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "scheduled_for": {
           "name": "scheduled_for",
@@ -9177,7 +9177,7 @@
         },
         "task_schedules_target_check": {
           "name": "task_schedules_target_check",
-          "value": "(\"task_schedules\".\"task_kind\" = 'connector_sync' and \"task_schedules\".\"owner_kind\" = 'workspace' and \"task_schedules\".\"connector_id\" is not null and \"task_schedules\".\"agent_task_id\" is null and \"task_schedules\".\"interval_minutes\" > 0) or (\"task_schedules\".\"task_kind\" = 'agent_task' and \"task_schedules\".\"owner_kind\" = 'user' and \"task_schedules\".\"owner_user_id\" is not null and \"task_schedules\".\"connector_id\" is null)"
+          "value": "(\"task_schedules\".\"task_kind\" = 'connector_sync' and \"task_schedules\".\"owner_kind\" = 'workspace' and \"task_schedules\".\"connector_id\" is not null and \"task_schedules\".\"agent_task_id\" is null and \"task_schedules\".\"interval_minutes\" > 0) or (\"task_schedules\".\"task_kind\" = 'agent_task' and \"task_schedules\".\"owner_kind\" = 'user' and \"task_schedules\".\"owner_user_id\" is not null and \"task_schedules\".\"agent_task_id\" is not null and \"task_schedules\".\"connector_id\" is null)"
         }
       },
       "isRLSEnabled": false

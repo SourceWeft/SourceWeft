@@ -338,6 +338,65 @@ test("the target check rejects a schedule that points at both kinds of target", 
   );
 });
 
+test("the target check rejects a task schedule without its task", async () => {
+  const tenant = await workspace();
+  const owner = await task(tenant);
+  assert.equal(
+    await violation(() =>
+      schema.db
+        .insert(schema.taskSchedules)
+        .values(taskSchedule(owner, { agentTaskId: null })),
+    ),
+    "task_schedules_target_check",
+  );
+  // Neither kind of target at all.
+  assert.equal(
+    await violation(() =>
+      schema.db.insert(schema.taskSchedules).values({
+        id: randomUUID(),
+        ...tenant,
+        taskKind: "connector_sync",
+        ownerKind: "workspace",
+        intervalMinutes: 60,
+      }),
+    ),
+    "task_schedules_target_check",
+  );
+});
+
+test("an occurrence may be written with or without its tenant keys for now", async () => {
+  const tenant = await workspace();
+  const connectorRow = connectorSchedule(tenant, await connector(tenant));
+  await schema.db.insert(schema.taskSchedules).values(connectorRow);
+  // The shape a scheduler from before this migration writes.
+  const oldShape = randomUUID();
+  await schema.db.insert(schema.scheduleOccurrences).values({
+    id: oldShape,
+    scheduleId: connectorRow.id,
+    scheduledFor: new Date("2027-01-01T00:00:00Z"),
+  });
+  const newShape = randomUUID();
+  await schema.db.insert(schema.scheduleOccurrences).values({
+    id: newShape,
+    scheduleId: connectorRow.id,
+    ...tenant,
+    scheduledFor: new Date("2027-01-01T01:00:00Z"),
+  });
+  const rows = await rowsOf(connectorRow.id);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  assert.equal(byId.get(oldShape)!.teamId, null);
+  assert.equal(byId.get(oldShape)!.workspaceId, null);
+  assert.equal(byId.get(oldShape)!.status, "pending");
+  assert.equal(byId.get(oldShape)!.triggerKind, "schedule");
+  assert.equal(byId.get(newShape)!.teamId, tenant.teamId);
+  assert.equal(byId.get(newShape)!.workspaceId, tenant.workspaceId);
+  // Both still go when the schedule's workspace is deleted.
+  await schema.db
+    .delete(schema.workspaces)
+    .where(eq(schema.workspaces.id, tenant.workspaceId));
+  assert.equal((await rowsOf(connectorRow.id)).length, 0);
+});
+
 test("a schedule can only point at a task with the same workspace, team and owner", async () => {
   const tenant = await workspace();
   const other = await workspace();
@@ -503,8 +562,7 @@ test("an occurrence records its tenant, trigger, version and links, with safe de
   assert.equal(stored!.taskVersion, null);
   assert.equal(stored!.isCatchUp, false);
 
-  // Tenant keys are mandatory and must name a real workspace of that team.
-  assert.equal(await insert({ teamId: undefined as never }), "23502");
+  // When present, the tenant keys must name a real workspace of that team.
   assert.equal(
     await insert({ teamId: other.teamId }),
     "schedule_occurrences_workspace_team_fk",
