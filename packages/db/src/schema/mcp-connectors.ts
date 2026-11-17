@@ -150,6 +150,7 @@ export const connectorOAuthStates = pgTable(
       mode: "date",
     }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+    attemptRef: text("attempt_ref"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),

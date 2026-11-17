@@ -27,10 +27,7 @@ function redirectWithOAuthResult(input: {
 export function registerConnectorOAuthRoutes(app: Hono) {
   app.get("/v1/connectors/oauth/:connectorType/callback", async (c) => {
     const connectorType = requireRouteParam(c, "connectorType");
-    const code = c.req.query("code");
     const state = c.req.query("state");
-    const oauthError = c.req.query("error");
-    const oauthErrorDescription = c.req.query("error_description");
     if (!state) {
       throw new ApiError(
         400,
@@ -39,6 +36,59 @@ export function registerConnectorOAuthRoutes(app: Hono) {
       );
     }
 
+    const brokered =
+      connectorOAuthService.usesBrokeredAuthorization(connectorType);
+
+    if (brokered) {
+      const status = c.req.query("status");
+      if (status !== "success") {
+        const stateRow = await connectorOAuthService.getGlobalCallbackState({
+          connectorType,
+          state,
+        });
+        if (stateRow?.redirectAfter) {
+          return c.redirect(
+            redirectWithOAuthResult({
+              connectorType,
+              error:
+                c.req.query("error_description") ||
+                c.req.query("error") ||
+                "Connector authorization did not complete.",
+              redirectAfter: stateRow.redirectAfter,
+              status: "error",
+              workspaceId: stateRow.workspaceId,
+            }),
+          );
+        }
+        throw new ApiError(
+          400,
+          "CONNECTOR_OAUTH_CALLBACK_INVALID",
+          "Connector authorization did not complete",
+        );
+      }
+
+      const result = await connectorOAuthService.finishGlobalCallback({
+        connectorType,
+        state,
+        callbackParams: { ...c.req.query() },
+      });
+      if (result.redirectAfter) {
+        return c.redirect(
+          redirectWithOAuthResult({
+            accountId: result.account.id,
+            connectorType: result.account.connectorType,
+            redirectAfter: result.redirectAfter,
+            status: "success",
+            workspaceId: result.account.workspaceId,
+          }),
+        );
+      }
+      return ApiResponse.success(c, result);
+    }
+
+    const code = c.req.query("code");
+    const oauthError = c.req.query("error");
+    const oauthErrorDescription = c.req.query("error_description");
     if (oauthError || !code) {
       const stateRow = await connectorOAuthService.getGlobalCallbackState({
         connectorType,

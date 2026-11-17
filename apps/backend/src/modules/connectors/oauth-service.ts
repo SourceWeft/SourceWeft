@@ -31,6 +31,29 @@ import type {
   OAuthTokenSet,
 } from "./types";
 
+/**
+ * Narrow a connector manifest to its `oauth2` auth variant, for the standard
+ * OAuth2 flow this service implements. `start` and `finishGlobalCallback`
+ * branch on the adapter's brokered hooks before this guard runs, so it is
+ * only reached for a genuine OAuth2 manifest there; `finish` (the
+ * workspace-scoped callback) stays OAuth2-only and keeps calling this
+ * unconditionally, so a brokered manifest reaching it is rejected.
+ */
+function assertOAuth2Manifest(
+  manifest: ConnectorManifest,
+): asserts manifest is ConnectorManifest & {
+  auth: Extract<ConnectorManifest["auth"], { kind: "oauth2" }>;
+} {
+  if (manifest.auth.kind !== "oauth2") {
+    throw new ConnectorError(
+      500,
+      "CONNECTOR_AUTH_KIND_UNSUPPORTED",
+      `${manifest.displayName} does not use the standard OAuth2 authorization flow`,
+      { connectorType: manifest.type, authKind: manifest.auth.kind },
+    );
+  }
+}
+
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 const REFRESH_LOCK_TIMEOUT_MS = 30_000;
@@ -145,12 +168,53 @@ export class ConnectorOAuthService {
     });
     await this.access.requireAvailable(input.connectorType, input.userId);
     const manifest = this.registry.getManifest(input.connectorType);
+    const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS);
+
+    if (manifest.auth.kind === "brokered") {
+      const adapter = this.registry.getAdapter(input.connectorType);
+      const state = randomBytes(32).toString("base64url");
+      const callbackUrl = `${config.auth.baseUrl}/v1/connectors/oauth/${input.connectorType}/callback?state=${state}`;
+      let started;
+      try {
+        started = await adapter.startAuthorization?.({
+          callbackUrl,
+          ownerRef: `ws_${workspace.id}`,
+        });
+      } catch (error) {
+        throw toConnectorError(error);
+      }
+      if (!started) {
+        throw new ConnectorError(
+          500,
+          "CONNECTOR_AUTH_KIND_UNSUPPORTED",
+          `${manifest.displayName} is configured for brokered authorization but its adapter does not implement startAuthorization`,
+          { connectorType: input.connectorType },
+        );
+      }
+
+      await createOAuthStateRecord({
+        stateHash: hashState(state),
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: input.userId,
+        connectorType: input.connectorType,
+        redirectAfter: input.redirectAfter ?? null,
+        expiresAt,
+        attemptRef: started.attemptRef,
+      });
+
+      return {
+        authorizationUrl: started.authorizationUrl,
+        expiresAt: expiresAt.toISOString(),
+      };
+    }
+
+    assertOAuth2Manifest(manifest);
     assertAuthorizationParamsConfigured({
       connectorType: input.connectorType,
       manifest,
     });
     const state = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS);
 
     await createOAuthStateRecord({
       stateHash: hashState(state),
@@ -197,6 +261,18 @@ export class ConnectorOAuthService {
     code: string;
     state: string;
   }) {
+    // A brokered connector completes authorization through the global callback
+    // (`finishGlobalCallback`), never this workspace-scoped code-exchange path.
+    // Reject it before the state row is consumed, so a stray hit here does not
+    // burn the single-use handshake, and with a client 400 rather than a 500.
+    if (this.usesBrokeredAuthorization(input.connectorType)) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_OAUTH_CALLBACK_INVALID",
+        "This connector completes authorization through its broker, not the workspace callback",
+        { connectorType: input.connectorType },
+      );
+    }
     const stateRow = await consumeOAuthStateRecord({
       stateHash: hashState(input.state),
       connectorType: input.connectorType,
@@ -218,6 +294,7 @@ export class ConnectorOAuthService {
     await this.access.requireAvailable(input.connectorType, stateRow.userId);
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
+    assertOAuth2Manifest(manifest);
     const tokenSet = await adapter.exchangeOAuthCode({
       code: input.code,
       redirectUri: resolveCallbackUrl({
@@ -244,8 +321,9 @@ export class ConnectorOAuthService {
 
   async finishGlobalCallback(input: {
     connectorType: string;
-    code: string;
     state: string;
+    code?: string;
+    callbackParams?: Record<string, string>;
   }) {
     const stateRow = await consumeOAuthStateRecord({
       stateHash: hashState(input.state),
@@ -268,23 +346,74 @@ export class ConnectorOAuthService {
     await this.access.requireAvailable(input.connectorType, stateRow.userId);
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
-    const tokenSet = await adapter.exchangeOAuthCode({
-      code: input.code,
-      redirectUri: resolveCallbackUrl({
-        manifest,
+
+    let tokenSet: OAuthTokenSet;
+    if (adapter.finishAuthorization) {
+      if (!stateRow.attemptRef) {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_OAUTH_STATE_INVALID",
+          "Connector OAuth state is invalid or expired",
+        );
+      }
+      try {
+        tokenSet = await adapter.finishAuthorization({
+          callbackParams: input.callbackParams ?? {},
+          attemptRef: stateRow.attemptRef,
+          ownerRef: `ws_${stateRow.workspaceId}`,
+        });
+      } catch (error) {
+        throw toConnectorError(error);
+      }
+    } else {
+      assertOAuth2Manifest(manifest);
+      if (!input.code) {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_OAUTH_CALLBACK_INVALID",
+          "OAuth callback code is required",
+        );
+      }
+      tokenSet = await adapter.exchangeOAuthCode({
+        code: input.code,
+        redirectUri: resolveCallbackUrl({
+          manifest,
+          workspaceId: stateRow.workspaceId,
+          connectorType: input.connectorType,
+        }),
+        scopes: manifest.auth.scopes,
+      });
+    }
+
+    let account;
+    try {
+      account = await this.storeAuthorization({
+        teamId: stateRow.teamId,
         workspaceId: stateRow.workspaceId,
+        userId: stateRow.userId,
         connectorType: input.connectorType,
-      }),
-      scopes: manifest.auth.scopes,
-    });
-    const account = await this.storeAuthorization({
-      teamId: stateRow.teamId,
-      workspaceId: stateRow.workspaceId,
-      userId: stateRow.userId,
-      connectorType: input.connectorType,
-      manifest,
-      tokenSet,
-    });
+        manifest,
+        tokenSet,
+      });
+    } catch (error) {
+      // A brokered `finishAuthorization` has already created a live connection
+      // at the broker. If persisting it fails, the state row is spent and the
+      // user must start again, so revoke that connection best-effort rather
+      // than leave a grant SourceWeft can no longer see. No account row exists
+      // yet, so only the connector type is logged on failure.
+      if (adapter.finishAuthorization && adapter.revokeAuthorization) {
+        try {
+          await adapter.revokeAuthorization({
+            accessToken: tokenSet.accessToken,
+          });
+        } catch {
+          logger.error("connector_authorization_revoke_failed", {
+            connectorType: input.connectorType,
+          });
+        }
+      }
+      throw error;
+    }
 
     return {
       account,
@@ -330,6 +459,17 @@ export class ConnectorOAuthService {
         })
       : null;
     if (stored) {
+      // Captured before the overwrite below, and only when the adapter can
+      // revoke it: brokered adapters with `revokeAuthorization` must revoke
+      // the credential being replaced, after the new one is safely stored.
+      const adapter = this.registry.getAdapter(input.connectorType);
+      const replaced = adapter.revokeAuthorization
+        ? await findOAuthAccountRecord({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            accountId: stored.id,
+          })
+        : null;
       const reauthorized = await reauthorizeOAuthAccountRecord({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -342,6 +482,19 @@ export class ConnectorOAuthService {
         expiresAt,
       });
       if (reauthorized) {
+        if (replaced) {
+          // When the broker re-links the same mailbox under the same
+          // connected-account id, the "replaced" credential is byte-for-byte
+          // the one just stored; revoking it would delete the connection we
+          // just kept. Only revoke a credential that genuinely differs.
+          const replacedAccessToken = await decryptTeamSecret(
+            replaced.accessTokenEncrypted,
+            replaced.teamId,
+          );
+          if (replacedAccessToken !== tokenSet.accessToken) {
+            await this.revokeReplacedAuthorization(replaced);
+          }
+        }
         return reauthorized;
       }
     }
@@ -359,6 +512,83 @@ export class ConnectorOAuthService {
       expiresAt,
       createdBy: input.userId,
     });
+  }
+
+  /** Whether a connector's manifest declares the brokered auth flow. */
+  usesBrokeredAuthorization(connectorType: string): boolean {
+    return this.registry.getManifest(connectorType).auth?.kind === "brokered";
+  }
+
+  /**
+   * Revoke a stored authorization at the provider. A no-op when the adapter
+   * has no `revokeAuthorization` hook (every standard OAuth2 adapter today).
+   * The credential is decrypted only for this call and never logged.
+   */
+  async revokeStoredAuthorization(
+    account: ConnectorOAuthAccountSecretRecord,
+  ): Promise<void> {
+    let adapter: ConnectorAdapter;
+    try {
+      adapter = this.registry.getAdapter(account.connectorType);
+    } catch (error) {
+      // The connector type is switched off at deployment level
+      // (e.g. GMAIL_CONNECTOR_ENABLED=false): there is no adapter in this
+      // process to revoke through, and a switched-off connector cannot make
+      // new connections either, so this is "nothing this process can revoke".
+      // Let the local delete proceed, as it did before brokered revocation.
+      if (
+        error instanceof ConnectorError &&
+        error.code === "CONNECTOR_ADAPTER_NOT_FOUND"
+      ) {
+        logger.error("connector_authorization_revoke_skipped", {
+          accountId: account.id,
+          connectorType: account.connectorType,
+        });
+        return;
+      }
+      throw error;
+    }
+    if (!adapter.revokeAuthorization) {
+      return;
+    }
+    const accessToken = await decryptTeamSecret(
+      account.accessTokenEncrypted,
+      account.teamId,
+    );
+    try {
+      await adapter.revokeAuthorization({ accessToken });
+    } catch (error) {
+      // Record the cause (the classified error code, never its message or any
+      // credential) so an operator can see why a provider revoke failed before
+      // the caller sees the generic retryable error.
+      logger.error("connector_authorization_revoke_failed", {
+        accountId: account.id,
+        connectorType: account.connectorType,
+        code: toConnectorError(error).code,
+      });
+      throw new ConnectorError(
+        502,
+        "CONNECTOR_AUTHORIZATION_REVOKE_FAILED",
+        "The connection could not be removed at the provider. Try again.",
+      );
+    }
+  }
+
+  /**
+   * Same revocation, but for the account a reauthorization just replaced: a
+   * failure here must not fail the reconnect that already stored the new
+   * credential, so it is logged (account id only) instead of thrown.
+   */
+  private async revokeReplacedAuthorization(
+    account: ConnectorOAuthAccountSecretRecord,
+  ): Promise<void> {
+    try {
+      await this.revokeStoredAuthorization(account);
+    } catch {
+      logger.error("connector_authorization_revoke_failed", {
+        accountId: account.id,
+      });
+    }
   }
 
   async getGlobalCallbackState(input: {
