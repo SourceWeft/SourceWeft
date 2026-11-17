@@ -265,6 +265,11 @@ function decodeBrowseCursor(cursor: string): BrowseCursor {
   if ((t !== null && typeof t !== "string") || typeof a !== "string") {
     throw invalidRequest();
   }
+  // The team id is checked like `containerId`: a cursor carrying any other
+  // team value is rejected before any request is made.
+  if (typeof t === "string" && !SELECTION_ITEM_ID.test(t)) {
+    throw invalidRequest();
+  }
   return { teamId: t, after: a };
 }
 
@@ -505,6 +510,15 @@ export function createLinearConnectorAdapter(
   });
   const redirectUri = `${config.baseUrl}/v1/connectors/oauth/linear/callback`;
 
+  /** Without both credentials no token call can succeed, so fail with
+   * `LINEAR_UNAVAILABLE` before reaching Linear rather than sending a request
+   * that is guaranteed to be rejected. */
+  function requireConfiguredClient(): void {
+    if (!config.clientId || !config.clientSecret) {
+      throw new LinearAdapterError(503, "LINEAR_UNAVAILABLE", "Linear is unavailable");
+    }
+  }
+
   /** Root teams page: `after` continues a prior page (continuation pages
    * report `container: null`); omitted, it is the listing's first page
    * (which additionally reports `container: null`, since a team sits
@@ -743,7 +757,15 @@ export function createLinearConnectorAdapter(
         { id },
       );
     } catch (error) {
-      if (error instanceof LinearAdapterError && error.code === "LINEAR_NOT_FOUND") {
+      // The id was already pattern-validated, so not-found is the only
+      // provider-side error expected here. An unrecognised GraphQL error
+      // (LINEAR_REQUEST_FAILED) is folded into the same not-found so a missing
+      // issue cannot answer differently from an out-of-scope one. Rate limits,
+      // unavailability and reauthorization still propagate.
+      if (
+        error instanceof LinearAdapterError &&
+        (error.code === "LINEAR_NOT_FOUND" || error.code === "LINEAR_REQUEST_FAILED")
+      ) {
         throw issueNotFound();
       }
       throw error;
@@ -821,6 +843,7 @@ export function createLinearConnectorAdapter(
       });
     },
     async exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet> {
+      requireConfiguredClient();
       const token = await client.exchangeAuthorizationCode(input.code, input.redirectUri);
       const identity = await client.query<{
         viewer: { id: string; name: string; email: string };
@@ -833,7 +856,8 @@ export function createLinearConnectorAdapter(
         displayName: identity.organization.name,
       };
     },
-    refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+    async refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
+      requireConfiguredClient();
       return client.refreshAccessToken(input.refreshToken);
     },
     // Tools-only connector: nothing is ever discovered or indexed. The

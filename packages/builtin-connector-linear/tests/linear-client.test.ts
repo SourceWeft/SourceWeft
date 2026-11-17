@@ -427,3 +427,81 @@ test("error messages carry no token or variables", async () => {
     },
   );
 });
+
+test("ok response without data is LINEAR_UNAVAILABLE", async () => {
+  const bodies: Array<() => Response> = [
+    () => new Response("", { status: 200, headers: { "Content-Type": "application/json" } }),
+    () => new Response("not json", { status: 200, headers: { "Content-Type": "text/plain" } }),
+    () => json({}),
+    () => json({ data: null }),
+  ];
+  for (const make of bodies) {
+    const client = linear(async () => make());
+    await assert.rejects(client.query("token", IDENTITY_QUERY, {}), (error) => {
+      assert.ok(error instanceof LinearAdapterError);
+      assert.equal(error.statusCode, 503);
+      assert.equal(error.code, "LINEAR_UNAVAILABLE");
+      assert.match(error.message, /Linear request failed \(200\)/);
+      return true;
+    });
+  }
+});
+
+test("token response that is not JSON is LINEAR_UNAVAILABLE", async () => {
+  const client = linear(async () => new Response("oops", { status: 200 }));
+
+  await assert.rejects(client.refreshAccessToken("stored-refresh-token"), (error) => {
+    assert.ok(error instanceof LinearAdapterError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "LINEAR_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("token response without access_token is LINEAR_UNAVAILABLE", async () => {
+  const client = linear(async () => json({ expires_in: 3600, scope: "read" }));
+
+  await assert.rejects(client.refreshAccessToken("stored-refresh-token"), (error) => {
+    assert.ok(error instanceof LinearAdapterError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "LINEAR_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("invalid_client on refresh is LINEAR_UNAVAILABLE", async () => {
+  const client = linear(async () => json({ error: "invalid_client" }, 400));
+
+  await assert.rejects(client.refreshAccessToken("stored-refresh-token"), (error) => {
+    assert.ok(error instanceof LinearAdapterError);
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "LINEAR_UNAVAILABLE");
+    return true;
+  });
+});
+
+test("invalid_grant on refresh is LINEAR_REAUTH_REQUIRED", async () => {
+  const client = linear(async () => json({ error: "invalid_grant" }, 400));
+
+  await assert.rejects(client.refreshAccessToken("stored-refresh-token"), (error) => {
+    assert.ok(error instanceof LinearAdapterError);
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "LINEAR_REAUTH_REQUIRED");
+    return true;
+  });
+});
+
+test("token requests pass a timeout signal", async () => {
+  const { fetcher, calls } = recordingFetcher((call) =>
+    call.url.endsWith("/oauth/token")
+      ? json({ access_token: "a", expires_in: 3600, scope: "read" })
+      : json({ data: { viewer: { id: "u1" } } }),
+  );
+  const client = linear(fetcher);
+
+  await client.refreshAccessToken("stored-refresh-token");
+  await client.query("access-token", IDENTITY_QUERY, {});
+
+  assert.ok((calls[0]?.init.signal as unknown) instanceof AbortSignal);
+  assert.ok((calls[1]?.init.signal as unknown) instanceof AbortSignal);
+});

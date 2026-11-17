@@ -286,8 +286,11 @@ test("stale selection returns empty results", async () => {
 });
 
 test("malformed response is a failure, not an empty result", async () => {
+  // A 2xx body that carries `data` but no `searchIssues` connection: the client
+  // returns the object, and the tool's own shape guard rejects it as 502
+  // (a `{}` body with no `data` at all is the client's 503 case, tested there).
   const { fetcher } = router({
-    documents: new Map([[SEARCH_ISSUES_QUERY, () => json({})]]),
+    documents: new Map([[SEARCH_ISSUES_QUERY, () => json({ data: {} })]]),
   });
   await assert.rejects(
     adapter(fetcher).executeAction(toolInput("linear.issue.search", { query: "x" }, SELECTION)),
@@ -450,6 +453,35 @@ test("out-of-scope, missing and forbidden issues give the same LINEAR_NOT_FOUND 
         error.message === "Linear issue not found",
     );
   }
+});
+
+test("an unrecognised provider error on read is the same not-found", async () => {
+  const { fetcher } = router({
+    documents: new Map([
+      [ISSUE_QUERY, () => json({ errors: [{ message: "Something else" }] }, 200)],
+    ]),
+  });
+  await assert.rejects(
+    adapter(fetcher).executeAction(toolInput("linear.issue.read", { id: "ENG-1" }, SELECTION)),
+    (error: unknown) =>
+      error instanceof LinearAdapterError &&
+      error.statusCode === 404 &&
+      error.code === "LINEAR_NOT_FOUND" &&
+      error.message === "Linear issue not found",
+  );
+});
+
+test("a rate limit on read is not folded", async () => {
+  const { fetcher } = router({
+    documents: new Map([
+      [ISSUE_QUERY, () => json({ errors: [{ message: "rate limited" }] }, 429)],
+    ]),
+  });
+  await assert.rejects(
+    adapter(fetcher).executeAction(toolInput("linear.issue.read", { id: "ENG-1" }, SELECTION)),
+    (error: unknown) =>
+      error instanceof LinearAdapterError && error.code === "LINEAR_RATE_LIMITED",
+  );
 });
 
 test("rejects an id with spaces or a slash without a request", async () => {

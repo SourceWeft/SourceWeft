@@ -3,6 +3,11 @@ import type { OAuthTokenSet } from "@sourceweft/contracts";
 const TOKEN_URL = "https://api.linear.app/oauth/token";
 const GRAPHQL_URL = "https://api.linear.app/graphql";
 const REQUEST_TIMEOUT_MS = 30000;
+/** The token endpoint gets a shorter budget than GraphQL: the platform
+ * abandons a refresh after 20 seconds, and Linear's refresh tokens are
+ * single-use, so a refresh that returns later than that would rotate the
+ * token with nobody left to store it. */
+const TOKEN_REQUEST_TIMEOUT_MS = 15_000;
 /** Used when neither `Retry-After` nor `X-RateLimit-Requests-Reset` is
  * present on a rate-limited response. */
 const DEFAULT_RATE_LIMIT_RETRY_SECONDS = 60;
@@ -98,13 +103,27 @@ export function createLinearClient(options: LinearClientOptions) {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: params,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
       });
     } catch {
       throw unavailable();
     }
     if (!response.ok) {
       if (response.status === 400 || response.status === 401) {
+        // A wrong deployment client secret (`invalid_client` /
+        // `unauthorized_client`) is not the user's authorization failing:
+        // treat it as unavailable so the platform keeps retrying instead of
+        // marking every account as needing reauthorization. Only the `error`
+        // field is read; the response body never enters a message.
+        let errorCode: unknown;
+        try {
+          errorCode = ((await response.json()) as { error?: unknown }).error;
+        } catch {
+          errorCode = undefined;
+        }
+        if (errorCode === "invalid_client" || errorCode === "unauthorized_client") {
+          throw unavailable();
+        }
         throw new LinearAdapterError(400, "LINEAR_REAUTH_REQUIRED", "Linear reauthorization required");
       }
       if (response.status === 429) {
@@ -115,9 +134,19 @@ export function createLinearClient(options: LinearClientOptions) {
       }
       throw new LinearAdapterError(502, "LINEAR_REQUEST_FAILED", `Linear request failed (${response.status})`);
     }
-    const payload = (await response.json()) as TokenResponseBody;
+    let payload: TokenResponseBody;
+    try {
+      payload = (await response.json()) as TokenResponseBody;
+    } catch {
+      throw unavailable();
+    }
+    // A 2xx with no usable access token is an upstream fault, never a stored
+    // empty token.
+    if (typeof payload.access_token !== "string" || payload.access_token.length === 0) {
+      throw unavailable();
+    }
     return {
-      accessToken: payload.access_token ?? "",
+      accessToken: payload.access_token,
       // A refresh response may carry no refresh_token: the caller keeps
       // using the one it already stored.
       refreshToken: payload.refresh_token ?? undefined,
@@ -196,7 +225,14 @@ export function createLinearClient(options: LinearClientOptions) {
       if (!response.ok || (body?.errors && body.errors.length > 0)) {
         throw new LinearAdapterError(502, "LINEAR_REQUEST_FAILED", `Linear request failed (${response.status})`);
       }
-      return body?.data as T;
+      // A 2xx whose body cannot be parsed, or carries neither object-valued
+      // `data` nor an `errors` array, is an upstream fault, not an answer:
+      // `query` must never resolve `undefined`, so callers that dereference
+      // `data` directly can rely on it.
+      if (!body || typeof body.data !== "object" || body.data === null) {
+        throw new LinearAdapterError(503, "LINEAR_UNAVAILABLE", `Linear request failed (${response.status})`);
+      }
+      return body.data as T;
     },
   };
 }

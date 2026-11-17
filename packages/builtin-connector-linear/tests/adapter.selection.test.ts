@@ -143,6 +143,24 @@ test("exchange maps organization and viewer to the account", async () => {
   assert.equal(token.displayName, "Acme Co");
 });
 
+test("refresh without a configured secret is LINEAR_UNAVAILABLE and makes no request", async () => {
+  const { fetcher, calls } = router({});
+  const noSecret = createLinearConnectorAdapter({
+    baseUrl: "https://sourceweft.example",
+    clientId: "client-id",
+    clientSecret: "",
+    fetcher,
+  });
+  await assert.rejects(
+    noSecret.refreshOAuthToken({ refreshToken: "stored-refresh-token", scopes: ["read"] }),
+    (error: unknown) =>
+      error instanceof LinearAdapterError &&
+      error.statusCode === 503 &&
+      error.code === "LINEAR_UNAVAILABLE",
+  );
+  assert.equal(calls.length, 0);
+});
+
 // ---------------------------------------------------------------------------
 // parseLinearSelection
 // ---------------------------------------------------------------------------
@@ -365,6 +383,17 @@ test("browse rejects a cursor that does not decode", async () => {
   const { fetcher, calls } = router({});
   await assert.rejects(
     adapter(fetcher).executeAction(actionInput("linear.browse", { cursor: "####" })),
+    (error: unknown) =>
+      error instanceof LinearAdapterError && error.code === "LINEAR_INVALID_REQUEST",
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("browse rejects a cursor whose team id is not a UUID", async () => {
+  const { fetcher, calls } = router({});
+  const cursor = encodeCursor("not-a-uuid", "after-cursor");
+  await assert.rejects(
+    adapter(fetcher).executeAction(actionInput("linear.browse", { cursor })),
     (error: unknown) =>
       error instanceof LinearAdapterError && error.code === "LINEAR_INVALID_REQUEST",
   );
