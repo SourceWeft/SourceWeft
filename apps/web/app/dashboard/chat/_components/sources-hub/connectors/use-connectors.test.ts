@@ -115,6 +115,15 @@ const toolsSelectionSpec = {
   kinds: ["item"],
   maxItems: 100,
 };
+const githubSelectionSpec = {
+  actions: {
+    browse: "github.browse",
+    search: "github.search",
+    describe: "github.describe",
+  },
+  kinds: ["account", "repository"],
+  maxItems: 20,
+};
 
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
@@ -601,6 +610,61 @@ test("dropbox connect creates an empty selection and opens settings", async () =
   expect(sync).not.toHaveBeenCalled();
   expect(api().connectorSettingsConnector?.id).toBe("dropbox-1");
   expect(toastSuccess).toHaveBeenCalledWith("Dropbox connected.");
+});
+
+test("github connect creates an empty selection without periodic indexing and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "github", selection: githubSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-gh",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "github-1",
+    connectorType: "github",
+    name: "Person",
+    oauthAccountId: "acc-gh",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  // The new connector is listed once it exists.
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-github",
+    connectorType: "github",
+    accountId: "acc-gh",
+  });
+
+  await mountHook(baseInput("ws-github"));
+
+  expect(create).toHaveBeenCalledWith("ws-github", {
+    connectorType: "github",
+    name: "Person",
+    oauthAccountId: "acc-gh",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(create.mock.calls[0]?.[1]).not.toHaveProperty(
+    "indexingFrequencyMinutes",
+  );
+  // Nothing is selected yet, so nothing is synced; settings open instead.
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("github-1");
+  expect(toastSuccess).toHaveBeenCalledWith("GitHub connected.");
 });
 
 test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {

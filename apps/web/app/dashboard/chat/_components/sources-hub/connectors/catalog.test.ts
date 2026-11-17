@@ -2,6 +2,8 @@ import type { SourceConnector } from "@sourceweft/sdk";
 import { describe, expect, test } from "vitest";
 import { connectorCatalog, connectorCatalogForAvailableTypes } from "./catalog";
 import { getCatalogStatus } from "./components";
+import en from "../../../../../../messages/en.json";
+import zhCN from "../../../../../../messages/zh-CN.json";
 
 test("catalog lists only implemented connectors", () => {
   expect(
@@ -10,8 +12,9 @@ test("catalog lists only implemented connectors", () => {
       "gmail",
       "google_drive",
       "dropbox",
+      "github",
     ]).map((i) => i.id),
-  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox", "github"]);
 });
 
 test("Gmail stays hidden in the catalog until the backend registers it", () => {
@@ -52,6 +55,76 @@ test("Notion never depends on backend registration", () => {
   expect(connectorCatalogForAvailableTypes([]).map((i) => i.id)).toEqual([
     "notion",
   ]);
+});
+
+test("github hidden until registered", () => {
+  expect(
+    connectorCatalogForAvailableTypes([
+      "notion",
+      "gmail",
+      "google_drive",
+      "dropbox",
+    ]).map((i) => i.id),
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  const github = connectorCatalog.find((item) => item.id === "github");
+  expect(github).toMatchObject({
+    name: "GitHub",
+    category: "Knowledge & Docs",
+    description:
+      "Let agents search and read issues, pull requests and discussions in the repositories you choose.",
+    capabilities: ["Issues & pull requests", "Discussions", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    logoIconName: "github",
+    logoIconTone: "mono",
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  });
+});
+
+describe("github selection copy", () => {
+  const GITHUB_SELECTION_KEYS = [
+    "itemsTitle",
+    "itemsDescription",
+    "choose",
+    "empty",
+    "browser.description",
+    "browser.root",
+    "browser.emptyRoot",
+    "kinds.account",
+    "kinds.repository",
+    "helpLink.add_repositories",
+  ];
+
+  function getPath(root: unknown, path: string): unknown {
+    return path
+      .split(".")
+      .reduce<unknown>(
+        (value, segment) =>
+          typeof value === "object" && value !== null
+            ? (value as Record<string, unknown>)[segment]
+            : undefined,
+        root,
+      );
+  }
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const catalog = catalogName === "en" ? en : zhCN;
+    const githubEntry = getPath(
+      catalog,
+      "dashboardSourcesHub.connectors.selection.byType.github",
+    );
+
+    test(`${catalogName} has all ten github selection keys`, () => {
+      for (const key of GITHUB_SELECTION_KEYS) {
+        const value = getPath(githubEntry, key);
+        expect(typeof value, key).toBe("string");
+        expect((value as string).trim().length, key).toBeGreaterThan(0);
+      }
+    });
+  }
 });
 
 describe("sync-block-status.test.ts", () => {

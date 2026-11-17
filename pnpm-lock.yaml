@@ -616,6 +616,9 @@ importers:
       '@sourceweft/billing':
         specifier: workspace:*
         version: link:../../enterprise/billing
+      '@sourceweft/builtin-connector-github':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-github
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-gmail
