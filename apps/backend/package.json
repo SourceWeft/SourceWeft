@@ -50,6 +50,7 @@
     "@better-auth/i18n": "1.7.7",
     "@better-auth/oauth-provider": "1.7.7",
     "@better-auth/passkey": "1.7.7",
+    "@better-auth/sso": "1.7.7",
     "@better-auth/utils": "0.4.2",
     "@hono/node-server": "2.1.6",
     "@langchain/core": "^1.2.9",
@@ -93,7 +94,9 @@
     "@sourceweft/market-contracts": "workspace:*",
     "@sourceweft/market-sdk": "workspace:*",
     "@sourceweft/model-gateway": "workspace:*",
+    "@sourceweft/security-braces": "workspace:*",
     "@sourceweft/skill-format": "workspace:*",
+    "@xmldom/xmldom": "0.8.15",
     "better-auth": "1.7.7",
     "bullmq": "^5.81.3",
     "deepagents": "1.13.1",
@@ -122,8 +125,7 @@
     "unique-names-generator": "^4.7.1",
     "ws": "^8.21.3",
     "yaml": "^2.9.0",
-    "zod": "^4.6.6",
-    "@sourceweft/security-braces": "workspace:*"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -137,6 +139,7 @@
     "concurrently": "^9.2.4",
     "eslint": "^9.39.5",
     "globals": "^16.5.0",
+    "samlify": "2.15.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.12",
     "vitest": "4.1.12"

@@ -97,6 +97,7 @@ export function MobileLoginView({ path }: { path: string }) {
   const router = useRouter();
   const t = useTranslations("authPages.mobileLogin");
   const tAuthUi = useTranslations("authUi");
+  const tSso = useTranslations("authLocale.plugins.sso");
   const [mode, setMode] = useState<MobileAuthMode>(() =>
     resolveInitialMode(path),
   );
@@ -479,6 +480,17 @@ export function MobileLoginView({ path }: { path: string }) {
               {copy.submit}
             </Button>
           </form>
+
+          {!isSignUp && (
+            <div className="mt-3 flex justify-center [@media(max-height:760px)]:mt-2">
+              <Link
+                className="text-sm font-medium text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+                href="/auth/sso"
+              >
+                {tSso("signInWithSso")}
+              </Link>
+            </div>
+          )}
 
           <div className="mt-4 flex items-center justify-center gap-1.5 text-sm text-muted-foreground [@media(max-height:760px)]:mt-2">
             {isSignUp ? (

@@ -105,7 +105,10 @@ export default function Page() {
         </div>
       </div>
 
-      <nav aria-label="Guides" className="z-10 mb-12 text-center">
+      <nav
+        aria-label="Guides"
+        className="z-10 mb-12 grid gap-4 text-center sm:grid-cols-2"
+      >
         <Link
           href="/cli"
           className="group inline-block rounded-lg border border-neutral-700 px-5 py-4 transition-colors hover:bg-neutral-800/30"
@@ -118,6 +121,20 @@ export default function Page() {
           </span>
           <span className="block text-sm opacity-50">
             Install skills from the marketplace with the sourceweft CLI.
+          </span>
+        </Link>
+        <Link
+          href="/sso"
+          className="group inline-block rounded-lg border border-neutral-700 px-5 py-4 transition-colors hover:bg-neutral-800/30"
+        >
+          <span className="block text-2xl font-semibold">
+            Single sign-on{" "}
+            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
+              -&gt;
+            </span>
+          </span>
+          <span className="block text-sm opacity-50">
+            Connect your identity provider so your team signs in with SSO.
           </span>
         </Link>
       </nav>

@@ -180,7 +180,7 @@ export function PlugIcon({ className }: { className?: string }) {
   return <Link2 className={className} />;
 }
 
-function getConnectorProviderName(connectorType: string) {
+export function getConnectorProviderName(connectorType: string) {
   return (
     connectorCatalog.find((item) => item.id === connectorType)?.name ??
     connectorType

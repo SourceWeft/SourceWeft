@@ -24,7 +24,12 @@ export type TeamAuditAction =
   | "workspace.guest_invited"
   | "workspace.guest_accepted"
   | "workspace.guest_revoked"
-  | "workspace.guest_removed";
+  | "workspace.guest_removed"
+  | "sso.provider_created"
+  | "sso.provider_updated"
+  | "sso.provider_deleted"
+  | "sso.domain_verified"
+  | "sso.sign_in";
 
 export type TeamAuditTargetType =
   | "skill"
@@ -32,7 +37,8 @@ export type TeamAuditTargetType =
   | "workspace_member"
   | "member"
   | "artifact"
-  | "guest";
+  | "guest"
+  | "sso_provider";
 
 export type TeamAuditEntry = {
   teamId: string;
