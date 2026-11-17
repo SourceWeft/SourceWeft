@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/github",
+  "kind": "connector",
+  "name": "GitHub Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "github",
+      "title": "GitHub",
+      "auth": {
+        "kind": "oauth2",
+        "authorizationUrl": "https://github.com/login/oauth/authorize",
+        "tokenUrl": "https://github.com/login/oauth/access_token",
+        "scopes": [],
+        "authorizationParams": {},
+        "sendScope": false
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "resources": []
+      },
+      "actions": [
+        {
+          "id": "github.browse",
+          "title": "Browse GitHub",
+          "description": "List the GitHub App installations and their repositories so the user can choose repositories for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^installation:[0-9]{1,20}$"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "github.search",
+          "title": "Search GitHub repositories",
+          "description": "Search the repositories this installation can access by name so the user can choose repositories for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          }
+        },
+        {
+          "id": "github.describe",
+          "title": "Describe GitHub repositories",
+          "description": "Return the name and existence of selected GitHub repositories.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_+/=-]{4,128}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "github.items.search",
+          "title": "Search GitHub issues, pull requests and discussions",
+          "agentToolName": "search_github",
+          "description": "Search issues, pull requests, and discussions. Results cover only the repositories chosen in this connector's settings. `repository`, if given, must be one of those chosen repositories. Do not put `repo:`, `org:`, or `user:` qualifiers in `query` — results are already scoped to the chosen repositories. Returns metadata and links; read a selected item with `read_github_item` for its full body.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "type": {
+                "type": "string",
+                "enum": ["issue", "pull_request", "discussion"]
+              },
+              "repository": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+              },
+              "state": {
+                "type": "string",
+                "enum": ["open", "closed"]
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "github.item.read",
+          "title": "Read GitHub item",
+          "agentToolName": "read_github_item",
+          "description": "Read one issue, pull request, or discussion by repository, number, and type. `repository` must be one of the repositories chosen in this connector's settings. Returns the body and other details with a source link.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repository", "number", "type"],
+            "properties": {
+              "repository": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": ["issue", "pull_request", "discussion"]
+              }
+            }
+          }
+        },
+        {
+          "id": "github.repositories.list",
+          "title": "List GitHub repositories",
+          "agentToolName": "list_github_repositories",
+          "description": "List the repositories chosen in this connector's settings.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_+/=-]{4,128}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["repository"]
+                }
+              }
+            }
+          }
+        },
+        "default": { "items": [] }
+      },
+      "selection": {
+        "actions": {
+          "browse": "github.browse",
+          "search": "github.search",
+          "describe": "github.describe"
+        },
+        "kinds": ["account", "repository"],
+        "maxItems": 20
+      }
+    }
+  ]
+}
