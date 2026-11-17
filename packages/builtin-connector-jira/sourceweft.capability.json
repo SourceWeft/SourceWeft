@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/jira",
+  "kind": "connector",
+  "name": "Jira Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "jira",
+      "title": "Jira",
+      "auth": {
+        "kind": "oauth2",
+        "authorizationUrl": "https://auth.atlassian.com/authorize",
+        "tokenUrl": "https://auth.atlassian.com/oauth/token",
+        "scopes": [
+          "read:jira-work",
+          "read:jira-user",
+          "read:me",
+          "offline_access"
+        ],
+        "authorizationParams": {
+          "audience": "api.atlassian.com",
+          "prompt": "consent"
+        },
+        "sendScope": true
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "resources": []
+      },
+      "actions": [
+        {
+          "id": "jira.browse",
+          "title": "Browse Jira",
+          "description": "List Jira sites, then the projects within a site, so the user can choose projects for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^site:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "cursor": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "id": "jira.search",
+          "title": "Search Jira",
+          "description": "Search Jira project names so the user can choose projects for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          }
+        },
+        {
+          "id": "jira.describe",
+          "title": "Describe Jira items",
+          "description": "Return the name and existence of selected Jira projects.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^project:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]{1,20}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "jira.issue.search",
+          "title": "Search Jira issues",
+          "agentToolName": "search_jira_issues",
+          "description": "Search Jira issues across the projects chosen in this connector's settings. Results are limited to those projects. Pass `cursor` from a prior result's `nextCursor` to continue. Cite the returned `url` for each issue.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "projectKeys": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,31}$"
+                }
+              },
+              "status": { "type": "string", "minLength": 1, "maxLength": 100 },
+              "assignee": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "issueType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "updatedWithinDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365
+              },
+              "orderBy": {
+                "type": "string",
+                "enum": ["updated", "created", "priority"]
+              },
+              "cursor": { "type": "string", "maxLength": 4096 }
+            }
+          }
+        },
+        {
+          "id": "jira.issue.read",
+          "title": "Read Jira issue",
+          "agentToolName": "read_jira_issue",
+          "description": "Read one Jira issue by key, limited to the projects chosen in this connector's settings. Cite the returned `url`.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["issueKey"],
+            "properties": {
+              "issueKey": { "type": "string", "minLength": 1, "maxLength": 64 }
+            }
+          }
+        },
+        {
+          "id": "jira.project.list",
+          "title": "List Jira projects",
+          "agentToolName": "list_jira_projects",
+          "description": "List the Jira projects chosen in this connector's settings.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^project:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]{1,20}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["project"]
+                }
+              }
+            }
+          }
+        },
+        "default": { "items": [] }
+      },
+      "selection": {
+        "actions": {
+          "browse": "jira.browse",
+          "search": "jira.search",
+          "describe": "jira.describe"
+        },
+        "kinds": ["site", "project"],
+        "maxItems": 100
+      }
+    }
+  ]
+}
