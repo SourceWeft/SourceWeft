@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { File, FileText, Folder } from "lucide-react";
+import { File, FileText, Folder, FolderKanban, Users } from "lucide-react";
 import {
   selectionIconFor,
   selectionPresenterFor,
@@ -153,6 +153,19 @@ describe("selectionPresenters.dropbox", () => {
         presenter.indexing?.containerIndexedCount({ item, described, sources }),
       ).toBeNull();
     });
+  });
+});
+
+describe("selectionPresenters.linear", () => {
+  const presenter = selectionPresenters.linear!;
+
+  test("registers icons for team and project", () => {
+    expect(presenter.kindIcons.team).toBe(Users);
+    expect(presenter.kindIcons.project).toBe(FolderKanban);
+  });
+
+  test("has no indexing presenter (tools-only connector)", () => {
+    expect(presenter.indexing).toBeUndefined();
   });
 });
 

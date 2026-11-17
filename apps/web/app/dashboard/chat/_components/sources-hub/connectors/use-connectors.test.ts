@@ -115,6 +115,15 @@ const toolsSelectionSpec = {
   kinds: ["item"],
   maxItems: 100,
 };
+const linearSelectionSpec = {
+  actions: {
+    browse: "linear.browse",
+    search: "linear.search",
+    describe: "linear.describe",
+  },
+  kinds: ["team", "project"],
+  maxItems: 100,
+};
 
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
@@ -601,6 +610,61 @@ test("dropbox connect creates an empty selection and opens settings", async () =
   expect(sync).not.toHaveBeenCalled();
   expect(api().connectorSettingsConnector?.id).toBe("dropbox-1");
   expect(toastSuccess).toHaveBeenCalledWith("Dropbox connected.");
+});
+
+test("linear connect creates an empty selection without periodic sync and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "linear", selection: linearSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-linear",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "linear-1",
+    connectorType: "linear",
+    name: "Person",
+    oauthAccountId: "acc-linear",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  // The new connector is listed once it exists.
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-linear",
+    connectorType: "linear",
+    accountId: "acc-linear",
+  });
+
+  await mountHook(baseInput("ws-linear"));
+
+  // A tools-only selection connector: an empty selection, periodic indexing
+  // stays off (it is not in the explicit periodic-index list), no sync is
+  // triggered (nothing selected), and settings open so the admin can choose
+  // teams and projects.
+  expect(create).toHaveBeenCalledWith("ws-linear", {
+    connectorType: "linear",
+    name: "Person",
+    oauthAccountId: "acc-linear",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("linear-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Linear connected.");
 });
 
 test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {

@@ -8,7 +8,14 @@
  * and no indexing (a tools-only connector has nothing to count or map).
  */
 
-import { File, FileText, Folder, type LucideIcon } from "lucide-react";
+import {
+  File,
+  FileText,
+  Folder,
+  FolderKanban,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   ConnectorSelectionDescribeItem,
   ConnectorSelectionItem,
@@ -87,6 +94,11 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
         }).length;
       },
     },
+  },
+  // Tools-only connector: nothing is indexed, so there is no `indexing`
+  // block, only the kind icons for the selection dialog and settings list.
+  linear: {
+    kindIcons: { team: Users, project: FolderKanban },
   },
 };
 

@@ -1,4 +1,4 @@
-import { Box, FileText, HardDrive, Mail } from "lucide-react";
+import { Box, FileText, HardDrive, ListChecks, Mail } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -62,6 +62,24 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     isIndexable: true,
     supportsActions: false,
     supportsPeriodicSync: true,
+    supportsWebhook: false,
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    category: "Knowledge & Docs",
+    description:
+      "Search and read Linear issues and projects from the teams you choose.",
+    capabilities: ["Issues & projects", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    // C3: no linear.svg is created in this branch (a download needs the
+    // user's go-ahead, not given here), so logoIconName is omitted and this
+    // lucide icon shows instead.
+    icon: ListChecks,
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
     supportsWebhook: false,
   },
 ];

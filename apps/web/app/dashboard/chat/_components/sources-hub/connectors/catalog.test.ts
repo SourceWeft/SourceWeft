@@ -10,8 +10,9 @@ test("catalog lists only implemented connectors", () => {
       "gmail",
       "google_drive",
       "dropbox",
+      "linear",
     ]).map((i) => i.id),
-  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox", "linear"]);
 });
 
 test("Gmail stays hidden in the catalog until the backend registers it", () => {
@@ -46,6 +47,34 @@ test("dropbox hidden until registered", () => {
     supportsPeriodicSync: true,
     supportsWebhook: false,
   });
+});
+
+test("linear stays hidden until the backend registers it", () => {
+  expect(
+    connectorCatalogForAvailableTypes([
+      "notion",
+      "gmail",
+      "google_drive",
+      "dropbox",
+    ]).map((i) => i.id),
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  const linear = connectorCatalog.find((item) => item.id === "linear");
+  expect(linear).toMatchObject({
+    name: "Linear",
+    category: "Knowledge & Docs",
+    description:
+      "Search and read Linear issues and projects from the teams you choose.",
+    capabilities: ["Issues & projects", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  });
+  // C3: no linear.svg is created in this branch, so logoIconName stays
+  // absent and the lucide `icon` shows instead.
+  expect(linear?.logoIconName).toBeUndefined();
 });
 
 test("Notion never depends on backend registration", () => {
