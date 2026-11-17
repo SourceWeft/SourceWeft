@@ -72,6 +72,8 @@ function baseProps(
       connectorReadinessById: {},
       isLoadingActivity: false,
       open: true,
+      // Gmail has no shared selection list.
+      selectionSpec: null,
       webhookConfig: null,
       ...handlers,
     },
