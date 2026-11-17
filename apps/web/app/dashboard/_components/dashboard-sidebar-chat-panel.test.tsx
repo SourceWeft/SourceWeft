@@ -120,17 +120,28 @@ test("sidebar text search spans all execution targets", () => {
   assert.ok(!html.includes("Clear all private chats"));
 });
 
-test("the PC client clears only the traffic lights above the workspace switcher", () => {
+test("the PC client puts the workspace switcher on the traffic lights' row", () => {
   const desktop = render("cloud", "", true);
-  // A draggable 40px strip, not the 56px spacer that read as a blank band.
+  // One 56px row level with the chat header: no spacer above the switcher,
+  // which is inset past the lights and drags the window by its blank space.
   assert.ok(!desktop.includes("pt-14"));
-  assert.ok(desktop.includes('data-desktop-drag-region=""'));
-  assert.ok(desktop.includes("h-10 shrink-0 select-none"));
-  assert.ok(desktop.includes("h-12 sm:h-14"));
+  assert.ok(!desktop.includes("h-10 shrink-0 select-none"));
+  assert.ok(!desktop.includes("h-12 sm:h-14"));
+  const row = desktop.match(
+    /<div data-desktop-drag-region="" class="([^"]*)"><div class="min-w-0 flex-1">/,
+  );
+  assert.ok(row, "titlebar row not found");
+  // Full column width, so its bottom line meets the chat header's.
+  assert.ok(
+    row[1]?.includes(
+      "-mx-3 h-14 select-none border-b border-sidebar-border pl-7 pr-3",
+    ),
+  );
 
   const web = render("cloud");
   assert.ok(!web.includes("data-desktop-drag-region"));
   assert.ok(web.includes("h-12 sm:h-14"));
+  assert.ok(!web.includes("pl-7"));
 });
 
 test("new chat aligns with navigation and search belongs to the chats header", () => {

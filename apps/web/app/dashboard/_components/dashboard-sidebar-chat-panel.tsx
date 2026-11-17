@@ -1074,17 +1074,20 @@ export function DashboardSidebarChatPanel({
     <div className="flex h-full min-h-0 flex-col">
       <SidebarHeader className="shrink-0 gap-0 px-3 pb-0 pt-0">
         {brand}
-        {/* The PC client hides the brand, so the strip above the workspace
-            switcher reserves only what the traffic lights occupy, and drags
-            the window instead of sitting there empty. */}
-        {desktopTitlebar ? (
-          <div
-            aria-hidden="true"
-            data-desktop-drag-region=""
-            className="h-10 shrink-0 select-none"
-          />
-        ) : null}
-        <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
+        {/* The PC client hides the brand and its traffic lights reach about
+            14px into this column, so the workspace switcher shares their
+            row: the chat header's height and bottom line across the whole
+            column, inset past the lights, and its blank space drags the
+            window. */}
+        <div
+          data-desktop-drag-region={desktopTitlebar ? "" : undefined}
+          className={cn(
+            "flex min-w-0 items-center gap-1",
+            desktopTitlebar
+              ? "-mx-3 h-14 select-none border-b border-sidebar-border pl-7 pr-3"
+              : "h-12 sm:h-14",
+          )}
+        >
           <div className="min-w-0 flex-1">
             <WorkspaceSwitcher
               activeWorkspace={workspaceName}

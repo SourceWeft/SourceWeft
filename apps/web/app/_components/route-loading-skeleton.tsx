@@ -135,12 +135,15 @@ export function DashboardSidebarSkeleton({
       <aside
         style={{ width }}
         className={cn(
-          "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
-          desktopTitlebar ? "pt-0" : "pt-3",
+          "relative flex h-svh shrink-0 flex-col items-center gap-1 bg-sidebar px-2 pb-3",
+          desktopTitlebar ? "pt-0" : "border-r border-sidebar-border pt-3",
         )}
       >
         {desktopTitlebar ? (
-          <div data-desktop-drag-region="" className="h-10 w-full shrink-0" />
+          <>
+            <div data-desktop-drag-region="" className="h-14 w-full shrink-0" />
+            <div className="pointer-events-none absolute bottom-0 right-0 top-[55px] w-px bg-sidebar-border" />
+          </>
         ) : (
           brand
         )}
@@ -165,10 +168,15 @@ export function DashboardSidebarSkeleton({
       className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
     >
       <div className="shrink-0 px-3">
-        {desktopTitlebar && (
-          <div data-desktop-drag-region="" className="h-10 shrink-0" />
-        )}
-        <div className="flex h-12 items-center gap-2 sm:h-14">
+        <div
+          data-desktop-drag-region={desktopTitlebar ? "" : undefined}
+          className={cn(
+            "flex items-center gap-2",
+            desktopTitlebar
+              ? "-mx-3 h-14 border-b border-sidebar-border pl-7 pr-3"
+              : "h-12 sm:h-14",
+          )}
+        >
           <SkeletonBlock className="h-8 flex-1 rounded-lg" />
         </div>
       </div>

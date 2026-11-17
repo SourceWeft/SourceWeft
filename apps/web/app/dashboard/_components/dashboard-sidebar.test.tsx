@@ -235,4 +235,22 @@ test("the macOS rail leaves the traffic lights a drag strip instead of the brand
   const strip = rail.firstElementChild!;
   assert.ok(strip.hasAttribute("data-desktop-drag-region"));
   assert.ok(!rail.textContent?.includes("Brand"));
+  // The lights reach past the rail, so the strip matches the 56px header row
+  // and the rail's edge starts at that row's bottom line instead of running
+  // between them.
+  assert.ok(strip.className.includes("h-14"));
+  assert.ok(!rail.className.includes("border-r"));
+  const edge = rail.querySelector('[data-testid="navigation-rail-edge"]')!;
+  assert.ok(edge.className.includes("top-[55px]"));
+});
+
+test("the web rail keeps its full-height edge", async () => {
+  layout.desktopTitlebar = false;
+  const container = await render({
+    pathname: "/dashboard/chat/t1",
+    docked: true,
+  });
+  const rail = container.querySelector('[data-testid="navigation-rail"]')!;
+  assert.ok(rail.className.includes("border-r"));
+  assert.ok(!rail.querySelector('[data-testid="navigation-rail-edge"]'));
 });
