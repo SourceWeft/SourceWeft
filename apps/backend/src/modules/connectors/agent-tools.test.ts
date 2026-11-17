@@ -1,6 +1,33 @@
 vi.mock("../preview", () => ({
   previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
 }));
+const loggerMocks = vi.hoisted(() => ({
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock("../../shared/logger", () => ({
+  logger: {
+    debug: loggerMocks.debug,
+    info: loggerMocks.info,
+    warn: loggerMocks.warn,
+    error: loggerMocks.error,
+  },
+}));
+// Only `getRuntimeToken` is stubbed; every other export (notably
+// `connectorRegistry`, the same singleton the tests register adapters on) is
+// the real module, so direct tool invocation can reach the adapter without a
+// database-backed OAuth account.
+vi.mock(".", async (importOriginal) => {
+  const original = await importOriginal<typeof import(".")>();
+  return {
+    ...original,
+    connectorOAuthService: {
+      getRuntimeToken: vi.fn().mockResolvedValue({ accessToken: "token" }),
+    },
+  };
+});
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import {
@@ -13,6 +40,7 @@ import {
   CONNECTOR_ACTION_APPROVED_NOTE,
   connectorActionToolOutput,
 } from "./agent-tools";
+import { ConnectorError } from "./errors";
 import { connectorRegistry } from "./registry";
 import { listSourceConnectorRecords } from "./repository";
 import type { ConnectorAdapter, ConnectorManifest } from "./types";
@@ -261,4 +289,229 @@ test("an approved connector action's result says the user approved it", () => {
       }),
     false,
   );
+});
+
+const githubReadManifest: ConnectorManifest = {
+  ...manifest,
+  type: "github",
+  displayName: "GitHub",
+  actions: [
+    {
+      type: "github.issue.search",
+      displayName: "Search GitHub issues",
+      agentToolName: "search_github",
+      description: "Search GitHub issues.",
+      visibility: "agent",
+      capabilities: ["connector_read"],
+      riskLevel: "low",
+      requiresApproval: false,
+      inputSchema: { type: "object", properties: {} },
+    },
+  ],
+};
+
+const githubConnector = {
+  id: "github-connector",
+  connectorType: "github",
+  name: "GitHub",
+  status: "active",
+  oauthAccountId: "github-account",
+} as never;
+
+test("does not log the result of a read action for any connector type", async () => {
+  loggerMocks.debug.mockClear();
+  connectorRegistry.register({
+    ...adapter,
+    getManifest: () => githubReadManifest,
+    executeAction: async () => ({
+      result: { items: [{ title: "secret title" }] },
+      rawResponseJson: { body: "secret body" },
+    }),
+  });
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([githubConnector]);
+
+  const tools = await createConnectorActionTools(context);
+  const readTool = tools.find(
+    (item) => item.name === "search_github",
+  ) as unknown as { invoke(input: Record<string, unknown>): Promise<unknown> };
+  assert.ok(readTool);
+  await readTool.invoke({});
+
+  const logged = JSON.stringify(loggerMocks.debug.mock.calls);
+  assert.equal(logged.includes("secret title"), false);
+  assert.equal(logged.includes("secret body"), false);
+  assert.equal(
+    logged.includes("Connector action direct adapter execution succeeded"),
+    true,
+  );
+});
+
+function findDebugCall(message: string) {
+  const call = loggerMocks.debug.mock.calls.find(
+    (entry) => entry[0] === message,
+  );
+  return call as [string, Record<string, unknown>] | undefined;
+}
+
+test("does not log the provider response of a failed read action", async () => {
+  loggerMocks.debug.mockClear();
+  loggerMocks.info.mockClear();
+  loggerMocks.warn.mockClear();
+  loggerMocks.error.mockClear();
+  connectorRegistry.register({
+    ...adapter,
+    getManifest: () => githubReadManifest,
+    executeAction: async () => {
+      throw new ConnectorError(502, "GITHUB_UNAVAILABLE", "secret provider text", {
+        rawResponseJson: { body: "secret body" },
+      });
+    },
+  });
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([githubConnector]);
+
+  const tools = await createConnectorActionTools(context);
+  const readTool = tools.find(
+    (item) => item.name === "search_github",
+  ) as unknown as { invoke(input: Record<string, unknown>): Promise<unknown> };
+  assert.ok(readTool);
+  await readTool.invoke({});
+
+  // The provider text must appear at NO logger level — the error-level log in
+  // `connectorToolResult` used to leak it through `message`/`stack`.
+  const everyLevel = JSON.stringify([
+    loggerMocks.debug.mock.calls,
+    loggerMocks.info.mock.calls,
+    loggerMocks.warn.mock.calls,
+    loggerMocks.error.mock.calls,
+  ]);
+  assert.equal(everyLevel.includes("secret body"), false);
+  assert.equal(everyLevel.includes("secret provider text"), false);
+  assert.equal(
+    JSON.stringify(loggerMocks.debug.mock.calls).includes(
+      "Connector action direct adapter execution failed",
+    ),
+    true,
+  );
+  const failureCall = findDebugCall(
+    "Connector action direct adapter execution failed",
+  );
+  assert.ok(failureCall);
+  const [, failureMeta] = failureCall!;
+  assert.equal(failureMeta.errorCode, "GITHUB_UNAVAILABLE");
+  assert.equal(failureMeta.statusCode, 502);
+  assert.equal("errorMessage" in failureMeta, false);
+
+  // The error-level line still records the shape of the failure, by code/name.
+  const errorCall = loggerMocks.error.mock.calls.find(
+    (entry) => entry[0] === "Connector agent tool failed",
+  );
+  assert.ok(errorCall);
+  const errorMeta = errorCall![1] as Record<string, unknown>;
+  assert.equal(errorMeta.code, "GITHUB_UNAVAILABLE");
+  assert.equal(errorMeta.errorName, "ConnectorError");
+  assert.equal("error" in errorMeta, false);
+  assert.equal("stack" in errorMeta, false);
+});
+
+test("still logs the error message of a failed non-read action on a non-Gmail connector", async () => {
+  loggerMocks.debug.mockClear();
+  loggerMocks.error.mockClear();
+  const githubWriteFailManifest: ConnectorManifest = {
+    ...manifest,
+    type: "github",
+    displayName: "GitHub",
+    actions: [
+      {
+        type: "github.issue.create",
+        displayName: "Create GitHub issue",
+        agentToolName: "create_github_issue",
+        description: "Create a GitHub issue.",
+        visibility: "agent",
+        capabilities: ["connector_write"],
+        riskLevel: "medium",
+        requiresApproval: false,
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+  };
+  connectorRegistry.register({
+    ...adapter,
+    getManifest: () => githubWriteFailManifest,
+    executeAction: async () => {
+      throw new ConnectorError(
+        500,
+        "GITHUB_WRITE_FAILED",
+        "write failed: quota",
+      );
+    },
+  });
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([githubConnector]);
+
+  const tools = await createConnectorActionTools(context);
+  const writeTool = tools.find(
+    (item) => item.name === "create_github_issue",
+  ) as unknown as { invoke(input: Record<string, unknown>): Promise<unknown> };
+  assert.ok(writeTool);
+  await writeTool.invoke({});
+
+  const failureCall = findDebugCall(
+    "Connector action direct adapter execution failed",
+  );
+  assert.ok(failureCall);
+  const [, failureMeta] = failureCall!;
+  assert.equal(failureMeta.errorMessage, "write failed: quota");
+  assert.equal(failureMeta.errorCode, "GITHUB_WRITE_FAILED");
+  assert.equal(failureMeta.statusCode, 500);
+
+  // A non-read action is not subject to the omit rule, so the error-level log
+  // still carries the error message.
+  const errorCall = loggerMocks.error.mock.calls.find(
+    (entry) => entry[0] === "Connector agent tool failed",
+  );
+  assert.ok(errorCall);
+  assert.equal(
+    (errorCall![1] as Record<string, unknown>).error,
+    "write failed: quota",
+  );
+});
+
+test("still logs the result of a non-read action on a non-Gmail connector", async () => {
+  loggerMocks.debug.mockClear();
+  const githubWriteManifest: ConnectorManifest = {
+    ...manifest,
+    type: "github",
+    displayName: "GitHub",
+    actions: [
+      {
+        type: "github.issue.create",
+        displayName: "Create GitHub issue",
+        agentToolName: "create_github_issue",
+        description: "Create a GitHub issue.",
+        visibility: "agent",
+        capabilities: ["connector_write"],
+        riskLevel: "medium",
+        requiresApproval: false,
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+  };
+  connectorRegistry.register({
+    ...adapter,
+    getManifest: () => githubWriteManifest,
+    executeAction: async () => ({
+      result: { id: "created-1" },
+      rawResponseJson: { ok: true },
+    }),
+  });
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([githubConnector]);
+
+  const tools = await createConnectorActionTools(context);
+  const writeTool = tools.find(
+    (item) => item.name === "create_github_issue",
+  ) as unknown as { invoke(input: Record<string, unknown>): Promise<unknown> };
+  assert.ok(writeTool);
+  await writeTool.invoke({});
+
+  const logged = JSON.stringify(loggerMocks.debug.mock.calls);
+  assert.equal(logged.includes("created-1"), true);
 });

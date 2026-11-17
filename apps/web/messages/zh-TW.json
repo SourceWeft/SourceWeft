@@ -3285,44 +3285,37 @@
           "unknown": "因未知原因被跳過"
         }
       },
-      "dropbox": {
-        "itemsTitle": "檔案和資料夾",
-        "itemsDescription": "選擇要索引的 Dropbox 檔案和資料夾。所選內容都會按連接器的同步排程保持同步。",
-        "chooseFiles": "選擇檔案",
+      "selection": {
         "count": "{count} / {limit}",
-        "empty": "尚未選擇任何內容。選擇檔案或資料夾以進行索引。",
-        "foldersGroup": "資料夾",
-        "filesGroup": "檔案",
-        "folderIndexedCount": "{count, plural, other {已索引 # 個檔案}}",
-        "folderMissing": "已不存在",
+        "missing": "已不存在",
         "remove": "移除 {name}",
         "lastSynced": "{date} 已同步",
-        "limitReached": "最多可選擇 {limit} 個檔案和資料夾。請先移除部分內容再新增。",
+        "limitReached": "最多可選擇 {limit} 項。請先移除部分內容再新增。",
+        "containerIndexedCount": "{count, plural, other {已索引 # 個檔案}}",
+        "untitled": "未命名",
+        "nameUnavailable": "名稱不可用",
         "browser": {
-          "title": "從 Dropbox 選擇",
-          "description": "開啟資料夾檢視其中內容，然後勾選要索引的檔案和資料夾。",
-          "root": "Dropbox",
-          "breadcrumbLabel": "資料夾路徑",
-          "searchLabel": "按檔名搜尋 Dropbox",
-          "searchPlaceholder": "搜尋 Dropbox",
-          "emptyFolder": "此資料夾為空。",
-          "noResults": "沒有與搜尋符合的檔案或資料夾。",
+          "title": "從 {provider} 選擇",
+          "breadcrumbLabel": "路徑",
+          "searchLabel": "依名稱搜尋 {provider}",
+          "searchPlaceholder": "搜尋 {provider}",
+          "emptyContainer": "這裡沒有內容。",
+          "noResults": "沒有與搜尋符合的內容。",
           "loadMore": "載入更多",
+          "refresh": "重新整理",
           "select": "選擇 {name}",
-          "unsupported": "此檔案類型無法索引",
           "alreadyAdded": "已新增",
           "selectedCount": "已選擇 {count} 項",
-          "folderNote": "資料夾合計最多同步 {limit, number} 個檔案",
           "cancel": "取消",
           "add": "新增"
         },
         "error": {
-          "reconnect": "你的 Dropbox 帳號需要重新連接。重新連接後再試。",
-          "notFound": "此 Dropbox 連接器不可用。請重新整理後重試。",
-          "notFoundItem": "該資料夾或檔案在 Dropbox 中已不存在。",
-          "tryLater": "Dropbox 暫時繁忙。請稍後再試。",
-          "reopen": "Dropbox 列表已變化，請重新開啟該資料夾。",
-          "generic": "無法連接到 Dropbox。請重試。"
+          "reconnect": "你的 {provider} 帳號需要重新連接。重新連接後再試。",
+          "notFound": "此連接器不可用。請重新整理後重試。",
+          "notFoundItem": "此項在 {provider} 中已不存在。",
+          "tryLater": "{provider} 暫時繁忙。請稍後再試。",
+          "reopen": "列表已變化，請重新開啟後繼續。",
+          "generic": "無法連接到 {provider}。請重試。"
         },
         "state": {
           "skipped": "已跳過",
@@ -3330,7 +3323,7 @@
           "processing": "同步中",
           "failed": "失敗",
           "waiting": "等待同步",
-          "unavailable": "已在 Dropbox 中刪除或失去存取權限"
+          "unavailable": "已在 {provider} 中刪除或失去存取權限"
         },
         "skipReason": {
           "unsupported_type": "不支援的檔案類型",
@@ -3340,6 +3333,39 @@
           "empty_content": "沒有可讀內容",
           "unreadable": "無法讀取檔案",
           "unknown": "因未知原因被跳過"
+        },
+        "disabledReason": {
+          "unknown": "無法選擇此項"
+        },
+        "default": {
+          "itemsTitle": "已選內容",
+          "itemsDescription": "選擇此連接器可以存取的內容。",
+          "choose": "選擇",
+          "empty": "尚未選擇任何內容。",
+          "browser": {
+            "description": "開啟某一項檢視其中內容，然後勾選要包含的內容。"
+          }
+        },
+        "byType": {
+          "dropbox": {
+            "itemsTitle": "檔案和資料夾",
+            "itemsDescription": "選擇要索引的 Dropbox 檔案和資料夾。所選內容都會按連接器的同步排程保持同步。",
+            "choose": "選擇檔案",
+            "empty": "尚未選擇任何內容。選擇檔案或資料夾以進行索引。",
+            "kinds": {
+              "folder": "資料夾",
+              "file": "檔案"
+            },
+            "disabledReason": {
+              "unsupported": "此檔案類型無法索引"
+            },
+            "browser": {
+              "description": "開啟資料夾檢視其中內容，然後勾選要索引的檔案和資料夾。",
+              "root": "Dropbox",
+              "note": "資料夾合計最多同步 1,000 個檔案",
+              "emptyContainer": "此資料夾為空。"
+            }
+          }
         }
       },
       "settingsTab": {
@@ -3667,6 +3693,7 @@
         "disabledConflict": "已存在同名的已停用連接器。請先啟用或刪除後再重新連接。",
         "enableFailed": "啟用 {name} 連接器失敗。",
         "authFailed": "{name} 授權失敗。",
+        "setupIncomplete": "{name} 已授權，但設定未能完成。請重新連接。",
         "connectionCanceled": "{name} 連接已取消。",
         "webhookCopied": "Webhook URL 已複製。",
         "webhookCopyFailed": "無法複製 webhook URL。",

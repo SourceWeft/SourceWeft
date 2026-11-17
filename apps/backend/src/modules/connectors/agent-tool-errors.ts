@@ -13,7 +13,15 @@ export type ConnectorToolErrorPayload = {
   recoverable?: boolean;
 };
 
-function errorLogFields(error: unknown) {
+function errorLogFields(error: unknown, omitResponseContent: boolean) {
+  const errorName = error instanceof Error ? error.name : typeof error;
+  // A read action's error can carry the provider's own response text in its
+  // `message` (and therefore its `stack`), so when the omit rule applies the
+  // error-level line records only the error's name, alongside the `code` and
+  // `statusCode` the caller already logs.
+  if (omitResponseContent) {
+    return { errorName };
+  }
   if (error instanceof Error) {
     return {
       error: error.message,
@@ -23,7 +31,7 @@ function errorLogFields(error: unknown) {
   }
   return {
     error: String(error),
-    errorName: typeof error,
+    errorName,
   };
 }
 
@@ -48,17 +56,22 @@ export async function connectorToolResult<T>(
   context: {
     connectorType?: string;
     toolName?: string;
+    /** When true (Gmail, or a `connector_read` action), the error-level log
+     * drops the error message, stack and details so a provider's response text
+     * cannot leak through it. Mirrors the debug log's omit rule. */
+    omitResponseContent?: boolean;
   } = {},
 ): Promise<T | ConnectorToolErrorPayload> {
+  const { omitResponseContent, ...logContext } = context;
   try {
     return await operation();
   } catch (error) {
     const connectorError = toConnectorError(error);
     logger.error("Connector agent tool failed", {
-      ...context,
+      ...logContext,
       code: connectorError.code,
       statusCode: connectorError.statusCode,
-      ...errorLogFields(error),
+      ...errorLogFields(error, omitResponseContent === true),
     });
     return {
       type: "connector_tool_error",

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ConnectorActionInput } from "@sourceweft/contracts";
+import {
+  connectorSelectionBrowseResultSchema,
+  connectorSelectionDescribeResultSchema,
+  connectorSelectionSearchResultSchema,
+  type ConnectorActionInput,
+} from "@sourceweft/contracts";
 import { createDropboxConnectorAdapter } from "../src/adapter";
 import { DropboxAdapterError } from "../src/dropbox-client";
 
@@ -132,39 +137,46 @@ test("browse root lists sorted entries with supported flags", async () => {
   const dbx = adapter(fetcher);
   const result = await dbx.executeAction(actionInput("dropbox.browse", {}));
   assert.deepEqual(result.result, {
-    folder: null,
+    container: null,
     breadcrumbs: [],
     entries: [
       {
         id: "id:afold00000001",
         kind: "folder",
         name: "Apples",
-        pathDisplay: "/Apples",
+        detail: "/Apples",
+        selectable: true,
+        expandable: true,
+        disabledReason: null,
         size: null,
-        serverModified: null,
-        supported: true,
+        modifiedAt: null,
       },
       {
         id: "id:bfile00000001",
         kind: "file",
         name: "banana.png",
-        pathDisplay: "/banana.png",
+        detail: "/banana.png",
+        selectable: false,
+        expandable: false,
+        disabledReason: "unsupported",
         size: 100,
-        serverModified: "2026-01-01T00:00:00Z",
-        supported: false,
+        modifiedAt: "2026-01-01T00:00:00Z",
       },
       {
         id: "id:zfile00000001",
         kind: "file",
         name: "zebra.pdf",
-        pathDisplay: "/zebra.pdf",
+        detail: "/zebra.pdf",
+        selectable: true,
+        expandable: false,
+        disabledReason: null,
         size: 100,
-        serverModified: "2026-01-01T00:00:00Z",
-        supported: true,
+        modifiedAt: "2026-01-01T00:00:00Z",
       },
     ],
     cursor: "cursor-1",
     hasMore: false,
+    helpLink: null,
   });
   const listFolderCall = calls.find((call) => call.url.endsWith("/2/files/list_folder"));
   assert.equal((listFolderCall?.body as { path: string }).path, "");
@@ -191,12 +203,13 @@ test("browse folder builds breadcrumbs from path_display", async () => {
   });
   const dbx = adapter(fetcher);
   const result = await dbx.executeAction(
-    actionInput("dropbox.browse", { folderId: "id:folderccccc1" }),
+    actionInput("dropbox.browse", { containerId: "id:folderccccc1" }),
   );
-  assert.deepEqual(result.result.folder, {
+  assert.deepEqual(result.result.container, {
     id: "id:folderccccc1",
+    kind: "folder",
     name: "C",
-    pathDisplay: "/A/B/C",
+    detail: "/A/B/C",
   });
   assert.deepEqual(result.result.breadcrumbs, [
     { id: "id:folderaaaaa1", name: "A" },
@@ -223,7 +236,7 @@ test("browse omits a breadcrumb whose ancestor metadata is missing", async () =>
   });
   const dbx = adapter(fetcher);
   const result = await dbx.executeAction(
-    actionInput("dropbox.browse", { folderId: "id:foldercccc02" }),
+    actionInput("dropbox.browse", { containerId: "id:foldercccc02" }),
   );
   assert.deepEqual(result.result.breadcrumbs, [{ id: "id:folderbbbb02", name: "B" }]);
 });
@@ -241,7 +254,7 @@ test("browse with cursor continues without folder", async () => {
   const result = await dbx.executeAction(
     actionInput("dropbox.browse", { cursor: "cursor-1" }),
   );
-  assert.equal(result.result.folder, null);
+  assert.equal(result.result.container, null);
   assert.deepEqual(result.result.breadcrumbs, []);
   assert.equal((result.result.entries as unknown[]).length, 1);
   assert.equal(result.result.cursor, "cursor-2");
@@ -278,10 +291,12 @@ test("search returns entries and cursor", async () => {
         id: "id:searchhit001",
         kind: "file",
         name: "Annual Report.pdf",
-        pathDisplay: "/Annual Report.pdf",
+        detail: "/Annual Report.pdf",
+        selectable: true,
+        expandable: false,
+        disabledReason: null,
         size: 100,
-        serverModified: "2026-01-01T00:00:00Z",
-        supported: true,
+        modifiedAt: "2026-01-01T00:00:00Z",
       },
     ],
     cursor: "search-cursor-1",
@@ -347,17 +362,17 @@ test("describe marks missing ids exists:false", async () => {
       id: "id:missingone01",
       kind: null,
       name: null,
-      pathDisplay: null,
-      pathLower: null,
+      detail: null,
       exists: false,
+      meta: {},
     },
     {
       id: "id:existsfile01",
       kind: "file",
       name: "Keep.pdf",
-      pathDisplay: "/Keep.pdf",
-      pathLower: "/report.pdf",
+      detail: "/Keep.pdf",
       exists: true,
+      meta: { pathLower: "/report.pdf" },
     },
   ]);
 });
@@ -408,6 +423,157 @@ test("action 401 surfaces DROPBOX_REAUTH_REQUIRED", async () => {
       error.statusCode === 401 &&
       error.code === "DROPBOX_REAUTH_REQUIRED",
   );
+});
+
+test("every action result satisfies the selection contract unchanged", async () => {
+  const browseFirstPageFetcher = router({
+    listFolder: () =>
+      json({
+        entries: [fileEntry({ id: "id:contractfile1", name: "Doc.pdf", path_display: "/Doc.pdf" })],
+        cursor: "cursor-1",
+        has_more: false,
+      }),
+  }).fetcher;
+  const browseFirstPage = await adapter(browseFirstPageFetcher).executeAction(
+    actionInput("dropbox.browse", {}),
+  );
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(browseFirstPage.result),
+    browseFirstPage.result,
+  );
+
+  const browseCursorPageFetcher = router({
+    listFolderContinue: () =>
+      json({
+        entries: [fileEntry({ id: "id:contractfile2", name: "Doc2.pdf", path_display: "/Doc2.pdf" })],
+        cursor: "cursor-2",
+        has_more: true,
+      }),
+  }).fetcher;
+  const browseCursorPage = await adapter(browseCursorPageFetcher).executeAction(
+    actionInput("dropbox.browse", { cursor: "cursor-1" }),
+  );
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(browseCursorPage.result),
+    browseCursorPage.result,
+  );
+
+  const searchFetcher = router({
+    search: () =>
+      json({
+        matches: [
+          { metadata: { metadata: fileEntry({ id: "id:contractsrch1", name: "Found.pdf" }) } },
+        ],
+        cursor: "search-cursor-1",
+        has_more: false,
+      }),
+  }).fetcher;
+  const searchPage = await adapter(searchFetcher).executeAction(
+    actionInput("dropbox.search", { query: "found" }),
+  );
+  assert.deepEqual(
+    connectorSelectionSearchResultSchema.parse(searchPage.result),
+    searchPage.result,
+  );
+
+  const describeFetcher = router({
+    getMetadata: (call) => {
+      const path = (call.body as { path: string }).path;
+      if (path === "id:contractmiss1") {
+        return json({ error_summary: "path/not_found/.." }, 409);
+      }
+      return json(fileEntry({ id: "id:contractexist1", name: "Keep.pdf", path_display: "/Keep.pdf" }));
+    },
+  }).fetcher;
+  const describeResult = await adapter(describeFetcher).executeAction(
+    actionInput("dropbox.describe", { ids: ["id:contractmiss1", "id:contractexist1"] }),
+  );
+  assert.deepEqual(
+    connectorSelectionDescribeResultSchema.parse(describeResult.result),
+    describeResult.result,
+  );
+});
+
+test("an over-long path is truncated to the contract bound", async () => {
+  const longPath = `/${"a".repeat(3000)}`;
+  const { fetcher } = router({
+    listFolder: () =>
+      json({
+        entries: [
+          fileEntry({
+            id: "id:longpath0001",
+            name: "deep.pdf",
+            path_display: longPath,
+          }),
+        ],
+        cursor: "",
+        has_more: false,
+      }),
+  });
+  const dbx = adapter(fetcher);
+  const result = await dbx.executeAction(actionInput("dropbox.browse", {}));
+  const detail = (result.result.entries as Array<{ detail: string }>)[0]!.detail;
+  assert.equal(detail.length, 2048);
+  assert.equal(detail, longPath.slice(0, 2048));
+  // The truncated result still satisfies the contract (would 502 otherwise).
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(result.result),
+    result.result,
+  );
+});
+
+test("more than 50 ancestors keeps the 50 nearest", async () => {
+  const ancestors = Array.from({ length: 60 }, (_, index) => `a${index + 1}`);
+  const containerPath = `/${ancestors.join("/")}/C`;
+  const { fetcher } = router({
+    listFolder: () => json({ entries: [], cursor: "", has_more: false }),
+    getMetadata: (call) => {
+      const path = (call.body as { path: string }).path;
+      if (path === "id:ancestordeep1") {
+        return json(
+          folderEntry({
+            id: "id:ancestordeep1",
+            name: "C",
+            path_display: containerPath,
+          }),
+        );
+      }
+      // Ancestor lookups come in by path; derive a stable id/name from the
+      // path's last segment.
+      const segment = path.split("/").filter(Boolean).pop()!;
+      return json(
+        folderEntry({ id: `id:${segment}`, name: segment, path_display: path }),
+      );
+    },
+  });
+  const dbx = adapter(fetcher);
+  const result = await dbx.executeAction(
+    actionInput("dropbox.browse", { containerId: "id:ancestordeep1" }),
+  );
+  const breadcrumbs = result.result.breadcrumbs as Array<{
+    id: string;
+    name: string;
+  }>;
+  // Outermost ancestors (a1..a10) are dropped; the 50 nearest are kept.
+  assert.equal(breadcrumbs.length, 50);
+  assert.deepEqual(breadcrumbs[0], { id: "id:a11", name: "a11" });
+  assert.deepEqual(breadcrumbs[49], { id: "id:a60", name: "a60" });
+  // The capped result still satisfies the contract (would 502 otherwise).
+  assert.deepEqual(
+    connectorSelectionBrowseResultSchema.parse(result.result),
+    result.result,
+  );
+});
+
+test("browse rejects the old folderId field", async () => {
+  const { fetcher, calls } = router({});
+  const dbx = adapter(fetcher);
+  await assert.rejects(
+    dbx.executeAction(actionInput("dropbox.browse", { folderId: "id:abc" })),
+    (error: unknown) =>
+      error instanceof DropboxAdapterError && error.code === "DROPBOX_INVALID_REQUEST",
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("unknown action is rejected", async () => {

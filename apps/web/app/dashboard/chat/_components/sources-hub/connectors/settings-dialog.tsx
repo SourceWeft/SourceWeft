@@ -16,7 +16,12 @@ import {
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
-import type { ConnectorActivityItem, SourceConnector } from "@sourceweft/sdk";
+import type {
+  ConnectorActivityItem,
+  ConnectorSelectionItem,
+  ConnectorSelectionSpec,
+  SourceConnector,
+} from "@sourceweft/sdk";
 import {
   Alert,
   AlertDescription,
@@ -66,11 +71,9 @@ import {
   getConnectorDisplayName,
   getConnectorReadinessFromConfig,
 } from "./components";
-import { DropboxItems } from "./dropbox-items";
-import {
-  commitDropboxSelection,
-  type DropboxSelectionItem,
-} from "./dropbox-selection";
+import { SelectionItems } from "./selection-items";
+import { commitSelection } from "./selection";
+import { selectionPresenterFor } from "./selection-presenters";
 import { GoogleDriveFiles } from "./google-drive-files";
 import { isGoogleDrivePickerElement } from "./google-drive-picker";
 import { commitGoogleDriveSelection } from "./google-drive-selection";
@@ -121,6 +124,7 @@ export function ConnectorSettingsDialog({
   onSyncConnector,
   onToggleStatus,
   open,
+  selectionSpec,
   webhookConfig,
 }: {
   activity: ConnectorActivityItem[];
@@ -151,6 +155,9 @@ export function ConnectorSettingsDialog({
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleStatus: (connector: ConnectorItem) => void;
   open: boolean;
+  // The connector type's selection descriptor, or null for a type that
+  // declares none (its Configuration tab shows no selection list).
+  selectionSpec: ConnectorSelectionSpec | null;
   webhookConfig: ConnectorWebhookConfig | null;
 }) {
   const displayLocale = useDisplayLocale();
@@ -342,8 +349,8 @@ export function ConnectorSettingsDialog({
     });
   }
 
-  function handleChangeDropboxItems(
-    items: DropboxSelectionItem[],
+  function handleChangeSelectionItems(
+    items: ConnectorSelectionItem[],
   ): Promise<boolean> {
     const currentConnector = connector;
     if (!currentConnector) {
@@ -351,17 +358,25 @@ export function ConnectorSettingsDialog({
     }
     // Same contract as handleChangeGoogleDriveFiles: only the selection
     // changes, and the sync runs only after the save succeeded, so the backend
-    // reconciles against a selection it has stored.
-    return commitDropboxSelection({
+    // reconciles against a selection it has stored. A tools-only connector
+    // (no indexing presenter) has nothing to sync, so its save omits the sync.
+    // The selection merges into the existing configJson so a connector's other
+    // config keys survive.
+    const hasIndexing = Boolean(
+      selectionPresenterFor(currentConnector.raw.connectorType).indexing,
+    );
+    return commitSelection({
       save: () =>
         onSaveSettings(currentConnector, {
           name: currentConnector.name,
           periodicIndexingEnabled: currentConnector.raw.periodicIndexingEnabled,
           indexingFrequencyMinutes:
             currentConnector.raw.indexingFrequencyMinutes,
-          configJson: { items },
+          configJson: { ...currentConnector.raw.configJson, items },
         }),
-      sync: () => onSyncConnector(currentConnector),
+      ...(hasIndexing
+        ? { sync: () => onSyncConnector(currentConnector) }
+        : {}),
     });
   }
 
@@ -620,12 +635,13 @@ export function ConnectorSettingsDialog({
                     onChangeFileIds={handleChangeGoogleDriveFiles}
                   />
                 ) : null}
-                {connectorType === "dropbox" ? (
-                  <DropboxItems
+                {selectionSpec ? (
+                  <SelectionItems
                     connector={connector}
                     disabled={isSavingSettings}
                     latestSyncRun={latestSyncRun}
-                    onChangeItems={handleChangeDropboxItems}
+                    onChangeItems={handleChangeSelectionItems}
+                    spec={selectionSpec}
                   />
                 ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">

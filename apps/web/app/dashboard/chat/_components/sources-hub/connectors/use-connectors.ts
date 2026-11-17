@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import {
   HttpClientError,
   type ConnectorActivityItem,
+  type ConnectorSelectionSpec,
   type SourceConnector,
 } from "@sourceweft/sdk";
 import { connectorsClient } from "../../../../../../lib/sdk";
@@ -55,6 +56,54 @@ const CONNECTOR_OAUTH_URL_PARAMS = [
 ] as const;
 
 const WORKSPACE_CONNECTORS_CACHE_BUCKET = "connectors";
+
+/** The selection spec of every manifest that declares one, keyed by type. A
+ * connector type without a `selection` descriptor is absent, so a lookup
+ * returns undefined (it has no shared selection UI). */
+function selectionSpecsFromManifests(
+  manifests: ReadonlyArray<{
+    type: string;
+    selection?: ConnectorSelectionSpec;
+  }>,
+): Record<string, ConnectorSelectionSpec> {
+  const byType: Record<string, ConnectorSelectionSpec> = {};
+  for (const manifest of manifests) {
+    if (manifest.selection) byType[manifest.type] = manifest.selection;
+  }
+  return byType;
+}
+
+/**
+ * The selection specs of a successful manifest load, tagged with the workspace
+ * and actor they belong to. Mirrors how `availableManifests` is keyed: the
+ * specs are visible only for the current workspace and actor, so they never
+ * leak across a workspace or actor switch. `loaded` records that a manifest
+ * load has succeeded for this workspace/actor — an empty `byType` with
+ * `loaded: true` means "no type declares a selection", not "not loaded yet".
+ */
+type SelectionSpecsSnapshot = {
+  workspaceId: string | null;
+  actorId: string | undefined;
+  loaded: boolean;
+  byType: Record<string, ConnectorSelectionSpec>;
+};
+
+const EMPTY_SELECTION_SPECS: SelectionSpecsSnapshot = {
+  workspaceId: null,
+  actorId: undefined,
+  loaded: false,
+  byType: {},
+};
+
+const EMPTY_SELECTION_SPEC_MAP: Record<string, ConnectorSelectionSpec> = {};
+
+function selectionSpecsMatch(
+  snapshot: SelectionSpecsSnapshot,
+  workspaceId: string | null,
+  actorId: string | undefined,
+): boolean {
+  return snapshot.workspaceId === workspaceId && snapshot.actorId === actorId;
+}
 
 type WorkspaceConnectorsCacheValue = {
   accounts: ConnectorAccountItem[];
@@ -198,6 +247,32 @@ export function useConnectors(input: {
   }>({ actorId: undefined, types: [] });
   const availableConnectorTypes =
     availableManifests.actorId === actorId ? availableManifests.types : [];
+  const [selectionSpecsSnapshot, setSelectionSpecsSnapshot] =
+    useState<SelectionSpecsSnapshot>(EMPTY_SELECTION_SPECS);
+  // Mirrors the state so a just-authorised connect can read the latest specs
+  // even from inside a callback that closed over an earlier render's state
+  // (for example when a fresh manifest fetch fails and we fall back to it).
+  // Kept in step with the state by `applySelectionSpecs` below.
+  const selectionSpecsSnapshotRef = useRef<SelectionSpecsSnapshot>(
+    EMPTY_SELECTION_SPECS,
+  );
+  const applySelectionSpecs = useCallback(
+    (snapshot: SelectionSpecsSnapshot) => {
+      selectionSpecsSnapshotRef.current = snapshot;
+      setSelectionSpecsSnapshot(snapshot);
+    },
+    [],
+  );
+  // The specs the settings UI consumes: the loaded map only when it belongs to
+  // the current workspace and actor (so a failed refresh keeps them, while a
+  // workspace or actor switch hides them until the new context loads).
+  const selectionSpecByType = selectionSpecsMatch(
+    selectionSpecsSnapshot,
+    workspaceId ?? null,
+    actorId,
+  )
+    ? selectionSpecsSnapshot.byType
+    : EMPTY_SELECTION_SPEC_MAP;
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
   >([]);
@@ -271,6 +346,7 @@ export function useConnectors(input: {
       setConnectors([]);
       setConnectorAccounts([]);
       setAvailableManifests({ actorId, types: [] });
+      applySelectionSpecs(EMPTY_SELECTION_SPECS);
       setConnectorWebhookEventsById({});
       setConnectorWebhookConfigsById({});
       setConnectorsLoadingError(null);
@@ -323,6 +399,12 @@ export function useConnectors(input: {
       setAvailableManifests({
         actorId,
         types: manifests.items.map((manifest) => manifest.type),
+      });
+      applySelectionSpecs({
+        workspaceId: activeWorkspaceId,
+        actorId,
+        loaded: true,
+        byType: selectionSpecsFromManifests(manifests.items),
       });
       const webhookConnectors = uiConnectors.filter((connector) => {
         const catalogItem = connectorCatalog.find(
@@ -383,6 +465,10 @@ export function useConnectors(input: {
     } catch (error) {
       if (actorIdRef.current !== actorId) return;
       setAvailableManifests({ actorId, types: [] });
+      // A failed refresh keeps the last good selection specs (state and ref):
+      // the settings list and any open picker depend on them, and a refresh
+      // runs after every save and sync. They are cleared only when the
+      // workspace or actor changes (the keyed read above hides them then).
       setConnectorsLoadingError(
         getErrorMessage(error, t("toasts.connectors.loadFailed")),
       );
@@ -396,6 +482,7 @@ export function useConnectors(input: {
     }
   }, [
     actorId,
+    applySelectionSpecs,
     connectorCacheBucket,
     currentWorkspaceIdRef,
     onConnectorsChange,
@@ -597,11 +684,29 @@ export function useConnectors(input: {
         return null;
       }
       let knownConnectors = connectors;
+      // Which connector types declare a shared selection UI, and whether that
+      // is known at all. Deciding a new connector's initial config and whether
+      // to open settings turns on this; an empty map from a *failed* load is
+      // "unknown", not "this type has no selection" (see the snapshot's
+      // `loaded`). Specs from another workspace/actor do not count.
+      const snapshotActorId = actorIdRef.current;
+      const currentSnapshot = selectionSpecsMatch(
+        selectionSpecsSnapshotRef.current,
+        workspaceId,
+        snapshotActorId,
+      )
+        ? selectionSpecsSnapshotRef.current
+        : null;
+      let knownSelectionSpecByType = currentSnapshot?.byType ?? {};
+      let selectionCapabilityKnown = currentSnapshot?.loaded ?? false;
       if (accountId) {
         // An authorization just completed. After the provider redirects back
-        // this runs before the connector list has loaded, so read the list
-        // itself: deciding from the empty state would take an existing
-        // connector for a first connection.
+        // this runs before the connector list and manifests have loaded, so
+        // read them itself: deciding from the empty state would take an
+        // existing connector for a first connection, or miss the selection
+        // spec that a just-registered type declares.
+        //
+        // The connector list is required — its failure is the auth failure.
         try {
           const fresh = await connectorsClient.list(workspaceId, {
             includeDisabled: true,
@@ -618,6 +723,36 @@ export function useConnectors(input: {
             ),
           );
           return null;
+        }
+        // The manifest fetch decides selection config. A transient failure
+        // falls back to the specs already in state, but only when a manifest
+        // load has succeeded before (manifestsLoadedRef); otherwise the
+        // capability is genuinely unknown and the create path must stop rather
+        // than guess.
+        try {
+          const manifests = await connectorsClient.listManifests(workspaceId);
+          const byType = selectionSpecsFromManifests(manifests.items);
+          knownSelectionSpecByType = byType;
+          selectionCapabilityKnown = true;
+          // Apply the fresh specs to both state and ref so the settings list
+          // (state) and any later fallback (ref) see them.
+          applySelectionSpecs({
+            workspaceId,
+            actorId: actorIdRef.current,
+            loaded: true,
+            byType,
+          });
+        } catch {
+          const snapshot = selectionSpecsSnapshotRef.current;
+          if (
+            selectionSpecsMatch(snapshot, workspaceId, actorIdRef.current) &&
+            snapshot.loaded
+          ) {
+            knownSelectionSpecByType = snapshot.byType;
+            selectionCapabilityKnown = true;
+          } else {
+            selectionCapabilityKnown = false;
+          }
         }
       }
       const current = knownConnectors.find(
@@ -758,21 +893,40 @@ export function useConnectors(input: {
             return null;
           }
 
+          // A connector type with a selection spec is configured through the
+          // shared selection list, exactly as Dropbox is. The three types
+          // below have their own config, so their creation does not depend on
+          // whether the manifests are known.
           if (
             item.id !== "notion" &&
             item.id !== "gmail" &&
-            item.id !== "google_drive" &&
-            item.id !== "dropbox"
+            item.id !== "google_drive"
           ) {
-            toast.info(
-              t("toasts.connectors.connectedConfigureNext", {
-                name: item.name,
-              }),
-            );
-            await refreshConnectors();
-            return null;
+            if (!selectionCapabilityKnown) {
+              // Authorization succeeded but we could not load the manifests, so
+              // we cannot tell whether this type is configured through a
+              // selection list. Do not create and do not report success; ask
+              // the person to connect again. The IIFE's finally clears the
+              // waiting state, as it does for the other early returns here.
+              toast.error(
+                t("toasts.connectors.setupIncomplete", { name: item.name }),
+              );
+              return null;
+            }
+            if (!knownSelectionSpecByType[item.id]) {
+              toast.info(
+                t("toasts.connectors.connectedConfigureNext", {
+                  name: item.name,
+                }),
+              );
+              await refreshConnectors();
+              return null;
+            }
           }
+          const hasSelectionSpec = Boolean(knownSelectionSpecByType[item.id]);
 
+          // Periodic indexing stays keyed on the explicit type list: a
+          // tools-only selection connector has nothing to index on a schedule.
           const periodicIndexingEnabled =
             item.id === "notion" ||
             item.id === "google_drive" ||
@@ -786,7 +940,7 @@ export function useConnectors(input: {
                 ? gmailConfigForMode(options.gmailMode ?? "tools")
                 : item.id === "google_drive"
                   ? { fileIds: [] }
-                  : item.id === "dropbox"
+                  : hasSelectionSpec
                     ? { items: [] }
                     : { includePages: true },
             periodicIndexingEnabled,
@@ -799,7 +953,7 @@ export function useConnectors(input: {
             gmailMode:
               item.id === "gmail" ? (options.gmailMode ?? "tools") : undefined,
           });
-          if (item.id === "google_drive" || item.id === "dropbox") {
+          if (item.id === "google_drive" || hasSelectionSpec) {
             // No files are selected yet, so there is nothing to sync; open
             // settings so the admin can pick files from the Files section.
             await refreshConnectors();
@@ -893,6 +1047,7 @@ export function useConnectors(input: {
       return request;
     },
     [
+      applySelectionSpecs,
       clearConnectorReadiness,
       connectors,
       markConnectorNotReady,
@@ -1281,6 +1436,7 @@ export function useConnectors(input: {
   return {
     connectors,
     availableConnectorTypes,
+    selectionSpecByType,
     connectorAccounts,
     isLoadingConnectors,
     connectorsLoadingError,

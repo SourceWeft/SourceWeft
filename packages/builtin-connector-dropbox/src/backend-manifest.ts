@@ -42,5 +42,6 @@ export function toBackendDropboxManifest(input: {
       inputSchema: action.inputSchema,
     })),
     configSchema: contribution.configSchema,
+    selection: contribution.selection,
   };
 }

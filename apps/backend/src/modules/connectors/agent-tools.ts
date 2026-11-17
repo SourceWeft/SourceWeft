@@ -223,6 +223,24 @@ function directConnectorActionMeta(input: {
   };
 }
 
+// Gmail results and, more broadly, any connector read result can carry a
+// person's private content (message bodies, issue/ticket text, …). Keep that
+// content out of the debug logs for every connector type, not just Gmail.
+// This also governs the failure log's `errorMessage`: an adapter's error class
+// may pass a provider's own error text straight through (for example Notion's
+// `parseNotionResponse` builds its message from the parsed response body), so
+// a read action's error message can carry the same private content as its
+// result.
+function shouldOmitConnectorActionResponseContent(input: {
+  action: ConnectorActionSpec;
+  connectorType: string;
+}) {
+  return (
+    input.connectorType === "gmail" ||
+    input.action.capabilities?.includes("connector_read") === true
+  );
+}
+
 export function createConnectorActionInterruptConfigs(
   options: ConnectorActionToolsetOptions = {},
 ) {
@@ -632,6 +650,11 @@ export async function createConnectorActionTools(
                   context,
                   idempotencyKey,
                 });
+                const omitResponseContent =
+                  shouldOmitConnectorActionResponseContent({
+                    action,
+                    connectorType: connector.connectorType,
+                  });
                 logger.debug("Connector action direct execution selected", {
                   ...logMeta,
                   connectorName: connector.name,
@@ -661,11 +684,12 @@ export async function createConnectorActionTools(
                       {
                         ...logMeta,
                         errorCode: connectorError.code,
-                        errorMessage: connectorError.message,
+                        statusCode: connectorError.statusCode,
                         latencyMs: Date.now() - startedAt,
-                        ...(connector.connectorType === "gmail"
+                        ...(omitResponseContent
                           ? {}
                           : {
+                              errorMessage: connectorError.message,
                               rawResponseJson:
                                 connectorError.details?.rawResponseJson,
                             }),
@@ -679,7 +703,7 @@ export async function createConnectorActionTools(
                     ...logMeta,
                     externalId: result.externalId ?? null,
                     latencyMs: Date.now() - startedAt,
-                    ...(connector.connectorType === "gmail"
+                    ...(omitResponseContent
                       ? {}
                       : {
                           rawResponseJson: result.rawResponseJson,
@@ -697,6 +721,14 @@ export async function createConnectorActionTools(
               {
                 connectorType: manifest.type,
                 toolName: agentToolName,
+                // The error-level failure log follows the same omit rule as the
+                // debug logs: a Gmail or `connector_read` action's error can
+                // carry provider response text. The connector resolves to this
+                // manifest's type, so this matches the per-connector decision.
+                omitResponseContent: shouldOmitConnectorActionResponseContent({
+                  action,
+                  connectorType: manifest.type,
+                }),
               },
             ),
           {
