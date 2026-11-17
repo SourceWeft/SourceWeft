@@ -2021,7 +2021,7 @@
         "insufficientCredits": "點數不足，無法繼續語音輸入。",
         "failed": "轉寫失敗，已輸入的文字會保留。",
         "rateLimited": "語音輸入過於頻繁，請稍後再試。",
-        "silenceTimeout": "一分鐘內沒有檢測到語音，語音輸入已停止。",
+        "silenceTimeout": "一分鐘內沒有偵測到語音，語音輸入已停止。",
         "maxDuration": "語音輸入已達到 10 分鐘上限，已停止。",
         "deviceLost": "麥克風已斷開。"
       },
