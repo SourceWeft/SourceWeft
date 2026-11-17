@@ -30,14 +30,22 @@ import {
  * record whose repository cannot be determined is out of scope and dropped.
  */
 
-/** Interleave so no single repository dominates a page. */
+/** The most rows one page returns across every packed query, and the point at
+ * which the round-robin merge stops. */
 const SEARCH_MERGE_LIMIT = 20;
-/** One query can afford 20 results; several share the ≤5-request budget. */
+/** A lone query may take the whole page budget. */
 const SINGLE_QUERY_PER_PAGE = 20;
-const MULTI_QUERY_PER_PAGE = 10;
-const DISCUSSION_PER_QUERY = 10;
 /** The REST search API never serves beyond the first 1,000 results. */
 const SEARCH_RESULT_CEILING = 1_000;
+
+/** Per-query page size: a single query takes the whole page budget; several
+ * split it evenly (floored) so that every row fetched across the queries fits
+ * inside the merge limit and none is cut. */
+function perQueryPageSize(queryCount: number): number {
+  return queryCount <= 1
+    ? SINGLE_QUERY_PER_PAGE
+    : Math.floor(SEARCH_MERGE_LIMIT / queryCount);
+}
 const BODY_MAX = 20_000;
 /** R7: the spec fixes only the item body; comment bodies are cut here. */
 const COMMENT_MAX = 4_000;
@@ -138,11 +146,12 @@ function parseState(value: unknown): "open" | "closed" | undefined {
 
 function mapSearchIssue(
   item: GithubIssueSearchItem,
-  kind: SearchKind,
   repository: string,
 ): SearchResultItem {
+  // The row is labelled by what it is: a search row that carries a
+  // pull-request marker is a pull request even when the search was for issues.
   return {
-    type: kind,
+    type: item.isPullRequest ? "pull_request" : "issue",
     repository,
     number: item.number,
     title: item.title,
@@ -193,6 +202,14 @@ export async function searchItemsTool(
     invalidRequest("state applies to issues and pull requests only");
   }
   const cursor = decodeSearchCursor(request.cursor);
+  if (cursor) {
+    // A cursor belongs to one search kind: issues and pull requests page by
+    // number, discussions page by per-query `after`. A cursor of the other
+    // kind is rejected rather than silently restarting from the first page.
+    const wrongKind =
+      kind === "discussion" ? cursor.page !== undefined : cursor.after !== undefined;
+    if (wrongKind) invalidRequest();
+  }
 
   const { available } = await resolveSelection(api, items);
   const canonicalByName = new Map<string, string>();
@@ -219,11 +236,13 @@ export async function searchItemsTool(
   const base = buildBaseQuery({ query, kind, state });
   const { queries, skipped } = packRepositoryQueries(base, targets);
   const searchedRepositories = queries.flatMap((packed) => packed.repositories);
+  const perPage = perQueryPageSize(queries.length);
 
   if (kind === "discussion") {
     return searchDiscussionItems({
       api,
       queries,
+      perPage,
       cursor,
       searchedRepositories,
       skipped,
@@ -233,7 +252,6 @@ export async function searchItemsTool(
   }
 
   const page = cursor?.page ?? 1;
-  const perPage = queries.length === 1 ? SINGLE_QUERY_PER_PAGE : MULTI_QUERY_PER_PAGE;
   const batches: SearchResultItem[][] = [];
   let anyQueryHasMore = false;
   for (const packed of queries) {
@@ -247,7 +265,7 @@ export async function searchItemsTool(
       if (!name) continue;
       const canonical = canonicalByName.get(repositoryName(name));
       if (!canonical) continue;
-      batch.push(mapSearchIssue(row, kind, canonical));
+      batch.push(mapSearchIssue(row, canonical));
     }
     batches.push(batch);
   }
@@ -267,13 +285,15 @@ export async function searchItemsTool(
 async function searchDiscussionItems(input: {
   api: GithubApi;
   queries: Array<{ q: string; repositories: string[] }>;
+  perPage: number;
   cursor: SearchCursor | null;
   searchedRepositories: string[];
   skipped: string[];
   canonicalById: Map<string, string>;
   selectedIds: Set<string>;
 }): Promise<Record<string, unknown>> {
-  const { api, queries, cursor, searchedRepositories, skipped, canonicalById, selectedIds } = input;
+  const { api, queries, perPage, cursor, searchedRepositories, skipped, canonicalById, selectedIds } =
+    input;
   const afters = cursor?.after;
   const isContinuation = afters !== undefined;
   const batches: SearchResultItem[][] = [];
@@ -292,7 +312,7 @@ async function searchDiscussionItems(input: {
     }
     const { items, endCursor, hasNextPage } = await api.searchDiscussions(
       packed.q,
-      DISCUSSION_PER_QUERY,
+      perPage,
       after,
     );
     const batch: SearchResultItem[] = [];

@@ -443,29 +443,26 @@ test("query with repo: is rejected without a request", async () => {
 });
 
 test("many repositories are searched in at most five requests and merged round robin", async () => {
-  // Long names so the packer fits two repositories per 256-char query and makes
-  // two provider queries, letting the round-robin merge interleave the batches.
-  const owner = "acme";
-  const name = (n: number) => `${owner}/${"x".repeat(95)}${n}`;
-  const ids = ["R_01", "R_02", "R_03", "R_04"];
+  // Five names long enough that each repository needs its own packed query, so
+  // the selection really produces the full five-query budget.
+  const names = ["a", "b", "c", "d", "e"].map((char) => `acme/${char.repeat(120)}`);
+  const ids = ["R_01", "R_02", "R_03", "R_04", "R_05"];
   const map: Record<string, string> = {};
   ids.forEach((id, index) => {
-    map[id] = name(index);
+    map[id] = names[index] as string;
   });
 
-  const searchQs: string[] = [];
   const { fetcher, calls } = router({
     resolve: resolveFrom(map),
     searchIssues: (q) => {
-      const index = searchQs.length;
-      searchQs.push(q);
+      const index = names.findIndex((name) => q.includes(`repo:${name}`));
+      const full = names[index] as string;
       // Each batch returns two items tagged by batch so ordering is visible.
-      const repoInBatch = Object.values(map).find((full) => q.includes(`repo:${full}`)) as string;
       return json({
         total_count: 2,
         items: [
-          issueSearchRow(repoInBatch, { number: index * 10 + 1 }),
-          issueSearchRow(repoInBatch, { number: index * 10 + 2 }),
+          issueSearchRow(full, { number: index * 10 + 1 }),
+          issueSearchRow(full, { number: index * 10 + 2 }),
         ],
       });
     },
@@ -476,11 +473,169 @@ test("many repositories are searched in at most five requests and merged round r
   );
 
   const searchCalls = calls.filter((call) => call.pathname === "/search/issues");
-  assert.ok(searchCalls.length >= 2, `expected multiple queries, got ${searchCalls.length}`);
-  assert.ok(searchCalls.length <= 5, `expected at most five, got ${searchCalls.length}`);
+  // Five repositories that cannot share a query make exactly five requests.
+  assert.equal(searchCalls.length, 5);
+  assert.deepEqual(result.result.skippedRepositories, []);
   const numbers = (result.result.items as Array<{ number: number }>).map((item) => item.number);
-  // Round robin: first item of each batch, then second item of each batch.
-  assert.deepEqual(numbers, [1, 11, 2, 12]);
+  // Round robin: the first row of every batch, then the second row of every batch.
+  assert.deepEqual(numbers, [1, 11, 21, 31, 41, 2, 12, 22, 32, 42]);
+});
+
+test("five packed queries return every row exactly once across pages", async () => {
+  const MATCHES = 10;
+  const names = ["a", "b", "c", "d", "e"].map((char) => `acme/${char.repeat(120)}`);
+  const ids = ["R_01", "R_02", "R_03", "R_04", "R_05"];
+  const map: Record<string, string> = {};
+  ids.forEach((id, index) => {
+    map[id] = names[index] as string;
+  });
+
+  const { fetcher } = router({
+    resolve: resolveFrom(map),
+    searchIssues: (q, perPage, page) => {
+      const index = names.findIndex((name) => q.includes(`repo:${name}`));
+      const full = names[index] as string;
+      const start = (page - 1) * perPage;
+      const items = [];
+      for (let i = start; i < Math.min(start + perPage, MATCHES); i += 1) {
+        items.push(issueSearchRow(full, { number: index * 100 + i }));
+      }
+      return json({ total_count: MATCHES, items });
+    },
+  });
+  const gh = adapter(fetcher);
+
+  const seen: number[] = [];
+  let cursor: string | undefined;
+  for (let guard = 0; guard < 20; guard += 1) {
+    const request: Record<string, unknown> = { query: "bug" };
+    if (cursor !== undefined) request.cursor = cursor;
+    const result = await gh.executeAction(
+      actionInput("github.items.search", request, selection(...ids)),
+    );
+    for (const item of result.result.items as Array<{ number: number }>) {
+      seen.push(item.number);
+    }
+    const next = result.result.nextCursor as string | null;
+    if (next === null) break;
+    cursor = next;
+  }
+
+  // Five repositories × ten matches = fifty rows, each returned exactly once.
+  assert.equal(seen.length, 50);
+  assert.equal(new Set(seen).size, 50);
+});
+
+test("five packed discussion queries return every row exactly once across pages", async () => {
+  const MATCHES = 10;
+  const names = ["a", "b", "c", "d", "e"].map((char) => `acme/${char.repeat(120)}`);
+  const ids = ["R_01", "R_02", "R_03", "R_04", "R_05"];
+  const map: Record<string, string> = {};
+  ids.forEach((id, index) => {
+    map[id] = names[index] as string;
+  });
+
+  const { fetcher } = router({
+    resolve: resolveFrom(map),
+    searchDiscussions: (vars) => {
+      const index = names.findIndex((name) => vars.q.includes(`repo:${name}`));
+      const id = ids[index] as string;
+      const full = names[index] as string;
+      const offset = vars.after === null ? 0 : Number(vars.after);
+      const nodes = [];
+      for (let i = offset; i < Math.min(offset + vars.first, MATCHES); i += 1) {
+        nodes.push(discussionNode(id, full, { number: index * 100 + i }));
+      }
+      const nextOffset = offset + nodes.length;
+      return json({
+        data: {
+          search: {
+            pageInfo: { endCursor: String(nextOffset), hasNextPage: nextOffset < MATCHES },
+            nodes,
+          },
+        },
+      });
+    },
+  });
+  const gh = adapter(fetcher);
+
+  const seen: number[] = [];
+  let cursor: string | undefined;
+  for (let guard = 0; guard < 20; guard += 1) {
+    const request: Record<string, unknown> = { query: "bug", type: "discussion" };
+    if (cursor !== undefined) request.cursor = cursor;
+    const result = await gh.executeAction(
+      actionInput("github.items.search", request, selection(...ids)),
+    );
+    for (const item of result.result.items as Array<{ number: number }>) {
+      seen.push(item.number);
+    }
+    const next = result.result.nextCursor as string | null;
+    if (next === null) break;
+    cursor = next;
+  }
+
+  assert.equal(seen.length, 50);
+  assert.equal(new Set(seen).size, 50);
+});
+
+test("an issue-search row with a pull-request marker is typed pull_request", async () => {
+  const { fetcher } = router({
+    resolve: resolveFrom({ R_aa: "acme/one" }),
+    searchIssues: () =>
+      json({
+        total_count: 2,
+        items: [
+          issueSearchRow("acme/one", { number: 1 }),
+          // A pull request can surface in an issue search; the row carries the marker.
+          issueSearchRow("acme/one", { number: 2, pull_request: { url: "x" } }),
+        ],
+      }),
+  });
+  const gh = adapter(fetcher);
+  const result = await gh.executeAction(
+    actionInput("github.items.search", { query: "bug", type: "issue" }, selection("R_aa")),
+  );
+  const items = result.result.items as Array<{ number: number; type: string }>;
+  const typeByNumber = new Map(items.map((item) => [item.number, item.type]));
+  assert.equal(typeByNumber.get(1), "issue");
+  assert.equal(typeByNumber.get(2), "pull_request");
+});
+
+test("a cursor of the wrong kind is rejected without a request", async () => {
+  const { fetcher, calls } = router({
+    resolve: resolveFrom({ R_aa: "acme/one" }),
+  });
+  const gh = adapter(fetcher);
+  // A discussion cursor (per-query `after`) handed to an issue search.
+  await assert.rejects(
+    gh.executeAction(
+      actionInput(
+        "github.items.search",
+        { query: "bug", cursor: encodeSearchCursor({ after: ["c", null] }) },
+        selection("R_aa"),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 400 &&
+      error.code === "GITHUB_INVALID_REQUEST",
+  );
+  // A page cursor handed to a discussion search.
+  await assert.rejects(
+    gh.executeAction(
+      actionInput(
+        "github.items.search",
+        { query: "bug", type: "discussion", cursor: encodeSearchCursor({ page: 2 }) },
+        selection("R_aa"),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof GithubAdapterError &&
+      error.statusCode === 400 &&
+      error.code === "GITHUB_INVALID_REQUEST",
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("repositories that do not fit are reported as skipped", async () => {

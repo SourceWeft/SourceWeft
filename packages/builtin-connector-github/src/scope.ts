@@ -67,7 +67,12 @@ export function parseGithubSelection(
   return items;
 }
 
-const SCOPE_QUALIFIER_REGEX = /(^|\s)-?(repo|org|user|owner):/i;
+// A `repo:`/`org:`/`user:`/`owner:` qualifier (with an optional leading `-`)
+// counts only when it starts the query or follows a character that is not an
+// ASCII letter or digit. That rejects qualifiers glued to punctuation or a
+// quote (`"a"repo:x/y`, `(repo:x/y)`) while leaving a colon inside a larger
+// word alone (`myrepo:`, `error:`).
+const SCOPE_QUALIFIER_REGEX = /(^|[^A-Za-z0-9])-?(repo|org|user|owner):/i;
 
 /** Validates the agent-supplied free-text search query. Qualifiers such as
  * `repo:`/`org:`/`user:`/`owner:` are rejected because results are already
@@ -92,7 +97,7 @@ export function assertAgentQuery(value: unknown): string {
     throw new GithubAdapterError(
       400,
       "GITHUB_INVALID_REQUEST",
-      "Do not put repo:, org: or user: in the query. Use the repository parameter to search one selected repository.",
+      "Do not put repo:, org:, user: or owner: in the query. Use the repository parameter to search one selected repository.",
     );
   }
   return trimmed;
@@ -258,7 +263,9 @@ export function decodeSearchCursor(value: unknown): SearchCursor | null {
       typeof record.page !== "number" ||
       !Number.isInteger(record.page) ||
       record.page < 2 ||
-      record.page > 100
+      // 1,000 results at the smallest per-query page size (four across five
+      // queries) reach page 250.
+      record.page > 250
     ) {
       invalidCursor();
     }

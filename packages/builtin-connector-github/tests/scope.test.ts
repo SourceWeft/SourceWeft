@@ -87,6 +87,12 @@ test("scope qualifiers are rejected in any case and position", () => {
     "crash org:acme",
     "user:me fix",
     "owner:x",
+    // A qualifier glued to a non-alphanumeric character still slips the scope
+    // guard unless the word boundary is anything-but-alphanumeric.
+    '"a"repo:x/y',
+    "(repo:x/y)",
+    "a,repo:x/y",
+    "bug\nrepo:x/y",
   ]) {
     assertGithubError(() => assertAgentQuery(query), "GITHUB_INVALID_REQUEST");
   }
@@ -95,6 +101,9 @@ test("scope qualifiers are rejected in any case and position", () => {
 test("ordinary colons pass", () => {
   assert.equal(assertAgentQuery("error: timeout"), "error: timeout");
   assert.equal(assertAgentQuery("fix: login"), "fix: login");
+  // A letter directly before the word means it is part of a larger token,
+  // not a search qualifier.
+  assert.equal(assertAgentQuery("myrepo: notes"), "myrepo: notes");
 });
 
 test("query of 121 chars is rejected", () => {
@@ -189,8 +198,14 @@ test("cursor round-trips and rejects garbage", () => {
     () => decodeSearchCursor(encodeSearchCursor({ page: 1 })),
     "GITHUB_INVALID_REQUEST",
   );
+  // The page bound allows up to 1,000 results at the smallest per-query page
+  // size (four per page across five queries): page 250 is in range, 251 is not.
+  assert.deepEqual(decodeSearchCursor(encodeSearchCursor({ page: 250 })), {
+    page: 250,
+    after: undefined,
+  });
   assertGithubError(
-    () => decodeSearchCursor(encodeSearchCursor({ page: 101 })),
+    () => decodeSearchCursor(encodeSearchCursor({ page: 251 })),
     "GITHUB_INVALID_REQUEST",
   );
   assertGithubError(
