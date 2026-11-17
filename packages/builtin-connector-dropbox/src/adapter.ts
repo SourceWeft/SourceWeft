@@ -9,6 +9,11 @@ import {
   type ConnectorExtractedContent,
   type ConnectorExtractedText,
   type ConnectorItem,
+  type ConnectorSelectionBrowseResult,
+  type ConnectorSelectionDescribeItem,
+  type ConnectorSelectionDescribeResult,
+  type ConnectorSelectionEntry,
+  type ConnectorSelectionSearchResult,
   type OAuthCodeExchangeInput,
   type OAuthRefreshInput,
   type OAuthTokenSet,
@@ -55,6 +60,19 @@ const CURSOR_MAX_LENGTH = 4096;
 const COUNT_CEILING = 20000;
 // Derived from the single pattern contribution.ts also uses for configSchema.
 const SELECTION_ITEM_ID = new RegExp(DROPBOX_ITEM_ID_PATTERN);
+/** Contract bounds (packages/contracts selection schema) a real Dropbox path
+ * could exceed: a very long `path_display` or a very deeply nested folder must
+ * be trimmed to fit rather than fail result validation with a 502. */
+const MAX_DETAIL_LENGTH = 2048;
+const MAX_BREADCRUMBS = 50;
+
+/** Truncate a `detail` (a Dropbox path) to the contract's 2,048-character
+ * bound; shorter values are returned unchanged. */
+function truncateDetail(detail: string): string {
+  return detail.length > MAX_DETAIL_LENGTH
+    ? detail.slice(0, MAX_DETAIL_LENGTH)
+    : detail;
+}
 
 export type DropboxAdapterConfig = {
   baseUrl: string;
@@ -66,82 +84,32 @@ export type DropboxAdapterConfig = {
 export type DropboxSelectionEntry = { id: string; kind: "file" | "folder" };
 
 /*
- * Browse-dialog action contract. These results are returned unchanged by the
- * backend routes `POST /connectors/:connectorId/dropbox/{browse,search,describe}`
- * and redeclared in packages/sdk/src/connectors-client.ts; keep the three in
- * step. They carry metadata only, never a token. Ids are Dropbox file ids
- * (`id:…`), stable across renames and moves, and are what the connector config
- * stores.
- */
-
-/** One file or folder row in a `dropbox.browse`/`dropbox.search` result. */
-export type DropboxBrowseEntry = {
-  id: string;
-  kind: "file" | "folder";
-  name: string;
-  /** Path as Dropbox displays it, relative to the account's root namespace
-   * (the team space root for team accounts). */
-  pathDisplay: string;
-  /** Bytes; null for folders. */
-  size: number | null;
-  /** ISO 8601 timestamp; null for folders. */
-  serverModified: string | null;
-  /** Whether the connector can index it. Always true for folders. */
-  supported: boolean;
-};
-
-export type DropboxBrowseFolder = { id: string; name: string; pathDisplay: string };
-
-/**
- * `dropbox.browse` request `{ folderId?: "id:…" | null, cursor?: string }`.
- * Without `folderId` it lists the root. A first page carries the listed
- * folder (null for the root) and its breadcrumbs: the ancestors between the
- * root and that folder, both excluded, outermost first. A page fetched with
- * `cursor` only continues the listing, so it returns `folder: null` and
- * `breadcrumbs: []`; callers keep those from the first page and append
- * `entries`. Entries are sorted folders first, then by name, within a page.
- */
-export type DropboxBrowseResult = {
-  folder: DropboxBrowseFolder | null;
-  breadcrumbs: Array<{ id: string; name: string }>;
-  entries: DropboxBrowseEntry[];
-  /** Pass back as `cursor` while `hasMore` is true. */
-  cursor: string;
-  hasMore: boolean;
-};
-
-/**
+ * Browse-dialog action contract. `dropbox.browse`, `dropbox.search` and
+ * `dropbox.describe` return the generic selection-contract result types
+ * (`ConnectorSelectionBrowseResult`, `ConnectorSelectionSearchResult`,
+ * `ConnectorSelectionDescribeResult`) defined and validated in
+ * `packages/contracts/src/connectors.ts`; see that file for field shapes and
+ * bounds. Results carry metadata only, never a token. Ids are Dropbox file
+ * ids (`id:…`), stable across renames and moves, and are what the connector
+ * config stores.
+ *
+ * `dropbox.browse` request `{ containerId?: "id:…" | null, cursor?: string }`.
+ * Without `containerId` it lists the root. A first page carries the listed
+ * container (null for the root) and its breadcrumbs: the ancestors between
+ * the root and that container, both excluded, outermost first. A page
+ * fetched with `cursor` only continues the listing, so it returns
+ * `container: null` and `breadcrumbs: []`; callers keep those from the first
+ * page and append `entries`. Entries are sorted expandable-first, then by
+ * name, within a page.
+ *
  * `dropbox.search` request `{ query: string (1–200 chars after trimming),
  * cursor?: string }`. Matches active files and folders by name only.
- */
-export type DropboxSearchResult = {
-  entries: DropboxBrowseEntry[];
-  cursor: string;
-  hasMore: boolean;
-};
-
-/**
- * One item of a `dropbox.describe` result. When the id no longer resolves
- * (deleted, moved out of reach, or access lost), `exists` is false and every
- * other field except `id` is null.
- */
-export type DropboxDescribeItem = {
-  id: string;
-  kind: "file" | "folder" | null;
-  name: string | null;
-  pathDisplay: string | null;
-  /** Lower-cased path; matches the `pathLower` stored on synced sources. */
-  pathLower: string | null;
-  exists: boolean;
-};
-
-/**
+ *
  * `dropbox.describe` request `{ ids: string[] }` with 1–100 ids. Items come
- * back in request order.
+ * back in request order. When an id no longer resolves (deleted, moved out
+ * of reach, or access lost), `exists` is false and every other field except
+ * `id` is null.
  */
-export type DropboxDescribeResult = {
-  items: DropboxDescribeItem[];
-};
 
 function invalidRequest(): DropboxAdapterError {
   return new DropboxAdapterError(400, "DROPBOX_INVALID_REQUEST", INVALID_REQUEST_MESSAGE);
@@ -158,18 +126,22 @@ function parseActionCursor(value: unknown): string | undefined {
   return value;
 }
 
+/** Rejects the pre-contract `folderId` field outright rather than ignoring
+ * it: silently falling back to `containerId` undefined would treat a caller
+ * still sending the old field name as a request for the root. */
 function parseBrowseRequest(
   request: Record<string, unknown>,
-): { folderId: string | null; cursor?: string } {
-  const rawFolderId = request.folderId;
-  let folderId: string | null = null;
-  if (rawFolderId !== undefined && rawFolderId !== null) {
-    if (typeof rawFolderId !== "string" || !SELECTION_ITEM_ID.test(rawFolderId)) {
+): { containerId: string | null; cursor?: string } {
+  if ("folderId" in request) throw invalidRequest();
+  const rawContainerId = request.containerId;
+  let containerId: string | null = null;
+  if (rawContainerId !== undefined && rawContainerId !== null) {
+    if (typeof rawContainerId !== "string" || !SELECTION_ITEM_ID.test(rawContainerId)) {
       throw invalidRequest();
     }
-    folderId = rawFolderId;
+    containerId = rawContainerId;
   }
-  return { folderId, cursor: parseActionCursor(request.cursor) };
+  return { containerId, cursor: parseActionCursor(request.cursor) };
 }
 
 /** The query is validated against its 1–200 char bound only after trimming,
@@ -221,36 +193,42 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/** Maps one listing entry to a browse/search row, or `null` for an entry
- * this adapter cannot surface (no id, or Dropbox's `deleted` tag, which
- * `search_v2`/`list_folder` should not return but a future API change
- * might). Folder entries are always `supported: true`; files defer to the
- * same extension/downloadability check discovery uses. */
-function toBrowseEntry(entry: DropboxEntry): DropboxBrowseEntry | null {
+/** Maps one listing entry to a selection-contract entry, or `null` for an
+ * entry this adapter cannot surface (no id, or Dropbox's `deleted` tag,
+ * which `search_v2`/`list_folder` should not return but a future API change
+ * might). Folders are always `selectable: true, expandable: true`; files
+ * defer to the same extension/downloadability check discovery uses, and an
+ * unsupported file is `selectable: false` with `disabledReason:
+ * "unsupported"`. */
+function toSelectionEntry(entry: DropboxEntry): ConnectorSelectionEntry | null {
   const tag = entry[".tag"];
   if (tag !== "file" && tag !== "folder") return null;
   if (typeof entry.id !== "string") return null;
   const name = entry.name ?? "";
+  const expandable = tag === "folder";
+  const selectable = expandable || isDropboxFileSupported(name, entry.is_downloadable ?? true);
   return {
     id: entry.id,
     kind: tag,
     name,
-    pathDisplay: entry.path_display ?? "",
+    detail: truncateDetail(entry.path_display ?? ""),
+    selectable,
+    expandable,
+    disabledReason: selectable ? null : "unsupported",
     size: typeof entry.size === "number" ? entry.size : null,
-    serverModified: typeof entry.server_modified === "string" ? entry.server_modified : null,
-    supported: tag === "folder" ? true : isDropboxFileSupported(name, entry.is_downloadable ?? true),
+    modifiedAt: typeof entry.server_modified === "string" ? entry.server_modified : null,
   };
 }
 
-function toBrowseEntries(entries: DropboxEntry[]): DropboxBrowseEntry[] {
-  const mapped: DropboxBrowseEntry[] = [];
+function toSelectionEntries(entries: DropboxEntry[]): ConnectorSelectionEntry[] {
+  const mapped: ConnectorSelectionEntry[] = [];
   for (const entry of entries) {
-    const browseEntry = toBrowseEntry(entry);
-    if (browseEntry) mapped.push(browseEntry);
+    const selectionEntry = toSelectionEntry(entry);
+    if (selectionEntry) mapped.push(selectionEntry);
   }
-  // Folders first, then case-insensitive name order.
+  // Expandable entries first, then case-insensitive name order.
   return mapped.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+    if (a.expandable !== b.expandable) return a.expandable ? -1 : 1;
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   });
 }
@@ -532,59 +510,78 @@ export function createDropboxConnectorAdapter(
 
   /**
    * `dropbox.browse`: lists one folder (or continues a prior listing page).
-   * A `cursor` page and the root page both report `folder: null,
-   * breadcrumbs: []`; only a first page for a specific `folderId`
-   * resolves the folder itself and its breadcrumb ancestors.
+   * A `cursor` page and the root page both report `container: null,
+   * breadcrumbs: []`; only a first page for a specific `containerId`
+   * resolves the container itself and its breadcrumb ancestors.
    */
-  async function browseAction(input: ConnectorActionInput): Promise<DropboxBrowseResult> {
-    const { folderId, cursor } = parseBrowseRequest(input.request);
+  async function browseAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorSelectionBrowseResult> {
+    const { containerId, cursor } = parseBrowseRequest(input.request);
     const account = await client.getCurrentAccount(input.accessToken);
     const pathRoot = pathRootFor(account);
 
     if (cursor !== undefined) {
       const listing = await client.listFolderContinue(input.accessToken, pathRoot, cursor);
       return {
-        folder: null,
+        container: null,
         breadcrumbs: [],
-        entries: toBrowseEntries(listing.entries),
+        entries: toSelectionEntries(listing.entries),
         cursor: listing.cursor,
         hasMore: listing.hasMore,
+        helpLink: null,
       };
     }
 
     const listing = await client.listFolder(input.accessToken, pathRoot, {
-      path: folderId ?? "",
+      path: containerId ?? "",
       recursive: false,
       limit: BROWSE_LIST_LIMIT,
     });
     if (!listing) {
       throw new DropboxAdapterError(404, "DROPBOX_NOT_FOUND", "Dropbox folder not found");
     }
-    const entries = toBrowseEntries(listing.entries);
+    const entries = toSelectionEntries(listing.entries);
 
-    if (folderId === null) {
-      return { folder: null, breadcrumbs: [], entries, cursor: listing.cursor, hasMore: listing.hasMore };
+    if (containerId === null) {
+      return {
+        container: null,
+        breadcrumbs: [],
+        entries,
+        cursor: listing.cursor,
+        hasMore: listing.hasMore,
+        helpLink: null,
+      };
     }
 
-    const folderMetadata = await client.getMetadata(input.accessToken, pathRoot, folderId);
-    if (!folderMetadata || typeof folderMetadata.id !== "string") {
+    const containerMetadata = await client.getMetadata(input.accessToken, pathRoot, containerId);
+    if (!containerMetadata || typeof containerMetadata.id !== "string") {
       throw new DropboxAdapterError(404, "DROPBOX_NOT_FOUND", "Dropbox folder not found");
     }
-    const pathDisplay = folderMetadata.path_display ?? "";
-    const folder: DropboxBrowseFolder = {
-      id: folderMetadata.id,
-      name: folderMetadata.name ?? "",
-      pathDisplay,
+    const pathDisplay = containerMetadata.path_display ?? "";
+    const container: ConnectorSelectionBrowseResult["container"] = {
+      id: containerMetadata.id,
+      kind: "folder",
+      name: containerMetadata.name ?? "",
+      detail: truncateDetail(pathDisplay),
     };
 
     // Breadcrumbs are the ancestors strictly between the root and the
-    // current folder; each id comes from a `getMetadata` lookup on the
-    // ancestor's own path (not an id), because the discovered folder's
+    // current container; each id comes from a `getMetadata` lookup on the
+    // ancestor's own path (not an id), because the discovered container's
     // path_display is the only source of its ancestry.
+    const segments = parentPathSegments(pathDisplay);
+    // Keep at most the innermost MAX_BREADCRUMBS ancestors so a very deep
+    // folder does not exceed the contract's breadcrumb bound; the outermost
+    // ancestors are dropped. The full path is still walked to build each kept
+    // ancestor's own path.
+    const firstKept = Math.max(0, segments.length - MAX_BREADCRUMBS);
     const breadcrumbs: Array<{ id: string; name: string }> = [];
     let ancestorPath = "";
-    for (const segment of parentPathSegments(pathDisplay)) {
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!;
       ancestorPath += `/${segment}`;
+      if (index < firstKept) continue;
       const ancestorMetadata = await client.getMetadata(input.accessToken, pathRoot, ancestorPath);
       if (ancestorMetadata && typeof ancestorMetadata.id === "string") {
         breadcrumbs.push({ id: ancestorMetadata.id, name: ancestorMetadata.name ?? segment });
@@ -593,12 +590,21 @@ export function createDropboxConnectorAdapter(
       // rename or delete) is omitted rather than failing the whole browse.
     }
 
-    return { folder, breadcrumbs, entries, cursor: listing.cursor, hasMore: listing.hasMore };
+    return {
+      container,
+      breadcrumbs,
+      entries,
+      cursor: listing.cursor,
+      hasMore: listing.hasMore,
+      helpLink: null,
+    };
   }
 
   /** `dropbox.search`: a `cursor` continues the prior query's results;
    * otherwise a fresh `search_v2` call is made with the trimmed query. */
-  async function searchAction(input: ConnectorActionInput): Promise<DropboxSearchResult> {
+  async function searchAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorSelectionSearchResult> {
     const { query, cursor } = parseSearchRequest(input.request);
     const account = await client.getCurrentAccount(input.accessToken);
     const pathRoot = pathRootFor(account);
@@ -607,7 +613,7 @@ export function createDropboxConnectorAdapter(
         ? await client.searchContinue(input.accessToken, pathRoot, cursor)
         : await client.search(input.accessToken, pathRoot, query);
     return {
-      entries: toBrowseEntries(listing.entries),
+      entries: toSelectionEntries(listing.entries),
       cursor: listing.cursor,
       hasMore: listing.hasMore,
     };
@@ -616,25 +622,30 @@ export function createDropboxConnectorAdapter(
   /** `dropbox.describe`: looks up each requested id independently (order
    * preserved) and reports whether it still exists, for the settings list's
    * folder names, file counts and "no longer exists" mark. */
-  async function describeAction(input: ConnectorActionInput): Promise<DropboxDescribeResult> {
+  async function describeAction(
+    input: ConnectorActionInput,
+  ): Promise<ConnectorSelectionDescribeResult> {
     const { ids } = parseDescribeRequest(input.request);
     const account = await client.getCurrentAccount(input.accessToken);
     const pathRoot = pathRootFor(account);
     const items = await mapWithConcurrency(
       ids,
       DESCRIBE_CONCURRENCY,
-      async (id): Promise<DropboxDescribeItem> => {
+      async (id): Promise<ConnectorSelectionDescribeItem> => {
         const entry = await client.getMetadata(input.accessToken, pathRoot, id);
         if (!entry || entry[".tag"] === "deleted") {
-          return { id, kind: null, name: null, pathDisplay: null, pathLower: null, exists: false };
+          return { id, kind: null, name: null, detail: null, exists: false, meta: {} };
         }
         return {
           id,
           kind: entry[".tag"],
           name: entry.name ?? null,
-          pathDisplay: entry.path_display ?? null,
-          pathLower: entry.path_lower ?? null,
+          detail:
+            entry.path_display != null
+              ? truncateDetail(entry.path_display)
+              : null,
           exists: true,
+          meta: { pathLower: entry.path_lower ?? null },
         };
       },
     );

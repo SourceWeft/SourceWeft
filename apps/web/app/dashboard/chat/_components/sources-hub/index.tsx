@@ -443,6 +443,7 @@ export function SourcesHub({
     connectors,
     connectorAccounts,
     availableConnectorTypes,
+    selectionSpecByType,
     isLoadingConnectors,
     connectorsLoadingError,
     connectorBusyById,
@@ -1438,6 +1439,13 @@ export function SourcesHub({
           void handleToggleConnectorStatus(connector)
         }
         open={Boolean(connectorSettingsConnector)}
+        selectionSpec={
+          connectorSettingsConnector
+            ? (selectionSpecByType[
+                connectorSettingsConnector.raw.connectorType
+              ] ?? null)
+            : null
+        }
         webhookConfig={
           connectorSettingsConnector
             ? (connectorWebhookConfigsById[connectorSettingsConnector.id] ??

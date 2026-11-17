@@ -3,7 +3,11 @@
 import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { ConnectorActivityItem, SourceConnector } from "@sourceweft/sdk";
+import type {
+  ConnectorActivityItem,
+  ConnectorSelectionSpec,
+  SourceConnector,
+} from "@sourceweft/sdk";
 import {
   button,
   click,
@@ -13,17 +17,17 @@ import {
   withIntl,
 } from "@/test/react";
 
-const { dropboxDescribe, dropboxBrowse, listSources } = vi.hoisted(() => ({
-  dropboxDescribe: vi.fn(),
-  dropboxBrowse: vi.fn(),
+const { selectionDescribe, selectionBrowse, listSources } = vi.hoisted(() => ({
+  selectionDescribe: vi.fn(),
+  selectionBrowse: vi.fn(),
   listSources: vi.fn(),
 }));
 
 vi.mock("../../../../../../lib/sdk", () => ({
   connectorsClient: {
-    dropboxDescribe,
-    dropboxBrowse,
-    dropboxSearch: vi.fn(),
+    selectionDescribe,
+    selectionBrowse,
+    selectionSearch: vi.fn(),
   },
   contentClient: { listSources },
 }));
@@ -32,11 +36,31 @@ vi.mock("@/lib/billing-edition/capabilities", () => ({
   useBillingAvailable: () => false,
 }));
 
-import { DropboxItems } from "./dropbox-items";
+import { SelectionItems } from "./selection-items";
 import { ConnectorSettingsDialog } from "./settings-dialog";
 import type { ConnectorItem } from "./types";
 
-function dropboxConnector(items: Array<{ id: string; kind: string }>) {
+const dropboxSpec: ConnectorSelectionSpec = {
+  actions: {
+    browse: "dropbox.browse",
+    search: "dropbox.search",
+    describe: "dropbox.describe",
+  },
+  kinds: ["folder", "file"],
+  maxItems: 500,
+};
+
+const toolsSpec: ConnectorSelectionSpec = {
+  actions: { browse: "x.browse", describe: "x.describe" },
+  kinds: ["item"],
+  maxItems: 100,
+};
+
+function connectorFor(
+  connectorType: string,
+  items: Array<{ id: string; kind: string }>,
+  configJson: Record<string, unknown> = {},
+) {
   return {
     id: "c-1",
     name: "Person",
@@ -46,9 +70,9 @@ function dropboxConnector(items: Array<{ id: string; kind: string }>) {
       id: "c-1",
       teamId: "t-1",
       workspaceId: "ws-1",
-      connectorType: "dropbox",
+      connectorType,
       name: "Person",
-      configJson: { items },
+      configJson: { items, ...configJson },
       oauthAccountId: "acc-1",
       status: "active",
       periodicIndexingEnabled: true,
@@ -61,6 +85,10 @@ function dropboxConnector(items: Array<{ id: string; kind: string }>) {
       updatedAt: "2026-11-01T00:00:00.000Z",
     } as SourceConnector,
   } satisfies ConnectorItem;
+}
+
+function dropboxConnector(items: Array<{ id: string; kind: string }>) {
+  return connectorFor("dropbox", items);
 }
 
 function source(
@@ -82,14 +110,19 @@ function describeItem(
   id: string,
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  const { pathLower, pathDisplay, meta, ...rest } = overrides as {
+    pathLower?: string | null;
+    pathDisplay?: string | null;
+    meta?: Record<string, unknown>;
+  } & Record<string, unknown>;
   return {
     id,
     kind: "folder",
     name: null,
-    pathDisplay: null,
-    pathLower: null,
+    detail: pathDisplay ?? null,
     exists: true,
-    ...overrides,
+    ...rest,
+    meta: meta ?? (pathLower !== undefined ? { pathLower } : {}),
   };
 }
 
@@ -115,18 +148,21 @@ function syncRun(resultJson: Record<string, unknown>): ConnectorActivityItem {
 
 async function mountItems(input: {
   connector: ConnectorItem;
+  spec?: ConnectorSelectionSpec;
   latestSyncRun?: ConnectorActivityItem | null;
   onChangeItems?: (
-    items: Array<{ id: string; kind: "file" | "folder" }>,
+    items: Array<{ id: string; kind: string }>,
   ) => Promise<boolean>;
 }) {
   const onChangeItems = input.onChangeItems ?? vi.fn(async () => true);
+  const spec = input.spec ?? dropboxSpec;
   const element = (
     connector: ConnectorItem,
     latestSyncRun: ConnectorActivityItem | null,
   ) =>
-    createElement(DropboxItems, {
+    createElement(SelectionItems, {
       connector,
+      spec,
       latestSyncRun,
       disabled: false,
       onChangeItems,
@@ -172,6 +208,7 @@ async function mountSettings(
       onSyncConnector: vi.fn(),
       onToggleStatus: vi.fn(),
       open: true,
+      selectionSpec: dropboxSpec,
       webhookConfig: null,
       ...overrides,
     }),
@@ -180,9 +217,7 @@ async function mountSettings(
     (node) => node.textContent?.trim() === "Configuration",
   )!;
   await act(async () => {
-    tab.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, button: 0 }),
-    );
+    tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
   });
   await flush(10);
 }
@@ -202,11 +237,11 @@ function rows(scope: ParentNode) {
 }
 
 beforeEach(() => {
-  dropboxDescribe.mockReset();
-  dropboxBrowse.mockReset();
+  selectionDescribe.mockReset();
+  selectionBrowse.mockReset();
   listSources.mockReset();
   listSources.mockResolvedValue({ items: [] });
-  dropboxDescribe.mockResolvedValue({ items: [] });
+  selectionDescribe.mockResolvedValue({ items: [] });
 });
 
 afterEach(unmountAll);
@@ -227,7 +262,7 @@ test("groups folders and files with counts and states", async () => {
       source("file:id:in3", { metadata: { pathLower: "/work/q30/z.pdf" } }),
     ],
   });
-  dropboxDescribe.mockResolvedValue({
+  selectionDescribe.mockResolvedValue({
     items: [
       describeItem("id:f1", {
         name: "Q3",
@@ -256,9 +291,9 @@ test("groups folders and files with counts and states", async () => {
     }),
   });
 
-  // Folders are described straight away; a file only once the sources show
+  // Containers are described straight away; a file only once the sources show
   // that neither a source nor a skipped item names it. Each id is asked once.
-  expect(dropboxDescribe.mock.calls.map((call) => call[2].ids)).toEqual([
+  expect(selectionDescribe.mock.calls.map((call) => call[2].ids)).toEqual([
     ["id:f1"],
     ["id:a2"],
   ]);
@@ -279,27 +314,43 @@ test("groups folders and files with counts and states", async () => {
 });
 
 test("missing folder shows no longer exists", async () => {
-  dropboxDescribe.mockResolvedValue({
+  selectionDescribe.mockResolvedValue({
     items: [describeItem("id:gone", { exists: false, kind: null })],
   });
   const { container } = await mountItems({
     connector: dropboxConnector([{ id: "id:gone", kind: "folder" }]),
   });
 
-  // No name from describe: the row falls back to the id.
+  // No name from describe: the row shows the kind placeholder, never the raw
+  // id, and keeps the "no longer exists" mark.
   expect(rows(group(container, "Folders"))).toEqual([
-    "id:goneNo longer exists",
+    "Folders · Name unavailableNo longer exists",
   ]);
+  expect(container.textContent).not.toContain("id:gone");
   expect(group(container, "Files")).toBeNull();
 });
 
-test("a failed describe falls back to ids", async () => {
-  dropboxDescribe.mockRejectedValue(new Error("network"));
+test("a row whose details could not be loaded shows a placeholder, not its id", async () => {
+  selectionDescribe.mockRejectedValue(new Error("network"));
   const { container } = await mountItems({
     connector: dropboxConnector([{ id: "id:f1", kind: "folder" }]),
   });
 
-  expect(rows(group(container, "Folders"))).toEqual(["id:f1"]);
+  expect(rows(group(container, "Folders"))).toEqual([
+    "Folders · Name unavailable",
+  ]);
+  expect(container.textContent).not.toContain("id:f1");
+});
+
+test("an id containing a comma is described intact", async () => {
+  // A connector id may contain any character; it must reach describe whole,
+  // not split on the separator a joined key would have used.
+  await mountItems({
+    connector: dropboxConnector([{ id: "id:a,b", kind: "folder" }]),
+  });
+
+  expect(selectionDescribe).toHaveBeenCalledTimes(1);
+  expect(selectionDescribe.mock.calls[0]![2].ids).toEqual(["id:a,b"]);
 });
 
 test("loads sources without their content", async () => {
@@ -318,21 +369,21 @@ test("describes folders in chunks of at most 100", async () => {
   }));
   await mountItems({ connector: dropboxConnector(items) });
 
-  expect(dropboxDescribe).toHaveBeenCalledTimes(2);
-  expect(dropboxDescribe.mock.calls[0]![2].ids).toHaveLength(100);
-  expect(dropboxDescribe.mock.calls[1]![2].ids).toEqual(
+  expect(selectionDescribe).toHaveBeenCalledTimes(2);
+  expect(selectionDescribe.mock.calls[0]![2].ids).toHaveLength(100);
+  expect(selectionDescribe.mock.calls[1]![2].ids).toEqual(
     items.slice(100).map((item) => item.id),
   );
 });
 
 test("a sync status change does not re-describe already-described folders", async () => {
-  dropboxDescribe.mockResolvedValue({
+  selectionDescribe.mockResolvedValue({
     items: [describeItem("id:f1", { name: "Q3", pathLower: "/q3" })],
   });
   const connector = dropboxConnector([{ id: "id:f1", kind: "folder" }]);
   const running = { ...syncRun({}), status: "running" };
   const mounted = await mountItems({ connector, latestSyncRun: running });
-  expect(dropboxDescribe).toHaveBeenCalledTimes(1);
+  expect(selectionDescribe).toHaveBeenCalledTimes(1);
   expect(listSources).toHaveBeenCalledTimes(1);
 
   await mounted.rerender(connector, syncRun({}));
@@ -340,14 +391,14 @@ test("a sync status change does not re-describe already-described folders", asyn
   // The sources reload for the new run status, but the folder is not asked
   // about again.
   expect(listSources).toHaveBeenCalledTimes(2);
-  expect(dropboxDescribe).toHaveBeenCalledTimes(1);
+  expect(selectionDescribe).toHaveBeenCalledTimes(1);
   expect(rows(group(mounted.container, "Folders"))).toEqual([
     "Q30 files indexed",
   ]);
 });
 
 test("a failed describe keeps previously known names", async () => {
-  dropboxDescribe.mockResolvedValueOnce({
+  selectionDescribe.mockResolvedValueOnce({
     items: [describeItem("id:f1", { name: "Q3", pathLower: "/q3" })],
   });
   const mounted = await mountItems({
@@ -357,7 +408,7 @@ test("a failed describe keeps previously known names", async () => {
     "Q30 files indexed",
   ]);
 
-  dropboxDescribe.mockRejectedValueOnce(new Error("network"));
+  selectionDescribe.mockRejectedValueOnce(new Error("network"));
   await mounted.rerender(
     dropboxConnector([
       { id: "id:f1", kind: "folder" },
@@ -366,18 +417,19 @@ test("a failed describe keeps previously known names", async () => {
     null,
   );
 
-  // Only the new folder is described; its failure leaves the known name.
-  expect(dropboxDescribe).toHaveBeenCalledTimes(2);
-  expect(dropboxDescribe.mock.calls[1]![2].ids).toEqual(["id:f2"]);
+  // Only the new folder is described; its failure leaves the known name and the
+  // new row shows the placeholder rather than its id.
+  expect(selectionDescribe).toHaveBeenCalledTimes(2);
+  expect(selectionDescribe.mock.calls[1]![2].ids).toEqual(["id:f2"]);
   expect(rows(group(mounted.container, "Folders"))).toEqual([
     "Q30 files indexed",
-    "id:f2",
+    "Folders · Name unavailable",
   ]);
 });
 
 test("describe chunks run one at a time", async () => {
   const resolvers: Array<() => void> = [];
-  dropboxDescribe.mockImplementation(
+  selectionDescribe.mockImplementation(
     () =>
       new Promise((resolve) => {
         resolvers.push(() => resolve({ items: [] }));
@@ -388,18 +440,18 @@ test("describe chunks run one at a time", async () => {
     kind: "folder",
   }));
   await mountItems({ connector: dropboxConnector(items) });
-  expect(dropboxDescribe).toHaveBeenCalledTimes(1);
+  expect(selectionDescribe).toHaveBeenCalledTimes(1);
 
   await act(async () => resolvers[0]!());
   await flush(10);
-  expect(dropboxDescribe).toHaveBeenCalledTimes(2);
+  expect(selectionDescribe).toHaveBeenCalledTimes(2);
   await act(async () => resolvers[1]!());
   await flush(10);
-  expect(dropboxDescribe).toHaveBeenCalledTimes(2);
+  expect(selectionDescribe).toHaveBeenCalledTimes(2);
 });
 
 test("a failed chunk is not retried when a later chunk succeeds", async () => {
-  dropboxDescribe
+  selectionDescribe
     .mockRejectedValueOnce(new Error("network"))
     .mockResolvedValueOnce({
       items: [describeItem("id:f100", { name: "Last", pathLower: "/last" })],
@@ -412,19 +464,54 @@ test("a failed chunk is not retried when a later chunk succeeds", async () => {
     connector: dropboxConnector(items),
   });
 
-  expect(dropboxDescribe).toHaveBeenCalledTimes(2);
+  expect(selectionDescribe).toHaveBeenCalledTimes(2);
   const shown = rows(group(container, "Folders"));
-  expect(shown[0]).toBe("id:f0");
+  expect(shown[0]).toBe("Folders · Name unavailable");
   expect(shown[100]).toBe("Last0 files indexed");
 });
 
+test("tools-only connectors list names from describe and no state badges", async () => {
+  selectionDescribe.mockResolvedValue({
+    items: [
+      describeItem("t1", {
+        kind: "item",
+        name: "Alpha",
+        detail: "path/alpha",
+      }),
+      describeItem("t2", { kind: null, name: null, exists: false }),
+    ],
+  });
+  const { container } = await mountItems({
+    connector: connectorFor("unknown-type", [
+      { id: "t1", kind: "item" },
+      { id: "t2", kind: "item" },
+    ]),
+    spec: toolsSpec,
+  });
+
+  // A tools-only connector loads no sources and describes every selected id.
+  expect(listSources).not.toHaveBeenCalled();
+  expect(selectionDescribe).toHaveBeenCalledTimes(1);
+  expect(selectionDescribe.mock.calls[0]![2].ids).toEqual(["t1", "t2"]);
+
+  const section = group(container, "item");
+  expect(rows(section)).toEqual([
+    "Alphapath/alpha",
+    "item · Name unavailableNo longer exists",
+  ]);
+  // No index-state badges for a tools-only connector.
+  expect(container.textContent).not.toContain("Waiting for sync");
+  expect(container.textContent).not.toContain("Indexed");
+});
+
 test("Escape closes the browser but not the settings dialog", async () => {
-  dropboxBrowse.mockResolvedValue({
-    folder: null,
+  selectionBrowse.mockResolvedValue({
+    container: null,
     breadcrumbs: [],
     entries: [],
     cursor: "end",
     hasMore: false,
+    helpLink: null,
   });
   const onOpenChange = vi.fn();
   await mountSettings(dropboxConnector([]), { onOpenChange });
@@ -449,7 +536,7 @@ test("Escape closes the browser but not the settings dialog", async () => {
 });
 
 test("remove saves then syncs", async () => {
-  dropboxDescribe.mockResolvedValue({
+  selectionDescribe.mockResolvedValue({
     items: [describeItem("id:f1", { name: "Q3", pathLower: "/q3" })],
   });
   listSources.mockResolvedValue({
@@ -469,9 +556,7 @@ test("remove saves then syncs", async () => {
   });
   await mountSettings(connector, { onSaveSettings, onSyncConnector });
 
-  await click(
-    document.querySelector<HTMLElement>('button[title="Remove Q3"]')!,
-  );
+  await click(document.querySelector<HTMLElement>('button[title="Remove Q3"]')!);
   await flush(5);
 
   expect(onSaveSettings).toHaveBeenCalledWith(connector, {
@@ -482,4 +567,25 @@ test("remove saves then syncs", async () => {
   });
   expect(onSyncConnector).toHaveBeenCalledWith(connector);
   expect(calls).toEqual(["save", "sync"]);
+});
+
+test("keeps other config keys when the selection changes", async () => {
+  selectionDescribe.mockResolvedValue({
+    items: [describeItem("id:f1", { name: "Q3", pathLower: "/q3" })],
+  });
+  const connector = connectorFor("dropbox", [{ id: "id:f1", kind: "folder" }], {
+    liveSearchEnabled: true,
+  });
+  const onSaveSettings = vi.fn(async () => true);
+  await mountSettings(connector, { onSaveSettings });
+
+  await click(document.querySelector<HTMLElement>('button[title="Remove Q3"]')!);
+  await flush(5);
+
+  expect(onSaveSettings).toHaveBeenCalledWith(connector, {
+    name: "Person",
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+    configJson: { items: [], liveSearchEnabled: true },
+  });
 });

@@ -63,7 +63,7 @@
       "js-yaml@5": "^5.4.1",
       "hono": "4.13.16",
       "@anthropic-ai/sandbox-runtime>zod": "4.6.7",
-      "next": "16.4.2",
+      "next": "16.4.5",
       "creem": "1.6.0",
       "proxy-addr": "2.0.8",
       "source-map-js": "1.2.2",

@@ -3285,44 +3285,37 @@
           "unknown": "Skipped for an unknown reason"
         }
       },
-      "dropbox": {
-        "itemsTitle": "Files and folders",
-        "itemsDescription": "Choose Dropbox files and folders to index. Everything selected is kept in sync on the connector's schedule.",
-        "chooseFiles": "Choose files",
+      "selection": {
         "count": "{count} / {limit}",
-        "empty": "Nothing selected yet. Choose files or folders to index them.",
-        "foldersGroup": "Folders",
-        "filesGroup": "Files",
-        "folderIndexedCount": "{count, plural, one {# file indexed} other {# files indexed}}",
-        "folderMissing": "No longer exists",
+        "missing": "No longer exists",
         "remove": "Remove {name}",
         "lastSynced": "Synced {date}",
-        "limitReached": "You can select at most {limit} files and folders. Remove some before adding more.",
+        "limitReached": "You can select at most {limit} items. Remove some before adding more.",
+        "containerIndexedCount": "{count, plural, one {# file indexed} other {# files indexed}}",
+        "untitled": "Untitled",
+        "nameUnavailable": "Name unavailable",
         "browser": {
-          "title": "Choose from Dropbox",
-          "description": "Open a folder to look inside, then tick the files and folders to index.",
-          "root": "Dropbox",
-          "breadcrumbLabel": "Folder path",
-          "searchLabel": "Search Dropbox by file name",
-          "searchPlaceholder": "Search Dropbox",
-          "emptyFolder": "This folder is empty.",
-          "noResults": "No files or folders match your search.",
+          "title": "Choose from {provider}",
+          "breadcrumbLabel": "Path",
+          "searchLabel": "Search {provider} by name",
+          "searchPlaceholder": "Search {provider}",
+          "emptyContainer": "Nothing here.",
+          "noResults": "Nothing matches your search.",
           "loadMore": "Load more",
+          "refresh": "Refresh",
           "select": "Select {name}",
-          "unsupported": "This file type cannot be indexed",
           "alreadyAdded": "Already added",
           "selectedCount": "{count} selected",
-          "folderNote": "Folders sync up to {limit, number} files in total",
           "cancel": "Cancel",
           "add": "Add"
         },
         "error": {
-          "reconnect": "Your Dropbox account needs reconnecting. Reconnect it, then try again.",
-          "notFound": "This Dropbox connector is unavailable. Refresh and try again.",
-          "notFoundItem": "This folder or file no longer exists in Dropbox.",
-          "tryLater": "Dropbox is busy right now. Try again in a moment.",
-          "reopen": "The Dropbox listing changed. Reopen the folder to continue.",
-          "generic": "Dropbox could not be reached. Try again."
+          "reconnect": "Your {provider} account needs reconnecting. Reconnect it, then try again.",
+          "notFound": "This connector is unavailable. Refresh and try again.",
+          "notFoundItem": "This item no longer exists in {provider}.",
+          "tryLater": "{provider} is busy right now. Try again in a moment.",
+          "reopen": "The listing changed. Reopen it to continue.",
+          "generic": "{provider} could not be reached. Try again."
         },
         "state": {
           "skipped": "Skipped",
@@ -3330,7 +3323,7 @@
           "processing": "Syncing",
           "failed": "Failed",
           "waiting": "Waiting for sync",
-          "unavailable": "Deleted in Dropbox or access was lost"
+          "unavailable": "Deleted in {provider} or access was lost"
         },
         "skipReason": {
           "unsupported_type": "Unsupported file type",
@@ -3340,6 +3333,39 @@
           "empty_content": "No readable content",
           "unreadable": "File could not be read",
           "unknown": "Skipped for an unknown reason"
+        },
+        "disabledReason": {
+          "unknown": "This item cannot be selected"
+        },
+        "default": {
+          "itemsTitle": "Selected items",
+          "itemsDescription": "Choose what this connector can reach.",
+          "choose": "Choose",
+          "empty": "Nothing selected yet.",
+          "browser": {
+            "description": "Open an item to look inside, then tick what to include."
+          }
+        },
+        "byType": {
+          "dropbox": {
+            "itemsTitle": "Files and folders",
+            "itemsDescription": "Choose Dropbox files and folders to index. Everything selected is kept in sync on the connector's schedule.",
+            "choose": "Choose files",
+            "empty": "Nothing selected yet. Choose files or folders to index them.",
+            "kinds": {
+              "folder": "Folders",
+              "file": "Files"
+            },
+            "disabledReason": {
+              "unsupported": "This file type cannot be indexed"
+            },
+            "browser": {
+              "description": "Open a folder to look inside, then tick the files and folders to index.",
+              "root": "Dropbox",
+              "note": "Folders sync up to 1,000 files in total",
+              "emptyContainer": "This folder is empty."
+            }
+          }
         }
       },
       "settingsTab": {
@@ -3667,6 +3693,7 @@
         "disabledConflict": "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
         "enableFailed": "Failed to enable {name} connector.",
         "authFailed": "{name} authorization failed.",
+        "setupIncomplete": "{name} was authorized, but setup could not finish. Connect it again.",
         "connectionCanceled": "{name} connection canceled.",
         "webhookCopied": "Webhook URL copied.",
         "webhookCopyFailed": "Could not copy webhook URL.",

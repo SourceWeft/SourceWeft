@@ -9,8 +9,9 @@ export const DROPBOX_SCOPES = [
 ] as const;
 
 /** Server-enforced ceiling on how many Dropbox files or folders one
- * connector may select. Keep in sync with the client-side selection limit
- * in apps/web/.../dropbox-selection.ts. */
+ * connector may select. Published to clients as the manifest's
+ * `selection.maxItems` and enforced there by the shared web selection helpers
+ * (apps/web/.../sources-hub/connectors/selection.ts). */
 export const DROPBOX_MAX_SELECTED_ITEMS = 500;
 
 /** Discovery cap: past this many unique supported files, a run fails with
@@ -19,7 +20,7 @@ export const DROPBOX_MAX_FILES = 1000;
 
 /** Shape of every Dropbox item id this connector hands out or accepts back:
  * the `id:` prefix from Dropbox's own file/folder ids. Keep in sync with the
- * pattern baked into dropbox.browse's `folderId`, dropbox.search's result
+ * pattern baked into dropbox.browse's `containerId`, dropbox.search's result
  * ids and dropbox.describe's `ids`. */
 export const DROPBOX_ITEM_ID_PATTERN = "^id:[A-Za-z0-9_-]{1,200}$";
 
@@ -62,7 +63,7 @@ export const dropboxConnectorContribution = {
         type: "object",
         additionalProperties: false,
         properties: {
-          folderId: {
+          containerId: {
             type: ["string", "null"],
             pattern: DROPBOX_ITEM_ID_PATTERN,
           },
@@ -156,5 +157,14 @@ export const dropboxConnectorContribution = {
       },
     },
     default: { items: [] },
+  },
+  selection: {
+    actions: {
+      browse: "dropbox.browse",
+      search: "dropbox.search",
+      describe: "dropbox.describe",
+    },
+    kinds: ["folder", "file"],
+    maxItems: DROPBOX_MAX_SELECTED_ITEMS,
   },
 } as const satisfies ConnectorContribution;
