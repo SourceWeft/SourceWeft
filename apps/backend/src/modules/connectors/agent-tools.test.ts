@@ -346,6 +346,75 @@ test("does not log the result of a read action for any connector type", async ()
   );
 });
 
+const toolsOnlyManifest: ConnectorManifest = {
+  ...manifest,
+  type: "tools-only-test",
+  displayName: "Tools Only Test",
+  sync: {
+    supportsIncremental: false,
+    defaultFrequencyMinutes: 60,
+    resources: [],
+  },
+  selection: {
+    actions: { browse: "browse", describe: "describe" },
+    kinds: ["item"],
+    maxItems: 100,
+  },
+  actions: [
+    {
+      type: "tools-only-test.item.read",
+      displayName: "Read tools-only item",
+      agentToolName: "read_tools_only_item",
+      description: "Read a tools-only item.",
+      visibility: "agent",
+      capabilities: ["connector_read"],
+      riskLevel: "low",
+      requiresApproval: false,
+      inputSchema: { type: "object", properties: {} },
+    },
+  ],
+};
+
+test("a paused tools-only connector binds no tools", async () => {
+  connectorRegistry.register({
+    ...adapter,
+    getManifest: () => toolsOnlyManifest,
+  });
+
+  for (const status of ["paused", "disabled", "error"] as const) {
+    vi.mocked(listSourceConnectorRecords).mockResolvedValue([
+      {
+        id: "tools-only-connector",
+        connectorType: toolsOnlyManifest.type,
+        name: "Tools Only",
+        status,
+        oauthAccountId: "tools-only-account",
+      } as never,
+    ]);
+    const tools = await createConnectorActionTools(context);
+    assert.equal(
+      tools.some((entry) => entry.name === "read_tools_only_item"),
+      false,
+      `expected no tool bound for status "${status}"`,
+    );
+  }
+
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([
+    {
+      id: "tools-only-connector",
+      connectorType: toolsOnlyManifest.type,
+      name: "Tools Only",
+      status: "active",
+      oauthAccountId: "tools-only-account",
+    } as never,
+  ]);
+  const activeTools = await createConnectorActionTools(context);
+  assert.equal(
+    activeTools.some((entry) => entry.name === "read_tools_only_item"),
+    true,
+  );
+});
+
 function findDebugCall(message: string) {
   const call = loggerMocks.debug.mock.calls.find(
     (entry) => entry[0] === message,
