@@ -142,7 +142,7 @@ export function DashboardSidebarSkeleton({
         {desktopTitlebar ? (
           <>
             <div data-desktop-drag-region="" className="h-14 w-full shrink-0" />
-            <div className="pointer-events-none absolute bottom-0 right-0 top-[55px] w-px bg-sidebar-border" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[55px] border-r border-t border-sidebar-border" />
           </>
         ) : (
           brand

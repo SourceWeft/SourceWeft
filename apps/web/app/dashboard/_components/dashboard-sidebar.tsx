@@ -437,8 +437,9 @@ export function DashboardSidebar() {
       {desktopTitlebar ? (
         // The traffic lights sit here and reach past the rail, so this strip
         // is one titlebar row with the column beside it: as tall as the chat
-        // header, and the rail's edge starts at that row's bottom line
-        // instead of running between the lights.
+        // header, with that row's bottom line carried across the rail, and
+        // the rail's edge starts at that line instead of running between the
+        // lights.
         <>
           <div
             aria-hidden="true"
@@ -448,7 +449,7 @@ export function DashboardSidebar() {
           <div
             aria-hidden="true"
             data-testid="navigation-rail-edge"
-            className="pointer-events-none absolute bottom-0 right-0 top-[55px] w-px bg-sidebar-border"
+            className="pointer-events-none absolute inset-x-0 bottom-0 top-[55px] border-r border-t border-sidebar-border"
           />
         </>
       ) : (
