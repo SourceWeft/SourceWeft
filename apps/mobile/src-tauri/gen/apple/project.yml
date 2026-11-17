@@ -71,10 +71,10 @@ targets:
         ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
         # Declared so the Tauri CLI edits these lines in place when it applies
-        # manual signing in CI. Its project editor misplaces every setting it has
-        # to add after the first, which leaves the build without a profile.
-        CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY[sdk=iphoneos*]: iPhone Developer
+        # manual signing in CI: its project editor misplaces every setting it
+        # has to add after the first. Do not declare CODE_SIGN_STYLE or
+        # CODE_SIGN_IDENTITY[sdk=iphoneos*] here: its export step reads the
+        # value a declared setting had before the edit.
         DEVELOPMENT_TEAM[sdk=iphoneos*]: PBML833M58
         PROVISIONING_PROFILE_SPECIFIER: ""
         PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]: ""

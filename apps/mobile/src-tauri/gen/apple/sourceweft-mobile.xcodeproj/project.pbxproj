@@ -319,8 +319,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "sourceweft-mobile_iOS/sourceweft-mobile_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "PBML833M58";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = "PBML833M58";
 				ENABLE_BITCODE = NO;
@@ -367,8 +365,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "sourceweft-mobile_iOS/sourceweft-mobile_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = "PBML833M58";
 				"DEVELOPMENT_TEAM[sdk=iphoneos*]" = "PBML833M58";
 				ENABLE_BITCODE = NO;

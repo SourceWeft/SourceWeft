@@ -183,10 +183,14 @@ test("Sign in with Apple is permitted to the page and entitled in the app", () =
   );
 });
 
-// The Tauri CLI applies CI signing by editing these settings. It only edits a
-// setting in place when the project already declares it; a setting it has to
-// add ends up outside the build settings, and the archive then has no profile.
-test("the iOS target declares every signing setting the Tauri CLI edits", () => {
+// The Tauri CLI (2.11.4) applies CI signing by editing these settings, and its
+// project editor has two faults this layout works around:
+// - of the settings it has to add, only the first lands inside the build
+//   settings, so the settings the build needs must already be declared;
+// - its export step reads the value a declared setting had before the edit, so
+//   the two settings the export reads (signing style and the device identity)
+//   must not be declared. The style is the first setting it adds.
+test("the iOS target declares exactly the signing settings the Tauri CLI can edit in place", () => {
   const project = read(
     resolve(apple, "sourceweft-mobile.xcodeproj/project.pbxproj"),
   );
@@ -195,19 +199,21 @@ test("the iOS target declares every signing setting the Tauri CLI edits", () => 
     .filter((block) => block.includes("CODE_SIGN_ENTITLEMENTS"));
   assert.equal(targetConfigs.length, 2, "expected debug and release");
   const spec = read(resolve(apple, "project.yml"));
+  const line = (key) => (key.includes("[") ? `\t"${key}" = ` : `\t${key} = `);
   for (const key of [
-    "CODE_SIGN_STYLE",
     "CODE_SIGN_IDENTITY",
-    "CODE_SIGN_IDENTITY[sdk=iphoneos*]",
     "DEVELOPMENT_TEAM",
     "DEVELOPMENT_TEAM[sdk=iphoneos*]",
     "PROVISIONING_PROFILE_SPECIFIER",
     "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]",
   ]) {
-    const line = key.includes("[") ? `\t"${key}" = ` : `\t${key} = `;
     for (const config of targetConfigs)
-      assert(config.includes(line), `${key} is not declared in the project`);
+      assert(config.includes(line(key)), `${key} is not declared`);
     if (key !== "CODE_SIGN_IDENTITY")
       assert(spec.includes(`${key}: `), `${key} is not in project.yml`);
+  }
+  for (const key of ["CODE_SIGN_STYLE", "CODE_SIGN_IDENTITY[sdk=iphoneos*]"]) {
+    assert(!project.includes(line(key)), `${key} must not be declared`);
+    assert(!spec.includes(`${key}: `), `${key} must not be in project.yml`);
   }
 });
