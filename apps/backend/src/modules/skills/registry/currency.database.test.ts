@@ -61,7 +61,9 @@ describe.skipIf(!skillDatabaseEnabled)(
         displayName: `Writer ${marker}`,
         description: `Version ${marker}`,
         commitSha,
-        storagePointer: `github:fixture/skills@${commitSha}#writer`,
+        // One source root per skill: the registry resolves a submission to the
+        // definition that already holds its repository path, whatever the slug.
+        storagePointer: `github:fixture/skills@${commitSha}#${slug}`,
         versionStatus: flagged ? ("draft" as const) : ("published" as const),
         outcome: flagged ? ("queued" as const) : ("indexed" as const),
         files: [
@@ -79,8 +81,8 @@ describe.skipIf(!skillDatabaseEnabled)(
           visibility: "restricted" as const,
           categories: [],
           registry: {
-            identifier: "gh:fixture/skills/writer",
-            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/writer`,
+            identifier: `gh:fixture/skills/${slug}`,
+            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/${slug}`,
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: "skill-owner",
             ...(options.committedAt
