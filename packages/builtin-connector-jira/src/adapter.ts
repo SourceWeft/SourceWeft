@@ -374,6 +374,12 @@ export function createJiraConnectorAdapter(
 
     const projectByItemId = new Map<string, JiraProject>();
     for (const [cloudId, projectIds] of projectIdsByCloudId) {
+      const site = siteByCloudId.get(cloudId);
+      if (!site || !hasJiraScope(site)) {
+        // The site is not in accessible resources, or has lost the Jira read
+        // scope: every id under it is missing and no request is made for it.
+        continue;
+      }
       let projects: JiraProject[];
       try {
         projects = await client.getProjectsByIds(
@@ -383,7 +389,7 @@ export function createJiraConnectorAdapter(
         );
       } catch (error) {
         if (error instanceof AtlassianApiError && error.code === "JIRA_NOT_FOUND") {
-          // The site is no longer reachable: every id under it is missing.
+          // The site stopped resolving mid-request: every id under it is missing.
           projects = [];
         } else {
           throw error;

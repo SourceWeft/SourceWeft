@@ -293,11 +293,326 @@ test("search skips a site that is no longer accessible", async () => {
   const issues = result.result.issues as Array<{ key: string }>;
   assert.equal(issues.length, 1);
   assert.equal(issues[0]!.key, "IN-1");
-  assert.equal(result.result.note, "Some selected sites were skipped");
+  assert.equal(
+    result.result.note,
+    `1 selected site can no longer be accessed: ${CLOUD_B}.`,
+  );
   assert.equal(
     calls.some((c) => c.jql !== undefined && c.cloudId === CLOUD_B),
     false,
   );
+});
+
+test("search drops a deleted project and retries once with the survivors", async () => {
+  let searchCount = 0;
+  const { fetcher, calls } = buildFetcher({
+    sites: [site(1)],
+    searchJql: () => {
+      searchCount += 1;
+      if (searchCount === 1) {
+        return json({ errorMessages: ["project does not exist"] }, { status: 400 });
+      }
+      return json({
+        issues: [
+          issueFixture({ id: "1", key: "KEEP-1", projectId: "10000", projectKey: "KEEP" }),
+        ],
+      });
+    },
+    // 10001 was deleted: only 10000 resolves.
+    projectSearch: (_cloudId, url) => {
+      const ids = url.searchParams.getAll("id");
+      return json({
+        values: ids
+          .filter((id) => id === "10000")
+          .map((id) => ({ id, key: "KEEP", name: "Kept" })),
+      });
+    },
+  });
+  const jira = adapter(fetcher);
+  const result = await jira.executeAction(
+    actionInput(
+      "jira.issue.search",
+      {},
+      projectItems(`project:${CLOUD_A}:10000`, `project:${CLOUD_A}:10001`),
+    ),
+  );
+
+  const jqlCalls = calls.filter((c) => c.jql !== undefined);
+  assert.equal(jqlCalls.length, 2);
+  assert.equal(jqlCalls[0]!.jql, "project in (10000, 10001) ORDER BY updated DESC");
+  assert.equal(jqlCalls[1]!.jql, "project in (10000) ORDER BY updated DESC");
+  const issues = result.result.issues as Array<{ key: string }>;
+  assert.deepEqual(issues.map((i) => i.key), ["KEEP-1"]);
+});
+
+test("a site whose projects are all gone is skipped with a note", async () => {
+  let searchCount = 0;
+  const { fetcher, calls } = buildFetcher({
+    sites: [site(1)],
+    searchJql: () => {
+      searchCount += 1;
+      return json({ errorMessages: ["project does not exist"] }, { status: 400 });
+    },
+    // Both selected projects are gone: nothing resolves.
+    projectSearch: () => json({ values: [] }),
+  });
+  const jira = adapter(fetcher);
+  const result = await jira.executeAction(
+    actionInput(
+      "jira.issue.search",
+      {},
+      projectItems(`project:${CLOUD_A}:10000`, `project:${CLOUD_A}:10001`),
+    ),
+  );
+
+  assert.equal(searchCount, 1);
+  assert.deepEqual(result.result.issues, []);
+  assert.equal(result.result.nextCursor, null);
+  assert.equal(
+    result.result.note,
+    "1 selected site can no longer be accessed: Site 1.",
+  );
+});
+
+test("a persistent rejection with a status throws an explaining JIRA_INVALID_REQUEST", async () => {
+  const { fetcher } = buildFetcher({
+    sites: [site(1)],
+    // Both searches are rejected; the projects still resolve.
+    searchJql: () => json({ errorMessages: ["bad status"] }, { status: 400 }),
+    projectSearch: (_cloudId, url) => {
+      const ids = url.searchParams.getAll("id");
+      return json({ values: ids.map((id) => ({ id, key: "KEEP", name: "Kept" })) });
+    },
+  });
+  const jira = adapter(fetcher);
+  await assert.rejects(
+    jira.executeAction(
+      actionInput(
+        "jira.issue.search",
+        { status: "Nonexistent" },
+        projectItems(`project:${CLOUD_A}:10000`),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 400 &&
+      error.code === "JIRA_INVALID_REQUEST" &&
+      error.message ===
+        "Jira rejected the search. The status or issue type may not exist in the selected projects; use the exact names shown in Jira.",
+  );
+});
+
+test("a persistent rejection without a status or issue type rethrows the original error", async () => {
+  const { fetcher } = buildFetcher({
+    sites: [site(1)],
+    searchJql: () => json({ errorMessages: ["bad jql"] }, { status: 400 }),
+    projectSearch: (_cloudId, url) => {
+      const ids = url.searchParams.getAll("id");
+      return json({ values: ids.map((id) => ({ id, key: "KEEP", name: "Kept" })) });
+    },
+  });
+  const jira = adapter(fetcher);
+  await assert.rejects(
+    jira.executeAction(
+      actionInput(
+        "jira.issue.search",
+        { text: "hello" },
+        projectItems(`project:${CLOUD_A}:10000`),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 400 &&
+      error.code === "JIRA_INVALID_REQUEST" &&
+      error.message !==
+        "Jira rejected the search. The status or issue type may not exist in the selected projects; use the exact names shown in Jira.",
+  );
+});
+
+test("projectKeys narrows to matching selected projects without a key clause", async () => {
+  const { fetcher, calls } = buildFetcher({
+    sites: [site(1)],
+    projectSearch: (_cloudId, url) => {
+      const ids = url.searchParams.getAll("id");
+      const byId: Record<string, string> = { "10000": "ENG", "10001": "OPS" };
+      return json({
+        values: ids.map((id) => ({ id, key: byId[id] ?? "X", name: `P${id}` })),
+      });
+    },
+    searchJql: () => json({ issues: [] }),
+  });
+  const jira = adapter(fetcher);
+  await jira.executeAction(
+    actionInput(
+      "jira.issue.search",
+      { projectKeys: ["ENG"] },
+      projectItems(`project:${CLOUD_A}:10000`, `project:${CLOUD_A}:10001`),
+    ),
+  );
+  const jqlCalls = calls.filter((c) => c.jql !== undefined);
+  assert.equal(jqlCalls.length, 1);
+  assert.equal(jqlCalls[0]!.jql, "project in (10000) ORDER BY updated DESC");
+  assert.ok(!jqlCalls[0]!.jql!.includes('"ENG"'));
+});
+
+test("a projectKeys value that matches nothing queries no site and returns an empty page", async () => {
+  const { fetcher, calls } = buildFetcher({
+    sites: [site(1)],
+    projectSearch: (_cloudId, url) => {
+      const ids = url.searchParams.getAll("id");
+      const byId: Record<string, string> = { "10000": "ENG", "10001": "OPS" };
+      return json({
+        values: ids.map((id) => ({ id, key: byId[id] ?? "X", name: `P${id}` })),
+      });
+    },
+  });
+  const jira = adapter(fetcher);
+  const result = await jira.executeAction(
+    actionInput(
+      "jira.issue.search",
+      { projectKeys: ["ZZZ"] },
+      projectItems(`project:${CLOUD_A}:10000`, `project:${CLOUD_A}:10001`),
+    ),
+  );
+  assert.equal(calls.some((c) => c.jql !== undefined), false);
+  assert.deepEqual(result.result.issues, []);
+  assert.equal(result.result.nextCursor, null);
+});
+
+test("search text with no searchable words is rejected", async () => {
+  const { fetcher, calls } = buildFetcher({});
+  const jira = adapter(fetcher);
+  await assert.rejects(
+    jira.executeAction(
+      actionInput(
+        "jira.issue.search",
+        { text: "()" },
+        projectItems(`project:${CLOUD_A}:10000`),
+      ),
+    ),
+    (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 400 &&
+      error.code === "JIRA_INVALID_REQUEST" &&
+      error.message === "The search text has no searchable words.",
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("an assignee name that matches nobody returns no issues", async () => {
+  const { fetcher, calls } = buildFetcher({
+    sites: [site(1)],
+    userSearch: () => json([]),
+    searchJql: () => json({ issues: [] }),
+  });
+  const jira = adapter(fetcher);
+  const result = await jira.executeAction(
+    actionInput(
+      "jira.issue.search",
+      { assignee: "Nobody" },
+      projectItems(`project:${CLOUD_A}:10000`),
+    ),
+  );
+  const jql = calls.find((c) => c.jql !== undefined)!.jql;
+  assert.equal(
+    jql,
+    "project in (10000) AND assignee is EMPTY AND assignee is not EMPTY ORDER BY updated DESC",
+  );
+  assert.deepEqual(result.result.issues, []);
+});
+
+test("every tool throws JIRA_NOT_FOUND when no selected site can be accessed", async () => {
+  const selection = projectItems(`project:${CLOUD_A}:10000`);
+  for (const [actionType, request] of [
+    ["jira.issue.search", {}],
+    ["jira.issue.read", { issueKey: "ENG-1" }],
+    ["jira.project.list", {}],
+  ] as const) {
+    const { fetcher } = buildFetcher({ sites: [] });
+    const jira = adapter(fetcher);
+    await assert.rejects(
+      jira.executeAction(actionInput(actionType, request, selection)),
+      (error: unknown) =>
+        error instanceof AtlassianApiError &&
+        error.statusCode === 404 &&
+        error.code === "JIRA_NOT_FOUND" &&
+        error.message ===
+          "None of the selected Jira sites can be accessed any more. Ask the user to reconnect Jira or choose projects again.",
+    );
+  }
+});
+
+test("list re-checks returned projects against the selection", async () => {
+  const { fetcher } = buildFetcher({
+    sites: [site(1)],
+    // The fake ignores the id filter and returns a project that is not selected.
+    projectSearch: () =>
+      json({
+        values: [
+          { id: "10000", key: "KEEP", name: "Kept", projectTypeKey: "software" },
+          { id: "99999", key: "SNEAK", name: "Not selected", projectTypeKey: "software" },
+        ],
+      }),
+  });
+  const jira = adapter(fetcher);
+  const result = await jira.executeAction(
+    actionInput(
+      "jira.project.list",
+      {},
+      projectItems(`project:${CLOUD_A}:10000`),
+    ),
+  );
+  const projects = result.result.projects as Array<{ key: string }>;
+  assert.deepEqual(projects.map((p) => p.key), ["KEEP"]);
+  assert.equal(result.result.unavailable, 0);
+});
+
+test("comment bodies over 2000 characters are flagged truncated", async () => {
+  const longBody = "y".repeat(2500);
+  const { fetcher } = buildFetcher({
+    sites: [site(1)],
+    issue: () =>
+      json(
+        issueFixture({ id: "1", key: "CMT-1", projectId: "10000", projectKey: "CMT" }),
+      ),
+    comments: () =>
+      json({
+        comments: [
+          {
+            author: { displayName: "Long" },
+            created: "2026-11-18T00:00:00.000Z",
+            body: {
+              type: "doc",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: longBody }] },
+              ],
+            },
+          },
+          {
+            author: { displayName: "Short" },
+            created: "2026-11-18T00:00:00.000Z",
+            body: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }],
+            },
+          },
+        ],
+        total: 2,
+      }),
+  });
+  const jira = adapter(fetcher);
+  const result = await jira.executeAction(
+    actionInput(
+      "jira.issue.read",
+      { issueKey: "CMT-1" },
+      projectItems(`project:${CLOUD_A}:10000`),
+    ),
+  );
+  const comments = (result.result.issue as { comments: Array<{ body: string; truncated: boolean }> })
+    .comments;
+  assert.equal(comments[0]!.body.length, 2000);
+  assert.equal(comments[0]!.truncated, true);
+  assert.equal(comments[1]!.truncated, false);
 });
 
 test("search pages each site independently", async () => {

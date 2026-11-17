@@ -17,7 +17,7 @@ import type {
 } from "@sourceweft/contracts";
 import { decodeSiteCursor, encodeSiteCursor } from "./cursor";
 import { groupByCloudId, parseJiraSelection } from "./ids";
-import { buildIssueJql, type JqlInput } from "./jql";
+import { buildIssueJql, jqlTextTerm, type JqlInput } from "./jql";
 import {
   createJiraClient,
   type JiraIssueDetail,
@@ -56,8 +56,6 @@ const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,31}-[1-9][0-9]{0,9}$/;
 /** A Jira project key the agent may narrow by (contribution.ts input schema). */
 const PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,31}$/;
 
-const SKIPPED_NOTE = "Some selected sites were skipped";
-
 function invalidRequest(message = "Invalid Jira request"): AtlassianApiError {
   return new AtlassianApiError(400, "JIRA_INVALID_REQUEST", message);
 }
@@ -72,6 +70,39 @@ function nothingSelected(): AtlassianApiError {
 
 function issueNotFound(): AtlassianApiError {
   return new AtlassianApiError(404, "JIRA_NOT_FOUND", "Jira issue not found");
+}
+
+/** Thrown when not one selected site is reachable any more, instead of letting
+ * a tool return an empty result that looks like "no matching issues". */
+function noSitesReachable(): AtlassianApiError {
+  return new AtlassianApiError(
+    404,
+    "JIRA_NOT_FOUND",
+    "None of the selected Jira sites can be accessed any more. Ask the user to reconnect Jira or choose projects again.",
+  );
+}
+
+/** Builds the sites note from the selected sites that could not be reached
+ * (named, or by cloud id when the name is unknown) and the count of sites left
+ * unsearched because of the fan-out cap. Either fact may be present; returns
+ * `undefined` when nothing was dropped. */
+function buildSitesNote(
+  unreachable: readonly string[],
+  overflowCount: number,
+): string | undefined {
+  const facts: string[] = [];
+  if (unreachable.length > 0) {
+    const noun = unreachable.length === 1 ? "site" : "sites";
+    facts.push(
+      `${unreachable.length} selected ${noun} can no longer be accessed: ${unreachable.join(", ")}.`,
+    );
+  }
+  if (overflowCount > 0) {
+    facts.push(
+      `Only the first ${MAX_FANOUT_SITES} selected sites are searched; ${overflowCount} more were not.`,
+    );
+  }
+  return facts.length > 0 ? facts.join(" ") : undefined;
 }
 
 function hasJiraScope(site: AtlassianSite): boolean {
@@ -95,30 +126,45 @@ function selectionScope(config: Record<string, unknown>): Map<string, string[]> 
   return groupByCloudId(selection);
 }
 
+type AccessibleSites = {
+  kept: SiteScope[];
+  /** Cloud ids of selected sites that are no longer in accessible resources (or
+   * have lost the Jira read scope). */
+  inaccessible: string[];
+  /** Accessible selected sites dropped because of the fan-out cap. */
+  overflowCount: number;
+};
+
 /** Lists the accessible sites and keeps the first {@link MAX_FANOUT_SITES}
- * selected sites that still carry the Jira read scope (R3/R6 order: cloud-id
- * ascending). `note` is set when any selected site was dropped — because it is
- * no longer accessible, or because it fell past the fan-out cap. */
+ * selected sites that still carry the Jira read scope, in cloud-id ascending
+ * order. Throws `404 JIRA_NOT_FOUND` when not one selected site is reachable,
+ * rather than returning an empty result. */
 async function accessibleSelectedSites(
   deps: JiraLiveToolDeps,
   accessToken: string,
   grouped: Map<string, string[]>,
-): Promise<{ kept: SiteScope[]; note?: string }> {
+): Promise<AccessibleSites> {
   const sites = await listAccessibleResources(deps.atlassianConfig, accessToken);
   const accessible = new Map(
     sites.filter(hasJiraScope).map((site) => [site.cloudId, site]),
   );
   const kept: SiteScope[] = [];
-  let skipped = false;
+  const inaccessible: string[] = [];
+  let overflowCount = 0;
   for (const [cloudId, projectIds] of grouped) {
     const site = accessible.get(cloudId);
-    if (!site || kept.length >= MAX_FANOUT_SITES) {
-      skipped = true;
+    if (!site) {
+      inaccessible.push(cloudId);
+      continue;
+    }
+    if (kept.length >= MAX_FANOUT_SITES) {
+      overflowCount += 1;
       continue;
     }
     kept.push({ cloudId, site, projectIds });
   }
-  return { kept, note: skipped ? SKIPPED_NOTE : undefined };
+  if (kept.length === 0) throw noSitesReachable();
+  return { kept, inaccessible, overflowCount };
 }
 
 /** The issue-search parameters the agent may pass, each validated the same way
@@ -271,6 +317,73 @@ async function resolveAssignee(
   return { kind: "accounts", accountIds };
 }
 
+type SiteSearchOutcome =
+  | { kind: "page"; page: Awaited<ReturnType<JiraClient["searchIssues"]>> }
+  | { kind: "gone" };
+
+/** Runs one site's issue search and recovers from a project Jira no longer
+ * accepts. Jira answers HTTP 400 to JQL naming a project that was deleted,
+ * archived or is no longer visible; the ids that no longer resolve are dropped
+ * and the search is retried once with the survivors. If none resolve, the site
+ * contributes nothing. If the retry is still rejected and the agent passed a
+ * status or issue type, that is the likely cause and is reported; otherwise the
+ * original rejection propagates. The scope ids only ever shrink, never widen. */
+async function runSiteSearch(
+  deps: JiraLiveToolDeps,
+  accessToken: string,
+  cloudId: string,
+  scopeIds: string[],
+  params: IssueSearchParams,
+  assignee: JqlInput["assignee"],
+  pageToken: string | undefined,
+): Promise<SiteSearchOutcome> {
+  const search = (projectIds: string[]) =>
+    deps.client.searchIssues(accessToken, cloudId, {
+      jql: buildIssueJql({
+        projectIds,
+        text: params.text,
+        status: params.status,
+        issueType: params.issueType,
+        assignee,
+        updatedWithinDays: params.updatedWithinDays,
+        orderBy: params.orderBy,
+      }),
+      nextPageToken: pageToken,
+      maxResults: ISSUE_PAGE_SIZE,
+    });
+
+  try {
+    return { kind: "page", page: await search(scopeIds) };
+  } catch (error) {
+    if (
+      !(error instanceof AtlassianApiError) ||
+      error.code !== "JIRA_INVALID_REQUEST"
+    ) {
+      throw error;
+    }
+    const resolved = await deps.client.getProjectsByIds(accessToken, cloudId, scopeIds);
+    const scopeSet = new Set(scopeIds);
+    const survivingIds = resolved
+      .map((project) => project.id)
+      .filter((id) => scopeSet.has(id));
+    if (survivingIds.length === 0) return { kind: "gone" };
+    try {
+      return { kind: "page", page: await search(survivingIds) };
+    } catch (retryError) {
+      if (
+        retryError instanceof AtlassianApiError &&
+        retryError.code === "JIRA_INVALID_REQUEST" &&
+        (params.status !== undefined || params.issueType !== undefined)
+      ) {
+        throw invalidRequest(
+          "Jira rejected the search. The status or issue type may not exist in the selected projects; use the exact names shown in Jira.",
+        );
+      }
+      throw retryError;
+    }
+  }
+}
+
 /** `jira.issue.search`: structured filters only. Every site's query starts with
  * its selected project ids, and every returned issue is dropped unless its
  * `projectId` is one of those ids (out-of-scope and uncheckable issues are
@@ -281,12 +394,19 @@ async function searchIssuesTool(
 ): Promise<ConnectorActionResult> {
   const grouped = selectionScope(input.config);
   const params = parseIssueSearchRequest(input.request);
+
+  if (params.text !== undefined && jqlTextTerm(params.text) === "") {
+    // Text that is only stripped characters would otherwise silently drop the
+    // text filter and return all recent issues; that is an error instead.
+    throw invalidRequest("The search text has no searchable words.");
+  }
+
   const cursorSites =
     params.cursor !== undefined && params.cursor !== ""
       ? decodeSiteCursor(params.cursor, [...grouped.keys()])
       : null;
 
-  const { kept, note } = await accessibleSelectedSites(
+  const { kept, inaccessible, overflowCount } = await accessibleSelectedSites(
     deps,
     input.accessToken,
     grouped,
@@ -294,6 +414,7 @@ async function searchIssuesTool(
 
   const issues: SearchIssue[] = [];
   const nextSites: Record<string, string | null> = {};
+  const projectsGone: string[] = [];
   let anyUnfinished = false;
 
   for (const { cloudId, site, projectIds } of kept) {
@@ -308,27 +429,47 @@ async function searchIssuesTool(
       pageToken = token;
     }
 
+    // Narrow by project key locally: resolve the site's selected projects and
+    // keep the ids whose key the agent asked for. The key never enters JQL, so
+    // an unselected key simply matches nothing on this site.
+    let scopeIds = projectIds;
+    if (params.projectKeys) {
+      const resolved = await deps.client.getProjectsByIds(
+        input.accessToken,
+        cloudId,
+        projectIds,
+      );
+      const wanted = new Set(params.projectKeys.map((key) => key.toUpperCase()));
+      scopeIds = resolved
+        .filter((project) => wanted.has(project.key.toUpperCase()))
+        .map((project) => project.id);
+      if (scopeIds.length === 0) {
+        nextSites[cloudId] = null;
+        continue;
+      }
+    }
+
     const assignee = await resolveAssignee(
       deps,
       input.accessToken,
       cloudId,
       params.assignee,
     );
-    const jql = buildIssueJql({
-      projectIds,
-      text: params.text,
-      projectKeys: params.projectKeys,
-      status: params.status,
-      issueType: params.issueType,
+    const outcome = await runSiteSearch(
+      deps,
+      input.accessToken,
+      cloudId,
+      scopeIds,
+      params,
       assignee,
-      updatedWithinDays: params.updatedWithinDays,
-      orderBy: params.orderBy,
-    });
-    const page = await deps.client.searchIssues(input.accessToken, cloudId, {
-      jql,
-      nextPageToken: pageToken,
-      maxResults: ISSUE_PAGE_SIZE,
-    });
+      pageToken,
+    );
+    if (outcome.kind === "gone") {
+      projectsGone.push(site.name || cloudId);
+      nextSites[cloudId] = null;
+      continue;
+    }
+    const page = outcome.page;
 
     const selectedProjectIds = new Set(projectIds);
     for (const summary of page.issues) {
@@ -346,6 +487,7 @@ async function searchIssuesTool(
     }
   }
 
+  const note = buildSitesNote([...inaccessible, ...projectsGone], overflowCount);
   const result: Record<string, unknown> = {
     issues,
     nextCursor: anyUnfinished ? encodeSiteCursor(nextSites) : null,
@@ -364,7 +506,12 @@ async function readIssueTool(
 ): Promise<ConnectorActionResult> {
   const grouped = selectionScope(input.config);
   const issueKey = parseIssueKey(input.request);
-  const { kept } = await accessibleSelectedSites(deps, input.accessToken, grouped);
+  const { kept, inaccessible, overflowCount } = await accessibleSelectedSites(
+    deps,
+    input.accessToken,
+    grouped,
+  );
+  const note = buildSitesNote(inaccessible, overflowCount);
 
   for (const { cloudId, site, projectIds } of kept) {
     const detail = await deps.client.getIssue(input.accessToken, cloudId, issueKey);
@@ -372,7 +519,11 @@ async function readIssueTool(
     if (detail.projectId === null || !projectIds.includes(detail.projectId)) {
       continue;
     }
-    return { result: { issue: await toIssueDetail(deps, input.accessToken, cloudId, site, detail) } };
+    const result: Record<string, unknown> = {
+      issue: await toIssueDetail(deps, input.accessToken, cloudId, site, detail),
+    };
+    if (note) result.note = note;
+    return { result };
   }
 
   throw issueNotFound();
@@ -392,11 +543,15 @@ async function toIssueDetail(
     COMMENT_LIMIT,
   );
   const description = adfToMarkdown(detail.description);
-  const comments = commentsPage.comments.slice(0, COMMENT_LIMIT).map((comment) => ({
-    author: comment.author,
-    created: comment.created,
-    body: adfToMarkdown(comment.body).slice(0, COMMENT_BODY_LIMIT),
-  }));
+  const comments = commentsPage.comments.slice(0, COMMENT_LIMIT).map((comment) => {
+    const body = adfToMarkdown(comment.body);
+    return {
+      author: comment.author,
+      created: comment.created,
+      body: body.slice(0, COMMENT_BODY_LIMIT),
+      truncated: body.length > COMMENT_BODY_LIMIT,
+    };
+  });
   return {
     ...toSearchIssue(detail, site),
     reporter: detail.reporter,
@@ -443,8 +598,12 @@ async function listProjectsTool(
         throw error;
       }
     }
+    const selectedIds = new Set(projectIds);
     const resolvedIds = new Set<string>();
     for (const project of resolved) {
+      // Re-check every returned project against this site's selection: a
+      // provider that ignores the id filter must not leak an unselected project.
+      if (!selectedIds.has(project.id)) continue;
       if (resolvedIds.has(project.id)) continue;
       resolvedIds.add(project.id);
       projects.push({

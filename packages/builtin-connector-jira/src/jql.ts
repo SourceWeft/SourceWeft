@@ -34,7 +34,6 @@ export function jqlTextTerm(value: string): string {
 export type JqlInput = {
   projectIds: string[]; // numeric strings, 1..n, already validated
   text?: string;
-  projectKeys?: string[];
   status?: string;
   issueType?: string;
   assignee?: { kind: "me" } | { kind: "accounts"; accountIds: string[] };
@@ -61,10 +60,6 @@ export function buildIssueJql(input: JqlInput): string {
   }
 
   const clauses: string[] = [`project in (${input.projectIds.join(", ")})`];
-
-  if (input.projectKeys && input.projectKeys.length > 0) {
-    clauses.push(`project in (${input.projectKeys.map(jqlString).join(", ")})`);
-  }
 
   if (input.text !== undefined) {
     const term = jqlTextTerm(input.text);

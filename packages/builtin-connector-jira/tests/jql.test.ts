@@ -15,7 +15,6 @@ test("scope clause comes first and ids are unquoted", () => {
 test("every optional clause in order", () => {
   const jql = buildIssueJql({
     projectIds: ["10000"],
-    projectKeys: ["ABC", "DEF"],
     text: "release notes",
     status: "Open",
     issueType: "Bug",
@@ -27,7 +26,6 @@ test("every optional clause in order", () => {
     jql,
     [
       "project in (10000)",
-      'project in ("ABC", "DEF")',
       'text ~ "release notes"',
       'status = "Open"',
       'issuetype = "Bug"',

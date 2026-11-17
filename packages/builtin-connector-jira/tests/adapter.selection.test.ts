@@ -401,11 +401,13 @@ test("describe keeps request order and marks missing projects", async () => {
   ]);
 });
 
-test("describe marks items on a lost site as missing", async () => {
+test("describe marks items on a lost site as missing without a project request", async () => {
   const idLost = `project:${CLOUD_A}:10000`;
-  const { fetcher } = buildFetcher({
+  const { fetcher, calls } = buildFetcher({
     sites: [],
-    projectSearch: () => json({ errorMessages: ["not found"] }, 404),
+    projectSearch: () => {
+      throw new Error("must not query a site that is not in accessible resources");
+    },
   });
   const jira = adapter(fetcher);
   const result = await jira.executeAction(
@@ -414,6 +416,7 @@ test("describe marks items on a lost site as missing", async () => {
   assert.deepEqual(result.result.items, [
     { id: idLost, kind: null, name: null, detail: null, exists: false, meta: {} },
   ]);
+  assert.equal(calls.some((call) => call.url.includes("project/search")), false);
 });
 
 test("describe rejects 101 ids", async () => {

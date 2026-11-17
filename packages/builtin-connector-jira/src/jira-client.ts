@@ -97,20 +97,30 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return result;
 }
 
-function toProject(raw: unknown): JiraProject {
+/** Maps one project, or `null` when the provider item has no id or no key: an
+ * item that cannot be identified is dropped rather than carried as a blank. */
+function toProject(raw: unknown): JiraProject | null {
   const value = asRecord(raw);
+  const id = safeString(value.id, 64);
+  const key = safeString(value.key, 64);
+  if (!id || !key) return null;
   const lead = asRecord(value.lead);
   return {
-    id: safeString(value.id, 64) ?? "",
-    key: safeString(value.key, 64) ?? "",
+    id,
+    key,
     name: safeString(value.name, 512) ?? "",
     projectTypeKey: safeString(value.projectTypeKey, 64),
     leadName: safeString(lead.displayName, 512),
   };
 }
 
-function toIssueSummary(raw: unknown): JiraIssueSummary {
+/** Maps one issue summary, or `null` when the provider item has no id or no
+ * key (it cannot be cited, re-checked against the selection, or fetched). */
+function toIssueSummary(raw: unknown): JiraIssueSummary | null {
   const value = asRecord(raw);
+  const id = safeString(value.id, 64);
+  const key = safeString(value.key, 64);
+  if (!id || !key) return null;
   const fields = asRecord(value.fields);
   const project = asRecord(fields.project);
   const status = asRecord(fields.status);
@@ -118,8 +128,8 @@ function toIssueSummary(raw: unknown): JiraIssueSummary {
   const priority = asRecord(fields.priority);
   const assignee = asRecord(fields.assignee);
   return {
-    id: safeString(value.id, 64) ?? "",
-    key: safeString(value.key, 64) ?? "",
+    id,
+    key,
     projectId: safeString(project.id, 64),
     projectKey: safeString(project.key, 64),
     projectName: safeString(project.name, 512),
@@ -132,8 +142,9 @@ function toIssueSummary(raw: unknown): JiraIssueSummary {
   };
 }
 
-function toIssueDetail(raw: unknown): JiraIssueDetail {
+function toIssueDetail(raw: unknown): JiraIssueDetail | null {
   const summary = toIssueSummary(raw);
+  if (!summary) return null;
   const fields = asRecord(asRecord(raw).fields);
   const reporter = asRecord(fields.reporter);
   return {
@@ -143,6 +154,16 @@ function toIssueDetail(raw: unknown): JiraIssueDetail {
     created: safeString(fields.created, 64),
     description: fields.description ?? null,
   };
+}
+
+/** Maps a list of provider items, dropping any the mapper rejects (no id/key). */
+function mapDefined<T>(values: readonly unknown[], map: (raw: unknown) => T | null): T[] {
+  const result: T[] = [];
+  for (const value of values) {
+    const mapped = map(value);
+    if (mapped !== null) result.push(mapped);
+  }
+  return result;
 }
 
 function toComment(raw: unknown): JiraComment {
@@ -184,7 +205,7 @@ export function createJiraClient(config: AtlassianClientConfig) {
       const values = response.values ?? [];
       const startAt = response.startAt ?? input.startAt ?? 0;
       return {
-        projects: values.map(toProject),
+        projects: mapDefined(values, toProject),
         isLast: response.isLast ?? true,
         nextStartAt: startAt + values.length,
       };
@@ -206,7 +227,7 @@ export function createJiraClient(config: AtlassianClientConfig) {
           path: "/rest/api/3/project/search",
           query: { id: batch, maxResults: PROJECT_ID_CHUNK_SIZE, expand: "lead" },
         });
-        for (const value of response.values ?? []) projects.push(toProject(value));
+        projects.push(...mapDefined(response.values ?? [], toProject));
       }
       return projects;
     },
@@ -237,7 +258,7 @@ export function createJiraClient(config: AtlassianClientConfig) {
         },
       });
       return {
-        issues: (response.issues ?? []).map(toIssueSummary),
+        issues: mapDefined(response.issues ?? [], toIssueSummary),
         nextPageToken: response.nextPageToken ?? null,
       };
     },
@@ -313,7 +334,9 @@ export function createJiraClient(config: AtlassianClientConfig) {
         const accountId = safeString(asRecord(value).accountId, 128);
         if (accountId) ids.push(accountId);
       }
-      return ids;
+      // The endpoint is asked for `limit` results, but a provider that returns
+      // more must never widen the assignee filter past the cap.
+      return ids.slice(0, limit);
     },
   };
 }

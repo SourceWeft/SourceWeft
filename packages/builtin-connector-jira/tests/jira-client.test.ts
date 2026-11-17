@@ -80,6 +80,65 @@ test("listProjects requests project/search with query, startAt, maxResults, orde
   });
 });
 
+test("listProjects drops projects without an id or a key", async () => {
+  const { fetcher } = recordingFetcher(() =>
+    json({
+      values: [
+        { id: "10000", key: "KEEP", name: "Kept" },
+        { id: "10001", name: "No key" },
+        { key: "NOID", name: "No id" },
+      ],
+      isLast: true,
+      startAt: 0,
+    }),
+  );
+  const client = createJiraClient(config(fetcher));
+
+  const result = await client.listProjects(TOKEN, CLOUD_ID, { maxResults: 25 });
+
+  assert.deepEqual(
+    result.projects.map((p) => p.id),
+    ["10000"],
+  );
+});
+
+test("searchIssues drops issues without an id or a key", async () => {
+  const { fetcher } = recordingFetcher(() =>
+    json({
+      issues: [
+        { id: "1", key: "KEEP-1", fields: { summary: "ok" } },
+        { id: "2", fields: { summary: "no key" } },
+        { key: "NOID-3", fields: { summary: "no id" } },
+      ],
+    }),
+  );
+  const client = createJiraClient(config(fetcher));
+
+  const result = await client.searchIssues(TOKEN, CLOUD_ID, {
+    jql: "project in (10000) ORDER BY updated DESC",
+    maxResults: 25,
+  });
+
+  assert.deepEqual(
+    result.issues.map((i) => i.key),
+    ["KEEP-1"],
+  );
+});
+
+test("findAccountIds slices its answer to the limit", async () => {
+  const { fetcher } = recordingFetcher(() =>
+    json(
+      Array.from({ length: 8 }, (_, i) => ({ accountId: `acc-${i}` })),
+    ),
+  );
+  const client = createJiraClient(config(fetcher));
+
+  const ids = await client.findAccountIds(TOKEN, CLOUD_ID, "Ada", 5);
+
+  assert.equal(ids.length, 5);
+  assert.deepEqual(ids, ["acc-0", "acc-1", "acc-2", "acc-3", "acc-4"]);
+});
+
 test("getProjectsByIds chunks ids by 50 and repeats the id parameter per request", async () => {
   const projectIds = Array.from({ length: 120 }, (_, i) => String(10000 + i));
   const { fetcher, calls } = recordingFetcher((call) => {
