@@ -1052,6 +1052,25 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  packages/builtin-connector-linear:
+    dependencies:
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/builtin-connector-notion:
     dependencies:
       '@sourceweft/capability-contracts':

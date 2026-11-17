@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/linear",
+  "kind": "connector",
+  "name": "Linear Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "linear",
+      "title": "Linear",
+      "auth": {
+        "kind": "oauth2",
+        "authorizationUrl": "https://linear.app/oauth/authorize",
+        "tokenUrl": "https://api.linear.app/oauth/token",
+        "scopes": ["read"],
+        "authorizationParams": {
+          "prompt": "consent"
+        },
+        "sendScope": true
+      },
+      "sync": {
+        "supportsIncremental": false,
+        "defaultFrequencyMinutes": 360,
+        "resources": []
+      },
+      "actions": [
+        {
+          "id": "linear.issue.search",
+          "title": "Search Linear issues",
+          "agentToolName": "search_linear_issues",
+          "description": "Search issues in the Linear teams and projects selected for this connector. Returns matching issues with state, assignee and link; read one issue for its description and comments.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "required": ["query"],
+            "additionalProperties": false,
+            "properties": {
+              "query": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "state": { "type": "string", "minLength": 1, "maxLength": 100 },
+              "assignee": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "updatedWithinDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365
+              },
+              "cursor": { "type": "string", "maxLength": 4096 }
+            }
+          }
+        },
+        {
+          "id": "linear.issue.read",
+          "title": "Read Linear issue",
+          "agentToolName": "read_linear_issue",
+          "description": "Read one Linear issue by identifier (for example ENG-123), with description, labels, comments and link. Only issues inside the selected teams and projects can be read.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 64 }
+            }
+          }
+        },
+        {
+          "id": "linear.project.list",
+          "title": "List Linear projects",
+          "agentToolName": "list_linear_projects",
+          "description": "List the Linear projects inside the selected teams and projects, with status, lead, progress and link.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "agent",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        },
+        {
+          "id": "linear.browse",
+          "title": "Browse Linear",
+          "description": "List Linear teams and projects so the user can choose teams and projects for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "containerId": {
+                "type": ["string", "null"],
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "cursor": { "type": "string", "maxLength": 4096 }
+            }
+          }
+        },
+        {
+          "id": "linear.search",
+          "title": "Search Linear",
+          "description": "Search Linear team and project names so the user can choose teams and projects for this connector.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query"],
+            "properties": {
+              "query": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          }
+        },
+        {
+          "id": "linear.describe",
+          "title": "Describe Linear items",
+          "description": "Return the name, kind and existence of selected Linear teams and projects.",
+          "capabilities": ["connector_read"],
+          "risk": "low",
+          "requiresApproval": false,
+          "visibility": "internal",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ids"],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["team", "project"]
+                }
+              }
+            }
+          }
+        },
+        "default": { "items": [] }
+      },
+      "selection": {
+        "actions": {
+          "browse": "linear.browse",
+          "search": "linear.search",
+          "describe": "linear.describe"
+        },
+        "kinds": ["team", "project"],
+        "maxItems": 100
+      }
+    }
+  ]
+}
