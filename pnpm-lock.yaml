@@ -604,6 +604,9 @@ importers:
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-gmail
+      '@sourceweft/builtin-connector-jira':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-jira
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion

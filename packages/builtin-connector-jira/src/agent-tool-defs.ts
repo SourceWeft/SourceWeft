@@ -13,7 +13,10 @@ const common = {
   domain: "connector",
   activation,
   configuration,
-  slash: { iconName: "jira", iconTone: "brand", supportsCommand: true },
+  // R13/C3: no Atlassian artwork is in the repo (apps/web/public/icons/jira.svg
+  // does not exist), so these fall back to the generic tool icon. Switch to
+  // iconName: "jira" / iconTone: "brand" once a Jira mark is added there.
+  slash: { iconName: "tool", iconTone: "mono", supportsCommand: true },
 } as const;
 
 export const jiraAgentToolDefs = [

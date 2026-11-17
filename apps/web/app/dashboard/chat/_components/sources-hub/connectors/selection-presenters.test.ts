@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { File, FileText, Folder } from "lucide-react";
+import { File, FileText, Folder, Globe, SquareKanban } from "lucide-react";
 import {
   selectionIconFor,
   selectionPresenterFor,
@@ -153,6 +153,14 @@ describe("selectionPresenters.dropbox", () => {
         presenter.indexing?.containerIndexedCount({ item, described, sources }),
       ).toBeNull();
     });
+  });
+});
+
+describe("selectionPresenters.jira", () => {
+  test("presenter has an icon for every selection kind", () => {
+    const presenter = selectionPresenters.jira!;
+    expect(presenter.kindIcons.site).toBe(Globe);
+    expect(presenter.kindIcons.project).toBe(SquareKanban);
   });
 });
 

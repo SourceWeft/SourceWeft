@@ -8,7 +8,14 @@
  * and no indexing (a tools-only connector has nothing to count or map).
  */
 
-import { File, FileText, Folder, type LucideIcon } from "lucide-react";
+import {
+  File,
+  FileText,
+  Folder,
+  Globe,
+  SquareKanban,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   ConnectorSelectionDescribeItem,
   ConnectorSelectionItem,
@@ -87,6 +94,11 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
         }).length;
       },
     },
+  },
+  // Jira is tools-only (nothing is indexed): just the per-kind icons for the
+  // selection dialog, no `indexing` entry.
+  jira: {
+    kindIcons: { site: Globe, project: SquareKanban },
   },
 };
 

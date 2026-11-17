@@ -1,4 +1,4 @@
-import { Box, FileText, HardDrive, Mail } from "lucide-react";
+import { Box, FileText, HardDrive, Mail, SquareKanban } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -62,6 +62,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     isIndexable: true,
     supportsActions: false,
     supportsPeriodicSync: true,
+    supportsWebhook: false,
+  },
+  {
+    id: "jira",
+    name: "Jira",
+    category: "Knowledge & Docs",
+    description:
+      "Let the agent search and read issues in the Jira projects you choose.",
+    capabilities: ["Live search", "Issues & projects"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: SquareKanban,
+    // R13/C3: no Atlassian artwork is shipped, so this entry has no
+    // logoIconName (unlike Notion/Dropbox's logoIconName/logoIconTone).
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
     supportsWebhook: false,
   },
 ];

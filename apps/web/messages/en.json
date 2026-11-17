@@ -3365,6 +3365,20 @@
               "note": "Folders sync up to 1,000 files in total",
               "emptyContainer": "This folder is empty."
             }
+          },
+          "jira": {
+            "itemsTitle": "Projects",
+            "itemsDescription": "Agents of every member of this workspace can search and read issues in the projects you choose, and only those.",
+            "choose": "Choose projects",
+            "empty": "Nothing selected yet. Nothing can be searched until you choose at least one project.",
+            "kinds": {
+              "site": "Sites",
+              "project": "Projects"
+            },
+            "browser": {
+              "description": "Open a site to see its projects, then tick the projects to include.",
+              "root": "Jira sites"
+            }
           }
         }
       },

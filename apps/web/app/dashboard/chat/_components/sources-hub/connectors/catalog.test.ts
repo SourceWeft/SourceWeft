@@ -48,6 +48,33 @@ test("dropbox hidden until registered", () => {
   });
 });
 
+test("jira hidden until registered", () => {
+  expect(
+    connectorCatalogForAvailableTypes([
+      "notion",
+      "gmail",
+      "google_drive",
+      "dropbox",
+    ]).map((i) => i.id),
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  const jira = connectorCatalog.find((item) => item.id === "jira");
+  expect(jira).toMatchObject({
+    name: "Jira",
+    category: "Knowledge & Docs",
+    description:
+      "Let the agent search and read issues in the Jira projects you choose.",
+    capabilities: ["Live search", "Issues & projects"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  });
+  // R13/C3: no Atlassian artwork is shipped, so no logoIconName.
+  expect(jira?.logoIconName).toBeUndefined();
+});
+
 test("Notion never depends on backend registration", () => {
   expect(connectorCatalogForAvailableTypes([]).map((i) => i.id)).toEqual([
     "notion",
