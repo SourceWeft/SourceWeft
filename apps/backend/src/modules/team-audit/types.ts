@@ -29,7 +29,17 @@ export type TeamAuditAction =
   | "sso.provider_updated"
   | "sso.provider_deleted"
   | "sso.domain_verified"
-  | "sso.sign_in";
+  | "sso.sign_in"
+  // Scheduled tasks. `actorUserId` is the owner for what they did themselves
+  // and null for what the platform did to the task (blocked, paused, resumed).
+  | "agent_task.created"
+  | "agent_task.updated"
+  | "agent_task.activated"
+  | "agent_task.paused"
+  | "agent_task.resumed"
+  | "agent_task.blocked"
+  | "agent_task.deleted"
+  | "agent_task.run_requested";
 
 export type TeamAuditTargetType =
   | "skill"
@@ -38,7 +48,8 @@ export type TeamAuditTargetType =
   | "member"
   | "artifact"
   | "guest"
-  | "sso_provider";
+  | "sso_provider"
+  | "agent_task";
 
 export type TeamAuditEntry = {
   teamId: string;

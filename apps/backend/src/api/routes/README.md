@@ -20,6 +20,7 @@ Purpose of this directory:
 | `connectors-oauth.ts` | `connectors` | OAuth callback + state init |
 | `connectors-webhooks.ts` | `connectors` | Third-party webhook receivers |
 | `content/agent-confirmations.ts` | `agent-confirmations` | Human-in-the-loop tool approval |
+| `content/agent-tasks.ts` | `agent-tasks` | Scheduled tasks: CRUD, pause / resume / activate, run now, run history |
 | `content/artifacts.ts` | `artifacts` | Artifact metadata, source JSON, assets |
 | `content/byok.ts` | `byok` | Bring-Your-Own-Key credential / model management |
 | `content/connectors.ts` | `connectors` | Connector lifecycle + action management |

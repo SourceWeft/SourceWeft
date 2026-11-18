@@ -68,6 +68,13 @@ export const NOTIFICATION_KINDS = {
     template: "notification.task-paused-owner-left",
     path: taskPath,
   },
+  // The sources or MCP servers a task names are gone: blocked at first,
+  // paused after three days (`payload.state`). In-app only.
+  task_tools_unavailable: {
+    defaultEmail: false,
+    template: null,
+    path: taskPath,
+  },
   task_paused_repeated_failure: {
     defaultEmail: true,
     template: "notification.task-paused-repeated-failure",

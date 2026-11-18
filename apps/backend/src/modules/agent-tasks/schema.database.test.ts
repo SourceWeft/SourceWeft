@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, test } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 
@@ -364,17 +364,19 @@ test("the target check rejects a task schedule without its task", async () => {
   );
 });
 
-test("an occurrence may be written with or without its tenant keys for now", async () => {
+test("an occurrence must carry its tenant keys", async () => {
   const tenant = await workspace();
   const connectorRow = connectorSchedule(tenant, await connector(tenant));
   await schema.db.insert(schema.taskSchedules).values(connectorRow);
-  // The shape a scheduler from before this migration writes.
-  const oldShape = randomUUID();
-  await schema.db.insert(schema.scheduleOccurrences).values({
-    id: oldShape,
-    scheduleId: connectorRow.id,
-    scheduledFor: new Date("2027-01-01T00:00:00Z"),
-  });
+  // The shape a scheduler from before the tenant keys existed wrote.
+  assert.equal(
+    await violation(() =>
+      schema.db.execute(
+        sql`insert into schedule_occurrences (id, schedule_id, scheduled_for) values (${randomUUID()}, ${connectorRow.id}, ${"2027-01-01T00:00:00Z"})`,
+      ),
+    ),
+    "23502",
+  );
   const newShape = randomUUID();
   await schema.db.insert(schema.scheduleOccurrences).values({
     id: newShape,
@@ -384,13 +386,12 @@ test("an occurrence may be written with or without its tenant keys for now", asy
   });
   const rows = await rowsOf(connectorRow.id);
   const byId = new Map(rows.map((row) => [row.id, row]));
-  assert.equal(byId.get(oldShape)!.teamId, null);
-  assert.equal(byId.get(oldShape)!.workspaceId, null);
-  assert.equal(byId.get(oldShape)!.status, "pending");
-  assert.equal(byId.get(oldShape)!.triggerKind, "schedule");
+  assert.equal(rows.length, 1);
   assert.equal(byId.get(newShape)!.teamId, tenant.teamId);
   assert.equal(byId.get(newShape)!.workspaceId, tenant.workspaceId);
-  // Both still go when the schedule's workspace is deleted.
+  assert.equal(byId.get(newShape)!.status, "pending");
+  assert.equal(byId.get(newShape)!.triggerKind, "schedule");
+  // It still goes when the schedule's workspace is deleted.
   await schema.db
     .delete(schema.workspaces)
     .where(eq(schema.workspaces.id, tenant.workspaceId));

@@ -24,6 +24,7 @@ export {
   materializeDueSchedules,
   retryOccurrence,
   type ClaimedOccurrence,
+  type MaterializedSlot,
   type OccurrenceRow,
   type ScheduleRow,
   type ScheduleTaskKind,

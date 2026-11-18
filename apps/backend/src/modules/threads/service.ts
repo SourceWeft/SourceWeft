@@ -58,6 +58,7 @@ import {
 } from "./thread/model-catalog";
 import { downloadChatImageObject } from "../sources/storage";
 import { durableChatRunService } from "./durable/service";
+import { seedThreadSourceSelection } from "./source-selection-service";
 import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
 import { streamThreadRoom } from "./durable/room-service";
 import { readPresence } from "./durable/presence-store";
@@ -173,6 +174,42 @@ export type StartThreadTurnInput = {
   imageProfileAlias?: string | null;
   visionProfileAlias?: string | null;
 };
+
+/**
+ * A turn the host starts for a person who is not there: a scheduled run.
+ * `threadId` and `idempotencyKey` are derived by the caller from the thing
+ * being run, so starting the same one again returns the same conversation and
+ * the same run instead of a second one.
+ */
+export type StartScheduledTurnInput = {
+  workspaceId: string;
+  /** Whose identity the turn runs as, and who pays for it. */
+  userId: string;
+  threadId: string;
+  idempotencyKey: string;
+  title: string;
+  content: string;
+  /** Sources the conversation starts with; ones that are gone are left out. */
+  sourceIds?: string[];
+  tools?: StreamThreadEventInput["tools"];
+  timezone?: string;
+  llm?: StreamThreadEventInput["llm"];
+  modelSettings?: StartThreadTurnInput["modelSettings"];
+};
+
+/**
+ * Queue priority of a scheduled run's job. Jobs without a priority (a person
+ * waiting on a reply) always run first.
+ */
+const SCHEDULED_TURN_JOB_PRIORITY = 10;
+
+/**
+ * A run that failed before it reached the queue did nothing: no message, no
+ * model call. Starting the same scheduled turn again gets a fresh run under
+ * the next key of this many, in the same conversation.
+ */
+const SCHEDULED_TURN_START_KEYS = 5;
+const CHAT_RUN_START_FAILED_CODE = "CHAT_RUN_START_FAILED";
 
 class ContentThreadService {
   async listThreads(input: {
@@ -829,6 +866,109 @@ class ContentThreadService {
     });
 
     return { thread, run };
+  }
+
+  /**
+   * Starts a scheduled run: a new conversation with origin `scheduled` and an
+   * ordinary durable chat run in it, as `userId`. The run goes through the
+   * same queue, worker and turn pipeline as a turn a person sends; the only
+   * differences are the conversation's origin, the lower queue priority and
+   * the `unattended` mark that makes the turn bind read-class tools only.
+   *
+   * Safe to call again with the same ids. Thread creation and run creation
+   * are not one transaction: a crash in between leaves an empty conversation
+   * that the next call picks up.
+   */
+  async startScheduledTurn(input: StartScheduledTurnInput) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const scope = {
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    };
+
+    let idempotencyKey: string | null = null;
+    for (let attempt = 0; attempt < SCHEDULED_TURN_START_KEYS; attempt += 1) {
+      const key =
+        attempt === 0
+          ? input.idempotencyKey
+          : `${input.idempotencyKey}:retry-${attempt}`;
+      const existingRun = await findChatThreadRunByIdempotencyKey({
+        ...scope,
+        idempotencyKey: key,
+      });
+      if (!existingRun) {
+        idempotencyKey = key;
+        break;
+      }
+      const existingThread = await findThreadRecord({
+        ...scope,
+        threadId: existingRun.threadId,
+      });
+      if (
+        existingRun.userId !== input.userId ||
+        existingRun.threadId !== input.threadId ||
+        !existingThread
+      ) {
+        throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
+      }
+      const neverStarted =
+        existingRun.status === "failed" &&
+        existingRun.errorCode === CHAT_RUN_START_FAILED_CODE;
+      if (!neverStarted) {
+        return { thread: existingThread, run: existingRun, created: false };
+      }
+    }
+    if (!idempotencyKey) {
+      throw new ContentError(
+        503,
+        "SCHEDULED_TURN_START_FAILED",
+        "The scheduled run could not be queued",
+      );
+    }
+
+    const modelSettings = await pruneUnavailableThreadModelAliases(
+      normalizeThreadModelSettings(input.modelSettings),
+    );
+    await validateThreadModelSettings(modelSettings);
+    const thread = await createThreadRecord({
+      id: input.threadId,
+      ...scope,
+      title: normalizeContentTitle(input.title, "New Thread"),
+      createdBy: input.userId,
+      modelSettings: await resolveThreadModelSettingsSnapshots(modelSettings),
+      origin: "scheduled",
+    });
+    // A turn may only read sources its conversation has selected.
+    await seedThreadSourceSelection({
+      ...scope,
+      threadId: thread.id,
+      sourceIds: input.sourceIds ?? [],
+    });
+
+    const request: StreamThreadEventInput = {
+      workspaceId: input.workspaceId,
+      threadId: thread.id,
+      userId: input.userId,
+      content: input.content,
+      tools: input.tools,
+      timezone: input.timezone,
+      idempotencyKey,
+      llm: input.llm,
+      unattended: true,
+    };
+    const { run, created } = await durableChatRunService.getOrCreateRun({
+      workspaceId: input.workspaceId,
+      threadId: thread.id,
+      userId: input.userId,
+      idempotencyKey,
+      mode: "send",
+      request,
+      jobPriority: SCHEDULED_TURN_JOB_PRIORITY,
+    });
+    return { thread, run, created };
   }
 
   async getCitationDetail(input: {

@@ -73,6 +73,8 @@ export interface CreateThreadAgentParams {
   /** Run start origin (epoch ms) for the step-budget wall clock. */
   turnStartedAtMs?: number | null;
   interruptOn?: Record<string, boolean | InterruptOnConfig>;
+  /** Nobody is present: no `askUser` tool. See `unattended-policy.ts`. */
+  unattended?: boolean;
   /**
    * The chat model to drive the agent with.
    *
@@ -114,6 +116,7 @@ export async function createThreadAgent(
     contextCompressionReportKey: params.contextCompressionReportKey,
     commandExecutionPolicy: params.commandExecutionPolicy,
     interruptOn: params.interruptOn,
+    askUser: !params.unattended,
     extraMiddleware: params.extraMiddleware,
     filesystemMounts,
     toolObservabilityContext: params.toolObservabilityContext,
@@ -215,5 +218,9 @@ export {
   updateWorkspacePersona,
 } from "./personas";
 export type { PersonaOverrides, PersonaSpec } from "./personas";
+
+// The policy of a turn nobody attends (a scheduled run): the turn preparer
+// narrows permissions with it, the stream service reads nothing else.
+export { applyUnattendedToolPolicy } from "./unattended-policy";
 
 export { agentCheckpointFromStepStopError } from "./turn/step-stop-outcome";

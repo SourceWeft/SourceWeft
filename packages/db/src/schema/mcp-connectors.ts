@@ -545,10 +545,10 @@ export const scheduleOccurrences = pgTable(
     scheduleId: text("schedule_id")
       .notNull()
       .references(() => taskSchedules.id, { onDelete: "cascade" }),
-    // Nullable for one release so a writer from before these columns existed
-    // can still insert during a deploy; the engine always fills them.
-    teamId: text("team_id"),
-    workspaceId: text("workspace_id"),
+    // The schedule's own team and workspace, repeated so a run history can
+    // be read with a tenant filter. Every writer sets them.
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
     // The slot's nominal time; a task's fixed offset is not part of it.
     scheduledFor: timestamp("scheduled_for", {
       withTimezone: true,
