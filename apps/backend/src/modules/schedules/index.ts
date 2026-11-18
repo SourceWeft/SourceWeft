@@ -1,5 +1,15 @@
-export { stableJitterMs } from "./jitter";
+export { stableJitterMs, stableOffsetMs } from "./jitter";
 export { intervalSlot, type ScheduleSlot } from "./slots";
+export {
+  CATCH_UP_GRACE_MS,
+  ScheduleRuleError,
+  compileScheduleRule,
+  nextFireTimes,
+  planDueSlot,
+  validateScheduleRule,
+  type CompiledScheduleRule,
+  type DueSlotPlan,
+} from "./rules";
 export {
   runScheduleTick,
   type ScheduleAdapter,

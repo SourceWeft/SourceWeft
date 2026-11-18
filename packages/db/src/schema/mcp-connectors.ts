@@ -12,8 +12,18 @@ import {
   unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { emptyJsonObject } from "./shared";
+import {
+  scheduleOccurrenceStatusSchema,
+  scheduleSkipReasonSchema,
+  scheduleTriggerKindSchema,
+  type ScheduleOccurrenceStatus,
+  type ScheduleSkipReason,
+  type ScheduleTriggerKind,
+} from "@sourceweft/contracts/scheduled-tasks";
+import { emptyJsonObject, sqlEnumList } from "./shared";
 import { workspaces } from "./identity-workspace";
+import { agentTasks } from "./agent-tasks";
+import { chatThreadRuns, threads } from "./threads";
 
 type ConnectorStatus = "active" | "paused" | "error" | "disabled";
 type ConnectorOAuthAccountStatus =
@@ -422,7 +432,12 @@ export const connectorSyncRuns = pgTable(
   ],
 );
 
-/** Durable time rules. Only connector_sync targets are executable for now. */
+/**
+ * Durable time rules. A row targets one thing: a connector (`connector_sync`,
+ * workspace-owned) or a scheduled task (`agent_task`, owned by the user it
+ * runs as). The composite foreign key keeps a task's schedule in the task's
+ * own workspace, team and owner.
+ */
 export const taskSchedules = pgTable(
   "task_schedules",
   {
@@ -442,6 +457,7 @@ export const taskSchedules = pgTable(
     connectorId: text("connector_id").references(() => sourceConnectors.id, {
       onDelete: "cascade",
     }),
+    agentTaskId: text("agent_task_id"),
     enabled: boolean("enabled").notNull().default(false),
     intervalMinutes: integer("interval_minutes"),
     specVersion: integer("spec_version").notNull().default(1),
@@ -484,20 +500,44 @@ export const taskSchedules = pgTable(
         sourceConnectors.teamId,
       ],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "task_schedules_agent_task_owner_fk",
+      columns: [
+        table.agentTaskId,
+        table.workspaceId,
+        table.teamId,
+        table.ownerUserId,
+      ],
+      foreignColumns: [
+        agentTasks.id,
+        agentTasks.workspaceId,
+        agentTasks.teamId,
+        agentTasks.ownerUserId,
+      ],
+    }).onDelete("cascade"),
     check(
       "task_schedules_kind_check",
       sql`${table.taskKind} in ('connector_sync', 'agent_task')`,
     ),
     check(
       "task_schedules_target_check",
-      sql`(${table.taskKind} = 'connector_sync' and ${table.ownerKind} = 'workspace' and ${table.connectorId} is not null and ${table.intervalMinutes} > 0) or (${table.taskKind} = 'agent_task' and ${table.ownerKind} = 'user' and ${table.ownerUserId} is not null)`,
+      sql`(${table.taskKind} = 'connector_sync' and ${table.ownerKind} = 'workspace' and ${table.connectorId} is not null and ${table.agentTaskId} is null and ${table.intervalMinutes} > 0) or (${table.taskKind} = 'agent_task' and ${table.ownerKind} = 'user' and ${table.ownerUserId} is not null and ${table.agentTaskId} is not null and ${table.connectorId} is null)`,
     ),
     uniqueIndex("task_schedules_connector_uq").on(table.connectorId),
+    uniqueIndex("task_schedules_agent_task_uq").on(table.agentTaskId),
     index("task_schedules_due_idx").on(table.enabled, table.nextDueAt),
   ],
 );
 
-/** One durable occurrence per schedule slot, independent of BullMQ state. */
+/**
+ * One durable occurrence per schedule slot, independent of BullMQ state.
+ *
+ * `team_id`/`workspace_id` repeat the schedule's so a run history can be read
+ * with a tenant filter and no join. `sync_run_id` links a connector run;
+ * `chat_run_id`/`thread_id` link the chat run and conversation a scheduled
+ * task produced. `last_error` is for developers; what a person is shown comes
+ * from `skip_reason`.
+ */
 export const scheduleOccurrences = pgTable(
   "schedule_occurrences",
   {
@@ -505,24 +545,37 @@ export const scheduleOccurrences = pgTable(
     scheduleId: text("schedule_id")
       .notNull()
       .references(() => taskSchedules.id, { onDelete: "cascade" }),
+    // Nullable for one release so a writer from before these columns existed
+    // can still insert during a deploy; the engine always fills them.
+    teamId: text("team_id"),
+    workspaceId: text("workspace_id"),
+    // The slot's nominal time; a task's fixed offset is not part of it.
     scheduledFor: timestamp("scheduled_for", {
       withTimezone: true,
       mode: "date",
     }).notNull(),
     status: text("status")
-      .$type<
-        | "pending"
-        | "dispatching"
-        | "queued"
-        | "succeeded"
-        | "failed"
-        | "skipped"
-      >()
+      .$type<ScheduleOccurrenceStatus>()
       .notNull()
       .default("pending"),
+    triggerKind: text("trigger_kind")
+      .$type<ScheduleTriggerKind>()
+      .notNull()
+      .default("schedule"),
+    skipReason: text("skip_reason").$type<ScheduleSkipReason>(),
     syncRunId: text("sync_run_id").references(() => connectorSyncRuns.id, {
       onDelete: "set null",
     }),
+    chatRunId: text("chat_run_id").references(() => chatThreadRuns.id, {
+      onDelete: "set null",
+    }),
+    threadId: text("thread_id").references(() => threads.id, {
+      onDelete: "set null",
+    }),
+    // The task version that ran, to trace a result back to its prompt.
+    taskVersion: integer("task_version"),
+    // True when the run made up for a slot missed while the platform was down.
+    isCatchUp: boolean("is_catch_up").notNull().default(false),
     retryAt: timestamp("retry_at", { withTimezone: true, mode: "date" }),
     leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
     attempts: integer("attempts").notNull().default(0),
@@ -535,12 +588,33 @@ export const scheduleOccurrences = pgTable(
       .defaultNow(),
   },
   (table) => [
+    foreignKey({
+      name: "schedule_occurrences_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
     uniqueIndex("schedule_occurrences_slot_uq").on(
       table.scheduleId,
       table.scheduledFor,
     ),
     index("schedule_occurrences_pending_idx").on(table.status, table.retryAt),
     check("schedule_occurrences_attempts_check", sql`${table.attempts} >= 0`),
+    check(
+      "schedule_occurrences_status_check",
+      sql`${table.status} in (${sqlEnumList(scheduleOccurrenceStatusSchema.options)})`,
+    ),
+    check(
+      "schedule_occurrences_trigger_kind_check",
+      sql`${table.triggerKind} in (${sqlEnumList(scheduleTriggerKindSchema.options)})`,
+    ),
+    check(
+      "schedule_occurrences_skip_reason_check",
+      sql`${table.skipReason} is null or (${table.status} in ('skipped', 'blocked') and ${table.skipReason} in (${sqlEnumList(scheduleSkipReasonSchema.options)}))`,
+    ),
+    check(
+      "schedule_occurrences_task_version_check",
+      sql`${table.taskVersion} is null or ${table.taskVersion} >= 1`,
+    ),
   ],
 );
 

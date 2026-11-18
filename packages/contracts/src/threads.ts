@@ -29,7 +29,8 @@ export type ThreadRunFailureSummary = {
   errorMessage: string;
 };
 
-export const threadOriginSchema = z.enum(["user", "subagent"]);
+// `scheduled` marks a conversation a scheduled task run created.
+export const threadOriginSchema = z.enum(["user", "subagent", "scheduled"]);
 
 export const threadSchema = z.object({
   id: z.string(),
