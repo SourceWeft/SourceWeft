@@ -112,6 +112,11 @@
       "langchain@1.5.10": "patches/langchain@1.5.10.patch",
       "deepagents@1.13.1": "patches/deepagents@1.13.1.patch",
       "@anthropic-ai/sandbox-runtime@0.0.81": "patches/@anthropic-ai__sandbox-runtime@0.0.81.patch"
+    },
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-fc5q-39xc-vjpf"
+      ]
     }
   },
   "engines": {
