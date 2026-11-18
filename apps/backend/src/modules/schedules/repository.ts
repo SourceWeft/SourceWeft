@@ -73,6 +73,8 @@ export async function materializeDueSchedules(input: {
           .values({
             id: randomUUID(),
             scheduleId: schedule.id,
+            teamId: schedule.teamId,
+            workspaceId: schedule.workspaceId,
             scheduledFor: slot.scheduledFor,
           })
           .onConflictDoNothing();

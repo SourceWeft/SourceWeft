@@ -69,6 +69,9 @@ test("notion adapter declares install-integration OAuth manifest", () => {
   const manifest = adapter.getManifest();
 
   assert.equal(manifest.type, "notion");
+  if (manifest.auth.kind !== "oauth2") {
+    throw new Error("expected notion manifest to use oauth2 auth");
+  }
   assert.equal(
     manifest.auth.authorizationUrl,
     "https://www.notion.so/install-integration",
@@ -102,6 +105,9 @@ test("notion adapter declares install-integration OAuth manifest", () => {
 test("notion adapter manifest does not require OAuth env at startup", () => {
   const adapter = createNotionConnectorAdapter(testConfig({ clientId: "" }));
   const manifest = adapter.getManifest();
+  if (manifest.auth.kind !== "oauth2") {
+    throw new Error("expected notion manifest to use oauth2 auth");
+  }
   assert.deepEqual(manifest.auth.authorizationParams, {
     client_id: "",
     owner: "user",
