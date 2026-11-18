@@ -444,6 +444,7 @@ export function SourcesHub({
     connectorAccounts,
     availableConnectorTypes,
     selectionSpecByType,
+    connectorManifestInfoByType,
     isLoadingConnectors,
     connectorsLoadingError,
     connectorBusyById,
@@ -1394,6 +1395,7 @@ export function SourcesHub({
         accounts={connectorAccounts}
         availableConnectorTypes={availableConnectorTypes}
         connectorBusyById={connectorBusyById}
+        connectorManifestInfoByType={connectorManifestInfoByType}
         connectorReadinessById={connectorReadinessById}
         connectors={connectors}
         connectorWaitingByType={connectorWaitingByType}
@@ -1421,6 +1423,7 @@ export function SourcesHub({
         activityError={connectorSettingsActivityError}
         connector={connectorSettingsConnector}
         connectorBusyById={connectorBusyById}
+        connectorManifestInfoByType={connectorManifestInfoByType}
         connectorReadinessById={connectorReadinessById}
         isLoadingActivity={isLoadingConnectorSettingsActivity}
         onCopyWebhook={handleCopyWebhook}

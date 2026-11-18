@@ -73,6 +73,11 @@ export function adaptBillingTestPort<T extends object>(
         billing: await ingestion(...args),
       }),
     ),
+    async getScheduledTaskLimits() {
+      throw new Error(
+        "Scheduled task limits were not configured for this test",
+      );
+    },
     async reconcileProviderCost() {
       throw new Error("Cost reconciliation was not configured for this test");
     },

@@ -6,5 +6,8 @@ export {
 } from "./contribution";
 export { builtinGmailConnectorCapabilityManifest } from "./manifest";
 export { createGmailConnectorAdapter } from "./adapter";
-export { toBackendGmailManifest } from "./backend-manifest";
+export {
+  toBackendGmailManifest,
+  toBackendGmailComposioManifest,
+} from "./backend-manifest";
 export { createConnectorAdapters } from "./host-services";

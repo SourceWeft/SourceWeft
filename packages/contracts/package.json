@@ -33,6 +33,7 @@
     "./messages": "./src/messages.ts",
     "./thread-message-compaction": "./src/thread-message-compaction.ts",
     "./threads": "./src/threads.ts",
+    "./scheduled-tasks": "./src/scheduled-tasks.ts",
     "./stream": "./src/stream.ts",
     "./skills": "./src/skills.ts",
     "./working-files": "./src/working-files.ts",
