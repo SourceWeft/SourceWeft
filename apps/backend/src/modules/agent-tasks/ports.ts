@@ -1,4 +1,3 @@
-import type { ChatThreadRunStatus } from "../threads/durable/types";
 import type { NotifyInput } from "../notifications";
 import type { StartScheduledTurnInput } from "../threads";
 import type { TeamAuditEntry } from "../team-audit/types";
@@ -41,8 +40,6 @@ export interface AgentTaskPorts {
   audit(entry: TeamAuditEntry): Promise<void>;
   consumeRateLimit(rules: readonly RateLimitRule[]): Promise<RateLimitVerdict>;
 }
-
-export type AgentTaskRunStatus = ChatThreadRunStatus;
 
 /** The production wiring. Loaded lazily: the scheduler, the api and unit
  * tests import this module without pulling the chat stack in at load time. */
