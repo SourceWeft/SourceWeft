@@ -1560,6 +1560,25 @@ importers:
         specifier: ^4.23.12
         version: 4.23.12
 
+  packages/builtin-tool-table:
+    dependencies:
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sourceweft/grounded-generation':
+        specifier: workspace:*
+        version: link:../grounded-generation
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+
   packages/builtin-tool-video-presentation:
     dependencies:
       '@sourceweft/capability-contracts':
