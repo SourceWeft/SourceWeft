@@ -13,6 +13,7 @@ import {
   artifactPrimaryPreviewFile,
 } from "@sourceweft/builtin-tool-publish-artifact/ui";
 import { Preview } from "@sourceweft/preview/react";
+import { GroundedEvidenceSourcePreview } from "./grounded-evidence-source";
 
 export const artifactPreviewRenderers: ArtifactPreviewRenderer[] = [
   videoFilePreviewRenderer,
@@ -54,7 +55,13 @@ export function resolveArtifactPreviewRenderer(
       blocksDefaultOpen: owned.blocksDefaultOpen,
       id: owned.id,
       match: () => true,
-      render: () => owned.content,
+      render: () => (
+        <>
+          {owned.content}
+          {/* Where a viewer's "open source at this quote" lands. */}
+          <GroundedEvidenceSourcePreview />
+        </>
+      ),
     };
   }
 

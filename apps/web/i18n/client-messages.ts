@@ -112,6 +112,7 @@ export const CLIENT_NAMESPACES = {
     "mcp.authMethod",
     "mcp.badges.runtime",
     "mcp.readme",
+    "table",
   ],
   /** `app/artifact-preview`: renders the chat canvas around a shared artifact. */
   artifactPreview: [
@@ -133,6 +134,7 @@ export const CLIENT_NAMESPACES = {
     "mcp.authMethod",
     "mcp.badges.runtime",
     "mcp.readme",
+    "table",
   ],
 } as const satisfies Record<string, readonly string[]>;
 

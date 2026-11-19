@@ -53,6 +53,7 @@
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-tool-publish-artifact": "workspace:*",
     "@sourceweft/builtin-tool-study": "workspace:*",
+    "@sourceweft/builtin-tool-table": "workspace:*",
     "@sourceweft/builtin-tool-video-presentation": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/i18n": "workspace:*",

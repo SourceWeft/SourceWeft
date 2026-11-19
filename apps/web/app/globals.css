@@ -15,6 +15,8 @@
 @source "../../../packages/ui/src";
 /* The study viewers (flashcards, quiz, mind map) style themselves with utilities. */
 @source "../../../packages/builtin-tool-study/src/ui";
+/* The table viewer styles itself with utilities. */
+@source "../../../packages/builtin-tool-table/src/ui";
 /* The evidence popover and stale banner shared by study and table viewers. */
 @source "../../../packages/grounded-generation/src/ui";
 /* Optional commercial UI ships in the same build and loads at runtime. */
