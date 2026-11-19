@@ -7,6 +7,7 @@ import {
   FolderGit2,
   FolderKanban,
   Globe,
+  LibraryBig,
   SquareKanban,
   Users,
 } from "lucide-react";
@@ -193,6 +194,15 @@ describe("selectionPresenters.jira", () => {
     const presenter = selectionPresenters.jira!;
     expect(presenter.kindIcons.site).toBe(Globe);
     expect(presenter.kindIcons.project).toBe(SquareKanban);
+  });
+});
+
+describe("selectionPresenters.confluence", () => {
+  test("confluence presenter has an icon for every selection kind", () => {
+    const presenter = selectionPresenters.confluence!;
+    expect(presenter.kindIcons.site).toBe(Globe);
+    expect(presenter.kindIcons.space).toBe(LibraryBig);
+    expect(presenter.kindIcons.page).toBe(FileText);
   });
 });
 

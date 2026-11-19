@@ -145,6 +145,16 @@ const jiraSelectionSpec = {
   maxItems: 100,
 };
 
+const confluenceSelectionSpec = {
+  actions: {
+    browse: "confluence.browse",
+    search: "confluence.search",
+    describe: "confluence.describe",
+  },
+  kinds: ["site", "space", "page"],
+  maxItems: 100,
+};
+
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
     await Promise.resolve();
@@ -990,6 +1000,59 @@ test("jira connect creates an empty selection without periodic sync and opens se
   expect(sync).not.toHaveBeenCalled();
   expect(api().connectorSettingsConnector?.id).toBe("jira-1");
   expect(toastSuccess).toHaveBeenCalledWith("Jira connected.");
+});
+
+test("confluence connect creates an empty selection without periodic sync and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "confluence", selection: confluenceSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-confluence",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "confluence-1",
+    connectorType: "confluence",
+    name: "Person",
+    oauthAccountId: "acc-confluence",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-confluence",
+    connectorType: "confluence",
+    accountId: "acc-confluence",
+  });
+
+  await mountHook(baseInput("ws-confluence"));
+
+  // Confluence is a tools-only selection connector, not in the periodic-index list:
+  // an empty selection is created, periodic indexing stays off, and settings
+  // open so the admin can pick spaces and pages.
+  expect(create).toHaveBeenCalledWith("ws-confluence", {
+    connectorType: "confluence",
+    name: "Person",
+    oauthAccountId: "acc-confluence",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("confluence-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Confluence connected.");
 });
 
 test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {

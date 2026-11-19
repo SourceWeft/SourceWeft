@@ -625,6 +625,9 @@ importers:
       '@sourceweft/billing':
         specifier: workspace:*
         version: link:../../enterprise/billing
+      '@sourceweft/builtin-connector-confluence':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-confluence
       '@sourceweft/builtin-connector-github':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-github

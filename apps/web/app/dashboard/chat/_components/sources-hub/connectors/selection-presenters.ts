@@ -16,6 +16,7 @@ import {
   FolderGit2,
   FolderKanban,
   Globe,
+  LibraryBig,
   type LucideIcon,
   SquareKanban,
   Users,
@@ -112,6 +113,10 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
   // selection dialog, no `indexing` entry.
   jira: {
     kindIcons: { site: Globe, project: SquareKanban },
+  },
+  // Confluence is tools-only too: the kind icons only, no `indexing` entry.
+  confluence: {
+    kindIcons: { site: Globe, space: LibraryBig, page: FileText },
   },
 };
 

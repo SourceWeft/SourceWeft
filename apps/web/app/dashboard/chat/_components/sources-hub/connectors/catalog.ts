@@ -1,4 +1,5 @@
 import {
+  BookOpenText,
   Box,
   FileText,
   FolderGit2,
@@ -118,6 +119,22 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     icon: SquareKanban,
     // No Atlassian artwork is shipped, so this entry has no logoIconName
     // (unlike Notion/Dropbox's logoIconName/logoIconTone).
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  },
+  {
+    id: "confluence",
+    name: "Confluence",
+    category: "Knowledge & Docs",
+    description:
+      "Let the agent search and read pages in the Confluence spaces and pages you choose.",
+    capabilities: ["Live search", "Spaces & pages"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: BookOpenText,
+    // No Atlassian artwork is shipped, so this entry has no logoIconName.
     isIndexable: false,
     supportsActions: true,
     supportsPeriodicSync: false,
