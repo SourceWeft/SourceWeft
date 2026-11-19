@@ -1,59 +1,40 @@
-import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
-import {
-  artifactSources,
-  artifactVersions,
-  artifacts,
-  db,
-} from "@sourceweft/db";
 import type {
   StudyCheckpointData,
   StudyCheckpointStore,
   StudyProgress,
 } from "@sourceweft/contracts/study-capability";
-import type { StudySourceSnapshot } from "./corpus-loader";
+import {
+  countRunningGenerationJobs,
+  createArtifactCheckpointStore as createCheckpointStore,
+  findArtifactVersionContent,
+  linkArtifactVersionParent,
+  readArtifactPayloadKey,
+  recordArtifactInputSources,
+  writeArtifactPayloadKey,
+  writeGenerationProgress,
+  type ArtifactPayloadKey,
+  type ArtifactScope,
+} from "../grounded-generation/artifact-store";
+import type { GroundedSourceSnapshot } from "../grounded-generation/corpus-loader";
 
-type ArtifactScope = {
-  artifactId: string;
-  teamId: string;
-  workspaceId: string;
-};
+/** Study's view of the shared artifact store: `payload_json.study.*`. */
 
-function scoped(scope: ArtifactScope) {
-  return and(
-    eq(artifacts.id, scope.artifactId),
-    eq(artifacts.teamId, scope.teamId),
-    eq(artifacts.workspaceId, scope.workspaceId),
-  );
-}
-
-export type StudyPayloadKey = "checkpoint" | "progress" | "regeneration";
+export type StudyPayloadKey = ArtifactPayloadKey;
 
 /** Merges `{ [key]: value }` into `payload_json.study`, leaving the rest. */
-export async function writeStudyPayloadKey(
+export function writeStudyPayloadKey(
   scope: ArtifactScope,
   key: StudyPayloadKey,
   value: unknown,
 ) {
-  await db
-    .update(artifacts)
-    .set({
-      payloadJson: sql`coalesce(${artifacts.payloadJson}, '{}'::jsonb) || jsonb_build_object('study', coalesce(${artifacts.payloadJson} -> 'study', '{}'::jsonb) || jsonb_build_object(${key}::text, ${JSON.stringify(value)}::jsonb))`,
-      updatedAt: new Date(),
-    })
-    .where(scoped(scope));
+  return writeArtifactPayloadKey(scope, "study", key, value);
 }
 
-export async function readStudyPayloadKey(
+export function readStudyPayloadKey(
   scope: ArtifactScope,
   key: StudyPayloadKey,
 ): Promise<unknown> {
-  const [row] = await db
-    .select({ value: sql<unknown>`${artifacts.payloadJson} -> 'study' -> ${key}::text` })
-    .from(artifacts)
-    .where(scoped(scope))
-    .limit(1);
-  return row?.value ?? null;
+  return readArtifactPayloadKey(scope, "study", key);
 }
 
 function isCheckpoint(value: unknown): value is StudyCheckpointData {
@@ -76,99 +57,24 @@ function isCheckpoint(value: unknown): value is StudyCheckpointData {
 export function createArtifactCheckpointStore(
   scope: ArtifactScope,
 ): StudyCheckpointStore {
-  return {
-    async load() {
-      const value = await readStudyPayloadKey(scope, "checkpoint");
-      return isCheckpoint(value) ? value : null;
-    },
-    async save(checkpoint) {
-      await writeStudyPayloadKey(scope, "checkpoint", checkpoint);
-    },
-  };
+  return createCheckpointStore(scope, "study", isCheckpoint);
 }
 
 /** Progress for pollers, in `payload_json.study.progress`. */
-export async function writeStudyProgress(
+export function writeStudyProgress(
   scope: ArtifactScope,
   progress: StudyProgress,
 ) {
-  await writeStudyPayloadKey(scope, "progress", progress);
+  return writeGenerationProgress(scope, "study", progress);
 }
 
-/**
- * Records the sources a study artifact was generated from (`role = input`),
- * once per source: `artifact_sources` is per artifact, not per version, so a
- * regeneration only adds sources that are new to it.
- */
-export async function recordStudyInputSources(
+export const recordStudyInputSources: (
   artifactId: string,
-  snapshots: readonly StudySourceSnapshot[],
-) {
-  if (snapshots.length === 0) return;
-  await db.transaction(async (tx) => {
-    const existing = await tx
-      .select({ sourceId: artifactSources.sourceId })
-      .from(artifactSources)
-      .where(
-        and(
-          eq(artifactSources.artifactId, artifactId),
-          eq(artifactSources.role, "input"),
-        ),
-      );
-    const known = new Set(existing.map((row) => row.sourceId));
-    const fresh = snapshots.filter((snapshot) => !known.has(snapshot.sourceId));
-    if (fresh.length === 0) return;
-    await tx.insert(artifactSources).values(
-      fresh.map((snapshot) => ({
-        id: `asrc_${randomUUID()}`,
-        artifactId,
-        sourceId: snapshot.sourceId,
-        documentId: snapshot.documentId,
-        role: "input" as const,
-      })),
-    );
-  });
-}
+  snapshots: readonly GroundedSourceSnapshot[],
+) => Promise<void> = recordArtifactInputSources;
 
-/** The content of one version of an artifact in this workspace. */
-export async function findStudyVersionContent(
-  input: ArtifactScope & { versionNo: number },
-): Promise<Record<string, unknown> | null> {
-  const [row] = await db
-    .select({ content: artifactVersions.contentJson })
-    .from(artifactVersions)
-    .where(
-      and(
-        eq(artifactVersions.artifactId, input.artifactId),
-        eq(artifactVersions.teamId, input.teamId),
-        eq(artifactVersions.workspaceId, input.workspaceId),
-        eq(artifactVersions.versionNo, input.versionNo),
-      ),
-    )
-    .limit(1);
-  return row?.content ?? null;
-}
-
-/**
- * Points a regenerated version at the one it replaced. The writer does not
- * record lineage, so this runs right after the version commits; it is
- * idempotent and only ever names the immediately preceding version.
- */
-export async function linkStudyVersionParent(input: {
-  artifactId: string;
-  versionNo: number;
-}) {
-  if (input.versionNo <= 1) return;
-  await db.execute(sql`
-    update artifact_versions child
-    set parent_version_id = parent.id
-    from artifact_versions parent
-    where child.artifact_id = ${input.artifactId}
-      and child.version_no = ${input.versionNo}
-      and parent.artifact_id = child.artifact_id
-      and parent.version_no = ${input.versionNo - 1}
-  `);
-}
+export const findStudyVersionContent = findArtifactVersionContent;
+export const linkStudyVersionParent = linkArtifactVersionParent;
 
 export const STUDY_ARTIFACT_TYPE_LIST = ["flashcards", "quiz", "mindmap"] as const;
 
@@ -179,25 +85,14 @@ export const STUDY_MAX_RUNNING_PER_USER = 3;
  * Study generations a person has in flight in a workspace: artifacts they
  * opened that are still pending or running, plus regenerations of ready ones.
  */
-export async function countRunningStudyJobs(input: {
+export function countRunningStudyJobs(input: {
   teamId: string;
   workspaceId: string;
   userId: string;
 }): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(artifacts)
-    .where(
-      and(
-        eq(artifacts.teamId, input.teamId),
-        eq(artifacts.workspaceId, input.workspaceId),
-        eq(artifacts.createdBy, input.userId),
-        inArray(artifacts.artifactType, [...STUDY_ARTIFACT_TYPE_LIST]),
-        sql`(${artifacts.status} in ('pending', 'running') or (${artifacts.status} = 'ready' and ${artifacts.payloadJson} -> 'study' -> 'regeneration' ->> 'status' = 'running'))`,
-        // A job lost to a crash must not hold a slot forever: two attempts of
-        // the longest budget have long passed after half an hour.
-        sql`${artifacts.updatedAt} > now() - interval '30 minutes'`,
-      ),
-    );
-  return row?.count ?? 0;
+  return countRunningGenerationJobs({
+    ...input,
+    artifactTypes: STUDY_ARTIFACT_TYPE_LIST,
+    namespace: "study",
+  });
 }
