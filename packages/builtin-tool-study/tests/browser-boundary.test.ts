@@ -82,7 +82,9 @@ for (const entry of BROWSER_ENTRIES) {
       ({ specifier }) =>
         specifier.startsWith("node:") ||
         specifier === "ts-fsrs" ||
-        specifier === "@sourceweft/builtin-tool-study",
+        specifier === "@sourceweft/builtin-tool-study" ||
+        // The shared package's root entry is server-only; browsers use `/ui`.
+        specifier === "@sourceweft/grounded-generation",
     );
     assert.deepEqual(
       nodeImports.map(({ from, specifier }) => `${relative(PACKAGE_ROOT, from)} → ${specifier}`),

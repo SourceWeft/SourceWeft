@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Download, RotateCcw } from "lucide-react";
 import type { ReviewGrade, StudyContent } from "@sourceweft/contracts/study";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { exportFlashcardsCsv } from "../../export/anki-csv";
-import { EvidencePopover } from "../shared/evidence-popover";
+import { EvidencePopover } from "@sourceweft/grounded-generation/ui";
 import { downloadStem, isViewerShortcut } from "../shared/util";
 import { useStudyHost, type StudyVersionRef } from "../study-host";
 import { Flashcard } from "./flashcard";

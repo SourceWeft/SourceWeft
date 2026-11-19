@@ -4,20 +4,20 @@ import { useEffect, useState } from "react";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
-  useStudyHost,
-  type StudyFreshness,
-  type StudyVersionRef,
-} from "../study-host";
+  useGroundedHost,
+  type GroundedFreshness,
+  type GroundedVersionRef,
+} from "./host";
 
 /**
  * Says when an input source changed (or was deleted) since generation. It
  * never regenerates by itself — that costs credits — it only offers the
  * host's regenerate action when there is one.
  */
-export function StaleBanner({ version }: { version: StudyVersionRef }) {
-  const host = useStudyHost();
+export function StaleBanner({ version }: { version: GroundedVersionRef }) {
+  const host = useGroundedHost();
   const t = host.useTranslate();
-  const [freshness, setFreshness] = useState<StudyFreshness["status"]>("unknown");
+  const [freshness, setFreshness] = useState<GroundedFreshness["status"]>("unknown");
   const { workspaceId, artifactId, artifactVersionId } = version;
 
   useEffect(() => {

@@ -1439,6 +1439,9 @@ importers:
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@sourceweft/grounded-generation':
+        specifier: workspace:*
+        version: link:../grounded-generation
       '@sourceweft/ui-web':
         specifier: workspace:*
         version: link:../ui
@@ -1702,6 +1705,34 @@ importers:
       typescript-eslint:
         specifier: ^8.67.0
         version: 8.67.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+
+  packages/grounded-generation:
+    dependencies:
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sourceweft/ui-web':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@19.2.8)
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
 
   packages/i18n:
     dependencies:
