@@ -117,8 +117,12 @@ export function getMobileAppleSignInError(error: unknown) {
     return null;
   }
 
-  return (
-    errorMessage(error).trim() ||
-    "Unable to sign in with Apple. Try again or use email."
-  );
+  const message = errorMessage(error).trim();
+  // Apple's framework error code 1000 is "unknown": the device could not start
+  // the request, for example when it is not signed in to iCloud. Its raw text
+  // names a system framework, which means nothing to the person.
+  if (!message || /AuthenticationServices\.AuthorizationError/i.test(message)) {
+    return "Unable to sign in with Apple. Check that this device is signed in to iCloud, or use email.";
+  }
+  return message;
 }
