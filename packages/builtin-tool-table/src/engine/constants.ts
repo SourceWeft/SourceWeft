@@ -21,3 +21,6 @@ export const TABLE_JOB_TIMEOUT_MS = 20 * 60_000;
 
 /** How many times a table generation job is attempted before it fails. */
 export const TABLE_JOB_ATTEMPTS = 2;
+
+/** Output budget of the column suggestion call. */
+export const SUGGEST_MAX_OUTPUT_TOKENS = 800;
