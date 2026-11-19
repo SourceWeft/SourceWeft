@@ -133,17 +133,29 @@ export function registerConnectorRoutes(app: Hono) {
       accountId: connector.oauthAccountId,
       connectorType: "gmail",
     });
-    const result = await connectorRegistry.getAdapter("gmail").executeAction({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      connectorId,
-      connectorType: "gmail",
-      actionType: "gmail.labels.list",
-      request: {},
-      config: connector.configJson,
-      accessToken,
-      idempotencyKey: "gmail.labels.list",
-    });
+    let result;
+    try {
+      result = await connectorRegistry.getAdapter("gmail").executeAction({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId,
+        connectorType: "gmail",
+        actionType: "gmail.labels.list",
+        request: {},
+        config: connector.configJson,
+        accessToken,
+        idempotencyKey: "gmail.labels.list",
+      });
+    } catch (error) {
+      await connectorOAuthService.markBrokeredAccountReauthRequired({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: connector.oauthAccountId,
+        connectorType: "gmail",
+        error,
+      });
+      throw error;
+    }
     return ApiResponse.success(c, result.result);
   });
 

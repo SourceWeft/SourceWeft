@@ -699,6 +699,13 @@ export class ConnectorActionRunner {
       }
       return { action: updated ?? action };
     } catch (error) {
+      await this.oauthService.markBrokeredAccountReauthRequired({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: connector.oauthAccountId,
+        connectorType: connector.connectorType,
+        error,
+      });
       const connectorError = toConnectorError(error);
       logger.debug("Connector action adapter execution failed", {
         ...connectorActionExecutionMeta({
