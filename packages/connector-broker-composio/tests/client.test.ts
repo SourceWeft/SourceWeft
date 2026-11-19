@@ -522,6 +522,38 @@ test("a connected-account-not-found/inactive answer maps to COMPOSIO_CONNECTION_
   );
 });
 
+test("a not-ACTIVE connected account (422 BadConnectedAccountState) maps to COMPOSIO_CONNECTION_INACTIVE", async () => {
+  // Body observed on the real service 2026-11-19 for a never-consented account.
+  const calls: FakeCall[] = [];
+  const fetcher = fakeFetcher(() => ({
+    status: 422,
+    json: {
+      error: {
+        slug: "TOOL_AUTH_BadConnectedAccountState",
+        message:
+          'Connected account is not in an ACTIVE state. Current status is "EXPIRED" but ACTIVE status is required for authorization.',
+        status: 422,
+      },
+    },
+  }), calls);
+  const broker = createComposioBroker({ apiKey: "sk_test_key", fetcher });
+
+  await assert.rejects(
+    () =>
+      broker.proxy({
+        connectedAccountId: "ca_abc123",
+        ownerRef: "owner-1",
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        method: "GET",
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof ComposioBrokerError);
+      assert.equal(err.code, "COMPOSIO_CONNECTION_INACTIVE" satisfies ComposioBrokerErrorCode);
+      return true;
+    },
+  );
+});
+
 test("an undocumented non-2xx status maps to COMPOSIO_REQUEST_FAILED", async () => {
   const calls: FakeCall[] = [];
   const fetcher = fakeFetcher(() => ({ status: 418, json: { message: "I'm a teapot" } }), calls);
