@@ -270,6 +270,19 @@ fn main() {
         .expect("failed to run tauri application");
 }
 
+/// Where the macOS traffic lights sit in the overlaid titlebar, as (x, y) in logical points.
+///
+/// The web app's titlebar row is 56px tall (`h-14`, its bottom line at y=55), so the lights
+/// belong on y=27.5. tao puts the title bar container at the window's top with a height of
+/// `button height + y` and leaves each button at its own offset inside it, so the lights'
+/// centre moves one point for every point of `y`. Measured in the released client (12pt
+/// buttons, built against the macOS 15 SDK), `y = 20` put the centre at 22; `y = 25.5` makes it
+/// 27.5. A build against the macOS 26 SDK draws larger buttons lower in the container (its
+/// centre was 18 at `y = 20`), so it needs about 4pt more to centre; the Rust toolchain on a
+/// development Mac uses that SDK, which is why a local build sits higher than the release.
+#[cfg(target_os = "macos")]
+const TRAFFIC_LIGHT_INSET: (f64, f64) = (16.0, 25.5);
+
 fn create_main_window(app: &mut tauri::App, locale: &str) -> tauri::Result<()> {
     let mut window_config = app
         .config()
@@ -296,7 +309,10 @@ fn create_main_window(app: &mut tauri::App, locale: &str) -> tauri::Result<()> {
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
-        .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0))
+        .traffic_light_position(tauri::LogicalPosition::new(
+            TRAFFIC_LIGHT_INSET.0,
+            TRAFFIC_LIGHT_INSET.1,
+        ))
         .initialization_script(window_chrome::INITIALIZATION_SCRIPT);
     builder
         .initialization_script(desktop_bridge_script())
