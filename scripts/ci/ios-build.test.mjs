@@ -52,7 +52,11 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
   );
   assert(testflight.includes("environment: ios-testflight"));
   assert(testflight.includes("--export-method app-store-connect"));
-  for (const name of ["IOS_CERTIFICATE", "IOS_CERTIFICATE_PASSWORD", "IOS_MOBILE_PROVISION"]) {
+  for (const name of [
+    "IOS_CERTIFICATE",
+    "IOS_CERTIFICATE_PASSWORD",
+    "IOS_MOBILE_PROVISION",
+  ]) {
     assert(
       testflight.includes(`${name}: `),
       `TestFlight job does not set the Tauri signing variable ${name}`,

@@ -217,3 +217,18 @@ test("the iOS target declares exactly the signing settings the Tauri CLI can edi
     assert(!spec.includes(`${key}: `), `${key} must not be in project.yml`);
   }
 });
+
+// With Xcode 26's Metal toolchain installed, TOOLCHAIN_DIR points at the Metal
+// toolchain, which has no Swift compatibility libraries. The linker then fails
+// on __swift_FORCE_LOAD_$_swiftCompatibility56. DT_TOOLCHAIN_DIR is always the
+// default toolchain.
+test("Swift library search paths use the default toolchain, not TOOLCHAIN_DIR", () => {
+  for (const file of [
+    "project.yml",
+    "sourceweft-mobile.xcodeproj/project.pbxproj",
+  ]) {
+    const text = read(resolve(apple, file));
+    assert(!/\$\(TOOLCHAIN_DIR\)/.test(text), `${file} uses $(TOOLCHAIN_DIR)`);
+    assert(text.includes("$(DT_TOOLCHAIN_DIR)/usr/lib/swift"), file);
+  }
+});
