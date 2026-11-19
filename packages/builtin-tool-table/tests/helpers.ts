@@ -194,19 +194,23 @@ export function substringAnchor(): GroundedAnchorPort & { requests: number } {
     ) {
       port.requests += requests.length;
       return requests.map(({ text, chunkContent }) => {
+        // The longest line of the claim that the chunk holds word for word.
+        let best: { start: number; part: string } | null = null;
         for (const part of text.split("\n")) {
           const trimmed = part.trim();
           const start = trimmed ? chunkContent.indexOf(trimmed) : -1;
-          if (start >= 0) {
-            return {
-              startChar: start,
-              endChar: start + trimmed.length,
-              quote: trimmed,
-              confidence: 0.9,
-            };
+          if (start >= 0 && (!best || trimmed.length > best.part.length)) {
+            best = { start, part: trimmed };
           }
         }
-        return null;
+        return best
+          ? {
+              startChar: best.start,
+              endChar: best.start + best.part.length,
+              quote: best.part,
+              confidence: 0.9,
+            }
+          : null;
       });
     },
   };
@@ -263,4 +267,63 @@ export function promptHandles(user: string): string[] {
 /** The column ids a fill prompt asks for, in order. */
 export function promptColumnIds(user: string): string[] {
   return [...user.matchAll(/id="(col_[0-9a-f]{32})"/g)].map((match) => match[1]!);
+}
+
+/** Handles the engine gives the chunks of the sources it reads, in order. */
+export function handlesOf(sources: readonly TableSourceInput[]): Map<string, string> {
+  const handles = new Map<string, string>();
+  let next = 1;
+  for (const source of sources) {
+    for (const chunk of source.chunks) handles.set(chunk.chunkId, `c${next++}`);
+  }
+  return handles;
+}
+
+export type AnswerCell = {
+  columnId: string;
+  found: boolean;
+  value: string | null;
+  chunk: string | null;
+  quote: string | null;
+};
+
+export const answer = (
+  columnId: string,
+  value: string,
+  chunk: string,
+  quote: string,
+): AnswerCell => ({ columnId, found: true, value, chunk, quote });
+
+export const absent = (columnId: string): AnswerCell => ({
+  columnId,
+  found: false,
+  value: null,
+  chunk: null,
+  quote: null,
+});
+
+/** The calls of a stub model that are fill (not merge) calls. */
+export const isFill = (call: ModelCall) => call.operation === "table.fill";
+export const isMerge = (call: ModelCall) => call.operation === "table.merge";
+
+/** The handle of the chunk in a fill prompt whose text contains `needle`. */
+export function handleHolding(user: string, needle: string): string | undefined {
+  for (const block of user.split("<<<CHUNK ").slice(1)) {
+    if (block.includes(needle)) return block.match(/^(c\d+)/)![1];
+  }
+  return undefined;
+}
+
+/**
+ * The answer for one column: found, citing the chunk of this prompt that holds
+ * `quote`, when the prompt has such a chunk; not found otherwise.
+ */
+export function answerIfStated(
+  user: string,
+  columnId: string,
+  value: string,
+  quote: string,
+): AnswerCell {
+  const handle = handleHolding(user, quote);
+  return handle ? answer(columnId, value, handle, quote) : absent(columnId);
 }

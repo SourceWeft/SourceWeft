@@ -33,6 +33,7 @@ const ENTRY_FACTORIES = [
   "createConnectorAdapters",
   "createHostWebProvider",
   "createSandboxProviderFactories",
+  "createTableCapability",
 ];
 
 /**

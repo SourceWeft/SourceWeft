@@ -24,3 +24,18 @@ export const TABLE_JOB_ATTEMPTS = 2;
 
 /** Output budget of the column suggestion call. */
 export const SUGGEST_MAX_OUTPUT_TOKENS = 800;
+
+/** Output budget of one fill call: a base plus a share per requested column. */
+export const FILL_BASE_OUTPUT_TOKENS = 300;
+export const FILL_COLUMN_OUTPUT_TOKENS = 220;
+export const FILL_MAX_OUTPUT_TOKENS = 4_000;
+
+/** Output budget of the call that picks between disagreeing candidates. */
+export const MERGE_MAX_OUTPUT_TOKENS = 100;
+
+export function fillMaxTokens(columnCount: number): number {
+  return Math.min(
+    FILL_MAX_OUTPUT_TOKENS,
+    FILL_BASE_OUTPUT_TOKENS + FILL_COLUMN_OUTPUT_TOKENS * columnCount,
+  );
+}
