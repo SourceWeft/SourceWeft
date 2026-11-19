@@ -20,6 +20,7 @@
       ],
       "@sourceweft/builtin-connector-github": [
         "../builtin-connector-github/src/index.ts"
+      ],
       "@sourceweft/builtin-connector-linear": [
         "../builtin-connector-linear/src/index.ts"
       ],

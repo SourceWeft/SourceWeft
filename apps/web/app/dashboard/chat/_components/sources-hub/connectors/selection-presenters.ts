@@ -15,8 +15,7 @@ import {
   Folder,
   FolderGit2,
   FolderKanban,
-  LucideIcon,
-  type,
+  type LucideIcon,
   Users,
 } from "lucide-react";
 import type {
