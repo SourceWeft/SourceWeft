@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
+import type { ConnectorManifest } from "@sourceweft/contracts";
 import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
 import {
   builtinGithubConnectorCapabilityManifest,
@@ -10,6 +11,14 @@ import {
 } from "../src";
 
 const root = new URL("../", import.meta.url);
+
+// The GitHub manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 test("JSON capability manifest matches the TypeScript export", async () => {
   const { raw } = await loadCapabilityManifestFixture(root);
@@ -24,9 +33,9 @@ test("backend manifest is tools-only", () => {
   });
 
   assert.equal(manifest.type, "github");
-  assert.deepEqual(manifest.auth.scopes, []);
-  assert.equal(manifest.auth.sendScope, false);
-  assert.deepEqual(manifest.auth.authorizationParams, {
+  assert.deepEqual(oauth2Auth(manifest).scopes, []);
+  assert.equal(oauth2Auth(manifest).sendScope, false);
+  assert.deepEqual(oauth2Auth(manifest).authorizationParams, {
     client_id: "client-id",
   });
   assert.deepEqual(manifest.sync.resources, []);

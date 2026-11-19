@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { OAuthCodeExchangeInput, OAuthRefreshInput } from "@sourceweft/contracts";
+import type {
+  ConnectorManifest,
+  OAuthCodeExchangeInput,
+  OAuthRefreshInput,
+} from "@sourceweft/contracts";
 import { createGithubConnectorAdapter, type GithubAdapterConfig } from "../src/adapter";
 import { GithubAdapterError } from "../src/errors";
 
 type RecordedCall = { url: string; method: string; body: unknown };
+
+// The GitHub manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -141,16 +153,16 @@ test("exchange without a configured client id makes no request", async () => {
 test("manifest client_id is empty without a slug", () => {
   const { fetcher } = router({});
   const withoutSlug = adapter(fetcher, { appSlug: "" }).getManifest();
-  assert.equal(withoutSlug.auth.authorizationParams?.client_id, "");
+  assert.equal(oauth2Auth(withoutSlug).authorizationParams?.client_id, "");
 
   const withSlug = adapter(fetcher).getManifest();
-  assert.equal(withSlug.auth.authorizationParams?.client_id, "client-id");
+  assert.equal(oauth2Auth(withSlug).authorizationParams?.client_id, "client-id");
 });
 
 test("manifest client_id is empty without a client secret", () => {
   const { fetcher } = router({});
   const manifest = adapter(fetcher, { clientSecret: "" }).getManifest();
-  assert.equal(manifest.auth.authorizationParams?.client_id, "");
+  assert.equal(oauth2Auth(manifest).authorizationParams?.client_id, "");
 });
 
 test("discover yields nothing", async () => {
