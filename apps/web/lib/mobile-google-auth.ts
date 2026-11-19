@@ -77,18 +77,17 @@ export async function signInWithMobileGoogle(clientId: string) {
   return result;
 }
 
+/**
+ * The message to show for a failed Google sign-in, or null when the person
+ * cancelled it. The Google SDK's own errors describe app configuration
+ * ("…is not configured in Info.plist") and mean nothing to the person, so they
+ * go to the console and the person sees one plain sentence.
+ */
 export function getMobileGoogleSignInError(error: unknown) {
   if (isCancelledGoogleSignIn(error)) {
     return null;
   }
 
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
+  console.warn("[mobile sign-in] Google sign-in failed", error);
   return "Unable to sign in with Google. Try again or use email.";
 }

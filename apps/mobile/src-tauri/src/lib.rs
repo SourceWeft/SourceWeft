@@ -371,19 +371,14 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
     }
 
     if is_app_url(app, url) {
-        if is_allowed_app_path(url.path()) {
-            return true;
-        }
-
-        // Public pages such as the terms and privacy policy are not part of the app: they
-        // open in the browser, so the app is not thrown onto another screen. Only the site
-        // root, where a redirect can land, returns to the app's home.
-        if is_app_web_url(app, url) && url.path() != "/" {
-            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
-        } else {
+        // Pages of the app's own site stay in the app: the web app shows public pages such
+        // as the terms and privacy policy in its own sheet, a same-origin frame. Only the
+        // site root, where a redirect can land, returns to the app's home.
+        if lands_on_site_root(url.path()) {
             let _ = navigate_main_window(app, HOME_PATH);
+            return false;
         }
-        return false;
+        return true;
     }
 
     if url.scheme() == "http" || url.scheme() == "https" {
@@ -407,8 +402,8 @@ fn is_app_web_url(app: &AppHandle, url: &Url) -> bool {
     resolve_app_url(app, HOME_PATH).is_ok_and(|base| same_origin(url, &base))
 }
 
-fn is_allowed_app_path(path: &str) -> bool {
-    is_dashboard_path(path) || path == "/auth" || path.starts_with("/auth/")
+fn lands_on_site_root(path: &str) -> bool {
+    path.is_empty() || path == "/"
 }
 
 fn navigate_main_window(app: &AppHandle, path: &str) -> Result<(), String> {
@@ -704,12 +699,10 @@ mod tests {
     }
 
     #[test]
-    fn the_webview_may_navigate_to_dashboard_and_sign_in_pages_only() {
-        for path in ["/dashboard", "/dashboard/chat", "/auth", "/auth/sign-in"] {
-            assert!(is_allowed_app_path(path), "{path}");
-        }
-        for path in ["/", "/dashboardx", "/authx", "/pricing", "/mcp/dashboard/"] {
-            assert!(!is_allowed_app_path(path), "{path}");
+    fn only_the_site_root_sends_the_app_home() {
+        assert!(lands_on_site_root("/"));
+        for path in ["/privacy", "/terms", "/dashboard/chat", "/auth/sign-in"] {
+            assert!(!lands_on_site_root(path), "{path}");
         }
     }
 }

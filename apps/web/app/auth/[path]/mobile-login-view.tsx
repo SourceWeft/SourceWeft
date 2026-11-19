@@ -500,10 +500,6 @@ export function MobileLoginView({ path }: { path: string }) {
             )}
           </div>
 
-          <p className="mt-3 text-center text-xs text-muted-foreground [@media(max-height:760px)]:mt-2 [@media(max-height:680px)]:hidden">
-            {t("appleComingSoon")}
-          </p>
-
           <p className="mt-6 px-5 text-center text-xs leading-5 text-muted-foreground [@media(max-height:760px)]:mt-3 [@media(max-height:680px)]:px-2 [@media(max-height:680px)]:leading-4">
             {t.rich("termsNotice", {
               terms: (chunks) => (

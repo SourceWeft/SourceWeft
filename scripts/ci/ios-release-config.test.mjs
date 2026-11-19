@@ -278,3 +278,41 @@ test("the launch image uses the splash page's background, defined for light and 
     new RegExp(`prefers-color-scheme: dark\\)[^}]*--bg: ${hex(dark)};`),
   );
 });
+
+// The Google Sign-In SDK refuses to start unless the app registers its iOS
+// OAuth client, reversed, as a URL scheme. The client is the one the API
+// returns as nativeSignIn.googleIosClientId for sourceweft.com.
+test("Google Sign-In's reversed iOS client is a registered URL scheme", () => {
+  const plist = read(resolve(tauri, "Info.ios.plist"));
+  const types = plist.match(
+    /<key>CFBundleURLTypes<\/key>\s*<array>([\s\S]*?)<\/array>\s*<key>/,
+  )?.[1];
+  assert(types, "Info.ios.plist declares no CFBundleURLTypes");
+  assert.match(
+    types,
+    /<string>com\.googleusercontent\.apps\.\d+-[a-z0-9]+<\/string>/,
+  );
+});
+
+// The launch image shows the logo alone, as the splash page and the web cover
+// do: the sign-in page below shows the logo with the name, and two names would
+// collide. PNGs, light and dark: launch screens do not draw vector images.
+test("the launch image shows the logo mark alone, in light and dark", () => {
+  const storyboard = read(resolve(apple, "LaunchScreen.storyboard"));
+  assert.match(storyboard, /<imageView [^>]*image="LaunchLogo"/);
+  assert.doesNotMatch(storyboard, /<label /);
+  const imageset = resolve(apple, "Assets.xcassets/LaunchLogo.imageset");
+  const { images } = json(resolve(imageset, "Contents.json"));
+  assert.deepEqual(images.map(({ filename }) => filename).sort(), [
+    "launch-logo-dark@2x.png",
+    "launch-logo-dark@3x.png",
+    "launch-logo@2x.png",
+    "launch-logo@3x.png",
+  ]);
+  for (const { filename } of images)
+    assert.equal(
+      readFileSync(resolve(imageset, filename)).subarray(1, 4).toString(),
+      "PNG",
+      filename,
+    );
+});
