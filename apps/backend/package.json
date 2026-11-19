@@ -60,7 +60,7 @@
     "@langchain/langgraph-checkpoint-postgres": "^1.1.4",
     "@langchain/mcp-adapters": "2.0.0",
     "@langchain/openai": "1.5.5",
-    "@langchain/quickjs": "0.6.1",
+    "@langchain/quickjs": "0.6.7",
     "@modelcontextprotocol/client": "2.4.0",
     "@octokit/core": "^7.0.8",
     "@octokit/plugin-paginate-graphql": "^6.0.0",

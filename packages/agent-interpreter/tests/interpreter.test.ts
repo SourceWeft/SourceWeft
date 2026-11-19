@@ -397,6 +397,113 @@ test("QuickJS interrupts non-terminating code", async () => {
   }
 });
 
+function officialEvalTool(input: {
+  limits: InterpreterLimits;
+  /** How long the backend takes to read a path. */
+  readDelayMs: (path: string) => number;
+  turnId: string;
+}) {
+  const backend = backendWithCalls([]);
+  const read = backend.read.bind(backend);
+  backend.read = async (...args) => {
+    const delayMs = input.readDelayMs(String(args[0]));
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return read(...args);
+  };
+  const middleware = createSourceWeftInterpreterMiddleware({
+    backend,
+    allowedTools: ["read_file"],
+    limits: input.limits,
+    gate: createInterpreterExecutionGate(input.limits),
+    context: { turnId: input.turnId },
+  });
+  const official = middleware[0] as unknown as {
+    afterAgent?: (state: unknown, runtime: unknown) => unknown;
+    tools: Array<{
+      invoke: (input: unknown, config?: unknown) => Promise<unknown>;
+    }>;
+    wrapModelCall: (
+      request: unknown,
+      handler: (request: unknown) => Promise<unknown>,
+    ) => Promise<unknown>;
+  };
+  return {
+    async evaluate(threadId: string, code: string) {
+      await official.wrapModelCall(
+        { tools: [], systemMessage: new SystemMessage("") },
+        async () => new AIMessage("ready"),
+      );
+      return String(
+        await official.tools[0]?.invoke(
+          { code },
+          { configurable: { thread_id: threadId } },
+        ),
+      );
+    },
+    async endRun(threadId: string) {
+      await official.afterAgent?.({}, { configurable: { thread_id: threadId } });
+    },
+  };
+}
+
+test("the execution timeout counts the code's own time, not the wait for a bridged call", async () => {
+  const interpreter = officialEvalTool({
+    limits: limits({ executionTimeoutMs: 1_000, ptcCallTimeoutMs: 5_000 }),
+    readDelayMs: () => 1_500,
+    turnId: "turn-timeout-meaning",
+  });
+  const threadId = "thread-timeout-meaning";
+  try {
+    // The bridged read takes longer than the execution timeout. The budget is
+    // generous on purpose: the runtime polls while it waits, and that polling
+    // is charged to it, so a tight budget fails on a busy machine.
+    const waited = await interpreter.evaluate(
+      threadId,
+      'const text = await tools.readFile({ file_path: "/kb/a.md" }); text.includes("content:")',
+    );
+    assert.doesNotMatch(waited, /interrupt|timed out/i);
+    assert.match(waited, /true/);
+
+    const spinning = await interpreter.evaluate(threadId, "while (true) {}");
+    assert.match(spinning, /interrupt|timed out/i);
+  } finally {
+    await interpreter.endRun(threadId);
+  }
+});
+
+test("the process keeps evaluating after an eval times out with a bridged call in flight", async () => {
+  const interpreter = officialEvalTool({
+    limits: limits({ executionTimeoutMs: 300, ptcCallTimeoutMs: 5_000 }),
+    readDelayMs: (path) => (path === "/kb/slow.md" ? 800 : 0),
+    turnId: "turn-timeout-recovery",
+  });
+  // The read is started and never awaited, so it is still running when the
+  // loop exhausts the budget. Disposing a session in that state used to abort
+  // the WASM module every session in the process shares.
+  const timedOut = await interpreter.evaluate(
+    "thread-timeout-recovery-a",
+    'tools.readFile({ file_path: "/kb/slow.md" }); while (true) {}',
+  );
+  assert.match(timedOut, /interrupt|timed out/i);
+  await interpreter.endRun("thread-timeout-recovery-a");
+  // Let the abandoned read settle against the disposed session.
+  await new Promise((resolve) => setTimeout(resolve, 900));
+
+  try {
+    const next = await interpreter.evaluate("thread-timeout-recovery-b", "40 + 2");
+    assert.match(next, /42/);
+    const read = await interpreter.evaluate(
+      "thread-timeout-recovery-b",
+      'await tools.readFile({ file_path: "/kb/b.md" })',
+    );
+    assert.match(read, /content:\/kb\/b\.md/);
+  } finally {
+    await interpreter.endRun("thread-timeout-recovery-b");
+  }
+});
+
 test("PC interpreter reads the physical working directory and denies DB Files", async () => {
   const calls: string[] = [];
   const configuredLimits = limits();
