@@ -7,7 +7,12 @@
 import {
   adfToMarkdown,
   AtlassianApiError,
+  CURSOR_MAX_LENGTH,
+  buildSitesNote,
+  decodeSiteCursor,
+  encodeSiteCursor,
   listAccessibleResources,
+  pickAccessibleSites,
   type AtlassianClientConfig,
   type AtlassianSite,
 } from "@sourceweft/atlassian-client";
@@ -15,7 +20,6 @@ import type {
   ConnectorActionInput,
   ConnectorActionResult,
 } from "@sourceweft/contracts";
-import { decodeSiteCursor, encodeSiteCursor } from "./cursor";
 import { groupByCloudId, parseJiraSelection } from "./ids";
 import { buildIssueJql, jqlTextTerm, type JqlInput } from "./jql";
 import {
@@ -24,12 +28,7 @@ import {
   type JiraIssueSummary,
   type JiraProject,
 } from "./jira-client";
-import {
-  CURSOR_MAX_LENGTH,
-  MAX_FANOUT_SITES,
-  hasJiraScope,
-  invalidRequest,
-} from "./shared";
+import { hasJiraScope, invalidRequest } from "./shared";
 
 type JiraClient = ReturnType<typeof createJiraClient>;
 
@@ -75,29 +74,6 @@ function noSitesReachable(): AtlassianApiError {
   );
 }
 
-/** Builds the sites note from the selected sites that could not be reached
- * (named, or by cloud id when the name is unknown) and the count of sites left
- * unsearched because of the fan-out cap. Either fact may be present; returns
- * `undefined` when nothing was dropped. */
-function buildSitesNote(
-  unreachable: readonly string[],
-  overflowCount: number,
-): string | undefined {
-  const facts: string[] = [];
-  if (unreachable.length > 0) {
-    const noun = unreachable.length === 1 ? "site" : "sites";
-    facts.push(
-      `${unreachable.length} selected ${noun} can no longer be accessed: ${unreachable.join(", ")}.`,
-    );
-  }
-  if (overflowCount > 0) {
-    facts.push(
-      `Only the first ${MAX_FANOUT_SITES} selected sites are searched; ${overflowCount} more were not.`,
-    );
-  }
-  return facts.length > 0 ? facts.join(" ") : undefined;
-}
-
 /** One selected site kept for this call, with the numeric project ids selected
  * on it (non-empty: it came from the grouped selection). */
 type SiteScope = {
@@ -124,7 +100,7 @@ type AccessibleSites = {
   overflowCount: number;
 };
 
-/** Lists the accessible sites and keeps the first {@link MAX_FANOUT_SITES}
+/** Lists the accessible sites and keeps the first `MAX_FANOUT_SITES`
  * selected sites that still carry the Jira read scope, in cloud-id ascending
  * order. Throws `404 JIRA_NOT_FOUND` when not one selected site is reachable,
  * rather than returning an empty result. */
@@ -134,26 +110,21 @@ async function accessibleSelectedSites(
   grouped: Map<string, string[]>,
 ): Promise<AccessibleSites> {
   const sites = await listAccessibleResources(deps.atlassianConfig, accessToken);
-  const accessible = new Map(
-    sites.filter(hasJiraScope).map((site) => [site.cloudId, site]),
-  );
-  const kept: SiteScope[] = [];
-  const inaccessible: string[] = [];
-  let overflowCount = 0;
-  for (const [cloudId, projectIds] of grouped) {
-    const site = accessible.get(cloudId);
-    if (!site) {
-      inaccessible.push(cloudId);
-      continue;
-    }
-    if (kept.length >= MAX_FANOUT_SITES) {
-      overflowCount += 1;
-      continue;
-    }
-    kept.push({ cloudId, site, projectIds });
-  }
-  if (kept.length === 0) throw noSitesReachable();
-  return { kept, inaccessible, overflowCount };
+  const picked = pickAccessibleSites({
+    sites,
+    grouped,
+    hasScope: hasJiraScope,
+  });
+  if (picked.kept.length === 0) throw noSitesReachable();
+  return {
+    kept: picked.kept.map(({ cloudId, site, value }) => ({
+      cloudId,
+      site,
+      projectIds: value,
+    })),
+    inaccessible: picked.inaccessible,
+    overflowCount: picked.overflowCount,
+  };
 }
 
 /** The issue-search parameters the agent may pass, each validated the same way
@@ -392,7 +363,7 @@ async function searchIssuesTool(
 
   const cursorSites =
     params.cursor !== undefined && params.cursor !== ""
-      ? decodeSiteCursor(params.cursor, [...grouped.keys()])
+      ? decodeSiteCursor(params.cursor, [...grouped.keys()], "JIRA")
       : null;
 
   const { kept, inaccessible, overflowCount } = await accessibleSelectedSites(
