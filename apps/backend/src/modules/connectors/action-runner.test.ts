@@ -60,6 +60,7 @@ vi.mock("../../shared/team-secrets", () => ({
 
 import { ConnectorActionRunner } from "./action-runner";
 import { resolveConnectorActionExecutionRef } from "./agent-tool-idempotency";
+import { ConnectorError } from "./errors";
 
 function registry() {
   const manifest: ConnectorManifest = {
@@ -213,6 +214,57 @@ test("ConnectorActionRunner logs raw adapter responses on approved execution", a
     debug.mockRestore();
     vi.clearAllMocks();
   }
+});
+
+test("ConnectorActionRunner marks the account for reauthorization when the provider refuses it", async () => {
+  vi.clearAllMocks();
+  const refused = new ConnectorError(
+    401,
+    "GMAIL_REAUTH_REQUIRED",
+    "Gmail request failed (401)",
+  );
+  const adapter = {
+    executeAction: vi.fn().mockRejectedValue(refused),
+  } as unknown as ConnectorAdapter;
+  const registry = { getAdapter: vi.fn(() => adapter) };
+  const oauthService = {
+    getRuntimeToken: vi.fn().mockResolvedValue("runtime-token"),
+    markBrokeredAccountReauthRequired: vi.fn().mockResolvedValue(undefined),
+  };
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace_1", organizationId: "team_1" },
+  });
+  mocks.findActionRunRecord.mockResolvedValue(action());
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector());
+  mocks.updateActionRunRecord.mockImplementation(async (input) =>
+    action({
+      status: input.status ?? "failed",
+      errorCode: input.errorCode ?? null,
+    }),
+  );
+
+  const result = await new ConnectorActionRunner(
+    registry as never,
+    oauthService as never,
+  ).execute({
+    workspaceId: "workspace_1",
+    connectorId: "connector_1",
+    actionRunId: "action_1",
+    userId: "user_1",
+  });
+
+  assert.equal(result.action.status, "failed");
+  assert.equal(result.action.errorCode, "GMAIL_REAUTH_REQUIRED");
+  assert.deepEqual(
+    oauthService.markBrokeredAccountReauthRequired.mock.calls[0]?.[0],
+    {
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      accountId: "account_1",
+      connectorType: "fake",
+      error: refused,
+    },
+  );
 });
 
 test("Gmail send proposal stores ciphertext and requires its approver and send grant", async () => {

@@ -25,6 +25,7 @@ vi.mock(".", async (importOriginal) => {
     ...original,
     connectorOAuthService: {
       getRuntimeToken: vi.fn().mockResolvedValue({ accessToken: "token" }),
+      markBrokeredAccountReauthRequired: vi.fn().mockResolvedValue(undefined),
     },
   };
 });

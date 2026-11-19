@@ -677,7 +677,16 @@ export async function createConnectorActionTools(
                     accessToken,
                     idempotencyKey,
                   })
-                  .catch((error) => {
+                  .catch(async (error) => {
+                    await connectorOAuthService.markBrokeredAccountReauthRequired(
+                      {
+                        teamId: context.teamId,
+                        workspaceId: context.workspaceId,
+                        accountId: connector.oauthAccountId,
+                        connectorType: connector.connectorType,
+                        error,
+                      },
+                    );
                     const connectorError = toConnectorError(error);
                     logger.debug(
                       "Connector action direct adapter execution failed",

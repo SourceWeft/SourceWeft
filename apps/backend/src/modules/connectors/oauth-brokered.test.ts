@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   findReauthorizable: vi.fn(),
   reauthorize: vi.fn(),
   createAccount: vi.fn(),
-  updateStatus: vi.fn(),
+  markReauth: vi.fn(),
   updateToken: vi.fn(),
   startAuthorization: vi.fn(),
   finishAuthorization: vi.fn(),
@@ -45,7 +45,7 @@ vi.mock("./repository", () => ({
   findOAuthStateRecord: mocks.findState,
   findReauthorizableOAuthAccountRecord: mocks.findReauthorizable,
   reauthorizeOAuthAccountRecord: mocks.reauthorize,
-  updateOAuthAccountStatusRecord: mocks.updateStatus,
+  markOAuthAccountReauthRequiredRecord: mocks.markReauth,
   updateOAuthAccountTokenRecord: mocks.updateToken,
 }));
 
@@ -631,5 +631,82 @@ describe("revokeStoredAuthorization", () => {
       switchedOffService.revokeStoredAuthorization(brokeredAccount as never),
     ).resolves.toBeUndefined();
     expect(mocks.revokeAuthorization).not.toHaveBeenCalled();
+  });
+});
+
+describe("markBrokeredAccountReauthRequired", () => {
+  const base = {
+    teamId: "team",
+    workspaceId: "workspace",
+    accountId: "account_1",
+    connectorType: "composio_gmail",
+  };
+  const refused = () =>
+    new ConnectorError(401, "GMAIL_REAUTH_REQUIRED", "Gmail request failed (401)");
+
+  it("marks the account when the broker refuses the authorization", async () => {
+    mocks.markReauth.mockResolvedValue(true);
+
+    await service.markBrokeredAccountReauthRequired({
+      ...base,
+      error: refused(),
+    });
+
+    expect(mocks.markReauth).toHaveBeenCalledWith({
+      teamId: "team",
+      workspaceId: "workspace",
+      accountId: "account_1",
+      lastError: expect.any(String),
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "connector_brokered_account_reauth_required",
+      { accountId: "account_1", connectorType: "composio_gmail" },
+    );
+  });
+
+  it.each([
+    ["GMAIL_UNAVAILABLE", 503],
+    ["GMAIL_RATE_LIMITED", 429],
+    ["GMAIL_ACCESS_DENIED", 403],
+    ["GMAIL_REQUEST_FAILED", 400],
+  ])("leaves the account alone for %s", async (code, status) => {
+    await service.markBrokeredAccountReauthRequired({
+      ...base,
+      error: new ConnectorError(status, code, "failed"),
+    });
+
+    expect(mocks.markReauth).not.toHaveBeenCalled();
+  });
+
+  it("leaves the account alone for a connector that is not brokered", async () => {
+    await service.markBrokeredAccountReauthRequired({
+      ...base,
+      connectorType: "notion",
+      error: new ConnectorError(401, "NOTION_REAUTH_REQUIRED", "refused"),
+    });
+
+    expect(mocks.markReauth).not.toHaveBeenCalled();
+  });
+
+  it("does nothing without an account", async () => {
+    await service.markBrokeredAccountReauthRequired({
+      ...base,
+      accountId: null,
+      error: refused(),
+    });
+
+    expect(mocks.markReauth).not.toHaveBeenCalled();
+  });
+
+  it("never throws, so the original failure is still the one reported", async () => {
+    mocks.markReauth.mockRejectedValue(new Error("database down"));
+
+    await expect(
+      service.markBrokeredAccountReauthRequired({ ...base, error: refused() }),
+    ).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      "connector_brokered_account_mark_failed",
+      expect.objectContaining({ accountId: "account_1" }),
+    );
   });
 });

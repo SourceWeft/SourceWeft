@@ -190,6 +190,38 @@ export async function reauthorizeOAuthAccountRecord(input: {
   return row ? mapOAuthAccount(row) : null;
 }
 
+/**
+ * Mark an active authorization as needing reauthorization. Only an `active`
+ * row is changed, so a concurrent reconnect that already made the account
+ * usable again is never reverted by a late failure report. Returns whether a
+ * row changed.
+ */
+export async function markOAuthAccountReauthRequiredRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  lastError: string;
+}) {
+  const rows = await db
+    .update(connectorOAuthAccounts)
+    .set({
+      status: "reauth_required",
+      lastError: input.lastError,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(connectorOAuthAccounts.id, input.accountId),
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+        eq(connectorOAuthAccounts.status, "active"),
+      ),
+    )
+    .returning({ id: connectorOAuthAccounts.id });
+
+  return rows.length > 0;
+}
+
 export async function listOAuthAccountRecordsByProviderAccount(input: {
   connectorType: string;
   providerAccountId: string;

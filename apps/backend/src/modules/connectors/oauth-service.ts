@@ -19,6 +19,7 @@ import {
   findOAuthStateRecord,
   findReauthorizableOAuthAccountRecord,
   listOAuthAccountsDueForKeepAlive,
+  markOAuthAccountReauthRequiredRecord,
   reauthorizeOAuthAccountRecord,
   withOAuthAccountRefreshLock,
   type OAuthAccountRefreshWrite,
@@ -512,6 +513,51 @@ export class ConnectorOAuthService {
       expiresAt,
       createdBy: input.userId,
     });
+  }
+
+  /**
+   * Record that the provider refused a brokered authorization during a live
+   * call. A brokered account never refreshes (the broker holds and renews the
+   * token), so the refresh path that normally marks an account never runs for
+   * it; a revoked or deactivated connection would otherwise keep showing as
+   * connected. Only an adapter's `*_REAUTH_REQUIRED` answer on a brokered
+   * connector marks the account, which then shows Reconnect and refuses
+   * further calls until the mailbox is authorized again. Any other failure
+   * (broker unavailable, quota, a transient error) leaves the account alone.
+   * Never throws: the caller is already reporting the original error.
+   */
+  async markBrokeredAccountReauthRequired(input: {
+    teamId: string;
+    workspaceId: string;
+    accountId: string | null;
+    connectorType: string;
+    error: unknown;
+  }): Promise<void> {
+    if (!input.accountId) return;
+    try {
+      if (!toConnectorError(input.error).code.endsWith("_REAUTH_REQUIRED")) {
+        return;
+      }
+      if (!this.usesBrokeredAuthorization(input.connectorType)) return;
+      const marked = await markOAuthAccountReauthRequiredRecord({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        accountId: input.accountId,
+        lastError: "The authorization is no longer active at the provider",
+      });
+      if (marked) {
+        logger.warn("connector_brokered_account_reauth_required", {
+          accountId: input.accountId,
+          connectorType: input.connectorType,
+        });
+      }
+    } catch (error) {
+      logger.error("connector_brokered_account_mark_failed", {
+        accountId: input.accountId,
+        connectorType: input.connectorType,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** Whether a connector's manifest declares the brokered auth flow. */
