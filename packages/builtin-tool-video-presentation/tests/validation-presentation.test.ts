@@ -96,6 +96,8 @@ test("the card title follows the call status and the verdict", () => {
       status,
     });
   assert.equal(title("running"), "Validating video presentation");
+  // No output yet: the host appends "failed" to this itself.
+  assert.equal(title("completed"), "Video presentation validation");
   assert.equal(title("error"), "Video presentation validation failed");
   assert.equal(
     title("completed", { status: "passed" }),

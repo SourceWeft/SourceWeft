@@ -80,9 +80,25 @@ for (const error of [
       }),
     );
 
+    // The tool opened a validation step when it started, so a call that errors
+    // also closes that step as failed instead of leaving it in progress.
     assert.deepEqual(
       liveEvents.map((event) => event.type),
-      ["tool-call-error", "tool-call-end"],
+      ["tool-call-error", "tool-call-end", "thinking-step", "thinking-step"],
+    );
+    const steps = liveEvents.flatMap((event) =>
+      event.type === "thinking-step" ? [event.step] : [],
+    );
+    assert.deepEqual(
+      steps.map((step) => [step.id, step.status, step.title]),
+      [
+        [
+          "video-validation",
+          "completed",
+          "Video presentation validation failed",
+        ],
+        [`tool:${callId}`, "completed", "Video presentation validation failed"],
+      ],
     );
     assert.equal(
       liveEvents[0]?.type === "tool-call-error"

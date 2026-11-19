@@ -89,6 +89,11 @@ export const validateVideoPresentationPresentation: AgentToolPresentation = {
     if (status === "error") {
       return PHASE_TITLES.failed!;
     }
+    // The host also asks for the end title when the call died before it had an
+    // output, and then appends "failed" itself; answer with the bare noun.
+    if (toolOutput === undefined) {
+      return "Video presentation validation";
+    }
     return readOutputField(toolOutput, "status") === "passed"
       ? PHASE_TITLES.completed!
       : PHASE_TITLES.failed!;

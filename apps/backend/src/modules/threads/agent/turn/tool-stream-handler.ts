@@ -692,6 +692,32 @@ export async function* handleToolErrorStreamChunk(input: {
     status: "error",
     toolCall: nextToolCall,
   };
+  // A capability that opened a generation step when the call started must be
+  // able to close it when the call dies too, or the step stays in progress.
+  const failedPhase = getAgentToolPresentation(
+    toolName,
+  )?.artifactCompletionPhase?.({
+    toolInput: nextToolCall.input,
+    toolOutput: undefined,
+    readOutputField: extractToolOutputField,
+    status: "error",
+  });
+  if (failedPhase) {
+    const step = buildArtifactGenerationStep({
+      error: errorText,
+      latencyMs,
+      phase: failedPhase,
+      toolInput: nextToolCall.input,
+      toolCallId,
+      toolName,
+    });
+    if (step) {
+      yield {
+        type: "thinking-step",
+        step: runtime.setThinkingStep(step),
+      };
+    }
+  }
   const webTitle = getWebToolEndTitle(toolName);
   const title = getFilesystemToolEndTitle(
     toolName,
