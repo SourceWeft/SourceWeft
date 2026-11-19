@@ -31,6 +31,8 @@
     "./grounded-generation": "./src/grounded-generation.ts",
     "./study": "./src/study.ts",
     "./study-capability": "./src/study-capability.ts",
+    "./table": "./src/table.ts",
+    "./table-capability": "./src/table-capability.ts",
     "./artifacts": "./src/artifacts.ts",
     "./messages": "./src/messages.ts",
     "./thread-message-compaction": "./src/thread-message-compaction.ts",

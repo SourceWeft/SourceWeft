@@ -5,6 +5,7 @@ import {
 } from "./grounded-evidence";
 import {
   groundedErrorCodeSchema,
+  normalizeFingerprintText,
   type GroundedErrorCode,
 } from "./grounded-generation";
 import { sha256Hex } from "./sha256";
@@ -536,20 +537,12 @@ export const deriveCardsResponseSchema = z.object({
 });
 export type DeriveCardsResponse = z.infer<typeof deriveCardsResponseSchema>;
 
-/** Lower-cases, folds width/compatibility forms, drops punctuation and spaces. */
-function normalizeForFingerprint(text: string): string {
-  return text
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[\p{P}\p{S}\p{Z}\s]+/gu, "");
-}
-
 /**
  * First 16 hex digits of sha256 over `kind` and the normalized text. Only used
  * on regeneration to find which new item is an old one; it is never an id.
  */
 export function studyFingerprint(kind: StudyKind, text: string): string {
-  return sha256Hex(`${kind}:${normalizeForFingerprint(text)}`).slice(0, 16);
+  return sha256Hex(`${kind}:${normalizeFingerprintText(text)}`).slice(0, 16);
 }
 
 const ID_PREFIX: Record<StudyKind, string> = {
