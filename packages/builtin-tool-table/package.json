@@ -1,0 +1,23 @@
+{
+  "name": "@sourceweft/builtin-tool-table",
+  "license": "Apache-2.0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/grounded-generation": "workspace:*",
+    "typescript": "5.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12"
+  }
+}
