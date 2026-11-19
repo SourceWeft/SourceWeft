@@ -120,7 +120,7 @@ function connectorMigrationError(error: unknown) {
   return null;
 }
 
-function isPackageConnectorError(
+export function isPackageConnectorError(
   error: unknown,
 ): error is { statusCode: number; code: string; message: string; details?: Record<string, unknown> } {
   return (

@@ -52,6 +52,7 @@ import {
   adaptMessagesEvent,
   adaptToolArgDelta,
   adaptToolsEvent,
+  createAssistantMessageFilter,
   interruptsToLegacyUpdatesPayload,
   isSerializedInterruptMessage,
   unwrapCustomEvent,
@@ -272,6 +273,9 @@ export async function* invokeDeepAgentTurn(input: {
     // v3 `tool-finished`/`tool-error` events omit the tool name; the adapter
     // recovers it from this map, populated on each `tool-started`.
     const toolNameByCallId = new Map<string, string>();
+    // Messages a middleware adds to the conversation (a pinned skill's
+    // instructions) stream through `messages` too; only the model's are output.
+    const isAssistantMessageEvent = createAssistantMessageFilter();
     let autoApprovedHitlResumeCount = 0;
     const maxAutoApprovedHitlResumes = Math.max(
       1,
@@ -294,6 +298,12 @@ export async function* invokeDeepAgentTurn(input: {
           ? (protocolEvent.params?.namespace as unknown[])
           : [];
         const data = protocolEvent.params?.data;
+        if (
+          method === "messages" &&
+          !isAssistantMessageEvent(namespace, data)
+        ) {
+          continue;
+        }
 
         // A `task` delegate's events reach the client only to group its tool
         // cards. Every other sub-agent event (model text, reasoning, checkpoints,

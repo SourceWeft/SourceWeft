@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   flashcardItemSchema,
   newStudyItemId,
@@ -9,10 +8,12 @@ import {
   type StudyEvidence,
   type StudyKind,
 } from "@sourceweft/contracts/study";
+import {
+  anchorCandidates as anchorItems,
+  matchesOutputLanguage,
+} from "@sourceweft/grounded-generation";
 import { LEAK_LENGTH_RATIO, QUOTE_MAX_CHARS } from "./constants";
-import { isCjkChar } from "./corpus";
 import { normalizeForCompare } from "./dedupe";
-import { matchesOutputLanguage } from "./language";
 import {
   flashcardsOutputReader,
   mindmapOutputReader,
@@ -29,7 +30,6 @@ import type {
   MindmapCandidate,
   QuizCandidate,
   StudyAnchorPort,
-  StudyAnchorResult,
 } from "./types";
 
 export function addDrop(dropped: DropCounts, reason: string, by = 1) {
@@ -370,101 +370,24 @@ export function quizRuleViolation(item: QuizCandidate): string | null {
   return null;
 }
 
-export function quoteHash(quote: string) {
-  return `sha256:${createHash("sha256").update(quote, "utf8").digest("hex")}`;
-}
-
-export function evidenceFrom(
-  chunk: CorpusChunk,
-  anchor: StudyAnchorResult,
-): StudyEvidence {
-  let { startChar, endChar, quote } = anchor;
-  if ([...quote].length > QUOTE_MAX_CHARS) {
-    quote = [...quote].slice(0, QUOTE_MAX_CHARS).join("");
-    endChar = startChar + quote.length;
-  }
-  return {
-    kind: "chunk",
-    sourceId: chunk.sourceId,
-    documentId: chunk.documentId,
-    chunkId: chunk.chunkId,
-    chunkNo: chunk.chunkNo,
-    headingPath: chunk.headingPath,
-    quote,
-    startChar,
-    endChar,
-    quoteHash: quoteHash(quote),
-  };
-}
-
 /**
  * Anchors every candidate's supporting text in each chunk it cites, in one
  * batch. Returns the evidence per item id; an item absent from the map was
  * not supported by any of its chunks.
  */
-export async function anchorCandidates(
+export function anchorCandidates(
   items: readonly (FlashcardCandidate | QuizCandidate | MindmapCandidate)[],
   anchorPort: StudyAnchorPort,
   chunkByHandle: ReadonlyMap<string, CorpusChunk>,
 ): Promise<Map<string, StudyEvidence[]>> {
-  const requests: { itemId: string; chunk: CorpusChunk; text: string }[] = [];
-  for (const item of items) {
-    const text = supportText(item);
-    for (const ref of item.refs) {
-      const chunk = chunkByHandle.get(ref);
-      if (chunk) requests.push({ itemId: item.id, chunk, text });
-    }
-  }
-  const evidence = new Map<string, StudyEvidence[]>();
-  if (requests.length === 0) return evidence;
-  const results = await anchorPort.anchor(
-    requests.map((request) => ({
-      text: request.text,
-      chunkId: request.chunk.chunkId,
-      chunkContent: request.chunk.text,
+  return anchorItems(
+    items.map((item) => ({
+      id: item.id,
+      refs: item.refs,
+      text: supportText(item),
     })),
+    anchorPort,
+    chunkByHandle,
+    { evidencePerItem: STUDY_LIMITS.evidencePerItem, quoteChars: QUOTE_MAX_CHARS },
   );
-  requests.forEach((request, index) => {
-    const result = results[index];
-    if (!result || result.quote.trim().length === 0) return;
-    const list = evidence.get(request.itemId) ?? [];
-    if (list.length < STUDY_LIMITS.evidencePerItem) {
-      list.push(evidenceFrom(request.chunk, result));
-    }
-    evidence.set(request.itemId, list);
-  });
-  return evidence;
-}
-
-/** Cited chunk text for a verification call, cut to the token budget. */
-export function citedTextWithin(
-  chunks: readonly CorpusChunk[],
-  budgetTokens: number,
-): string {
-  const parts: string[] = [];
-  let used = 0;
-  for (const chunk of chunks) {
-    const remaining = budgetTokens - used;
-    if (remaining <= 0) break;
-    if (chunk.tokens <= remaining) {
-      parts.push(chunk.text);
-      used += chunk.tokens;
-      continue;
-    }
-    let cut = "";
-    let tokens = 0;
-    let pendingOther = 0;
-    for (const char of chunk.text) {
-      // Same arithmetic as estimateTokens, kept incremental.
-      const isCjk = isCjkChar(char);
-      const next = isCjk ? tokens + 1 : tokens + (pendingOther % 4 === 0 ? 1 : 0);
-      if (next > remaining) break;
-      if (!isCjk) pendingOther += 1;
-      tokens = next;
-      cut += char;
-    }
-    if (cut) parts.push(cut);
-    break;
-  }
-  return parts.join("\n\n");
 }

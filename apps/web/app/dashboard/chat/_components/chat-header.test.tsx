@@ -88,7 +88,7 @@ test("phones open the drawer from the same place", () => {
 test("the macOS header clears the traffic lights without the old 264px gap", () => {
   layout.titlebarInset = true;
   const inset = renderHeader();
-  assert.ok(inset.includes("pl-6"));
+  assert.ok(inset.includes("pl-7"));
   assert.ok(!inset.includes("pl-[264px]"));
 
   layout.titlebarInset = false;

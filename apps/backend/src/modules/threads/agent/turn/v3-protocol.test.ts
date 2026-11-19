@@ -14,6 +14,7 @@ import {
   adaptToolArgDelta,
   adaptToolsEvent,
   adoptV3RunStream,
+  createAssistantMessageFilter,
   interruptsToLegacyUpdatesPayload,
   isSerializedInterruptMessage,
   unwrapCustomEvent,
@@ -211,6 +212,98 @@ test("adaptMessagesEvent drops tool_call chunks and lifecycle events", () => {
     adaptMessagesEvent({ event: "message-finish", usage: { input_tokens: 1 } }),
     [],
   );
+});
+
+test("createAssistantMessageFilter drops every event of a human-authored message", () => {
+  // The shape deepagents streams when the skills middleware pins a skill: a
+  // human message from a middleware node, then the model's own message.
+  const pinned = ["SkillsMiddleware.before_model:1"];
+  const model = ["model_request:2"];
+  const isAssistant = createAssistantMessageFilter();
+  const verdicts = [
+    isAssistant(pinned, { event: "message-start", role: "human", run_id: "a" }),
+    isAssistant(pinned, {
+      event: "content-block-start",
+      index: 0,
+      run_id: "a",
+    }),
+    isAssistant(pinned, {
+      event: "content-block-delta",
+      index: 0,
+      delta: { type: "text-delta", text: "<skill>body</skill>" },
+      run_id: "a",
+    }),
+    isAssistant(pinned, {
+      event: "content-block-finish",
+      index: 0,
+      run_id: "a",
+    }),
+    isAssistant(pinned, { event: "message-finish", run_id: "a" }),
+    isAssistant(model, { event: "message-start", run_id: "b" }),
+    isAssistant(model, {
+      event: "content-block-delta",
+      index: 0,
+      delta: { type: "text-delta", text: "answer" },
+      run_id: "b",
+    }),
+    isAssistant(model, { event: "message-finish", run_id: "b" }),
+  ];
+  assert.deepEqual(verdicts, [
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+    true,
+    true,
+  ]);
+});
+
+test("createAssistantMessageFilter keeps messages apart when they interleave", () => {
+  const isAssistant = createAssistantMessageFilter();
+  const delta = (run_id: string) => ({
+    event: "content-block-delta",
+    index: 0,
+    delta: { type: "text-delta", text: "x" },
+    run_id,
+  });
+  assert.equal(
+    isAssistant([], { event: "message-start", role: "ai", run_id: "ai" }),
+    true,
+  );
+  assert.equal(
+    isAssistant([], { event: "message-start", role: "system", run_id: "sys" }),
+    false,
+  );
+  assert.equal(isAssistant([], delta("ai")), true);
+  assert.equal(isAssistant([], delta("sys")), false);
+  assert.equal(
+    isAssistant([], { event: "message-finish", run_id: "sys" }),
+    false,
+  );
+  // A finished foreign message leaves nothing behind for a later run to trip on.
+  assert.equal(isAssistant([], delta("sys")), true);
+});
+
+test("createAssistantMessageFilter falls back to the namespace without a run id", () => {
+  const isAssistant = createAssistantMessageFilter();
+  const human = ["middleware:1"];
+  const model = ["model_request:2"];
+  const delta = {
+    event: "content-block-delta",
+    index: 0,
+    delta: { type: "text-delta", text: "x" },
+  };
+  assert.equal(
+    isAssistant(human, { event: "message-start", role: "human" }),
+    false,
+  );
+  assert.equal(isAssistant(human, delta), false);
+  assert.equal(isAssistant(model, delta), true);
+  assert.equal(isAssistant(human, { event: "message-finish" }), false);
+  assert.equal(isAssistant(human, { event: "message-start" }), true);
+  assert.equal(isAssistant(human, delta), true);
 });
 
 test("unwrapCustomEvent unwraps the v3 { payload } envelope", () => {

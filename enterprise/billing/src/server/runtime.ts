@@ -22,6 +22,8 @@ export function createBillingRuntime(service: BillingService): BillingRuntime {
         billing: await service.meterIngestion(teamId, input, actorUserId),
       };
     },
+    getScheduledTaskLimits: (teamId, actorUserId) =>
+      service.getScheduledTaskLimits(teamId, actorUserId),
     async reconcileProviderCost(input) {
       return {
         status: "settled",

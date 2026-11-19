@@ -112,7 +112,7 @@ describe("from runner.test.ts", () => {
     assert.match(prompt, /<active_skills>/);
     assert.match(prompt, /name="feynman"/);
     assert.match(prompt, /skill_path="\/skills\/feynman\/SKILL\.md"/);
-    assert.match(prompt, /read_required="true"/);
+    assert.match(prompt, /supplied in the conversation as a <skill name=/);
     assert.match(prompt, /strong instruction, not a suggestion/);
     assert.doesNotMatch(
       prompt,
@@ -147,7 +147,7 @@ describe("from runner.test.ts", () => {
     assert.doesNotMatch(prompt, /<active_skills>/);
     assert.doesNotMatch(prompt, /\/skills\/ppt-deck\/SKILL\.md/);
     assert.doesNotMatch(prompt, /\/skills\/image-generate\/SKILL\.md/);
-    assert.doesNotMatch(prompt, /read_required="true"/);
+    assert.doesNotMatch(prompt, /supplied in the conversation as a <skill/);
   });
 
   test("runtime prompt exposes invoked skill runtime config", () => {

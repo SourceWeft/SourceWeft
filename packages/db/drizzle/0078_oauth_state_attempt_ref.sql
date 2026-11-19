@@ -1,0 +1,1 @@
+ALTER TABLE "connector_oauth_states" ADD COLUMN "attempt_ref" text;

@@ -664,6 +664,8 @@ function ChatList({
   onToggleSearch,
   onSearchChange,
   headerActions,
+  titlebar = false,
+  belowHeader = null,
   activeId,
   hasMore = false,
   isLoadingMore = false,
@@ -687,6 +689,14 @@ function ChatList({
   onToggleSearch: () => void;
   onSearchChange: (value: string) => void;
   headerActions: ReactNode;
+  /**
+   * The macOS client: this row is the window's titlebar row beside the
+   * traffic lights, so it holds only the icon actions, at the chat header's
+   * height, and drags the window by its blank space.
+   */
+  titlebar?: boolean;
+  /** Rendered between the header row and the search field. */
+  belowHeader?: ReactNode;
   activeId?: string;
   hasMore?: boolean;
   isLoadingMore?: boolean;
@@ -758,10 +768,26 @@ function ChatList({
 
   return (
     <>
-      <div className="group/section-label flex shrink-0 items-center gap-1 px-3 py-2">
-        <span className="flex-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+      <div
+        data-desktop-drag-region={titlebar ? "" : undefined}
+        className={cn(
+          "group/section-label flex shrink-0 items-center gap-1",
+          titlebar
+            ? "h-14 select-none border-b border-sidebar-border pl-7 pr-3"
+            : "px-3 py-2",
+        )}
+      >
+        <span
+          className={cn(
+            "flex-1",
+            titlebar
+              ? "sr-only"
+              : "text-[10px] uppercase tracking-[0.16em] text-muted-foreground",
+          )}
+        >
           {t("chats.heading")}
         </span>
+        {titlebar ? <span aria-hidden="true" className="flex-1" /> : null}
         {headerActions}
         {onClear && clearItems.length > 0 ? (
           <Dialog>
@@ -829,14 +855,14 @@ function ChatList({
         <Button
           className="text-muted-foreground"
           variant="ghost"
-          size="icon-xs"
+          size={titlebar ? "icon-sm" : "icon-xs"}
           type="button"
           title={t("chats.searchAll")}
           aria-label={t("chats.searchAll")}
           aria-expanded={searchOpen}
           onClick={onToggleSearch}
         >
-          <Search className="size-3.5" />
+          <Search className={titlebar ? "size-4" : "size-3.5"} />
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -846,13 +872,13 @@ function ChatList({
                 filter !== "all" &&
                   "bg-sidebar-accent text-sidebar-accent-foreground",
               )}
-              size="icon-xs"
+              size={titlebar ? "icon-sm" : "icon-xs"}
               type="button"
               variant="ghost"
               title={t("chats.filter")}
               aria-label={t("chats.filter")}
             >
-              <ListFilter className="size-3.5" />
+              <ListFilter className={titlebar ? "size-4" : "size-3.5"} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
@@ -892,6 +918,7 @@ function ChatList({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {belowHeader}
       {searchOpen && (
         <div className="shrink-0 px-3 pb-2">
           <SidebarInput
@@ -1070,33 +1097,41 @@ export function DashboardSidebarChatPanel({
   const [personaManagerOpen, setPersonaManagerOpen] = useState(false);
   const [personaRefreshToken, setPersonaRefreshToken] = useState(0);
 
+  const workspaceRow = (
+    <>
+      <div className="min-w-0 flex-1">
+        <WorkspaceSwitcher
+          activeWorkspace={workspaceName}
+          workspaceId={workspaceId}
+          workspaces={workspaces}
+          onCreateWorkspace={onCreateWorkspace}
+          onRenameWorkspace={onRenameWorkspace}
+          onWorkspaceChange={onWorkspaceChange}
+        />
+      </div>
+      {heading}
+    </>
+  );
+  // In the macOS client's titlebar row the list actions match the chat
+  // header's controls instead of the small section-label ones.
+  const actionSize = desktopTitlebar ? "icon-sm" : "icon-xs";
+  const actionIcon = desktopTitlebar ? "size-4" : "size-3";
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SidebarHeader className="shrink-0 gap-0 px-3 pb-0 pt-0">
         {brand}
-        {/* The PC client hides the brand, so the strip above the workspace
-            switcher reserves only what the traffic lights occupy, and drags
-            the window instead of sitting there empty. */}
-        {desktopTitlebar ? (
+        {/* The PC client hides the brand and its traffic lights reach into
+            this column's first row. Text beside them reads badly, so there
+            the first row holds the list's icon actions and the workspace
+            switcher follows it (see ChatList's titlebar row). */}
+        {desktopTitlebar ? null : (
           <div
-            aria-hidden="true"
-            data-desktop-drag-region=""
-            className="h-10 shrink-0 select-none"
-          />
-        ) : null}
-        <div className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}>
-          <div className="min-w-0 flex-1">
-            <WorkspaceSwitcher
-              activeWorkspace={workspaceName}
-              workspaceId={workspaceId}
-              workspaces={workspaces}
-              onCreateWorkspace={onCreateWorkspace}
-              onRenameWorkspace={onRenameWorkspace}
-              onWorkspaceChange={onWorkspaceChange}
-            />
+            className={cn("flex min-w-0 items-center gap-1", "h-12 sm:h-14")}
+          >
+            {workspaceRow}
           </div>
-          {heading}
-        </div>
+        )}
         {showCreateChat ? (
           <div className="flex items-center gap-1">
             <Button
@@ -1125,28 +1160,38 @@ export function DashboardSidebarChatPanel({
           onSearchChange("");
         }}
         onSearchChange={onSearchChange}
+        titlebar={desktopTitlebar}
+        belowHeader={
+          desktopTitlebar ? (
+            <div className="flex h-12 min-w-0 shrink-0 items-center gap-1 px-3">
+              {workspaceRow}
+            </div>
+          ) : null
+        }
         headerActions={
           <>
             <Button
+              className={cn(desktopTitlebar && "text-muted-foreground")}
               onClick={() =>
                 setPersonaPicker({ parentThreadId: null, parentTitle: null })
               }
-              size="icon-xs"
+              size={actionSize}
               title={t("sidebar.newAgentChat")}
               type="button"
               variant="ghost"
             >
-              <Bot className="size-3" />
+              <Bot className={actionIcon} />
               <span className="sr-only">{t("sidebar.newAgentChat")}</span>
             </Button>
             <Button
+              className={cn(desktopTitlebar && "text-muted-foreground")}
               onClick={onOpenMembers}
-              size="icon-xs"
+              size={actionSize}
               title={t("sidebar.inviteManageMembers")}
               type="button"
               variant="ghost"
             >
-              <Share2 className="size-3" />
+              <Share2 className={actionIcon} />
               <span className="sr-only">
                 {t("sidebar.inviteManageMembers")}
               </span>

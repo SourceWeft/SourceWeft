@@ -5,7 +5,7 @@ import { Download, ListTree, MessageSquarePlus, Network } from "lucide-react";
 import type { MindmapNode, StudyContent } from "@sourceweft/contracts/study";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { exportMindmapJson, exportMindmapMarkdown } from "../../export/mindmap-outline";
-import { EvidencePopover } from "../shared/evidence-popover";
+import { EvidencePopover } from "@sourceweft/grounded-generation/ui";
 import { downloadStem } from "../shared/util";
 import { useStudyHost, type StudyVersionRef } from "../study-host";
 import { MindmapCanvas } from "./mindmap-canvas";

@@ -1,4 +1,4 @@
-import { Box, FileText, HardDrive, Mail } from "lucide-react";
+import { Box, FileText, FolderGit2, HardDrive, Mail } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -64,6 +64,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: true,
     supportsWebhook: false,
   },
+  {
+    id: "github",
+    name: "GitHub",
+    category: "Knowledge & Docs",
+    description:
+      "Let agents search and read issues, pull requests and discussions in the repositories you choose.",
+    capabilities: ["Issues & pull requests", "Discussions", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: FolderGit2,
+    logoIconName: "github",
+    logoIconTone: "mono",
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  },
 ];
 
 // Some connectors ship behind a backend rollout gate; hide each until the API
@@ -76,6 +93,23 @@ export function connectorCatalogForAvailableTypes(
       !item.requiresBackendRegistration ||
       availableConnectorTypes.includes(item.id),
   );
+}
+
+// The catalog lists "Optional indexing" statically, but a deployment can run
+// a connector type with no sync resources at all (e.g. a tools-only,
+// Composio-brokered Gmail). Drop that one chip in that case; every other
+// capability still applies. `supportsIndexing` is `undefined` when the
+// manifest for this type has not loaded yet, which keeps today's chips.
+export function connectorCatalogCapabilities(
+  item: ConnectorCatalogItem,
+  supportsIndexing: boolean | undefined,
+): string[] {
+  if (supportsIndexing === false) {
+    return item.capabilities.filter(
+      (capability) => capability !== "Optional indexing",
+    );
+  }
+  return item.capabilities;
 }
 
 export const connectorCatalogCategories: ConnectorCatalogCategory[] = [

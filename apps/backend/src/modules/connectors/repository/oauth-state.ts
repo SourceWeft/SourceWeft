@@ -16,6 +16,7 @@ export async function createOAuthStateRecord(input: {
   connectorType: string;
   redirectAfter?: string | null;
   expiresAt: Date;
+  attemptRef?: string | null;
 }) {
   const [row] = await db
     .insert(connectorOAuthStates)
@@ -28,6 +29,7 @@ export async function createOAuthStateRecord(input: {
       connectorType: input.connectorType,
       redirectAfter: input.redirectAfter ?? null,
       expiresAt: input.expiresAt,
+      attemptRef: input.attemptRef ?? null,
     })
     .returning();
 
@@ -67,7 +69,12 @@ export async function consumeOAuthStateRecord(input: {
 
     const [consumed] = await tx
       .update(connectorOAuthStates)
-      .set({ consumedAt: input.now })
+      // Clear the attempt reference in the same single-use UPDATE: once the
+      // handshake is consumed the broker's connected-account id has no further
+      // use here, and leaving it in plain text would outlive the encrypted
+      // credential it points at. The `isNull(consumedAt)` guard still makes
+      // this atomic and single-use.
+      .set({ consumedAt: input.now, attemptRef: null })
       .where(
         and(
           eq(connectorOAuthStates.id, row.id),
@@ -76,7 +83,14 @@ export async function consumeOAuthStateRecord(input: {
       )
       .returning();
 
-    return consumed ?? null;
+    if (!consumed) {
+      return null;
+    }
+
+    // The caller still receives the attempt reference read before the update,
+    // so the adapter can finish the authorization; only the stored row is
+    // cleared.
+    return { ...consumed, attemptRef: row.attemptRef };
   });
 }
 

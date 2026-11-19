@@ -9,6 +9,10 @@ import {
   type StudyKind,
 } from "@sourceweft/contracts/study";
 import {
+  citedTextWithin,
+  matchesOutputLanguage,
+} from "@sourceweft/grounded-generation";
+import {
   CHECKPOINT_MAX_BYTES,
   FLASHCARD_VERIFY_EVERY,
   FLASHCARD_VERIFY_MIN,
@@ -27,7 +31,6 @@ import {
   type CorpusGroup,
 } from "./corpus";
 import { dedupeItems } from "./dedupe";
-import { matchesOutputLanguage } from "./language";
 import {
   assembleRoot,
   buildGroupForest,
@@ -71,7 +74,6 @@ import {
 import {
   addDrop,
   anchorCandidates,
-  citedTextWithin,
   hasOutputLanguage,
   mergeDrops,
   parseGroupOutput,
