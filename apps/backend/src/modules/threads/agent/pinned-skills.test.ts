@@ -25,6 +25,10 @@ import {
   pinnedSkillNamesForTurn,
   skillMetadataForTurn,
 } from "./turn/turn-assembly";
+import {
+  adaptMessagesEvent,
+  createAssistantMessageFilter,
+} from "./turn/v3-protocol";
 
 function selectedSkill(name: string): EnabledSkillDescriptor {
   const description = `${name} description`;
@@ -153,6 +157,59 @@ test("an invoked skill's SKILL.md reaches the model without a read_file call", a
     result.messages.filter(isUserRequestMessage).at(-1)?.content,
     "and now something else",
   );
+});
+
+test("a pinned skill's instructions never stream as the assistant's answer", async () => {
+  // Found with a real turn: the skills middleware returns the pinned message
+  // from a graph node, so it streams through `messages` like model output, and
+  // the stored answer began with the whole SKILL.md.
+  const alpha = selectedSkill("alpha-skill");
+  const agent = createDeepAgent({
+    model: new ScriptedChatModel(() => "the model's answer") as never,
+    backend: new CompositeBackend(new StateBackend(), {
+      "/skills/": new SelectedSkillsBackend([alpha]),
+    }),
+    checkpointer: new MemorySaver(),
+    skills: ["/skills/"],
+  });
+  const config = await agent.updateState(
+    { configurable: { thread_id: "pinned-skill-stream" } },
+    { skillsMetadata: skillMetadataForTurn([alpha]) },
+  );
+  const stream = (await agent.streamEvents(
+    {
+      messages: [{ role: "user", content: "use alpha" }],
+      pinnedSkills: ["alpha-skill"],
+    } as never,
+    { ...(config as Record<string, unknown>), version: "v3" } as never,
+  )) as unknown as AsyncIterable<{
+    method: string;
+    params?: { namespace?: unknown; data?: unknown };
+  }>;
+
+  const isAssistantMessageEvent = createAssistantMessageFilter();
+  let humanMessageStarts = 0;
+  let unfilteredText = "";
+  let assistantText = "";
+  for await (const event of stream) {
+    if (event.method !== "messages") continue;
+    const data = event.params?.data as { event?: string; role?: string };
+    if (data?.event === "message-start" && data.role === "human") {
+      humanMessageStarts += 1;
+    }
+    const text = adaptMessagesEvent(data)
+      .map(([chunk]) => String(chunk.content ?? ""))
+      .join("");
+    unfilteredText += text;
+    if (isAssistantMessageEvent(event.params?.namespace, data)) {
+      assistantText += text;
+    }
+  }
+
+  // The stream does carry the pinned message; the filter is what keeps it out.
+  assert.equal(humanMessageStarts, 1);
+  assert.match(unfilteredText, /BODY-OF-alpha-skill/);
+  assert.equal(assistantText, "the model's answer");
 });
 
 test("the step-budget summary quotes the user's request, not pinned skill instructions", () => {
