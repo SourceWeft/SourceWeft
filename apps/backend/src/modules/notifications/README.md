@@ -15,6 +15,9 @@ A person's in-app inbox plus its email counterpart. Generic: features call
     occurrence retries it.
   - `listNotifications`, `unreadCount`, `markRead`, `markAllRead`, all scoped to
     the person and the team.
+- `notificationPath(item)` gives where a stored notification leads. The API
+  (`/v1/workspaces/:workspaceId/notifications`: list, unread-count, read,
+  read-all) scopes everything to the signed-in person and the workspace's team.
 - Payloads are flat, small (2 KB) and carry only what a list row may show. Mail
   carries only the task name and a link, never prompts or results.
 - `notification.*` mail templates live in `modules/mail/templates` (en, zh-CN

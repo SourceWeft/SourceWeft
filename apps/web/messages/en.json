@@ -1006,7 +1006,8 @@
       "chat": "Chat",
       "more": "More",
       "me": "Me",
-      "mainNavigation": "Main navigation"
+      "mainNavigation": "Main navigation",
+      "scheduled": "Scheduled"
     },
     "sidebar": {
       "newChat": "New chat",
@@ -1136,7 +1137,8 @@
           "label": "About",
           "description": "Version and build details"
         }
-      }
+      },
+      "scheduledDescription": "Prompts that run on a schedule"
     },
     "members": {
       "dialogTitle": "Workspace members"
@@ -6448,5 +6450,182 @@
     "privacyPolicy": "Privacy Policy",
     "agree": "Agree and continue",
     "decline": "Decline and sign out"
+  },
+  "dashboardScheduled": {
+    "rule": {
+      "manual": "Runs only when you start it",
+      "daily": "Every day at {time}",
+      "weekdays": "Weekdays at {time}",
+      "weekly": "Every {days} at {time}",
+      "cron": "Cron {expr}",
+      "once": "Once, {at}"
+    },
+    "status": {
+      "draft": "Draft",
+      "active": "Active",
+      "paused": "Paused",
+      "blocked": "Blocked",
+      "completed": "Done",
+      "archived": "Deleted"
+    },
+    "statusReason": {
+      "user_paused": "Paused by you.",
+      "owner_left": "Paused because the owner left this workspace.",
+      "repeated_failure": "Paused after repeated failures. Check the history, then resume.",
+      "insufficient_credits": "Blocked: not enough credits to run.",
+      "tools_unavailable": "Blocked: a source or MCP server this task uses is no longer available.",
+      "auth_expired": "Blocked: a connected account needs to be signed in again."
+    },
+    "runStatus": {
+      "pending": "Waiting",
+      "dispatching": "Starting",
+      "queued": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "blocked": "Blocked",
+      "cancelled": "Cancelled"
+    },
+    "skipReason": {
+      "missed_platform_down": "Missed while the platform was down.",
+      "previous_run_active": "The previous run was still going.",
+      "user_concurrency_limit": "Too many of your tasks were running at once.",
+      "user_daily_cap": "Daily limit of scheduled runs reached.",
+      "insufficient_credits": "Not enough credits.",
+      "owner_left": "The owner left this workspace.",
+      "tools_unavailable": "A source or MCP server was unavailable.",
+      "auth_expired": "A connected account needs to be signed in again.",
+      "rate_limited": "Too many runs in a short time."
+    },
+    "trigger": {
+      "schedule": "Scheduled",
+      "manual": "Run now",
+      "api": "API",
+      "event": "Event"
+    },
+    "errors": {
+      "generic": "Something went wrong. Please try again.",
+      "AGENT_TASK_LIMIT_REACHED": "Your plan's limit of active scheduled tasks is reached. Pause or delete one first.",
+      "AGENT_TASK_RUN_RATE_LIMITED": "Too many manual runs this hour. Try again later.",
+      "AGENT_TASK_RUN_CONFLICT": "This task is already running.",
+      "AGENT_TASK_INVALID_STATE": "That action is not available for this task right now.",
+      "AGENT_TASK_VERSION_CONFLICT": "This task was changed elsewhere. Reopen it and try again.",
+      "AGENT_TASK_NOT_FOUND": "This task no longer exists.",
+      "AGENT_TASK_SCHEDULE_INVALID": "This schedule is not valid. Runs must be at least one hour apart and in the future."
+    },
+    "toasts": {
+      "runStarted": "Run started",
+      "paused": "Task paused",
+      "resumed": "Task resumed",
+      "enabled": "Task enabled",
+      "deleted": "Task deleted",
+      "saved": "Task saved",
+      "created": "Task created"
+    },
+    "frequency": {
+      "daily": "Every day",
+      "weekdays": "Weekdays",
+      "weekly": "Certain days of the week",
+      "once": "Once",
+      "cron": "Cron expression",
+      "manual": "Only when I run it"
+    },
+    "form": {
+      "title": "New scheduled task",
+      "editTitle": "Edit scheduled task",
+      "description": "A saved prompt that runs on a schedule as you, and puts the result in a new chat.",
+      "name": "Name",
+      "namePlaceholder": "Morning digest",
+      "prompt": "Prompt",
+      "promptPlaceholder": "What should the assistant do each time?",
+      "promptHint": "Runs with no one watching, so it can read and summarize but not change anything.",
+      "frequency": "Repeat",
+      "time": "Time",
+      "runAt": "Run at",
+      "cron": "Cron expression (5 fields)",
+      "days": "Days",
+      "timezone": "Time zone",
+      "manualHint": "This task has no schedule. Save it, then use Run now whenever you want.",
+      "nextRuns": "Next runs",
+      "previewLoading": "Checking the schedule…",
+      "previewEmpty": "Fill in the schedule to see the next runs.",
+      "offsetHint": "A run may start up to {minutes} min after the time shown.",
+      "webAccess": "Allow web search",
+      "webAccessHint": "Lets the task search and read public web pages.",
+      "notifyOnSuccess": "Notify me when a run succeeds",
+      "notifyEmail": "Also email me about problems",
+      "notifyEmailHint": "Failures, pauses and blocked runs.",
+      "mcp": "MCP servers",
+      "mcpHint": "Only read-only tools of these servers are used.",
+      "readOnlyNote": "Scheduled runs are read-only: they cannot write files, publish artifacts or ask you questions.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saveDraft": "Save as draft",
+      "createAndEnable": "Create and enable"
+    },
+    "actions": {
+      "open": "Actions for {name}",
+      "runNow": "Run now",
+      "pause": "Pause",
+      "resume": "Resume",
+      "enable": "Enable",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "delete": {
+      "title": "Delete \"{name}\"?",
+      "body": "The task stops running. Its past runs and chats stay."
+    },
+    "list": {
+      "nextRun": "Next run {at}"
+    },
+    "page": {
+      "title": "Scheduled tasks",
+      "subtitle": "Prompts that run on a schedule and leave their results in a chat.",
+      "new": "New task",
+      "tabTasks": "Tasks",
+      "tabInbox": "Notifications",
+      "loading": "Loading…",
+      "loadError": "Could not load scheduled tasks.",
+      "emptyTitle": "No scheduled tasks yet",
+      "emptyBody": "Save a prompt once and let it run every morning, every Monday, or at a time you pick."
+    },
+    "detail": {
+      "back": "All tasks",
+      "notFound": "This task was not found.",
+      "prompt": "Prompt",
+      "history": "Run history",
+      "noRuns": "No runs yet.",
+      "catchUp": "catch-up",
+      "openResult": "Open result"
+    },
+    "inbox": {
+      "loading": "Loading…",
+      "loadError": "Could not load notifications.",
+      "empty": "No notifications.",
+      "repeated": "{count} times",
+      "loadMore": "Load more",
+      "markAllRead": "Mark all read"
+    },
+    "bell": {
+      "label": "Notifications",
+      "labelUnread": "Notifications, {count} unread",
+      "title": "Notifications",
+      "viewAll": "View all"
+    },
+    "notification": {
+      "task_run_succeeded": "\"{taskName}\" finished.",
+      "task_run_failed": "\"{taskName}\" failed.",
+      "task_run_catch_up": "\"{taskName}\" ran late to make up for a missed slot.",
+      "task_blocked_quota": "\"{taskName}\" could not run: not enough credits.",
+      "task_needs_approval": "\"{taskName}\" needs your approval.",
+      "task_paused_owner_left": "\"{taskName}\" was paused because its owner left.",
+      "task_tools_unavailable": "\"{taskName}\" cannot run: a source or MCP server it uses is unavailable.",
+      "task_paused_repeated_failure": "\"{taskName}\" was paused after repeated failures.",
+      "unknown": "Update about \"{taskName}\"."
+    },
+    "composer": {
+      "schedule": "Run on a schedule"
+    }
   }
 }

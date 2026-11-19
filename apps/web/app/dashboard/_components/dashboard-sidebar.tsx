@@ -8,6 +8,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  CalendarClock,
   LayoutDashboard,
   MessageSquareText,
   MoreHorizontal,
@@ -36,6 +37,7 @@ import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
+import { NotificationBell } from "../scheduled/_components/notification-bell";
 import { MARKET_ADMIN_HREF, MarketAdminNavLink } from "./market-admin-nav-link";
 
 type NavItem = {
@@ -74,6 +76,13 @@ const navMain: NavItem[] = [
     href: "/dashboard/mcp",
     icon: McpIcon,
     match: (p) => p.startsWith("/dashboard/mcp"),
+  },
+  {
+    labelKey: "nav.scheduled",
+    href: "/dashboard/scheduled",
+    icon: CalendarClock,
+    match: (p) => p.startsWith("/dashboard/scheduled"),
+    more: true,
   },
   {
     labelKey: "nav.observability",
@@ -500,7 +509,8 @@ export function DashboardSidebar() {
           </DropdownMenuContent>
         </DropdownMenu>
       </nav>
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <NotificationBell />
         <DashboardAccountMenu />
       </div>
     </aside>

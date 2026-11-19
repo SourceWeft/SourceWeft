@@ -46,6 +46,9 @@ vi.mock("./dashboard-chat-state", () => ({
 vi.mock("./dashboard-account-menu", () => ({
   DashboardAccountMenu: () => createElement("span", null, "Account"),
 }));
+vi.mock("../scheduled/_components/notification-bell", () => ({
+  NotificationBell: () => createElement("span", null, "Bell"),
+}));
 vi.mock("./dashboard-sidebar-brand", () => ({
   DashboardSidebarBrand: () => createElement("span", null, "Brand"),
 }));
@@ -222,6 +225,7 @@ test("the rail links primary pages and keeps secondary ones under More", async (
   assert.ok(more.className.includes("bg-sidebar-accent"));
   const menu = rail.querySelector('[role="menu"]')!;
   assert.ok(menu.querySelector('a[href="/dashboard/observability"]'));
+  assert.ok(menu.querySelector('a[href="/dashboard/scheduled"]'));
   assert.ok(menu.querySelector("[data-market-admin]"));
 });
 
