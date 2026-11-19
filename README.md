@@ -43,7 +43,7 @@ Multi-agent & Sub-agents · Skills & MCP · Sandbox · Cross-platform · Self-ho
 - **Multiple models & BYOK.** Choose supported model providers and bring your own API keys. Configure models for chat and indexing to fit your deployment.
 - **Across devices & remote access.** Work through the web app or macOS, Windows, and Linux desktop clients. Access your deployed workstation remotely and return to saved conversations and files across devices.
 - **Creation & working files.** Produce reports, presentations, HTML pages, learning guides, audio overviews, and images. Review results, ask for changes, and keep refining the work in the same place.
-- **Knowledge & verifiable citations.** Bring in PDFs, web pages, notes, YouTube, Notion, Google Drive, Dropbox, GitHub, Linear, Jira, Gmail, Slack, and more. Give agents the sources a task needs and follow citations back to the original material.
+- **Knowledge & verifiable citations.** Bring in PDFs, web pages, notes, YouTube, Notion, Google Drive, Dropbox, GitHub, Linear, Jira, Confluence, Gmail, Slack, and more. Give agents the sources a task needs and follow citations back to the original material.
 - **Self-hosting & team collaboration.** Deploy for yourself or your organization, manage your database and file storage, and organize shared workspaces with roles and access controls. External models and tools process the data sent to them according to your configuration.
 
 ## Use Cases
