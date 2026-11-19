@@ -811,6 +811,20 @@ export function createSubagentProjector(input: {
       );
     },
 
+    /**
+     * The run stopped at an interrupt: every `task` call that started and has
+     * not finished is waiting on its delegate. Since @langchain/langgraph 1.6 a
+     * paused tool reports nothing on the tools stream (before, it reported an
+     * interrupt-shaped tool error), so the run's end is where the pause shows.
+     */
+    pauseOpenTasks() {
+      for (const tracked of tasksByCallId.values()) {
+        if (!tracked.finished && !tracked.paused) {
+          this.pauseTask(tracked.taskCallId);
+        }
+      }
+    },
+
     /** A delegate's model event (the runner drops these from the client). */
     observeMessages(namespace: unknown, data: unknown) {
       taskForChildNamespace(namespace)?.collector.observeMessages(data);

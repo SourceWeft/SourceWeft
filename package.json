@@ -114,9 +114,8 @@
       "@langchain/google-genai@2.2.0": "patches/@langchain__google-genai@2.2.0.patch",
       "openai@6.49.0": "patches/openai@6.49.0.patch",
       "streamdown@2.5.0": "patches/streamdown@2.5.0.patch",
-      "langchain@1.5.10": "patches/langchain@1.5.10.patch",
       "@anthropic-ai/sandbox-runtime@0.0.81": "patches/@anthropic-ai__sandbox-runtime@0.0.81.patch",
-      "deepagents@1.15.1": "patches/deepagents@1.15.1.patch"
+      "deepagents@1.16.5": "patches/deepagents@1.16.5.patch"
     }
   },
   "engines": {

@@ -1,3 +1,4 @@
+import { ModelRefusalError } from "@langchain/core/errors";
 import { ModelGatewayError } from "../../shared/model-gateway/errors";
 import { ContentError } from "./errors";
 
@@ -22,6 +23,17 @@ export const MODEL_STREAM_DURATION_EXCEEDED_CODE =
 export const MODEL_OUTPUT_TRUNCATED_CODE = "MODEL_OUTPUT_TRUNCATED";
 export const MODEL_OUTPUT_TRUNCATED_MESSAGE =
   "The model hit its output limit before finishing a tool call, so the incomplete call was not executed. Try again, or ask for a smaller result (for example split the task or shorten the content).";
+
+/**
+ * The model answered with a refusal (a provider safety-policy refusal reported
+ * as a `refusal` content block). Deep Agents raises it as `ModelRefusalError`
+ * instead of ending the run as if it had succeeded. The provider call itself
+ * completed, so it is billed like any other; the turn ends with this error.
+ * It is not in the retryable set: asking again gets the same refusal.
+ */
+export const MODEL_REFUSED_CODE = "MODEL_REFUSED";
+export const MODEL_REFUSED_MESSAGE =
+  "The model declined to answer this request. Rephrase it, or try another model.";
 
 export const MODEL_UPSTREAM_CONTENT_ERROR_CODES: ReadonlySet<string> = new Set([
   "MODEL_TIMEOUT",
@@ -104,6 +116,21 @@ function findContentError(
   return (
     findContentError(record.cause, seen) ?? findContentError(record.error, seen)
   );
+}
+
+/** A model refusal anywhere in the error's `cause` / `error` chain. */
+function hasModelRefusal(error: unknown, seen = new Set<unknown>()): boolean {
+  if (!error || seen.has(error)) {
+    return false;
+  }
+  seen.add(error);
+  if (ModelRefusalError.isInstance(error)) {
+    return true;
+  }
+  const record = toRecord(error);
+  return record
+    ? hasModelRefusal(record.cause, seen) || hasModelRefusal(record.error, seen)
+    : false;
 }
 
 function findGatewayErrorData(
@@ -299,6 +326,11 @@ export function toContentError(error: unknown): ContentError {
   const contentError = findContentError(error);
   if (contentError) {
     return contentError;
+  }
+
+  // The refusal text is the model's own words; the client gets a fixed message.
+  if (hasModelRefusal(error)) {
+    return new ContentError(422, MODEL_REFUSED_CODE, MODEL_REFUSED_MESSAGE);
   }
 
   const gatewayError = findGatewayError(error);

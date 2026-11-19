@@ -21,7 +21,7 @@
     "@sourceweft/ui-web": "workspace:*",
     "dom-to-pptx": "^1.1.10",
     "html-to-image": "^1.11.13",
-    "langchain": "^1.5.10",
+    "langchain": "^1.6.7",
     "lucide-react": "^0.562.0",
     "parse5": "7.3.0",
     "postcss": "8.5.26",

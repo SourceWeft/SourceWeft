@@ -1922,13 +1922,8 @@
           "event": "content-block-delta",
           "index": 0,
           "delta": {
-            "type": "block-delta",
-            "fields": {
-              "type": "tool_call_chunk",
-              "id": "call_1",
-              "name": "lookup",
-              "args": ""
-            }
+            "type": "tool-call-delta",
+            "args": "{\"q\":"
           }
         }
       },
@@ -1938,29 +1933,8 @@
           "event": "content-block-delta",
           "index": 0,
           "delta": {
-            "type": "block-delta",
-            "fields": {
-              "type": "tool_call_chunk",
-              "id": "call_1",
-              "name": "lookup",
-              "args": "{\"q\":"
-            }
-          }
-        }
-      },
-      {
-        "event": "chat_model_stream_event",
-        "payload": {
-          "event": "content-block-delta",
-          "index": 0,
-          "delta": {
-            "type": "block-delta",
-            "fields": {
-              "type": "tool_call_chunk",
-              "id": "call_1",
-              "name": "lookup",
-              "args": "{\"q\":\"x\"}"
-            }
+            "type": "tool-call-delta",
+            "args": "\"x\"}"
           }
         }
       },

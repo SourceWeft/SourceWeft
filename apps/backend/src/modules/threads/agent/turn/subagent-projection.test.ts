@@ -481,6 +481,34 @@ test("a paused task writes only its brief and resumes in the same child thread w
   );
 });
 
+test("a run that ends interrupted pauses the delegates still open, not the finished ones", async () => {
+  // @langchain/langgraph 1.6: a paused `task` reports nothing on the tools
+  // stream, so the runner pauses whatever is still open once the run stops.
+  const { projector, briefs, persisted } = createPausableProjector({});
+
+  projector.startTask({
+    taskCallId: "task-done",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  projector.startTask({
+    taskCallId: "task-waiting",
+    namespace: ["tools:branch-b"],
+    input: PAUSED_TASK_INPUT,
+  });
+  await projector.finishTask({ taskCallId: "task-done", report: "sent" });
+
+  projector.pauseOpenTasks();
+  projector.pauseOpenTasks();
+  await projector.flush();
+
+  assert.deepEqual(
+    briefs.map((brief) => (brief as { taskCallId: string }).taskCallId),
+    ["task-waiting"],
+  );
+  assert.equal(persisted.length, 1);
+});
+
 test("a task resumed in a later run continues the child thread its paused run opened", async () => {
   const { projector, created, found, briefs, persisted } =
     createPausableProjector({
