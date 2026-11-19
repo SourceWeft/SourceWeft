@@ -26,6 +26,7 @@ import { registerThreadRoutes } from "./content/threads";
 import { registerWorkingFileRoutes } from "./content/working-files";
 import { registerSourceSelectionRoutes } from "./content/source-selection";
 import { registerStudyRoutes } from "./content/study";
+import { registerTableRoutes } from "./content/tables";
 
 export function registerContentRoutes(app: Hono) {
   const workspaceRoutes = new Hono();
@@ -42,6 +43,7 @@ export function registerContentRoutes(app: Hono) {
   registerSourceRoutes(workspaceRoutes);
   registerDictationRoutes(workspaceRoutes);
   registerStudyRoutes(workspaceRoutes);
+  registerTableRoutes(workspaceRoutes);
   registerConnectorRoutes(workspaceRoutes);
   registerSkillRoutes(workspaceRoutes);
   registerSkillSubmissionRoutes(workspaceRoutes);

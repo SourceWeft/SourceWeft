@@ -53,9 +53,6 @@ export const LEAK_LENGTH_RATIO = 1.6;
 /** One difficulty holding more than this share is recorded as skewed. */
 export const DIFFICULTY_SKEW_SHARE = 0.85;
 
-/** A source language under this token share does not decide the output. */
-export const LANGUAGE_MAJORITY_SHARE = 0.6;
-
 /** Serialized checkpoint ceiling; beyond it the checkpoint is not saved. */
 export const CHECKPOINT_MAX_BYTES = 200 * 1024;
 

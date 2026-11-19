@@ -241,6 +241,9 @@ importers:
       '@sourceweft/builtin-tool-study':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-study
+      '@sourceweft/builtin-tool-table':
+        specifier: workspace:*
+        version: link:../../packages/builtin-tool-table
       '@sourceweft/builtin-tool-video-presentation':
         specifier: workspace:*
         version: link:../../packages/builtin-tool-video-presentation
@@ -265,6 +268,9 @@ importers:
       '@sourceweft/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sourceweft/grounded-generation':
+        specifier: workspace:*
+        version: link:../../packages/grounded-generation
       '@sourceweft/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n

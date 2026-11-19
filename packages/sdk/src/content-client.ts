@@ -36,6 +36,13 @@ import type {
   SubmitAnswers,
 } from "@sourceweft/contracts/study";
 import type {
+  TableColumnInput,
+  TableFreshness,
+  TableGenerateRequest,
+  TableRegenerateRequest,
+  TableSuggestColumnsRequest,
+} from "@sourceweft/contracts/table";
+import type {
   MarketMcpLocale,
   MarketSkillLocale,
 } from "@sourceweft/market-contracts";
@@ -265,6 +272,44 @@ export type StudyFreshnessResponse = {
   changedSourceIds: string[];
   deletedSourceIds: string[];
 };
+
+/* ---- Data table generation -------------------------------------------- */
+
+export type TableSuggestColumnsResponse = {
+  columns: TableColumnInput[];
+};
+
+export type TableEstimateResponse = {
+  /** Selected sources, including those that cannot be read yet. */
+  sources: number;
+  /** Sources that are not indexed yet; their rows will be skipped. */
+  skippedSources: number;
+  columns: number;
+  /** Cells the model has to fill: readable sources × columns. */
+  cells: number;
+  /** Model calls the fill needs. */
+  calls: number;
+  inputTokensEstimate: number;
+  exceedsLimit: boolean;
+};
+
+export type TableGenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+  /** Follows the thread; the requested visibility is not a separate control. */
+  visibility: "private" | "workspace";
+  /** True when an identical request in the last minutes already opened it. */
+  reused: boolean;
+};
+
+export type TableRegenerateResponse = {
+  artifactId: string;
+  versionNo: number;
+  status: "pending";
+};
+
+export type TableFreshnessResponse = TableFreshness;
 
 export class ContentClient {
   constructor(private readonly http: HttpClient) {}
@@ -1707,6 +1752,51 @@ export class ContentClient {
   getStudyFreshness(workspaceId: string, artifactId: string) {
     return this.http.get<StudyFreshnessResponse>(
       `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/freshness`,
+    );
+  }
+
+  /* ---- Data table generation ------------------------------------------ */
+
+  /** Proposes columns from the sources' summaries; the requester pays (200). */
+  suggestTableColumns(workspaceId: string, input: TableSuggestColumnsRequest) {
+    return this.http.post<TableSuggestColumnsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/columns/suggest`,
+      input,
+    );
+  }
+
+  /** Size of a table generation, without calling a model. */
+  estimateTable(workspaceId: string, input: TableGenerateRequest) {
+    return this.http.post<TableEstimateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/estimate`,
+      input,
+    );
+  }
+
+  /** Opens a pending table and queues its generation (202). */
+  generateTable(workspaceId: string, input: TableGenerateRequest) {
+    return this.http.post<TableGenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/artifacts`,
+      input,
+    );
+  }
+
+  /** Queues the next version of a ready table (202); left-out fields keep the recipe. */
+  regenerateTable(
+    workspaceId: string,
+    artifactId: string,
+    input: TableRegenerateRequest = {},
+  ) {
+    return this.http.post<TableRegenerateResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/artifacts/${encode(artifactId)}/regenerate`,
+      input,
+    );
+  }
+
+  /** Whether the sources of the current version changed since it was made, row by row. */
+  getTableFreshness(workspaceId: string, artifactId: string) {
+    return this.http.get<TableFreshnessResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/tables/artifacts/${encode(artifactId)}/freshness`,
     );
   }
 

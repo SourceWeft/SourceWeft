@@ -162,3 +162,25 @@ test("a quarter and a kilowatt-hour do not stop a claim from being covered", () 
     true,
   );
 });
+
+test("a k suffix multiplies the number it touches by a thousand", () => {
+  assertFigures("1.2k participants", [1200]);
+  assertFigures("about 5K users", [5000]);
+  assertFigures("2.5k to 3k", [2500, 3000]);
+});
+
+test("a k that starts a word or a unit is not a suffix", () => {
+  assertFigures("3 key points", [3]);
+  assertFigures("a 10km run", [10]);
+  assertFigures("60 kWh", [60]);
+  assertFigures("5 kg of rice", [5]);
+  // The k must touch the number: a spaced letter is part of the next word.
+  assertFigures("12 k", [12]);
+});
+
+test("1.2k and 1,200 cover each other, and a different figure does not", () => {
+  assert.equal(figuresCovered("1.2k participants", "Enrolled 1,200 participants."), true);
+  assert.equal(figuresCovered("1,200 participants", "Enrolled 1.2k participants."), true);
+  assert.equal(figuresCovered("1,300", "1.2k participants"), false);
+  assert.equal(figuresCovered("1.2k", "enrolled 12,000"), false);
+});

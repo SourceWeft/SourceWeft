@@ -43,8 +43,10 @@ export function createGroundedModelPort<Op extends string = string>(input: {
   teamId: string;
   workspaceId: string;
   actorUserId: string;
-  /** The queue job id: the billing scope of every call in this run. */
+  /** The queue job id (or, for a synchronous request, the request id): the billing scope of every call. */
   scopeId: string;
+  /** A queued job's calls are `worker-job`; a call inside an API request is `api-request`. */
+  scopeKind?: "worker-job" | "api-request";
   /** Names the artifact in the refusal message; "artifact" when omitted. */
   subject?: string;
   complete?: typeof completeStructuredWithDefaultChat;
@@ -59,7 +61,7 @@ export function createGroundedModelPort<Op extends string = string>(input: {
           workspaceId: input.workspaceId,
           actorUserId: input.actorUserId,
           scopeId: input.scopeId,
-          scopeKind: "worker-job",
+          scopeKind: input.scopeKind ?? "worker-job",
           operation: call.operation,
           referenceId: call.referenceId,
           idempotencyKey: call.idempotencyKey,
