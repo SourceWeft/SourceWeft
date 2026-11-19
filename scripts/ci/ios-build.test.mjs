@@ -52,7 +52,11 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
   );
   assert(testflight.includes("environment: ios-testflight"));
   assert(testflight.includes("--export-method app-store-connect"));
-  for (const name of ["IOS_CERTIFICATE", "IOS_CERTIFICATE_PASSWORD", "IOS_MOBILE_PROVISION"]) {
+  for (const name of [
+    "IOS_CERTIFICATE",
+    "IOS_CERTIFICATE_PASSWORD",
+    "IOS_MOBILE_PROVISION",
+  ]) {
     assert(
       testflight.includes(`${name}: `),
       `TestFlight job does not set the Tauri signing variable ${name}`,
@@ -69,6 +73,16 @@ test("only a manual testflight dispatch signs and uploads, from the gated enviro
       testflight.indexOf("install-signing"),
     "secrets must be checked before signing",
   );
+});
+
+test("both jobs build with Xcode 26, which App Store Connect requires", () => {
+  for (const name of ["verify", "testflight"]) {
+    assert.match(
+      jobBlock(name),
+      /xcode-select -s \/Applications\/Xcode_26\.\d+\.app/,
+      `${name} does not select Xcode 26`,
+    );
+  }
 });
 
 test("the workflow only calls subcommands the helper script defines", () => {
