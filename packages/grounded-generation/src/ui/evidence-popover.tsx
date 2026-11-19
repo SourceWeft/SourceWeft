@@ -2,9 +2,9 @@
 
 import { useEffect, useId, useState } from "react";
 import { ExternalLink, Quote } from "lucide-react";
-import type { StudyEvidence } from "@sourceweft/contracts/study";
+import type { GroundedEvidence } from "@sourceweft/contracts/grounded-evidence";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { useStudyHost } from "../study-host";
+import { useGroundedHost } from "./host";
 
 type EvidenceCheck = "checking" | "current" | "changed";
 
@@ -14,12 +14,12 @@ function EvidenceEntry({
   artifactId,
   interactive,
 }: {
-  evidence: StudyEvidence;
+  evidence: GroundedEvidence;
   workspaceId: string;
   artifactId: string;
   interactive: boolean;
 }) {
-  const host = useStudyHost();
+  const host = useGroundedHost();
   const t = host.useTranslate();
   const [check, setCheck] = useState<EvidenceCheck>(
     interactive ? "checking" : "current",
@@ -87,14 +87,14 @@ export function EvidencePopover({
   interactive,
   defaultOpen = false,
 }: {
-  evidence: readonly StudyEvidence[];
+  evidence: readonly GroundedEvidence[];
   workspaceId: string;
   artifactId: string;
   /** Defaults to the host's `interactive`. */
   interactive?: boolean;
   defaultOpen?: boolean;
 }) {
-  const host = useStudyHost();
+  const host = useGroundedHost();
   const t = host.useTranslate();
   const [open, setOpen] = useState(defaultOpen);
   const regionId = useId();

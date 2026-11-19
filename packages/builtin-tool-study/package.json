@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/grounded-generation": "workspace:*",
     "@sourceweft/ui-web": "workspace:*",
     "lucide-react": "^0.562.0",
     "ts-fsrs": "5.4.2",
