@@ -220,6 +220,53 @@ export function adaptToolsEvent(
 }
 
 /**
+ * Tell assistant-authored `messages` events from the rest.
+ *
+ * The v3 stream carries every message a graph node returns, not only model
+ * output. A middleware that adds a HumanMessage to the conversation — Deep
+ * Agents pinning an invoked skill's SKILL.md is the case in production — streams
+ * it as `message-start { role: "human" }` followed by ordinary text deltas.
+ * Only `message-start` names the author; the deltas that follow share its
+ * `run_id` (the namespace is the fallback key when a stream omits it).
+ *
+ * The returned predicate is stateful: feed it every `messages` event in order.
+ * It answers false for all events of a message whose author is not the model,
+ * so that text never reaches the assistant's answer or a delegate's transcript.
+ * A `message-start` without a role is treated as the model's, as before.
+ */
+export function createAssistantMessageFilter(): (
+  namespace: unknown,
+  data: unknown,
+) => boolean {
+  const foreignMessages = new Set<string>();
+  return (namespace, data) => {
+    const record = toObjectRecord(data);
+    if (!record) {
+      return true;
+    }
+    const key =
+      typeof record.run_id === "string" && record.run_id.length > 0
+        ? `run:${record.run_id}`
+        : `ns:${JSON.stringify(Array.isArray(namespace) ? namespace : [])}`;
+    if (record.event === "message-start") {
+      if (record.role === "human" || record.role === "system") {
+        foreignMessages.add(key);
+        return false;
+      }
+      foreignMessages.delete(key);
+      return true;
+    }
+    if (!foreignMessages.has(key)) {
+      return true;
+    }
+    if (record.event === "message-finish" || record.event === "error") {
+      foreignMessages.delete(key);
+    }
+    return false;
+  };
+}
+
+/**
  * Translate a v3 `messages` ProtocolEvent's `data` (content-block protocol) into
  * zero or more synthetic AIMessageChunk-like `[chunk, meta]` payloads for
  * {@link handleMessagesStreamChunk}. Only text and reasoning deltas surface here;
