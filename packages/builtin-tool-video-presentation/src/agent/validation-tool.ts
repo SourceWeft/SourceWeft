@@ -31,6 +31,10 @@ import { VIDEO_PRESENTATION_NARRATION_TAIL_PADDING_SECONDS } from "@sourceweft/c
 import { resolveSynthesizedAudioMimeType } from "../pipeline/audio";
 import { shellQuote } from "../pipeline/util";
 import { sanitizeVideoPresentationFileBase } from "../video-presentation-files";
+import {
+  VALIDATE_VIDEO_PRESENTATION_PROGRESS_EVENT_TYPE,
+  type VideoValidationStage,
+} from "../presentation";
 import { VALIDATE_VIDEO_PRESENTATION_TOOL_NAME } from "./agent-tool-defs";
 import {
   VIDEO_PRESENTATION_BUILDER_VERSION,
@@ -352,6 +356,20 @@ export function createValidateVideoPresentationTool(input: {
       const profile = input.profile;
       const toolCallId = resolveVideoToolCallId(runtime);
       const abortSignal = resolveVideoToolAbortSignal(runtime);
+      // Validation runs for minutes; each stage is announced so the chat can
+      // show where it is. Progress is advisory and must never fail the tool.
+      const reportStage = (stage: VideoValidationStage) => {
+        try {
+          runtime.writer?.({
+            type: VALIDATE_VIDEO_PRESENTATION_PROGRESS_EVENT_TYPE,
+            tool: VALIDATE_VIDEO_PRESENTATION_TOOL_NAME,
+            toolCallId,
+            stage,
+          });
+        } catch {
+          // A broken progress channel does not change the validation result.
+        }
+      };
       const captured = await input.services.sandbox.captureCurrentTree({
         root: args.projectRoot,
         maxFiles: 200,
@@ -934,7 +952,10 @@ export function createValidateVideoPresentationTool(input: {
             timeoutMs: VIDEO_PRESENTATION_RENDER_POLICY.commandTimeoutMs,
             ...(abortSignal ? { signal: abortSignal } : {}),
           });
-        const projectCode = await validateCanonicalProjectTree({ execute });
+        const projectCode = await validateCanonicalProjectTree({
+          execute,
+          onStage: reportStage,
+        });
         if (
           !projectCode.install.ok ||
           !projectCode.typecheck.ok ||
@@ -949,6 +970,7 @@ export function createValidateVideoPresentationTool(input: {
             },
           ]);
         }
+        reportStage("samples");
         const renderSession = await resolveRenderPort().prepare({
           canonicalRoot,
           project: {
@@ -986,6 +1008,7 @@ export function createValidateVideoPresentationTool(input: {
               mimeType: "image/jpeg",
             }));
           if (profile) {
+            reportStage("review");
             let review: Awaited<ReturnType<typeof reviewStills>>;
             try {
               const vision = await input.services.modelGateway.getClient({
@@ -1084,6 +1107,7 @@ export function createValidateVideoPresentationTool(input: {
           if (!cover) {
             return fail([{ code: "VIDEO_COVER_REQUIRED" }]);
           }
+          reportStage("render");
           finalRender = await renderSession.renderFinal();
         } finally {
           await renderSession.dispose();
@@ -1092,6 +1116,7 @@ export function createValidateVideoPresentationTool(input: {
           return fail([{ code: "VIDEO_RENDER_REQUIRED" }]);
         }
         const coverDigest = sha256Digest(cover.data);
+        reportStage("saving");
         const coverWip = await input.services.workBlobs.putIfAbsent({
           semanticKey: `validation-cover:${semanticKey}`,
           bytes: cover.data,
