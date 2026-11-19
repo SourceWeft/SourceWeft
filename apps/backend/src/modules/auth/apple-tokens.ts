@@ -1,17 +1,20 @@
 import { createPrivateKey, sign } from "node:crypto";
 
 /**
- * Calls to Apple's Sign in with Apple token service for the native iOS app:
- * exchanging the authorization code the app receives for a refresh token, and
- * revoking that token when the account is deleted (App Store guideline
- * 5.1.1(v)). The client id is the app's bundle id; the client secret is a
- * short-lived ES256 JWT signed with the Sign in with Apple key.
+ * Calls to Apple's Sign in with Apple token service: exchanging the
+ * authorization code the iOS app receives for a refresh token, and revoking a
+ * refresh token when the account is deleted (App Store guideline 5.1.1(v)).
+ * The client id is the Apple client the token belongs to: the iOS app's bundle
+ * id, or the Services ID of the web sign-in. The client secret is a short-lived
+ * ES256 JWT signed with the team's Sign in with Apple key, which serves every
+ * client of the team.
  *
  * Nothing here logs or returns token values in errors.
  */
 
 export type AppleKeySettings = {
-  appBundleId: string;
+  /** The Apple client (bundle id or Services ID) the request is made as. */
+  clientId: string;
   teamId: string;
   keyId: string;
   privateKey: string;
@@ -65,7 +68,7 @@ export function createAppleClientSecret(
     iat: nowSeconds,
     exp: nowSeconds + CLIENT_SECRET_TTL_SECONDS,
     aud: APPLE_AUDIENCE,
-    sub: settings.appBundleId,
+    sub: settings.clientId,
   };
   const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(
     JSON.stringify(payload),
@@ -141,7 +144,7 @@ export async function exchangeAppleAuthorizationCode(
     fetchImpl,
     TOKEN_URL,
     {
-      client_id: settings.appBundleId,
+      client_id: settings.clientId,
       client_secret: createAppleClientSecret(settings),
       code,
       grant_type: "authorization_code",
@@ -177,7 +180,7 @@ export async function revokeAppleRefreshToken(
     fetchImpl,
     REVOKE_URL,
     {
-      client_id: settings.appBundleId,
+      client_id: settings.clientId,
       client_secret: createAppleClientSecret(settings),
       token: refreshToken,
       token_type_hint: "refresh_token",

@@ -1,3 +1,5 @@
+import { createAppleClientSecret } from "./apple-tokens";
+
 /**
  * The sign-in providers Better Auth is given, built from the deployment's auth
  * settings. Kept free of side effects so each combination can be tested.
@@ -11,6 +13,10 @@ export type SocialProviderSettings = {
   githubClientId: string;
   githubClientSecret: string;
   appleAppBundleId: string;
+  appleServicesId: string;
+  appleTeamId: string;
+  appleKeyId: string;
+  applePrivateKey: string;
 };
 
 function googleEnabled(settings: SocialProviderSettings) {
@@ -61,7 +67,30 @@ export function buildSocialProviders(
     };
   }
 
-  if (settings.appleAppBundleId) {
+  if (settings.appleServicesId) {
+    // Web Sign in with Apple: the browser redirect flow runs as the Services
+    // ID. When the iOS app is set up too, the same provider still accepts its
+    // native identity tokens, whose audience is the bundle id. Both clients
+    // share one Apple user id, so either sign-in reaches the same account.
+    const servicesId = settings.appleServicesId;
+    providers.apple = {
+      clientId: servicesId,
+      // Apple caps how long a client secret lives, so every token request
+      // signs a fresh one rather than reusing one made at startup. Better
+      // Auth reads this when it makes the request.
+      get clientSecret() {
+        return createAppleClientSecret({
+          clientId: servicesId,
+          teamId: settings.appleTeamId,
+          keyId: settings.appleKeyId,
+          privateKey: settings.applePrivateKey,
+        });
+      },
+      ...(settings.appleAppBundleId
+        ? { appBundleIdentifier: settings.appleAppBundleId }
+        : {}),
+    };
+  } else if (settings.appleAppBundleId) {
     // Native Sign in with Apple only: the iOS app obtains an identity token and
     // Better Auth verifies it against Apple's keys, with the app's bundle id as
     // the audience. No client secret is configured, so the browser redirect
@@ -97,4 +126,16 @@ export function nativeSignInConfig(
         ? settings.googleIosClientId
         : null,
   };
+}
+
+/** What the web sign-in page needs to know to offer its sign-in methods. */
+export type WebSignInConfig = {
+  /** The web page may offer Sign in with Apple (the redirect flow). */
+  apple: boolean;
+};
+
+export function webSignInConfig(
+  settings: SocialProviderSettings,
+): WebSignInConfig {
+  return { apple: Boolean(settings.appleServicesId) };
 }

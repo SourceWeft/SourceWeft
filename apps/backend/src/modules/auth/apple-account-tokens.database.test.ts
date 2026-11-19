@@ -20,6 +20,7 @@ const saved: Record<string, string | undefined> = {};
 const VARS = {
   DATABASE_URL: "",
   AUTH_APPLE_APP_BUNDLE_ID: "nicelab.sourceweft.mobile",
+  AUTH_APPLE_SERVICES_ID: "com.sourceweft.web",
   AUTH_APPLE_TEAM_ID: "TEAM123456",
   AUTH_APPLE_KEY_ID: "KEY1234567",
   AUTH_APPLE_PRIVATE_KEY: generateKeyPairSync("ec", {
@@ -100,10 +101,10 @@ test("the refresh token is stored encrypted on the signed-in user's Apple accoun
   const stored = await storedToken(userId);
   assert.ok(stored);
   assert.notEqual(stored, "refresh-1");
-  assert.equal(
-    secrets.decryptSecret(stored, process.env.MODEL_GATEWAY_ENCRYPTION_SECRET!),
-    "refresh-1",
-  );
+  assert.deepEqual(tokens.openAppleRefreshToken(stored, "unused"), {
+    clientId: "nicelab.sourceweft.mobile",
+    refreshToken: "refresh-1",
+  });
   assert.deepEqual(apple.revoked, []);
 
   // A later sign-in replaces it with the newest token.
@@ -113,10 +114,8 @@ test("the refresh token is stored encrypted on the signed-in user's Apple accoun
     fakeApple(subject, "refresh-2").deps,
   );
   assert.equal(
-    secrets.decryptSecret(
-      (await storedToken(userId))!,
-      process.env.MODEL_GATEWAY_ENCRYPTION_SECRET!,
-    ),
+    tokens.openAppleRefreshToken((await storedToken(userId))!, "unused")
+      .refreshToken,
     "refresh-2",
   );
 });
@@ -159,6 +158,48 @@ test("deleting an account revokes its stored Apple refresh token", async () => {
     revoked.push(token);
   });
   assert.deepEqual(revoked, ["refresh-to-revoke"]);
+});
+
+async function setStoredToken(userId: string, value: string) {
+  await schema.database.query(
+    `update "account" set "refreshToken" = $1 where "userId" = $2 and "providerId" = 'apple'`,
+    [value, userId],
+  );
+}
+
+test("deleting revokes each token as the client it was issued to", async () => {
+  // Web: written by Better Auth's callback through the account hook.
+  const webUser = await user(`sub-${randomUUID()}`);
+  const row: Record<string, unknown> = {
+    providerId: "apple",
+    refreshToken: "refresh-web",
+  };
+  tokens.protectAppleAccountWrite(row, { path: "/callback/:id" });
+  await setStoredToken(webUser, row.refreshToken as string);
+
+  // Legacy: a bare encrypted token from before the client was recorded.
+  const legacyUser = await user(`sub-${randomUUID()}`);
+  await setStoredToken(
+    legacyUser,
+    secrets.encryptSecret(
+      "refresh-legacy",
+      process.env.MODEL_GATEWAY_ENCRYPTION_SECRET!,
+    ),
+  );
+
+  for (const [userId, expected] of [
+    [webUser, { clientId: "com.sourceweft.web", token: "refresh-web" }],
+    [
+      legacyUser,
+      { clientId: "nicelab.sourceweft.mobile", token: "refresh-legacy" },
+    ],
+  ] as const) {
+    const calls: Array<{ clientId: string; token: string }> = [];
+    await tokens.revokeAppleTokensBeforeDelete(userId, async (s, token) => {
+      calls.push({ clientId: s.clientId, token });
+    });
+    assert.deepEqual(calls, [expected]);
+  }
 });
 
 test("an Apple account without a stored token blocks deletion until the person signs in again", async () => {

@@ -805,6 +805,25 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                 },
               },
             },
+            // Apple refresh tokens are sealed with the client that issued
+            // them, so account deletion can revoke them (see
+            // protectAppleAccountWrite).
+            account: {
+              create: {
+                before: async (account, context) => {
+                  const { protectAppleAccountWrite } =
+                    await import("./apple-account-tokens");
+                  protectAppleAccountWrite(account, context);
+                },
+              },
+              update: {
+                before: async (account, context) => {
+                  const { protectAppleAccountWrite } =
+                    await import("./apple-account-tokens");
+                  protectAppleAccountWrite(account, context);
+                },
+              },
+            },
             session: {
               delete: {
                 after: async (session) => {
