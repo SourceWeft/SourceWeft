@@ -87,11 +87,12 @@ const nextConfig: NextConfig = {
             value: "max-age=31536000; includeSubDomains",
           },
           { key: "X-Content-Type-Options", value: "nosniff" },
-          // Nothing in the app asks for these; the only media API in use is
-          // screen capture (`getDisplayMedia`), which is `display-capture`.
+          // The composer's dictation asks for the microphone on our own origin;
+          // camera and geolocation stay off; screen capture is `display-capture` and
+          // is not listed.
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(), microphone=(self), geolocation=()",
           },
         ],
       },

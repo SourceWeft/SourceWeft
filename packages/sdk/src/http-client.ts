@@ -79,10 +79,15 @@ export class HttpClient {
     });
   }
 
-  async postForm<T>(path: string, body: FormData): Promise<T> {
+  async postForm<T>(
+    path: string,
+    body: FormData,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<T> {
     return this.request<T>(path, {
       method: "POST",
       body,
+      signal: options.signal,
     });
   }
 

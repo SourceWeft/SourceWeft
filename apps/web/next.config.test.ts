@@ -20,7 +20,7 @@ describe("next.config security headers", () => {
           { key: "X-Content-Type-Options", value: "nosniff" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(), microphone=(self), geolocation=()",
           },
         ],
       },

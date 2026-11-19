@@ -471,28 +471,6 @@ const replaceTextRange = (
   range.insertNode(fragment);
 };
 
-const insertTextAtCaret = (root: HTMLElement, text: string) => {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) {
-    root.append(document.createTextNode(text));
-    return;
-  }
-
-  const range = selection.getRangeAt(0);
-  if (!root.contains(range.commonAncestorContainer)) {
-    root.append(document.createTextNode(text));
-    return;
-  }
-
-  range.deleteContents();
-  const node = document.createTextNode(text);
-  range.insertNode(node);
-  range.setStartAfter(node);
-  range.collapse(true);
-  selection.removeAllRanges();
-  selection.addRange(range);
-};
-
 const closestSourceMention = (node: Node | null) =>
   node instanceof HTMLElement
     ? node.closest<HTMLElement>("[data-source-mention-id]")
@@ -505,6 +483,43 @@ const closestSlashCommand = (node: Node | null) =>
     : (node?.parentElement?.closest<HTMLElement>(
         "[data-slash-command-value]",
       ) ?? null);
+
+/**
+ * Insert plain text into the editor at the given range, or at the end when the
+ * range is missing or no longer inside the editor. A caret resting inside a
+ * mention chip or slash command is nudged to just after that atom so it stays
+ * intact. Returns a collapsed range positioned right after the inserted text.
+ */
+const insertTextAtRange = (
+  root: HTMLElement,
+  range: Range | null,
+  text: string,
+): Range => {
+  const node = document.createTextNode(text);
+
+  if (!range || !root.contains(range.commonAncestorContainer)) {
+    root.append(node);
+    const end = document.createRange();
+    end.setStartAfter(node);
+    end.collapse(true);
+    return end;
+  }
+
+  const target = range.cloneRange();
+  const atom =
+    closestSourceMention(target.commonAncestorContainer) ??
+    closestSlashCommand(target.commonAncestorContainer);
+  if (atom) {
+    target.setStartAfter(atom);
+    target.setEndAfter(atom);
+  }
+
+  target.deleteContents();
+  target.insertNode(node);
+  target.setStartAfter(node);
+  target.collapse(true);
+  return target;
+};
 
 const findPreviousNode = (node: Node | null): Node | null => {
   if (!node) {
@@ -1075,6 +1090,10 @@ export interface PromptInputControllerProps {
     ref: RefObject<HTMLInputElement | null>,
     open: () => void,
   ) => void;
+  /** Inserts plain text at the editor's last caret position, or at its end. False when no editor is mounted. */
+  insertText: (text: string) => boolean;
+  /** INTERNAL: the mention editor registers its inserter; null on unmount. */
+  __registerTextInserter: (insert: ((text: string) => void) | null) => void;
 }
 
 const PromptInputController = createContext<PromptInputControllerProps | null>(
@@ -1218,6 +1237,25 @@ export const PromptInputProvider = ({
     openRef.current?.();
   }, []);
 
+  // ----- text inserter (registered by the mounted mention editor)
+  const textInserterRef = useRef<((text: string) => void) | null>(null);
+
+  const __registerTextInserter = useCallback(
+    (insert: ((text: string) => void) | null) => {
+      textInserterRef.current = insert;
+    },
+    [],
+  );
+
+  const insertText = useCallback((text: string) => {
+    const insert = textInserterRef.current;
+    if (!insert) {
+      return false;
+    }
+    insert(text);
+    return true;
+  }, []);
+
   const attachments = useMemo<AttachmentsContext>(
     () => ({
       add,
@@ -1241,14 +1279,23 @@ export const PromptInputProvider = ({
   const controller = useMemo<PromptInputControllerProps>(
     () => ({
       __registerFileInput,
+      __registerTextInserter,
       attachments,
+      insertText,
       textInput: {
         clear: clearInput,
         setInput: setTextInput,
         value: textInput,
       },
     }),
-    [textInput, clearInput, attachments, __registerFileInput],
+    [
+      textInput,
+      clearInput,
+      attachments,
+      __registerFileInput,
+      __registerTextInserter,
+      insertText,
+    ],
   );
 
   return (
@@ -2052,6 +2099,10 @@ export const PromptInputMentionEditor = ({
   const attachments = usePromptInputAttachments();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const [isComposing, setIsComposing] = useState(false);
+  const isComposingRef = useRef(false);
+  // The caret the editor was last at while focused, used when text is inserted
+  // from outside (e.g. a toolbar action) after focus has moved elsewhere.
+  const lastRangeRef = useRef<Range | null>(null);
   const [segments, setSegments] = useState<PromptInputSegment[]>(() =>
     initialSegments && initialSegments.length > 0
       ? initialSegments
@@ -2207,6 +2258,82 @@ export const PromptInputMentionEditor = ({
       updateMentionState();
     });
   }, [syncFromDom, updateMentionState, updateSlashState]);
+
+  // Remember the caret while it rests inside the editor, so text inserted from
+  // outside (e.g. a toolbar action) can land there after focus has moved away.
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (editor.contains(range.commonAncestorContainer)) {
+        lastRangeRef.current = range.cloneRange();
+      }
+    };
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () =>
+      document.removeEventListener("selectionchange", handleSelectionChange);
+  }, []);
+
+  const insertTextIntoEditor = useCallback(
+    (text: string) => {
+      const editor = editorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      let range: Range | null = null;
+      let liveSelectionInEditor = false;
+      if (!isComposingRef.current) {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const live = selection.getRangeAt(0);
+          if (editor.contains(live.commonAncestorContainer)) {
+            range = live;
+            liveSelectionInEditor = true;
+          }
+        }
+        if (
+          !range &&
+          lastRangeRef.current &&
+          editor.contains(lastRangeRef.current.commonAncestorContainer)
+        ) {
+          range = lastRangeRef.current;
+        }
+      }
+
+      const result = insertTextAtRange(editor, range, text);
+      lastRangeRef.current = result;
+      // Only move the on-screen caret when the user's live caret was already in
+      // the editor; if focus is elsewhere on the page we leave their selection
+      // and focus alone and only advance the remembered range.
+      if (liveSelectionInEditor) {
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(result.cloneRange());
+        }
+      }
+      syncAndUpdateMention();
+    },
+    [syncAndUpdateMention],
+  );
+
+  const registerTextInserter = controller?.__registerTextInserter;
+  useEffect(() => {
+    if (!registerTextInserter) {
+      return;
+    }
+    registerTextInserter(insertTextIntoEditor);
+    return () => registerTextInserter(null);
+  }, [registerTextInserter, insertTextIntoEditor]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -2551,8 +2678,12 @@ export const PromptInputMentionEditor = ({
     updateMentionState();
   }, [updateMentionState, updateSlashState]);
 
-  const handleCompositionStart = useCallback(() => setIsComposing(true), []);
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+    setIsComposing(true);
+  }, []);
   const handleCompositionEnd = useCallback(() => {
+    isComposingRef.current = false;
     setIsComposing(false);
     window.requestAnimationFrame(syncAndUpdateMention);
   }, [syncAndUpdateMention]);
@@ -2582,7 +2713,20 @@ export const PromptInputMentionEditor = ({
       const plainText = event.clipboardData?.getData("text/plain");
       if (plainText) {
         event.preventDefault();
-        insertTextAtCaret(event.currentTarget, plainText);
+        const editor = event.currentTarget;
+        const selection = window.getSelection();
+        const range =
+          selection && selection.rangeCount > 0
+            ? selection.getRangeAt(0)
+            : null;
+        const result = insertTextAtRange(editor, range, plainText);
+        lastRangeRef.current = result;
+        // preventDefault() stops the browser's own caret move, so place the
+        // caret just after the pasted text ourselves.
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(result.cloneRange());
+        }
         syncAndUpdateMention();
       }
     },
