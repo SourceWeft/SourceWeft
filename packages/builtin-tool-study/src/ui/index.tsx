@@ -33,8 +33,7 @@ export { StudyArtifactView } from "./study-artifact-view";
 export { FlashcardsViewer } from "./flashcards/flashcards-viewer";
 export { QuizViewer } from "./quiz/quiz-viewer";
 export { MindmapViewer } from "./mindmap/mindmap-viewer";
-export { EvidencePopover } from "./shared/evidence-popover";
-export { StaleBanner } from "./shared/stale-banner";
+export { EvidencePopover, StaleBanner } from "@sourceweft/grounded-generation/ui";
 export { StudyCannotDisplay, StudyErrorBoundary } from "./shared/error-boundary";
 export {
   configureStudyHost,

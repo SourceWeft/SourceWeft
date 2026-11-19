@@ -9,6 +9,15 @@ import {
   dropboxConnectorContribution,
   toBackendDropboxManifest,
 } from "../src";
+import type { ConnectorManifest } from "@sourceweft/contracts";
+
+// The Dropbox manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 const root = new URL("../", import.meta.url);
 
@@ -26,12 +35,12 @@ test("backend manifest exposes the Dropbox scopes, client id and redirect uri", 
 
   assert.equal(manifest.type, "dropbox");
   assert.deepEqual(manifest.auth.scopes, [...DROPBOX_SCOPES]);
-  assert.deepEqual(manifest.auth.authorizationParams, {
+  assert.deepEqual(oauth2Auth(manifest).authorizationParams, {
     token_access_type: "offline",
     client_id: "app-key",
   });
   assert.equal(
-    manifest.auth.redirectUri,
+    oauth2Auth(manifest).redirectUri,
     "https://sourceweft.example/callback",
   );
   assert.equal(manifest.sync.supportsIncremental, false);

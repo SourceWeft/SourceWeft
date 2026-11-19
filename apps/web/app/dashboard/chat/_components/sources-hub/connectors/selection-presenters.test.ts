@@ -1,5 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { File, FileText, Folder, Globe, SquareKanban } from "lucide-react";
+import {
+  Building2,
+  File,
+  FileText,
+  Folder,
+  FolderGit2,
+  FolderKanban,
+  Globe,
+  SquareKanban,
+  Users,
+} from "lucide-react";
 import {
   selectionIconFor,
   selectionPresenterFor,
@@ -153,6 +163,28 @@ describe("selectionPresenters.dropbox", () => {
         presenter.indexing?.containerIndexedCount({ item, described, sources }),
       ).toBeNull();
     });
+  });
+});
+
+describe("selectionPresenters.github", () => {
+  test("registers icons for account and repository and no indexing hooks", () => {
+    const presenter = selectionPresenters.github!;
+    expect(presenter.kindIcons.account).toBe(Building2);
+    expect(presenter.kindIcons.repository).toBe(FolderGit2);
+    expect(presenter.indexing).toBeUndefined();
+  });
+});
+
+describe("selectionPresenters.linear", () => {
+  const presenter = selectionPresenters.linear!;
+
+  test("registers icons for team and project", () => {
+    expect(presenter.kindIcons.team).toBe(Users);
+    expect(presenter.kindIcons.project).toBe(FolderKanban);
+  });
+
+  test("has no indexing presenter (tools-only connector)", () => {
+    expect(presenter.indexing).toBeUndefined();
   });
 });
 

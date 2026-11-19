@@ -120,17 +120,44 @@ test("sidebar text search spans all execution targets", () => {
   assert.ok(!html.includes("Clear all private chats"));
 });
 
-test("the PC client clears only the traffic lights above the workspace switcher", () => {
+test("the PC client's first row holds the list actions beside the traffic lights", () => {
+  const switcher = 'font-medium text-left">Workspace</span>';
   const desktop = render("cloud", "", true);
-  // A draggable 40px strip, not the 56px spacer that read as a blank band.
+  // No spacer above the column, and no text beside the lights: the 56px row
+  // level with the chat header carries only the icon actions, drags the
+  // window by its blank space, and the workspace switcher follows it.
   assert.ok(!desktop.includes("pt-14"));
-  assert.ok(desktop.includes('data-desktop-drag-region=""'));
-  assert.ok(desktop.includes("h-10 shrink-0 select-none"));
-  assert.ok(desktop.includes("h-12 sm:h-14"));
+  assert.ok(!desktop.includes("h-10 shrink-0 select-none"));
+  assert.ok(!desktop.includes("h-12 sm:h-14"));
+  const row = desktop.match(
+    /<div data-desktop-drag-region="" class="([^"]*)">([\s\S]*?)<div class="flex h-12 min-w-0 shrink-0 items-center gap-1 px-3">/,
+  );
+  assert.ok(row, "titlebar row not found");
+  assert.ok(
+    row[1]?.includes("h-14 select-none border-b border-sidebar-border pl-7"),
+  );
+  const actions = row[2] ?? "";
+  assert.ok(actions.includes('<span class="flex-1 sr-only">Chats</span>'));
+  for (const label of [
+    "New agent chat",
+    "Invite &amp; manage members",
+    "Search all chats",
+    "Filter chats",
+  ])
+    assert.ok(actions.includes(label), `${label} is not in the titlebar row`);
+  assert.ok(!actions.includes(switcher));
+  // The switcher is the second row, above the conversations.
+  const switcherIndex = desktop.indexOf(switcher);
+  assert.ok(switcherIndex > desktop.indexOf("Filter chats"));
+  assert.ok(switcherIndex < desktop.indexOf("Cloud research"));
 
   const web = render("cloud");
   assert.ok(!web.includes("data-desktop-drag-region"));
   assert.ok(web.includes("h-12 sm:h-14"));
+  assert.ok(!web.includes("pl-7"));
+  // On the web the switcher stays first and the list keeps its label row.
+  assert.ok(web.indexOf(switcher) < web.indexOf("Filter chats"));
+  assert.ok(web.includes("uppercase tracking-[0.16em]"));
 });
 
 test("new chat aligns with navigation and search belongs to the chats header", () => {

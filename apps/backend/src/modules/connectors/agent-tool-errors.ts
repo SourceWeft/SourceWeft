@@ -1,6 +1,7 @@
 import { logger } from "../../shared/logger";
 import {
   isConnectorError,
+  isPackageConnectorError,
   toConnectorError,
   type ConnectorError,
 } from "./errors";
@@ -11,7 +12,38 @@ export type ConnectorToolErrorPayload = {
   message: string;
   statusCode: number;
   recoverable?: boolean;
+  retryAfterSeconds?: number;
 };
+
+const MAX_PACKAGE_ERROR_MESSAGE_LENGTH = 500;
+
+// Connector packages throw their own structured errors (a numeric
+// `statusCode`, a string `code`, a string `message`, optional `details`).
+// A package's message is forwarded to the caller as-is, after stripping
+// control characters and bounding its length. It is not always a fixed string
+// the connector author wrote: some adapters (for example Notion) build it from
+// the provider's own answer, so each adapter owns keeping tokens, headers and
+// response bodies out of the message it throws.
+function sanitizePackageErrorMessage(message: string): string {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = message.replace(/[\x00-\x1F\x7F]/g, " ").trim();
+  if (cleaned.length <= MAX_PACKAGE_ERROR_MESSAGE_LENGTH) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, MAX_PACKAGE_ERROR_MESSAGE_LENGTH - 1)}…`;
+}
+
+const MAX_RETRY_AFTER_SECONDS = 86400;
+
+function resolveRetryAfterSeconds(
+  details: Record<string, unknown> | undefined,
+): number | undefined {
+  const raw = details?.retryAfterSeconds;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 1) {
+    return undefined;
+  }
+  return Math.min(Math.ceil(raw), MAX_RETRY_AFTER_SECONDS);
+}
 
 function errorLogFields(error: unknown, omitResponseContent: boolean) {
   const errorName = error instanceof Error ? error.name : typeof error;
@@ -48,6 +80,12 @@ function safeToolErrorMessage(input: {
   ) {
     return input.connectorError.message;
   }
+  if (isPackageConnectorError(input.originalError)) {
+    const sanitized = sanitizePackageErrorMessage(input.connectorError.message);
+    if (sanitized) {
+      return sanitized;
+    }
+  }
   return "Connector tool failed. Check backend logs for details.";
 }
 
@@ -73,6 +111,7 @@ export async function connectorToolResult<T>(
       statusCode: connectorError.statusCode,
       ...errorLogFields(error, omitResponseContent === true),
     });
+    const retryAfterSeconds = resolveRetryAfterSeconds(connectorError.details);
     return {
       type: "connector_tool_error",
       code: connectorError.code,
@@ -82,6 +121,7 @@ export async function connectorToolResult<T>(
       }),
       statusCode: connectorError.statusCode,
       ...(connectorError.recoverable ? { recoverable: true } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     };
   }
 }

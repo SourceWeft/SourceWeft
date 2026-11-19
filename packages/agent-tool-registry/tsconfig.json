@@ -18,6 +18,12 @@
       "@sourceweft/builtin-connector-dropbox": [
         "../builtin-connector-dropbox/src/index.ts"
       ],
+      "@sourceweft/builtin-connector-github": [
+        "../builtin-connector-github/src/index.ts"
+      ],
+      "@sourceweft/builtin-connector-linear": [
+        "../builtin-connector-linear/src/index.ts"
+      ],
       "@sourceweft/builtin-connector-jira": [
         "../builtin-connector-jira/src/index.ts"
       ],

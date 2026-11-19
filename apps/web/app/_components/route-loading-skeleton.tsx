@@ -135,12 +135,15 @@ export function DashboardSidebarSkeleton({
       <aside
         style={{ width }}
         className={cn(
-          "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
-          desktopTitlebar ? "pt-0" : "pt-3",
+          "relative flex h-svh shrink-0 flex-col items-center gap-1 bg-sidebar px-2 pb-3",
+          desktopTitlebar ? "pt-0" : "border-r border-sidebar-border pt-3",
         )}
       >
         {desktopTitlebar ? (
-          <div data-desktop-drag-region="" className="h-10 w-full shrink-0" />
+          <>
+            <div data-desktop-drag-region="" className="h-14 w-full shrink-0" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[55px] border-r border-t border-sidebar-border" />
+          </>
         ) : (
           brand
         )}
@@ -158,22 +161,37 @@ export function DashboardSidebarSkeleton({
     );
   }
 
-  // The conversation column beside the rail: workspace, then the chats.
+  // The conversation column beside the rail: workspace, then the chats. The
+  // macOS client's first row sits beside the traffic lights, so there it
+  // holds the list's icon actions and the workspace follows it.
   return (
     <aside
       style={{ width }}
       className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
     >
-      <div className="shrink-0 px-3">
-        {desktopTitlebar && (
-          <div data-desktop-drag-region="" className="h-10 shrink-0" />
-        )}
-        <div className="flex h-12 items-center gap-2 sm:h-14">
-          <SkeletonBlock className="h-8 flex-1 rounded-lg" />
+      {desktopTitlebar ? (
+        <>
+          <div
+            data-desktop-drag-region=""
+            className="flex h-14 shrink-0 items-center justify-end gap-1 border-b border-sidebar-border pl-7 pr-3"
+          >
+            {Array.from({ length: 4 }, (_, index) => (
+              <SkeletonBlock key={index} className="size-8 rounded-md" />
+            ))}
+          </div>
+          <div className="flex h-12 shrink-0 items-center px-3">
+            <SkeletonBlock className="h-8 flex-1 rounded-lg" />
+          </div>
+        </>
+      ) : (
+        <div className="shrink-0 px-3">
+          <div className="flex h-12 items-center gap-2 sm:h-14">
+            <SkeletonBlock className="h-8 flex-1 rounded-lg" />
+          </div>
         </div>
-      </div>
+      )}
       <div className="min-h-0 flex-1 space-y-5 overflow-hidden px-3 py-4">
-        <SkeletonLine className="w-16" />
+        {desktopTitlebar ? null : <SkeletonLine className="w-16" />}
         {Array.from({ length: 8 }, (_, index) => (
           <SkeletonLine key={index} className="w-44" />
         ))}

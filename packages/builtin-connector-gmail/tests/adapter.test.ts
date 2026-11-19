@@ -37,6 +37,7 @@ function json(value: unknown, status = 200) {
 
 function adapter(fetcher: typeof fetch) {
   return createGmailConnectorAdapter({
+    mode: "google",
     baseUrl: "https://sourceweft.example",
     clientId: "client-id",
     clientSecret: "client-secret",

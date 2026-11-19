@@ -1,6 +1,8 @@
 import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import { notionAgentToolDefs } from "@sourceweft/builtin-connector-notion/agent-tool-defs";
 import { gmailAgentToolDefs } from "@sourceweft/builtin-connector-gmail/agent-tool-defs";
+import { githubAgentToolDefs } from "@sourceweft/builtin-connector-github/agent-tool-defs";
+import { linearAgentToolDefs } from "@sourceweft/builtin-connector-linear/agent-tool-defs";
 import { jiraAgentToolDefs } from "@sourceweft/builtin-connector-jira/agent-tool-defs";
 
 /**
@@ -17,5 +19,7 @@ import { jiraAgentToolDefs } from "@sourceweft/builtin-connector-jira/agent-tool
 export function registerBuiltinAgentTools() {
   registerAgentTools(notionAgentToolDefs);
   registerAgentTools(gmailAgentToolDefs);
+  registerAgentTools(githubAgentToolDefs);
+  registerAgentTools(linearAgentToolDefs);
   registerAgentTools(jiraAgentToolDefs);
 }

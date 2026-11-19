@@ -4,10 +4,19 @@ import { AtlassianApiError } from "@sourceweft/atlassian-client";
 import type {
   ConnectorDiscoverInput,
   ConnectorExtractInput,
+  ConnectorManifest,
   OAuthCodeExchangeInput,
   OAuthRefreshInput,
 } from "@sourceweft/contracts";
 import { createJiraConnectorAdapter, type JiraAdapterConfig } from "../src/adapter";
+
+// The Jira manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -42,7 +51,7 @@ test("manifest client_id is empty without a secret", () => {
     clientSecret: "",
   });
   assert.equal(
-    withoutSecret.getManifest().auth.authorizationParams?.client_id,
+    oauth2Auth(withoutSecret.getManifest()).authorizationParams?.client_id,
     "",
   );
 
@@ -52,11 +61,11 @@ test("manifest client_id is empty without a secret", () => {
     clientSecret: "jira-client-secret",
   });
   assert.equal(
-    withBoth.getManifest().auth.authorizationParams?.client_id,
+    oauth2Auth(withBoth.getManifest()).authorizationParams?.client_id,
     "jira-client-id",
   );
   assert.equal(
-    withBoth.getManifest().auth.redirectUri,
+    oauth2Auth(withBoth.getManifest()).redirectUri,
     "https://sourceweft.example/v1/connectors/oauth/jira/callback",
   );
 });

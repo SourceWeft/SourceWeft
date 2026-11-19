@@ -112,6 +112,11 @@ test("connectors of the same type merge, different types stay apart", () => {
   );
 });
 
+test("GitHub tool calls summarize as Used GitHub", () => {
+  assert.equal(summarize([call("search_github")]), "Used GitHub");
+  assert.equal(summarize([call("read_github_item")]), "Used GitHub");
+});
+
 test("unknown and MCP tools are named by the tool itself", () => {
   assert.deepEqual(
     getToolActivityCategory(call("mcp__io_github_x_1a2b__list_issues")),

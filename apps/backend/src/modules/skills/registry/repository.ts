@@ -2,7 +2,7 @@ import { canUpgradeSupportingBundle } from "./bundle-projection";
 import { randomUUID } from "node:crypto";
 import { chunk } from "../../../shared/chunk";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
@@ -791,6 +791,54 @@ export async function upsertRegistrySkillIndex(
     // insert. 5,000 rows a statement keeps the largest bundle well under it.
     for (const rows of chunk(fileRows, 5000)) {
       await tx.insert(skillVersionFiles).values(rows);
+    }
+    // A skill in review is sticky, so every later commit queues too. Only the
+    // newest is worth a reviewer's time: without this the queue gained one
+    // entry per commit rather than one per skill. A draft from a NEWER commit
+    // than this one (an older commit arriving late) is left where it is.
+    if (!isPublished && existing) {
+      const candidateAt = committedAtMs(
+        input.manifestJson.registry?.committedAt,
+      )!;
+      const drafts = await tx
+        .select({
+          id: skillVersions.id,
+          manifestJson: skillVersions.manifestJson,
+        })
+        .from(skillVersions)
+        .where(
+          and(
+            eq(skillVersions.skillId, skillId),
+            eq(skillVersions.status, "draft"),
+            ne(skillVersions.id, skillVersionId),
+          ),
+        )
+        .for("update");
+      for (const draft of drafts) {
+        const registry = draft.manifestJson.registry;
+        const draftAt = committedAtMs(registry?.committedAt);
+        if (!registry || (draftAt !== null && draftAt > candidateAt)) continue;
+        await tx
+          .update(skillVersions)
+          .set({
+            status: "deprecated",
+            manifestJson: {
+              ...draft.manifestJson,
+              registry: {
+                ...registry,
+                moderation: {
+                  action: "supersede",
+                  actorUserId: "system",
+                  at: now.toISOString(),
+                  reason: "Superseded by a newer submission of the same skill",
+                  supersededBySkillVersionId: skillVersionId,
+                },
+              },
+            },
+            updatedAt: now,
+          })
+          .where(eq(skillVersions.id, draft.id));
+      }
     }
     // Recorded because nobody chose it: an admin wondering where the badge
     // went finds the version that took it.

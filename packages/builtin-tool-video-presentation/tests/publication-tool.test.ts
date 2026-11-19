@@ -587,3 +587,14 @@ test("publisher reports invalid draft input without leaking parser details", asy
   );
   assert.equal(harness.counts().publishCalls, 0);
 });
+
+test("the publisher hands control back to the model so the turn can summarize the delivery", () => {
+  const tool = createPublishVideoPresentationTool({
+    workspaceId: "workspace-1",
+    services: createFakeVideoServices({}),
+  });
+  // A direct-return tool ends the run at its own result, so no final reply is
+  // ever written and a rejected publish cannot be repaired. The committed
+  // delivery path finishes the turn instead: it asks for one closing reply.
+  assert.notEqual(tool.returnDirect, true);
+});

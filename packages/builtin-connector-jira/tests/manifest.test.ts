@@ -2,13 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
 import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
-import { connectorManifestSchema } from "@sourceweft/contracts";
+import {
+  connectorManifestSchema,
+  type ConnectorManifest,
+} from "@sourceweft/contracts";
 import {
   JIRA_SCOPES,
   builtinJiraConnectorCapabilityManifest,
   jiraConnectorContribution,
   toBackendJiraManifest,
 } from "../src";
+
+// The Jira manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 const root = new URL("../", import.meta.url);
 
@@ -27,13 +38,13 @@ test("backend manifest exposes the Jira scopes, auth params, empty sync resource
   assert.equal(manifest.type, "jira");
   assert.deepEqual(manifest.auth.scopes, [...JIRA_SCOPES]);
   assert.equal(manifest.auth.scopes.length, 4);
-  assert.deepEqual(manifest.auth.authorizationParams, {
+  assert.deepEqual(oauth2Auth(manifest).authorizationParams, {
     audience: "api.atlassian.com",
     prompt: "consent",
     client_id: "app",
   });
   assert.equal(
-    manifest.auth.redirectUri,
+    oauth2Auth(manifest).redirectUri,
     "https://sourceweft.example/callback",
   );
   assert.equal(manifest.sync.supportsIncremental, false);

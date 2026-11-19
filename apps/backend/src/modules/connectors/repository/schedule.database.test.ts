@@ -197,6 +197,21 @@ test("connector sync lock excludes concurrent workers and releases after complet
 test("reserved user-owned task schedules are never dispatched by the connector scheduler", async () => {
   const target = await connector();
   const scheduleId = randomUUID();
+  const agentTaskId = randomUUID();
+  await schema.db.insert(schema.agentTasks).values({
+    id: agentTaskId,
+    teamId: target.teamId,
+    workspaceId: target.workspaceId,
+    ownerUserId: "future-user",
+    name: agentTaskId,
+    prompt: "Reserved",
+    requestJson: {
+      sourceIds: [],
+      skillIds: [],
+      mcp: { installIds: [] },
+      webAccess: false,
+    },
+  });
   await schema.db.insert(schema.taskSchedules).values({
     id: scheduleId,
     teamId: target.teamId,
@@ -204,6 +219,7 @@ test("reserved user-owned task schedules are never dispatched by the connector s
     taskKind: "agent_task",
     ownerKind: "user",
     ownerUserId: "future-user",
+    agentTaskId,
     enabled: true,
     specJson: { kind: "once", at: new Date().toISOString() },
     timezone: "Asia/Singapore",

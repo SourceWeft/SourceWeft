@@ -1,8 +1,16 @@
 import {
-  studyErrorCodeSchema,
+  GroundedGenerationError,
+  isGroundedGenerationError,
+  type GroundedAnchorPort,
+  type GroundedAnchorRequest,
+  type GroundedAnchorResult,
+  type GroundedCheckpointStore,
+  type GroundedCorpusChunk,
+  type GroundedModelPort,
+} from "./grounded-generation";
+import {
   type StudyContent,
   type StudyDifficulty,
-  type StudyErrorCode,
   type StudyInputs,
   type StudyKind,
   type StudyOptions,
@@ -25,38 +33,14 @@ import {
 
 /* ------------------------------------------------------------------ errors */
 
-/** A generation failure with the code the artifact records. */
-export class StudyGenerationError extends Error {
-  readonly code: StudyErrorCode;
-  readonly details: Record<string, unknown>;
-
-  constructor(
-    code: StudyErrorCode,
-    message: string,
-    details: Record<string, unknown> = {},
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-    this.name = "StudyGenerationError";
-    this.code = code;
-    this.details = details;
-  }
-}
-
 /**
- * Structural check, never `instanceof` alone: the capability's module graph
- * and the host's may hold separate copies of this class.
+ * The generation error and its structural check now live in
+ * `./grounded-generation`; these are the same class and function under the
+ * names study code has always used.
  */
-export function isStudyGenerationError(
-  error: unknown,
-): error is StudyGenerationError {
-  if (error instanceof StudyGenerationError) return true;
-  return (
-    error instanceof Error &&
-    error.name === "StudyGenerationError" &&
-    studyErrorCodeSchema.safeParse((error as { code?: unknown }).code).success
-  );
-}
+export const StudyGenerationError = GroundedGenerationError;
+export type StudyGenerationError = GroundedGenerationError;
+export const isStudyGenerationError = isGroundedGenerationError;
 
 /* ------------------------------------------------------------------- ports */
 
@@ -68,46 +52,13 @@ export type StudyOperation =
   | "study.mindmap.generate";
 
 /** One structured-output call on the default chat model, billed by the host. */
-export interface StudyModelPort {
-  /**
-   * The host never substitutes another model: an unusable default fails with
-   * `MODEL_UNAVAILABLE`, refused admission with `INSUFFICIENT_CREDITS` (both as
-   * `StudyGenerationError`). Other failures are thrown as they are.
-   */
-  completeStructured(input: {
-    operation: StudyOperation;
-    idempotencyKey: string;
-    referenceId: string;
-    system: string;
-    user: string;
-    schema: { name: string; description: string; schema: Record<string, unknown> };
-    maxTokens: number;
-  }): Promise<unknown>;
-}
+export type StudyModelPort = GroundedModelPort<StudyOperation>;
 
-export type StudyAnchorRequest = {
-  /** The generated text that should be supported by the chunk. */
-  text: string;
-  chunkId: string;
-  chunkContent: string;
-};
-
-export type StudyAnchorResult = {
-  /** Range inside `chunkContent`. */
-  startChar: number;
-  endChar: number;
-  quote: string;
-  /** 0..1 */
-  confidence: number;
-};
+export type StudyAnchorRequest = GroundedAnchorRequest;
+export type StudyAnchorResult = GroundedAnchorResult;
 
 /** Finds where generated text is supported in its cited chunk. */
-export interface StudyAnchorPort {
-  /** One result per request, in order; null when the chunk does not support it. */
-  anchor(
-    requests: readonly StudyAnchorRequest[],
-  ): Promise<(StudyAnchorResult | null)[]>;
-}
+export type StudyAnchorPort = GroundedAnchorPort;
 
 /**
  * The engine's resume state. The host stores it as JSON and hands it back
@@ -119,10 +70,7 @@ export type StudyCheckpointData = {
   verified: Record<string, { keep: boolean; reason?: string }>;
 };
 
-export interface StudyCheckpointStore {
-  load(): Promise<StudyCheckpointData | null>;
-  save(checkpoint: StudyCheckpointData): Promise<void>;
-}
+export type StudyCheckpointStore = GroundedCheckpointStore<StudyCheckpointData>;
 
 export type StudyProgress = {
   stage: "assemble" | "generate" | "verify" | "finalize";
@@ -133,15 +81,7 @@ export type StudyProgress = {
 /* ------------------------------------------------------------- generation */
 
 /** A chunk as the host loads it. */
-export type StudyCorpusChunk = {
-  chunkId: string;
-  sourceId: string;
-  documentId: string;
-  chunkNo: number;
-  headingPath: string | null;
-  language: string | null;
-  text: string;
-};
+export type StudyCorpusChunk = GroundedCorpusChunk;
 
 export type ResolvedStudyOptions = {
   /** Items to keep (mind maps: most nodes below the root). */
