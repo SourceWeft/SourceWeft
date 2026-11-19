@@ -1006,7 +1006,8 @@
       "chat": "對話",
       "more": "更多",
       "me": "我",
-      "mainNavigation": "主導覽"
+      "mainNavigation": "主導覽",
+      "scheduled": "排程任務"
     },
     "sidebar": {
       "newChat": "新對話",
@@ -1136,7 +1137,8 @@
           "label": "關於",
           "description": "版本和建置詳細資訊"
         }
-      }
+      },
+      "scheduledDescription": "按時間安排執行的提示詞"
     },
     "members": {
       "dialogTitle": "工作區成員"
@@ -6462,5 +6464,182 @@
     "privacyPolicy": "隱私政策",
     "agree": "同意並繼續",
     "decline": "不同意並登出"
+  },
+  "dashboardScheduled": {
+    "rule": {
+      "manual": "僅在你手動啟動時執行",
+      "daily": "每天 {time}",
+      "weekdays": "工作日 {time}",
+      "weekly": "每{days} {time}",
+      "cron": "Cron {expr}",
+      "once": "僅一次，{at}"
+    },
+    "status": {
+      "draft": "草稿",
+      "active": "執行中",
+      "paused": "已暫停",
+      "blocked": "已阻塞",
+      "completed": "已完成",
+      "archived": "已刪除"
+    },
+    "statusReason": {
+      "user_paused": "已由你暫停。",
+      "owner_left": "負責人已離開該工作區，任務已暫停。",
+      "repeated_failure": "連續失敗後已暫停。請檢視執行歷史，處理後再恢復。",
+      "insufficient_credits": "已阻塞：額度不足，無法執行。",
+      "tools_unavailable": "已阻塞：任務使用的資料或 MCP 服務已不可用。",
+      "auth_expired": "已阻塞：已連接的帳號需要重新登入。"
+    },
+    "runStatus": {
+      "pending": "等待中",
+      "dispatching": "啟動中",
+      "queued": "執行中",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "skipped": "已跳過",
+      "blocked": "已阻塞",
+      "cancelled": "已取消"
+    },
+    "skipReason": {
+      "missed_platform_down": "平臺停機期間錯過。",
+      "previous_run_active": "上一次執行尚未結束。",
+      "user_concurrency_limit": "你同時執行的任務過多。",
+      "user_daily_cap": "已達到每日定時執行上限。",
+      "insufficient_credits": "額度不足。",
+      "owner_left": "負責人已離開該工作區。",
+      "tools_unavailable": "資料或 MCP 服務不可用。",
+      "auth_expired": "已連接的帳號需要重新登入。",
+      "rate_limited": "短時間內執行次數過多。"
+    },
+    "trigger": {
+      "schedule": "定時",
+      "manual": "立即執行",
+      "api": "API",
+      "event": "事件"
+    },
+    "errors": {
+      "generic": "出錯了，請重試。",
+      "AGENT_TASK_LIMIT_REACHED": "已達到目前方案的啟用任務數上限。請先暫停或刪除一個任務。",
+      "AGENT_TASK_RUN_RATE_LIMITED": "本小時手動執行次數過多，請稍後再試。",
+      "AGENT_TASK_RUN_CONFLICT": "該任務正在執行。",
+      "AGENT_TASK_INVALID_STATE": "該任務目前不能執行此操作。",
+      "AGENT_TASK_VERSION_CONFLICT": "該任務已在別處被修改。請重新開啟後再試。",
+      "AGENT_TASK_NOT_FOUND": "該任務已不存在。",
+      "AGENT_TASK_SCHEDULE_INVALID": "該時間安排無效。執行間隔至少 1 小時，且必須在未來。"
+    },
+    "toasts": {
+      "runStarted": "已開始執行",
+      "paused": "任務已暫停",
+      "resumed": "任務已恢復",
+      "enabled": "任務已啟用",
+      "deleted": "任務已刪除",
+      "saved": "任務已儲存",
+      "created": "任務已建立"
+    },
+    "frequency": {
+      "daily": "每天",
+      "weekdays": "工作日",
+      "weekly": "每週的某幾天",
+      "once": "僅一次",
+      "cron": "Cron 規則",
+      "manual": "僅手動執行"
+    },
+    "form": {
+      "title": "新增排程任務",
+      "editTitle": "編輯排程任務",
+      "description": "儲存一段提示詞，按時間安排以你的身份執行，並把結果放進一個新對話。",
+      "name": "名稱",
+      "namePlaceholder": "每日早報",
+      "prompt": "提示詞",
+      "promptPlaceholder": "每次執行，助理應該做什麼？",
+      "promptHint": "執行期間無人看守，只能讀取和總結，不能修改任何內容。",
+      "frequency": "重複",
+      "time": "時間",
+      "runAt": "日期和時間",
+      "cron": "Cron 規則（5 段）",
+      "days": "星期",
+      "timezone": "時區",
+      "manualHint": "該任務沒有時間安排。儲存後，可隨時點「立即執行」。",
+      "nextRuns": "接下來的幾次執行",
+      "previewLoading": "正在檢查時間安排…",
+      "previewEmpty": "填好時間安排後可預覽接下來的幾次執行。",
+      "offsetHint": "實際執行可能比所示時間晚最多 {minutes} 分鐘。",
+      "webAccess": "允許聯網搜尋",
+      "webAccessHint": "允許任務搜尋並閱讀公開網頁。",
+      "notifyOnSuccess": "執行成功時通知我",
+      "notifyEmail": "出問題時也寄電子郵件給我",
+      "notifyEmailHint": "包括失敗、暫停和被阻塞的執行。",
+      "mcp": "MCP 服務",
+      "mcpHint": "只會使用這些服務的唯讀工具。",
+      "readOnlyNote": "定時執行是唯讀的：不能寫檔案、發布產物，也不能向你提問。",
+      "cancel": "取消",
+      "save": "儲存",
+      "saveDraft": "存為草稿",
+      "createAndEnable": "建立並啟用"
+    },
+    "actions": {
+      "open": "{name} 的操作",
+      "runNow": "立即執行",
+      "pause": "暫停",
+      "resume": "恢復",
+      "enable": "啟用",
+      "edit": "編輯",
+      "delete": "刪除"
+    },
+    "delete": {
+      "title": "刪除「{name}」？",
+      "body": "任務將停止執行，已有的執行記錄和對話會保留。"
+    },
+    "list": {
+      "nextRun": "下次執行 {at}"
+    },
+    "page": {
+      "title": "排程任務",
+      "subtitle": "按時間安排執行的提示詞，結果會放進對話裡。",
+      "new": "新增任務",
+      "tabTasks": "任務",
+      "tabInbox": "通知",
+      "loading": "載入中…",
+      "loadError": "無法載入排程任務。",
+      "emptyTitle": "還沒有排程任務",
+      "emptyBody": "儲存一次提示詞，讓它每天早上、每週一或你指定的時間自動執行。"
+    },
+    "detail": {
+      "back": "全部任務",
+      "notFound": "找不到該任務。",
+      "prompt": "提示詞",
+      "history": "執行歷史",
+      "noRuns": "還沒有執行記錄。",
+      "catchUp": "補跑",
+      "openResult": "開啟結果"
+    },
+    "inbox": {
+      "loading": "載入中…",
+      "loadError": "無法載入通知。",
+      "empty": "暫無通知。",
+      "repeated": "{count} 次",
+      "loadMore": "載入更多",
+      "markAllRead": "全部標為已讀"
+    },
+    "bell": {
+      "label": "通知",
+      "labelUnread": "通知，{count} 條未讀",
+      "title": "通知",
+      "viewAll": "檢視全部"
+    },
+    "notification": {
+      "task_run_succeeded": "「{taskName}」已完成。",
+      "task_run_failed": "「{taskName}」執行失敗。",
+      "task_run_catch_up": "「{taskName}」已補跑之前錯過的一次。",
+      "task_blocked_quota": "「{taskName}」未能執行：額度不足。",
+      "task_needs_approval": "「{taskName}」需要你的核准。",
+      "task_paused_owner_left": "「{taskName}」因負責人離開而暫停。",
+      "task_tools_unavailable": "「{taskName}」無法執行：它使用的資料或 MCP 服務不可用。",
+      "task_paused_repeated_failure": "「{taskName}」連續失敗後已暫停。",
+      "unknown": "關於「{taskName}」的更新。"
+    },
+    "composer": {
+      "schedule": "按時間安排執行"
+    }
   }
 }

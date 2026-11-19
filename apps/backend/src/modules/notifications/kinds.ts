@@ -93,3 +93,20 @@ export function notificationKindDefinition(
   if (!definition) throw new Error(`Unknown notification kind: ${kind}`);
   return definition;
 }
+
+/** Where a stored notification leads; unknown kinds lead to the task list. */
+export function notificationPath(item: {
+  kind: string;
+  ref: { kind: string; id: string } | null;
+  payload: NotificationPayload;
+}) {
+  const definition = (
+    NOTIFICATION_KINDS as Record<string, NotificationKindDefinition>
+  )[item.kind];
+  return (
+    definition?.path({
+      refId: item.ref?.id ?? null,
+      payload: item.payload,
+    }) ?? "/dashboard/scheduled"
+  );
+}

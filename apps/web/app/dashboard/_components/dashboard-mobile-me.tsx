@@ -2,6 +2,7 @@
 import { disconnectLocalHostSession } from "../../../lib/local-host-session";
 
 import * as React from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import { usePurchasesAllowed } from "../../../lib/native-host";
@@ -10,6 +11,7 @@ import { useAuthenticate } from "@better-auth-ui/react";
 import {
   Activity,
   ArrowLeft,
+  CalendarClock,
   ChevronRight,
   CreditCard,
   Info,
@@ -76,7 +78,7 @@ export function DashboardMobileMe() {
     | null
     | undefined;
   const { activeOrg, orgList } = useDashboardTeamSelector();
-  const { openObservability } = useDashboardMobileNav();
+  const { openMain, openObservability } = useDashboardMobileNav();
   const [activePanel, setActivePanel] = React.useState<MobileMePanel | null>(
     null,
   );
@@ -203,6 +205,26 @@ export function DashboardMobileMe() {
                   </button>
                 );
               })}
+            <Link
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
+              href="/dashboard/scheduled"
+              onClick={openMain}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <CalendarClock className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-foreground">
+                    {t("nav.scheduled")}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {t("mobileMe.scheduledDescription")}
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </Link>
             <button
               className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors hover:bg-accent"
               onClick={openObservability}

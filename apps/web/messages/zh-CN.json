@@ -1006,7 +1006,8 @@
       "chat": "对话",
       "more": "更多",
       "me": "我",
-      "mainNavigation": "主导航"
+      "mainNavigation": "主导航",
+      "scheduled": "定时任务"
     },
     "sidebar": {
       "newChat": "新建对话",
@@ -1136,7 +1137,8 @@
           "label": "关于",
           "description": "版本和构建详情"
         }
-      }
+      },
+      "scheduledDescription": "按时间安排运行的提示词"
     },
     "members": {
       "dialogTitle": "工作区成员"
@@ -6462,5 +6464,182 @@
     "privacyPolicy": "隐私政策",
     "agree": "同意并继续",
     "decline": "不同意并退出登录"
+  },
+  "dashboardScheduled": {
+    "rule": {
+      "manual": "仅在你手动启动时执行",
+      "daily": "每天 {time}",
+      "weekdays": "工作日 {time}",
+      "weekly": "每{days} {time}",
+      "cron": "Cron {expr}",
+      "once": "仅一次，{at}"
+    },
+    "status": {
+      "draft": "草稿",
+      "active": "运行中",
+      "paused": "已暂停",
+      "blocked": "已阻塞",
+      "completed": "已完成",
+      "archived": "已删除"
+    },
+    "statusReason": {
+      "user_paused": "已由你暂停。",
+      "owner_left": "负责人已离开该工作区，任务已暂停。",
+      "repeated_failure": "连续失败后已暂停。请查看运行历史，处理后再恢复。",
+      "insufficient_credits": "已阻塞：额度不足，无法运行。",
+      "tools_unavailable": "已阻塞：任务使用的资料或 MCP 服务已不可用。",
+      "auth_expired": "已阻塞：已连接的账号需要重新登录。"
+    },
+    "runStatus": {
+      "pending": "等待中",
+      "dispatching": "启动中",
+      "queued": "运行中",
+      "succeeded": "成功",
+      "failed": "失败",
+      "skipped": "已跳过",
+      "blocked": "已阻塞",
+      "cancelled": "已取消"
+    },
+    "skipReason": {
+      "missed_platform_down": "平台停机期间错过。",
+      "previous_run_active": "上一次运行尚未结束。",
+      "user_concurrency_limit": "你同时运行的任务过多。",
+      "user_daily_cap": "已达到每日定时运行上限。",
+      "insufficient_credits": "额度不足。",
+      "owner_left": "负责人已离开该工作区。",
+      "tools_unavailable": "资料或 MCP 服务不可用。",
+      "auth_expired": "已连接的账号需要重新登录。",
+      "rate_limited": "短时间内运行次数过多。"
+    },
+    "trigger": {
+      "schedule": "定时",
+      "manual": "立即运行",
+      "api": "API",
+      "event": "事件"
+    },
+    "errors": {
+      "generic": "出错了，请重试。",
+      "AGENT_TASK_LIMIT_REACHED": "已达到当前套餐的启用任务数上限。请先暂停或删除一个任务。",
+      "AGENT_TASK_RUN_RATE_LIMITED": "本小时手动运行次数过多，请稍后再试。",
+      "AGENT_TASK_RUN_CONFLICT": "该任务正在运行。",
+      "AGENT_TASK_INVALID_STATE": "该任务当前不能执行此操作。",
+      "AGENT_TASK_VERSION_CONFLICT": "该任务已在别处被修改。请重新打开后再试。",
+      "AGENT_TASK_NOT_FOUND": "该任务已不存在。",
+      "AGENT_TASK_SCHEDULE_INVALID": "该时间安排无效。运行间隔至少 1 小时，且必须在未来。"
+    },
+    "toasts": {
+      "runStarted": "已开始运行",
+      "paused": "任务已暂停",
+      "resumed": "任务已恢复",
+      "enabled": "任务已启用",
+      "deleted": "任务已删除",
+      "saved": "任务已保存",
+      "created": "任务已创建"
+    },
+    "frequency": {
+      "daily": "每天",
+      "weekdays": "工作日",
+      "weekly": "每周的某几天",
+      "once": "仅一次",
+      "cron": "Cron 规则",
+      "manual": "仅手动运行"
+    },
+    "form": {
+      "title": "新建定时任务",
+      "editTitle": "编辑定时任务",
+      "description": "保存一段提示词，按时间安排以你的身份运行，并把结果放进一个新对话。",
+      "name": "名称",
+      "namePlaceholder": "每日早报",
+      "prompt": "提示词",
+      "promptPlaceholder": "每次执行，助手应该做什么？",
+      "promptHint": "执行期间无人看守，只能读取和总结，不能修改任何内容。",
+      "frequency": "重复",
+      "time": "时间",
+      "runAt": "日期和时间",
+      "cron": "Cron 规则（5 段）",
+      "days": "星期",
+      "timezone": "时区",
+      "manualHint": "该任务没有时间安排。保存后，可随时点“立即运行”。",
+      "nextRuns": "接下来的几次运行",
+      "previewLoading": "正在检查时间安排…",
+      "previewEmpty": "填好时间安排后可预览接下来的几次运行。",
+      "offsetHint": "实际运行可能比所示时间晚最多 {minutes} 分钟。",
+      "webAccess": "允许联网搜索",
+      "webAccessHint": "允许任务搜索并阅读公开网页。",
+      "notifyOnSuccess": "运行成功时通知我",
+      "notifyEmail": "出问题时也发邮件给我",
+      "notifyEmailHint": "包括失败、暂停和被阻塞的运行。",
+      "mcp": "MCP 服务",
+      "mcpHint": "只会使用这些服务的只读工具。",
+      "readOnlyNote": "定时运行是只读的：不能写文件、发布产物，也不能向你提问。",
+      "cancel": "取消",
+      "save": "保存",
+      "saveDraft": "存为草稿",
+      "createAndEnable": "创建并启用"
+    },
+    "actions": {
+      "open": "{name} 的操作",
+      "runNow": "立即运行",
+      "pause": "暂停",
+      "resume": "恢复",
+      "enable": "启用",
+      "edit": "编辑",
+      "delete": "删除"
+    },
+    "delete": {
+      "title": "删除“{name}”？",
+      "body": "任务将停止运行，已有的运行记录和对话会保留。"
+    },
+    "list": {
+      "nextRun": "下次运行 {at}"
+    },
+    "page": {
+      "title": "定时任务",
+      "subtitle": "按时间安排运行的提示词，结果会放进对话里。",
+      "new": "新建任务",
+      "tabTasks": "任务",
+      "tabInbox": "通知",
+      "loading": "加载中…",
+      "loadError": "无法加载定时任务。",
+      "emptyTitle": "还没有定时任务",
+      "emptyBody": "保存一次提示词，让它每天早上、每周一或你指定的时间自动运行。"
+    },
+    "detail": {
+      "back": "全部任务",
+      "notFound": "未找到该任务。",
+      "prompt": "提示词",
+      "history": "运行历史",
+      "noRuns": "还没有运行记录。",
+      "catchUp": "补跑",
+      "openResult": "打开结果"
+    },
+    "inbox": {
+      "loading": "加载中…",
+      "loadError": "无法加载通知。",
+      "empty": "暂无通知。",
+      "repeated": "{count} 次",
+      "loadMore": "加载更多",
+      "markAllRead": "全部标为已读"
+    },
+    "bell": {
+      "label": "通知",
+      "labelUnread": "通知，{count} 条未读",
+      "title": "通知",
+      "viewAll": "查看全部"
+    },
+    "notification": {
+      "task_run_succeeded": "“{taskName}”已完成。",
+      "task_run_failed": "“{taskName}”运行失败。",
+      "task_run_catch_up": "“{taskName}”已补跑之前错过的一次。",
+      "task_blocked_quota": "“{taskName}”未能运行：额度不足。",
+      "task_needs_approval": "“{taskName}”需要你的批准。",
+      "task_paused_owner_left": "“{taskName}”因负责人离开而暂停。",
+      "task_tools_unavailable": "“{taskName}”无法运行：它使用的资料或 MCP 服务不可用。",
+      "task_paused_repeated_failure": "“{taskName}”连续失败后已暂停。",
+      "unknown": "关于“{taskName}”的更新。"
+    },
+    "composer": {
+      "schedule": "按时间安排运行"
+    }
   }
 }

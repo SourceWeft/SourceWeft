@@ -16,6 +16,7 @@ import {
   registerMcpOAuthCallbackRoutes,
   registerMcpRoutes,
 } from "./content/mcp";
+import { registerNotificationRoutes } from "./content/notifications";
 import { registerSourceRoutes } from "./content/sources";
 import { registerSkillRoutes } from "./content/skills";
 import { registerSkillSubmissionRoutes } from "./content/skill-submissions";
@@ -31,6 +32,7 @@ export function registerContentRoutes(app: Hono) {
 
   registerAgentConfirmationRoutes(workspaceRoutes);
   registerAgentTaskRoutes(workspaceRoutes);
+  registerNotificationRoutes(workspaceRoutes);
   registerArtifactRoutes(workspaceRoutes);
   registerArtifactRecordRoutes(workspaceRoutes);
   registerArtifactNavigationRoutes(workspaceRoutes);

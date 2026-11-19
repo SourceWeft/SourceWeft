@@ -57,6 +57,7 @@ import {
   type PromptInputSegment,
   type PromptInputSlashCommand,
 } from "@sourceweft/ui-web/components/ai-elements/prompt-input";
+import { ComposerScheduleButton } from "../../../scheduled/_components/composer-schedule-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1750,6 +1751,9 @@ function ComposerBody({
             <PromptInputTools className="w-full flex-nowrap gap-2">
               {workingFolderSlot}
               <div className="flex min-w-0 items-center gap-1.5">
+                {dictationWorkspaceId ? (
+                  <ComposerScheduleButton workspaceId={dictationWorkspaceId} />
+                ) : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <PromptInputButton
