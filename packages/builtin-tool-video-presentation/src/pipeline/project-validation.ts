@@ -42,15 +42,20 @@ export const VIDEO_PROJECT_INSTALL_COMMAND =
  */
 export async function validateCanonicalProjectTree(input: {
   execute: (command: string) => Promise<SandboxExecuteLikeResult>;
+  /** Called before each command runs, so callers can report progress. */
+  onStage?: (stage: "install" | "typecheck" | "smoke") => void;
 }): Promise<CanonicalProjectValidationResult> {
   const run = async (command: string) =>
     projectExecutionResultFromSandbox(await input.execute(command));
   // The dependency manifest and lockfile are host-generated and pinned.
   // Generated scene code never gets package lifecycle-script authority.
+  input.onStage?.("install");
   const install = await run(VIDEO_PROJECT_INSTALL_COMMAND);
+  if (install.ok) input.onStage?.("typecheck");
   const typecheck = install.ok
     ? await run("pnpm run build")
     : { ok: false, diagnostics: [] };
+  if (install.ok && typecheck.ok) input.onStage?.("smoke");
   const smoke =
     install.ok && typecheck.ok
       ? { ...(await run("pnpm run render-smoke")), checked: true }

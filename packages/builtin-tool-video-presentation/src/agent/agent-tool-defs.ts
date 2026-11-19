@@ -1,4 +1,5 @@
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
+import { validateVideoPresentationPresentation } from "../presentation";
 import { createVideoModelTurnPreflight } from "./preflight";
 import {
   GENERATE_VIDEO_ASSETS_TOOL_NAME,
@@ -70,6 +71,7 @@ export const validateVideoPresentationAgentTool = defineAgentTool({
   name: VALIDATE_VIDEO_PRESENTATION_TOOL_NAME,
   domain: "artifact",
   capabilities: ["filesystem", "sandbox_execute", "sandbox_file_transfer"],
+  presentation: validateVideoPresentationPresentation,
   requirements: { modelKind: "vision", sandbox: true },
   activation,
   defaultPermission: "allow",
