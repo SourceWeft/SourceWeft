@@ -69,6 +69,10 @@ const SEARCH_MAX_LIMIT = 25;
 /** `searchSpaces` reads at most this many pages of {@link V2_MAX_LIMIT}. */
 const SPACE_SEARCH_MAX_PAGES = 5;
 
+/** Page titles are cut at the selection contract's entry-name limit, so a long
+ * title can never make a whole selection result fail validation. */
+const TITLE_MAX = 1024;
+
 const EXCERPT_MAX = 500;
 const HIGHLIGHT_MARKERS = /@@@(?:end)?hl@@@/g;
 
@@ -184,7 +188,7 @@ function toPageRef(raw: unknown): ConfluencePageRef | null {
   if (!id) return null;
   return {
     id,
-    title: safeString(value.title, 2000) ?? "",
+    title: safeString(value.title, TITLE_MAX) ?? "",
     spaceId: idString(value.spaceId),
     parentId: idString(value.parentId),
     status: safeString(value.status, 64),
@@ -241,7 +245,7 @@ function toSearchHit(raw: unknown, base: unknown): ConfluenceSearchHit | null {
   const excerpt = typeof value.excerpt === "string" ? value.excerpt : "";
   return {
     pageId,
-    title: safeString(value.title, 2000) ?? safeString(content.title, 2000) ?? "",
+    title: safeString(value.title, TITLE_MAX) ?? safeString(content.title, TITLE_MAX) ?? "",
     excerpt: excerpt.replace(HIGHLIGHT_MARKERS, "").slice(0, EXCERPT_MAX),
     lastModified: safeString(value.lastModified, 64),
     webUrl: joinWebUrl(base, value.url),

@@ -369,6 +369,21 @@ test("getPagesByIds never returns a page that was not asked for", async () => {
   );
 });
 
+test("page titles are cut at the selection name limit", async () => {
+  const { fetcher } = recordingFetcher(() =>
+    json({
+      results: [
+        { id: "1", status: "current", title: "t".repeat(3000), spaceId: "9" },
+      ],
+    }),
+  );
+  const client = createConfluenceClient(config(fetcher));
+
+  const pages = await client.getPagesByIds(TOKEN, CLOUD_ID, ["1"]);
+
+  assert.equal(pages[0]?.title, "t".repeat(1024));
+});
+
 test("getPagesByIds with no ids makes no request", async () => {
   const { fetcher, calls } = recordingFetcher(() => json({ results: [] }));
   const client = createConfluenceClient(config(fetcher));
