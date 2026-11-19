@@ -1,8 +1,8 @@
 diff --git a/dist/chat_models.cjs b/dist/chat_models.cjs
-index 00da70163b694aaf05f45e545624494aa3e52bf6..413b147ae0998e5c7573c6d77c78bc723ebf0bd0 100644
+index 9b87d5f84c4d2c98ffce46942007522e7ea1f5b3..0d6950561373a2da0d97b3432cc392a6d8ae1090 100644
 --- a/dist/chat_models.cjs
 +++ b/dist/chat_models.cjs
-@@ -416,6 +416,7 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
+@@ -418,6 +418,7 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
  	convertSystemMessageToHumanContent;
  	thinkingConfig;
  	client;
@@ -10,21 +10,21 @@ index 00da70163b694aaf05f45e545624494aa3e52bf6..413b147ae0998e5c7573c6d77c78bc72
  	get _isMultimodalModel() {
  		return this.model.includes("vision") || this.model.startsWith("gemini-1.5") || this.model.startsWith("gemini-2") || this.model.startsWith("gemma-3-") && !this.model.startsWith("gemma-3-1b") || this.model.startsWith("gemini-3");
  	}
-@@ -446,6 +447,7 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
+@@ -453,6 +454,7 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
  		this.streaming = fields.streaming ?? this.streaming;
  		this.json = fields.json;
  		this.thinkingConfig = fields.thinkingConfig ?? this.thinkingConfig;
-+		this.requestOptions = { apiVersion: fields.apiVersion, baseUrl: fields.baseUrl, customHeaders: fields.customHeaders, fetch: fields.fetch };
++		this.requestOptions = { apiVersion: fields.apiVersion, baseUrl: this.baseUrl, customHeaders: fields.customHeaders, fetch: fields.fetch };
  		this.client = new _google_generative_ai.GoogleGenerativeAI(this.apiKey).getGenerativeModel({
  			model: this.model,
  			safetySettings: this.safetySettings,
-@@ -458,16 +460,12 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
+@@ -465,18 +467,15 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
  				...this.json ? { responseMimeType: "application/json" } : {},
  				...this.thinkingConfig ? { thinkingConfig: this.thinkingConfig } : {}
  			}
 -		}, {
 -			apiVersion: fields.apiVersion,
--			baseUrl: fields.baseUrl,
+-			baseUrl: this.baseUrl,
 -			customHeaders: fields.customHeaders
 -		});
 +		}, this.requestOptions);
@@ -32,12 +32,16 @@ index 00da70163b694aaf05f45e545624494aa3e52bf6..413b147ae0998e5c7573c6d77c78bc72
  	}
  	useCachedContent(cachedContent, modelParams, requestOptions) {
  		if (!this.apiKey) return;
--		this.client = new _google_generative_ai.GoogleGenerativeAI(this.apiKey).getGenerativeModelFromCachedContent(cachedContent, modelParams, requestOptions);
-+		this.client = new _google_generative_ai.GoogleGenerativeAI(this.apiKey).getGenerativeModelFromCachedContent(cachedContent, modelParams, { ...this.requestOptions, ...requestOptions, fetch: this.requestOptions.fetch });
+ 		const resolvedRequestOptions = {
+-			baseUrl: this.baseUrl,
+-			...requestOptions
++			...this.requestOptions,
++			...requestOptions,
++			fetch: this.requestOptions.fetch
+ 		};
+ 		this.client = new _google_generative_ai.GoogleGenerativeAI(this.apiKey).getGenerativeModelFromCachedContent(cachedContent, modelParams, resolvedRequestOptions);
  	}
- 	get useSystemInstruction() {
- 		return typeof this.convertSystemMessageToHumanContent === "boolean" ? !this.convertSystemMessageToHumanContent : this.computeUseSystemInstruction;
-@@ -551,7 +549,7 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
+@@ -572,7 +571,7 @@ var ChatGoogleGenerativeAI = class extends _langchain_core_language_models_chat_
  				llmOutput: { estimatedTokenUsage: tokenUsage }
  			};
  		}
@@ -47,10 +51,10 @@ index 00da70163b694aaf05f45e545624494aa3e52bf6..413b147ae0998e5c7573c6d77c78bc72
  		if ("usageMetadata" in res.response) usageMetadata = require_common.convertUsageMetadata(res.response.usageMetadata, this.model);
  		const generationResult = require_common.mapGenerateContentResultToChatResult(res.response, { usageMetadata });
 diff --git a/dist/chat_models.d.cts b/dist/chat_models.d.cts
-index 7df42d9099bb4c3702a52d03d9def4841e587c5d..a8aae508eda2fc3684d8050603982f2e08321869 100644
+index 217e3e2c7b62c9c58fa6d38625d9ca1bb776a145..7824121583db4926b4edb983c3e489707887bb24 100644
 --- a/dist/chat_models.d.cts
 +++ b/dist/chat_models.d.cts
-@@ -112,6 +112,8 @@ interface GoogleGenerativeAIChatInput extends BaseChatModelParams, Pick<GoogleGe
+@@ -109,6 +109,8 @@ export interface GoogleGenerativeAIChatInput extends BaseChatModelParams, Pick<G
     * Google API base URL to use
     */
    baseUrl?: string;
@@ -59,7 +63,7 @@ index 7df42d9099bb4c3702a52d03d9def4841e587c5d..a8aae508eda2fc3684d8050603982f2e
    /**
     * Google API custom headers to use
     */
-@@ -537,6 +539,7 @@ declare class ChatGoogleGenerativeAI extends BaseChatModel<GoogleGenerativeAICha
+@@ -535,6 +537,7 @@ export declare class ChatGoogleGenerativeAI extends BaseChatModel<GoogleGenerati
    convertSystemMessageToHumanContent: boolean | undefined;
    thinkingConfig?: GoogleGenerativeAIThinkingConfig;
    private client;
@@ -68,10 +72,10 @@ index 7df42d9099bb4c3702a52d03d9def4841e587c5d..a8aae508eda2fc3684d8050603982f2e
    constructor(model: ModelParams["model"], fields?: Omit<GoogleGenerativeAIChatInput, "model">);
    constructor(fields: GoogleGenerativeAIChatInput);
 diff --git a/dist/chat_models.d.ts b/dist/chat_models.d.ts
-index bfcb505c1a6ee21aeafcd30452865181f08c8aa0..0ba965f394f54fd8d5a1154acc7dc42c50f9dbdd 100644
+index a38c54119b00c73841e84942ff74479839faf3ef..045775780b630e63e217503c6b3af84a766b73d1 100644
 --- a/dist/chat_models.d.ts
 +++ b/dist/chat_models.d.ts
-@@ -112,6 +112,8 @@ interface GoogleGenerativeAIChatInput extends BaseChatModelParams, Pick<GoogleGe
+@@ -109,6 +109,8 @@ export interface GoogleGenerativeAIChatInput extends BaseChatModelParams, Pick<G
     * Google API base URL to use
     */
    baseUrl?: string;
@@ -80,7 +84,7 @@ index bfcb505c1a6ee21aeafcd30452865181f08c8aa0..0ba965f394f54fd8d5a1154acc7dc42c
    /**
     * Google API custom headers to use
     */
-@@ -537,6 +539,7 @@ declare class ChatGoogleGenerativeAI extends BaseChatModel<GoogleGenerativeAICha
+@@ -535,6 +537,7 @@ export declare class ChatGoogleGenerativeAI extends BaseChatModel<GoogleGenerati
    convertSystemMessageToHumanContent: boolean | undefined;
    thinkingConfig?: GoogleGenerativeAIThinkingConfig;
    private client;
@@ -89,10 +93,10 @@ index bfcb505c1a6ee21aeafcd30452865181f08c8aa0..0ba965f394f54fd8d5a1154acc7dc42c
    constructor(model: ModelParams["model"], fields?: Omit<GoogleGenerativeAIChatInput, "model">);
    constructor(fields: GoogleGenerativeAIChatInput);
 diff --git a/dist/chat_models.js b/dist/chat_models.js
-index d917bc182184d15de8ddc4507174cecc9de86448..adb6a5aec382268dc7c5968361e091857f908021 100644
+index 66cd268bf5c62ce80eb71af3d95275b8bb97d869..1ae506a2e160f14137087e9c8694a34af4a04c63 100644
 --- a/dist/chat_models.js
 +++ b/dist/chat_models.js
-@@ -416,6 +416,7 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
+@@ -418,6 +418,7 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
  	convertSystemMessageToHumanContent;
  	thinkingConfig;
  	client;
@@ -100,21 +104,21 @@ index d917bc182184d15de8ddc4507174cecc9de86448..adb6a5aec382268dc7c5968361e09185
  	get _isMultimodalModel() {
  		return this.model.includes("vision") || this.model.startsWith("gemini-1.5") || this.model.startsWith("gemini-2") || this.model.startsWith("gemma-3-") && !this.model.startsWith("gemma-3-1b") || this.model.startsWith("gemini-3");
  	}
-@@ -446,6 +447,7 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
+@@ -453,6 +454,7 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
  		this.streaming = fields.streaming ?? this.streaming;
  		this.json = fields.json;
  		this.thinkingConfig = fields.thinkingConfig ?? this.thinkingConfig;
-+		this.requestOptions = { apiVersion: fields.apiVersion, baseUrl: fields.baseUrl, customHeaders: fields.customHeaders, fetch: fields.fetch };
++		this.requestOptions = { apiVersion: fields.apiVersion, baseUrl: this.baseUrl, customHeaders: fields.customHeaders, fetch: fields.fetch };
  		this.client = new GoogleGenerativeAI(this.apiKey).getGenerativeModel({
  			model: this.model,
  			safetySettings: this.safetySettings,
-@@ -458,16 +460,12 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
+@@ -465,18 +467,15 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
  				...this.json ? { responseMimeType: "application/json" } : {},
  				...this.thinkingConfig ? { thinkingConfig: this.thinkingConfig } : {}
  			}
 -		}, {
 -			apiVersion: fields.apiVersion,
--			baseUrl: fields.baseUrl,
+-			baseUrl: this.baseUrl,
 -			customHeaders: fields.customHeaders
 -		});
 +		}, this.requestOptions);
@@ -122,12 +126,16 @@ index d917bc182184d15de8ddc4507174cecc9de86448..adb6a5aec382268dc7c5968361e09185
  	}
  	useCachedContent(cachedContent, modelParams, requestOptions) {
  		if (!this.apiKey) return;
--		this.client = new GoogleGenerativeAI(this.apiKey).getGenerativeModelFromCachedContent(cachedContent, modelParams, requestOptions);
-+		this.client = new GoogleGenerativeAI(this.apiKey).getGenerativeModelFromCachedContent(cachedContent, modelParams, { ...this.requestOptions, ...requestOptions, fetch: this.requestOptions.fetch });
+ 		const resolvedRequestOptions = {
+-			baseUrl: this.baseUrl,
+-			...requestOptions
++			...this.requestOptions,
++			...requestOptions,
++			fetch: this.requestOptions.fetch
+ 		};
+ 		this.client = new GoogleGenerativeAI(this.apiKey).getGenerativeModelFromCachedContent(cachedContent, modelParams, resolvedRequestOptions);
  	}
- 	get useSystemInstruction() {
- 		return typeof this.convertSystemMessageToHumanContent === "boolean" ? !this.convertSystemMessageToHumanContent : this.computeUseSystemInstruction;
-@@ -551,7 +549,7 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
+@@ -572,7 +571,7 @@ var ChatGoogleGenerativeAI = class extends BaseChatModel {
  				llmOutput: { estimatedTokenUsage: tokenUsage }
  			};
  		}
@@ -137,11 +145,11 @@ index d917bc182184d15de8ddc4507174cecc9de86448..adb6a5aec382268dc7c5968361e09185
  		if ("usageMetadata" in res.response) usageMetadata = convertUsageMetadata(res.response.usageMetadata, this.model);
  		const generationResult = mapGenerateContentResultToChatResult(res.response, { usageMetadata });
 diff --git a/dist/embeddings.cjs b/dist/embeddings.cjs
-index dca08bd5b16cdfedbea4326a47aaca880687cf6a..6caa216bc819b1a0e2380a99ab370ef4d6a51083 100644
+index 6fe7089584d7e3ffdce80a95b9a73515135d8cbe..693ef601b6918ccbc234ee9949bbc161ab5b5ece 100644
 --- a/dist/embeddings.cjs
 +++ b/dist/embeddings.cjs
-@@ -33,16 +33,18 @@ var GoogleGenerativeAIEmbeddings = class extends _langchain_core_embeddings.Embe
- 	stripNewLines = true;
+@@ -34,17 +34,19 @@ var GoogleGenerativeAIEmbeddings = class extends _langchain_core_embeddings.Embe
+ 	outputDimensionality;
  	maxBatchSize = 100;
  	client;
 +	signal;
@@ -152,6 +160,7 @@ index dca08bd5b16cdfedbea4326a47aaca880687cf6a..6caa216bc819b1a0e2380a99ab370ef4
  		this.taskType = fields?.taskType ?? this.taskType;
  		this.title = fields?.title ?? this.title;
 +		this.signal = fields?.signal;
+ 		this.outputDimensionality = fields?.outputDimensionality;
  		if (this.title && this.taskType !== "RETRIEVAL_DOCUMENT") throw new Error("title can only be sepcified with TaskType.RETRIEVAL_DOCUMENT");
  		this.apiKey = fields?.apiKey ?? (0, _langchain_core_utils_env.getEnvironmentVariable)("GOOGLE_API_KEY");
  		if (!this.apiKey) throw new Error("Please set an API key for Google GenerativeAI in the environmentb variable GOOGLE_API_KEY or in the `apiKey` field of the GoogleGenerativeAIEmbeddings constructor");
@@ -160,7 +169,7 @@ index dca08bd5b16cdfedbea4326a47aaca880687cf6a..6caa216bc819b1a0e2380a99ab370ef4
  	}
  	_convertToContent(text) {
  		return {
-@@ -56,14 +58,14 @@ var GoogleGenerativeAIEmbeddings = class extends _langchain_core_embeddings.Embe
+@@ -59,14 +61,14 @@ var GoogleGenerativeAIEmbeddings = class extends _langchain_core_embeddings.Embe
  	}
  	async _embedQueryContent(text) {
  		const req = this._convertToContent(text);
@@ -179,10 +188,10 @@ index dca08bd5b16cdfedbea4326a47aaca880687cf6a..6caa216bc819b1a0e2380a99ab370ef4
  	}
  	/**
 diff --git a/dist/embeddings.d.cts b/dist/embeddings.d.cts
-index 707f1ef2e0788b0bfa02a40c7ea05498705e7f81..8e4341f3fe11c5349ad9bae552e03eb483ed05fc 100644
+index 675d9ae2a1ceb4ad692cad8b92ccc8caf7078866..6f6238e6f5f66f138df3fb78236e00139bbcdaa6 100644
 --- a/dist/embeddings.d.cts
 +++ b/dist/embeddings.d.cts
-@@ -46,6 +46,10 @@ interface GoogleGenerativeAIEmbeddingsParams extends EmbeddingsParams {
+@@ -49,6 +49,10 @@ export interface GoogleGenerativeAIEmbeddingsParams extends EmbeddingsParams {
     * Google API base URL to use
     */
    baseUrl?: string;
@@ -193,8 +202,8 @@ index 707f1ef2e0788b0bfa02a40c7ea05498705e7f81..8e4341f3fe11c5349ad9bae552e03eb4
  }
  /**
   * Class that extends the Embeddings class and provides methods for
-@@ -77,6 +81,7 @@ declare class GoogleGenerativeAIEmbeddings extends Embeddings implements GoogleG
-   stripNewLines: boolean;
+@@ -81,6 +85,7 @@ export declare class GoogleGenerativeAIEmbeddings extends Embeddings implements
+   outputDimensionality?: number;
    maxBatchSize: number;
    private client;
 +  signal?: AbortSignal;
@@ -202,10 +211,10 @@ index 707f1ef2e0788b0bfa02a40c7ea05498705e7f81..8e4341f3fe11c5349ad9bae552e03eb4
    private _convertToContent;
    protected _embedQueryContent(text: string): Promise<number[]>;
 diff --git a/dist/embeddings.d.ts b/dist/embeddings.d.ts
-index b9423c89a7c0486714a6de737d11b4b3a77f6f25..ed143e3d25320e8d65aaef56e04d0c15dfa52738 100644
+index 5179ce9cd5873471f6286d75a7c4394f3c6a9b76..c8804bb379ec4d675493e880dadf39943752331a 100644
 --- a/dist/embeddings.d.ts
 +++ b/dist/embeddings.d.ts
-@@ -46,6 +46,10 @@ interface GoogleGenerativeAIEmbeddingsParams extends EmbeddingsParams {
+@@ -49,6 +49,10 @@ export interface GoogleGenerativeAIEmbeddingsParams extends EmbeddingsParams {
     * Google API base URL to use
     */
    baseUrl?: string;
@@ -216,8 +225,8 @@ index b9423c89a7c0486714a6de737d11b4b3a77f6f25..ed143e3d25320e8d65aaef56e04d0c15
  }
  /**
   * Class that extends the Embeddings class and provides methods for
-@@ -77,6 +81,7 @@ declare class GoogleGenerativeAIEmbeddings extends Embeddings implements GoogleG
-   stripNewLines: boolean;
+@@ -81,6 +85,7 @@ export declare class GoogleGenerativeAIEmbeddings extends Embeddings implements
+   outputDimensionality?: number;
    maxBatchSize: number;
    private client;
 +  signal?: AbortSignal;
@@ -225,11 +234,11 @@ index b9423c89a7c0486714a6de737d11b4b3a77f6f25..ed143e3d25320e8d65aaef56e04d0c15
    private _convertToContent;
    protected _embedQueryContent(text: string): Promise<number[]>;
 diff --git a/dist/embeddings.js b/dist/embeddings.js
-index 27387b61ba79c5ada4b489baab7cdc2abf9def97..aaecdc7daa8a28bb4435d1d842c6cdced8a60a42 100644
+index d569784415ef0ca84dcbd89d71e008ddede530f5..dfb6306b209ac4b23d0f31a963c1a76d9b414a80 100644
 --- a/dist/embeddings.js
 +++ b/dist/embeddings.js
-@@ -33,16 +33,18 @@ var GoogleGenerativeAIEmbeddings = class extends Embeddings {
- 	stripNewLines = true;
+@@ -34,17 +34,19 @@ var GoogleGenerativeAIEmbeddings = class extends Embeddings {
+ 	outputDimensionality;
  	maxBatchSize = 100;
  	client;
 +	signal;
@@ -240,6 +249,7 @@ index 27387b61ba79c5ada4b489baab7cdc2abf9def97..aaecdc7daa8a28bb4435d1d842c6cdce
  		this.taskType = fields?.taskType ?? this.taskType;
  		this.title = fields?.title ?? this.title;
 +		this.signal = fields?.signal;
+ 		this.outputDimensionality = fields?.outputDimensionality;
  		if (this.title && this.taskType !== "RETRIEVAL_DOCUMENT") throw new Error("title can only be sepcified with TaskType.RETRIEVAL_DOCUMENT");
  		this.apiKey = fields?.apiKey ?? getEnvironmentVariable("GOOGLE_API_KEY");
  		if (!this.apiKey) throw new Error("Please set an API key for Google GenerativeAI in the environmentb variable GOOGLE_API_KEY or in the `apiKey` field of the GoogleGenerativeAIEmbeddings constructor");
@@ -248,7 +258,7 @@ index 27387b61ba79c5ada4b489baab7cdc2abf9def97..aaecdc7daa8a28bb4435d1d842c6cdce
  	}
  	_convertToContent(text) {
  		return {
-@@ -56,14 +58,14 @@ var GoogleGenerativeAIEmbeddings = class extends Embeddings {
+@@ -59,14 +61,14 @@ var GoogleGenerativeAIEmbeddings = class extends Embeddings {
  	}
  	async _embedQueryContent(text) {
  		const req = this._convertToContent(text);

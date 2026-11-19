@@ -46,7 +46,7 @@ conversion. They do not install a global fetch override or switch protocols.
   wrapped error causes, propagate already-aborted signals, and prevent the
   unused aggregate streaming promise from causing an unhandled rejection.
   The returned aggregate promise and the primary stream still reject on error.
-- `@langchain/google-genai@2.2.0`: pass fetch to chat and embedding requests,
+- `@langchain/google-genai@2.3.6`: pass fetch to chat and embedding requests,
   retain it when using cached content, pass cancellation signals, and throw a
   failed embedding batch instead of substituting empty vectors.
 
@@ -64,7 +64,7 @@ pnpm install --no-frozen-lockfile --ignore-scripts
 pnpm install --frozen-lockfile --ignore-scripts
 ```
 
-Use the equivalent command for `@langchain/google-genai@2.2.0`. `pnpm patch`
+Use the equivalent command for `@langchain/google-genai@2.3.6`. `pnpm patch`
 applies the existing patch to a clean package; do not modify the installed
 `node_modules` directly. After changes, run the model-gateway tests and backend
 `src/shared/model-gateway/gemini-network.test.ts` against a local HTTP server.

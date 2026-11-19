@@ -144,7 +144,7 @@ Keep the patch and version pin when deploying; see [patch maintenance](../../../
   Cloudflare and SiliconFlow), Azure OpenAI and Anthropic use the supplied
   transport. Only capabilities already supported by each adapter are available.
 - Native Gemini chat, streaming, tool calls and embeddings use the supplied
-  transport through fixed patches to `@langchain/google-genai@2.2.0` and
+  transport through fixed patches to `@langchain/google-genai@2.3.6` and
   `@google/generative-ai@0.24.1`. The original protocol is retained, including
   cached-content transport settings. Embedding failures now throw instead of
   yielding empty vectors. Keep both patches when installing or deploying, and
