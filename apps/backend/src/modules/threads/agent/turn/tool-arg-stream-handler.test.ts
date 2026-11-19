@@ -6,6 +6,7 @@ import {
   type PartialToolArgStreamState,
 } from "./tool-arg-stream-handler";
 import type { TurnRuntime } from "./turn-runtime";
+import type { ToolArgDelta } from "./v3-protocol";
 
 function makeRuntime() {
   const sequenceById = new Map<string, number>();
@@ -25,11 +26,19 @@ function makeRuntime() {
   } as unknown as TurnRuntime;
 }
 
+// A fragment without a `kind` is fed as a `snapshot`, the shape every producer
+// sent before @langchain/core 1.3 (and the lenient one: a snapshot that does
+// not extend the buffer is appended).
 function feed(
   runtime: TurnRuntime,
-  delta: { index: number; id?: string; name?: string; args: string },
+  delta: Omit<ToolArgDelta, "kind"> & { kind?: ToolArgDelta["kind"] },
 ) {
-  return [...handleToolArgDeltaChunk({ delta, runtime })];
+  return [
+    ...handleToolArgDeltaChunk({
+      delta: { kind: "snapshot", ...delta },
+      runtime,
+    }),
+  ];
 }
 
 test("extractStreamableContent reads write_file content, ignores others", () => {
@@ -253,4 +262,82 @@ test("content streamed before its path still delivers the path once it parses", 
     [{ content: "print(1)", file_path: "/files/a.py" }],
     [],
   ]);
+});
+
+test("a block start followed by appended slices streams the growing content (@langchain/core 1.3)", () => {
+  // The id and name come once, on the block start; the slices carry neither.
+  const runtime = makeRuntime();
+  assert.deepEqual(
+    feed(runtime, {
+      kind: "start",
+      index: 1,
+      id: "c1",
+      name: "write_file",
+      args: "",
+    }),
+    [],
+  );
+  const slices = ['{"file_path":"/a.py",', '"content":"pri', "nt(1)", '"}'];
+  const inputs = slices.map((args) =>
+    feed(runtime, { kind: "append", index: 1, args }).map((event) =>
+      event.type === "tool-input-delta" ? event.input : null,
+    ),
+  );
+  assert.deepEqual(inputs, [
+    [],
+    [{ content: "pri", file_path: "/a.py" }],
+    [{ content: "print(1)", file_path: "/a.py" }],
+    [],
+  ]);
+});
+
+test("an appended slice is never mistaken for a snapshot of the buffer", () => {
+  // The buffer is `{` and the next slice also starts with `{`: as a snapshot
+  // it would replace the buffer and lose a brace.
+  const runtime = makeRuntime();
+  feed(runtime, {
+    kind: "start",
+    index: 0,
+    id: "c1",
+    name: "write_file",
+    args: "",
+  });
+  feed(runtime, { kind: "append", index: 0, args: "{" });
+  feed(runtime, { kind: "append", index: 0, args: '{"content":"x"}' });
+  assert.equal(
+    runtime.partialToolArgsBySlot.get("0")?.args,
+    '{{"content":"x"}',
+  );
+});
+
+test("a new block start in an occupied slot discards the previous call's buffer", () => {
+  // Block indexes restart with every model message, so the next message's
+  // first tool call reuses slot 0.
+  const runtime = makeRuntime();
+  feed(runtime, {
+    kind: "start",
+    index: 0,
+    id: "c1",
+    name: "write_file",
+    args: "",
+  });
+  feed(runtime, { kind: "append", index: 0, args: '{"content":"old' });
+  feed(runtime, {
+    kind: "start",
+    index: 0,
+    id: "c2",
+    name: "write_file",
+    args: "",
+  });
+  const events = feed(runtime, {
+    kind: "append",
+    index: 0,
+    args: '{"content":"new"}',
+  });
+  assert.deepEqual(
+    events.map((event) =>
+      event.type === "tool-input-delta" ? [event.id, event.input] : null,
+    ),
+    [["c2", { content: "new" }]],
+  );
 });

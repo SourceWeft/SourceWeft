@@ -35,11 +35,46 @@ test("adaptToolArgDelta extracts a tool_call_chunk fragment", () => {
     },
   });
   assert.deepEqual(delta, {
+    kind: "snapshot",
     index: 2,
     id: "call_9",
     name: "write_file",
     args: '{"content":"pri',
   });
+});
+
+test("adaptToolArgDelta reads a tool-call block start and its appended slices", () => {
+  // @langchain/core 1.3: identity on content-block-start, args as slices.
+  assert.deepEqual(
+    adaptToolArgDelta({
+      event: "content-block-start",
+      index: 1,
+      content: {
+        type: "tool_call_chunk",
+        id: "call_9",
+        name: "write_file",
+        args: "",
+      },
+    }),
+    { kind: "start", index: 1, id: "call_9", name: "write_file", args: "" },
+  );
+  assert.deepEqual(
+    adaptToolArgDelta({
+      event: "content-block-delta",
+      index: 1,
+      delta: { type: "tool-call-delta", args: '{"content":"pri' },
+    }),
+    { kind: "append", index: 1, args: '{"content":"pri' },
+  );
+  // A text block opening is not a tool call.
+  assert.equal(
+    adaptToolArgDelta({
+      event: "content-block-start",
+      index: 0,
+      content: { type: "text", text: "" },
+    }),
+    null,
+  );
 });
 
 test("adaptToolArgDelta ignores text/reasoning deltas", () => {
@@ -430,13 +465,13 @@ describe("v3-tool-error-rejection", () => {
     return methods;
   }
 
-  test("reading only the event stream leaves the tool's rejected output promise unhandled", async () => {
+  test("the raw event stream no longer leaks the tool's rejected output promise (langchain 1.6)", async () => {
+    // Up to langchain 1.5 this leaked an unhandled rejection, which is why
+    // adoptV3RunStream observes the per-tool output promises. langchain 1.6
+    // handles them itself; the guard stays as a second line of defence, and
+    // this test says so if a later version starts leaking again.
     await runFailingTurn((raw) => raw);
-    assert.ok(
-      unhandled.length > 0,
-      "expected the raw v3 stream to leak an unhandled rejection — if langchain fixed this upstream, adoptV3RunStream's guard can go",
-    );
-    assert.match(String(unhandled[0]), /SANDBOX_NOT_READY_OR_UNHEALTHY/);
+    assert.deepEqual(unhandled, []);
   });
 
   test("adoptV3RunStream observes it, so a failing tool cannot take the process down", async () => {

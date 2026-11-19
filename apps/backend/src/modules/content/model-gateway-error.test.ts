@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { ModelRefusalError } from "@langchain/core/errors";
 import { ModelGatewayError } from "../../shared/model-gateway/errors";
 import { test } from "vitest";
 import { ContentError } from "./errors";
@@ -10,6 +11,8 @@ import {
   MODEL_OUTPUT_TRUNCATED_CODE,
   MODEL_OUTPUT_TRUNCATED_MESSAGE,
   MODEL_REASONING_BUDGET_EXCEEDED_CODE,
+  MODEL_REFUSED_CODE,
+  MODEL_REFUSED_MESSAGE,
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
   sanitizeClientErrorMessage,
   toContentError,
@@ -379,4 +382,27 @@ test("toContentError returns an already-mapped ContentError unchanged, directly 
   // Without the passthrough, the non-gateway code would fall through to the
   // generic upstream mapping and the retry policy would lose its code budget.
   assert.notEqual(toContentError(mapped).code, "MODEL_UPSTREAM_ERROR");
+});
+
+test("a model refusal maps to MODEL_REFUSED with a fixed message and is never retried", () => {
+  // Deep Agents raises a provider refusal as ModelRefusalError; middleware
+  // listed after it wraps the error, so it can sit down the cause chain.
+  const refusal = ModelRefusalError.fromRefusal(
+    { type: "refusal", refusal: "I can't help with SECRET-DETAIL." } as never,
+    undefined as never,
+  );
+  const wrapped = Object.assign(new Error("middleware failed"), {
+    cause: refusal,
+  });
+
+  for (const error of [refusal, wrapped]) {
+    const mapped = toContentError(error);
+    assert.equal(mapped.code, MODEL_REFUSED_CODE);
+    assert.equal(mapped.statusCode, 422);
+    // The model's own refusal text is not forwarded to the client.
+    assert.equal(mapped.message, MODEL_REFUSED_MESSAGE);
+    assert.equal(isModelUpstreamContentErrorCode(mapped.code), false);
+    assert.equal(isRetryableModelContentError(mapped), false);
+    assert.equal(isRetryableModelContentError(error), false);
+  }
 });

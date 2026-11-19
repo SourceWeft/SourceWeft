@@ -1,13 +1,13 @@
 /**
  * End-to-end validation of the load-bearing assumption behind sub-agent tool
- * grouping: that under LangGraph `subgraphs: true`, a `task` delegate's tool
- * events arrive with a namespace whose segment marks the sub-agent, while the
- * main agent's events do not — and that `classifyStreamNamespace` reads the real
- * shape correctly.
+ * grouping: that in the v3 event stream the runner reads, a `task` delegate's
+ * tool events arrive with a namespace whose depth marks the sub-agent, while
+ * the main agent's events do not — and that `isSubagentNamespace` reads the
+ * real shape correctly.
  *
  * This drives a REAL `createDeepAgent` graph (deepagents composes the actual
  * `task` tool + sub-agent subgraph) with a scripted model, and inspects the raw
- * stream chunks — no mocking of the namespace.
+ * stream events — no mocking of the namespace.
  */
 import assert from "node:assert/strict";
 import { test } from "vitest";
@@ -22,6 +22,7 @@ import {
   recordToolCallNamespace,
   resolveToolProducer,
 } from "./subagent-namespace";
+import { adaptToolsEvent } from "./v3-protocol";
 import type { ToolCallTrace } from "../..";
 
 const ECHO_MARKER = "ECHO_SUBAGENT_MARKER";
@@ -104,7 +105,7 @@ function buildEchoSubagent(): SubAgent {
   };
 }
 
-test("subgraphs:true tags a delegate's tool events with a sub-agent namespace", async () => {
+test("the v3 stream tags a delegate's tool events with a sub-agent namespace", async () => {
   const model = scriptedModel();
   const agent = createDeepAgent({
     model: model as never,
@@ -113,46 +114,42 @@ test("subgraphs:true tags a delegate's tool events with a sub-agent namespace", 
     subagents: [buildEchoSubagent()],
   } as never);
 
+  // The stream the runner reads: `streamEvents` v3, whose namespaces keep the
+  // `subgraphs: true` scheme. (The plain `stream` API changed its `tools`
+  // namespaces in @langchain/langgraph 1.6; v3 did not.)
   const stream = (await (
     agent as never as {
-      stream: (
+      streamEvents: (
         input: unknown,
         config: unknown,
       ) => Promise<AsyncIterable<unknown>>;
     }
-  ).stream(
+  ).streamEvents(
     { messages: [new HumanMessage("please echo")] },
     {
       configurable: { thread_id: "subgraph_e2e" },
-      streamMode: ["messages", "tools", "updates"],
-      subgraphs: true,
+      version: "v3",
       recursionLimit: 25,
     },
-  )) as AsyncIterable<unknown>;
+  )) as AsyncIterable<{
+    method?: string;
+    params?: { namespace?: unknown; data?: unknown };
+  }>;
 
   const toolChunks: { namespace: unknown; payload: Record<string, unknown> }[] =
     [];
-  let sawThreeTuple = false;
-  for await (const chunk of stream) {
-    if (!Array.isArray(chunk) || chunk.length < 2) {
+  const toolNameByCallId = new Map<string, string>();
+  for await (const event of stream) {
+    if (event?.method !== "tools") {
       continue;
     }
-    const hasNamespace = Array.isArray(chunk[0]);
-    if (hasNamespace) {
-      sawThreeTuple = true;
-    }
-    const namespace = hasNamespace ? chunk[0] : [];
-    const mode = hasNamespace ? chunk[1] : chunk[0];
-    const payload = hasNamespace ? chunk[2] : chunk[1];
-    if (
-      mode === "tools" &&
-      payload &&
-      typeof payload === "object" &&
-      !Array.isArray(payload)
-    ) {
+    const payload = adaptToolsEvent(event.params?.data, toolNameByCallId);
+    if (payload?.event === "on_tool_start") {
       toolChunks.push({
-        namespace,
-        payload: payload as Record<string, unknown>,
+        namespace: Array.isArray(event.params?.namespace)
+          ? event.params?.namespace
+          : [],
+        payload: payload as unknown as Record<string, unknown>,
       });
     }
   }
@@ -167,8 +164,6 @@ test("subgraphs:true tags a delegate's tool events with a sub-agent namespace", 
       })),
     ),
   );
-
-  assert.ok(sawThreeTuple, "expected [namespace, mode, payload] chunks");
 
   const echoChunk = toolChunks.find((chunk) => chunk.payload.name === "echo");
   assert.ok(echoChunk, "expected an `echo` tool event from the sub-agent");

@@ -493,6 +493,9 @@ export async function* invokeDeepAgentTurn(input: {
       // values, even if a later checkpoint read fails. Its rejection must stay
       // visible; a failed summary cannot become an ordinary successful answer.
       const graphOutput = stream.interrupted ? undefined : await stream.output;
+      if (stream.interrupted) {
+        projector.pauseOpenTasks();
+      }
       const headState = await getAgentHeadStateOrNull(
         agent,
         runConfig as AgentRunnableConfig,

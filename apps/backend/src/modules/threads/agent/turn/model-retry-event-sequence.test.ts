@@ -482,7 +482,8 @@ test("the retry middleware bundle leaves the streamed v3 event sequence byte-ide
       "text-delta",
     ],
   );
-  assert.equal(baseline.argDeltas.length, 2);
+  // One block start (id and name) plus the two arg slices.
+  assert.equal(baseline.argDeltas.length, 3);
   assert.equal(
     baseline.assistantContent,
     "I will verify first.Here is the answer.",
@@ -584,8 +585,16 @@ test("an attempt that dies mid-stream is withdrawn by one segment-reset and the 
   // failure, the partial `content` streamed to the client as it was written,
   // and the reset names that call so the client can drop it.
   assert.deepEqual(
-    retried.argDeltas.slice(0, 2).map((delta) => (delta as { id: string }).id),
-    ["call-write", "call-write"],
+    retried.argDeltas
+      .slice(0, 2)
+      .map((delta) => [
+        (delta as { kind: string }).kind,
+        (delta as { id?: string }).id,
+      ]),
+    [
+      ["start", "call-write"],
+      ["append", undefined],
+    ],
   );
   const partial = retried.turn[4] as DeepAgentTurnEvent;
   assert.equal(partial.type, "tool-input-delta");
@@ -750,8 +759,16 @@ test("a tool call cut by the output limit is withdrawn by a segment-reset, never
     },
   ]);
   assert.deepEqual(
-    retried.argDeltas.slice(0, 2).map((delta) => (delta as { id: string }).id),
-    ["call-cut", "call-cut"],
+    retried.argDeltas
+      .slice(0, 2)
+      .map((delta) => [
+        (delta as { kind: string }).kind,
+        (delta as { id?: string }).id,
+      ]),
+    [
+      ["start", "call-cut"],
+      ["append", undefined],
+    ],
   );
   assert.ok(!retried.pendingToolArgIds.includes("call-cut"));
   assert.deepEqual(retried.pendingToolArgIds, clean.pendingToolArgIds);
@@ -1114,33 +1131,20 @@ test("a write_file call streams its growing content before the authoritative too
     thread: "seq-write-stream",
   });
 
-  // Core's v3 block-delta carries the call's ACCUMULATED args, with id and
-  // name on every delta, keyed by the tool_call_chunk's index.
+  // @langchain/core 1.3: the block start carries the call's id and name; the
+  // args follow as slices that carry neither, keyed by the block's index.
   assert.deepEqual(observed.argDeltas, [
     {
+      kind: "start",
       index: 2,
       id: "call-write",
       name: "write_file",
-      args: '{"file_path":"/notes.md",',
+      args: "",
     },
-    {
-      index: 2,
-      id: "call-write",
-      name: "write_file",
-      args: '{"file_path":"/notes.md","content":"hel',
-    },
-    {
-      index: 2,
-      id: "call-write",
-      name: "write_file",
-      args: '{"file_path":"/notes.md","content":"hello wor',
-    },
-    {
-      index: 2,
-      id: "call-write",
-      name: "write_file",
-      args: '{"file_path":"/notes.md","content":"hello world"}',
-    },
+    { kind: "append", index: 2, args: '{"file_path":"/notes.md",' },
+    { kind: "append", index: 2, args: '"content":"hel' },
+    { kind: "append", index: 2, args: "lo wor" },
+    { kind: "append", index: 2, args: 'ld"}' },
   ]);
 
   assert.deepEqual(toolInputDeltas(observed), [

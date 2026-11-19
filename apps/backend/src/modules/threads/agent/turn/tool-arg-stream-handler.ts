@@ -3,6 +3,7 @@ import { parsePartialJson } from "@langchain/core/output_parsers";
 import type { DeepAgentTurnEvent } from "./events";
 import { sanitizeFilesystemToolInputForClient } from "./output-normalizer";
 import type { TurnRuntime } from "./turn-runtime";
+import type { ToolArgDelta } from "./v3-protocol";
 
 export type PartialToolArgStreamState = {
   id?: string;
@@ -56,16 +57,19 @@ export function extractStreamableContent(
  * uses to collapse tool_call_chunks) rather than hand-scraping the JSON.
  */
 export function* handleToolArgDeltaChunk(input: {
-  delta: { index: number; id?: string; name?: string; args: string };
+  delta: ToolArgDelta;
   runtime: TurnRuntime;
 }): Generator<DeepAgentTurnEvent> {
   const { delta, runtime } = input;
   const slotKey = String(delta.index);
   const existing = runtime.partialToolArgsBySlot.get(slotKey);
-  // A different id in a known slot is a different call: start it afresh
-  // rather than appending its args to (and reporting it under) the old id.
+  // A block that opens, or a different id in a known slot, is a different
+  // call: start it afresh rather than appending its args to (and reporting it
+  // under) the old id. Block indexes restart with every model message.
   const state: PartialToolArgStreamState =
-    existing && !(delta.id && existing.id && delta.id !== existing.id)
+    existing &&
+    delta.kind !== "start" &&
+    !(delta.id && existing.id && delta.id !== existing.id)
       ? existing
       : { args: "", lastContentLength: 0 };
   if (delta.id && !state.id) {
@@ -74,14 +78,12 @@ export function* handleToolArgDeltaChunk(input: {
   if (delta.name && !state.name) {
     state.name = delta.name;
   }
-  // @langchain/core's v3 producers (compat `convertChunksToEvents`, the OpenAI
-  // completions/responses converters) put the block's ACCUMULATED args on
-  // every block-delta, so a fragment that extends the buffer replaces it.
-  // Anything else is appended, defensively, in case a producer sends true
-  // deltas.
-  state.args = delta.args.startsWith(state.args)
-    ? delta.args
-    : state.args + delta.args;
+  // `append` is the next slice (@langchain/core >= 1.3); a `snapshot` is the
+  // args accumulated so far and replaces the buffer it extends.
+  state.args =
+    delta.kind === "snapshot" && delta.args.startsWith(state.args)
+      ? delta.args
+      : state.args + delta.args;
   runtime.partialToolArgsBySlot.set(slotKey, state);
 
   // Need the real tool-call id (so the client reconciles with tool-call-start)

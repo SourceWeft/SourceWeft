@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
-    "deepagents": "1.15.1"
+    "deepagents": "1.16.5"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

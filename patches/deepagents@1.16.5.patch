@@ -1,0 +1,44 @@
+diff --git a/dist/langsmith-CH6GPPud.js b/dist/langsmith-CH6GPPud.js
+index 8645fd9e0064b86d12ed3f0c66d8dc919ac5f8b7..710383758536a69eab85b494092ab384f083e0ee 100644
+--- a/dist/langsmith-CH6GPPud.js
++++ b/dist/langsmith-CH6GPPud.js
+@@ -4759,7 +4759,7 @@ function createSubAgent(spec, options) {
+ 	if (!spec.model) throw new Error(`SubAgent '${spec.name}' must specify 'model'`);
+ 	if (!spec.tools) throw new Error(`SubAgent '${spec.name}' must specify 'tools'`);
+ 	const middleware = [...spec.middleware ?? []];
+-	if (spec.interruptOn) middleware.push(humanInTheLoopMiddleware({ interruptOn: spec.interruptOn }));
++	if (spec.interruptOn && !middleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) middleware.push(humanInTheLoopMiddleware({ interruptOn: spec.interruptOn }));
+ 	if (!middleware.some((m) => m.name === "UnsupportedContentMiddleware")) middleware.push(createUnsupportedContentMiddleware());
+ 	const selectedResponseFormat = options?.responseFormat ?? spec.responseFormat;
+ 	return createAgent({
+@@ -4804,7 +4804,7 @@ function getSubagents(options) {
+ 	}
+ 	if (generalPurposeAgent) {
+ 		const generalPurposeMiddleware = [...generalPurposeMiddlewareBase];
+-		if (defaultInterruptOn) generalPurposeMiddleware.push(humanInTheLoopMiddleware({ interruptOn: defaultInterruptOn }));
++		if (defaultInterruptOn && !generalPurposeMiddleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) generalPurposeMiddleware.push(humanInTheLoopMiddleware({ interruptOn: defaultInterruptOn }));
+ 		const gpSpec = {
+ 			name: "general-purpose",
+ 			description: DEFAULT_GENERAL_PURPOSE_DESCRIPTION,
+diff --git a/dist/langsmith-CR3a2-Z7.cjs b/dist/langsmith-CR3a2-Z7.cjs
+index 2107146862b98a08e65f195eec4cc1fa0f3f2fb2..d5fd81cfe06a84130dbd292d810e11e6d5d7c365 100644
+--- a/dist/langsmith-CR3a2-Z7.cjs
++++ b/dist/langsmith-CR3a2-Z7.cjs
+@@ -4782,7 +4782,7 @@ function createSubAgent(spec, options) {
+ 	if (!spec.model) throw new Error(`SubAgent '${spec.name}' must specify 'model'`);
+ 	if (!spec.tools) throw new Error(`SubAgent '${spec.name}' must specify 'tools'`);
+ 	const middleware = [...spec.middleware ?? []];
+-	if (spec.interruptOn) middleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: spec.interruptOn }));
++	if (spec.interruptOn && !middleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) middleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: spec.interruptOn }));
+ 	if (!middleware.some((m) => m.name === "UnsupportedContentMiddleware")) middleware.push(createUnsupportedContentMiddleware());
+ 	const selectedResponseFormat = options?.responseFormat ?? spec.responseFormat;
+ 	return (0, langchain.createAgent)({
+@@ -4827,7 +4827,7 @@ function getSubagents(options) {
+ 	}
+ 	if (generalPurposeAgent) {
+ 		const generalPurposeMiddleware = [...generalPurposeMiddlewareBase];
+-		if (defaultInterruptOn) generalPurposeMiddleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: defaultInterruptOn }));
++		if (defaultInterruptOn && !generalPurposeMiddleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) generalPurposeMiddleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: defaultInterruptOn }));
+ 		const gpSpec = {
+ 			name: "general-purpose",
+ 			description: DEFAULT_GENERAL_PURPOSE_DESCRIPTION,

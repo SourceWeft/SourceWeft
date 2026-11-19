@@ -15,7 +15,7 @@
   "dependencies": {
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/model-gateway": "workspace:*",
-    "langchain": "^1.5.10",
+    "langchain": "^1.6.7",
     "zod": "^4.6.6"
   },
   "devDependencies": {

@@ -34,7 +34,6 @@ import {
   adaptToolsEvent,
   adoptV3RunStream,
   interruptsToLegacyUpdatesPayload,
-  isSerializedInterruptMessage,
 } from "./v3-protocol";
 
 const ECHO_MARKER = "ECHO_SUBAGENT_MARKER";
@@ -328,11 +327,12 @@ test("a delegate paused for approval surfaces one interrupt and a paused, not fa
     1,
   );
 
-  // The parent's `task` call ends in a tool error that is the interrupt itself,
-  // which the runner records as a pause rather than a failure.
+  // The parent's `task` call started and reports nothing more: since
+  // @langchain/langgraph 1.6 a paused tool is not a tool error. The runner
+  // therefore marks open `task` calls paused when the run ends interrupted
+  // (`pauseOpenTasks`).
   assert.deepEqual(
     taskEvents.map((payload) => payload.event),
-    ["on_tool_start", "on_tool_error"],
+    ["on_tool_start"],
   );
-  assert.equal(isSerializedInterruptMessage(taskEvents[1]?.error), true);
 }, 30_000);
