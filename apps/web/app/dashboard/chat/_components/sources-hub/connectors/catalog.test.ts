@@ -17,8 +17,16 @@ test("catalog lists only implemented connectors", () => {
       "google_drive",
       "dropbox",
       "github",
+      "linear",
     ]).map((i) => i.id),
-  ).toEqual(["notion", "gmail", "google_drive", "dropbox", "github"]);
+  ).toEqual([
+    "notion",
+    "gmail",
+    "google_drive",
+    "dropbox",
+    "github",
+    "linear",
+  ]);
 });
 
 test("Gmail stays hidden in the catalog until the backend registers it", () => {
@@ -86,6 +94,33 @@ test("github hidden until registered", () => {
     supportsPeriodicSync: false,
     supportsWebhook: false,
   });
+});
+
+test("linear stays hidden until the backend registers it", () => {
+  expect(
+    connectorCatalogForAvailableTypes([
+      "notion",
+      "gmail",
+      "google_drive",
+      "dropbox",
+    ]).map((i) => i.id),
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  const linear = connectorCatalog.find((item) => item.id === "linear");
+  expect(linear).toMatchObject({
+    name: "Linear",
+    category: "Knowledge & Docs",
+    description:
+      "Search and read Linear issues and projects from the teams you choose.",
+    capabilities: ["Issues & projects", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  });
+  // No Linear logo file is added yet, so the lucide `icon` shows instead.
+  expect(linear?.logoIconName).toBeUndefined();
 });
 
 describe("github selection copy", () => {

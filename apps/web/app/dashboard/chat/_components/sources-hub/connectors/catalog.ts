@@ -1,4 +1,11 @@
-import { Box, FileText, FolderGit2, HardDrive, Mail } from "lucide-react";
+import {
+  Box,
+  FileText,
+  FolderGit2,
+  HardDrive,
+  ListChecks,
+  Mail,
+} from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -76,6 +83,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     icon: FolderGit2,
     logoIconName: "github",
     logoIconTone: "mono",
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    category: "Knowledge & Docs",
+    description:
+      "Search and read Linear issues and projects from the teams you choose.",
+    capabilities: ["Issues & projects", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    // No Linear logo file is added yet, so `logoIconName` is omitted and this
+    // icon shows instead.
+    icon: ListChecks,
     isIndexable: false,
     supportsActions: true,
     supportsPeriodicSync: false,

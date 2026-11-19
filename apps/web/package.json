@@ -47,6 +47,7 @@
     "@sourceweft/billing": "workspace:*",
     "@sourceweft/builtin-connector-github": "workspace:*",
     "@sourceweft/builtin-connector-gmail": "workspace:*",
+    "@sourceweft/builtin-connector-linear": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-tool-publish-artifact": "workspace:*",

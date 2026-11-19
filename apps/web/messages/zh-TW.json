@@ -3400,6 +3400,20 @@
               "root": "GitHub",
               "emptyRoot": "應用還沒有安裝到任何帳號。請先在 GitHub 上新增儲存庫，然後點選重新整理。"
             }
+          },
+          "linear": {
+            "itemsTitle": "團隊和專案",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取你選中的團隊和專案裡的 issue，且僅限這些。選中團隊即包含它的全部 issue 和專案。",
+            "choose": "選擇團隊和專案",
+            "empty": "還沒有選擇。選擇團隊或專案之前，代理程式讀不到 Linear 裡的任何內容。",
+            "kinds": {
+              "team": "團隊",
+              "project": "專案"
+            },
+            "browser": {
+              "description": "點開團隊可以看到它的專案，然後勾選要包含的團隊和專案。",
+              "root": "Linear"
+            }
           }
         }
       },

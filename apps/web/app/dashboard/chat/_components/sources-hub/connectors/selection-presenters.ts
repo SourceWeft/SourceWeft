@@ -14,7 +14,9 @@ import {
   FileText,
   Folder,
   FolderGit2,
+  FolderKanban,
   type LucideIcon,
+  Users,
 } from "lucide-react";
 import type {
   ConnectorSelectionDescribeItem,
@@ -98,6 +100,11 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
   // Tools-only connector: nothing is indexed, so there is no `indexing` entry.
   github: {
     kindIcons: { account: Building2, repository: FolderGit2 },
+  },
+  // Tools-only connector: nothing is indexed, so there is no `indexing`
+  // block, only the kind icons for the selection dialog and settings list.
+  linear: {
+    kindIcons: { team: Users, project: FolderKanban },
   },
 };
 

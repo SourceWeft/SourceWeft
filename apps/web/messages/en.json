@@ -3400,6 +3400,20 @@
               "root": "GitHub",
               "emptyRoot": "The app is not installed on any account yet. Add repositories on GitHub, then press Refresh."
             }
+          },
+          "linear": {
+            "itemsTitle": "Teams and projects",
+            "itemsDescription": "Agents of every member of this workspace can search and read issues in the teams and projects you choose, and only those. Choosing a team includes all of its issues and projects.",
+            "choose": "Choose teams and projects",
+            "empty": "Nothing selected yet. Agents cannot read anything from Linear until you choose teams or projects.",
+            "kinds": {
+              "team": "Teams",
+              "project": "Projects"
+            },
+            "browser": {
+              "description": "Open a team to see its projects, then tick the teams and projects to include.",
+              "root": "Linear"
+            }
           }
         }
       },

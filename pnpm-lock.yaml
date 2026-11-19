@@ -199,6 +199,9 @@ importers:
       '@sourceweft/builtin-connector-google-drive':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-google-drive
+      '@sourceweft/builtin-connector-linear':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-linear
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
@@ -625,6 +628,9 @@ importers:
       '@sourceweft/builtin-connector-gmail':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-gmail
+      '@sourceweft/builtin-connector-linear':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-linear
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-notion
@@ -955,6 +961,9 @@ importers:
       '@sourceweft/builtin-connector-google-drive':
         specifier: workspace:*
         version: link:../builtin-connector-google-drive
+      '@sourceweft/builtin-connector-linear':
+        specifier: workspace:*
+        version: link:../builtin-connector-linear
       '@sourceweft/builtin-connector-notion':
         specifier: workspace:*
         version: link:../builtin-connector-notion
@@ -1098,6 +1107,25 @@ importers:
         version: 5.9.2
 
   packages/builtin-connector-google-drive:
+    dependencies:
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/builtin-connector-linear:
     dependencies:
       '@sourceweft/capability-contracts':
         specifier: workspace:*

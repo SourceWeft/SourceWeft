@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { Building2, File, FileText, Folder, FolderGit2 } from "lucide-react";
+import {
+  Building2,
+  File,
+  FileText,
+  Folder,
+  FolderGit2,
+  FolderKanban,
+  Users,
+} from "lucide-react";
 import {
   selectionIconFor,
   selectionPresenterFor,
@@ -161,6 +169,19 @@ describe("selectionPresenters.github", () => {
     const presenter = selectionPresenters.github!;
     expect(presenter.kindIcons.account).toBe(Building2);
     expect(presenter.kindIcons.repository).toBe(FolderGit2);
+    expect(presenter.indexing).toBeUndefined();
+  });
+});
+
+describe("selectionPresenters.linear", () => {
+  const presenter = selectionPresenters.linear!;
+
+  test("registers icons for team and project", () => {
+    expect(presenter.kindIcons.team).toBe(Users);
+    expect(presenter.kindIcons.project).toBe(FolderKanban);
+  });
+
+  test("has no indexing presenter (tools-only connector)", () => {
     expect(presenter.indexing).toBeUndefined();
   });
 });
