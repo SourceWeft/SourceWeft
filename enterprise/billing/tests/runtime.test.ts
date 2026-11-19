@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createBillingRuntime } from "../src/server/runtime";
 import { BillingService } from "../src/server/service";
+import { getScheduledTaskLimits } from "../src/server/plans";
 import { createBilling } from "../src/server/index";
 import {
   MemoryBillingStore,
@@ -161,4 +162,39 @@ test("execution state reports ingestion-page admission exactly when settlement w
     if (state.kind !== "metered") throw new Error("Expected metered state");
     assert.equal(state.ingestionPages.enforced, false);
   }
+});
+
+test("scheduled task limits follow the member's plan and are never a shared pool", async () => {
+  assert.deepEqual(
+    (
+      [
+        "individual_free",
+        "individual_pro",
+        "team_standard",
+        "team_premium",
+        "enterprise_usage",
+      ] as const
+    ).map((plan) => getScheduledTaskLimits(plan).maxActiveTasks),
+    [3, 10, 15, 25, 25],
+  );
+
+  const free = createBillingRuntime(
+    new BillingService(new MemoryBillingStore(), runtimeConfig, noopProvider),
+  );
+  assert.deepEqual(await free.getScheduledTaskLimits("team_1", "user_1"), {
+    maxActiveTasks: 3,
+  });
+
+  const pro = createBillingRuntime(
+    new BillingService(
+      new MemoryBillingStore(),
+      { ...runtimeConfig, defaultPlanFamily: "individual_pro" },
+      noopProvider,
+    ),
+  );
+  // Two members of one team each get the plan's full number.
+  for (const userId of ["user_1", "user_2"])
+    assert.deepEqual(await pro.getScheduledTaskLimits("team_1", userId), {
+      maxActiveTasks: 10,
+    });
 });

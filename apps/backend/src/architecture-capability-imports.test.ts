@@ -166,6 +166,11 @@ const FILE_EXEMPTIONS: readonly {
     reason:
       "The runtime-asset catalog (docs/architecture/sandbox-runtime-assets.md, A3): a feature declares its asset spec beside the dependency pin that makes the version correct — chrome-headless-shell's version and sha live next to the @remotion/renderer pin in the video package — and this file only assembles the lookup table. Importing the spec value is the price of keeping spec and pin adjacent; moving it into contracts would separate them, and the catalog stays a plain data table either way.",
   },
+  {
+    file: "modules/connectors/gmail-composio-flow.test.ts",
+    reason:
+      "The single end-to-end test that drives the REAL composio-mode Gmail adapter through the REAL ConnectorOAuthService (start, callback, runtime token, one action, revoke), the one place both sides of the host↔capability seam must meet to prove the brokered-authorization contract hop to hop. A synthetic capability cannot stand in: the whole point is the real adapter's own URL construction, credential encoding and error translation, which a stand-in would not exercise (this is how I7's dead guard got through review). Test-only; nothing is imported at runtime, and the host stays substrate in production.",
+  },
 ];
 
 /**

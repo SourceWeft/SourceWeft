@@ -45,7 +45,7 @@ export const reasoningEffortSchema = z.enum([
   "xhigh",
 ]);
 
-const llmExecutionConfigSchema = z
+export const llmExecutionConfigSchema = z
   .object({
     profileAlias: z.string().trim().min(1).max(512).optional(),
     modelAlias: z.string().trim().min(1).max(512).optional(),

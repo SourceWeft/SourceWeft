@@ -114,6 +114,8 @@ export const billingRuntime: BillingRuntime = {
   getExecutionState: (...args) => billing().runtime.getExecutionState(...args),
   settleModelUsage: (...args) => billing().runtime.settleModelUsage(...args),
   meterIngestion: (...args) => billing().runtime.meterIngestion(...args),
+  getScheduledTaskLimits: (...args) =>
+    billing().runtime.getScheduledTaskLimits(...args),
   reconcileProviderCost: (...args) =>
     billing().runtime.reconcileProviderCost(...args),
 };

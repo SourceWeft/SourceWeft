@@ -95,6 +95,23 @@ export function connectorCatalogForAvailableTypes(
   );
 }
 
+// The catalog lists "Optional indexing" statically, but a deployment can run
+// a connector type with no sync resources at all (e.g. a tools-only,
+// Composio-brokered Gmail). Drop that one chip in that case; every other
+// capability still applies. `supportsIndexing` is `undefined` when the
+// manifest for this type has not loaded yet, which keeps today's chips.
+export function connectorCatalogCapabilities(
+  item: ConnectorCatalogItem,
+  supportsIndexing: boolean | undefined,
+): string[] {
+  if (supportsIndexing === false) {
+    return item.capabilities.filter(
+      (capability) => capability !== "Optional indexing",
+    );
+  }
+  return item.capabilities;
+}
+
 export const connectorCatalogCategories: ConnectorCatalogCategory[] = [
   "Knowledge & Docs",
   "Communication",

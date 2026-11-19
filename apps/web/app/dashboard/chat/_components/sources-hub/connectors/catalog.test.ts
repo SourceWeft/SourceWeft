@@ -1,6 +1,10 @@
 import type { SourceConnector } from "@sourceweft/sdk";
 import { describe, expect, test } from "vitest";
-import { connectorCatalog, connectorCatalogForAvailableTypes } from "./catalog";
+import {
+  connectorCatalog,
+  connectorCatalogCapabilities,
+  connectorCatalogForAvailableTypes,
+} from "./catalog";
 import { getCatalogStatus } from "./components";
 import en from "../../../../../../messages/en.json";
 import zhCN from "../../../../../../messages/zh-CN.json";
@@ -125,6 +129,36 @@ describe("github selection copy", () => {
       }
     });
   }
+});
+
+describe("connectorCatalogCapabilities", () => {
+  const gmail = connectorCatalog.find((item) => item.id === "gmail")!;
+
+  test("keeps every capability when the manifest has not loaded yet", () => {
+    expect(connectorCatalogCapabilities(gmail, undefined)).toEqual(
+      gmail.capabilities,
+    );
+  });
+
+  test("keeps every capability when the connector still supports indexing", () => {
+    expect(connectorCatalogCapabilities(gmail, true)).toEqual(
+      gmail.capabilities,
+    );
+  });
+
+  test("drops only 'Optional indexing' for a tools-only connector", () => {
+    expect(connectorCatalogCapabilities(gmail, false)).toEqual([
+      "Search",
+      "Approved sending",
+    ]);
+  });
+
+  test("leaves a connector with no 'Optional indexing' chip untouched", () => {
+    const notion = connectorCatalog.find((item) => item.id === "notion")!;
+    expect(connectorCatalogCapabilities(notion, false)).toEqual(
+      notion.capabilities,
+    );
+  });
 });
 
 describe("sync-block-status.test.ts", () => {

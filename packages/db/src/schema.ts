@@ -2,6 +2,7 @@ export * from "./schema/identity-workspace";
 export * from "./schema/billing";
 export * from "./schema/observability";
 export * from "./schema/model-gateway";
+export * from "./schema/agent-tasks";
 export * from "./schema/mcp-connectors";
 export * from "./schema/misc";
 export * from "./schema/sources";

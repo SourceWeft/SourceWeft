@@ -209,7 +209,7 @@ export type ThreadRecord = {
   parentThreadId: string | null;
   /** Persona driving the thread; null for an ordinary chat. */
   personaId: string | null;
-  origin: "user" | "subagent";
+  origin: "user" | "subagent" | "scheduled";
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
