@@ -19,12 +19,19 @@ export class ComposioBrokerError extends Error {
 // Composio's error body is `{"error":{"slug":…,"message":…,"status":…}}`.
 // Seen on the real service 2026-11-16: any call that names a connected
 // account Composio does not hold (deleted or never created) answers HTTP 404
-// with slug `ConnectedAccount_ResourceNotFound`. The slug decides; the
-// message match below stays for a not-active account, whose body was not
-// observed. The quota body was not observed either (the test project never
-// reached its limit), so that match is still a best guess used only after
-// the HTTP status has not classified the answer.
-const INACTIVE_CONNECTION_SLUGS = new Set(["ConnectedAccount_ResourceNotFound"]);
+// with slug `ConnectedAccount_ResourceNotFound`. Seen 2026-11-19: a call that
+// names an account Composio holds but that is not ACTIVE (never consented,
+// and by the same state check expired or failed after a revoked grant)
+// answers HTTP 422 with slug `TOOL_AUTH_BadConnectedAccountState` and a
+// message "Connected account is not in an ACTIVE state". Both mean the
+// connection can no longer be used, so the slug decides; the message match
+// below stays as a second signal. The quota body was not observed (the test
+// project never reached its limit), so that match is still a best guess used
+// only after the HTTP status has not classified the answer.
+const INACTIVE_CONNECTION_SLUGS = new Set([
+  "ConnectedAccount_ResourceNotFound",
+  "TOOL_AUTH_BadConnectedAccountState",
+]);
 
 function errorSlug(rawBody: string): string | undefined {
   try {
@@ -43,7 +50,7 @@ function bodyIndicatesQuotaExhausted(rawBody: string): boolean {
 function bodyIndicatesInactiveConnection(rawBody: string): boolean {
   const slug = errorSlug(rawBody);
   if (slug !== undefined && INACTIVE_CONNECTION_SLUGS.has(slug)) return true;
-  return /no connected account|connected account[^.]*(not found|not active|inactive|unknown)/i.test(
+  return /no connected account|connected account[^.]*(not found|not active|not in an active state|inactive|unknown)/i.test(
     rawBody,
   );
 }

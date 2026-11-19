@@ -1,4 +1,5 @@
 import {
+  AgentTasksClient,
   BillingClient,
   DeploymentClient,
   ConnectorsClient,
@@ -8,6 +9,7 @@ import {
   JobsClient,
   LocalDevicesClient,
   LlmObservabilityClient,
+  NotificationsClient,
   UserSettingsClient,
   WorkspaceClient,
 } from "@sourceweft/sdk";
@@ -32,3 +34,5 @@ export const userSettingsClient = new UserSettingsClient(httpClient);
 export const workspaceClient = new WorkspaceClient(httpClient);
 export const localDevicesClient = new LocalDevicesClient(httpClient);
 export const llmObservabilityClient = new LlmObservabilityClient(httpClient);
+export const agentTasksClient = new AgentTasksClient(httpClient);
+export const notificationsClient = new NotificationsClient(httpClient);

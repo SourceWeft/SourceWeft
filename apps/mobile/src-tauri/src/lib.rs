@@ -17,7 +17,10 @@ pub fn run() {
 
 use serde::Serialize;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use tauri::{webview::NewWindowResponse, AppHandle, Emitter, Manager, WebviewWindowBuilder};
+use tauri::{
+    webview::{NewWindowResponse, PageLoadEvent},
+    AppHandle, Emitter, Manager, WebviewWindowBuilder,
+};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::{Host, Url};
 
@@ -28,6 +31,9 @@ const APP_PROTOCOL_SCHEME: &str = "tauri";
 const APP_PROTOCOL_ORIGIN: &str = "tauri://localhost";
 const SIGN_IN_PATH: &str = "/auth/sign-in";
 const HOME_PATH: &str = "/dashboard/chat";
+/// Bundled page the window opens on. It paints at once, so the wait for the web app shows a
+/// branded screen rather than a blank one.
+const SPLASH_PATH: &str = "/splash.html";
 const DASHBOARD_ROOT: &str = "/dashboard";
 
 #[derive(Serialize)]
@@ -117,9 +123,8 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
         .cloned()
         .unwrap_or_else(|| app.config().app.windows[0].clone());
 
-    window_config.url = tauri::WebviewUrl::External(
-        resolve_app_url(app.handle(), SIGN_IN_PATH).map_err(std::io::Error::other)?,
-    );
+    let sign_in_url = resolve_app_url(app.handle(), SIGN_IN_PATH).map_err(std::io::Error::other)?;
+    window_config.url = tauri::WebviewUrl::App(SPLASH_PATH.trim_start_matches('/').into());
     let handle = app.handle().clone();
     // Injected as its own script, the way the desktop host does it.
     // `append_invoke_initialization_script` concatenates onto Tauri's IPC script, which ends
@@ -128,6 +133,12 @@ fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
     WebviewWindowBuilder::from_config(app.handle(), &window_config)?
         .initialization_script(mobile_bridge_script())
         .on_navigation(move |url| handle_navigation(&handle, url))
+        .on_page_load(move |webview, payload| {
+            // The splash is on screen; only now start loading the web app behind it.
+            if payload.event() == PageLoadEvent::Finished && is_splash_url(payload.url()) {
+                let _ = webview.navigate(sign_in_url.clone());
+            }
+        })
         .on_new_window(move |url, _features| {
             let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
             NewWindowResponse::Deny
@@ -143,12 +154,23 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
         return false;
     }
 
+    if is_splash_url(url) {
+        return true;
+    }
+
     if is_app_url(app, url) {
         if is_allowed_app_path(url.path()) {
             return true;
         }
 
-        let _ = navigate_main_window(app, HOME_PATH);
+        // Public pages such as the terms and privacy policy are not part of the app: they
+        // open in the browser, so the app is not thrown onto another screen. Only the site
+        // root, where a redirect can land, returns to the app's home.
+        if is_app_web_url(app, url) && url.path() != "/" {
+            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+        } else {
+            let _ = navigate_main_window(app, HOME_PATH);
+        }
         return false;
     }
 
@@ -159,6 +181,10 @@ fn handle_navigation(app: &AppHandle, url: &Url) -> bool {
 
     // Internal WebView schemes (ipc, about, blob) carry the Tauri runtime itself.
     true
+}
+
+fn is_splash_url(url: &Url) -> bool {
+    url.scheme() == APP_PROTOCOL_SCHEME && url.path() == SPLASH_PATH
 }
 
 fn is_app_url(app: &AppHandle, url: &Url) -> bool {
@@ -178,7 +204,7 @@ fn navigate_main_window(app: &AppHandle, path: &str) -> Result<(), String> {
         .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main window was not found".to_string())?;
     let current = window.url().map_err(|error| error.to_string())?;
-    let target = if current.scheme() == APP_PROTOCOL_SCHEME {
+    let target = if current.scheme() == APP_PROTOCOL_SCHEME && !is_splash_url(&current) {
         app_protocol_url(path)?
     } else {
         resolve_app_url(app, path)?
@@ -340,6 +366,18 @@ mod tests {
 
     fn url(value: &str) -> Url {
         Url::parse(value).expect("test URL")
+    }
+
+    #[test]
+    fn only_the_bundled_splash_page_is_the_splash() {
+        assert!(is_splash_url(&url("tauri://localhost/splash.html")));
+        for other in [
+            "https://sourceweft.com/splash.html",
+            "tauri://localhost/",
+            "tauri://localhost/splash.html.evil",
+        ] {
+            assert!(!is_splash_url(&url(other)), "{other}");
+        }
     }
 
     #[test]

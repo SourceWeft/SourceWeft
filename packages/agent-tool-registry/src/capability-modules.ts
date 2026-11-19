@@ -59,6 +59,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-tool-publish-artifact"),
   "@sourceweft/builtin-tool-study": () =>
     import("@sourceweft/builtin-tool-study"),
+  "@sourceweft/builtin-tool-table": () =>
+    import("@sourceweft/builtin-tool-table"),
   "@sourceweft/builtin-tool-video-presentation": () =>
     import("@sourceweft/builtin-tool-video-presentation"),
   "@sourceweft/builtin-tool-web-search": () =>

@@ -1006,6 +1006,9 @@ importers:
       '@sourceweft/builtin-tool-study':
         specifier: workspace:*
         version: link:../builtin-tool-study
+      '@sourceweft/builtin-tool-table':
+        specifier: workspace:*
+        version: link:../builtin-tool-table
       '@sourceweft/builtin-tool-video-presentation':
         specifier: workspace:*
         version: link:../builtin-tool-video-presentation
