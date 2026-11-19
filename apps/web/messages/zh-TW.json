@@ -3369,6 +3369,24 @@
               "note": "資料夾合計最多同步 1,000 個檔案",
               "emptyContainer": "此資料夾為空。"
             }
+          },
+          "github": {
+            "itemsTitle": "儲存庫",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取這些儲存庫裡的 issue、拉取請求和討論，且僅限這些儲存庫。",
+            "choose": "選擇儲存庫",
+            "empty": "還沒有選擇。選擇儲存庫之前，代理程式讀不到 GitHub 裡的任何內容。",
+            "kinds": {
+              "account": "帳號",
+              "repository": "儲存庫"
+            },
+            "helpLink": {
+              "add_repositories": "在 GitHub 上新增儲存庫"
+            },
+            "browser": {
+              "description": "開啟一個帳號檢視已安裝應用的儲存庫，然後勾選允許代理程式搜尋和讀取的儲存庫。",
+              "root": "GitHub",
+              "emptyRoot": "應用還沒有安裝到任何帳號。請先在 GitHub 上新增儲存庫，然後點選重新整理。"
+            }
           }
         }
       },

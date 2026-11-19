@@ -1,4 +1,4 @@
-import { Box, FileText, HardDrive, Mail } from "lucide-react";
+import { Box, FileText, FolderGit2, HardDrive, Mail } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -62,6 +62,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     isIndexable: true,
     supportsActions: false,
     supportsPeriodicSync: true,
+    supportsWebhook: false,
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    category: "Knowledge & Docs",
+    description:
+      "Let agents search and read issues, pull requests and discussions in the repositories you choose.",
+    capabilities: ["Issues & pull requests", "Discussions", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: FolderGit2,
+    logoIconName: "github",
+    logoIconTone: "mono",
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
     supportsWebhook: false,
   },
 ];

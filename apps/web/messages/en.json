@@ -3369,6 +3369,24 @@
               "note": "Folders sync up to 1,000 files in total",
               "emptyContainer": "This folder is empty."
             }
+          },
+          "github": {
+            "itemsTitle": "Repositories",
+            "itemsDescription": "Agents of every member of this workspace can search and read issues, pull requests and discussions in these repositories, and only these.",
+            "choose": "Choose repositories",
+            "empty": "Nothing selected yet. Agents cannot read anything from GitHub until you choose repositories.",
+            "kinds": {
+              "account": "Accounts",
+              "repository": "Repositories"
+            },
+            "helpLink": {
+              "add_repositories": "Add repositories on GitHub"
+            },
+            "browser": {
+              "description": "Open an account to see the repositories the app is installed on, then tick the ones agents may search and read.",
+              "root": "GitHub",
+              "emptyRoot": "The app is not installed on any account yet. Add repositories on GitHub, then press Refresh."
+            }
           }
         }
       },
