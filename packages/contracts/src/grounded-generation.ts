@@ -56,6 +56,18 @@ export function isGroundedGenerationError(
   );
 }
 
+/**
+ * Lower-cases, folds width/compatibility forms, drops punctuation and spaces.
+ * The text normalization behind every artifact type's fingerprints, so that
+ * incidental edits (case, spacing, punctuation) keep an item's identity.
+ */
+export function normalizeFingerprintText(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}\p{Z}\s]+/gu, "");
+}
+
 /* ------------------------------------------------------------------- ports */
 
 /** One structured-output call on the default chat model, billed by the host. */
