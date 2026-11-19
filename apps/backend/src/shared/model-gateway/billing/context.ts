@@ -17,7 +17,9 @@ export type CoveredReason =
   /** Ingestion vision extraction, already charged per ingested page. */
   | "covered_by_ingestion_page"
   /** Customer supplied their own provider key, so there is no cost to pass on. */
-  | "byok";
+  | "byok"
+  /** Dictation segments. Their audio seconds accrue and are charged in one settlement. */
+  | "settled_by_dictation_accrual";
 
 export type BillingIntent =
   | { readonly mode: "billed" }

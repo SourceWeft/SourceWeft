@@ -100,6 +100,16 @@ test("an editor can write content", async () => {
   assert.equal((await call("POST", "/threads")).status, 200);
 });
 
+test("POST /dictation/segments needs the editor role; a viewer is refused", async () => {
+  withAccess({ role: "viewer" });
+  const refused = await call("POST", "/dictation/segments");
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).code, "WORKSPACE_ROLE_REQUIRED");
+
+  withAccess({ role: "editor" });
+  assert.equal((await call("POST", "/dictation/segments")).status, 200);
+});
+
 test("an editor cannot reach content-plane admin surfaces", async () => {
   withAccess({ role: "editor" });
 

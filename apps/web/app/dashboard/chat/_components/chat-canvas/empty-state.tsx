@@ -38,6 +38,7 @@ function promptFilesToImages(files: FileUIPart[] | undefined) {
 
 export function EmptyState({
   composerDraftKey,
+  workspaceId,
   workingFolderSlot,
   onSendMessage,
   composerInitialInput,
@@ -71,6 +72,7 @@ export function EmptyState({
   onComposerOptionsChange,
 }: {
   composerDraftKey?: string;
+  workspaceId?: string | null;
   workingFolderSlot?: import("react").ReactNode;
   onSendMessage: (input: ChatSendInput) => void;
   composerInitialInput?: string;
@@ -148,6 +150,7 @@ export function EmptyState({
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-3">
           <Composer
             draftKey={composerDraftKey}
+            dictationWorkspaceId={workspaceId}
             workingFolderSlot={workingFolderSlot}
             className="w-full"
             allSources={allSources}

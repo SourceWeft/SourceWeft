@@ -8,6 +8,7 @@ import { registerAgentConfirmationRoutes } from "./content/agent-confirmations";
 import { registerByokRoutes } from "./content/byok";
 import { registerCapabilityRoutes } from "./content/capabilities";
 import { registerConnectorRoutes } from "./content/connectors";
+import { registerDictationRoutes } from "./content/dictation";
 import { registerWorkspaceLlmObservabilityRoutes } from "./llm-observability";
 import { registerModelGatewayRoutes } from "./content/model-gateway";
 import {
@@ -35,6 +36,7 @@ export function registerContentRoutes(app: Hono) {
   registerArtifactSharedCollectionRoutes(workspaceRoutes);
   registerCapabilityRoutes(workspaceRoutes);
   registerSourceRoutes(workspaceRoutes);
+  registerDictationRoutes(workspaceRoutes);
   registerStudyRoutes(workspaceRoutes);
   registerConnectorRoutes(workspaceRoutes);
   registerSkillRoutes(workspaceRoutes);

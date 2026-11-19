@@ -26,11 +26,6 @@
   },
   "packageManager": "pnpm@10.19.0",
   "pnpm": {
-    "auditConfig": {
-      "ignoreGhsas": [
-        "GHSA-fc5q-39xc-vjpf"
-      ]
-    },
     "overrides": {
       "@google/generative-ai": "0.24.1",
       "openai": "6.49.0",

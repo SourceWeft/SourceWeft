@@ -6,6 +6,10 @@ import type {
   ArtifactRecordsStatus,
   ArtifactSharedCollectionsResponse,
 } from "@sourceweft/contracts/artifact-records";
+import type {
+  DictationAvailabilityResponse,
+  DictationSegmentResponse,
+} from "@sourceweft/contracts/dictation";
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type {
   ListSavedNotesResponse,
@@ -1638,6 +1642,34 @@ export class ContentClient {
         mode: "edit",
         stream: false,
       },
+    );
+  }
+
+  /* ---- Dictation --------------------------------------------------------- */
+
+  getDictationAvailability(workspaceId: string) {
+    return this.http.get<DictationAvailabilityResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/dictation`,
+    );
+  }
+
+  transcribeDictationSegment(
+    workspaceId: string,
+    input: { sessionId: string; seq: number; wav: Uint8Array; signal?: AbortSignal },
+  ) {
+    const formData = new FormData();
+    formData.append(
+      "file",
+      new Blob([input.wav.slice()], { type: "audio/wav" }),
+      "segment.wav",
+    );
+    formData.append("sessionId", input.sessionId);
+    formData.append("seq", String(input.seq));
+
+    return this.http.postForm<DictationSegmentResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/dictation/segments`,
+      formData,
+      { signal: input.signal },
     );
   }
 

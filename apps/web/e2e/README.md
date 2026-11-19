@@ -33,6 +33,21 @@ The default source is a real script-bearing Cisco fixture; it is queued by the c
 
 `mcp-auth-method.spec.ts` runs on the same deployment with the seeded accounts (`seed-skills-e2e.ts`; the API alone is enough): the owner installs Arcmira, chooses an API key, saves a dummy one and runs Test — Arcmira answers that the key is not a live account key, which it says only when an `Authorization: Bearer` header carried one — then switches to OAuth and the browser is sent to Arcmira's authorization server, where the run stops (signing in needs a real Arcmira account). It needs the same `NODE_ENV=development` behind a fake-IP proxy, on the API too, since Test connects from there.
 
+### Dictation (#589)
+
+`dictation.spec.ts` drives the composer's voice dictation button in a real Chromium with the microphone replaced by Chromium's fake audio-capture device, so captured frames are genuine: the composer only receives text because the speech segmenter (`packages/ui/src/lib/audio/speech-segmenter.ts`) cut real frames into segments. The two dictation HTTP routes (`GET …/dictation`, `POST …/dictation/segments`) are stubbed with `page.route`, so no real transcription model is involved. It needs the same isolated deployment and seeded accounts as the rest of this file (the owner account from `seed-skills-e2e.ts`), reusing one signed-in session the way `mcp-auth-method-mock.spec.ts` does.
+
+It covers: three dictated bursts landing in the composer in the right order even though the server is made to answer segment 1 before segment 0 (and each posted segment's own WAV is checked to be 2-3 s, proving the audio reached the page rather than being faked end to end); pressing Send while dictation is listening stops it and sends no thread request, keeping the dictated text; the microphone button is absent when the workspace has no dictation profile; a 402 (`DICTATION_INSUFFICIENT_CREDITS`) stops dictation and shows the "Not enough credits to keep dictating." notice; and the dashboard document is served with `Permissions-Policy: microphone=(self)`.
+
+Run it from `apps/web`, against the isolated deployment described above:
+
+```
+node e2e/fixtures/make-dictation-audio.mjs
+pnpm exec playwright test e2e/dictation.spec.ts
+```
+
+The first command writes `output/playwright/dictation/three-bursts.wav` at the repository root (1 s silence, three 2 s tone bursts at -15 dBFS separated by 1.2 s silence, 2 s silence at the end) — git-ignored and not committed; regenerate it whenever you clear `output/`. The spec reads that file by its absolute path and fails with a clear message if it is missing.
+
 ## Full acceptance fixtures
 
 The approved inert fixtures are now published at https://github.com/QThans/sourceweft-skill-registry-e2e. The committed `fixtures/public-registry.json` pins A/B/C and expected original SKILL.md hashes. After setup, run `pnpm test:e2e:skills:full` from `apps/web` for the complete eight-case acceptance run.

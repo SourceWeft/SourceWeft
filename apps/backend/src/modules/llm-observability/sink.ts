@@ -9,6 +9,7 @@ import type {
 } from "@sourceweft/model-gateway";
 import { db, llmGenerations } from "@sourceweft/db";
 import { endGeneration, recordGenerationError, startGeneration } from ".";
+import type { AuditPayloadMode } from "./types";
 import { logger } from "../../shared/logger";
 import { workspaceService } from "../workspace";
 import {
@@ -246,6 +247,19 @@ async function resolveGenerationCost(
   }
 }
 
+// Features whose generation payloads must never be stored, even in preview.
+// Dictation transcripts are the spoken words of the person dictating: only
+// their duration, model and ids may be recorded, never the text itself.
+const METADATA_ONLY_FEATURES = new Set<string>(["chat.dictation"]);
+
+function payloadModeForFeature(
+  feature: string | null | undefined,
+): AuditPayloadMode | undefined {
+  return feature && METADATA_ONLY_FEATURES.has(feature)
+    ? "metadata_only"
+    : undefined;
+}
+
 export function createLlmObservabilitySink(options?: {
   resolveCost?: GenerationCostResolver;
 }): ObserveSink {
@@ -302,6 +316,7 @@ export function createLlmObservabilitySink(options?: {
         modelParameters: generation.modelParameters,
         input: generation.input,
         rawCaptureMode: generation.rawCaptureMode,
+        payloadMode: payloadModeForFeature(context.feature),
         metadata: {
           ...(generation.name ? { observationName: generation.name } : {}),
           ...buildEventAttributes(generation.attributes ?? {}),
@@ -337,6 +352,9 @@ export function createLlmObservabilitySink(options?: {
         providerRequestId: generation.providerRequestId,
         rawCaptureError: generation.rawCaptureError,
         latencyMs: generation.latencyMs,
+        payloadMode: payloadModeForFeature(
+          extractGenerationContext(generation).feature,
+        ),
         metadata: {
           ...buildEventAttributes(generation.attributes ?? {}),
           ...(cost ? { costSource: cost.costSource } : {}),
@@ -372,6 +390,9 @@ export function createLlmObservabilitySink(options?: {
         providerRequestId: generation.providerRequestId,
         rawCaptureError: generation.rawCaptureError,
         latencyMs: generation.latencyMs,
+        payloadMode: payloadModeForFeature(
+          extractGenerationContext(generation).feature,
+        ),
         metadata: {
           ...buildEventAttributes(generation.attributes ?? {}),
           ...(cost ? { costSource: cost.costSource } : {}),
