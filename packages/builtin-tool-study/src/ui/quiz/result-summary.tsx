@@ -3,7 +3,7 @@
 import { CircleCheck, CircleX, RotateCcw } from "lucide-react";
 import type { QuizAnswer, QuizItem } from "@sourceweft/contracts/study";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { EvidencePopover } from "../shared/evidence-popover";
+import { EvidencePopover } from "@sourceweft/grounded-generation/ui";
 import type { StudyTranslate, StudyVersionRef } from "../study-host";
 import { quizOptionLabel } from "./question";
 import { isAnswerCorrect, type QuizScore } from "./scoring";

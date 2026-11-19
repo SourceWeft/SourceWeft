@@ -98,14 +98,13 @@ function buildActiveSkillsRuntimePrompt(input: {
 
   return [
     "<active_skills>",
-    "These skills are active for this turn. This is a strong instruction, not a suggestion: read each skill_path with read_file before doing the workflow, then follow that SKILL.md unless it conflicts with higher-priority system rules.",
+    'These skills are active for this turn. This is a strong instruction, not a suggestion: each skill\'s SKILL.md is supplied in the conversation as a <skill name="..." path="..."> message; follow it unless it conflicts with higher-priority system rules. If a skill listed here has no such message, read its skill_path with read_file before doing the workflow.',
     ...activeSkills.flatMap((skill) => {
       const skillPath = `/skills/${skill.name}/SKILL.md`;
       const lines = [
         `- name="${escapeRuntimeValue(skill.name)}"`,
         `description="${escapeRuntimeValue(skill.description)}"`,
         `skill_path="${escapeRuntimeValue(skillPath)}"`,
-        `read_required="true"`,
       ].join(" ");
       const runtimeConfig = skillRuntimeConfigLines(skill);
       if (!runtimeConfig) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
+import type { ConnectorManifest } from "@sourceweft/contracts";
 import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
 import {
   builtinLinearConnectorCapabilityManifest,
@@ -9,6 +10,14 @@ import {
 } from "../src";
 
 const root = new URL("../", import.meta.url);
+
+// The Linear manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 test("JSON capability manifest matches the TypeScript export", async () => {
   const { raw } = await loadCapabilityManifestFixture(root);
@@ -23,8 +32,8 @@ test("backend manifest is tools-only with read scope and a 100-item selection", 
   });
 
   assert.equal(manifest.type, "linear");
-  assert.deepEqual(manifest.auth.scopes, ["read"]);
-  assert.deepEqual(manifest.auth.authorizationParams, {
+  assert.deepEqual(oauth2Auth(manifest).scopes, ["read"]);
+  assert.deepEqual(oauth2Auth(manifest).authorizationParams, {
     prompt: "consent",
     client_id: "client-id",
   });

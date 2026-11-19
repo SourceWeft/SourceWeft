@@ -200,7 +200,7 @@ export const linearConnectorContribution = {
       },
     },
   ],
-  // Spec 2.2 / R2: the only configuration is the fixed set of Linear
+  // The only configuration is the fixed set of Linear
   // team/project ids the user picked, each tagged with its kind. There is no
   // `liveSearchEnabled` switch: a tools-only connector with live tools off
   // would do nothing, so the user stops the tools by pausing or deleting the

@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ConnectorDiscoveryPage, ConnectorItem } from "@sourceweft/contracts";
+import type {
+  ConnectorDiscoveryPage,
+  ConnectorItem,
+  ConnectorManifest,
+} from "@sourceweft/contracts";
 import {
   createDropboxConnectorAdapter,
   parseDropboxSelection,
 } from "../src/adapter";
 import { DropboxAdapterError } from "../src/dropbox-client";
+
+// The Dropbox manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 type FetchCall = { url: string; init: RequestInit; body: unknown };
 
@@ -111,7 +123,7 @@ test("manifest client_id is empty without both credentials", () => {
     fetcher: async () => json({}),
   });
   assert.equal(
-    bothCredentials.getManifest().auth.authorizationParams?.client_id,
+    oauth2Auth(bothCredentials.getManifest()).authorizationParams?.client_id,
     "app-key",
   );
   const missingSecret = createDropboxConnectorAdapter({
@@ -120,15 +132,15 @@ test("manifest client_id is empty without both credentials", () => {
     clientSecret: "",
     fetcher: async () => json({}),
   });
-  assert.equal(missingSecret.getManifest().auth.authorizationParams?.client_id, "");
+  assert.equal(oauth2Auth(missingSecret.getManifest()).authorizationParams?.client_id, "");
   const missingClientId = createDropboxConnectorAdapter({
     baseUrl: "https://sourceweft.example",
     clientId: "",
     clientSecret: "app-secret",
     fetcher: async () => json({}),
   });
-  assert.equal(missingClientId.getManifest().auth.authorizationParams?.client_id, "");
-  assert.equal(withSecret.getManifest().auth.authorizationParams?.client_id, "app-key");
+  assert.equal(oauth2Auth(missingClientId.getManifest()).authorizationParams?.client_id, "");
+  assert.equal(oauth2Auth(withSecret.getManifest()).authorizationParams?.client_id, "app-key");
 });
 
 test("duplicate ids are rejected", () => {

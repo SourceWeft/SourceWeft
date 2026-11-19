@@ -24,13 +24,7 @@ export {
   type StudyOperation,
   type StudyProgress,
 } from "@sourceweft/contracts/study-capability";
-import type { StudyCorpusChunk } from "@sourceweft/contracts/study-capability";
-
-/** A chunk inside the prompt, addressed by its short `handle` ("c12"). */
-export type CorpusChunk = StudyCorpusChunk & {
-  handle: string;
-  tokens: number;
-};
+export type { CorpusChunk } from "@sourceweft/grounded-generation";
 
 export type FlashcardCandidate = {
   kind: "flashcards";

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createConnectorAdapters } from "../src/host-services";
+import type { ConnectorManifest } from "@sourceweft/contracts";
+
+// The Dropbox manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 function environment(values: Record<string, string> = {}) {
   return {
@@ -55,7 +64,7 @@ test("Dropbox capability accepts whitespace- and case-insensitive true and regis
   assert.equal(result.agentToolDefs.length, 0);
   assert.deepEqual(warnings, []);
   assert.equal(
-    result.adapters[0]!.getManifest().auth.authorizationParams?.client_id,
+    oauth2Auth(result.adapters[0]!.getManifest()).authorizationParams?.client_id,
     CREDENTIALS.DROPBOX_CLIENT_ID,
   );
 });
@@ -105,7 +114,7 @@ test("Dropbox capability stays registered, warns, and offers no client id when a
     assert.equal(manifest.type, "dropbox");
     // An empty client id makes the platform refuse authorization with
     // CONNECTOR_OAUTH_CONFIG_MISSING before the user is sent to Dropbox.
-    assert.equal(manifest.auth.authorizationParams?.client_id, "");
+    assert.equal(oauth2Auth(manifest).authorizationParams?.client_id, "");
     assert.deepEqual(warnings, [
       {
         message: "connector_not_configured",
@@ -123,7 +132,7 @@ test("Dropbox capability does not warn when switched off or fully configured", a
     logger,
   });
   assert.equal(
-    configured.adapters[0]?.getManifest().auth.authorizationParams?.client_id,
+    oauth2Auth(configured.adapters[0]!.getManifest()).authorizationParams?.client_id,
     CREDENTIALS.DROPBOX_CLIENT_ID,
   );
   assert.deepEqual(warnings, []);

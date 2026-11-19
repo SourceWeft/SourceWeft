@@ -1,4 +1,11 @@
-import { Box, FileText, HardDrive, ListChecks, Mail } from "lucide-react";
+import {
+  Box,
+  FileText,
+  FolderGit2,
+  HardDrive,
+  ListChecks,
+  Mail,
+} from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -65,6 +72,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsWebhook: false,
   },
   {
+    id: "github",
+    name: "GitHub",
+    category: "Knowledge & Docs",
+    description:
+      "Let agents search and read issues, pull requests and discussions in the repositories you choose.",
+    capabilities: ["Issues & pull requests", "Discussions", "Live search"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: FolderGit2,
+    logoIconName: "github",
+    logoIconTone: "mono",
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  },
+  {
     id: "linear",
     name: "Linear",
     category: "Knowledge & Docs",
@@ -73,9 +97,8 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     capabilities: ["Issues & projects", "Live search"],
     postOAuthMode: "auto_create",
     requiresBackendRegistration: true,
-    // C3: no linear.svg is created in this branch (a download needs the
-    // user's go-ahead, not given here), so logoIconName is omitted and this
-    // lucide icon shows instead.
+    // No Linear logo file is added yet, so `logoIconName` is omitted and this
+    // icon shows instead.
     icon: ListChecks,
     isIndexable: false,
     supportsActions: true,
@@ -94,6 +117,23 @@ export function connectorCatalogForAvailableTypes(
       !item.requiresBackendRegistration ||
       availableConnectorTypes.includes(item.id),
   );
+}
+
+// The catalog lists "Optional indexing" statically, but a deployment can run
+// a connector type with no sync resources at all (e.g. a tools-only,
+// Composio-brokered Gmail). Drop that one chip in that case; every other
+// capability still applies. `supportsIndexing` is `undefined` when the
+// manifest for this type has not loaded yet, which keeps today's chips.
+export function connectorCatalogCapabilities(
+  item: ConnectorCatalogItem,
+  supportsIndexing: boolean | undefined,
+): string[] {
+  if (supportsIndexing === false) {
+    return item.capabilities.filter(
+      (capability) => capability !== "Optional indexing",
+    );
+  }
+  return item.capabilities;
 }
 
 export const connectorCatalogCategories: ConnectorCatalogCategory[] = [

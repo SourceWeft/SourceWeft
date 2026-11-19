@@ -6,7 +6,7 @@
  * returns outside the selection is still dropped). These functions are pure:
  * no network, no clock, no I/O.
  *
- * R3 (the scope rule): an issue is in scope when its team id is a selected
+ * Scope rule: an issue is in scope when its team id is a selected
  * team OR its project id is a selected project; a project is in scope when its
  * id is selected OR one of its teams is selected.
  *
@@ -22,7 +22,7 @@
 export type LinearScope = { teamIds: string[]; projectIds: string[] };
 
 /** Combines one or two branches: a single branch is returned on its own; two
- * branches are OR-ed (R3). An empty scope yields `{ or: [] }`, but the tools
+ * branches are OR-ed. An empty scope yields `{ or: [] }`, but the tools
  * reject an empty selection (LINEAR_NOTHING_SELECTED) before building a
  * filter, so that shape is never actually sent. */
 function combine(branches: Array<Record<string, unknown>>): Record<string, unknown> {
@@ -54,7 +54,7 @@ export function projectScopeFilter(scope: LinearScope): Record<string, unknown> 
   return combine(branches);
 }
 
-/** R3: in scope when the issue's team is selected OR its project is selected.
+/** In scope when the issue's team is selected OR its project is selected.
  * A record whose team and project fields are both missing or malformed matches
  * neither side and is therefore out of scope (dropped), never let through. */
 export function issueInScope(
@@ -68,7 +68,7 @@ export function issueInScope(
   return false;
 }
 
-/** R3: in scope when the project's id is selected OR one of its teams is
+/** In scope when the project's id is selected OR one of its teams is
  * selected. A record with missing or malformed id/teams matches neither and is
  * out of scope (dropped). */
 export function projectInScope(

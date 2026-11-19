@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ConnectorManifest } from "@sourceweft/contracts";
 import { createConnectorAdapters } from "../src/host-services";
+
+// The Linear manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 function environment(values: Record<string, string> = {}) {
   return {
@@ -58,7 +67,7 @@ test("Linear capability registers one adapter and three tool defs without warnin
   assert.equal(result.agentToolDefs.length, 3);
   assert.equal(result.adapters[0]?.getManifest().type, "linear");
   assert.equal(
-    result.adapters[0]?.getManifest().auth.authorizationParams?.client_id,
+    oauth2Auth(result.adapters[0]!.getManifest()).authorizationParams?.client_id,
     "id",
   );
   assert.deepEqual(warnings, []);
@@ -109,7 +118,7 @@ test("Linear capability stays registered, warns, and offers no client id when a 
     assert.equal(manifest.type, "linear");
     // An empty client id makes the platform refuse authorization with
     // CONNECTOR_OAUTH_CONFIG_MISSING before the user is sent to Linear.
-    assert.equal(manifest.auth.authorizationParams?.client_id, "");
+    assert.equal(oauth2Auth(manifest).authorizationParams?.client_id, "");
     assert.deepEqual(warnings, [
       {
         message: "connector_not_configured",

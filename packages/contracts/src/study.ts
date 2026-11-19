@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  groundedEvidenceSchema,
+  type GroundedEvidence,
+} from "./grounded-evidence";
+import {
+  groundedErrorCodeSchema,
+  type GroundedErrorCode,
+} from "./grounded-generation";
 import { sha256Hex } from "./sha256";
 
 /**
@@ -47,7 +55,6 @@ export const STUDY_SCHEMA_VERSION = 1;
 export const STUDY_TRUEFALSE_OPTIONS = ["true", "false"] as const;
 
 const isoTimestampSchema = z.iso.datetime();
-const sha256DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{16}$/);
 const idBody = "[A-Za-z0-9_-]{1,64}";
 const flashcardIdSchema = z.string().regex(new RegExp(`^c_${idBody}$`));
@@ -55,29 +62,10 @@ const quizItemIdSchema = z.string().regex(new RegExp(`^q_${idBody}$`));
 const mindmapNodeIdSchema = z.string().regex(new RegExp(`^n_${idBody}$`));
 
 /** Where a generated item came from; the quote is source text, not model output. */
-export const studyEvidenceSchema = z
-  .object({
-    kind: z.literal("chunk"),
-    sourceId: z.string().min(1),
-    documentId: z.string().min(1),
-    chunkId: z.string().min(1),
-    chunkNo: z.number().int().nonnegative().optional(),
-    headingPath: z.string().nullable().optional(),
-    quote: z.string().min(1).max(STUDY_LIMITS.quoteChars),
-    /** Range of the quote inside the chunk, once anchored. */
-    startChar: z.number().int().nonnegative().optional(),
-    endChar: z.number().int().nonnegative().optional(),
-    /** `sha256:` of `quote`; tells a viewer whether the source text moved. */
-    quoteHash: sha256DigestSchema,
-  })
-  .refine(
-    (value) =>
-      value.startChar === undefined ||
-      value.endChar === undefined ||
-      value.endChar >= value.startChar,
-    { message: "endChar must not precede startChar", path: ["endChar"] },
-  );
-export type StudyEvidence = z.infer<typeof studyEvidenceSchema>;
+export const studyEvidenceSchema = groundedEvidenceSchema({
+  quoteChars: STUDY_LIMITS.quoteChars,
+});
+export type StudyEvidence = GroundedEvidence;
 
 const difficultySchema = z.union([z.literal(1), z.literal(2), z.literal(3)]);
 const evidenceListSchema = z
@@ -358,15 +346,8 @@ export function parseStudyContentForArtifact(
   return content;
 }
 
-export const studyErrorCodeSchema = z.enum([
-  "INSUFFICIENT_CREDITS",
-  "INPUT_TOO_LARGE",
-  "NO_INDEXED_SOURCES",
-  "MODEL_UNAVAILABLE",
-  "GENERATION_QUALITY_TOO_LOW",
-  "SOURCE_NOT_READABLE",
-]);
-export type StudyErrorCode = z.infer<typeof studyErrorCodeSchema>;
+export const studyErrorCodeSchema = groundedErrorCodeSchema;
+export type StudyErrorCode = GroundedErrorCode;
 
 export const studyGenerateRequestSchema = z
   .object({

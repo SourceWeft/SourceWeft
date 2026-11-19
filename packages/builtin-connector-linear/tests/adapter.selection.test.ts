@@ -5,6 +5,7 @@ import {
   connectorSelectionDescribeResultSchema,
   connectorSelectionSearchResultSchema,
   type ConnectorActionInput,
+  type ConnectorManifest,
 } from "@sourceweft/contracts";
 import {
   IDENTITY_QUERY,
@@ -17,6 +18,14 @@ import {
   createLinearConnectorAdapter,
   parseLinearSelection,
 } from "../src/adapter";
+
+// The Linear manifest always uses the platform's standard OAuth2 flow; this
+// narrows the manifest's auth union so its OAuth2 fields can be read.
+function oauth2Auth(manifest: ConnectorManifest) {
+  assert.equal(manifest.auth.kind, "oauth2");
+  if (manifest.auth.kind !== "oauth2") throw new Error("unreachable");
+  return manifest.auth;
+}
 
 const TEAM_A = "11111111-1111-1111-1111-111111111111";
 const TEAM_B = "22222222-2222-2222-2222-222222222222";
@@ -97,7 +106,7 @@ function actionInput(
   };
 }
 
-/** Mirrors the adapter's R6 cursor encoding (base64url of `{"t", "a"}`), so
+/** Mirrors the adapter's browse cursor encoding (base64url of `{"t", "a"}`), so
  * tests can build a continuation cursor and independently decode one the
  * adapter returned, without depending on any adapter-internal export. */
 function encodeCursor(teamId: string | null, after: string): string {
@@ -741,5 +750,5 @@ test("manifest client_id is empty without a secret", () => {
     clientSecret: "",
   });
   const manifest = withoutSecret.getManifest();
-  assert.equal(manifest.auth.authorizationParams?.client_id, "");
+  assert.equal(oauth2Auth(manifest).authorizationParams?.client_id, "");
 });

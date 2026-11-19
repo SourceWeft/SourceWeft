@@ -1,6 +1,7 @@
 import { ConnectorAccessPolicy } from "./access-policy";
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
+import { ConnectorOAuthService } from "./oauth-service";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   archiveConnectorSources,
@@ -27,6 +28,10 @@ export class ConnectorService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
     private readonly access = new ConnectorAccessPolicy(undefined, registry),
+    private readonly oauthService: ConnectorOAuthService = new ConnectorOAuthService(
+      registry,
+      access,
+    ),
   ) {}
 
   async listManifests(userId: string) {
@@ -441,6 +446,17 @@ export class ConnectorService {
           "Connector OAuth account is attached to another connector",
         );
       }
+
+      // Revoke at the provider before any local row is removed: a failure
+      // here must leave the connector, its sources and the account intact.
+      const account = await findOAuthAccountRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: current.oauthAccountId,
+      });
+      if (account) {
+        await this.oauthService.revokeStoredAuthorization(account);
+      }
     }
 
     const result = await hardDeleteSourceConnectorRecord({
@@ -506,6 +522,9 @@ export class ConnectorService {
         },
       );
     }
+
+    // Revoke at the provider before the row is removed: abort on failure.
+    await this.oauthService.revokeStoredAuthorization(account);
 
     const deleted = await deleteOAuthAccountRecord({
       teamId: workspace.organizationId,

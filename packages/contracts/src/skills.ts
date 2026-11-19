@@ -761,7 +761,7 @@ export const registryVersionSchema = z.object({
   hasIngestion: z.boolean(),
   moderation: z
     .object({
-      action: z.enum(["publish", "reject", "revoke"]),
+      action: z.enum(["publish", "reject", "revoke", "supersede"]),
       actorUserId: z.string(),
       at: z.string(),
       reason: z.string().optional(),

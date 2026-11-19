@@ -3243,6 +3243,10 @@
         "modeScopeNote": "所有模式都会向 Google 申请读取和发送权限；每封邮件发送前都必须审核。",
         "modeCancel": "取消",
         "modeContinue": "继续前往 Google",
+        "brokerNoticeTitle": "通过 Composio 连接 Gmail",
+        "brokerNoticeBody": "SourceWeft 通过 Composio 连接 Gmail。Google 的授权页会显示 Composio 的名称，并请求访问你的整个邮箱。SourceWeft 只会搜索你的邮件、读取你询问的邮件，并且只在你确认后发送邮件。经过的邮件内容会由 Composio 保留最长一年。",
+        "brokerNoticeContinue": "继续前往 Google",
+        "toolsOnlyCardDescription": "搜索并阅读邮件，经确认后发送邮件。",
         "liveSearch": "实时搜索 Gmail",
         "indexMail": "将选定邮件索引到此工作区",
         "indexNotice": "索引会将选定邮件内容存入工作区资料源。关闭索引会使保留的邮件不再参与代理检索；删除连接器可移除存储副本。定期同步需另行选择。",
@@ -3364,6 +3368,24 @@
               "root": "Dropbox",
               "note": "文件夹合计最多同步 1,000 个文件",
               "emptyContainer": "此文件夹为空。"
+            }
+          },
+          "github": {
+            "itemsTitle": "仓库",
+            "itemsDescription": "这个工作区所有成员的智能体都能搜索和读取这些仓库里的 issue、拉取请求和讨论，且仅限这些仓库。",
+            "choose": "选择仓库",
+            "empty": "还没有选择。选择仓库之前，智能体读不到 GitHub 里的任何内容。",
+            "kinds": {
+              "account": "账号",
+              "repository": "仓库"
+            },
+            "helpLink": {
+              "add_repositories": "在 GitHub 上添加仓库"
+            },
+            "browser": {
+              "description": "打开一个账号查看已安装应用的仓库，然后勾选允许智能体搜索和读取的仓库。",
+              "root": "GitHub",
+              "emptyRoot": "应用还没有安装到任何账号。请先在 GitHub 上添加仓库，然后点击刷新。"
             }
           },
           "linear": {

@@ -38,7 +38,7 @@ import {
 export { LinearAdapterError } from "./linear-client";
 
 /** `linear.search`'s own cap on how many teams/projects it returns, each
- * (R5: at most 25 matching teams followed by at most 25 matching projects, no
+ * (at most 25 matching teams followed by at most 25 matching projects, no
  * paging). `TEAMS_QUERY` has no `first` variable (it is fixed at 50 in the
  * document), so the team half of this cap is applied by slicing the result;
  * `PROJECTS_QUERY` takes `first` as a variable and is called with it
@@ -100,14 +100,14 @@ export type LinearAdapterConfig = {
  * string }`. Without `containerId` or `cursor` it lists teams at the root.
  * `containerId` set to a team id lists that team's projects, with the team as
  * `container`. A `cursor` continues a prior page of either listing without
- * needing `containerId` again (R6): it is opaque, base64url of `{"t": <team
+ * needing `containerId` again: it is opaque, base64url of `{"t": <team
  * id or null>, "a": <Linear endCursor>}`. A continuation page always reports
  * `container: null`; a team sits directly under the root, so `breadcrumbs` is
  * always `[]` and `helpLink` is always `null`. Entries are sorted by name
  * (case-insensitive) within a page.
  *
  * `linear.search` request `{ query: string (1-200 chars after trimming) }`.
- * Matches team and project names. No paging (R5): `cursor` is always `""`,
+ * Matches team and project names. No paging: `cursor` is always `""`,
  * `hasMore` is always `false`, and a request that itself carries a `cursor`
  * is rejected.
  *
@@ -138,7 +138,7 @@ function nothingSelected(): LinearAdapterError {
   );
 }
 
-/** R7: an issue that does not exist, one the token cannot see, and one outside
+/** An issue that does not exist, one the token cannot see, and one outside
  * the selection all surface the same not-found, so the agent cannot probe for
  * the existence of issues outside its scope. */
 function issueNotFound(): LinearAdapterError {
@@ -246,14 +246,14 @@ function parseBrowseRequest(
 
 type BrowseCursor = { teamId: string | null; after: string };
 
-/** R6: opaque to callers; base64url of `{"t": <teamId or null>, "a": <Linear
+/** Opaque to callers; base64url of `{"t": <teamId or null>, "a": <Linear
  * endCursor>}`. */
 function encodeBrowseCursor(teamId: string | null, after: string): string {
   return Buffer.from(JSON.stringify({ t: teamId, a: after }), "utf8").toString("base64url");
 }
 
 /** Throws `400 LINEAR_INVALID_REQUEST` when `cursor` does not decode to the
- * `{t, a}` shape R6 defines. */
+ * `{t, a}` shape of the browse cursor. */
 function decodeBrowseCursor(cursor: string): BrowseCursor {
   let decoded: unknown;
   try {
@@ -276,8 +276,8 @@ function decodeBrowseCursor(cursor: string): BrowseCursor {
 }
 
 /** The query is validated against its 1-200 char bound only after trimming,
- * and a request that itself carries a `cursor` is rejected outright (R5:
- * `linear.search` never paginates). */
+ * and a request that itself carries a `cursor` is rejected outright
+ * (`linear.search` never paginates). */
 function parseSearchRequest(request: Record<string, unknown>): { query: string } {
   if ("cursor" in request) throw invalidRequest();
   const rawQuery = request.query;
@@ -580,7 +580,7 @@ export function createLinearConnectorAdapter(
   }
 
   /** `linear.browse`: lists teams at the root, or one team's projects, or
-   * continues either listing via an opaque cursor (R6). The request is
+   * continues either listing via an opaque cursor. The request is
    * validated, and a cursor decoded, before any Linear request is made. */
   async function browseAction(
     input: ConnectorActionInput,
@@ -600,7 +600,7 @@ export function createLinearConnectorAdapter(
   }
 
   /** `linear.search`: matches team and project names in parallel, teams
-   * (at most 25) then projects (at most 25), never paginated (R5). */
+   * (at most 25) then projects (at most 25), never paginated. */
   async function searchAction(
     input: ConnectorActionInput,
   ): Promise<ConnectorSelectionSearchResult> {
@@ -744,7 +744,7 @@ export function createLinearConnectorAdapter(
 
   /** `read_linear_issue`: one issue by identifier or UUID, with description,
    * labels and the 20 most recent comments. A null issue, a not-found from the
-   * client, or an issue outside the selection all collapse to the same R7
+   * client, or an issue outside the selection all collapse to the same
    * not-found. */
   async function readIssueAction(
     input: ConnectorActionInput,

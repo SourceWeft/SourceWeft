@@ -11,10 +11,18 @@ Preview eligibility is operator-managed data in the existing `user_settings.sett
 
 The user settings API returns normalized preview flags but only accepts appearance updates. Users cannot grant themselves preview access. Missing flags are disabled. Only the boolean `true` grants access; malformed data is denied with a diagnostic, and database failures are surfaced rather than converted to an ordinary disabled flag.
 
+## Authorization mode
+
+`GMAIL_AUTH_PROVIDER` selects how the Gmail connector authorizes and talks to Gmail, independently of the preview gate above. The default, `google`, uses SourceWeft's own Google OAuth client (`GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`) and calls the Gmail API directly, with optional mailbox indexing scoped by label and start date. Setting it to `composio` instead authorizes through Composio and relays every Gmail request through Composio's proxy using `COMPOSIO_API_KEY`, so SourceWeft never holds a Google token; that mode offers live Gmail tools only (search, read message, read thread, approved send) and has no mailbox indexing. Setting `COMPOSIO_API_KEY` alone enables nothing — it only takes effect once `GMAIL_AUTH_PROVIDER=composio`.
+
+`COMPOSIO_API_KEY` is a Composio project API key. Give it these permissions when you create it (a key's permissions cannot be changed later): Session management (read, write), Connected accounts (read, write), Auth configs (read, write) and Proxy execute. No other setup is needed in the Composio dashboard. On the first Gmail connection SourceWeft looks in the project for an enabled Composio-managed Gmail auth config whose only scope is `https://mail.google.com/`, creates one named `sourceweft-gmail` if there is none, and pins every authorization link to it. Composio's managed Gmail app otherwise asks for contacts, addresses, birthday and phone numbers as well; if SourceWeft cannot find or create the mailbox-only auth config (for example the key lacks the Auth configs permission), the connection is refused rather than made with the wider consent. A key without Auth configs write also works when such an auth config already exists in the project.
+
+Changing `GMAIL_AUTH_PROVIDER` does not migrate existing connections: a Gmail connection made in one mode cannot be used or revoked in the other. Before changing the mode in either direction, delete the existing Gmail connectors; after the change, users reconnect.
+
 ## Deployment order
 
 1. Deploy the preview-aware API, workers and scheduler. All processes that save user settings must use the atomic partial-update implementation before any preview grant is written. Older versions replace the complete JSON document and can erase grants when a user changes appearance.
-2. Configure `GMAIL_CONNECTOR_ENABLED`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and the OAuth redirect URI on the backend. A user flag does not enable an unconfigured or disabled adapter.
+2. Configure `GMAIL_CONNECTOR_ENABLED` and the authorization-mode variables on the backend: for the default `google` mode, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and the OAuth redirect URI; for `composio` mode, `GMAIL_AUTH_PROVIDER=composio` and `COMPOSIO_API_KEY`. A user flag does not enable an unconfigured or disabled adapter.
 3. Use the operator command to grant preview to a test user. Use a dedicated mailbox with test messages and an isolated workspace for review recordings.
 4. Verify both an allowed account and an account without preview. Direct API calls and existing agent sessions must obey the same policy as the interface.
 

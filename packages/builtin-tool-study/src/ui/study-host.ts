@@ -4,6 +4,13 @@ import {
   useContext,
   type ReactNode,
 } from "react";
+import {
+  configureGroundedHost,
+  GroundedHostProvider,
+  type GroundedFreshness,
+  type GroundedTranslate,
+  type GroundedVersionRef,
+} from "@sourceweft/grounded-generation/ui";
 import type {
   QuizAnswer,
   QuizAttempt,
@@ -28,11 +35,7 @@ import type {
  * `artifactVersionId`; the host maps it to whatever the learning-state API
  * needs.
  */
-export type StudyVersionRef = {
-  readonly workspaceId: string;
-  readonly artifactId: string;
-  readonly artifactVersionId: string | null;
-};
+export type StudyVersionRef = GroundedVersionRef;
 
 export type ReviewStateView = Pick<
   ReviewState,
@@ -41,18 +44,9 @@ export type ReviewStateView = Pick<
 
 export type QuizAttemptView = QuizAttempt;
 
-export type StudyFreshness = {
-  /**
-   * `stale`: an input source changed since generation; `source_deleted`: one
-   * was removed (the artifact stays usable); `unknown`: not checked.
-   */
-  readonly status: "fresh" | "stale" | "source_deleted" | "unknown";
-};
+export type StudyFreshness = GroundedFreshness;
 
-export type StudyTranslate = (
-  key: string,
-  values?: Readonly<Record<string, string | number>>,
-) => string;
+export type StudyTranslate = GroundedTranslate;
 
 export type StudyHost = {
   /** False on public or signed-out surfaces: nothing is written, grading is hidden. */
@@ -141,6 +135,8 @@ let configuredHost: StudyHost | null = null;
 /** Installed once by the app shell, before any study viewer renders. */
 export function configureStudyHost(host: StudyHost | null) {
   configuredHost = host;
+  // The shared evidence and staleness components read the same host.
+  configureGroundedHost(host);
 }
 
 const StudyHostContext = createContext<StudyHost | null>(null);
@@ -153,7 +149,11 @@ export function StudyHostProvider({
   host: StudyHost;
   children?: ReactNode;
 }) {
-  return createElement(StudyHostContext.Provider, { value: host }, children);
+  return createElement(
+    StudyHostContext.Provider,
+    { value: host },
+    createElement(GroundedHostProvider, { host, children }),
+  );
 }
 
 export function useStudyHost(): StudyHost {

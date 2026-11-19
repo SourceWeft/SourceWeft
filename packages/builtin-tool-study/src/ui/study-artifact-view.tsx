@@ -12,7 +12,7 @@ import { FlashcardsViewer } from "./flashcards/flashcards-viewer";
 import { MindmapViewer } from "./mindmap/mindmap-viewer";
 import { QuizViewer } from "./quiz/quiz-viewer";
 import { StudyCannotDisplay, StudyErrorBoundary } from "./shared/error-boundary";
-import { StaleBanner } from "./shared/stale-banner";
+import { StaleBanner } from "@sourceweft/grounded-generation/ui";
 import { useStudyHost, type StudyVersionRef } from "./study-host";
 
 function record(value: unknown): Record<string, unknown> | null {

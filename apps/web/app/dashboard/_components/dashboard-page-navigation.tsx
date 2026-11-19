@@ -35,7 +35,7 @@ export function DashboardPageNavigation() {
         desktopTitlebar
           ? "h-14 select-none"
           : "h-12 border-b border-border/70 sm:h-14",
-        titlebarInset ? "pl-6" : "pl-3 sm:pl-4",
+        titlebarInset ? "pl-7" : "pl-3 sm:pl-4",
       )}
     >
       {hasRail ? null : (

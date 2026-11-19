@@ -41,6 +41,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-google-drive"),
   "@sourceweft/builtin-connector-dropbox": () =>
     import("@sourceweft/builtin-connector-dropbox"),
+  "@sourceweft/builtin-connector-github": () =>
+    import("@sourceweft/builtin-connector-github"),
   "@sourceweft/builtin-connector-linear": () =>
     import("@sourceweft/builtin-connector-linear"),
   "@sourceweft/builtin-retrieval": () =>
