@@ -6,6 +6,8 @@ import {
   Folder,
   FolderGit2,
   FolderKanban,
+  Globe,
+  SquareKanban,
   Users,
 } from "lucide-react";
 import {
@@ -183,6 +185,14 @@ describe("selectionPresenters.linear", () => {
 
   test("has no indexing presenter (tools-only connector)", () => {
     expect(presenter.indexing).toBeUndefined();
+  });
+});
+
+describe("selectionPresenters.jira", () => {
+  test("presenter has an icon for every selection kind", () => {
+    const presenter = selectionPresenters.jira!;
+    expect(presenter.kindIcons.site).toBe(Globe);
+    expect(presenter.kindIcons.project).toBe(SquareKanban);
   });
 });
 

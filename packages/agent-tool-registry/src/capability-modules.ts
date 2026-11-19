@@ -45,6 +45,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/builtin-connector-github"),
   "@sourceweft/builtin-connector-linear": () =>
     import("@sourceweft/builtin-connector-linear"),
+  "@sourceweft/builtin-connector-jira": () =>
+    import("@sourceweft/builtin-connector-jira"),
   "@sourceweft/builtin-retrieval": () =>
     import("@sourceweft/builtin-retrieval"),
   "@sourceweft/builtin-skill-ppt-deck": () =>

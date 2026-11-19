@@ -15,7 +15,9 @@ import {
   Folder,
   FolderGit2,
   FolderKanban,
+  Globe,
   type LucideIcon,
+  SquareKanban,
   Users,
 } from "lucide-react";
 import type {
@@ -105,6 +107,11 @@ export const selectionPresenters: Record<string, SelectionPresenter> = {
   // block, only the kind icons for the selection dialog and settings list.
   linear: {
     kindIcons: { team: Users, project: FolderKanban },
+  },
+  // Jira is tools-only (nothing is indexed): just the per-kind icons for the
+  // selection dialog, no `indexing` entry.
+  jira: {
+    kindIcons: { site: Globe, project: SquareKanban },
   },
 };
 

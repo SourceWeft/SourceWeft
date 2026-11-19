@@ -3414,6 +3414,20 @@
               "description": "点开团队可以看到它的项目，然后勾选要包含的团队和项目。",
               "root": "Linear"
             }
+          },
+          "jira": {
+            "itemsTitle": "项目",
+            "itemsDescription": "这个工作区所有成员的智能体都能搜索和读取你所选项目中的 issue，且仅限这些项目。",
+            "choose": "选择项目",
+            "empty": "还没有选择。至少选择一个项目后，智能体才能搜索。",
+            "kinds": {
+              "site": "站点",
+              "project": "项目"
+            },
+            "browser": {
+              "description": "点开站点可以看到它的项目，然后勾选要包含的项目。",
+              "root": "Jira 站点"
+            }
           }
         }
       },

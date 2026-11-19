@@ -3414,6 +3414,20 @@
               "description": "點開團隊可以看到它的專案，然後勾選要包含的團隊和專案。",
               "root": "Linear"
             }
+          },
+          "jira": {
+            "itemsTitle": "專案",
+            "itemsDescription": "這個工作區所有成員的代理程式都能搜尋和讀取你所選專案中的 issue，且僅限這些專案。",
+            "choose": "選擇專案",
+            "empty": "還沒有選擇。至少選擇一個專案後，代理程式才能搜尋。",
+            "kinds": {
+              "site": "站點",
+              "project": "專案"
+            },
+            "browser": {
+              "description": "點開站點可以看到它的專案，然後勾選要包含的專案。",
+              "root": "Jira 站點"
+            }
           }
         }
       },

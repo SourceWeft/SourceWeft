@@ -5,6 +5,7 @@ import {
   HardDrive,
   ListChecks,
   Mail,
+  SquareKanban,
 } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
@@ -100,6 +101,23 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     // No Linear logo file is added yet, so `logoIconName` is omitted and this
     // icon shows instead.
     icon: ListChecks,
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  },
+  {
+    id: "jira",
+    name: "Jira",
+    category: "Knowledge & Docs",
+    description:
+      "Let the agent search and read issues in the Jira projects you choose.",
+    capabilities: ["Live search", "Issues & projects"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    icon: SquareKanban,
+    // No Atlassian artwork is shipped, so this entry has no logoIconName
+    // (unlike Notion/Dropbox's logoIconName/logoIconTone).
     isIndexable: false,
     supportsActions: true,
     supportsPeriodicSync: false,

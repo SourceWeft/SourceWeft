@@ -135,6 +135,16 @@ const linearSelectionSpec = {
   maxItems: 100,
 };
 
+const jiraSelectionSpec = {
+  actions: {
+    browse: "jira.browse",
+    search: "jira.search",
+    describe: "jira.describe",
+  },
+  kinds: ["site", "project"],
+  maxItems: 100,
+};
+
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
     await Promise.resolve();
@@ -927,6 +937,59 @@ test("linear connect creates an empty selection without periodic sync and opens 
   expect(sync).not.toHaveBeenCalled();
   expect(api().connectorSettingsConnector?.id).toBe("linear-1");
   expect(toastSuccess).toHaveBeenCalledWith("Linear connected.");
+});
+
+test("jira connect creates an empty selection without periodic sync and opens settings", async () => {
+  listManifests.mockResolvedValue({
+    items: [
+      { type: "notion" },
+      { type: "dropbox", selection: dropboxSelectionSpec },
+      { type: "jira", selection: jiraSelectionSpec },
+    ],
+  });
+  listAccounts.mockResolvedValue({
+    items: [
+      {
+        id: "acc-jira",
+        status: "active",
+        displayName: "Person",
+        createdAt: "2024-01-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const created = fakeConnector({
+    id: "jira-1",
+    connectorType: "jira",
+    name: "Person",
+    oauthAccountId: "acc-jira",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  create.mockImplementation(async () => {
+    list.mockResolvedValue({ items: [created] });
+    return { connector: created };
+  });
+  returnFromAuthorization({
+    workspaceId: "ws-jira",
+    connectorType: "jira",
+    accountId: "acc-jira",
+  });
+
+  await mountHook(baseInput("ws-jira"));
+
+  // Jira is a tools-only selection connector, not in the periodic-index list:
+  // an empty selection is created, periodic indexing stays off, and settings
+  // open so the admin can pick projects.
+  expect(create).toHaveBeenCalledWith("ws-jira", {
+    connectorType: "jira",
+    name: "Person",
+    oauthAccountId: "acc-jira",
+    configJson: { items: [] },
+    periodicIndexingEnabled: false,
+  });
+  expect(sync).not.toHaveBeenCalled();
+  expect(api().connectorSettingsConnector?.id).toBe("jira-1");
+  expect(toastSuccess).toHaveBeenCalledWith("Jira connected.");
 });
 
 test("a manifest fetch that fails after OAuth return still creates the connector from the spec in state", async () => {

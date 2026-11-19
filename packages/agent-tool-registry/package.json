@@ -20,6 +20,7 @@
     "@sourceweft/builtin-connector-dropbox": "workspace:*",
     "@sourceweft/builtin-connector-github": "workspace:*",
     "@sourceweft/builtin-connector-linear": "workspace:*",
+    "@sourceweft/builtin-connector-jira": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
     "@sourceweft/builtin-tool-generate-image": "workspace:*",
