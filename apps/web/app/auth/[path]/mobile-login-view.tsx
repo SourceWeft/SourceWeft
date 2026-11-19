@@ -3,12 +3,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import {
-  Alert,
-  AlertDescription,
-} from "@sourceweft/ui-web/components/ui/alert";
+import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { AppleIcon, GoogleIcon } from "../../_components/brand-icons";
@@ -51,11 +48,6 @@ type SessionResult = {
   } | null;
   session?: unknown;
   user?: unknown;
-};
-
-type MobileAuthNotice = {
-  message: string;
-  variant: "error" | "success";
 };
 
 function resolveInitialMode(path: string): MobileAuthMode {
@@ -104,7 +96,6 @@ export function MobileLoginView({ path }: { path: string }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [notice, setNotice] = useState<MobileAuthNotice | null>(null);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [isAppleSubmitting, setIsAppleSubmitting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -197,7 +188,7 @@ export function MobileLoginView({ path }: { path: string }) {
 
   function switchMode(nextMode: MobileAuthMode) {
     setMode(nextMode);
-    setNotice(null);
+    toast.dismiss();
   }
 
   async function completeAuthSuccess(
@@ -214,17 +205,11 @@ export function MobileLoginView({ path }: { path: string }) {
     if (source === "sign-up") {
       setMode("sign-in");
       setPassword("");
-      setNotice({
-        message: t("signUpSuccessNoSession"),
-        variant: "success",
-      });
+      toast.success(t("signUpSuccessNoSession"));
       return;
     }
 
-    setNotice({
-      message: t("signInErrorNoSession"),
-      variant: "error",
-    });
+    toast.error(t("signInErrorNoSession"));
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
@@ -233,7 +218,7 @@ export function MobileLoginView({ path }: { path: string }) {
       return;
     }
 
-    setNotice(null);
+    toast.dismiss();
     setIsSubmitting(true);
 
     try {
@@ -259,7 +244,7 @@ export function MobileLoginView({ path }: { path: string }) {
           method: "email",
           surface: "mobile",
         });
-        setNotice({ message: resultError, variant: "error" });
+        toast.error(resultError);
         return;
       }
 
@@ -275,15 +260,14 @@ export function MobileLoginView({ path }: { path: string }) {
         method: "email",
         surface: "mobile",
       });
-      setNotice({
-        message: getErrorMessage(
+      toast.error(
+        getErrorMessage(
           caughtError,
           mode === "sign-up"
             ? t("signUpErrorFallback")
             : t("signInErrorFallback"),
         ),
-        variant: "error",
-      });
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -295,7 +279,7 @@ export function MobileLoginView({ path }: { path: string }) {
       return;
     }
 
-    setNotice(null);
+    toast.dismiss();
     setIsGoogleSubmitting(true);
 
     try {
@@ -310,7 +294,7 @@ export function MobileLoginView({ path }: { path: string }) {
       });
       const message = getMobileGoogleSignInError(caughtError);
       if (message) {
-        setNotice({ message, variant: "error" });
+        toast.error(message);
       }
     } finally {
       setIsGoogleSubmitting(false);
@@ -322,7 +306,7 @@ export function MobileLoginView({ path }: { path: string }) {
       return;
     }
 
-    setNotice(null);
+    toast.dismiss();
     setIsAppleSubmitting(true);
 
     try {
@@ -337,7 +321,7 @@ export function MobileLoginView({ path }: { path: string }) {
       });
       const message = getMobileAppleSignInError(caughtError);
       if (message) {
-        setNotice({ message, variant: "error" });
+        toast.error(message);
       }
     } finally {
       setIsAppleSubmitting(false);
@@ -455,20 +439,6 @@ export function MobileLoginView({ path }: { path: string }) {
               type="password"
               value={password}
             />
-
-            {notice && (
-              <Alert
-                className="rounded-2xl"
-                variant={notice.variant === "error" ? "destructive" : "default"}
-              >
-                {notice.variant === "error" ? (
-                  <AlertCircle />
-                ) : (
-                  <CheckCircle2 />
-                )}
-                <AlertDescription>{notice.message}</AlertDescription>
-              </Alert>
-            )}
 
             <Button
               className="h-12 w-full rounded-full text-sm font-semibold [@media(max-height:760px)]:h-11"

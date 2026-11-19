@@ -12,6 +12,11 @@ const state = vi.hoisted(() => ({
   getSession: vi.fn(),
   signInWithMobileApple: vi.fn(),
   signInWithMobileGoogle: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: state.toastError, success: vi.fn(), dismiss: vi.fn() },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -86,6 +91,7 @@ beforeEach(() => {
   state.getSession.mockResolvedValue({ data: null });
   state.signInWithMobileApple.mockReset();
   state.signInWithMobileGoogle.mockReset();
+  state.toastError.mockReset();
   state.replace.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -121,6 +127,22 @@ test("iOS offers Apple and Google when the API accepts both, and signs in with t
   await flush();
   assert.equal(state.signInWithMobileApple.mock.calls.length, 1);
   assert.deepEqual(state.replace.mock.calls.at(-1), ["/dashboard/chat"]);
+});
+
+test("a failed Apple sign-in is reported in a toast, not on the page", async () => {
+  answerAuthConfig({ apple: true, googleIosClientId: IOS_CLIENT });
+  state.signInWithMobileApple.mockRejectedValue(new Error("Apple is down"));
+  await mount();
+
+  button("Continue with Apple")?.click();
+  await flush();
+  await flush();
+
+  assert.deepEqual(state.toastError.mock.calls, [["Apple is down"]]);
+  assert(
+    !document.body.textContent?.includes("Apple is down"),
+    "the message is not rendered in the page",
+  );
 });
 
 test("offers an SSO sign-in link pointing at /auth/sso", async () => {
