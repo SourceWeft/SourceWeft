@@ -10,6 +10,7 @@ import {
   type SkillVersionChangelog,
 } from "./changelog";
 import { recordSkillMarketEvent } from "./events";
+import { AUTO_LISTABLE_FLAGS } from "../registry/scan";
 import {
   listSkillPublicly,
   prepareSkillListing,
@@ -17,20 +18,20 @@ import {
 } from "./listing";
 
 /**
- * A skill whose scan came back clean goes public on its own.
+ * A skill whose scan found nothing hostile goes public on its own.
  *
- * The signal is already in the data: ingest triage publishes a clean version
- * and leaves a flagged one as a `draft` for review (`registry/guard.ts`). So
- * "has a published current version" *is* "passed the scan", and this pass needs
- * no hook in the ingest pipeline — it just looks for skills in that state that
- * are not public yet.
+ * The signal is already in the data: ingest triage publishes a version the scan
+ * did not hold back and leaves an unknown flag as a `draft` for review
+ * (`registry/guard.ts`). So "has a published current version" *is* "passed the
+ * scan", and this pass needs no hook in the ingest pipeline — it just looks for
+ * skills in that state that are not public yet.
  *
- * "Clean" means no flags at all, not merely "published". Some flags are
- * advisory (`binary:executable`, `registry/scan.ts`): they no longer hold a
- * version back, so the person who imported the skill can use it straight away —
- * on the understanding that showing it to OTHER people stays an admin's call,
- * made with the flag in front of them. A published version that carries a flag
- * therefore waits in the listing queue below instead of listing itself.
+ * Flags that describe what a skill does (reads an API key, posts to a host,
+ * asks for a shell tool) do not stop it: they are shown on the skill's page,
+ * where the reader sees them before installing. A bundled binary still does
+ * (`registry/scan.ts`, `AUTO_LISTABLE_FLAGS`): opaque code is not something a
+ * page can describe, so such a skill waits in the listing queue below for an
+ * admin, who decides with the flag in front of them.
  */
 
 /**
@@ -45,10 +46,20 @@ const AUTO_LIST_GRACE_MINUTES = 10;
 /** Most skills listed in one pass; the rest wait for the next tick. */
 const AUTO_LIST_BATCH_SIZE = 200;
 
-const currentVersionFlags = sql`coalesce(${skillVersions.manifestJson}->'registry'->'scan'->'flags', '[]'::jsonb)`;
+/**
+ * A flag outside `AUTO_LISTABLE_FLAGS` makes the current version one an admin
+ * must list. No flags at all is listable too.
+ */
+const heldFlagCount = sql`(
+  select count(*) from jsonb_array_elements_text(coalesce(${skillVersions.manifestJson}->'registry'->'scan'->'flags', '[]'::jsonb)) as flag(name)
+  where flag.name not in (${sql.join(
+    AUTO_LISTABLE_FLAGS.map((flag) => sql`${flag}`),
+    sql`, `,
+  )})
+)`;
 
 function publishedCurrentVersion(
-  flags: "none" | "some",
+  flags: "listable" | "held",
   options: { settled?: boolean } = {},
 ) {
   const settled = options.settled
@@ -61,7 +72,7 @@ function publishedCurrentVersion(
       and ${skillVersions.status} = 'published'
       and ${skillVersions.manifestJson}->>'listing' is distinct from 'hidden'
       and ${skillVersions.manifestJson}->'registry'->'provenance' is not null
-      and jsonb_array_length(${currentVersionFlags}) ${flags === "none" ? sql`= 0` : sql`> 0`}
+      and ${heldFlagCount} ${flags === "listable" ? sql`= 0` : sql`> 0`}
       ${settled}
   )`;
 }
@@ -82,7 +93,7 @@ export async function listAutoListCandidateIds(scope: AutoListScope = {}) {
         eq(skillDefinitions.status, "active"),
         eq(skillDefinitions.visibility, "restricted"),
         eq(skillDefinitions.listingHold, false),
-        publishedCurrentVersion("none", { settled: !scope.skipGrace }),
+        publishedCurrentVersion("listable", { settled: !scope.skipGrace }),
         scope.onlySkillIds
           ? inArray(skillDefinitions.id, scope.onlySkillIds)
           : undefined,
@@ -114,9 +125,9 @@ export type SkillListingQueueEntry = {
 /**
  * Two kinds of skill wait for an admin here:
  *
- * - Usable by whoever imported them but carrying an advisory flag, so going
- *   public is an admin's decision: list it, or withdraw it (which holds it and
- *   takes it out of this queue).
+ * - Usable by whoever imported them but carrying a flag the page cannot
+ *   explain away (a bundled binary), so going public is an admin's decision:
+ *   list it, or withdraw it (which holds it and takes it out of this queue).
  * - Already public, whose current version brought scan flags or scripts the
  *   version before it did not have. Taking it down on its own would punish
  *   every author for every update; leaving it unseen would let a skill turn
@@ -150,7 +161,7 @@ async function listFlaggedUnlistedSkills(): Promise<SkillListingQueueEntry[]> {
         eq(skillDefinitions.status, "active"),
         eq(skillDefinitions.visibility, "restricted"),
         eq(skillDefinitions.listingHold, false),
-        publishedCurrentVersion("some"),
+        publishedCurrentVersion("held"),
       ),
     )
     .orderBy(asc(skillDefinitions.createdAt), asc(skillDefinitions.id))
@@ -267,7 +278,9 @@ async function listEscalatedPublicSkills(): Promise<SkillListingQueueEntry[]> {
       // When the version arrived, which is what the admin is deciding about.
       createdAt: version.createdAt.toISOString(),
       reason:
-        changes.newFlags.length > 0 ? "new-version-flags" : "new-version-scripts",
+        changes.newFlags.length > 0
+          ? "new-version-flags"
+          : "new-version-scripts",
       visibility: "public" as const,
       changes,
     };

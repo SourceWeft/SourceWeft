@@ -4508,7 +4508,9 @@
       "secrets:env-access": "讀取環境變數",
       "scope:other-skill-file": "讀取其他技能的檔案",
       "tool:sensitive": "請求程式碼執行類工具",
-      "binary:executable": "附帶可執行二進位檔案"
+      "binary:executable": "附帶可執行二進位檔案",
+      "capability:undeclared-scripts": "附帶說明裡沒有提到的腳本",
+      "script:out-of-bundle-path": "腳本存取技能目錄之外的檔案"
     },
     "community": {
       "overview": {
@@ -4983,6 +4985,8 @@
       "scope:other-skill-file": "讀取其他技能的檔案",
       "tool:sensitive": "請求程式碼執行工具",
       "binary:executable": "附帶可執行二進位檔案",
+      "capability:undeclared-scripts": "附帶說明裡沒有提到的腳本",
+      "script:out-of-bundle-path": "腳本存取技能目錄之外的檔案",
       "sticky-review": "暫緩審核：較早的版本尚未處理"
     },
     "escalation": {

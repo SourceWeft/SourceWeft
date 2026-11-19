@@ -2,14 +2,28 @@
  * Stage 4 — Guard (triage). Pure decision, no IO.
  * docs/architecture/skill-registry-index.md §3 Stage 4 / build phase R2.
  *
- *   - No ownership veto: anyone may submit a newer commit of the same public
- *     repository (see below). Control of the listing is not decided here.
- *   - Sticky: once a definition/version is in review (draft) or tombstoned
- *     (deprecated / archived), a re-submit that merely drops the risky lines
- *     can't auto-index — only an admin moves it.
- *   - Triage: a clean submission indexes (version published); anything flagged
- *     or sticky queues for review (version draft).
+ * Every submission ends in one of three states, and only the last needs a
+ * person:
+ *
+ *   - indexed  — a scan that found nothing hostile. Version published. Flags
+ *                that merely describe what a skill does are shown on its page.
+ *   - refused  — a scan that found the attack itself (`REFUSED_SCAN_FLAGS`), or
+ *                a skill a person already took down. Nothing is stored; the
+ *                submitter is told why. Waiting for review would only fill the
+ *                queue.
+ *   - queued   — a flag the scan does not know. Version draft, for an admin.
+ *
+ * No ownership veto: anyone may submit a newer commit of the same public
+ * repository (see below). Control of the listing is not decided here.
+ *
+ * A person's decision sticks: once an admin deprecated or disabled the
+ * latest version, or the definition is archived, a later commit that merely
+ * drops the risky lines cannot bring it back — only an admin moves it. A draft
+ * does NOT stick: it is the scan's own hold, and a clean later commit of the
+ * same skill has answered it.
  */
+
+import { refusedScanFlags } from "./scan";
 
 export type RegistryExistingEntry = {
   ownerUserId: string | null;
@@ -24,21 +38,37 @@ export type TriageInput = {
   scan: { reviewRequired: boolean; flags: string[] };
 };
 
-export type TriageDecision = {
-  /** Maps to the submit-response status (`indexed` | `queued`). */
-  outcome: "indexed" | "queued";
-  versionStatus: "published" | "draft";
-  definitionStatus: "active";
-  reasons: string[];
-};
+export type TriageDecision =
+  | {
+      /** Maps to the submit-response status (`indexed` | `queued`). */
+      outcome: "indexed" | "queued";
+      versionStatus: "published" | "draft";
+      definitionStatus: "active";
+      reasons: string[];
+    }
+  | {
+      /** Reported to the submitter as a failure; nothing is stored. */
+      outcome: "refused";
+      reasons: string[];
+    };
 
-function isSticky(existing: NonNullable<RegistryExistingEntry>): boolean {
-  return (
-    existing.definitionStatus === "archived" ||
-    existing.currentVersionStatus === "draft" ||
-    existing.currentVersionStatus === "deprecated" ||
-    existing.currentVersionStatus === "disabled"
-  );
+/** Why a person's earlier decision holds a skill, or null when none does. */
+function heldBy(
+  existing: NonNullable<RegistryExistingEntry>,
+): "archived" | "disabled" | "deprecated" | null {
+  if (existing.definitionStatus === "archived") return "archived";
+  if (existing.currentVersionStatus === "disabled") return "disabled";
+  if (existing.currentVersionStatus === "deprecated") return "deprecated";
+  return null;
+}
+
+/** The submitter-facing sentence for a refusal. */
+export function describeRefusal(reasons: string[]): string {
+  const held = reasons.find((reason) => reason.startsWith("held:"));
+  if (held) {
+    return `This skill was ${held.slice("held:".length)} by an admin, so new commits of it are not indexed`;
+  }
+  return `The scan found content that is not indexed: ${reasons.join(", ")}`;
 }
 
 export function triageRegistrySubmission(input: TriageInput): TriageDecision {
@@ -53,21 +83,19 @@ export function triageRegistrySubmission(input: TriageInput): TriageDecision {
   // (It used to be refused outright, which let whoever imported a public
   // repository first keep everyone else from it, and froze it at their commit.)
 
-  const reasons: string[] = [];
-  const sticky = existing ? isSticky(existing) : false;
-  if (sticky) {
-    reasons.push("sticky-review");
+  const held = existing ? heldBy(existing) : null;
+  if (held) {
+    return { outcome: "refused", reasons: [`held:${held}`] };
   }
-  if (scan.reviewRequired) {
-    reasons.push(...scan.flags);
+  const refused = refusedScanFlags(scan.flags);
+  if (refused.length > 0) {
+    return { outcome: "refused", reasons: refused };
   }
-
-  const reviewRequired = scan.reviewRequired || sticky;
 
   return {
-    outcome: reviewRequired ? "queued" : "indexed",
-    versionStatus: reviewRequired ? "draft" : "published",
+    outcome: scan.reviewRequired ? "queued" : "indexed",
+    versionStatus: scan.reviewRequired ? "draft" : "published",
     definitionStatus: "active",
-    reasons,
+    reasons: scan.reviewRequired ? [...scan.flags] : [],
   };
 }

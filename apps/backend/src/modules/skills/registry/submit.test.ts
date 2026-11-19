@@ -173,11 +173,11 @@ test("a skill the reader refused for its size is that skill's failure; the rest 
   assert.equal(mocks.upsert.mock.calls.length, 1);
 });
 
-test("a flagged skill queues for review (draft version)", async () => {
+test("a skill with a flag the registry does not know queues for review (draft version)", async () => {
   mocks.read.mockResolvedValue(readResult(1));
   mocks.analyze.mockReturnValue(
     analyzed({
-      scan: { reviewRequired: true, flags: ["egress:pipe-to-shell"] },
+      scan: { reviewRequired: true, flags: ["something:new"] },
     }),
   );
 
@@ -188,6 +188,64 @@ test("a flagged skill queues for review (draft version)", async () => {
 
   assert.equal(result.status, "queued");
   assert.equal(mocks.upsert.mock.calls[0]?.[0]?.versionStatus, "draft");
+});
+
+test("a skill that fetches and runs remote code is refused, and nothing is stored", async () => {
+  mocks.read.mockResolvedValue(readResult(1));
+  mocks.analyze.mockReturnValue(
+    analyzed({
+      scan: { reviewRequired: false, flags: ["egress:pipe-to-shell"] },
+    }),
+  );
+
+  await assert.rejects(
+    submitRegistrySkillFromGitHub({
+      repoUrl: "https://github.com/acme/skills",
+      userId: "me",
+    }),
+    (error: unknown) =>
+      error instanceof RegistrySubmissionError &&
+      error.code === "REGISTRY_SUBMISSION_NOT_SKILL" &&
+      JSON.stringify(error.details).includes("REGISTRY_SKILL_REFUSED") &&
+      JSON.stringify(error.details).includes("egress:pipe-to-shell"),
+  );
+  assert.equal(mocks.upsert.mock.calls.length, 0);
+});
+
+test("a skill an admin took down is refused with the reason", async () => {
+  mocks.read.mockResolvedValue(readResult(2));
+  mocks.analyze
+    .mockReturnValueOnce(analyzed({ slug: "gh-acme-skills-a" }))
+    .mockReturnValueOnce(analyzed({ slug: "gh-acme-skills-b" }));
+  mocks.getExisting.mockResolvedValueOnce(null).mockResolvedValueOnce({
+    ownerUserId: "someone",
+    definitionStatus: "archived",
+    currentVersionStatus: "published",
+    currentVersion: null,
+  });
+  mocks.upsert.mockResolvedValue({
+    slug: "gh-acme-skills-a",
+    skillId: "skill_1",
+    skillVersionId: "ver_1",
+    version: "aaaaaaaaaaaa",
+    status: "indexed",
+    flags: [],
+    diagnostics: [],
+  });
+
+  const result = await submitRegistrySkillFromGitHub({
+    repoUrl: "https://github.com/acme/skills",
+    userId: "me",
+  });
+
+  assert.equal(result.skills[0]?.status, "indexed");
+  assert.equal(result.skills[1]?.status, "failed");
+  assert.equal(
+    result.skills[1]?.diagnostics[0]?.code,
+    "REGISTRY_SKILL_REFUSED",
+  );
+  assert.match(result.skills[1]?.diagnostics[0]?.message ?? "", /archived/);
+  assert.equal(mocks.upsert.mock.calls.length, 1);
 });
 
 test("another submitter's commit of an indexed skill is written, not refused", async () => {
@@ -217,14 +275,14 @@ test("another submitter's commit of an indexed skill is written, not refused", a
   assert.equal(mocks.upsert.mock.calls[0]?.[0]?.submitterId, "someone-else");
 });
 
-test("a multi-skill repo aggregates to queued when any skill is flagged", async () => {
+test("a multi-skill repo aggregates to queued when any skill is held", async () => {
   mocks.read.mockResolvedValue(readResult(2));
   mocks.analyze
     .mockReturnValueOnce(analyzed({ slug: "gh-acme-skills-a" }))
     .mockReturnValueOnce(
       analyzed({
         slug: "gh-acme-skills-b",
-        scan: { reviewRequired: true, flags: ["injection:override"] },
+        scan: { reviewRequired: true, flags: ["something:new"] },
       }),
     );
 

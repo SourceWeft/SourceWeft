@@ -276,9 +276,11 @@ describe.skipIf(!skillDatabaseEnabled)(
       const first = await upsert(
         input(slug, "b", { committedAt: NEWER, flagged: true }),
       );
-      // Clean, but the skill is in review: sticky, so it queues as well.
       const second = await upsert(
-        input(slug, "c", { committedAt: "2026-03-01T00:00:00.000Z" }),
+        input(slug, "c", {
+          committedAt: "2026-03-01T00:00:00.000Z",
+          flagged: true,
+        }),
       );
       expect(second.status).toBe("queued");
 
@@ -300,6 +302,45 @@ describe.skipIf(!skillDatabaseEnabled)(
       expect(queued.map((item) => item.skillVersionId)).toEqual([
         second.skillVersionId,
       ]);
+    });
+
+    test("a clean commit answers the draft before it: it publishes and retires the draft", async () => {
+      const slug = newSlug();
+      const first = await upsert(
+        input(slug, "a", { committedAt: OLDER, flagged: true }),
+      );
+      expect(first.status).toBe("queued");
+      const second = await upsert(input(slug, "b", { committedAt: NEWER }));
+      expect(second.status).toBe("indexed");
+
+      const after = await state(first.skillId);
+      const byId = new Map(after.versions.map((v) => [v.id, v]));
+      expect(byId.get(second.skillVersionId)!.status).toBe("published");
+      expect(byId.get(first.skillVersionId)!.status).toBe("deprecated");
+      expect(
+        byId.get(first.skillVersionId)!.manifestJson.registry?.moderation,
+      ).toMatchObject({
+        action: "supersede",
+        supersededBySkillVersionId: second.skillVersionId,
+      });
+      expect(after.current).toEqual([second.skillVersionId]);
+    });
+
+    test("what an admin took down stays down: a later clean commit is refused and stores nothing", async () => {
+      const slug = newSlug();
+      const first = await upsert(
+        input(slug, "a", { committedAt: OLDER, flagged: true }),
+      );
+      await review.setRegistrySkillVersionStatus(
+        first.skillVersionId,
+        "deprecated",
+        { actorUserId: "admin_1", reason: "not what it says" },
+      );
+      await expect(
+        repo.upsertRegistrySkillIndex(input(slug, "b", { committedAt: NEWER })),
+      ).rejects.toMatchObject({ code: "REGISTRY_SKILL_REFUSED" });
+      const after = await state(first.skillId);
+      expect(after.versions.map((v) => v.id)).toEqual([first.skillVersionId]);
     });
 
     test("a draft from a newer commit is not retired by an older one arriving late", async () => {
