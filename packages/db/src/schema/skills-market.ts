@@ -177,12 +177,14 @@ export type SkillManifestJson = {
       findings: Array<{ ruleId: string; file?: string; line?: number }>;
     };
     moderation?: {
-      action: "publish" | "reject" | "revoke";
+      action: "publish" | "reject" | "revoke" | "supersede";
       actorUserId: string;
       at: string;
       reason?: string;
       /** Revoking the current version: the published version that took over. */
       promotedSkillVersionId?: string;
+      /** A draft retired by a newer draft of the same skill: that draft. */
+      supersededBySkillVersionId?: string;
     };
     visibilityChange?: {
       actorUserId: string;

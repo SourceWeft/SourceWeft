@@ -1,0 +1,30 @@
+{
+  "name": "@sourceweft/grounded-generation",
+  "license": "Apache-2.0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@sourceweft/contracts": "workspace:*",
+    "@sourceweft/ui-web": "workspace:*",
+    "lucide-react": "^0.562.0",
+    "typescript": "5.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
+    "tsx": "^4.23.12"
+  },
+  "peerDependencies": {
+    "react": "^19.2.1"
+  }
+}

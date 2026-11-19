@@ -182,3 +182,53 @@ test("Sign in with Apple is permitted to the page and entitled in the app", () =
     /^tauri-plugin-apple-sign-in = \{ path = "plugins\/apple-sign-in" \}$/m,
   );
 });
+
+// The Tauri CLI (2.11.4) applies CI signing by editing these settings, and its
+// project editor has two faults this layout works around:
+// - of the settings it has to add, only the first lands inside the build
+//   settings, so the settings the build needs must already be declared;
+// - its export step reads the value a declared setting had before the edit, so
+//   the two settings the export reads (signing style and the device identity)
+//   must not be declared. The style is the first setting it adds.
+test("the iOS target declares exactly the signing settings the Tauri CLI can edit in place", () => {
+  const project = read(
+    resolve(apple, "sourceweft-mobile.xcodeproj/project.pbxproj"),
+  );
+  const targetConfigs = project
+    .split("isa = XCBuildConfiguration;")
+    .filter((block) => block.includes("CODE_SIGN_ENTITLEMENTS"));
+  assert.equal(targetConfigs.length, 2, "expected debug and release");
+  const spec = read(resolve(apple, "project.yml"));
+  const line = (key) => (key.includes("[") ? `\t"${key}" = ` : `\t${key} = `);
+  for (const key of [
+    "CODE_SIGN_IDENTITY",
+    "DEVELOPMENT_TEAM",
+    "DEVELOPMENT_TEAM[sdk=iphoneos*]",
+    "PROVISIONING_PROFILE_SPECIFIER",
+    "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]",
+  ]) {
+    for (const config of targetConfigs)
+      assert(config.includes(line(key)), `${key} is not declared`);
+    if (key !== "CODE_SIGN_IDENTITY")
+      assert(spec.includes(`${key}: `), `${key} is not in project.yml`);
+  }
+  for (const key of ["CODE_SIGN_STYLE", "CODE_SIGN_IDENTITY[sdk=iphoneos*]"]) {
+    assert(!project.includes(line(key)), `${key} must not be declared`);
+    assert(!spec.includes(`${key}: `), `${key} must not be in project.yml`);
+  }
+});
+
+// With Xcode 26's Metal toolchain installed, TOOLCHAIN_DIR points at the Metal
+// toolchain, which has no Swift compatibility libraries. The linker then fails
+// on __swift_FORCE_LOAD_$_swiftCompatibility56. DT_TOOLCHAIN_DIR is always the
+// default toolchain.
+test("Swift library search paths use the default toolchain, not TOOLCHAIN_DIR", () => {
+  for (const file of [
+    "project.yml",
+    "sourceweft-mobile.xcodeproj/project.pbxproj",
+  ]) {
+    const text = read(resolve(apple, file));
+    assert(!/\$\(TOOLCHAIN_DIR\)/.test(text), `${file} uses $(TOOLCHAIN_DIR)`);
+    assert(text.includes("$(DT_TOOLCHAIN_DIR)/usr/lib/swift"), file);
+  }
+});

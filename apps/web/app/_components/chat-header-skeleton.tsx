@@ -18,7 +18,7 @@ export function ChatHeaderSkeleton() {
       <div
         className={cn(
           "flex h-full min-w-0 items-center gap-2 pr-3 sm:pr-4",
-          layout?.titlebarInset ? "pl-6" : "pl-3 sm:pl-4",
+          layout?.titlebarInset ? "pl-7" : "pl-3 sm:pl-4",
         )}
       >
         {layout?.railWidth ? null : (

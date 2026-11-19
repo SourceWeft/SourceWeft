@@ -430,17 +430,28 @@ export function DashboardSidebar() {
       data-testid="navigation-rail"
       style={{ width: railWidth }}
       className={cn(
-        "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
-        desktopTitlebar ? "pt-0" : "pt-3",
+        "relative flex h-svh shrink-0 flex-col items-center gap-1 bg-sidebar px-2 pb-3",
+        desktopTitlebar ? "pt-0" : "border-r border-sidebar-border pt-3",
       )}
     >
       {desktopTitlebar ? (
-        // The traffic lights sit here; the strip drags the window.
-        <div
-          aria-hidden="true"
-          data-desktop-drag-region=""
-          className="h-10 w-full shrink-0 select-none"
-        />
+        // The traffic lights sit here and reach past the rail, so this strip
+        // is one titlebar row with the column beside it: as tall as the chat
+        // header, with that row's bottom line carried across the rail, and
+        // the rail's edge starts at that line instead of running between the
+        // lights.
+        <>
+          <div
+            aria-hidden="true"
+            data-desktop-drag-region=""
+            className="h-14 w-full shrink-0 select-none"
+          />
+          <div
+            aria-hidden="true"
+            data-testid="navigation-rail-edge"
+            className="pointer-events-none absolute inset-x-0 bottom-0 top-[55px] border-r border-t border-sidebar-border"
+          />
+        </>
       ) : (
         <DashboardSidebarBrand collapsed />
       )}

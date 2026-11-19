@@ -47,7 +47,6 @@ import {
   type SandboxBackendProtocolV2,
   type SkillMetadata,
 } from "deepagents";
-import { Overwrite } from "@langchain/langgraph";
 import {
   createCapabilityAgentToolsForTurn,
   type AgentTurnTool,
@@ -427,6 +426,22 @@ export function skillMetadataForTurn(
     path: `/skills/${skill.name}/SKILL.md`,
     ...(skill.tools?.length ? { allowedTools: [...skill.tools] } : {}),
   }));
+}
+
+/**
+ * Names of the skills the user invoked this turn (slash command or invocation
+ * chip). Deep Agents pins each one: its SKILL.md body is added to the
+ * conversation before the first model call, so the instructions arrive without
+ * depending on the model to read the file. A skill that is only selected stays
+ * available and is not pinned.
+ */
+export function pinnedSkillNamesForTurn(
+  prepared: Pick<PreparedThreadTurn, "enabledSkills" | "invokedSkillIds">,
+): string[] {
+  const invoked = new Set(prepared.invokedSkillIds);
+  return prepared.enabledSkills
+    .filter((skill) => invoked.has(skill.workspaceSkillId))
+    .map((skill) => skill.name);
 }
 
 export interface RuntimePromptContextInput {
@@ -1361,10 +1376,10 @@ export async function buildThreadAgentAssembly(
         });
       }
       if (skills) {
+        // Since deepagents 1.14 this channel holds the last value written (no
+        // merging reducer), so the turn's list replaces the stored one as is.
         const checkpointConfig = await agent.updateState(effectiveRunConfig, {
-          skillsMetadata: new Overwrite(
-            skillMetadataForTurn(prepared.enabledSkills),
-          ),
+          skillsMetadata: skillMetadataForTurn(prepared.enabledSkills),
         });
         if (!checkpointConfig || typeof checkpointConfig !== "object") {
           throw new ContentError(
@@ -1389,10 +1404,20 @@ export async function buildThreadAgentAssembly(
           },
         } as AgentRunnableConfig;
       }
-      return agent.streamEvents({ messages: messages as never }, {
-        ...effectiveRunConfig,
-        version: "v3",
-      } as never) as Promise<unknown>;
+      // Only a new user message pins: an approval resume re-enters with a
+      // Command and must not add the instructions a second time. The state key
+      // exists only when the skills middleware is mounted.
+      const pinnedSkills = skills ? pinnedSkillNamesForTurn(prepared) : [];
+      return agent.streamEvents(
+        {
+          messages,
+          ...(pinnedSkills.length > 0 ? { pinnedSkills } : {}),
+        } as never,
+        {
+          ...effectiveRunConfig,
+          version: "v3",
+        } as never,
+      ) as Promise<unknown>;
     };
     return stream();
   };

@@ -61,7 +61,9 @@ describe.skipIf(!skillDatabaseEnabled)(
         displayName: `Writer ${marker}`,
         description: `Version ${marker}`,
         commitSha,
-        storagePointer: `github:fixture/skills@${commitSha}#writer`,
+        // One source root per skill: the registry resolves a submission to the
+        // definition that already holds its repository path, whatever the slug.
+        storagePointer: `github:fixture/skills@${commitSha}#${slug}`,
         versionStatus: flagged ? ("draft" as const) : ("published" as const),
         outcome: flagged ? ("queued" as const) : ("indexed" as const),
         files: [
@@ -79,8 +81,8 @@ describe.skipIf(!skillDatabaseEnabled)(
           visibility: "restricted" as const,
           categories: [],
           registry: {
-            identifier: "gh:fixture/skills/writer",
-            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/writer`,
+            identifier: `gh:fixture/skills/${slug}`,
+            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/${slug}`,
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: "skill-owner",
             ...(options.committedAt
@@ -266,6 +268,52 @@ describe.skipIf(!skillDatabaseEnabled)(
       after = await state(older.skillId);
       expect(after.current).toEqual([draft.skillVersionId]);
       expect(after.definition.description).toBe("Version b");
+    });
+
+    test("a new draft retires the older drafts of the same skill, and leaves published versions alone", async () => {
+      const slug = newSlug();
+      const published = await upsert(input(slug, "a", { committedAt: OLDER }));
+      const first = await upsert(
+        input(slug, "b", { committedAt: NEWER, flagged: true }),
+      );
+      // Clean, but the skill is in review: sticky, so it queues as well.
+      const second = await upsert(
+        input(slug, "c", { committedAt: "2026-03-01T00:00:00.000Z" }),
+      );
+      expect(second.status).toBe("queued");
+
+      const after = await state(published.skillId);
+      const byId = new Map(after.versions.map((v) => [v.id, v]));
+      expect(byId.get(second.skillVersionId)!.status).toBe("draft");
+      const retired = byId.get(first.skillVersionId)!;
+      expect(retired.status).toBe("deprecated");
+      expect(retired.manifestJson.registry?.moderation).toMatchObject({
+        action: "supersede",
+        actorUserId: "system",
+        supersededBySkillVersionId: second.skillVersionId,
+      });
+      expect(byId.get(published.skillVersionId)!.status).toBe("published");
+      expect(after.current).toEqual([published.skillVersionId]);
+
+      const queue = await review.listRegistryReviewQueue({ limit: 100 });
+      const queued = queue.items.filter((item) => item.slug === slug);
+      expect(queued.map((item) => item.skillVersionId)).toEqual([
+        second.skillVersionId,
+      ]);
+    });
+
+    test("a draft from a newer commit is not retired by an older one arriving late", async () => {
+      const slug = newSlug();
+      const newer = await upsert(
+        input(slug, "b", { committedAt: NEWER, flagged: true }),
+      );
+      const older = await upsert(
+        input(slug, "a", { committedAt: OLDER, flagged: true }),
+      );
+      const after = await state(newer.skillId);
+      const byId = new Map(after.versions.map((v) => [v.id, v]));
+      expect(byId.get(newer.skillVersionId)!.status).toBe("draft");
+      expect(byId.get(older.skillVersionId)!.status).toBe("draft");
     });
 
     test("a version without a commit date is refused, and stores nothing", async () => {

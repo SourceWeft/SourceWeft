@@ -1,20 +1,18 @@
 import type { StudyKind, StudySize } from "@sourceweft/contracts/study";
 
 /**
- * Scale and cost bounds of one generation. Code constants, not settings: they
- * change with a code review, never with a deployment variable.
+ * Cost bounds of one study generation. Code constants, not settings: they
+ * change with a code review, never with a deployment variable. The input-size
+ * bounds are shared with every grounded generator and live in
+ * `@sourceweft/grounded-generation`.
  */
-
-/** At or below this many estimated input tokens a single model call is made. */
-export const SINGLE_PASS_MAX_INPUT_TOKENS = 40_000;
-/** Map-reduce groups aim for this size... */
-export const GROUP_TARGET_TOKENS = 7_000;
-/** ...never exceed this one (a single oversized chunk is its own group)... */
-export const GROUP_MAX_TOKENS = 9_000;
-/** ...and a group smaller than this is merged with a neighbour. */
-export const GROUP_MIN_TOKENS = 1_500;
-/** Larger selections are refused, never truncated. */
-export const MAX_TOTAL_INPUT_TOKENS = 300_000;
+export {
+  GROUP_MAX_TOKENS,
+  GROUP_MIN_TOKENS,
+  GROUP_TARGET_TOKENS,
+  MAX_TOTAL_INPUT_TOKENS,
+  SINGLE_PASS_MAX_INPUT_TOKENS,
+} from "@sourceweft/grounded-generation";
 
 /** Item counts per size step; mind maps count nodes below the root. */
 export const STUDY_SIZE_COUNTS: Record<StudyKind, Record<StudySize, number>> = {
@@ -55,10 +53,6 @@ export const LEAK_LENGTH_RATIO = 1.6;
 /** One difficulty holding more than this share is recorded as skewed. */
 export const DIFFICULTY_SKEW_SHARE = 0.85;
 
-/** Share of letters that must be Han for Chinese output... */
-export const MIN_HAN_SHARE = 0.3;
-/** ...and Latin for English output. */
-export const MIN_LATIN_SHARE = 0.6;
 /** A source language under this token share does not decide the output. */
 export const LANGUAGE_MAJORITY_SHARE = 0.6;
 

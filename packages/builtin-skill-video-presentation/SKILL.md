@@ -22,7 +22,10 @@ no-progress, sandbox, and publication fences are enforced by the host.
 - Work in the root Agent. Do not delegate video authoring, validation, or
   publication to a subagent.
 - Use `write_todos` to keep the current plan and revise it as observations
-  arrive.
+  arrive. Publishing withdraws `write_todos`, so update the list in the step
+  right before `publish_video_presentation`: mark every finished step completed
+  and publishing as the one in-progress step. The host closes that step when
+  the publisher's committed result arrives.
 - Use bounded file tools for draft/scene authoring. Do not call raw `execute`,
   `generate_image`, or `collect_sandbox_outputs`.
 - Do not change provider/model, implementation, source, or tool after a failure

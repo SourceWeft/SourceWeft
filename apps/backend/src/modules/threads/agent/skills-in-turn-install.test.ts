@@ -4,7 +4,7 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import { Command, MemorySaver, Overwrite } from "@langchain/langgraph";
+import { Command, MemorySaver } from "@langchain/langgraph";
 import { CompositeBackend, StateBackend, createDeepAgent } from "deepagents";
 import { tool } from "langchain";
 import { test } from "vitest";
@@ -19,10 +19,11 @@ import { skillMetadataForTurn } from "./turn/turn-assembly";
 // same agent run — that is what lets `install_skill` be followed by use within
 // one turn. Runs the installed deepagents with a scripted model; no network.
 //
-// It also pins a deepagents behaviour we rely on knowing: the available-skills
-// list in the prompt only picks up the new skill mid-run when the run started
-// with none (the middleware caches a non-empty list per run), which is why the
-// install result hands the model the path instead of pointing at that list.
+// It also pins a deepagents behaviour we rely on knowing: since 1.14 the
+// skills list is a last-value channel read before every model call, so a tool
+// that writes `skillsMetadata` replaces the list and the next model call's
+// prompt shows exactly what was written. A tool that installs a skill must
+// therefore write the whole list, not only the new entry.
 
 function skill(name: string): EnabledSkillDescriptor {
   const description = `${name} unique instructions`;
@@ -82,7 +83,7 @@ async function run(initial: EnabledSkillDescriptor[]) {
       skillsBackend.addSkill(installed);
       return new Command({
         update: {
-          skillsMetadata: skillMetadataForTurn([installed]),
+          skillsMetadata: skillMetadataForTurn([...initial, installed]),
           messages: [
             new ToolMessage({
               content: "Installed new-skill. Read /skills/new-skill/SKILL.md.",
@@ -105,7 +106,7 @@ async function run(initial: EnabledSkillDescriptor[]) {
   });
   const config = { configurable: { thread_id: `spike-${initial.length}` } };
   const effective = await agent.updateState(config, {
-    skillsMetadata: new Overwrite(skillMetadataForTurn(initial)),
+    skillsMetadata: skillMetadataForTurn(initial),
   });
   const result = await agent.invoke(
     { messages: [{ role: "user", content: "install and use new-skill" }] },
@@ -133,9 +134,9 @@ for (const [label, initial] of [
       readResult.slice(0, 300),
     );
     assert.equal(prompts[0]?.includes("new-skill unique instructions"), false);
-    assert.equal(
-      prompts[1]?.includes("new-skill unique instructions"),
-      initial.length === 0,
-    );
+    assert.equal(prompts[1]?.includes("new-skill unique instructions"), true);
+    for (const existing of initial) {
+      assert.equal(prompts[1]?.includes(existing.description), true);
+    }
   });
 }

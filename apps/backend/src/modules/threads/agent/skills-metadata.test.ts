@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { MemorySaver, Overwrite } from "@langchain/langgraph";
+import { MemorySaver } from "@langchain/langgraph";
 import { CompositeBackend, StateBackend, createDeepAgent } from "deepagents";
 import { test } from "vitest";
 import { ScriptedChatModel } from "../../../test/chat-model";
@@ -60,7 +60,7 @@ test("skills metadata is overwritten per turn on a reused checkpoint", async () 
     const effectiveConfig =
       skills.length > 0
         ? await agent.updateState(config, {
-            skillsMetadata: new Overwrite(skillMetadataForTurn(skills)),
+            skillsMetadata: skillMetadataForTurn(skills),
           })
         : config;
     await agent.invoke(

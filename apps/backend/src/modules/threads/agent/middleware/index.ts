@@ -118,8 +118,8 @@ export function createSourceWeftSubagentMiddlewareStack(
     turnStartedAtMs: input.turnStartedAtMs,
   });
   return [
-    // Must precede every toolCallLimitMiddleware so the count channels bind to a
-    // concurrent-safe reducer (parallel `task` subagents write them at once).
+    // Declares the tool-call count channels on every stack: the step budget
+    // resets them even when no toolCallLimitMiddleware is mounted.
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
     stepBudget.toolCallRepair,
@@ -199,8 +199,8 @@ export async function createSourceWeftAgentMiddlewareStack(
     });
 
   return [
-    // Must precede every toolCallLimitMiddleware so the count channels bind to a
-    // concurrent-safe reducer (parallel `task` subagents write them at once).
+    // Declares the tool-call count channels on every stack: the step budget
+    // resets them even when no toolCallLimitMiddleware is mounted.
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
     stepBudget.toolCallRepair,
