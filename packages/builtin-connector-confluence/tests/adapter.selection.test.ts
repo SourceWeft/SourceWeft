@@ -956,23 +956,15 @@ test("action 401 surfaces CONFLUENCE_REAUTH_REQUIRED", async () => {
   );
 });
 
-test("unknown and agent actions are CONFLUENCE_UNSUPPORTED_ACTION", async () => {
+test("an unknown action is CONFLUENCE_UNSUPPORTED_ACTION", async () => {
   const { fetcher, calls } = buildFetcher({});
   const confluence = adapter(fetcher);
-  for (const actionType of [
-    "confluence.nope",
-    "confluence.content.search",
-    "confluence.page.read",
-    "confluence.space.list",
-  ]) {
-    await assert.rejects(
-      confluence.executeAction(actionInput(actionType, {})),
-      (error: unknown) =>
-        error instanceof AtlassianApiError &&
-        error.statusCode === 400 &&
-        error.code === "CONFLUENCE_UNSUPPORTED_ACTION",
-      actionType,
-    );
-  }
+  await assert.rejects(
+    confluence.executeAction(actionInput("confluence.nope", {})),
+    (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 400 &&
+      error.code === "CONFLUENCE_UNSUPPORTED_ACTION",
+  );
   assert.equal(calls.length, 0);
 });

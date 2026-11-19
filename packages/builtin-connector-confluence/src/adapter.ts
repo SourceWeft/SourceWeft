@@ -43,6 +43,7 @@ import {
   siteItemId,
   spaceItemId,
 } from "./ids";
+import { executeConfluenceLiveTool } from "./live-tools";
 import { hasConfluenceScope, invalidRequest } from "./shared";
 
 export type ConfluenceAdapterConfig = {
@@ -51,6 +52,9 @@ export type ConfluenceAdapterConfig = {
   clientId: string;
   clientSecret: string;
   fetcher?: typeof fetch;
+  /** The clock the search date filter is computed from; defaults to the wall
+   * clock. Injected so a computed date literal is deterministic in tests. */
+  now?: () => Date;
 };
 
 /** `confluence.browse` page size for every listing. */
@@ -672,7 +676,17 @@ export function createConfluenceConnectorAdapter(
       if (input.actionType === "confluence.describe") {
         return { result: await describeAction(input) };
       }
-      // Any other action type, the agent-visible tools included, is not served.
+      // The three agent-visible live tools (`confluence.content.search`,
+      // `confluence.page.read`, `confluence.space.list`): `null` means the action
+      // is not one of them.
+      const liveResult = await executeConfluenceLiveTool(
+        { client, atlassianConfig, now: config.now },
+        input.accessToken,
+        input.actionType,
+        input.request,
+        input.config,
+      );
+      if (liveResult) return liveResult;
       throw unsupportedAction();
     },
   };
