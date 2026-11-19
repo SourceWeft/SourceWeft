@@ -95,6 +95,18 @@ Triggered when a turn finishes with `finishReason === "tool_confirmation_request
 `completed`, and the client must start a *new* run with `mode: "resume"` and a
 `toolApprovalResume` payload. Expired approvals are swept by the scheduler.
 
+## Scheduled turns
+
+`contentThreadService.startScheduledTurn` starts a turn for a person who is
+not there (a scheduled task's run). It is the durable path above with three
+differences: the conversation is created with origin `scheduled` and an id the
+caller derives, the job is queued at a lower priority, and the request carries
+`unattended: true`. That mark is host-only (no HTTP schema has it) and makes
+the turn apply `agent/unattended-policy.ts`: read-class tools only, no
+sandbox, no `askUser`, nothing that asks for approval, no automatic title, and
+a `<scheduled_run>` block in the runtime prompt. A later turn a person sends
+in the same conversation is an ordinary attended turn.
+
 ## Traps
 
 1. **Stale detection has two thresholds.** A `queued` run with no `jobId` is

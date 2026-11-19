@@ -17,6 +17,7 @@ import {
   scheduleConnectorSyncs,
 } from "./schedules/connectors";
 import { connectorAdaptersReady } from "../modules/connectors";
+import { scheduleAgentTasks } from "./schedules/agent-tasks";
 import {
   GITHUB_REGISTRY_INTERVAL_MS,
   scheduleGithubRegistryEnrichment,
@@ -74,6 +75,8 @@ async function tick() {
     }
 
     jobs.push(scheduleConnectorSyncs());
+    // Scheduled tasks: due slots become chat runs, ended runs are settled.
+    jobs.push(scheduleAgentTasks());
     jobs.push(durableChatRunService.expireWaitingApprovals());
     jobs.push(durableChatRunService.failStaleActiveRuns());
     jobs.push(agentSandboxService.cleanupExpiredSandboxes());

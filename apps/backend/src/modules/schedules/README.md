@@ -25,5 +25,6 @@ readable while the work is spread out.
 A kind plugs in through a `ScheduleAdapter`: its time policy (`computeSlot`),
 its overlap rule (`isTargetBusy`), and what queueing, reconciling and recovering
 mean for the run it creates. The connector sync is the first adapter
-(`scheduler/schedules/connectors.ts`); the occurrence is the outbox, so replaying
+(`scheduler/schedules/connectors.ts`) and scheduled tasks are the second
+(`scheduler/schedules/agent-tasks.ts`); the occurrence is the outbox, so replaying
 a dispatch is always safe.

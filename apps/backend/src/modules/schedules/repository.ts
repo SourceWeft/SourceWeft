@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, lte, or } from "drizzle-orm";
 import { db, scheduleOccurrences, taskSchedules } from "@sourceweft/db";
-import type { ScheduleSlot } from "./slots";
+
+/**
+ * What a kind's time policy returns for a due schedule: the slot to
+ * materialize and when the schedule is due again. A null `nextDueAt` means the
+ * schedule has no further fire time (a one-time rule).
+ */
+export type MaterializedSlot = {
+  scheduledFor: Date;
+  nextDueAt: Date | null;
+};
 
 export type ScheduleRow = typeof taskSchedules.$inferSelect;
 export type OccurrenceRow = typeof scheduleOccurrences.$inferSelect;
@@ -23,15 +32,17 @@ export const MAX_DISPATCH_ATTEMPTS = 5;
  * is the kind's time policy (null skips the schedule); `onMaterialized` runs in
  * the same transaction for kind-specific projections.
  */
-export async function materializeDueSchedules(input: {
+export async function materializeDueSchedules<
+  Slot extends MaterializedSlot,
+>(input: {
   taskKind: ScheduleTaskKind;
   now: Date;
   limit: number;
-  computeSlot: (schedule: ScheduleRow, now: Date) => ScheduleSlot | null;
+  computeSlot: (schedule: ScheduleRow, now: Date) => Slot | null;
   onMaterialized?: (
     tx: ScheduleTx,
     schedule: ScheduleRow,
-    slot: ScheduleSlot,
+    slot: Slot,
   ) => Promise<void>;
 }) {
   return db.transaction(async (tx) => {
@@ -58,6 +69,9 @@ export async function materializeDueSchedules(input: {
           and(
             eq(scheduleOccurrences.scheduleId, schedule.id),
             eq(scheduleOccurrences.status, "pending"),
+            // A run someone asked for by hand is its own slot, never the
+            // schedule's next one.
+            eq(scheduleOccurrences.triggerKind, "schedule"),
           ),
         )
         .limit(1)
@@ -93,11 +107,16 @@ export async function materializeDueSchedules(input: {
  * Leases pending (or lease-expired) occurrences of one kind to the caller.
  * `isTargetBusy` is the kind's overlap rule: a busy target keeps its
  * occurrence pending without consuming an attempt.
+ *
+ * Only enabled schedules are considered unless `includeDisabledSchedules` is
+ * set, for a kind whose occurrences can exist on a schedule that is not
+ * enabled (a run started by hand on a task that has no time rule running).
  */
 export async function claimDispatchableOccurrences(input: {
   taskKind: ScheduleTaskKind;
   now: Date;
   limit: number;
+  includeDisabledSchedules?: boolean;
   isTargetBusy: (
     tx: ScheduleTx,
     candidate: ClaimedOccurrence,
@@ -113,7 +132,9 @@ export async function claimDispatchableOccurrences(input: {
       )
       .where(
         and(
-          eq(taskSchedules.enabled, true),
+          input.includeDisabledSchedules
+            ? undefined
+            : eq(taskSchedules.enabled, true),
           eq(taskSchedules.taskKind, input.taskKind),
           or(
             and(
@@ -209,13 +230,15 @@ export async function markOccurrenceSkipped(input: {
 
 /**
  * Returns a dispatching occurrence to pending with exponential backoff, or
- * fails it once `MAX_DISPATCH_ATTEMPTS` is reached. `onFinalFailure` runs in
- * the same transaction so the kind can fail the run it created for the slot.
+ * fails it once `maxAttempts` (default `MAX_DISPATCH_ATTEMPTS`) is reached.
+ * `onFinalFailure` runs in the same transaction so the kind can fail the run
+ * it created for the slot. Returns whether the occurrence failed for good.
  */
 export async function retryOccurrence(input: {
   occurrenceId: string;
   error: string;
   attempts: number;
+  maxAttempts?: number;
   /** Stored on the schedule as its last error code. */
   errorCode: string;
   onFinalFailure?: (tx: ScheduleTx, occurrence: OccurrenceRow) => Promise<void>;
@@ -224,8 +247,9 @@ export async function retryOccurrence(input: {
     60 * 60_000,
     30_000 * 2 ** Math.min(input.attempts, 7),
   );
-  const exhausted = input.attempts >= MAX_DISPATCH_ATTEMPTS;
-  await db.transaction(async (tx) => {
+  const exhausted =
+    input.attempts >= (input.maxAttempts ?? MAX_DISPATCH_ATTEMPTS);
+  return db.transaction(async (tx) => {
     const [row] = await tx
       .update(scheduleOccurrences)
       .set({
@@ -254,5 +278,6 @@ export async function retryOccurrence(input: {
         })
         .where(eq(taskSchedules.id, row.scheduleId));
     }
+    return Boolean(row) && exhausted;
   });
 }

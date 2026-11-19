@@ -97,6 +97,12 @@ import {
 } from "@sourceweft/agent-interpreter";
 import { createInterpreterMiddlewareForTurn } from "../interpreter";
 import {
+  SCHEDULED_RUN_PROMPT,
+  UNATTENDED_FILESYSTEM_PERMISSIONS,
+  filterToolsForUnattendedRun,
+  unattendedFilesystemMiddleware,
+} from "../unattended-policy";
+import {
   currentSourceWeftToolCallId,
   currentSourceWeftToolInvocationSignal,
 } from "../middleware";
@@ -547,7 +553,9 @@ export async function buildRuntimePromptContext(
   });
 
   return {
-    runtimePrompt,
+    runtimePrompt: prepared.unattended
+      ? `${runtimePrompt}\n${SCHEDULED_RUN_PROMPT}`
+      : runtimePrompt,
     visibleSources,
     selectedSourcesOmitted,
   };
@@ -717,9 +725,12 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
         }
       : null;
   const sandboxRuntime =
-    prepared.thread.executionTarget?.kind !== "local" &&
-    isToolDenied(prepared, AGENT_TOOL_NAMES.execute) &&
-    !commandNeedsTrustedSandbox
+    // An unattended turn never gets a sandbox: its lease would be held, and
+    // billed, for as long as an approval nobody can give stays open.
+    prepared.unattended ||
+    (prepared.thread.executionTarget?.kind !== "local" &&
+      isToolDenied(prepared, AGENT_TOOL_NAMES.execute) &&
+      !commandNeedsTrustedSandbox)
       ? null
       : await agentSandboxService.createRuntimeForTurn({
           executionTarget: prepared.thread.executionTarget ?? { kind: "cloud" },
@@ -1062,7 +1073,7 @@ export async function buildThreadAgentAssembly(
   // permissions already deny registry tools it may not use; this pass also drops
   // connector, MCP, and sandbox tools, which are bound under their own names.
   const persona = prepared.persona ?? null;
-  const boundTools = filterToolsForPersona(
+  const attendedTools = filterToolsForPersona(
     persona,
     filterCommandPolicyTools(prepared, [
       ...filterAllowedTools(prepared, fileTools),
@@ -1073,6 +1084,19 @@ export async function buildThreadAgentAssembly(
       ...(sandboxRuntime?.tools ?? []),
     ]),
   );
+  // With nobody present a tool that would ask for approval is not offered at
+  // all, so the turn has no approval to wait for and nothing to auto-approve.
+  const approvalGates = {
+    ...(sandboxRuntime?.interruptOn ?? {}),
+    ...(mcpToolRuntime?.interruptOn ?? {}),
+    ...connectorInterruptOn,
+    ...createSkillToolInterruptConfigs(),
+  };
+  const boundTools = prepared.unattended
+    ? filterToolsForUnattendedRun(attendedTools, {
+        gatedToolNames: new Set(Object.keys(approvalGates)),
+      })
+    : attendedTools;
   const inheritableTools = filterInheritableAgentTools(boundTools);
   const searchSourcesTool = boundTools.find(
     (candidate) => candidate.name === AGENT_TOOL_NAMES.searchSources,
@@ -1083,26 +1107,32 @@ export async function buildThreadAgentAssembly(
       (toolName !== AGENT_TOOL_NAMES.searchSources ||
         Boolean(searchSourcesTool)),
   );
-  const interpreterMiddleware = createInterpreterMiddlewareForTurn({
-    allowedTools: interpreterAllowedTools,
-    backend: filesystemBackend.localFiles ? backend : filesystemBackend.backend,
-    readRoots: filesystemBackend.localFiles
-      ? [
-          "/kb",
-          ...(sandboxRuntime ? [sandboxRuntime.pathPolicy.workspaceRoot] : []),
-        ]
-      : undefined,
-    context: {
-      runId: prepared.runTraceId,
-      teamId: prepared.workspace.organizationId,
-      workspaceId: prepared.workspace.id,
-      threadId: prepared.thread.id,
-      turnId: prepared.userMessage.id,
-      userId: prepared.userId,
-    },
-    searchSourcesTool,
-    traceContext,
-  });
+  const interpreterMiddleware = prepared.unattended
+    ? []
+    : createInterpreterMiddlewareForTurn({
+        allowedTools: interpreterAllowedTools,
+        backend: filesystemBackend.localFiles
+          ? backend
+          : filesystemBackend.backend,
+        readRoots: filesystemBackend.localFiles
+          ? [
+              "/kb",
+              ...(sandboxRuntime
+                ? [sandboxRuntime.pathPolicy.workspaceRoot]
+                : []),
+            ]
+          : undefined,
+        context: {
+          runId: prepared.runTraceId,
+          teamId: prepared.workspace.organizationId,
+          workspaceId: prepared.workspace.id,
+          threadId: prepared.thread.id,
+          turnId: prepared.userMessage.id,
+          userId: prepared.userId,
+        },
+        searchSourcesTool,
+        traceContext,
+      });
   const commandTargetToolName =
     prepared.commandSuccessCriteria.kind === "none"
       ? null
@@ -1118,12 +1148,7 @@ export async function buildThreadAgentAssembly(
     );
   }
 
-  const interruptOn = {
-    ...(sandboxRuntime?.interruptOn ?? {}),
-    ...(mcpToolRuntime?.interruptOn ?? {}),
-    ...connectorInterruptOn,
-    ...createSkillToolInterruptConfigs(),
-  };
+  const interruptOn = prepared.unattended ? {} : approvalGates;
   if (sandboxRuntime) {
     agentSandboxService.warnIfHitlBypassed({
       interruptOn,
@@ -1138,9 +1163,17 @@ export async function buildThreadAgentAssembly(
   const wallClockRunId = prepared.threadRunId ?? prepared.runTraceId;
   const turnStartedAtMs = Date.now();
   const childMiddleware = (subagentType: string) => [
+    // The general-purpose child would otherwise get the default filesystem
+    // tools, writes included; the read-scoped children bring their own.
+    ...(prepared.unattended && subagentType === "general-purpose"
+      ? [unattendedFilesystemMiddleware(backend)]
+      : []),
     fileImages.middleware(),
     ...createSourceWeftSubagentMiddlewareStack({
-      ...(subagentType === "general-purpose" ? { interruptOn } : {}),
+      ...(subagentType === "general-purpose" && !prepared.unattended
+        ? { interruptOn }
+        : {}),
+      askUser: !prepared.unattended,
       backend,
       chatProfileConfig: prepared.chatProfile.configJson,
       model,
@@ -1198,14 +1231,21 @@ export async function buildThreadAgentAssembly(
     backend,
     filesystemMounts: promptFilesystemMounts,
     skills,
-    permissions: persona?.filesystemPermissions
-      ? [...persona.filesystemPermissions]
-      : filesystemPermissions,
+    permissions: prepared.unattended
+      ? UNATTENDED_FILESYSTEM_PERMISSIONS
+      : persona?.filesystemPermissions
+        ? [...persona.filesystemPermissions]
+        : filesystemPermissions,
     runtimePrompt,
     personaPrompt: persona?.systemPrompt,
     chatProfileConfig: prepared.chatProfile.configJson,
     commandExecutionPolicy: commandExecutionPolicyFor(prepared),
-    extraMiddleware: [...interpreterMiddleware, fileImages.middleware()],
+    extraMiddleware: [
+      ...(prepared.unattended ? [unattendedFilesystemMiddleware(backend)] : []),
+      ...interpreterMiddleware,
+      fileImages.middleware(),
+    ],
+    unattended: Boolean(prepared.unattended),
     contextCompressionReportKey: prepared.userMessage.id,
     traceContext,
     runId: wallClockRunId,
@@ -1270,7 +1310,8 @@ export async function buildThreadAgentAssembly(
         })),
       },
     },
-    interruptOn,
+    // No gate is left to interrupt on, so no approval middleware is attached.
+    ...(prepared.unattended ? {} : { interruptOn }),
   });
 
   const agentMessages = [
@@ -1474,7 +1515,7 @@ export async function buildToolCollection(
       : null;
   const mcpTools = mcpToolRuntime?.tools ?? [];
 
-  return {
+  const collection: ToolCollection = {
     capabilityTools: [...capabilityAgentTools.tools],
     skillTools: buildSkillAgentTools({
       teamId: prepared.workspace.organizationId,
@@ -1500,5 +1541,39 @@ export async function buildToolCollection(
     mcpTools,
     connectorToolContext,
     mcpToolRuntime,
+  };
+  return prepared.unattended
+    ? restrictToolCollectionForUnattendedRun(collection)
+    : collection;
+}
+
+/**
+ * What is left of a turn's tools when nobody is present: only what the
+ * unattended policy allows. Applied to the collection, and again at binding,
+ * so the runtime prompt never names a tool the turn does not have.
+ */
+export function restrictToolCollectionForUnattendedRun(
+  collection: ToolCollection,
+): ToolCollection {
+  const policy = {
+    gatedToolNames: new Set([
+      ...Object.keys(collection.mcpToolRuntime?.interruptOn ?? {}),
+      ...Object.keys(collection.connectorInterruptOn),
+      ...Object.keys(createSkillToolInterruptConfigs()),
+    ]),
+  };
+  return {
+    ...collection,
+    capabilityTools: filterToolsForUnattendedRun(
+      collection.capabilityTools,
+      policy,
+    ),
+    skillTools: [],
+    webTools: filterToolsForUnattendedRun(collection.webTools, policy),
+    artifactTools: [],
+    promptProviders: [],
+    connectorActionTools: [],
+    connectorInterruptOn: {},
+    mcpTools: filterToolsForUnattendedRun(collection.mcpTools, policy),
   };
 }

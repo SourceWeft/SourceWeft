@@ -307,6 +307,9 @@ export function parseThreadChatRunJobId(jobId: string): string | null {
 
 export async function enqueueThreadChatRunJob(
   payload: ThreadChatRunJobPayload,
+  // A priority above zero runs after every job without one, so background
+  // turns (scheduled runs) do not hold up a person waiting on a reply.
+  options: { priority?: number } = {},
 ) {
   const jobId = threadChatRunJobId(payload.runId);
   const existing = await jobsQueue.getJob(jobId);
@@ -317,6 +320,7 @@ export async function enqueueThreadChatRunJob(
   try {
     return await jobsQueue.add(THREAD_CHAT_RUN_JOB, payload, {
       jobId,
+      ...(options.priority ? { priority: options.priority } : {}),
       attempts: 1,
       removeOnComplete: 100,
       removeOnFail: 100,

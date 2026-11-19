@@ -97,6 +97,46 @@ async function rejected(client: Client, sql: string, values: unknown[] = []) {
   }
 }
 
+describe("0080_schedule_occurrence_tenant_not_null", () => {
+  test("rows written without tenant keys are filled in, then the keys are required", async () => {
+    await migrated("at_notnull", async (client) => {
+      // What a scheduler from before 0079 could still write after it.
+      await client.query(
+        "INSERT INTO schedule_occurrences(id, schedule_id, scheduled_for) VALUES ('occ-old', 'sched-b', '2026-11-02T00:00:00Z')",
+      );
+      await client.query(
+        await drizzleFile("0080_schedule_occurrence_tenant_not_null.sql"),
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT team_id, workspace_id FROM schedule_occurrences WHERE id = 'occ-old'",
+          )
+        ).rows,
+      ).toEqual([{ team_id: "team-b", workspace_id: "ws-b" }]);
+      expect(
+        (
+          await client.query(
+            "SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'schedule_occurrences' AND column_name IN ('team_id', 'workspace_id')",
+          )
+        ).rows,
+      ).toEqual([{ is_nullable: "NO" }, { is_nullable: "NO" }]);
+      expect(
+        await rejected(
+          client,
+          "INSERT INTO schedule_occurrences(id, schedule_id, scheduled_for) VALUES ('occ-y', 'sched-a', now())",
+        ),
+      ).toBe("error");
+      expect(
+        await rejected(
+          client,
+          "INSERT INTO schedule_occurrences(id, schedule_id, team_id, workspace_id, scheduled_for) VALUES ('occ-z', 'sched-a', 'team-a', 'ws-a', now())",
+        ),
+      ).toBeNull();
+    });
+  });
+});
+
 describe("0079_agent_tasks", () => {
   test("existing occurrences inherit their schedule's team and workspace", async () => {
     await migrated("at_backfill", async (client) => {

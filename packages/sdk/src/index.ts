@@ -1,4 +1,5 @@
 export * from "./client-factory";
+export * from "./agent-tasks-client";
 export * from "./billing-client";
 export * from "./connectors-client";
 export * from "./content-client";

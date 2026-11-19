@@ -52,8 +52,9 @@ const RETRYABLE_READ_TOOL_NAMES = [
 // generic repeat-tool-call reminder.
 const ASK_USER_RUN_LIMIT = 3;
 
-function askUserMiddleware(): AgentMiddleware[] {
-  if (!config.chat.agent.askUserEnabled) {
+function askUserMiddleware(allowed = true): AgentMiddleware[] {
+  // `allowed` is false for a turn nobody attends: there is no one to answer.
+  if (!allowed || !config.chat.agent.askUserEnabled) {
     return [];
   }
   return [
@@ -71,6 +72,8 @@ export type SourceWeftAgentMiddlewareStackInput = {
   chatProfileConfig?: unknown;
   commandExecutionPolicy?: CommandExecutionPolicy;
   interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
+  /** False leaves the `askUser` tool out (an unattended turn). Default true. */
+  askUser?: boolean;
   contextCompressionReportKey?: string;
   execution?: LangChainModelExecutionConfig;
   extraMiddleware?: AgentMiddleware[];
@@ -88,6 +91,8 @@ export type SourceWeftAgentMiddlewareStackInput = {
 
 export type SourceWeftSubagentMiddlewareStackInput = {
   interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
+  /** False leaves the `askUser` tool out (an unattended turn). Default true. */
+  askUser?: boolean;
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   model: BaseLanguageModel;
@@ -131,7 +136,7 @@ export function createSourceWeftSubagentMiddlewareStack(
     // Sub-agents may also ask the user. The interrupt bubbles up to the parent
     // graph's updates stream; the resume is keyed by interrupt id so it targets
     // the correct nested/parallel task. Same flag + per-turn cap as the root.
-    ...askUserMiddleware(),
+    ...askUserMiddleware(input.askUser),
     createRepeatToolCallReminderMiddleware(),
     createSourceWeftToolErrorMiddleware(),
     createSourceWeftToolObservabilityMiddleware({
@@ -212,7 +217,7 @@ export async function createSourceWeftAgentMiddlewareStack(
     todoListMiddleware(),
     // Proactive `askUser` (+ a per-turn call cap). Enabled by default; see
     // config.chat.agent.askUserEnabled. Also added to the sub-agent stack.
-    ...askUserMiddleware(),
+    ...askUserMiddleware(input.askUser),
     // Generic advisory loop guard for all tools (nudges out of identical-call
     // loops; complements the askUser cap). Never blocks a call.
     createRepeatToolCallReminderMiddleware(),

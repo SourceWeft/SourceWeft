@@ -308,6 +308,8 @@ export class DurableChatRunService {
       | RefreshThreadInput
       | ResumeThreadInput
       | EditThreadInput;
+    /** Queue priority of the run's job; unset runs ahead of any set value. */
+    jobPriority?: number;
   }) {
     const workspace = await requireContentWorkspace(input);
     const existing = await findChatThreadRunByIdempotencyKey({
@@ -395,13 +397,18 @@ export class DurableChatRunService {
     }
     let job: Awaited<ReturnType<typeof enqueueThreadChatRunJob>>;
     try {
-      job = await enqueueThreadChatRunJob({
+      const payload = {
         runId: run.id,
         teamId: run.teamId,
         workspaceId: run.workspaceId,
         threadId: run.threadId,
         userId: run.userId,
-      });
+      };
+      job = input.jobPriority
+        ? await enqueueThreadChatRunJob(payload, {
+            priority: input.jobPriority,
+          })
+        : await enqueueThreadChatRunJob(payload);
     } catch (error) {
       await failRunBeforeMessages(run, {
         code: "CHAT_RUN_START_FAILED",

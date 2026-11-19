@@ -187,6 +187,13 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
   failurePersistence?: "persist-error-turn" | "transient";
   onPreflightThinkingStep?: (step: ThinkingStepTrace) => void;
   mcpInstallIds?: string[];
+  /**
+   * Nobody is present for this turn (a scheduled run). Set by the host when it
+   * starts the run, never exposed in an HTTP request schema. The turn then
+   * binds read-class tools only, no sandbox and no `askUser`; see
+   * `agent/unattended-policy.ts`.
+   */
+  unattended?: true;
 };
 
 export type AgentCheckpointRef = {
@@ -297,6 +304,8 @@ export type PreparedThreadTurn = {
   initialTitle: string;
   traceContext?: TraceContext;
   failurePersistence: "persist-error-turn" | "transient";
+  /** Nobody is present: the unattended tool policy applies to this turn. */
+  unattended?: true;
   mcpInstallIds: string[];
   enabledSkills: EnabledSkillDescriptor[];
   invokedSkillIds: string[];
