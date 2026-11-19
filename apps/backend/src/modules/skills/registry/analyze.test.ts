@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { analyzeRegistrySkill } from "./analyze";
 import { RegistrySubmissionError } from "./errors";
+import { refusedScanFlags } from "./scan";
 import {
   discoveredSkillFile,
   type DiscoveredSkill,
@@ -209,7 +210,11 @@ test("genuinely dangerous shell in prose is still caught by the scan", () => {
     }),
   });
   assert.ok(analyzed.scan.flags.includes("egress:pipe-to-shell"));
-  assert.equal(analyzed.scan.reviewRequired, true);
+  // Not held for review: triage refuses a skill that carries it
+  // (`guard.ts`), so nobody has to read it.
+  assert.deepEqual(refusedScanFlags(analyzed.scan.flags), [
+    "egress:pipe-to-shell",
+  ]);
 });
 
 test("license string is captured for display; absent license is null and never flags", () => {

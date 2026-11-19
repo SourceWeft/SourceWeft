@@ -4510,7 +4510,9 @@
       "secrets:env-access": "读取环境变量",
       "scope:other-skill-file": "读取其他技能的文件",
       "tool:sensitive": "请求代码执行类工具",
-      "binary:executable": "附带可执行二进制文件"
+      "binary:executable": "附带可执行二进制文件",
+      "capability:undeclared-scripts": "附带说明里没有提到的脚本",
+      "script:out-of-bundle-path": "脚本访问技能目录之外的文件"
     },
     "community": {
       "overview": {
@@ -4985,6 +4987,9 @@
       "scope:other-skill-file": "读取其他技能的文件",
       "tool:sensitive": "请求代码执行工具",
       "binary:executable": "附带可执行二进制文件",
+      "capability:undeclared-scripts": "附带说明里没有提到的脚本",
+      "script:out-of-bundle-path": "脚本访问技能目录之外的文件",
+
       "sticky-review": "暂缓审核：较早的版本尚未处理"
     },
     "escalation": {

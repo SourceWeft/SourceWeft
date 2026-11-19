@@ -4510,7 +4510,9 @@
       "secrets:env-access": "Reads environment variables",
       "scope:other-skill-file": "Reads another skill's files",
       "tool:sensitive": "Requests code-execution tools",
-      "binary:executable": "Ships an executable binary"
+      "binary:executable": "Ships an executable binary",
+      "capability:undeclared-scripts": "Ships scripts its instructions never mention",
+      "script:out-of-bundle-path": "A script reaches files outside the skill"
     },
     "community": {
       "overview": {
@@ -4985,6 +4987,9 @@
       "scope:other-skill-file": "Reads another skill's files",
       "tool:sensitive": "Requests code-execution tools",
       "binary:executable": "Ships an executable binary",
+      "capability:undeclared-scripts": "Ships scripts its instructions never mention",
+      "script:out-of-bundle-path": "A script reaches files outside the skill",
+
       "sticky-review": "Held for review: an earlier version is unresolved"
     },
     "escalation": {
