@@ -31,6 +31,7 @@ import {
   type MobileSignInMethods,
 } from "../../../lib/mobile-sign-in-methods";
 import { nativeBridge } from "../../../lib/native-bridge";
+import { setMobileSessionHint } from "../../../lib/mobile-app-shell";
 import { publicRuntimeConfig } from "../../../lib/public-runtime-config";
 
 type MobileAuthMode = "sign-in" | "sign-up";
@@ -87,6 +88,13 @@ function hasActiveSession(result: unknown) {
 
 export function MobileLoginView({ path }: { path: string }) {
   const router = useRouter();
+
+  // Someone on this page has no session, so the next launch starts here. Fetch
+  // the dashboard's code meanwhile, so the step after signing in is quick.
+  useEffect(() => {
+    setMobileSessionHint(false);
+    router.prefetch("/dashboard/chat");
+  }, [router]);
   const t = useTranslations("authPages.mobileLogin");
   const tAuthUi = useTranslations("authUi");
   const tSso = useTranslations("authLocale.plugins.sso");

@@ -26,10 +26,12 @@ them: registrations do not apply to data collected earlier.
 
 ## Custom metrics
 
+- launch_ms
 - seat_count
 - skill_count
 - source_count
 - tool_count
+- ttfb_ms
 
 ## User properties
 

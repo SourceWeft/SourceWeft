@@ -13,14 +13,23 @@ const state = vi.hoisted(() => ({
   signInWithMobileApple: vi.fn(),
   signInWithMobileGoogle: vi.fn(),
   toastError: vi.fn(),
+  prefetch: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
   toast: { error: state.toastError, success: vi.fn(), dismiss: vi.fn() },
 }));
 
+vi.mock("../../../lib/mobile-app-shell", () => ({
+  setMobileSessionHint: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: state.replace, refresh: state.refresh }),
+  useRouter: () => ({
+    replace: state.replace,
+    refresh: state.refresh,
+    prefetch: state.prefetch,
+  }),
 }));
 
 vi.mock("../../../lib/auth-client", () => ({
@@ -142,6 +151,14 @@ test("a failed Apple sign-in is reported in a toast, not on the page", async () 
   assert(
     !document.body.textContent?.includes("Apple is down"),
     "the message is not rendered in the page",
+  );
+});
+
+test("prefetches the dashboard so the step after signing in is quick", async () => {
+  answerAuthConfig({ apple: false, googleIosClientId: IOS_CLIENT });
+  await mount();
+  assert(
+    state.prefetch.mock.calls.some(([href]) => href === "/dashboard/chat"),
   );
 });
 

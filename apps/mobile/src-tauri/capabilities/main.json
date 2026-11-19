@@ -8,6 +8,9 @@
     "apple-sign-in:default",
     "google-auth:default",
     "allow-mobile-info",
-    "allow-open-external-url"
+    "allow-open-external-url",
+    "allow-take-launch-elapsed-ms",
+    "allow-set-session-hint",
+    "allow-retry-launch"
   ]
 }

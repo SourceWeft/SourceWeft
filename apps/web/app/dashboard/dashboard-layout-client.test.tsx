@@ -31,7 +31,7 @@ vi.mock("../../lib/auth-client", () => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => host.pathname,
   useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), prefetch: vi.fn() }),
 }));
 vi.mock("../../lib/register-builtin-agent-tools", () => ({
   registerBuiltinAgentTools: () => {},

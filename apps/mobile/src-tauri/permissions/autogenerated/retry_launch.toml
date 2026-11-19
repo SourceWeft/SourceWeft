@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-launch"
+description = "Enables the retry_launch command without any pre-configured scope."
+commands.allow = ["retry_launch"]
+
+[[permission]]
+identifier = "deny-retry-launch"
+description = "Denies the retry_launch command without any pre-configured scope."
+commands.deny = ["retry_launch"]

@@ -122,6 +122,12 @@ const nextConfig: NextConfig = {
         // (`/api/source-file` a `sandbox` CSP, `/api/artifact-file` its own
         // CSP and `no-referrer` for tokened URLs), and Next drops a handler's
         // header when the config already set the same key.
+        // The iOS app's service worker: always revalidated, so a fix reaches
+        // the app on its next launch.
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
+      },
+      {
         source: "/((?!api/).*)",
         headers: [
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -151,14 +157,42 @@ const nextConfig: NextConfig = {
       // The auth UI moved from `/account/*` to `/settings/*`, and renamed two
       // organization segments. Keep bookmarks and emailed links working.
       { source: "/account", destination: "/settings/account", permanent: true },
-      { source: "/account/profile", destination: "/settings/account", permanent: true },
-      { source: "/account/security", destination: "/settings/security", permanent: true },
+      {
+        source: "/account/profile",
+        destination: "/settings/account",
+        permanent: true,
+      },
+      {
+        source: "/account/security",
+        destination: "/settings/security",
+        permanent: true,
+      },
       // API keys are a card inside the security view now, not a view of their own.
-      { source: "/account/keys", destination: "/settings/security", permanent: true },
-      { source: "/account/organizations", destination: "/settings/organizations", permanent: true },
-      { source: "/account/teams", destination: "/settings/organizations", permanent: true },
-      { source: "/organization/members", destination: "/organization/people", permanent: true },
-      { source: "/organization/keys", destination: "/organization/settings", permanent: true },
+      {
+        source: "/account/keys",
+        destination: "/settings/security",
+        permanent: true,
+      },
+      {
+        source: "/account/organizations",
+        destination: "/settings/organizations",
+        permanent: true,
+      },
+      {
+        source: "/account/teams",
+        destination: "/settings/organizations",
+        permanent: true,
+      },
+      {
+        source: "/organization/members",
+        destination: "/organization/people",
+        permanent: true,
+      },
+      {
+        source: "/organization/keys",
+        destination: "/organization/settings",
+        permanent: true,
+      },
     ];
   },
   turbopack: {

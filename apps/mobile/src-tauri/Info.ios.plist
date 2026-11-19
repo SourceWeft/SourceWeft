@@ -4,6 +4,11 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>SourceWeft</string>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>sourceweft.com</string>
+		<string>localhost</string>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>

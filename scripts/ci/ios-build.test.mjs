@@ -85,6 +85,15 @@ test("both jobs build with Xcode 26, which App Store Connect requires", () => {
   }
 });
 
+// App Store Connect rejects an upload whose build number it has seen, and the
+// project's CFBundleVersion is the fixed app version, so each run adds its own.
+test("every TestFlight archive carries a new build number", () => {
+  assert.match(
+    jobBlock("testflight"),
+    /tauri ios build [^\n]*--build-number \$\{\{ github\.run_number \}\}/,
+  );
+});
+
 test("the workflow only calls subcommands the helper script defines", () => {
   const source = readFileSync(script, "utf8");
   for (const [, name] of workflow.matchAll(/ios-build\.mjs ([a-z-]+)/g)) {

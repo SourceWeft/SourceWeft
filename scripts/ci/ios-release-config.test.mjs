@@ -232,3 +232,49 @@ test("Swift library search paths use the default toolchain, not TOOLCHAIN_DIR", 
     assert(text.includes("$(DT_TOOLCHAIN_DIR)/usr/lib/swift"), file);
   }
 });
+
+// WKWebView runs the app's service worker only for app-bound domains, so the
+// hosts the app limits navigation to must be exactly the ones it declares.
+test("the app-bound domains in Info.ios.plist match the hosts the app binds", () => {
+  const plist = read(resolve(tauri, "Info.ios.plist"));
+  const declared = [
+    ...plist
+      .match(/<key>WKAppBoundDomains<\/key>\s*<array>([\s\S]*?)<\/array>/)[1]
+      .matchAll(/<string>([^<]+)<\/string>/g),
+  ].map(([, host]) => host);
+  const bound = [
+    ...read(resolve(tauri, "src/lib.rs"))
+      .match(/const APP_BOUND_HOSTS: \[&str; \d+\] = \[([^\]]+)\]/)[1]
+      .matchAll(/"([^"]+)"/g),
+  ].map(([, host]) => host);
+  assert.deepEqual(declared, bound);
+  assert(bound.includes(new URL(PRODUCTION_ORIGIN).host));
+});
+
+test("the launch image uses the splash page's background, defined for light and dark", () => {
+  const storyboard = read(resolve(apple, "LaunchScreen.storyboard"));
+  assert.match(
+    storyboard,
+    /<color key="backgroundColor" name="LaunchBackground"\/>/,
+  );
+  const colors = json(
+    resolve(apple, "Assets.xcassets/LaunchBackground.colorset/Contents.json"),
+  ).colors;
+  const hex = ({ color: { components: c } }) =>
+    "#" +
+    [c.red, c.green, c.blue]
+      .map((v) =>
+        Math.round(Number(v) * 255)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("");
+  const light = colors.find((entry) => !entry.appearances);
+  const dark = colors.find((entry) => entry.appearances?.[0]?.value === "dark");
+  const splash = read(resolve(mobile, "placeholder-dist/splash.html"));
+  assert.match(splash, new RegExp(`--bg: ${hex(light)};`));
+  assert.match(
+    splash,
+    new RegExp(`prefers-color-scheme: dark\\)[^}]*--bg: ${hex(dark)};`),
+  );
+});

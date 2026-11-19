@@ -357,6 +357,24 @@
           "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
         },
         {
+          "description": "Enables the retry_launch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-launch",
+          "markdownDescription": "Enables the retry_launch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_session_hint command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-session-hint",
+          "markdownDescription": "Enables the set_session_hint command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_launch_elapsed_ms command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-launch-elapsed-ms",
+          "markdownDescription": "Enables the take_launch_elapsed_ms command without any pre-configured scope."
+        },
+        {
           "description": "Denies the mobile_info command without any pre-configured scope.",
           "type": "string",
           "const": "deny-mobile-info",
@@ -367,6 +385,24 @@
           "type": "string",
           "const": "deny-open-external-url",
           "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the retry_launch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-launch",
+          "markdownDescription": "Denies the retry_launch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_session_hint command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-session-hint",
+          "markdownDescription": "Denies the set_session_hint command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_launch_elapsed_ms command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-launch-elapsed-ms",
+          "markdownDescription": "Denies the take_launch_elapsed_ms command without any pre-configured scope."
         },
         {
           "description": "Allows starting Sign in with Apple\n#### This default permission set includes:\n\n- `allow-sign-in`",
@@ -421,6 +457,12 @@
           "type": "string",
           "const": "core:app:allow-default-window-icon",
           "markdownDescription": "Enables the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:allow-exit",
+          "markdownDescription": "Enables the exit command without any pre-configured scope."
         },
         {
           "description": "Enables the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -511,6 +553,12 @@
           "type": "string",
           "const": "core:app:deny-default-window-icon",
           "markdownDescription": "Denies the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:deny-exit",
+          "markdownDescription": "Denies the exit command without any pre-configured scope."
         },
         {
           "description": "Denies the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -1773,6 +1821,12 @@
           "markdownDescription": "Enables the set_fullscreen command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:allow-set-fullscreen-on-monitor",
+          "markdownDescription": "Enables the set_fullscreen_on_monitor command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_icon command without any pre-configured scope.",
           "type": "string",
           "const": "core:window:allow-set-icon",
@@ -2239,6 +2293,12 @@
           "type": "string",
           "const": "core:window:deny-set-fullscreen",
           "markdownDescription": "Denies the set_fullscreen command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:deny-set-fullscreen-on-monitor",
+          "markdownDescription": "Denies the set_fullscreen_on_monitor command without any pre-configured scope."
         },
         {
           "description": "Denies the set_icon command without any pre-configured scope.",

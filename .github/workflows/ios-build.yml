@@ -130,7 +130,7 @@ jobs:
       # applies manual signing from IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD and
       # IOS_MOBILE_PROVISION (the Xcode project and export options follow).
       - name: Build and sign the App Store archive
-        run: pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --ci
+        run: pnpm --filter @sourceweft/mobile exec tauri ios build --export-method app-store-connect --build-number ${{ github.run_number }} --ci
       - name: Verify the signed IPA
         run: node scripts/ci/ios-build.mjs verify-ipa
       - name: Upload to TestFlight

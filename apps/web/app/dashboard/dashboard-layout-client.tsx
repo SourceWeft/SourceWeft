@@ -22,6 +22,7 @@ import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layo
 import { authClient } from "../../lib/auth-client";
 import { AiDataConsentGate } from "./_components/ai-data-consent-gate";
 import { isEmbedMode } from "../../lib/thread-embed-params";
+import { setMobileSessionHint } from "../../lib/mobile-app-shell";
 import { useIsHydrated } from "../_components/auth/use-is-hydrated";
 
 // Only chat surfaces read the registry, so marketing pages no longer pay for
@@ -124,6 +125,11 @@ export function DashboardLayoutClient({
       console.error("Local host initialization unavailable", error),
     );
   }, [hasSession, isPending, userId, sessionId, isAuxiliaryWindow]);
+  // The iOS app opens the dashboard directly on its next launch only while a session exists.
+  useEffect(() => {
+    if (isPending || isAuxiliaryWindow) return;
+    setMobileSessionHint(hasSession);
+  }, [hasSession, isPending, isAuxiliaryWindow]);
   // The sandbox runtime is fetched as soon as the signed-in dashboard is open, not when a menu
   // or Settings happens to be opened. The main window owns it, as it owns the host session.
   useEffect(() => {
