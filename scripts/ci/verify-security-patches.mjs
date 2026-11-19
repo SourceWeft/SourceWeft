@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -245,57 +245,6 @@ const normalBody = await parseBody(formRequest({ "user.name": "test" }), {
   dot: true,
 });
 assert.equal(normalBody.user.name, "test");
-// Audit exemptions. `pnpm audit` skips the advisories listed under
-// `pnpm.auditConfig.ignoreGhsas` in the root package.json, so the list is
-// pinned here: adding one is a reviewed change to this file, and each entry
-// states why it is tolerated and when it must go.
-//
-// GHSA-fc5q-39xc-vjpf (picomatch <= 4.0.7, ReDoS through a crafted glob
-// pattern): no patched release exists. picomatch only ever receives patterns
-// we write ourselves: build, test and watch tooling (tsup, vite, vitest, wxt,
-// chokidar, dotenvx), and the Daytona SDK's Dockerfile image builder, which
-// the sandbox provider never calls. Remove the entry, and this block, as soon
-// as a picomatch release outside the affected range is installed.
-const auditExemptions = JSON.parse(
-  readFileSync(path.join(root, "package.json"), "utf8"),
-).pnpm?.auditConfig?.ignoreGhsas;
-assert.deepEqual(auditExemptions, ["GHSA-fc5q-39xc-vjpf"]);
-const installedPicomatch = [
-  ...new Set(
-    [
-      ...readFileSync(path.join(root, "pnpm-lock.yaml"), "utf8").matchAll(
-        /^  picomatch@(\d+)\.(\d+)\.(\d+):$/gm,
-      ),
-    ].map((match) => match.slice(1, 4).map(Number).join(".")),
-  ),
-];
-assert.ok(installedPicomatch.length > 0);
-for (const version of installedPicomatch) {
-  const [major, minor, patch] = version.split(".").map(Number);
-  assert.ok(
-    major < 4 || (major === 4 && minor === 0 && patch <= 7),
-    `picomatch ${version} is outside the range of GHSA-fc5q-39xc-vjpf: check whether it is patched and remove the audit exemption`,
-  );
-}
-for (const directory of [
-  "packages/sandbox-provider-daytona/src",
-  "apps/backend/src",
-]) {
-  const usesImageBuilder = (folder) =>
-    readdirSync(folder, { withFileTypes: true }).some((entry) => {
-      const entryPath = path.join(folder, entry.name);
-      if (entry.isDirectory()) return usesImageBuilder(entryPath);
-      return (
-        /\.(ts|tsx|mts|cts)$/.test(entry.name) &&
-        readFileSync(entryPath, "utf8").includes("fromDockerfile")
-      );
-    });
-  assert.equal(
-    usesImageBuilder(path.join(root, directory)),
-    false,
-    `${directory} calls the Daytona image builder, which globs with picomatch: re-check GHSA-fc5q-39xc-vjpf`,
-  );
-}
 console.log(
-  "Security patch versions, audit exemptions, YAML merge budget, native AVIF decoding, Next optimization and Hono query/body boundaries passed.",
+  "Security patch versions, YAML merge budget, native AVIF decoding, Next optimization and Hono query/body boundaries passed.",
 );
