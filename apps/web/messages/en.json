@@ -5891,6 +5891,72 @@
       "approvalAsk": "This version asks to read and change <strong>shared data</strong> that everyone who can open it sees. It cannot use shared data until it is approved."
     }
   },
+  "table": {
+    "summary": "{sources, plural, one {# source} other {# sources}} · {columns, plural, one {# column} other {# columns}}",
+    "source": "Source",
+    "region": "Comparison table",
+    "empty": "This table has no rows.",
+    "cell": {
+      "notFound": "Not mentioned",
+      "unverified": "Could not be verified",
+      "unverifiedHint": "An answer was proposed, but the source text could not confirm it, so no value is shown.",
+      "missing": "No value"
+    },
+    "row": {
+      "failed": "This source could not be processed. Regenerate the table to try again.",
+      "notIndexed": "This source is not indexed yet, so it was skipped.",
+      "stale": "Source changed",
+      "sourceDeleted": "Source deleted"
+    },
+    "sort": {
+      "label": "Sort by {column}"
+    },
+    "columns": {
+      "button": "Columns",
+      "label": "Columns to show",
+      "showAll": "Show all"
+    },
+    "toolbar": {
+      "regenerate": "Regenerate"
+    },
+    "evidence": {
+      "show": "Show source quote",
+      "hide": "Hide source quote",
+      "sourceChanged": "The source text has changed since this table was generated. The quote shown is the original.",
+      "openSource": "Open in source"
+    },
+    "stale": {
+      "message": "A source changed after this table was generated. Regenerate to refresh it.",
+      "sourceDeleted": "A source was deleted. The table is still available.",
+      "regenerate": "Regenerate"
+    },
+    "status": {
+      "queued": "Waiting to start…",
+      "generating": "Completed {completed} of {total} sources"
+    },
+    "error": {
+      "retry": "Try again",
+      "cannotDisplay": "This table can't be displayed.",
+      "code": {
+        "INSUFFICIENT_CREDITS": "Not enough credits to generate this table.",
+        "INPUT_TOO_LARGE": "The selected sources are too large for one table. Choose fewer or shorter sources.",
+        "NO_INDEXED_SOURCES": "None of the selected sources is indexed yet.",
+        "MODEL_UNAVAILABLE": "The model is unavailable right now. Try again later.",
+        "GENERATION_QUALITY_TOO_LOW": "Too many answers could not be verified against the sources, so the table was not created.",
+        "SOURCE_NOT_READABLE": "A selected source could not be read.",
+        "UNKNOWN": "The table could not be generated."
+      }
+    },
+    "export": {
+      "menu": "Export",
+      "csv": "Download CSV",
+      "csvWithEvidence": "Download CSV with source quotes",
+      "markdown": "Copy as Markdown",
+      "copied": "Copied",
+      "source": "Source",
+      "evidenceSuffix": "source quote"
+    }
+  },
   "mobileRouteSheet": {
     "supplementaryPage": "Supplementary SourceWeft page"
   },

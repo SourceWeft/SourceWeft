@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing/index.ts",
-    "./export": "./src/export/index.ts"
+    "./export": "./src/export/index.ts",
+    "./ui": "./src/ui/index.tsx"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -16,10 +17,17 @@
   "dependencies": {
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/grounded-generation": "workspace:*",
+    "@sourceweft/ui-web": "workspace:*",
+    "lucide-react": "^0.562.0",
     "typescript": "5.9.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
     "tsx": "^4.23.12"
+  },
+  "peerDependencies": {
+    "react": "^19.2.1"
   }
 }

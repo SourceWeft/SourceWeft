@@ -5891,6 +5891,72 @@
       "approvalAsk": "此版本请求读取并修改<strong>共享数据</strong>，所有能打开它的人都会看到这些数据。审批通过前，它无法使用共享数据。"
     }
   },
+  "table": {
+    "summary": "{sources} 个来源 · {columns} 列",
+    "source": "来源",
+    "region": "对比表",
+    "empty": "这张表里还没有内容。",
+    "cell": {
+      "notFound": "来源未提及",
+      "unverified": "无法核实",
+      "unverifiedHint": "模型给出过答案，但原文无法证实，因此不显示该值。",
+      "missing": "无值"
+    },
+    "row": {
+      "failed": "这个来源处理失败。重新生成这张表即可重试。",
+      "notIndexed": "这个来源尚未建立索引，已跳过。",
+      "stale": "来源已更新",
+      "sourceDeleted": "来源已删除"
+    },
+    "sort": {
+      "label": "按 {column} 排序"
+    },
+    "columns": {
+      "button": "列设置",
+      "label": "要显示的列",
+      "showAll": "全部显示"
+    },
+    "toolbar": {
+      "regenerate": "重新生成"
+    },
+    "evidence": {
+      "show": "查看原文片段",
+      "hide": "隐藏原文片段",
+      "sourceChanged": "来源原文在生成这张表之后发生了变化，下方显示的是当时的片段。",
+      "openSource": "在来源中打开"
+    },
+    "stale": {
+      "message": "有来源在生成这张表之后发生了变化，重新生成即可更新。",
+      "sourceDeleted": "有来源已被删除，这张表仍可使用。",
+      "regenerate": "重新生成"
+    },
+    "status": {
+      "queued": "等待开始…",
+      "generating": "已完成 {completed} / {total} 个来源"
+    },
+    "error": {
+      "retry": "重试",
+      "cannotDisplay": "无法显示这张表。",
+      "code": {
+        "INSUFFICIENT_CREDITS": "积分不足，无法生成这张表。",
+        "INPUT_TOO_LARGE": "所选来源太大，一张表容纳不下。请减少来源，或选择较短的来源。",
+        "NO_INDEXED_SOURCES": "所选来源都还没有建立索引。",
+        "MODEL_UNAVAILABLE": "模型暂时不可用，请稍后再试。",
+        "GENERATION_QUALITY_TOO_LOW": "太多答案无法在原文中核实，所以没有生成这张表。",
+        "SOURCE_NOT_READABLE": "有来源无法读取。",
+        "UNKNOWN": "无法生成这张表。"
+      }
+    },
+    "export": {
+      "menu": "导出",
+      "csv": "下载 CSV",
+      "csvWithEvidence": "下载 CSV（含原文片段）",
+      "markdown": "复制为 Markdown",
+      "copied": "已复制",
+      "source": "来源",
+      "evidenceSuffix": "原文片段"
+    }
+  },
   "mobileRouteSheet": {
     "supplementaryPage": "SourceWeft 补充页面"
   },
