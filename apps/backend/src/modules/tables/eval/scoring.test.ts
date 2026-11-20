@@ -73,6 +73,10 @@ describe("date normalisation", () => {
       granularity: "day",
       iso: "2023-05-12",
     });
+    assert.deepEqual(parseDateValue("2021 Feb 24"), {
+      granularity: "day",
+      iso: "2021-02-24",
+    });
     assert.deepEqual(parseDateValue("May 12, 2023"), {
       granularity: "day",
       iso: "2023-05-12",

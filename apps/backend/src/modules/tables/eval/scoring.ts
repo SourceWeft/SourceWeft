@@ -130,6 +130,14 @@ const DATE_PATTERNS: {
     read: ([d, month, y]) => ymd(+y!, monthOf(month!), +d!),
   },
   {
+    // 2021 Feb 24 (the PubMed citation style)
+    pattern: new RegExp(
+      `(?<!\\d)(\\d{4})\\s+(${MONTH})\\.?\\s+(\\d{1,2})(?!\\d)`,
+      "gi",
+    ),
+    read: ([y, month, d]) => ymd(+y!, monthOf(month!), +d!),
+  },
+  {
     // 25/12/2023 is day-first, 12/25/2023 month-first, 05/06/2023 either.
     pattern: /(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?!\d)/g,
     read: ([a, b, y]) => {
