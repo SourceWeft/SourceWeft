@@ -25,7 +25,12 @@ export type VideoPresentationRenderPolicy = Readonly<{
   outputSafetyRatio: number;
   audioBitrateBps: number;
   minimumVideoBitrateBps: number;
-  concurrency: number;
+  /**
+   * Browser tabs the sandbox renders with. "auto" lets `render-scene` size it
+   * to the sandbox it runs in (Remotion's own default: half the CPU threads,
+   * at most 8), so a larger sandbox renders faster without a code change.
+   */
+  concurrency: number | "auto";
 }>;
 
 export const VIDEO_PRESENTATION_RENDER_POLICY: VideoPresentationRenderPolicy =
@@ -50,7 +55,7 @@ export const VIDEO_PRESENTATION_RENDER_POLICY: VideoPresentationRenderPolicy =
     outputSafetyRatio: 0.9,
     audioBitrateBps: 128_000,
     minimumVideoBitrateBps: 150_000,
-    concurrency: 1,
+    concurrency: "auto" as const,
   });
 
 export function resolveVideoPresentationRenderPolicy(

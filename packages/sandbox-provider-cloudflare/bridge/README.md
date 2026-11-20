@@ -73,6 +73,34 @@ curl "$CF_SANDBOX_BRIDGE_URL/v1/pool/stats" -H "Authorization: Bearer $CF_SANDBO
 # "config":{"maxInstances":50,…},"maxInstances":50   ← the second one is the ceiling in force
 ```
 
+### Instance size
+
+Each sandbox container has a fixed size that Cloudflare reads from
+`wrangler.jsonc` (`instance_type`), not from the request that creates it.
+`deploy.sh` sets it on every run from `BRIDGE_INSTANCE_TYPE` (default
+`standard-4`):
+
+| type | vCPU | memory | disk |
+|------|------|--------|------|
+| `lite` | 1/16 | 256 MiB | 2 GB |
+| `basic` | 1/4 | 1 GiB | 4 GB |
+| `standard-1` | 1/2 | 4 GiB | 8 GB |
+| `standard-2` | 1 | 6 GiB | 12 GB |
+| `standard-3` | 2 | 8 GiB | 16 GB |
+| `standard-4` | 4 | 12 GiB | 20 GB |
+
+The stock template ships `standard-1`; its comment calling that 4 vCPU / 8 GiB
+is wrong. Video rendering needs the larger sizes: one scene render on
+`standard-1` ran at a few frames per second. CPU is billed for active use only,
+while memory and disk are billed for as long as the container runs, so a bigger
+size costs mostly its extra memory and disk. A size change replaces running
+containers as they are recycled; it does not need an image build (see the next
+section).
+
+```sh
+BRIDGE_INSTANCE_TYPE=standard-3 pnpm --filter @sourceweft/sandbox-provider-cloudflare bridge:deploy
+```
+
 ### When the image cannot be built
 
 `bridge:deploy` builds the container image with the local Docker daemon, which

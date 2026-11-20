@@ -146,6 +146,15 @@ test("current validation bundles exactly once and every render phase reuses it",
   }
 });
 
+test("scene rendering derives auto concurrency from the sandbox's CPU count", () => {
+  const project = buildValidationProjectCodePayload(payloadWithScenes());
+  const script = project.files.find(
+    (file) => file.path === "scripts/render-scene.mjs",
+  )!.content;
+  assert.match(script, /availableParallelism/u);
+  assert.match(script, /"auto"/u);
+});
+
 test("generated package manifest and lockfile form a frozen dependency closure", () => {
   const project = buildValidationProjectCodePayload(payloadWithScenes());
   const packageFile = project.files.find(
