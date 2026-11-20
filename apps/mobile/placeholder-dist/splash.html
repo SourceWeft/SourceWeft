@@ -7,20 +7,19 @@
     <title>SourceWeft</title>
     <!-- Shown while the web app loads. Without viewport-fit=cover the viewport runs from
          below the status bar to the bottom of the screen, as it does for the web app's own
-         launch cover, and LaunchScreen.storyboard centres its logo in that same span, so
-         the three hand over without the logo moving. If loading takes a while it says
+         launch cover, and LaunchScreen.storyboard centres its wordmark in that same span, so
+         the three hand over without the wordmark moving. If loading takes a while it says
          so; if it fails (the app opens this page as #failed), it offers a retry. -->
     <style>
-      :root { --bg: #ffffff; --fg: #000000; --muted: #737373; --logo-bg: #0a0a0a; --logo-fg: #ffffff; }
+      :root { --bg: #ffffff; --fg: #000000; --muted: #737373; }
       @media (prefers-color-scheme: dark) {
-        :root { --bg: #171717; --fg: #ffffff; --muted: #a3a3a3; --logo-bg: #fafafa; --logo-fg: #171717; }
+        :root { --bg: #171717; --fg: #ffffff; --muted: #a3a3a3; }
       }
       html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
         font-family: -apple-system, BlinkMacSystemFont, sans-serif; -webkit-user-select: none; user-select: none; }
-      .mark { position: fixed; left: 50%; top: 50%; width: 64px; height: 64px; transform: translate(-50%, -50%); }
-      .mark rect { fill: var(--logo-bg); }
-      .mark path { fill: var(--logo-fg); }
-      .below { position: fixed; left: 24px; right: 24px; top: calc(50% + 52px);
+      .mark { position: fixed; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+        text-align: center; font-size: 22px; font-weight: 600; line-height: 27px; }
+      .below { position: fixed; left: 24px; right: 24px; top: calc(50% + 32px);
         display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
       .bar { width: 44px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 35%, transparent);
         overflow: hidden; position: relative; opacity: 0; animation: appear .2s ease-out .4s forwards; }
@@ -36,7 +35,7 @@
     </style>
   </head>
   <body>
-    <svg class="mark" viewBox="0 0 800 800" role="img" aria-label="SourceWeft"><rect width="800" height="800" rx="150"/><path transform="translate(108 108) scale(0.73)" d="M766.6 125.674h-83.275L624.072 376.14l48.525 141.407zM436.545 256.192h-80.873l128.916 418.137h32.83l24.822-86.477zm88.88 0-24.662 85.677 102.492 332.46h34.751l19.698-86.477-104.094-331.66zm-129.717-33.63v-96.888H200.813q-88.238.16-128.115 41.958Q31.86 209.59 33.462 274.128t42.6 95.446q31.068 23.38 75.268 48.205l106.814 56.53q46.282 25.143 38.275 62.937-8.167 37.634-57.172 39.556H36.185v97.527h215.073q48.202-2.562 81.674-22.902 53.168-32.51 65.178-101.371 10.89-93.843-76.709-148.934-111.3-61.015-165.909-99.45-27.545-19.377-18.897-47.724 9.449-31.388 58.933-31.388h200.18z"/></svg>
+    <div class="mark">SourceWeft</div>
     <div class="below">
       <div class="bar" id="bar" role="progressbar" aria-label="Loading"></div>
       <div class="status" id="status" aria-live="polite"></div>

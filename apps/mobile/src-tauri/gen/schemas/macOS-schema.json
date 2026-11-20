@@ -345,6 +345,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the log_sign_in_failure command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-log-sign-in-failure",
+          "markdownDescription": "Enables the log_sign_in_failure command without any pre-configured scope."
+        },
+        {
           "description": "Enables the mobile_info command without any pre-configured scope.",
           "type": "string",
           "const": "allow-mobile-info",
@@ -373,6 +379,12 @@
           "type": "string",
           "const": "allow-take-launch-elapsed-ms",
           "markdownDescription": "Enables the take_launch_elapsed_ms command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the log_sign_in_failure command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-log-sign-in-failure",
+          "markdownDescription": "Denies the log_sign_in_failure command without any pre-configured scope."
         },
         {
           "description": "Denies the mobile_info command without any pre-configured scope.",

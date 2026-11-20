@@ -28,9 +28,52 @@ const STATIC_LIMIT = 600;
 // Must match SHELL_CACHE_TIMING in lib/mobile-app-shell.ts.
 const SHELL_CACHE_TIMING = "sw-shell-cache";
 
-self.addEventListener("install", () => {
+// Fills the cache as soon as the worker installs, so the next launch is served
+// from the device even if the person has not opened those pages yet. A page or
+// file that fails to load is skipped; installing never waits on the network.
+self.addEventListener("install", (event) => {
   self.skipWaiting();
+  event.waitUntil(precache().catch(() => undefined));
 });
+
+async function precache() {
+  const cache = await caches.open(SHELL_CACHE);
+  await Promise.all(
+    [...SHELL_PATHS, ...SHELL_IMAGES].map(async (path) => {
+      try {
+        const response = await fetch(path, { credentials: "same-origin" });
+        if (!cacheable(response)) return;
+        if (SHELL_PATHS.has(path)) await warmStaticFiles(response.clone());
+        await cache.put(path, response);
+      } catch {
+        // Offline or failed: the page is cached the next time it loads.
+      }
+    }),
+  );
+}
+
+// A shell page names the build's scripts and styles it needs. Caching them
+// along with the page means a cached page also starts without the network,
+// including right after a deploy, when the page names new files.
+const STATIC_REFERENCE = /\/_next\/static\/[^"'\s)\\]+/g;
+
+async function warmStaticFiles(pageResponse) {
+  const html = await pageResponse.text();
+  const paths = new Set(html.match(STATIC_REFERENCE) ?? []);
+  const cache = await caches.open(STATIC_CACHE);
+  await Promise.all(
+    [...paths].map(async (path) => {
+      try {
+        if (await cache.match(path)) return;
+        const response = await fetch(path);
+        if (cacheable(response)) await cache.put(path, response);
+      } catch {
+        // Fetched on demand instead.
+      }
+    }),
+  );
+  await trim(cache);
+}
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
@@ -74,7 +117,14 @@ async function shellPage(event) {
   const cache = await caches.open(SHELL_CACHE);
   const cached = await cache.match(event.request);
   const fresh = fetch(event.request).then(async (response) => {
-    if (cacheable(response)) await cache.put(event.request, response.clone());
+    if (cacheable(response)) {
+      if (event.request.mode === "navigate") {
+        event.waitUntil(
+          warmStaticFiles(response.clone()).catch(() => undefined),
+        );
+      }
+      await cache.put(event.request, response.clone());
+    }
     return response;
   });
 
