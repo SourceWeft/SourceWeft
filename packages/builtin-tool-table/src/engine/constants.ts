@@ -1,5 +1,5 @@
 /** Version stamp of the table prompts; bump it when a prompt changes meaning. */
-export const TABLE_PROMPT_VERSION = "table-v1";
+export const TABLE_PROMPT_VERSION = "table-v2";
 
 /** How many sources are filled in parallel while generating a table. */
 export const FILL_CONCURRENCY = 4;

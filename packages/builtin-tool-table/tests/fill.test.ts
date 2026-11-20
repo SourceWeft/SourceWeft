@@ -12,6 +12,7 @@ import {
   MAX_UNVERIFIED_SHARE,
   TABLE_PROMPT_VERSION,
 } from "../src/engine/constants";
+import { quoteHash } from "@sourceweft/grounded-generation";
 import { fillTable } from "../src/engine/fill";
 import {
   absent,
@@ -144,8 +145,9 @@ test("a cell citing a chunk of another source is unverified", async () => {
     const own = promptHandles(call.user)[0]!;
     // Source a is asked about, but the model cites source b's chunk.
     const cited = own === handles.get("a-c1") ? handles.get("b-c1")! : own;
+    // A quote the chunk does not hold word for word, so the anchor port places it.
     return [
-      answer(columns[0]!.id, "randomised trial", cited, "randomised trial"),
+      answer(columns[0]!.id, "randomised trial", cited, "a randomised trial design"),
       ...padAnswers(call),
     ];
   });
@@ -156,8 +158,9 @@ test("a cell citing a chunk of another source is unverified", async () => {
   const cell = content.rows[0]!.cells[columns[0]!.id]!;
   assert.deepEqual(cell, { status: "unverified", fingerprint: cell.fingerprint });
   assert.equal(content.rows[1]!.cells[columns[0]!.id]!.status, "found");
-  // The foreign chunk was never offered to the anchor for row a: 2 pads + design for b, 2 pads for a.
-  assert.equal(anchor.requests, 5);
+  // The foreign chunk was never offered to the anchor for row a: only design
+  // for b went to the port (the pads quote their chunks verbatim).
+  assert.equal(anchor.requests, 1);
 });
 
 test("a handle that no chunk has is unverified", async () => {
@@ -203,6 +206,25 @@ test("a date cell needs a readable date that the evidence states, in any notatio
   if (ok.status === "found") assert.equal(ok.normalized, "2024-03-05");
   assert.equal((await run("March 6, 2024")).status, "unverified");
   assert.equal((await run("last spring")).status, "unverified");
+});
+
+test("a date cell more precise than its evidence is stored at the precision the source states", async () => {
+  const columns = columnsOf(dateColumn("Reporting date"));
+  const text = "截至2025年末 the randomised trial enrolled 1,200 participants.";
+  const run = async (value: string) => {
+    const { content } = await fillPadded(columns, [sourceOf("a", [text])], (call) => [
+      answer(columns[0]!.id, value, promptHandles(call.user)[0]!, "截至2025年末"),
+    ]);
+    return content.rows[0]!.cells[columns[0]!.id]!;
+  };
+  const kept = await run("2025-12-31");
+  assert.equal(kept.status, "found");
+  if (kept.status === "found") {
+    assert.equal(kept.value, "2025");
+    assert.equal(kept.normalized, "2025");
+    assert.equal(kept.evidence[0]!.quote, "截至2025年末");
+  }
+  assert.equal((await run("2024-12-31")).status, "unverified");
 });
 
 test("a boolean cell must read as yes or no", async () => {
@@ -270,6 +292,99 @@ test("malformed claims are unverified, a plain not-found is not_found, and an un
   assert.equal(content.rows[1]!.cells[columns[5]!.id]!.status, "not_found");
 });
 
+/** An anchor port that always answers with `span` of the chunk and records each request. */
+function relocatingAnchor(span: string) {
+  const port = {
+    texts: [] as string[],
+    async anchor(requests: readonly { text: string; chunkContent: string }[]) {
+      return requests.map(({ text, chunkContent }) => {
+        port.texts.push(text);
+        const start = chunkContent.indexOf(span);
+        return start < 0
+          ? null
+          : { startChar: start, endChar: start + span.length, quote: span, confidence: 1 };
+      });
+    },
+  };
+  return port;
+}
+
+const DATELINE =
+  "REDMOND, Wash. — October 28, 2026 — Microsoft Corp. today announced results for the quarter.";
+
+test("a quote the chunk holds verbatim is the stored evidence and never goes to the anchor port", async () => {
+  const columns = columnsOf(textColumn("Headquarters"));
+  const anchor = relocatingAnchor("— October 28, 2026 — Microsoft Corp.");
+  const { model } = fillModel((call) => [
+    answer(columns[0]!.id, "Redmond, Wash.", promptHandles(call.user)[0]!, "REDMOND, Wash. — October 28, 2026"),
+  ]);
+  const { content } = await fillTable(
+    { model, anchor, figures },
+    fillInput(columns, [sourceOf("a", [DATELINE])]),
+  );
+  const cell = content.rows[0]!.cells[columns[0]!.id]!;
+  assert.equal(cell.status, "found");
+  if (cell.status === "found") {
+    assert.equal(cell.evidence.length, 1);
+    const [evidence] = cell.evidence;
+    assert.equal(evidence!.quote, "REDMOND, Wash. — October 28, 2026");
+    assert.equal(evidence!.chunkId, "a-c1");
+    assert.equal(evidence!.startChar, 0);
+    assert.equal(evidence!.endChar, "REDMOND, Wash. — October 28, 2026".length);
+    assert.equal(evidence!.quoteHash, quoteHash("REDMOND, Wash. — October 28, 2026"));
+  }
+  assert.deepEqual(anchor.texts, []);
+});
+
+test("a quote the chunk does not hold verbatim is still placed by the anchor port", async () => {
+  const columns = columnsOf(textColumn("Headquarters"));
+  const anchor = relocatingAnchor("Microsoft Corp.");
+  const { model } = fillModel((call) => [
+    answer(columns[0]!.id, "Redmond, Wash.", promptHandles(call.user)[0]!, "Redmond, Washington — October 28"),
+  ]);
+  const { content } = await fillTable(
+    { model, anchor, figures },
+    fillInput(columns, [sourceOf("a", [DATELINE])]),
+  );
+  const cell = content.rows[0]!.cells[columns[0]!.id]!;
+  assert.equal(cell.status, "found");
+  if (cell.status === "found") {
+    assert.equal(cell.evidence[0]!.quote, "Microsoft Corp.");
+    assert.equal(cell.evidence[0]!.startChar, DATELINE.indexOf("Microsoft Corp."));
+  }
+  assert.deepEqual(anchor.texts, ["Redmond, Wash.\nRedmond, Washington — October 28"]);
+});
+
+test("a verbatim quote differing only in whitespace or width stores the chunk's own text", async () => {
+  const columns = columnsOf(textColumn("Headquarters"), dateColumn("Release date"));
+  const text = "ＲＥＤＭＯＮＤ，  Ｗａｓｈ．\n—\tOctober 28,   2026 — Microsoft Corp. reported.";
+  const original = "ＲＥＤＭＯＮＤ，  Ｗａｓｈ．\n—\tOctober 28,   2026";
+  const anchor = relocatingAnchor("Microsoft Corp.");
+  const { model } = fillModel((call) => {
+    const handle = promptHandles(call.user)[0]!;
+    return [
+      answer(columns[0]!.id, "Redmond, Wash.", handle, "REDMOND, Wash. — October 28, 2026"),
+      answer(columns[1]!.id, "2026-10-28", handle, "REDMOND,  Wash. —  October 28, 2026"),
+    ];
+  });
+  const { content } = await fillTable(
+    { model, anchor, figures },
+    fillInput(columns, [sourceOf("a", [text])]),
+  );
+  for (const column of columns) {
+    const cell = content.rows[0]!.cells[column.id]!;
+    assert.equal(cell.status, "found", column.name);
+    if (cell.status !== "found") continue;
+    assert.equal(cell.evidence[0]!.quote, original, column.name);
+    assert.equal(cell.evidence[0]!.startChar, 0, column.name);
+    assert.equal(cell.evidence[0]!.endChar, original.length, column.name);
+  }
+  // The date rule is checked against the faithful span, which states the day.
+  const date = content.rows[0]!.cells[columns[1]!.id]!;
+  assert.equal(date.status === "found" && date.normalized, "2026-10-28");
+  assert.deepEqual(anchor.texts, []);
+});
+
 test("a found cell whose quote is not in the chunk but whose value is still anchors on the value", async () => {
   const columns = columnsOf(textColumn("Design"));
   const { model } = fillModel((call) => [
@@ -317,6 +432,28 @@ test("split-source candidates that agree merge their evidence without a model ca
     assert.deepEqual(cell.evidence.map((entry) => entry.chunkId), ["a-c1", "a-c6"]);
     assert.equal(cell.value, "1,200");
     assert.equal(cell.normalized, 1200);
+  }
+});
+
+test("split-source dates that agree once kept at the source's precision merge without a model call", async () => {
+  const columns = columnsOf(dateColumn("Reporting date"));
+  const source = longSource("截至2025年末，员工总数为1,200人。", "The 2025 annual report lists the staff.");
+  const { model, calls } = stubModel((call) => ({
+    cells: [
+      call.user.includes("截至2025年末")
+        ? answerIfStated(call.user, columns[0]!.id, "2025-12-31", "截至2025年末")
+        : answerIfStated(call.user, columns[0]!.id, "2025", "The 2025 annual report"),
+    ],
+  }));
+  const { content } = await fillTable(deps(model), fillInput(columns, [source]));
+  assert.ok(calls.filter(isFill).length > 1);
+  assert.equal(calls.filter(isMerge).length, 0);
+  const cell = content.rows[0]!.cells[columns[0]!.id]!;
+  assert.equal(cell.status, "found");
+  if (cell.status === "found") {
+    assert.equal(cell.value, "2025");
+    assert.equal(cell.normalized, "2025");
+    assert.deepEqual(cell.evidence.map((entry) => entry.chunkId), ["a-c1", "a-c6"]);
   }
 });
 
@@ -440,7 +577,7 @@ test("an unreadable answer fails the row", async () => {
 test("a failing anchor port fails the row, not the table", async () => {
   const columns = columnsOf(textColumn("Design"));
   const { model } = fillModel((call) => [
-    answer(columns[0]!.id, "randomised", promptHandles(call.user)[0]!, "randomised"),
+    answer(columns[0]!.id, "randomised", promptHandles(call.user)[0]!, "randomised design"),
   ]);
   const anchor = {
     anchor: async () => {

@@ -12,7 +12,7 @@ import {
 } from "../src/engine/constants";
 
 test("table engine constants keep their pinned values", () => {
-  assert.equal(TABLE_PROMPT_VERSION, "table-v1");
+  assert.equal(TABLE_PROMPT_VERSION, "table-v2");
   assert.equal(FILL_CONCURRENCY, 4);
   assert.equal(MAX_UNVERIFIED_SHARE, 0.4);
   assert.equal(SUGGEST_MIN_COLUMNS, 4);

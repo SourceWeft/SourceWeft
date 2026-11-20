@@ -18,6 +18,7 @@ export {
   anchorCandidates,
   citedTextWithin,
   evidenceFrom,
+  locateQuote,
   quoteHash,
   type AnchorableItem,
 } from "./anchoring";

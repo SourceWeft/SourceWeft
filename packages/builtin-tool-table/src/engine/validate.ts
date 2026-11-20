@@ -2,7 +2,7 @@ import { TABLE_LIMITS, type TableColumn } from "@sourceweft/contracts/table";
 import type { TableFigurePort } from "@sourceweft/contracts/table-capability";
 import type { GroundedEvidence } from "@sourceweft/contracts/grounded-evidence";
 import { matchesOutputLanguage } from "@sourceweft/grounded-generation";
-import { dateCovered, extractFigures, parseBoolean } from "./normalize";
+import { coverDate, extractFigures, parseBoolean } from "./normalize";
 import type { RawCell } from "./schemas";
 
 /** What the model said about one column in one group of one source. */
@@ -42,33 +42,37 @@ export function anchorTextOf(claim: { value: string; quote: string | null }): st
 
 /**
  * The type rule of a column, checked against the anchored evidence (source
- * text), never against what the model wrote:
+ * text), never against what the model wrote. Returns the value the cell keeps,
+ * or undefined when the rule fails:
  * - number: the value states at least one figure and every figure appears in
  *   the passage, in whatever notation (the host's figure port decides);
- * - date: the value reads as a date and the passage states that date;
+ * - date: the value reads as a date and the passage states that date; a value
+ *   more precise than the passage is kept at the passage's precision
+ *   (`coverDate`), so `2025-12-31` backed by "截至2025年末" is kept as `2025`;
  * - boolean: the value reads as yes or no;
  * - text: nothing beyond anchoring.
+ * Every type but date keeps the value exactly as written.
  * The figure port sees width-normalised text so full-width digits count.
  */
-export function typeRuleHolds(
+export function keptValue(
   column: Pick<TableColumn, "type">,
   value: string,
   evidence: readonly GroundedEvidence[],
   figures: TableFigurePort,
-): boolean {
+): string | undefined {
   const passage = evidence.map((entry) => entry.quote).join("\n");
   switch (column.type) {
     case "number":
-      return (
-        extractFigures(value).length > 0 &&
+      return extractFigures(value).length > 0 &&
         figures.covered(value.normalize("NFKC"), passage.normalize("NFKC"))
-      );
+        ? value
+        : undefined;
     case "date":
-      return dateCovered(value, passage);
+      return coverDate(value, passage);
     case "boolean":
-      return parseBoolean(value) !== undefined;
+      return parseBoolean(value) !== undefined ? value : undefined;
     case "text":
-      return true;
+      return value;
   }
 }
 
