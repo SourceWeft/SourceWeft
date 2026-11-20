@@ -76,6 +76,20 @@ const PHASE_ITEMS: Partial<Record<ArtifactGenerationPhase, string>> = {
   failed: "Validation did not pass",
 };
 
+/**
+ * A validation passed when its payload carries a receipt id; a failed one has
+ * only diagnostics. The payload's `status` is deliberately not read: the tool
+ * result reaches the host wrapped in a LangChain tool message that has a
+ * `status` of its own ("success"), and a field read finds that one first, so a
+ * passing validation would be reported as failed.
+ */
+function validationPassed(
+  toolOutput: unknown,
+  readOutputField: (output: unknown, key: string) => string | null,
+): boolean {
+  return Boolean(readOutputField(toolOutput, "validationReceiptId"));
+}
+
 function isVideoValidationStage(value: string): value is VideoValidationStage {
   return (VIDEO_VALIDATION_STAGES as readonly string[]).includes(value);
 }
@@ -94,7 +108,7 @@ export const validateVideoPresentationPresentation: AgentToolPresentation = {
     if (toolOutput === undefined) {
       return "Video presentation validation";
     }
-    return readOutputField(toolOutput, "status") === "passed"
+    return validationPassed(toolOutput, readOutputField)
       ? PHASE_TITLES.completed!
       : PHASE_TITLES.failed!;
   },
@@ -104,7 +118,7 @@ export const validateVideoPresentationPresentation: AgentToolPresentation = {
     if (status !== "completed") {
       return "failed";
     }
-    return readOutputField(toolOutput, "status") === "passed"
+    return validationPassed(toolOutput, readOutputField)
       ? "completed"
       : "failed";
   },

@@ -68,7 +68,13 @@ test("the validation step stays active, then closes on the verdict", () => {
       readOutputField: readField,
       status,
     });
-  assert.equal(complete("completed", { status: "passed" }), "completed");
+  assert.equal(
+    complete("completed", {
+      status: "passed",
+      validationReceiptId: "receipt_1",
+    }),
+    "completed",
+  );
   // The call itself completes even when the verdict is a failed validation.
   assert.equal(complete("completed", { status: "failed" }), "failed");
   assert.equal(complete("error"), "failed");
@@ -100,7 +106,7 @@ test("the card title follows the call status and the verdict", () => {
   assert.equal(title("completed"), "Video presentation validation");
   assert.equal(title("error"), "Video presentation validation failed");
   assert.equal(
-    title("completed", { status: "passed" }),
+    title("completed", { status: "passed", validationReceiptId: "receipt_1" }),
     "Video presentation validated",
   );
   assert.equal(
