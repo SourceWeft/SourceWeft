@@ -11,6 +11,10 @@ export const PERSONAL_DATA_PASS_INTERVAL_MS = 6 * 60 * 60_000;
 // longer than tick's STUCK_TICK_MS budget, so scheduler/main.ts starts this on
 // its own timer. The in-flight guard stands in for that timer's own overlap
 // protection (the service also refuses a concurrent pass of its own).
+//
+// This guard is process-local: the pass assumes a single scheduler. Running
+// more than one scheduler would need a cross-process advisory lock to keep two
+// passes from reporting and reconciling the same accounts at once.
 let personalDataPassInFlight = false;
 
 /**

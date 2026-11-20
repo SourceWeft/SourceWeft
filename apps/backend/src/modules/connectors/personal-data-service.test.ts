@@ -589,3 +589,114 @@ it("recomputes bearers after a deletion so a closed bearer does not break the ne
   });
   expect(summary).toMatchObject({ reported: 91, closed: 1 });
 });
+
+// Fix 1: a batch with no working bearer stops the whole type (the same bearers
+// would only fail again for the next batch), logging and counting once, while
+// the fail-safe sweep after the loop still runs.
+it("stops the type after a bearerless batch but still runs the fail-safe", async () => {
+  const rows: Row[] = [];
+  for (let i = 0; i < 91; i++) {
+    rows.push(
+      row({
+        id: `r-${String(i).padStart(3, "0")}`,
+        providerAccountId: `atl-${String(i).padStart(3, "0")}`,
+        retrievedAt: daysAgo(30), // past two cycles → fail-safe scrubs
+        reportedAt: null,
+      }),
+    );
+  }
+  const report = vi
+    .fn()
+    .mockRejectedValue(
+      new ConnectorError(401, "ATLASSIAN_UNAUTHORIZED", "revoked"),
+    );
+  wireType("jira", "Jira", { report, readProfile: vi.fn() }, rows);
+
+  const summary = await service.runPass({ now: NOW });
+
+  // Only the first batch is attempted: at most three bearer candidates total.
+  expect(report).toHaveBeenCalledTimes(3);
+  expect(mocks.getRuntimeToken).toHaveBeenCalledTimes(3);
+  expect(summary.skippedNoBearer).toBe(1);
+  const failedLogs = mocks.error.mock.calls.filter(
+    (call) => call[0] === "connector_personal_data_failed",
+  );
+  expect(failedLogs).toHaveLength(1);
+  expect(mocks.markPersonalDataReported).not.toHaveBeenCalled();
+  expect(mocks.deleteAccountsByProviderAccount).not.toHaveBeenCalled();
+  // The fail-safe sweep after the loop still scrubs rows past two cycles.
+  expect(mocks.scrubAccountProfiles).toHaveBeenCalledTimes(1);
+  expect(summary.scrubbed).toBe(91);
+});
+
+// Fix 2: a closed id is not marked reported until its deletion succeeds, so a
+// failed deletion keeps the account due for the next pass; the other ids in the
+// batch are still marked, and the failure is logged by code only.
+it("keeps a closed account due when its deletion fails, still marking the others", async () => {
+  const rows: Row[] = [
+    row({ id: "r-a", providerAccountId: "atl-a", retrievedAt: daysAgo(2) }),
+    row({ id: "r-b", providerAccountId: "atl-b", retrievedAt: daysAgo(1) }),
+  ];
+  const report = vi.fn().mockResolvedValue({
+    closed: ["atl-a"],
+    updated: [],
+    ignored: 0,
+    cyclePeriodDays: null,
+  });
+  mocks.deleteAccountsByProviderAccount.mockRejectedValue(
+    new ConnectorError(500, "ATLASSIAN_DELETE_FAILED", "boom for atl-a"),
+  );
+  wireType("jira", "Jira", { report, readProfile: vi.fn() }, rows);
+
+  const summary = await service.runPass({ now: NOW });
+
+  // Only the non-closed id is stamped; the closed id stays unmarked.
+  expect(mocks.markPersonalDataReported).toHaveBeenCalledTimes(1);
+  expect(mocks.markPersonalDataReported).toHaveBeenCalledWith({
+    connectorType: "jira",
+    providerAccountIds: ["atl-b"],
+    reportedAt: NOW,
+  });
+  expect(mocks.deleteAccountsByProviderAccount).toHaveBeenCalledWith({
+    connectorType: "jira",
+    providerAccountId: "atl-a",
+  });
+  expect(summary).toMatchObject({ closed: 0, failed: 1 });
+  expect(mocks.error).toHaveBeenCalledWith("connector_personal_data_failed", {
+    connectorType: "jira",
+    code: "ATLASSIAN_DELETE_FAILED",
+  });
+  // The provider's message never reaches the log.
+  expect(JSON.stringify(mocks.error.mock.calls)).not.toContain("boom for atl-a");
+});
+
+// Fix 3: the scrub branch of an `updated` row is reached when readProfile itself
+// rejects (the row's token is valid), not only when the token cannot be minted.
+it("scrubs an updated row whose profile read rejects even with a valid token", async () => {
+  const rows: Row[] = [
+    row({ id: "r-1", providerAccountId: "atl-u", retrievedAt: daysAgo(2) }),
+  ];
+  const readProfile = vi
+    .fn()
+    .mockRejectedValue(
+      new ConnectorError(500, "ATLASSIAN_PROFILE_FAILED", "me endpoint down"),
+    );
+  const report = vi.fn().mockResolvedValue({
+    closed: [],
+    updated: ["atl-u"],
+    ignored: 0,
+    cyclePeriodDays: null,
+  });
+  wireType("jira", "Jira", { report, readProfile }, rows);
+
+  const summary = await service.runPass({ now: NOW });
+
+  expect(readProfile).toHaveBeenCalledTimes(1);
+  expect(mocks.updateAccountProfile).not.toHaveBeenCalled();
+  expect(mocks.scrubAccountProfiles).toHaveBeenCalledWith({
+    accountIds: ["r-1"],
+    placeholderName: "Jira",
+    at: NOW,
+  });
+  expect(summary).toMatchObject({ updated: 1, scrubbed: 1 });
+});

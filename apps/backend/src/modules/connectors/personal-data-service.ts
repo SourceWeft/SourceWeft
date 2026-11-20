@@ -244,25 +244,47 @@ export class ConnectorPersonalDataService {
           candidates: activeCandidates(liveRows),
         });
         if (!outcome.ok) {
+          // No active account could report this batch, and the next batch of
+          // the same type would only try the same failing bearers again: stop
+          // the type here, counting and logging once. The fail-safe sweep after
+          // the loop still runs.
           summary.skippedNoBearer += 1;
           logger.error("connector_personal_data_failed", {
             connectorType,
             code: outcome.code,
           });
-          continue;
+          break;
         }
         const report = outcome.report;
 
-        await markPersonalDataReported({
-          connectorType,
-          providerAccountIds: [...batchIds],
-          reportedAt: now,
-        });
+        // A `closed` id must not be stamped reported until its deletion
+        // succeeds: a stamped-but-undeleted account would look reported for a
+        // whole cycle, delaying the erasure Atlassian mandates. Mark only the
+        // non-closed ids now; a closed id whose delete throws stays unmarked,
+        // so the next pass re-reports it, is told `closed` again, and retries.
+        const closedInBatch = new Set(
+          report.closed.filter((id) => batchIds.has(id)),
+        );
+        const reportedIds = [...batchIds].filter(
+          (id) => !closedInBatch.has(id),
+        );
+        if (reportedIds.length > 0) {
+          await markPersonalDataReported({
+            connectorType,
+            providerAccountIds: reportedIds,
+            reportedAt: now,
+          });
+        }
         summary.reported += batchIds.size;
         // Reflect the stamp so the fail-safe sweep does not re-scrub a row that
-        // was just reported in this pass.
+        // was just reported in this pass; a closed id is left to the delete loop.
         for (const r of liveRows) {
-          if (batchIds.has(r.providerAccountId)) r.reportedAt = now;
+          if (
+            batchIds.has(r.providerAccountId) &&
+            !closedInBatch.has(r.providerAccountId)
+          ) {
+            r.reportedAt = now;
+          }
         }
 
         // Only ids actually sent in this batch are acted on; the client already
@@ -272,10 +294,22 @@ export class ConnectorPersonalDataService {
             summary.ignored += 1;
             continue;
           }
-          await deleteAccountsByProviderAccount({
-            connectorType,
-            providerAccountId,
-          });
+          try {
+            await deleteAccountsByProviderAccount({
+              connectorType,
+              providerAccountId,
+            });
+          } catch (error) {
+            // The id was never stamped reported, so the next pass re-reports it,
+            // is told `closed`, and retries. Isolate the failure and keep going
+            // so the batch's other closed/updated ids are still processed.
+            summary.failed += 1;
+            logger.error("connector_personal_data_failed", {
+              connectorType,
+              code: toConnectorError(error).code,
+            });
+            continue;
+          }
           summary.closed += 1;
           // Drop the deleted account's rows so a bearer just closed cannot be
           // reused by the next batch.

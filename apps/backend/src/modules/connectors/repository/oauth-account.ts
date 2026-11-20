@@ -575,6 +575,12 @@ export async function markPersonalDataReported(input: {
  * referencing connector goes first through the same hard delete a user's
  * disconnect uses (its sources, documents and the authorization), then any
  * account left without a connector is deleted.
+ *
+ * The deletions are deliberately not wrapped in a single transaction: a failure
+ * part-way leaves some rows removed and some remaining, and that is safe to
+ * retry — a later call simply picks up whatever rows still match and finishes
+ * the erasure. The personal-data pass relies on this, re-reporting a `closed`
+ * account whose delete did not complete until it does.
  */
 export async function deleteAccountsByProviderAccount(input: {
   connectorType: string;
