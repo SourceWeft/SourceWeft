@@ -1,4 +1,5 @@
 import type { DeliverableJobEnvelope } from "@sourceweft/capability-contracts";
+import type { TableColumnInput } from "@sourceweft/contracts/table";
 import { config } from "../../shared/config";
 import {
   deliverablesQueue,
@@ -278,6 +279,54 @@ export async function enqueueStudyGenerateJob(
   await jobsQueue.add(STUDY_GENERATE_JOB, payload, {
     jobId,
     attempts: STUDY_GENERATE_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
+  return { created: true as const };
+}
+
+export const TABLE_GENERATE_JOB = "table-generate";
+/** Queue attempts of one table generation; the engine resumes from its checkpoint. */
+export const TABLE_GENERATE_JOB_ATTEMPTS = 2;
+
+/**
+ * One table version to generate. Built by the server from an authorized
+ * request; the processor still re-reads the artifact and takes its tenancy from
+ * the row it finds there.
+ */
+export type TableGenerateJobPayload = {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  artifactId: string;
+  versionNo: number;
+  userId: string;
+  sourceIds: string[];
+  columns: TableColumnInput[];
+  instruction?: string;
+  language?: string;
+  uiLocale: string;
+};
+
+export function tableGenerateJobId(artifactId: string, versionNo: number) {
+  return `table_${artifactId}_${versionNo}`;
+}
+
+/**
+ * Queues the generation of one table version. The job id is the version, so a
+ * second request for the same version finds the first job instead of adding
+ * another: `created: false` tells the caller it was already queued.
+ */
+export async function enqueueTableGenerateJob(payload: TableGenerateJobPayload) {
+  const jobId = tableGenerateJobId(payload.artifactId, payload.versionNo);
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return { created: false as const };
+  }
+  await jobsQueue.add(TABLE_GENERATE_JOB, payload, {
+    jobId,
+    attempts: TABLE_GENERATE_JOB_ATTEMPTS,
     backoff: { type: "exponential", delay: 5000 },
     removeOnComplete: 100,
     removeOnFail: 100,

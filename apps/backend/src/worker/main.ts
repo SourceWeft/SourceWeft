@@ -28,6 +28,7 @@ import { processProviderCostReconciliationJob } from "../shared/model-gateway/pr
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { processSourceGuideGenerateJob } from "./processors/source-guide";
 import { processStudyGenerateJob } from "./processors/study";
+import { processTableGenerateJob } from "./processors/table";
 import { processSkillOverviewGenerateJob } from "./processors/skill-overview-generate";
 import { SKILL_OVERVIEW_GENERATE_JOB } from "../modules/skills/market/overview-queue";
 import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
@@ -80,6 +81,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "thread-title-generate": processThreadTitleGenerateJob,
   "source-guide-generate": processSourceGuideGenerateJob,
   "study-generate": processStudyGenerateJob,
+  "table-generate": processTableGenerateJob,
   [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
   [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
   [MCP_OVERVIEW_GENERATE_JOB]: processMcpOverviewGenerateJob,

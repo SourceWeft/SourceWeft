@@ -21,5 +21,9 @@ export {
   quoteHash,
   type AnchorableItem,
 } from "./anchoring";
-export { matchesOutputLanguage } from "./language";
+export {
+  LANGUAGE_MAJORITY_SHARE,
+  matchesOutputLanguage,
+  resolveOutputLanguage,
+} from "./language";
 export type { CorpusChunk, CorpusChunkInput } from "./types";

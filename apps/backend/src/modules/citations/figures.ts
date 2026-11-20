@@ -97,8 +97,10 @@ const DIGIT_MAGNITUDES = new Map<string, number>([
   ["亿", 1e8],
   ["万", 1e4],
 ]);
+// `k` counts only when it touches the number and ends the word: "1.2k" is
+// 1,200, while "10km", "5 kg" and "3 key points" keep their plain figure.
 const DIGIT_NUMBER =
-  /(\d[\d,]*(?:\.\d+)?)\s*(billion|million|thousand|trillion|亿|万)?/gi;
+  /(\d[\d,]*(?:\.\d+)?)(?:\s*(billion|million|thousand|trillion|亿|万)|(k)(?![a-z]))?/gi;
 
 function parseCjkNumeral(value: string) {
   let total = 0;
@@ -152,11 +154,12 @@ export function extractFigures(
 
   text = text.replace(
     DIGIT_NUMBER,
-    (_match, digits: string, magnitude?: string) => {
+    (_match, digits: string, magnitude?: string, kilo?: string) => {
       const value = Number.parseFloat(digits.replace(/,/g, ""));
       if (Number.isFinite(value)) {
         values.push(
-          value * (magnitude ? (DIGIT_MAGNITUDES.get(magnitude) ?? 1) : 1),
+          value *
+            (magnitude ? (DIGIT_MAGNITUDES.get(magnitude) ?? 1) : kilo ? 1e3 : 1),
         );
       }
       return " ";

@@ -198,3 +198,38 @@ export async function countRunningGenerationJobs(input: {
     );
   return row?.count ?? 0;
 }
+
+/** The artifact types each namespace's generations produce. */
+const GENERATED_ARTIFACT_TYPES: Record<
+  ArtifactPayloadNamespace,
+  readonly (typeof artifacts.$inferSelect)["artifactType"][]
+> = {
+  study: ["flashcards", "quiz", "mindmap"],
+  table: ["table"],
+};
+
+/** At most this many grounded generations per person run at once. */
+export const GROUNDED_MAX_RUNNING_PER_USER = 3;
+
+/**
+ * Grounded generations a person has in flight in a workspace, study and table
+ * together: they draw on one per-person limit. Each namespace is counted by
+ * its own types and its own `regeneration` key.
+ */
+export async function countRunningGroundedJobs(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+}): Promise<number> {
+  const counts = await Promise.all(
+    (Object.keys(GENERATED_ARTIFACT_TYPES) as ArtifactPayloadNamespace[]).map(
+      (namespace) =>
+        countRunningGenerationJobs({
+          ...input,
+          artifactTypes: GENERATED_ARTIFACT_TYPES[namespace],
+          namespace,
+        }),
+    ),
+  );
+  return counts.reduce((sum, count) => sum + count, 0);
+}

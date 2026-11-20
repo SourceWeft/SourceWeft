@@ -4,9 +4,10 @@ import type {
   StudyProgress,
 } from "@sourceweft/contracts/study-capability";
 import {
-  countRunningGenerationJobs,
+  countRunningGroundedJobs,
   createArtifactCheckpointStore as createCheckpointStore,
   findArtifactVersionContent,
+  GROUNDED_MAX_RUNNING_PER_USER,
   linkArtifactVersionParent,
   readArtifactPayloadKey,
   recordArtifactInputSources,
@@ -76,23 +77,16 @@ export const recordStudyInputSources: (
 export const findStudyVersionContent = findArtifactVersionContent;
 export const linkStudyVersionParent = linkArtifactVersionParent;
 
-export const STUDY_ARTIFACT_TYPE_LIST = ["flashcards", "quiz", "mindmap"] as const;
-
-/** At most this many study generations per person run at once. */
-export const STUDY_MAX_RUNNING_PER_USER = 3;
+/** At most this many generations per person run at once, study and table together. */
+export const STUDY_MAX_RUNNING_PER_USER = GROUNDED_MAX_RUNNING_PER_USER;
 
 /**
- * Study generations a person has in flight in a workspace: artifacts they
- * opened that are still pending or running, plus regenerations of ready ones.
+ * Generations a person has in flight in a workspace: artifacts they opened
+ * that are still pending or running, plus regenerations of ready ones. Data
+ * tables count too, because they share the limit.
  */
-export function countRunningStudyJobs(input: {
+export const countRunningStudyJobs: (input: {
   teamId: string;
   workspaceId: string;
   userId: string;
-}): Promise<number> {
-  return countRunningGenerationJobs({
-    ...input,
-    artifactTypes: STUDY_ARTIFACT_TYPE_LIST,
-    namespace: "study",
-  });
-}
+}) => Promise<number> = countRunningGroundedJobs;

@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import {
   parseStudyContentForArtifact,
   STUDY_ARTIFACT_TYPES,
   studyOptionsSchema,
-  type StudyErrorCode,
   type StudyGenerateRequest,
   type StudyKind,
   type StudyOptions,
@@ -19,11 +17,17 @@ import {
   enqueueStudyGenerateJob,
   type StudyGenerateJobPayload,
 } from "../content/queue";
-import { findThreadRecord } from "../threads/thread/repository";
-import { canViewContent, canViewThread } from "../workspace/content-visibility";
-import { requireContentWorkspace } from "../workspace/guards";
+import {
+  requireGeneratingThread,
+  requireViewableArtifact,
+  toGroundedContentError,
+  withGroundedErrors,
+} from "../grounded-generation/access";
+import {
+  GROUNDED_REQUEST_DEDUPE_WINDOW_MS,
+  groundedRequestKey,
+} from "../grounded-generation/request-key";
 import { checkStudySources, loadStudyCorpus } from "./corpus-loader";
-import { isStudyGenerationError } from "@sourceweft/contracts/study-capability";
 import { loadStudyGeneration } from "./capability";
 import { loadStudyFreshness, type StudyFreshness } from "./freshness";
 import {
@@ -34,34 +38,12 @@ import {
 } from "./repository";
 
 /** A double click within this window opens the same artifact once. */
-export const STUDY_REQUEST_DEDUPE_WINDOW_MS = 5 * 60_000;
-
-const ERROR_STATUS: Record<StudyErrorCode, number> = {
-  SOURCE_NOT_READABLE: 404,
-  NO_INDEXED_SOURCES: 409,
-  INPUT_TOO_LARGE: 413,
-  INSUFFICIENT_CREDITS: 402,
-  MODEL_UNAVAILABLE: 503,
-  GENERATION_QUALITY_TOO_LOW: 422,
-};
+export const STUDY_REQUEST_DEDUPE_WINDOW_MS = GROUNDED_REQUEST_DEDUPE_WINDOW_MS;
 
 /** Study failures raised while handling a request become API errors. */
-export function toStudyContentError(error: unknown): unknown {
-  if (isStudyGenerationError(error)) {
-    return new ContentError(ERROR_STATUS[error.code], error.code, error.message, {
-      details: error.details,
-    });
-  }
-  return error;
-}
+export const toStudyContentError = toGroundedContentError;
 
-async function withStudyErrors<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    throw toStudyContentError(error);
-  }
-}
+const withStudyErrors = withGroundedErrors;
 
 const TYPE_LABEL: Record<StudyKind, string> = {
   flashcards: "Flashcards",
@@ -73,18 +55,6 @@ function studyTitle(kind: StudyKind, titles: readonly string[]) {
   const first = titles[0]?.trim() || "Sources";
   const more = titles.length > 1 ? ` +${titles.length - 1}` : "";
   return `${TYPE_LABEL[kind]}: ${first}${more}`.slice(0, 200);
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value)
-      .sort()
-      .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 /**
@@ -101,34 +71,20 @@ export function studyRequestKey(
   },
   now = Date.now(),
 ) {
-  const window = Math.floor(now / STUDY_REQUEST_DEDUPE_WINDOW_MS);
-  const material = stableJson({
-    userId: input.userId,
-    threadId: input.threadId,
-    artifactType: input.artifactType,
-    sourceIds: [...new Set(input.sourceIds)].sort(),
-    options: input.options ?? {},
-    window,
-  });
-  return `study:${createHash("sha256").update(material).digest("hex").slice(0, 40)}`;
+  return groundedRequestKey(
+    "study",
+    {
+      userId: input.userId,
+      threadId: input.threadId,
+      artifactType: input.artifactType,
+      sourceIds: [...new Set(input.sourceIds)].sort(),
+      options: input.options ?? {},
+    },
+    now,
+  );
 }
 
-async function requireStudyThread(input: {
-  workspaceId: string;
-  userId: string;
-  threadId: string;
-}) {
-  const workspace = await requireContentWorkspace(input);
-  const thread = await findThreadRecord({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    threadId: input.threadId,
-  });
-  if (!thread || !canViewThread(input.userId, thread)) {
-    throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
-  }
-  return { workspace, thread };
-}
+const requireStudyThread = requireGeneratingThread;
 
 async function assertBelowRunningLimit(input: {
   teamId: string;
@@ -257,25 +213,12 @@ export const studyRegenerateRequestSchema = z.object({
 });
 export type StudyRegenerateRequest = z.infer<typeof studyRegenerateRequestSchema>;
 
-async function requireViewableStudyArtifact(input: {
+function requireViewableStudyArtifact(input: {
   workspaceId: string;
   userId: string;
   artifactId: string;
 }) {
-  const workspace = await requireContentWorkspace(input);
-  const artifact = await findArtifactRecord({
-    teamId: workspace.organizationId,
-    workspaceId: workspace.id,
-    artifactId: input.artifactId,
-  });
-  if (
-    !artifact ||
-    !canViewContent(input.userId, artifact) ||
-    !(STUDY_ARTIFACT_TYPES as readonly string[]).includes(artifact.artifactType)
-  ) {
-    throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-  }
-  return { workspace, artifact };
+  return requireViewableArtifact(input, STUDY_ARTIFACT_TYPES);
 }
 
 async function currentStudyContent(artifact: {
