@@ -17,12 +17,8 @@
 #   ./push-snapshot.sh                # build from this directory, then push
 #   ./push-snapshot.sh IMAGE[:TAG]    # push an existing local image
 #
-# Default resources are 4 vCPU / 8 GB / 5 GB disk. Daytona's per-sandbox ceiling is
-# 4 vCPU / 8 GB / 10 GB, and every running sandbox draws on the organization's
-# shared vCPU, memory and storage pool, so a bigger default means fewer
-# concurrent sandboxes: check the account tier before rolling a snapshot out.
-# Override via env:
-#   SNAPSHOT_CPU=2 SNAPSHOT_MEMORY_GB=4 SNAPSHOT_DISK_GB=5
+# Resources match the deployed defaults; override via env:
+#   SNAPSHOT_CPU=2 SNAPSHOT_MEMORY_GB=2 SNAPSHOT_DISK_GB=5
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -57,8 +53,8 @@ NAME="sw-${DATE}-${SEQ}"
 
 echo "Pushing ${IMAGE} as Daytona snapshot ${NAME}" >&2
 daytona snapshot push "$IMAGE" -n "$NAME" \
-  --cpu "${SNAPSHOT_CPU:-4}" \
-  --memory "${SNAPSHOT_MEMORY_GB:-8}" \
+  --cpu "${SNAPSHOT_CPU:-2}" \
+  --memory "${SNAPSHOT_MEMORY_GB:-2}" \
   --disk "${SNAPSHOT_DISK_GB:-5}"
 
 echo "" >&2

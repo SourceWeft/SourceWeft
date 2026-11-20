@@ -14,6 +14,7 @@
 # Usage:
 #   ./deploy.sh            # first run: scaffold + key + deploy; later runs: update + redeploy
 #   BRIDGE_DIR=~/cf-bridge ./deploy.sh
+#   BRIDGE_INSTANCE_TYPE=standard-3 ./deploy.sh   # container size, default standard-4
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -108,6 +109,28 @@ echo "==> Setting container capacity (max_instances=$MAX_INSTANCES)"
 perl -0pi -e 's/("max_instances"\s*:\s*)\d+/${1}'"$MAX_INSTANCES"'/; s/("WARM_POOL_MAX_INSTANCES"\s*:\s*")\d+(")/${1}'"$MAX_INSTANCES"'${2}/' wrangler.jsonc
 grep -q "\"max_instances\"[[:space:]]*:[[:space:]]*$MAX_INSTANCES" wrangler.jsonc \
   || { echo "ERROR: could not set max_instances in wrangler.jsonc" >&2; exit 1; }
+
+# ── Instance size ───────────────────────────────────────────────────────────
+# The container's size is fixed per deploy (Cloudflare takes it from
+# wrangler.jsonc, not from the request that creates a sandbox). Documented sizes:
+#   lite 1/16 vCPU, 256 MiB | basic 1/4 vCPU, 1 GiB | standard-1 1/2 vCPU, 4 GiB
+#   standard-2 1 vCPU, 6 GiB | standard-3 2 vCPU, 8 GiB | standard-4 4 vCPU, 12 GiB
+# The stock template ships standard-1, which is too slow to render video in
+# time (the template's own comment claiming 4 vCPU / 8 GiB for it is wrong).
+# CPU is billed for active use only; memory and disk are billed while the
+# container runs. Override with BRIDGE_INSTANCE_TYPE.
+INSTANCE_TYPE="${BRIDGE_INSTANCE_TYPE:-standard-4}"
+case "$INSTANCE_TYPE" in
+  lite|basic|standard-1|standard-2|standard-3|standard-4) ;;
+  *)
+    echo "ERROR: BRIDGE_INSTANCE_TYPE must be one of lite, basic, standard-1, standard-2, standard-3, standard-4 (got '$INSTANCE_TYPE')" >&2
+    exit 1
+    ;;
+esac
+echo "==> Setting container instance type (instance_type=$INSTANCE_TYPE)"
+perl -0pi -e 's/("instance_type"\s*:\s*)"[^"]*"/${1}"'"$INSTANCE_TYPE"'"/' wrangler.jsonc
+grep -q "\"instance_type\"[[:space:]]*:[[:space:]]*\"$INSTANCE_TYPE\"" wrangler.jsonc \
+  || { echo "ERROR: could not set instance_type in wrangler.jsonc" >&2; exit 1; }
 
 echo "==> Deploying"
 npx wrangler deploy
