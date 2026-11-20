@@ -6737,6 +6737,7 @@
       "task_needs_approval": "\"{taskName}\" needs your approval.",
       "task_paused_owner_left": "\"{taskName}\" was paused because its owner left.",
       "task_tools_unavailable": "\"{taskName}\" cannot run: a source or MCP server it uses is unavailable.",
+      "task_blocked_auth": "\"{taskName}\" cannot run: a connected account needs to be signed in again.",
       "task_paused_repeated_failure": "\"{taskName}\" was paused after repeated failures.",
       "unknown": "Update about \"{taskName}\"."
     },

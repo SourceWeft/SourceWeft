@@ -75,6 +75,13 @@ export const NOTIFICATION_KINDS = {
     template: null,
     path: taskPath,
   },
+  // An MCP server the task uses needs the owner to sign in again. In-app
+  // only; the task resumes by itself once they have.
+  task_blocked_auth: {
+    defaultEmail: false,
+    template: null,
+    path: taskPath,
+  },
   task_paused_repeated_failure: {
     defaultEmail: true,
     template: "notification.task-paused-repeated-failure",

@@ -426,6 +426,29 @@ async function decideAndStart(
     return;
   }
 
+  if (await ports.credentialsExpired(task)) {
+    // An MCP server the task uses wants the owner to sign in again; running
+    // without it would only make the run fail. It waits for the owner.
+    await stop("blocked", "auth_expired");
+    const blocked = await stopTask(ports, {
+      taskId: task.id,
+      status: "blocked",
+      reason: "auth_expired",
+      from: ["active"],
+      now,
+    });
+    if (blocked) {
+      await notifyOwner(
+        ports,
+        blocked,
+        "task_blocked_auth",
+        {},
+        { inAppOnly: true },
+      );
+    }
+    return;
+  }
+
   if (
     await hasRunInFlight({
       scheduleId: schedule.id,
@@ -777,6 +800,14 @@ async function recheckBlockedTask(
   }
 
   if (await ports.toolsAvailable(task)) {
+    if (
+      task.statusReason === "auth_expired" &&
+      (await ports.credentialsExpired(task))
+    ) {
+      // Waits for the owner to sign in, however long that takes.
+      await touchBlockedTask(task.id, now);
+      return;
+    }
     await reactivateTask(ports, task.id, now);
     return;
   }

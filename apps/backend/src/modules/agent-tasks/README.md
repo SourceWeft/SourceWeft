@@ -40,6 +40,7 @@ whenever the slot does not run:
 | task not active (or, by hand, not draft / active / paused) | `cancelled`                                       | unchanged                        |
 | owner can no longer work in the workspace                  | `blocked / owner_left`                            | `paused / owner_left`            |
 | every source gone, or an MCP install gone                  | `blocked / tools_unavailable`                     | `blocked / tools_unavailable`    |
+| an MCP server it uses needs the owner to sign in again     | `blocked / auth_expired`                          | `blocked / auth_expired`         |
 | the task's previous run still going                        | `skipped / previous_run_active`                   | unchanged                        |
 | owner already has 2 scheduled runs going                   | `skipped / user_concurrency_limit`                | unchanged                        |
 | owner started 50 runs in the last 24 hours                 | `skipped / user_daily_cap`                        | unchanged                        |
@@ -59,7 +60,8 @@ after 30 minutes is stopped and recorded as failed. A one-time task is
 
 A blocked task is looked at again every ten minutes. Blocked on credits, it
 resumes when there are credits, however long that takes. Blocked on tools, it
-resumes if they return within 72 hours and pauses after that. Neither makes up
+resumes if they return within 72 hours and pauses after that. Blocked on a
+sign-in, it resumes when the owner has signed in again, however long that takes. Neither makes up
 for slots that passed in between. An owner who left is never replaced: the
 task pauses and stays theirs.
 

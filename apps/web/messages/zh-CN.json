@@ -6737,6 +6737,7 @@
       "task_needs_approval": "“{taskName}”需要你的批准。",
       "task_paused_owner_left": "“{taskName}”因负责人离开而暂停。",
       "task_tools_unavailable": "“{taskName}”无法运行：它使用的资料或 MCP 服务不可用。",
+      "task_blocked_auth": "“{taskName}”无法运行：需要重新登录它使用的已连接账号。",
       "task_paused_repeated_failure": "“{taskName}”连续失败后已暂停。",
       "unknown": "关于“{taskName}”的更新。"
     },
