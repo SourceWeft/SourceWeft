@@ -1,4 +1,4 @@
-import { AtlassianApiError } from "@sourceweft/atlassian-client";
+import { AtlassianApiError, groupBySite } from "@sourceweft/atlassian-client";
 import {
   JIRA_MAX_SELECTED_ITEMS,
   JIRA_PROJECT_ID_PATTERN,
@@ -84,16 +84,10 @@ export function parseJiraSelection(
 export function groupByCloudId(
   selection: readonly JiraSelectionEntry[],
 ): Map<string, string[]> {
-  const byCloudId = new Map<string, string[]>();
-  for (const { cloudId, projectId } of selection) {
-    const projectIds = byCloudId.get(cloudId);
-    if (projectIds) {
-      projectIds.push(projectId);
-    } else {
-      byCloudId.set(cloudId, [projectId]);
-    }
-  }
   return new Map(
-    [...byCloudId.entries()].sort(([a], [b]) => a.localeCompare(b)),
+    [...groupBySite(selection)].map(([cloudId, entries]) => [
+      cloudId,
+      entries.map((entry) => entry.projectId),
+    ]),
   );
 }

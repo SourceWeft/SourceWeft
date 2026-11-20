@@ -1,9 +1,12 @@
 import {
   AtlassianApiError,
   exchangeAtlassianCode,
+  CURSOR_MAX_LENGTH,
+  MAX_FANOUT_SITES,
   getMe,
   listAccessibleResources,
   refreshAtlassianToken,
+  siteHost,
   type AtlassianClientConfig,
   type AtlassianSite,
 } from "@sourceweft/atlassian-client";
@@ -28,12 +31,7 @@ import { toBackendJiraManifest } from "./backend-manifest";
 import { parseProjectId, parseSiteId, projectItemId, siteItemId } from "./ids";
 import { createJiraClient, type JiraProject } from "./jira-client";
 import { executeJiraLiveTool } from "./live-tools";
-import {
-  CURSOR_MAX_LENGTH,
-  MAX_FANOUT_SITES,
-  hasJiraScope,
-  invalidRequest,
-} from "./shared";
+import { hasJiraScope, invalidRequest } from "./shared";
 
 export type JiraAdapterConfig = {
   baseUrl: string;
@@ -70,18 +68,6 @@ function siteNotFound(): AtlassianApiError {
 
 function unconfigured(): AtlassianApiError {
   return new AtlassianApiError(503, "JIRA_UNAVAILABLE", "Jira is not configured");
-}
-
-/** The site's host (e.g. `example.atlassian.net`) for a selection entry's
- * `detail`. An unparseable `url` (never expected from a real site, but the
- * provider payload is not trusted) falls back to an empty string rather than
- * throwing. */
-function siteHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "";
-  }
 }
 
 type JiraBrowseCursor = { v: 1; containerId: string; startAt: number };

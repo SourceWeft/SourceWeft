@@ -90,6 +90,33 @@ test("jira hidden until registered", () => {
   expect(jira?.logoIconName).toBeUndefined();
 });
 
+test("confluence hidden until registered", () => {
+  expect(
+    connectorCatalogForAvailableTypes([
+      "notion",
+      "gmail",
+      "google_drive",
+      "dropbox",
+    ]).map((i) => i.id),
+  ).toEqual(["notion", "gmail", "google_drive", "dropbox"]);
+  const confluence = connectorCatalog.find((item) => item.id === "confluence");
+  expect(confluence).toMatchObject({
+    name: "Confluence",
+    category: "Knowledge & Docs",
+    description:
+      "Let the agent search and read pages in the Confluence spaces and pages you choose.",
+    capabilities: ["Live search", "Spaces & pages"],
+    postOAuthMode: "auto_create",
+    requiresBackendRegistration: true,
+    isIndexable: false,
+    supportsActions: true,
+    supportsPeriodicSync: false,
+    supportsWebhook: false,
+  });
+  // No Atlassian artwork is shipped, so no logoIconName.
+  expect(confluence?.logoIconName).toBeUndefined();
+});
+
 test("Notion never depends on backend registration", () => {
   expect(connectorCatalogForAvailableTypes([]).map((i) => i.id)).toEqual([
     "notion",

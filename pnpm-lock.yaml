@@ -184,6 +184,9 @@ importers:
       '@sourceweft/billing':
         specifier: workspace:*
         version: link:../../enterprise/billing
+      '@sourceweft/builtin-connector-confluence':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-confluence
       '@sourceweft/builtin-connector-dropbox':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-dropbox
@@ -628,6 +631,9 @@ importers:
       '@sourceweft/billing':
         specifier: workspace:*
         version: link:../../enterprise/billing
+      '@sourceweft/builtin-connector-confluence':
+        specifier: workspace:*
+        version: link:../../packages/builtin-connector-confluence
       '@sourceweft/builtin-connector-github':
         specifier: workspace:*
         version: link:../../packages/builtin-connector-github
@@ -961,6 +967,9 @@ importers:
 
   packages/agent-tool-registry:
     dependencies:
+      '@sourceweft/builtin-connector-confluence':
+        specifier: workspace:*
+        version: link:../builtin-connector-confluence
       '@sourceweft/builtin-connector-dropbox':
         specifier: workspace:*
         version: link:../builtin-connector-dropbox
@@ -1048,6 +1057,28 @@ importers:
 
   packages/atlassian-client:
     dependencies:
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/builtin-connector-confluence:
+    dependencies:
+      '@sourceweft/atlassian-client':
+        specifier: workspace:*
+        version: link:../atlassian-client
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../contracts

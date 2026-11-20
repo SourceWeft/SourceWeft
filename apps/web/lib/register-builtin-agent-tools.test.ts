@@ -17,3 +17,13 @@ test("jira agent tools are registered in the web registry", () => {
     expect(getAgentToolDefinition(name), name).not.toBeNull();
   }
 });
+
+test("confluence agent tools are registered in the web registry", () => {
+  for (const name of [
+    "search_confluence",
+    "read_confluence_page",
+    "list_confluence_spaces",
+  ]) {
+    expect(getAgentToolDefinition(name), name).not.toBeNull();
+  }
+});

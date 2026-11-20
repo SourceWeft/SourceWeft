@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AtlassianApiError } from "@sourceweft/atlassian-client";
+import {
+  AtlassianApiError,
+  decodeSiteCursor,
+} from "@sourceweft/atlassian-client";
 import type { ConnectorActionInput } from "@sourceweft/contracts";
 import { createJiraConnectorAdapter } from "../src/adapter";
-import { decodeSiteCursor } from "../src/cursor";
 
 const JIRA_SCOPE = "read:jira-work";
 const ACCESS_TOKEN = "SECRET-ACCESS-TOKEN-should-never-appear-in-a-result";
@@ -648,7 +650,7 @@ test("search pages each site independently", async () => {
   );
   const nextCursor = first.result.nextCursor as string;
   assert.equal(typeof nextCursor, "string");
-  assert.deepEqual(decodeSiteCursor(nextCursor, [CLOUD_A, CLOUD_B]), {
+  assert.deepEqual(decodeSiteCursor(nextCursor, [CLOUD_A, CLOUD_B], "JIRA"), {
     [CLOUD_A]: "tokA",
     [CLOUD_B]: null,
   });

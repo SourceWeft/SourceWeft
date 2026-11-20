@@ -3430,6 +3430,21 @@
               "description": "Open a site to see its projects, then tick the projects to include.",
               "root": "Jira sites"
             }
+          },
+          "confluence": {
+            "itemsTitle": "Spaces and pages",
+            "itemsDescription": "Agents of every member of this workspace can search and read the spaces and pages you choose, and only those. A page includes its child pages.",
+            "choose": "Choose spaces and pages",
+            "empty": "Nothing selected yet. Nothing can be searched until you choose at least one space or page.",
+            "kinds": {
+              "site": "Sites",
+              "space": "Spaces",
+              "page": "Pages"
+            },
+            "browser": {
+              "description": "Open a site, then a space, to see its pages. Tick the spaces and pages to include.",
+              "root": "Confluence sites"
+            }
           }
         }
       },
