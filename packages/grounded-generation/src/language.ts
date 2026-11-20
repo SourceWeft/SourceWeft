@@ -11,18 +11,32 @@ const LETTER = /\p{L}/u;
  * A cheap script check of generated text: Chinese output must be at least 30%
  * Han letters, English output at least 60% Latin letters. Other languages, and
  * text without letters, are not judged.
+ *
+ * `latinWordUnits` (Chinese output only): a run of Latin letters counts as one
+ * unit, as one Han letter does. Short answers that keep English names, codes or
+ * quotations as instructed would otherwise read as English, since every letter
+ * of a kept name weighs as much as a Han character.
  */
-export function matchesOutputLanguage(text: string, language: string): boolean {
+export function matchesOutputLanguage(
+  text: string,
+  language: string,
+  options: { latinWordUnits?: boolean } = {},
+): boolean {
   const primary = language.toLowerCase().split(/[-_]/)[0];
   if (primary !== "zh" && primary !== "en") return true;
+  const wordUnits = primary === "zh" && options.latinWordUnits === true;
   let letters = 0;
   let han = 0;
   let latin = 0;
+  let inLatinWord = false;
   for (const char of text) {
-    if (!LETTER.test(char)) continue;
+    const isLatin = LETTER.test(char) && LATIN.test(char);
+    const continuesWord = wordUnits && isLatin && inLatinWord;
+    inLatinWord = isLatin;
+    if (!LETTER.test(char) || continuesWord) continue;
     letters += 1;
     if (HAN.test(char)) han += 1;
-    else if (LATIN.test(char)) latin += 1;
+    else if (isLatin) latin += 1;
   }
   if (letters === 0) return true;
   return primary === "zh"

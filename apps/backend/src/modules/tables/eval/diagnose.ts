@@ -63,7 +63,7 @@ function answerMatchesLanguage(
     .filter((entry) => entry.found && typeOf.get(entry.columnId) === "text")
     .map((entry) => entry.value ?? "")
     .join(" ");
-  return matchesOutputLanguage(text, language);
+  return matchesOutputLanguage(text, language, { latinWordUnits: true });
 }
 
 /* ------------------------------------------------------------- inputs */

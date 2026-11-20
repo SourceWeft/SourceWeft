@@ -95,3 +95,36 @@ test("the answer language is judged on the text columns together", () => {
   assert.equal(answerMatchesLanguage([found("t", "randomised trial")], columns, "en"), true);
   assert.equal(answerMatchesLanguage([], columns, "zh-CN"), true);
 });
+
+test("a Chinese answer that keeps English names and figures passes the language check", () => {
+  const columns = new Map<string, { type: "text" }>([
+    ["storage", { type: "text" }],
+    ["selling", { type: "text" }],
+  ]);
+  const found = (columnId: string, value: string) => ({
+    columnId,
+    found: true,
+    value,
+    chunk: "c1",
+    quote: null,
+  });
+  // The shape of the Neon row an evaluation run dropped: kept product names
+  // outweigh the Han text letter by letter (under 30%), not word by word.
+  const entries = [
+    found("storage", "1 GB per project"),
+    found(
+      "selling",
+      "Lakebase Postgres 及其后端（Managed Better Auth、Object Storage、Functions、AI Gateway、Realtime），默认高可用与分支",
+    ),
+  ];
+  assert.equal(answerMatchesLanguage(entries, columns, "zh-CN"), true);
+  // An answer left in English still fails.
+  assert.equal(
+    answerMatchesLanguage(
+      [found("storage", "1 GB per project"), found("selling", "Branching and autoscaling")],
+      columns,
+      "zh-CN",
+    ),
+    false,
+  );
+});
