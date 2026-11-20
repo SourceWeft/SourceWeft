@@ -992,6 +992,41 @@ export type ConnectorAuthorizationFinishInput = {
   ownerRef: string;
 };
 
+/** One stored provider account and when its personal data was last refreshed. */
+export type ConnectorPersonalDataAccount = { accountId: string; updatedAt: Date };
+
+export type ConnectorPersonalDataReport = {
+  /** Account ids the provider reports as closed; only ids that were sent. */
+  closed: string[];
+  /** Account ids the provider reports as changed; only ids that were sent. */
+  updated: string[];
+  /** Provider answer entries that were dropped (not sent, unknown, duplicate). */
+  ignored: number;
+  /** The provider's requested reporting cycle in days, or `null` when unknown. */
+  cyclePeriodDays: number | null;
+};
+
+/** The identity fields a provider stores for an account. */
+export type ConnectorAccountProfile = {
+  providerAccountId: string;
+  email: string | null;
+  displayName: string;
+};
+
+/**
+ * Optional provider personal-data obligations (reporting stored accounts and
+ * re-reading their identity), implemented by providers whose terms require it.
+ */
+export interface ConnectorPersonalDataSupport {
+  /** At most 90 accounts per call. */
+  report(input: {
+    accessToken: string;
+    accounts: ConnectorPersonalDataAccount[];
+  }): Promise<ConnectorPersonalDataReport>;
+  /** Re-reads the identity fields the platform stores for an account. */
+  readProfile(input: { accessToken: string }): Promise<ConnectorAccountProfile>;
+}
+
 export interface ConnectorAdapter {
   capabilityId?: string;
   getManifest(): ConnectorManifest;
@@ -1026,6 +1061,8 @@ export interface ConnectorAdapter {
   ): AsyncIterable<ConnectorDiscoveryPage>;
   extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
   executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;
+  /** Present on providers with personal-data reporting obligations. */
+  personalData?: ConnectorPersonalDataSupport;
   verifyWebhook?(input: ConnectorWebhookVerifyInput): Promise<void>;
   parseWebhookEvent?(
     input: ConnectorWebhookVerifyInput,

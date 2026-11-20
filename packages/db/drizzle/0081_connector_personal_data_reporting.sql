@@ -1,0 +1,2 @@
+ALTER TABLE "connector_oauth_accounts" ADD COLUMN "profile_retrieved_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "connector_oauth_accounts" ADD COLUMN "personal_data_reported_at" timestamp with time zone;

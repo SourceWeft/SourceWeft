@@ -103,6 +103,16 @@ export const connectorOAuthAccounts = pgTable(
       mode: "date",
     }),
     lastError: text("last_error"),
+    // Personal Data Reporting: when the stored name/email were last read from
+    // the provider, and when the account was last reported to it.
+    profileRetrievedAt: timestamp("profile_retrieved_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    personalDataReportedAt: timestamp("personal_data_reported_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()

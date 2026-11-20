@@ -17,6 +17,10 @@ import {
   scheduleConnectorSyncs,
 } from "./schedules/connectors";
 import { connectorAdaptersReady } from "../modules/connectors";
+import {
+  PERSONAL_DATA_PASS_INTERVAL_MS,
+  runConnectorPersonalDataPass,
+} from "./schedules/connector-personal-data";
 import { scheduleAgentTasks } from "./schedules/agent-tasks";
 import {
   GITHUB_REGISTRY_INTERVAL_MS,
@@ -278,6 +282,16 @@ const connectorTokenKeepAliveTimer = setInterval(() => {
   void refreshIdleConnectorTokens();
 }, KEEP_ALIVE_INTERVAL_MS);
 
+// The personal data pass reports connected provider accounts and reconciles
+// what the provider says changed. Like the keep-alive it is outside `tick`: a
+// pass over many accounts against a slow provider can outlast tick's
+// STUCK_TICK_MS budget and make the scheduler report itself unhealthy. It runs
+// on its own timer and guards itself against overlap.
+void runConnectorPersonalDataPass();
+const connectorPersonalDataTimer = setInterval(() => {
+  void runConnectorPersonalDataPass();
+}, PERSONAL_DATA_PASS_INTERVAL_MS);
+
 // Liveness for `launch.js health scheduler`: the event loop runs this timer
 // and no tick is stuck. A tick that is slow because a dependency is down still
 // ends within STUCK_TICK_MS through its own timeouts.
@@ -304,6 +318,7 @@ async function shutdown() {
   clearInterval(skillMarketTimer);
   clearInterval(githubRegistryTimer);
   clearInterval(connectorTokenKeepAliveTimer);
+  clearInterval(connectorPersonalDataTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
   process.exit(0);

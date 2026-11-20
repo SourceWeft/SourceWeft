@@ -3,11 +3,22 @@
  * (encrypted tokens, scopes, status) that connectors run against.
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { connectorOAuthAccounts, db, sourceConnectors } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapOAuthAccount, mapOAuthAccountWithSecret } from "../mappers";
 import type { ConnectorOAuthAccountSecretRecord } from "../types";
+import { hardDeleteSourceConnectorRecord } from "./connector";
 
 export async function createOAuthAccountRecord(input: {
   teamId: string;
@@ -466,4 +477,224 @@ export async function listOAuthAccountsDueForKeepAlive(input: {
     )
     .orderBy(sql`${lastActivityAt} asc`, asc(connectorOAuthAccounts.id))
     .limit(input.limit);
+}
+
+export type PersonalDataAccountRow = {
+  id: string;
+  teamId: string;
+  workspaceId: string;
+  connectorType: string;
+  status: "active" | "reauth_required" | "revoked" | "disabled";
+  providerAccountId: string;
+  /** `profile_retrieved_at`, or `created_at` for a row never refreshed. */
+  retrievedAt: Date;
+  reportedAt: Date | null;
+};
+
+/**
+ * Rows of one connector type with a provider account id, in every status:
+ * revoked, reauthorization-required and disabled rows still hold the person's
+ * name and email. Ordered by provider account id, then id.
+ */
+export async function listPersonalDataAccounts(input: {
+  connectorType: string;
+}): Promise<PersonalDataAccountRow[]> {
+  const rows = await db
+    .select({
+      id: connectorOAuthAccounts.id,
+      teamId: connectorOAuthAccounts.teamId,
+      workspaceId: connectorOAuthAccounts.workspaceId,
+      connectorType: connectorOAuthAccounts.connectorType,
+      status: connectorOAuthAccounts.status,
+      providerAccountId: connectorOAuthAccounts.providerAccountId,
+      profileRetrievedAt: connectorOAuthAccounts.profileRetrievedAt,
+      createdAt: connectorOAuthAccounts.createdAt,
+      reportedAt: connectorOAuthAccounts.personalDataReportedAt,
+    })
+    .from(connectorOAuthAccounts)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.connectorType, input.connectorType),
+        isNotNull(connectorOAuthAccounts.providerAccountId),
+      ),
+    )
+    .orderBy(
+      asc(connectorOAuthAccounts.providerAccountId),
+      asc(connectorOAuthAccounts.id),
+    );
+
+  return rows.flatMap((row) =>
+    row.providerAccountId === null
+      ? []
+      : [
+          {
+            id: row.id,
+            teamId: row.teamId,
+            workspaceId: row.workspaceId,
+            connectorType: row.connectorType,
+            status: row.status,
+            providerAccountId: row.providerAccountId,
+            retrievedAt: row.profileRetrievedAt ?? row.createdAt,
+            reportedAt: row.reportedAt,
+          },
+        ],
+  );
+}
+
+/** Stamp the report time on every row of one type for the given provider ids. */
+export async function markPersonalDataReported(input: {
+  connectorType: string;
+  providerAccountIds: string[];
+  reportedAt: Date;
+}): Promise<number> {
+  if (input.providerAccountIds.length === 0) {
+    return 0;
+  }
+
+  const rows = await db
+    .update(connectorOAuthAccounts)
+    .set({ personalDataReportedAt: input.reportedAt })
+    .where(
+      and(
+        eq(connectorOAuthAccounts.connectorType, input.connectorType),
+        inArray(
+          connectorOAuthAccounts.providerAccountId,
+          input.providerAccountIds,
+        ),
+      ),
+    )
+    .returning({ id: connectorOAuthAccounts.id });
+
+  return rows.length;
+}
+
+/**
+ * System-initiated deletion of every authorization one provider account holds,
+ * across all workspaces and teams: no user permission check and no provider
+ * revoke. A source connector references its account with `restrict`, so each
+ * referencing connector goes first through the same hard delete a user's
+ * disconnect uses (its sources, documents and the authorization), then any
+ * account left without a connector is deleted.
+ *
+ * The deletions are deliberately not wrapped in a single transaction: a failure
+ * part-way leaves some rows removed and some remaining, and that is safe to
+ * retry — a later call simply picks up whatever rows still match and finishes
+ * the erasure. The personal-data pass relies on this, re-reporting a `closed`
+ * account whose delete did not complete until it does.
+ */
+export async function deleteAccountsByProviderAccount(input: {
+  connectorType: string;
+  providerAccountId: string;
+}): Promise<{ accountsDeleted: number; connectorsDeleted: number }> {
+  const accountRows = await db
+    .select({
+      id: connectorOAuthAccounts.id,
+      teamId: connectorOAuthAccounts.teamId,
+      workspaceId: connectorOAuthAccounts.workspaceId,
+    })
+    .from(connectorOAuthAccounts)
+    .where(
+      and(
+        eq(connectorOAuthAccounts.connectorType, input.connectorType),
+        eq(connectorOAuthAccounts.providerAccountId, input.providerAccountId),
+      ),
+    );
+
+  let accountsDeleted = 0;
+  let connectorsDeleted = 0;
+  for (const account of accountRows) {
+    const connectorRows = await db
+      .select({ id: sourceConnectors.id })
+      .from(sourceConnectors)
+      .where(
+        and(
+          eq(sourceConnectors.oauthAccountId, account.id),
+          eq(sourceConnectors.teamId, account.teamId),
+          eq(sourceConnectors.workspaceId, account.workspaceId),
+        ),
+      );
+
+    let accountGone = false;
+    for (const connector of connectorRows) {
+      const deleted = await hardDeleteSourceConnectorRecord({
+        teamId: account.teamId,
+        workspaceId: account.workspaceId,
+        connectorId: connector.id,
+        oauthAccountId: account.id,
+      });
+      if (deleted.connectorDeleted) connectorsDeleted += 1;
+      if (deleted.authorizationDeleted) accountGone = true;
+    }
+
+    const removed = await deleteOAuthAccountRecord({
+      teamId: account.teamId,
+      workspaceId: account.workspaceId,
+      accountId: account.id,
+    });
+    if (accountGone || removed) accountsDeleted += 1;
+  }
+
+  return { accountsDeleted, connectorsDeleted };
+}
+
+/** Overwrite one account's stored identity after reading it from the provider. */
+export async function updateAccountProfile(input: {
+  teamId: string;
+  workspaceId: string;
+  accountId: string;
+  email: string | null;
+  displayName: string;
+  retrievedAt: Date;
+}): Promise<void> {
+  await db
+    .update(connectorOAuthAccounts)
+    .set({
+      providerAccountEmail: input.email,
+      displayName: input.displayName,
+      profileRetrievedAt: input.retrievedAt,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(connectorOAuthAccounts.id, input.accountId),
+        eq(connectorOAuthAccounts.teamId, input.teamId),
+        eq(connectorOAuthAccounts.workspaceId, input.workspaceId),
+      ),
+    );
+}
+
+/**
+ * Remove the stored email and replace the display name for the listed rows.
+ * Rows already scrubbed are left alone, so repeating the call changes nothing
+ * and returns 0.
+ */
+export async function scrubAccountProfiles(input: {
+  accountIds: string[];
+  placeholderName: string;
+  at: Date;
+}): Promise<number> {
+  if (input.accountIds.length === 0) {
+    return 0;
+  }
+
+  const rows = await db
+    .update(connectorOAuthAccounts)
+    .set({
+      providerAccountEmail: null,
+      displayName: input.placeholderName,
+      profileRetrievedAt: input.at,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        inArray(connectorOAuthAccounts.id, input.accountIds),
+        or(
+          isNotNull(connectorOAuthAccounts.providerAccountEmail),
+          ne(connectorOAuthAccounts.displayName, input.placeholderName),
+        ),
+      ),
+    )
+    .returning({ id: connectorOAuthAccounts.id });
+
+  return rows.length;
 }

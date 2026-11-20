@@ -6,6 +6,7 @@ import {
   getMe,
   listAccessibleResources,
   refreshAtlassianToken,
+  reportAccounts,
   siteHost,
   type AtlassianClientConfig,
   type AtlassianSite,
@@ -432,6 +433,21 @@ export function createJiraConnectorAdapter(
     async refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet> {
       if (!config.clientId || !config.clientSecret) throw unconfigured();
       return refreshAtlassianToken(atlassianConfig, input.refreshToken);
+    },
+    personalData: {
+      async report(input) {
+        if (!config.clientId || !config.clientSecret) throw unconfigured();
+        return reportAccounts(atlassianConfig, input);
+      },
+      async readProfile(input) {
+        if (!config.clientId || !config.clientSecret) throw unconfigured();
+        const identity = await getMe(atlassianConfig, input.accessToken);
+        return {
+          providerAccountId: identity.accountId,
+          email: identity.email,
+          displayName: identity.name ?? identity.email ?? identity.accountId,
+        };
+      },
     },
     async *discover(
       _input: ConnectorDiscoverInput,
