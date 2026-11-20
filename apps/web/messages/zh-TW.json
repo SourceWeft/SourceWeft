@@ -5978,7 +5978,8 @@
     }
   },
   "mobileRouteSheet": {
-    "supplementaryPage": "SourceWeft 補充頁面"
+    "supplementaryPage": "SourceWeft 補充頁面",
+    "loading": "正在載入…"
   },
   "authLocale": {
     "core": {

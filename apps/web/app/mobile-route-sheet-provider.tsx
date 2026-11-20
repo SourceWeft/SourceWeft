@@ -7,6 +7,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
+import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -45,6 +46,9 @@ export function MobileRouteSheetProvider({
   const [isMobileHost, setIsMobileHost] = useState(false);
   const purchasesAllowed = usePurchasesAllowed();
   const [sheetRoute, setSheetRoute] = useState<SheetRoute | null>(null);
+  // The page in the sheet loads over the network; until it has, the sheet says so.
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const sheetLoading = Boolean(sheetRoute) && loadedUrl !== sheetRoute?.url;
   const lastPrimaryPathRef = useRef("/auth/sign-in");
 
   useEffect(() => {
@@ -184,14 +188,25 @@ export function MobileRouteSheetProvider({
               {t("supplementaryPage")}
             </SheetDescription>
           </SheetHeader>
-          <div className="min-h-0 flex-1 bg-background">
+          <div className="relative min-h-0 flex-1 bg-background">
             {sheetRoute ? (
               <iframe
                 className="h-full w-full border-0"
+                onLoad={() => setLoadedUrl(sheetRoute.url)}
                 referrerPolicy="same-origin"
                 src={sheetRoute.url}
                 title={sheetRoute.title}
               />
+            ) : null}
+            {sheetLoading ? (
+              <div
+                className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background text-sm text-muted-foreground"
+                data-testid="mobile-route-sheet-loading"
+                role="status"
+              >
+                <Loader2 aria-hidden className="size-5 animate-spin" />
+                {t("loading")}
+              </div>
             ) : null}
           </div>
         </SheetContent>

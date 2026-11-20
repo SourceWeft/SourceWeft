@@ -5978,7 +5978,8 @@
     }
   },
   "mobileRouteSheet": {
-    "supplementaryPage": "Supplementary SourceWeft page"
+    "supplementaryPage": "Supplementary SourceWeft page",
+    "loading": "Loading…"
   },
   "authLocale": {
     "core": {

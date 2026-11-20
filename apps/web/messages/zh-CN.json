@@ -5978,7 +5978,8 @@
     }
   },
   "mobileRouteSheet": {
-    "supplementaryPage": "SourceWeft 补充页面"
+    "supplementaryPage": "SourceWeft 补充页面",
+    "loading": "正在加载…"
   },
   "authLocale": {
     "core": {
