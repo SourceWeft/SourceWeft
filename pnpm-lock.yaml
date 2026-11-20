@@ -135,7 +135,7 @@ importers:
         version: 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
       '@langchain/daytona':
         specifier: 0.2.2
-        version: 0.2.2(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(ebceef57dc750baa321166688cb1073c))(ws@8.21.3)
+        version: 0.2.2(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(815ea2cca8225d18911af02fb23b0421))(ws@8.21.3)
       '@langchain/langgraph':
         specifier: ^1.7.5
         version: 1.7.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.6.7)
@@ -153,7 +153,7 @@ importers:
         version: 1.5.5(@aws-sdk/credential-provider-node@3.972.79)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@smithy/signature-v4@5.7.0)(ws@8.21.3)
       '@langchain/quickjs':
         specifier: 0.6.7
-        version: 0.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(ebceef57dc750baa321166688cb1073c))
+        version: 0.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(815ea2cca8225d18911af02fb23b0421))
       '@modelcontextprotocol/client':
         specifier: 2.4.0
         version: 2.4.0
@@ -303,7 +303,7 @@ importers:
         version: 10.0.1
       deepagents:
         specifier: 1.16.5
-        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -938,10 +938,10 @@ importers:
         version: 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
       '@langchain/quickjs':
         specifier: 0.6.7
-        version: 0.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(ebceef57dc750baa321166688cb1073c))
+        version: 0.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(815ea2cca8225d18911af02fb23b0421))
       deepagents:
         specifier: 1.16.5
-        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
       langchain:
         specifier: ^1.6.7
         version: 1.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(ws@8.21.3)
@@ -1558,7 +1558,7 @@ importers:
         version: link:../contracts
       deepagents:
         specifier: 1.16.5
-        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
       langchain:
         specifier: ^1.6.7
         version: 1.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(ws@8.21.3)
@@ -1731,7 +1731,7 @@ importers:
         version: link:../contracts
       deepagents:
         specifier: 1.16.5
-        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
     devDependencies:
       '@sourceweft/capability-contracts':
         specifier: workspace:*
@@ -1949,8 +1949,8 @@ importers:
   packages/model-gateway:
     dependencies:
       '@langchain/anthropic':
-        specifier: ^1.5.5
-        version: 1.5.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))
+        specifier: ^1.6.5
+        version: 1.6.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))
       '@langchain/core':
         specifier: ^1.4.2
         version: 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
@@ -2042,7 +2042,7 @@ importers:
         version: link:../builtin-tool-sandbox
       deepagents:
         specifier: 1.16.5
-        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -2058,13 +2058,13 @@ importers:
     dependencies:
       '@langchain/daytona':
         specifier: 0.2.2
-        version: 0.2.2(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(ebceef57dc750baa321166688cb1073c))(ws@8.21.3)
+        version: 0.2.2(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(815ea2cca8225d18911af02fb23b0421))(ws@8.21.3)
       '@sourceweft/builtin-tool-sandbox':
         specifier: workspace:*
         version: link:../builtin-tool-sandbox
       deepagents:
         specifier: 1.16.5
-        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+        version: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
     devDependencies:
       '@types/node':
         specifier: ^22.20.1
@@ -2312,8 +2312,8 @@ packages:
     engines: {node: '>=22.12.0'}
     hasBin: true
 
-  '@anthropic-ai/sdk@0.115.0':
-    resolution: {integrity: sha512-BJrFIVyjNuU8lfDyIJTvlRYzgQg+zEl78BxE7fq8esULsGz9IRQvGtW5spq3tydmtjQb/GFdooKGdGsetpx+lQ==}
+  '@anthropic-ai/sdk@1.11.0':
+    resolution: {integrity: sha512-lW16YCGJ7ItUy92hehGjuMIxvhCeW8pYi4w4jzzfo8UtRbEamagUJAzAEh1VxS6wHfDh6yB+/KE/Rqp2i6elIw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -3708,11 +3708,11 @@ packages:
   '@kurkle/color@0.3.4':
     resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
 
-  '@langchain/anthropic@1.5.5':
-    resolution: {integrity: sha512-OeWrKNqx4kgJBfpFAbT/wVzeGibAwVdmI9+DifkI/U3ejpVuUpISdSEVvnRIT0aqlk+sf2EI362Rt8FiJwxIDg==}
+  '@langchain/anthropic@1.6.5':
+    resolution: {integrity: sha512-qB9bMeyRm46TI5ozkS66tPSnLu4Eayv+2R0aB7Uz79jwXZSEFRQ1i0uyov7xtPJW1R3EjbhpT2UuHy4x38pbAA==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@langchain/core': ^1.2.6
+      '@langchain/core': ^1.4.1
 
   '@langchain/classic@1.0.42':
     resolution: {integrity: sha512-cQX1qpooZy/qMn816XAvqAKiom3OCHIxdviKr0bn2PxOmZXn7VNk+BdnEm15lj6Hi92Z3r83PmbyWnGHzW8HUA==}
@@ -11500,8 +11500,9 @@ snapshots:
       node-forge: 1.4.3
       zod: 4.6.7
 
-  '@anthropic-ai/sdk@0.115.0(zod@4.6.7)':
+  '@anthropic-ai/sdk@1.11.0(zod@4.6.7)':
     dependencies:
+      '@opentelemetry/api': 1.9.1
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
@@ -12955,9 +12956,9 @@ snapshots:
 
   '@kurkle/color@0.3.4': {}
 
-  '@langchain/anthropic@1.5.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))':
+  '@langchain/anthropic@1.6.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))':
     dependencies:
-      '@anthropic-ai/sdk': 0.115.0(zod@4.6.7)
+      '@anthropic-ai/sdk': 1.11.0(zod@4.6.7)
       '@langchain/core': 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
       zod: 4.6.7
 
@@ -13000,10 +13001,10 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/daytona@0.2.2(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(ebceef57dc750baa321166688cb1073c))(ws@8.21.3)':
+  '@langchain/daytona@0.2.2(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(815ea2cca8225d18911af02fb23b0421))(ws@8.21.3)':
     dependencies:
       '@daytona/sdk': 0.200.1(ws@8.21.3)
-      deepagents: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+      deepagents: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -13096,14 +13097,14 @@ snapshots:
 
   '@langchain/protocol@0.0.21': {}
 
-  '@langchain/quickjs@0.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(ebceef57dc750baa321166688cb1073c))':
+  '@langchain/quickjs@0.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(815ea2cca8225d18911af02fb23b0421))':
     dependencies:
       '@jitl/quickjs-ng-wasmfile-release-asyncify': 0.32.0
       '@langchain/core': 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
       '@sveltejs/acorn-typescript': 1.0.13(acorn@8.19.0)
       acorn: 8.19.0
       dedent: 1.7.2
-      deepagents: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6)
+      deepagents: 1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e)
       estree-walker: 3.0.3
       json-schema-to-typescript: 16.0.0
       magic-string: 1.2.0
@@ -16662,7 +16663,7 @@ snapshots:
 
   deep-is@0.1.4: {}
 
-  deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(2d79a96b20f5a1c79ad4ee0f38128dd6):
+  deepagents@1.16.5(patch_hash=4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a)(50be9156087ea11805282e55e4bac69e):
     dependencies:
       '@langchain/core': 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
       '@langchain/langgraph': 1.7.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.6.7)
@@ -16675,6 +16676,7 @@ snapshots:
       yaml: 2.9.0
       zod: 4.6.7
     optionalDependencies:
+      '@langchain/anthropic': 1.6.5(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))
       '@langchain/openai': 1.5.5(@aws-sdk/credential-provider-node@3.972.79)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@smithy/signature-v4@5.7.0)(ws@8.21.3)
 
   deepmerge@4.3.1: {}
