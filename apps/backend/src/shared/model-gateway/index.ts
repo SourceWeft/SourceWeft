@@ -37,7 +37,7 @@ export type {
 } from "./billing/context";
 export type { BillingScope } from "./billing/scope";
 export { BillingAdmissionError } from "./billing/admission";
-export { ModelGatewayError } from "./errors";
+export { isModelGatewayTimeout, ModelGatewayError } from "./errors";
 export { resolveByokProviderRuntime } from "./runtime";
 export { resolveModelCapabilitiesFromLitellm } from "./sync-pricing";
 export type {

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { test } from "vitest";
 import {
+  APPLE_SIGN_IN_ORIGIN,
+  authTrustedOrigins,
   buildSocialProviders,
   nativeSignInConfig,
   webSignInConfig,
@@ -190,5 +192,39 @@ test("GitHub needs both its id and its secret", () => {
       clientSecret: "github-secret",
       scope: ["read:user", "user:email"],
     },
+  );
+});
+
+test("Better Auth trusts Apple's origin only while web Apple sign-in is on", () => {
+  const trustedOrigins = ["https://sourceweft.com"];
+  assert.deepEqual(authTrustedOrigins({ ...none, trustedOrigins }), [
+    "https://sourceweft.com",
+  ]);
+  // The iOS app alone posts no callback from Apple's site.
+  assert.deepEqual(
+    authTrustedOrigins({
+      ...none,
+      ...appleKey,
+      appleAppBundleId: "nicelab.sourceweft.mobile",
+      trustedOrigins,
+    }),
+    ["https://sourceweft.com"],
+  );
+  // Apple returns the web sign-in as a form POST from appleid.apple.com.
+  const web = {
+    ...none,
+    ...appleKey,
+    appleServicesId: "com.sourceweft.web",
+    trustedOrigins,
+  };
+  assert.deepEqual(authTrustedOrigins(web), [
+    "https://sourceweft.com",
+    APPLE_SIGN_IN_ORIGIN,
+  ]);
+  // The shared list (also used for API CORS) is left as it was.
+  assert.deepEqual(trustedOrigins, ["https://sourceweft.com"]);
+  assert.deepEqual(
+    authTrustedOrigins({ ...web, trustedOrigins: [APPLE_SIGN_IN_ORIGIN] }),
+    [APPLE_SIGN_IN_ORIGIN],
   );
 });

@@ -11,7 +11,8 @@ pub fn run() {
             open_external_url,
             take_launch_elapsed_ms,
             set_session_hint,
-            retry_launch
+            retry_launch,
+            log_sign_in_failure
         ])
         .setup(|app| {
             setup_deep_links(app.handle());
@@ -523,6 +524,51 @@ fn set_session_hint(app: AppHandle, signed_in: bool) -> Result<(), String> {
     }
 }
 
+/// Writes why a native sign-in failed to the device log. The person only sees a plain
+/// sentence; the SDK's own text goes here, where it can be read with the phone attached
+/// to a Mac (Console, or `idevicesyslog`).
+#[tauri::command]
+fn log_sign_in_failure(provider: String, reason: String) {
+    let line = sign_in_failure_line(&provider, &reason);
+    #[cfg(target_os = "ios")]
+    ios_log(&line);
+    #[cfg(not(target_os = "ios"))]
+    eprintln!("{line}");
+}
+
+/// One log line, with the provider and reason cut to a bounded length.
+fn sign_in_failure_line(provider: &str, reason: &str) -> String {
+    let provider: String = provider.chars().take(32).collect();
+    let reason: String = reason.chars().take(500).collect();
+    format!("[SourceWeft sign-in] {provider} failed: {reason}")
+}
+
+/// NSLog, which reaches the device's unified log in release builds (stderr does not).
+#[cfg(target_os = "ios")]
+fn ios_log(line: &str) {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use std::ffi::CString;
+
+    #[link(name = "Foundation", kind = "framework")]
+    extern "C" {
+        fn NSLog(format: *const AnyObject, ...);
+    }
+
+    let (Ok(format), Ok(text)) = (CString::new("%@"), CString::new(line.replace('\0', ""))) else {
+        return;
+    };
+    unsafe {
+        let format: *const AnyObject =
+            msg_send![class!(NSString), stringWithUTF8String: format.as_ptr()];
+        let text: *const AnyObject =
+            msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()];
+        if !format.is_null() && !text.is_null() {
+            NSLog(format, text);
+        }
+    }
+}
+
 /// The launch screen's retry button: start loading the web app again.
 #[tauri::command]
 fn retry_launch(app: AppHandle) -> Result<(), String> {
@@ -616,6 +662,19 @@ mod tests {
 
     fn url(value: &str) -> Url {
         Url::parse(value).expect("test URL")
+    }
+
+    #[test]
+    fn a_sign_in_failure_is_logged_as_one_bounded_line() {
+        assert_eq!(
+            sign_in_failure_line("google", "Token exchange failed"),
+            "[SourceWeft sign-in] google failed: Token exchange failed"
+        );
+        let long = sign_in_failure_line("google", &"x".repeat(2000));
+        assert_eq!(
+            long.chars().count(),
+            "[SourceWeft sign-in] google failed: ".len() + 500
+        );
     }
 
     #[test]

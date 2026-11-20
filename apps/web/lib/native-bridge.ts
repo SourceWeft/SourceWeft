@@ -251,6 +251,10 @@ export const nativeBridge = {
   setSessionHint(signedIn: boolean) {
     return invokeNative<void>("set_session_hint", { signedIn });
   },
+  /** Writes why a native sign-in failed to the device log. Mobile app only. */
+  logSignInFailure(provider: string, reason: string) {
+    return invokeNative<void>("log_sign_in_failure", { provider, reason });
+  },
   /** Shows the system's Sign in with Apple sheet. iOS app only. */
   signInWithApple(hashedNonce: string) {
     return invokeNative<AppleSignInCredential>("plugin:apple-sign-in|sign_in", {

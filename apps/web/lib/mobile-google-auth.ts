@@ -1,6 +1,7 @@
 "use client";
 
 import { authClient } from "./auth-client";
+import { nativeBridge } from "./native-bridge";
 
 type GoogleAuthModule = {
   signIn: (options: {
@@ -89,5 +90,19 @@ export function getMobileGoogleSignInError(error: unknown) {
   }
 
   console.warn("[mobile sign-in] Google sign-in failed", error);
+  // The web view's console cannot be read on a phone; the device log can.
+  void nativeBridge
+    .logSignInFailure("google", describeError(error))
+    .catch(() => undefined);
   return "Unable to sign in with Google. Try again or use email.";
+}
+
+function describeError(error: unknown) {
+  if (error instanceof Error) return error.message || error.name;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
 }

@@ -57,6 +57,23 @@ export function isGroundedGenerationError(
 }
 
 /**
+ * A model call that timed out on every target of the route. Unlike a
+ * `GroundedGenerationError` it does not end the job: the same request usually
+ * succeeds when sent again, so a generator may retry it once.
+ */
+export class GroundedModelTimeoutError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "GroundedModelTimeoutError";
+  }
+}
+
+/** Structural, like `isGroundedGenerationError`: module copies share the name. */
+export function isGroundedModelTimeout(error: unknown): error is GroundedModelTimeoutError {
+  return error instanceof Error && error.name === "GroundedModelTimeoutError";
+}
+
+/**
  * Lower-cases, folds width/compatibility forms, drops punctuation and spaces.
  * The text normalization behind every artifact type's fingerprints, so that
  * incidental edits (case, spacing, punctuation) keep an item's identity.
@@ -75,7 +92,8 @@ export interface GroundedModelPort<Op extends string = string> {
   /**
    * The host never substitutes another model: an unusable default fails with
    * `MODEL_UNAVAILABLE`, refused admission with `INSUFFICIENT_CREDITS` (both as
-   * `GroundedGenerationError`). Other failures are thrown as they are.
+   * `GroundedGenerationError`), a call that timed out on every target as
+   * `GroundedModelTimeoutError`. Other failures are thrown as they are.
    */
   completeStructured(input: {
     operation: Op;

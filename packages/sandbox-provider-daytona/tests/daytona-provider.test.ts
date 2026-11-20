@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { describe, test } from "node:test";
 import {
   assertDaytonaCommandSucceeded,
@@ -779,5 +780,159 @@ describe("mapDaytonaProviderError", () => {
     assert.match(error.message, /GITHUB_TOKEN=\[redacted\]/u);
     assert.match(error.message, /X-Amz-Signature=%5Bredacted%5D/u);
     assert.match(error.message, /X-Amz-Credential=%5Bredacted%5D/u);
+  });
+});
+
+// The Daytona SDK that `@langchain/daytona` brings in. Commands run through
+// the SDK's own `process.executeCommand`, so its errors reach the mapper
+// unwrapped. The classes are loaded from the wrapper's dependency so that these
+// cases follow whichever SDK version the wrapper resolves.
+type SdkErrorClass = new (
+  message: string,
+  statusCode?: number,
+  headers?: unknown,
+  code?: string,
+  source?: string,
+) => Error;
+const daytonaSdk = createRequire(
+  createRequire(import.meta.url).resolve("@langchain/daytona"),
+)("@daytona/sdk") as Record<string, SdkErrorClass>;
+const sdkError = (
+  name: string,
+  message: string,
+  statusCode?: number,
+  code?: string,
+  source?: string,
+) => {
+  const ErrorClass = daytonaSdk[name];
+  assert.ok(ErrorClass, `@daytona/sdk exports ${name}`);
+  return new ErrorClass(message, statusCode, undefined, code, source);
+};
+
+describe("mapDaytonaProviderError with Daytona SDK errors", () => {
+  test("a daemon error carries its HTTP status, a machine-readable code and its source", () => {
+    const error = sdkError(
+      "DaytonaFileNotFoundError",
+      "open /workspace/output/report.txt",
+      404,
+      "FILE_NOT_FOUND",
+      "DAYTONA_DAEMON",
+    ) as Error & { statusCode?: number; code?: string; source?: string };
+    assert.equal(error.statusCode, 404);
+    assert.equal(error.code, "FILE_NOT_FOUND");
+    assert.equal(error.source, "DAYTONA_DAEMON");
+  });
+
+  test("classifies by HTTP status when the message says nothing", () => {
+    for (const [name, status, code, operation, expected] of [
+      [
+        "DaytonaProcessExecutionTimeoutError",
+        408,
+        "PROCESS_EXECUTION_TIMEOUT",
+        "execute",
+        "SANDBOX_COMMAND_TIMEOUT",
+      ],
+      [
+        "DaytonaTimeoutError",
+        504,
+        undefined,
+        "execute",
+        "SANDBOX_COMMAND_TIMEOUT",
+      ],
+      [
+        "DaytonaFileNotFoundError",
+        404,
+        "FILE_NOT_FOUND",
+        "download",
+        "SANDBOX_FILE_NOT_FOUND",
+      ],
+      [
+        "DaytonaNotFoundError",
+        404,
+        undefined,
+        "get",
+        "SANDBOX_NOT_FOUND_OR_EXPIRED",
+      ],
+      [
+        "DaytonaNotFoundError",
+        404,
+        undefined,
+        "delete",
+        "SANDBOX_NOT_FOUND_OR_EXPIRED",
+      ],
+      [
+        "DaytonaAuthenticationError",
+        401,
+        undefined,
+        "create",
+        "SANDBOX_PROVIDER_AUTH_FAILED",
+      ],
+      [
+        "DaytonaForbiddenError",
+        403,
+        undefined,
+        "execute",
+        "SANDBOX_PROVIDER_AUTH_FAILED",
+      ],
+      [
+        "DaytonaAuthorizationError",
+        403,
+        undefined,
+        "execute",
+        "SANDBOX_PROVIDER_AUTH_FAILED",
+      ],
+    ] as const) {
+      const cause = sdkError(
+        name,
+        "request failed",
+        status,
+        code,
+        "DAYTONA_DAEMON",
+      );
+      const mapped = mapDaytonaProviderError(cause, operation);
+      assert.equal(mapped.code, expected, `${name} on ${operation}`);
+      assert.equal(mapped.cause, cause);
+    }
+  });
+
+  test("a transport timeout has no status and is classified from its message", () => {
+    assert.equal(
+      mapDaytonaProviderError(
+        sdkError("DaytonaConnectionTimeoutError", "Operation timed out"),
+        "execute",
+      ).code,
+      "SANDBOX_COMMAND_TIMEOUT",
+    );
+  });
+
+  test("a machine-readable code alone never stands in for an HTTP status", () => {
+    // Without a status the mapper reads `code` in its place; a daemon code is
+    // a word, so it matches none of the status checks.
+    for (const [name, code] of [
+      ["DaytonaError", "SESSION_ENDED"],
+      ["DaytonaError", "FILE_NOT_FOUND"],
+      ["DaytonaError", "PROCESS_EXECUTION_TIMEOUT"],
+    ] as const) {
+      assert.equal(
+        mapDaytonaProviderError(
+          sdkError(name, "request failed", undefined, code, "DAYTONA_DAEMON"),
+          "execute",
+        ).code,
+        "SANDBOX_PROVIDER_ERROR",
+        code,
+      );
+    }
+  });
+
+  test("arguments the SDK rejects before sending a request are a generic provider error", () => {
+    const cause = sdkError(
+      "DaytonaInvalidArgumentError",
+      "autoStopInterval must be a non-negative integer",
+    );
+    assert.ok(cause instanceof daytonaSdk.DaytonaValidationError!);
+    assert.equal(
+      mapDaytonaProviderError(cause, "create").code,
+      "SANDBOX_PROVIDER_ERROR",
+    );
   });
 });
