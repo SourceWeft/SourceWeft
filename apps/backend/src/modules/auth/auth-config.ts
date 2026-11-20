@@ -29,7 +29,10 @@ import {
 } from "./auth-error-i18n";
 import { resolveMailLocale } from "./mail-locale";
 import { mailDeliveryConfigured } from "../mail/delivery";
-import { buildSocialProviders } from "./social-providers";
+import {
+  authTrustedOrigins,
+  buildSocialProviders,
+} from "./social-providers";
 import { createAuthMiddleware } from "better-auth/api";
 import { serializeAuthLogArgs } from "./auth-log-args";
 import {
@@ -174,7 +177,7 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
       oauthAuthServerConfig: true,
     },
     database,
-    trustedOrigins: config.auth.trustedOrigins,
+    trustedOrigins: authTrustedOrigins(config.auth),
     socialProviders,
     user: {
       additionalFields: {
