@@ -272,6 +272,34 @@ test("render policy derives a bounded bitrate from duration and byte budget", ()
   assert.equal(tightened.maxSampleBytes, 1_500_000);
 });
 
+test("scene rendering sizes its concurrency to the sandbox unless a policy pins it", async () => {
+  const run = async (policy?: VideoPresentationRenderPolicy) => {
+    const { commands, sandbox } = harness();
+    const port = createSandboxVideoPresentationRenderPort({
+      sandbox,
+      ...(policy ? { policy } : {}),
+    });
+    const session = await port.prepare({
+      canonicalRoot: "/workspace/video",
+      project,
+      samples,
+    });
+    try {
+      await session.renderSamples();
+      await session.renderFinal();
+    } finally {
+      await session.dispose();
+    }
+    return commands.filter((command) => command.includes("render-scene"));
+  };
+  for (const command of await run()) {
+    assert.match(command, /SOURCEWEFT_VIDEO_CONCURRENCY=auto /u);
+  }
+  for (const command of await run(renderPolicy({ concurrency: 3 }))) {
+    assert.match(command, /SOURCEWEFT_VIDEO_CONCURRENCY=3 /u);
+  }
+});
+
 test("one prepared bundle feeds samples, ordered scene chunks, mux, probe, and bytes", async () => {
   const { commands, sandbox } = harness();
   const port = createSandboxVideoPresentationRenderPort({ sandbox });

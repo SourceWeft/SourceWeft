@@ -518,6 +518,7 @@ export function buildValidationProjectCodePayload(
         content: [
           'import { createHash } from "node:crypto";',
           'import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";',
+          'import { availableParallelism } from "node:os";',
           'import { ensureBrowser, renderMedia, selectComposition } from "@remotion/renderer";',
           "",
           ...PROJECT_BROWSER_PRELUDE_LINES,
@@ -529,7 +530,9 @@ export function buildValidationProjectCodePayload(
           "if (!Number.isInteger(slideNumber)) throw new Error(`render-scene expects a slide number, got ${JSON.stringify(positional[0])}`);",
           "if (!Number.isInteger(parts) || parts < 1 || !Number.isInteger(part) || part < 1 || part > parts) throw new Error(`render-scene expects part/parts within 1..parts, got ${JSON.stringify(positional.slice(1))}`);",
           "const videoBitrate = process.env.SOURCEWEFT_VIDEO_BITRATE;",
-          "const concurrency = Number(process.env.SOURCEWEFT_VIDEO_CONCURRENCY);",
+          "const rawConcurrency = process.env.SOURCEWEFT_VIDEO_CONCURRENCY;",
+          '// "auto" is Remotion\'s default sizing: half the CPU threads this sandbox has, at most 8.',
+          'const concurrency = rawConcurrency === "auto" ? Math.min(8, Math.max(1, Math.floor(availableParallelism() / 2))) : Number(rawConcurrency);',
           'if (!videoBitrate || !/^\\d+k$/u.test(videoBitrate) || !Number.isInteger(concurrency) || concurrency <= 0) throw new Error("trusted render policy environment is invalid");',
           'const manifest = JSON.parse(readFileSync(new URL("../video-presentation.manifest.json", import.meta.url), "utf8"));',
           "let sceneFrom = 0;",
