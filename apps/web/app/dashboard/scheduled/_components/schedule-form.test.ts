@@ -55,7 +55,7 @@ test("the form is complete only with a name, a prompt and a rule", () => {
   );
 });
 
-test("editing keeps the sources, skills and model the form has no control for", () => {
+test("editing keeps the model the form has no control for and carries the picked sources and skills", () => {
   const task = {
     name: "Digest",
     prompt: "Summarize",
@@ -84,6 +84,8 @@ test("editing keeps the sources, skills and model the form has no control for", 
     webAccess: true,
     notifyOnSuccess: false,
     mcpInstallIds: ["i1"],
+    sourceIds: ["s1"],
+    skillIds: ["k1"],
   });
   expect(formToRequest({ ...form, webAccess: false }, task.request)).toEqual({
     sourceIds: ["s1"],
@@ -91,5 +93,17 @@ test("editing keeps the sources, skills and model the form has no control for", 
     llm: { model: "m" },
     mcp: { installIds: ["i1"] },
     webAccess: false,
+  });
+});
+
+test("changing the picked sources and skills reaches the request", () => {
+  const form = {
+    ...emptyTaskForm({ timezone: "UTC" }),
+    sourceIds: ["s2", "s3"],
+    skillIds: [],
+  };
+  expect(formToRequest(form)).toMatchObject({
+    sourceIds: ["s2", "s3"],
+    skillIds: [],
   });
 });

@@ -22,6 +22,9 @@ export type TaskFormState = {
   notifyOnSuccess: boolean;
   notifyEmail: boolean;
   mcpInstallIds: string[];
+  sourceIds: string[];
+  /** Skill selection ids, as the chat sends them. */
+  skillIds: string[];
 };
 
 export const FREQUENCIES: ScheduleRuleKind[] = [
@@ -57,6 +60,8 @@ export function emptyTaskForm(
     notifyOnSuccess: true,
     notifyEmail: true,
     mcpInstallIds: [],
+    sourceIds: [],
+    skillIds: [],
     ...seed,
   };
 }
@@ -177,22 +182,24 @@ export function taskToForm(task: AgentTask): TaskFormState {
     notifyOnSuccess: task.notifyOnSuccess,
     notifyEmail: task.notifyEmail,
     mcpInstallIds: task.request.mcp.installIds,
+    sourceIds: task.request.sourceIds,
+    skillIds: task.request.skillIds,
     ...ruleToFormFields(task.schedule.rule, task.schedule.timezone),
   });
 }
 
 /**
  * The request the form saves. Whatever the form has no control for (the
- * sources, skills and model of a task) carries over from the task being
- * edited, so editing a prompt never drops them.
+ * model of a task) carries over from the task being edited, so editing a
+ * prompt never drops it.
  */
 export function formToRequest(
   form: TaskFormState,
   previous?: AgentTask["request"],
 ): CreateAgentTaskRequest["request"] {
   return {
-    sourceIds: previous?.sourceIds ?? [],
-    skillIds: previous?.skillIds ?? [],
+    sourceIds: form.sourceIds,
+    skillIds: form.skillIds,
     ...(previous?.llm ? { llm: previous.llm } : {}),
     ...(previous?.modelSettings
       ? { modelSettings: previous.modelSettings }

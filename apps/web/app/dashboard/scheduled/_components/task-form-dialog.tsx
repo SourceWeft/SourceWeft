@@ -45,6 +45,7 @@ import {
   taskToForm,
   type TaskFormState,
 } from "./schedule-form";
+import { SkillPicker, SourcePicker } from "./task-resource-pickers";
 import { useScheduleText, weekdayName } from "./use-schedule-text";
 
 type Props = {
@@ -404,6 +405,19 @@ export function TaskFormDialog({
               />
             </label>
           </div>
+
+          <SourcePicker
+            workspaceId={workspaceId}
+            enabled={open}
+            value={form.sourceIds}
+            onChange={(value) => set("sourceIds", value)}
+          />
+          <SkillPicker
+            workspaceId={workspaceId}
+            enabled={open}
+            value={form.skillIds}
+            onChange={(value) => set("skillIds", value)}
+          />
 
           {installs.data && installs.data.length > 0 ? (
             <fieldset className="grid gap-1.5">

@@ -4,7 +4,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const sdk = vi.hoisted(() => ({
   agentTasksClient: { previewSchedule: vi.fn() },
-  contentClient: { listWorkspaceMcpInstalls: vi.fn() },
+  contentClient: {
+    listWorkspaceMcpInstalls: vi.fn(),
+    listSourceMentions: vi.fn(),
+    getSource: vi.fn(),
+    listWorkspaceSkills: vi.fn(),
+    listSkillsCatalog: vi.fn(),
+  },
 }));
 const mutations = vi.hoisted(() => ({
   create: { mutateAsync: vi.fn() },
@@ -43,6 +49,23 @@ beforeEach(() => {
     maxOffsetSeconds: 300,
   });
   sdk.contentClient.listWorkspaceMcpInstalls.mockResolvedValue({ items: [] });
+  sdk.contentClient.listSourceMentions.mockResolvedValue({
+    items: [
+      { id: "s1", title: "Q3 report" },
+      { id: "s2", title: "Roadmap" },
+    ],
+    nextCursor: null,
+  });
+  sdk.contentClient.getSource.mockResolvedValue({
+    source: { title: "Old note" },
+  });
+  sdk.contentClient.listWorkspaceSkills.mockResolvedValue({
+    items: [
+      { selectionId: "w1", name: "brief", displayName: "Brief", enabled: true },
+      { selectionId: "w2", name: "off", displayName: "Off", enabled: false },
+    ],
+  });
+  sdk.contentClient.listSkillsCatalog.mockResolvedValue({ items: [] });
   mutations.create.mutateAsync.mockResolvedValue({ task: { id: "t1" } });
 });
 afterEach(async () => {
@@ -101,4 +124,73 @@ test("a prompt from the chat fills the new task", async () => {
   expect(
     document.querySelector<HTMLTextAreaElement>("#task-prompt")!.value,
   ).toBe("Check prices");
+});
+
+test("picked sources and skills are saved with the task", async () => {
+  await renderForm();
+  typeInto(document.querySelector<HTMLInputElement>("#task-name")!, "Digest");
+  typeInto(
+    document.querySelector<HTMLTextAreaElement>("#task-prompt")!,
+    "Summarize",
+  );
+  button("Add source").click();
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain("Roadmap"),
+  );
+  const roadmap = [
+    ...document.querySelectorAll<HTMLElement>("[role=checkbox]"),
+  ].find((el) => el.textContent?.includes("Roadmap"))!;
+  roadmap.click();
+  button("Add skill").click();
+  await vi.waitFor(() => expect(document.body.textContent).toContain("Brief"));
+  // A disabled workspace skill is not offered.
+  expect(document.body.textContent).not.toContain("Off");
+  [...document.querySelectorAll<HTMLElement>("[role=checkbox]")]
+    .find((el) => el.textContent?.includes("Brief"))!
+    .click();
+  // The chip appears once the choice reached the form state.
+  await vi.waitFor(() =>
+    expect(
+      document.querySelector('[aria-label="Skills: Brief ×"]'),
+    ).not.toBeNull(),
+  );
+  button("Create and enable").click();
+  await vi.waitFor(() =>
+    expect(mutations.create.mutateAsync).toHaveBeenCalled(),
+  );
+  expect(mutations.create.mutateAsync.mock.calls[0]![0].request).toMatchObject({
+    sourceIds: ["s2"],
+    skillIds: ["w1"],
+  });
+});
+
+test("an edited task shows its saved source by name and a gone skill as unavailable", async () => {
+  await renderForm({
+    task: {
+      id: "t1",
+      version: 1,
+      name: "Digest",
+      prompt: "Summarize",
+      schedule: {
+        rule: { kind: "manual" },
+        timezone: "UTC",
+        enabled: false,
+        nextDueAt: null,
+      },
+      request: {
+        sourceIds: ["old"],
+        skillIds: ["gone"],
+        mcp: { installIds: [] },
+        webAccess: false,
+      },
+      notifyOnSuccess: true,
+      notifyEmail: true,
+    } as never,
+  });
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain("Old note"),
+  );
+  await vi.waitFor(() =>
+    expect(document.body.textContent).toContain("Skill no longer available"),
+  );
 });
