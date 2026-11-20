@@ -39,6 +39,8 @@ test("the sheet says it is loading until its page has loaded", async () => {
   await act(async () =>
     root?.render(
       <MobileRouteSheetProvider>
+        {/* A plain link, as the sheet intercepts any same-origin anchor click. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a href="/terms">Terms</a>
       </MobileRouteSheetProvider>,
     ),
