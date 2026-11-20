@@ -5004,7 +5004,6 @@
       "binary:executable": "附带可执行二进制文件",
       "capability:undeclared-scripts": "附带说明里没有提到的脚本",
       "script:out-of-bundle-path": "脚本访问技能目录之外的文件",
-
       "sticky-review": "暂缓审核：较早的版本尚未处理"
     },
     "escalation": {
@@ -6661,7 +6660,23 @@
       "cancel": "取消",
       "save": "保存",
       "saveDraft": "存为草稿",
-      "createAndEnable": "创建并启用"
+      "createAndEnable": "创建并启用",
+      "sources": "资料来源",
+      "sourcesHint": "运行会读取下面选中的资料来源。留空则不使用工作区资料来源。",
+      "addSource": "添加资料来源",
+      "searchSources": "搜索资料来源",
+      "noSources": "没有找到资料来源。",
+      "sourcesLimit": "最多 {count} 个资料来源。",
+      "untitledSource": "未命名资料来源",
+      "unavailableSource": "资料来源已不可用",
+      "skills": "技能",
+      "skillsHint": "运行只能使用这些技能。",
+      "addSkill": "添加技能",
+      "searchSkills": "搜索技能",
+      "noSkills": "没有可用的技能。",
+      "skillsLimit": "最多 {count} 个技能。",
+      "unavailableSkill": "技能已不可用",
+      "showMore": "显示更多"
     },
     "actions": {
       "open": "{name} 的操作",

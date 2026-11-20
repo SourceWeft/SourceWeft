@@ -5004,7 +5004,6 @@
       "binary:executable": "Ships an executable binary",
       "capability:undeclared-scripts": "Ships scripts its instructions never mention",
       "script:out-of-bundle-path": "A script reaches files outside the skill",
-
       "sticky-review": "Held for review: an earlier version is unresolved"
     },
     "escalation": {
@@ -6661,7 +6660,23 @@
       "cancel": "Cancel",
       "save": "Save",
       "saveDraft": "Save as draft",
-      "createAndEnable": "Create and enable"
+      "createAndEnable": "Create and enable",
+      "sources": "Sources",
+      "sourcesHint": "The run reads only these sources. Leave empty to run without workspace sources.",
+      "addSource": "Add source",
+      "searchSources": "Search sources",
+      "noSources": "No sources found.",
+      "sourcesLimit": "At most {count} sources.",
+      "untitledSource": "Untitled source",
+      "unavailableSource": "Source no longer available",
+      "skills": "Skills",
+      "skillsHint": "The run may use only these skills.",
+      "addSkill": "Add skill",
+      "searchSkills": "Search skills",
+      "noSkills": "No skills available.",
+      "skillsLimit": "At most {count} skills.",
+      "unavailableSkill": "Skill no longer available",
+      "showMore": "Show more"
     },
     "actions": {
       "open": "Actions for {name}",
