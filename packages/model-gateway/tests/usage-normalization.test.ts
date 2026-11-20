@@ -224,6 +224,78 @@ test("prefers raw response usage over LangChain usage metadata", () => {
   );
 });
 
+test("reads cached and reasoning tokens from LangChain usage metadata when the reply carries no provider usage object", () => {
+  // A non-streamed Responses API reply: LangChain keeps the response's status
+  // but not its usage object, so `usage_metadata` is all there is to read.
+  const observation = normalizeModelCallObservation({
+    modelAlias: "chat-default",
+    context: {
+      target: target("openai"),
+      modality: "chat",
+      rawResponse: {
+        response_metadata: { object: "response", status: "completed" },
+      },
+      sdkUsage: {
+        input_tokens: 20,
+        output_tokens: 7,
+        total_tokens: 27,
+        input_token_details: { cache_read: 5, cache_creation: 2 },
+        output_token_details: { reasoning: 3 },
+      },
+      responseMetadata: { object: "response", status: "completed" },
+    },
+  });
+  assert.deepEqual(definedUsage(observation.usage), {
+    inputTokens: 20,
+    outputTokens: 7,
+    totalTokens: 27,
+    cacheReadTokens: 5,
+    cacheWriteTokens: 2,
+    reasoningTokens: 3,
+  });
+  assert.equal(observation.provenance.usage, "protocol:langchain.sdk_usage");
+});
+
+test("a provider usage object still wins over LangChain usage metadata", () => {
+  const observation = normalizeModelCallObservation({
+    modelAlias: "chat-default",
+    context: {
+      target: target("openai"),
+      modality: "chat",
+      rawResponse: {
+        response_metadata: {
+          usage: {
+            prompt_tokens: 12,
+            completion_tokens: 5,
+            total_tokens: 17,
+            prompt_tokens_details: { cached_tokens: 4 },
+            completion_tokens_details: { reasoning_tokens: 1 },
+          },
+        },
+      },
+      sdkUsage: {
+        input_tokens: 20,
+        output_tokens: 7,
+        total_tokens: 27,
+        input_token_details: { cache_read: 5 },
+        output_token_details: { reasoning: 3 },
+      },
+      responseMetadata: undefined,
+    },
+  });
+  assert.deepEqual(definedUsage(observation.usage), {
+    inputTokens: 12,
+    outputTokens: 5,
+    totalTokens: 17,
+    cacheReadTokens: 4,
+    reasoningTokens: 1,
+  });
+  assert.equal(
+    observation.provenance.usage,
+    "protocol:openai-compatible.raw_usage",
+  );
+});
+
 test("extracts protocol usage preserved inside LangChain response metadata", () => {
   assert.deepEqual(
     extractRawUsage({

@@ -7,6 +7,7 @@ import type { CallbackManager } from "@langchain/core/callbacks/manager";
 import type { ChatModelStreamEvent } from "@langchain/core/language_models/event";
 import type { LLMResult } from "@langchain/core/outputs";
 import { ModelGatewayError } from "../errors";
+import { finishReasonFromResponseMetadata } from "../normalize/finish-reason";
 import type {
   GatewayErrorCode,
   ResolvedRequestTarget,
@@ -85,7 +86,7 @@ type MessageLike = {
   tool_calls?: unknown;
   tool_call_chunks?: unknown;
   invalid_tool_calls?: unknown;
-  response_metadata?: { finish_reason?: unknown; finishReason?: unknown };
+  response_metadata?: unknown;
   usage_metadata?: unknown;
   additional_kwargs?: { reasoning_content?: unknown };
 };
@@ -134,11 +135,9 @@ export function toolCallCount(message: unknown): number {
 }
 
 function messageFinishReason(message: unknown): string | undefined {
-  const metadata = (message as MessageLike | undefined)?.response_metadata;
-  if (typeof metadata?.finish_reason === "string")
-    return metadata.finish_reason;
-  if (typeof metadata?.finishReason === "string") return metadata.finishReason;
-  return undefined;
+  return finishReasonFromResponseMetadata(
+    (message as MessageLike | undefined)?.response_metadata,
+  );
 }
 
 /**

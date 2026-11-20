@@ -17,6 +17,7 @@ import {
 } from "./utils";
 import { executeStructuredOutput } from "./structured-output";
 import { resolveModelCapabilities } from "../model-capabilities";
+import { finishReasonFromResponseMetadata } from "../normalize/finish-reason";
 import { resolveThinkingMode } from "../thinking";
 import {
   mergeModelCallObservations,
@@ -99,15 +100,7 @@ function extractRawResponseUsage(value: unknown): unknown {
 export function extractFinishReason(
   responseMetadata: Record<string, unknown> | undefined,
 ) {
-  if (typeof responseMetadata?.finish_reason === "string") {
-    return responseMetadata.finish_reason;
-  }
-
-  if (typeof responseMetadata?.finishReason === "string") {
-    return responseMetadata.finishReason;
-  }
-
-  return undefined;
+  return finishReasonFromResponseMetadata(responseMetadata);
 }
 
 export function extractUsage(input: {
