@@ -14,6 +14,7 @@ import {
   GroundedGenerationError,
   isGroundedGenerationError,
 } from "@sourceweft/contracts/grounded-generation";
+import type { GroundedEvidence } from "@sourceweft/contracts/grounded-evidence";
 import type {
   FillTableDeps,
   FillTableInput,
@@ -24,8 +25,10 @@ import type {
 import {
   anchorCandidates,
   assembleCorpus,
+  evidenceFrom,
   groupCorpus,
   InputTooLargeError,
+  locateQuote,
   MAX_TOTAL_INPUT_TOKENS,
   SINGLE_PASS_MAX_INPUT_TOKENS,
   type CorpusChunk,
@@ -278,9 +281,26 @@ async function fillSource(
       }
     }
 
-    const evidence = await guarded(run.deps.signal, () =>
+    // A quote the cited chunk holds word for word is the evidence as it
+    // stands: the chunk's own text at that span. Only a quote that is missing
+    // or not verbatim goes to the anchor port, which may place it elsewhere.
+    const verbatim = new Map<string, GroundedEvidence[]>();
+    const toAnchor: Candidate[] = [];
+    for (const candidate of candidates) {
+      const chunk = chunkByHandle.get(candidate.handle)!;
+      const span = candidate.quote ? locateQuote(chunk.text, candidate.quote) : null;
+      if (!span) {
+        toAnchor.push(candidate);
+        continue;
+      }
+      const quote = chunk.text.slice(span.startChar, span.endChar);
+      verbatim.set(candidate.id, [
+        evidenceFrom(chunk, { ...span, quote, confidence: 1 }, TABLE_LIMITS.quoteChars),
+      ]);
+    }
+    const anchored = await guarded(run.deps.signal, () =>
       anchorCandidates(
-        candidates.map((candidate) => ({
+        toAnchor.map((candidate) => ({
           id: candidate.id,
           refs: [candidate.handle],
           text: anchorTextOf(candidate),
@@ -293,6 +313,7 @@ async function fillSource(
         },
       ),
     );
+    const evidence = new Map([...anchored, ...verbatim]);
 
     const cells: Record<string, TableCell> = {};
     for (const column of columns) {

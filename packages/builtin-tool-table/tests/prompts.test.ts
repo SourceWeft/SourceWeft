@@ -39,3 +39,19 @@ test("the fill prompt forbids a date gaining a month or day its source does not 
   assert.match(prompt.system, /Keep numbers, dates and units exactly as the source writes them/);
   assert.match(prompt.system, /never add a month or day the source does not state/i);
 });
+
+test("the fill prompt answers only from passages about the source itself, never from references or page furniture", () => {
+  const prompt = buildFillPrompt({ chunks: [], columns: [], language: "en" });
+  assert.match(prompt.system, /only from a passage that states that fact about this source document itself/i);
+  for (const excluded of [
+    /reference list or bibliography entry/i,
+    /citation of another work/i,
+    /dateline/i,
+    /page header or footer/i,
+    /navigation or menu text/i,
+    /table of contents/i,
+  ]) {
+    assert.match(prompt.system, excluded);
+  }
+  assert.match(prompt.system, /when such text is the only support, found is false/i);
+});

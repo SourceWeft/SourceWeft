@@ -4,6 +4,7 @@ import {
   anchorCandidates,
   citedTextWithin,
   evidenceFrom,
+  locateQuote,
   quoteHash,
 } from "../src/anchoring";
 import type { CorpusChunk } from "../src/types";
@@ -79,4 +80,34 @@ test("citedTextWithin joins whole chunks and cuts the one that crosses the budge
   assert.equal(citedTextWithin(chunks, 10), "abcd\n\nefghijklmnop");
   assert.equal(citedTextWithin(chunks, 2), "abcd\n\nefgh");
   assert.equal(citedTextWithin(chunks, 0), "");
+});
+
+test("locateQuote finds a verbatim quote and returns its span in the original text", () => {
+  const text = "Intro. REDMOND, Wash. — October 28, 2026 — Microsoft Corp. today announced";
+  const span = locateQuote(text, "REDMOND, Wash. — October 28, 2026");
+  assert.deepEqual(span, { startChar: 7, endChar: 40 });
+  assert.equal(text.slice(span!.startChar, span!.endChar), "REDMOND, Wash. — October 28, 2026");
+  // The first occurrence wins; surrounding whitespace of the quote is ignored.
+  assert.deepEqual(locateQuote("a b a b", "  a b "), { startChar: 0, endChar: 3 });
+});
+
+test("locateQuote matches across whitespace runs and width forms, mapping back to the original text", () => {
+  const spaced = "x REDMOND,  Wash.\n—\tOctober 28,   2026 y";
+  const span = locateQuote(spaced, "REDMOND, Wash. — October 28, 2026");
+  assert.ok(span);
+  assert.equal(spaced.slice(span.startChar, span.endChar), "REDMOND,  Wash.\n—\tOctober 28,   2026");
+  const wide = "总部：ＲＥＤＭＯＮＤ，Ｗａｓｈ．　２０２６年";
+  const wideSpan = locateQuote(wide, "REDMOND,Wash. 2026年");
+  assert.ok(wideSpan);
+  assert.equal(wide.slice(wideSpan.startChar, wideSpan.endChar), "ＲＥＤＭＯＮＤ，Ｗａｓｈ．　２０２６年");
+  // The quote's own width forms fold too.
+  assert.deepEqual(locateQuote("revenue 1,200 units", "１，２００ units"), { startChar: 8, endChar: 19 });
+});
+
+test("locateQuote does not match a quote the text does not hold word for word", () => {
+  assert.equal(locateQuote("REDMOND, Wash. — October 28, 2026", "Redmond, Wash."), null);
+  assert.equal(locateQuote("a randomised trial", "a randomized trial"), null);
+  assert.equal(locateQuote("REDMOND, Wash.", "REDMOND,Wash."), null);
+  assert.equal(locateQuote("anything", "   "), null);
+  assert.equal(locateQuote("", "x"), null);
 });
