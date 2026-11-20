@@ -276,6 +276,54 @@ export type AgentToolCurrentRunArtifactPublicationServices = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Services: grounded artifacts                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the host answers when it accepted a grounded generation: the artifact
+ * row it opened (or the one an identical recent request opened) and that the
+ * work is queued, never done.
+ */
+export type AgentToolGroundedArtifactReceipt = {
+  readonly artifactId: string;
+  readonly versionNo: number;
+  readonly status: "pending";
+  /** True when an identical request within the dedupe window already opened it. */
+  readonly reused: boolean;
+};
+
+/**
+ * Generation grounded in the workspace's sources, as a background job.
+ *
+ * The same door the app's own request routes use: the host opens the pending
+ * artifact in this turn's thread, authorizes the turn's actor against the
+ * workspace and the thread, charges that actor, dedupes a repeat, and queues
+ * the job. Like the artifact row primitives it takes the artifact type as an
+ * argument — the capability knows its own type — and the request is the
+ * capability's own, validated by the host against that type's contract. A type
+ * the host has no grounded generation for is refused, not guessed at.
+ */
+export type AgentToolGroundedArtifactServices = {
+  /**
+   * The document sources this turn is about: the ones the user @mentioned when
+   * there are any, otherwise the thread's selection, with folders expanded to
+   * the documents in them. The model never sees source ids, so a tool that
+   * works on "the selected sources" asks the host for them.
+   */
+  readonly listTurnSourceIds: () => Promise<readonly string[]>;
+  readonly requestGeneration: (input: {
+    readonly artifactType: string;
+    /** The capability's request without the thread, which is the turn's. */
+    readonly request: Readonly<Record<string, unknown>>;
+    /**
+     * The language a mixed or untagged corpus falls back to (the app routes
+     * pass the UI locale). BCP 47.
+     */
+    readonly uiLocale: string;
+  }) => Promise<AgentToolGroundedArtifactReceipt>;
+};
+
+/* -------------------------------------------------------------------------- */
 /* Services: retrieval, web, citations                                         */
 /* -------------------------------------------------------------------------- */
 
@@ -756,6 +804,8 @@ export type AgentToolHostServices<TGateway = AgentToolGatewaySurface> = {
   readonly currentRunArtifacts?: AgentToolCurrentRunArtifactPublicationServices;
   readonly citationRegistry: AgentToolCitationRegistry;
   readonly filesystem?: AgentToolFilesystemServices;
+  /** Optional: a host without grounded generation (or a test) leaves it out. */
+  readonly groundedArtifacts?: AgentToolGroundedArtifactServices;
   readonly llm?: AgentToolLlmExecutionConfig;
   readonly logger: AgentToolLogger;
   readonly media?: AgentToolMediaServices;

@@ -2,6 +2,8 @@
 
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
+import { tableArtifactViewHandlers } from "@sourceweft/builtin-tool-table";
+import { TABLE_FIXTURE_EN } from "@sourceweft/builtin-tool-table/testing";
 import { SharedArtifactViewer } from "./shared-artifact-viewer";
 import { mountWithIntl, unmountAll } from "@/test/react";
 
@@ -153,5 +155,59 @@ test("public fallback uses primary file metadata rather than the display title",
       ?.getAttribute("data-name"),
     "report.md",
   );
+  await unmountAll();
+});
+
+test("a shared table renders its stripped public payload with values and no source quote", async () => {
+  const [handler] = tableArtifactViewHandlers;
+  const payload = handler!.buildPublicPayload!({
+    artifact: {
+      artifactType: "table",
+      status: "ready",
+      title: "Trials",
+      storageBucket: null,
+      storageKey: null,
+      payloadJson: TABLE_FIXTURE_EN,
+    },
+    assetUrl: (fileName) => `/public/${fileName}`,
+  });
+  assert.ok(payload);
+  assert.doesNotMatch(JSON.stringify(payload), /"quote"/);
+
+  const { container } = await mountWithIntl(
+    <SharedArtifactViewer
+      artifact={{
+        token: "token",
+        artifactType: "table",
+        title: "Trials",
+        fileUrl: null,
+        downloadUrl: null,
+        inlinePreviewable: false,
+        previewImageUrl: null,
+        payload,
+        description: null,
+        viewCount: 0,
+        noindex: false,
+        createdAt: "2026-11-21T00:00:00.000Z",
+      }}
+    />,
+  );
+  const text = container.textContent ?? "";
+  // Values, column names and source titles render.
+  for (const shown of [
+    "Atlas trial report",
+    "Beacon cohort study",
+    "Study design",
+    "Randomised controlled trial",
+    "1,200 participants",
+  ]) {
+    assert.ok(text.includes(shown), `missing "${shown}"`);
+  }
+  // Wording comes from the catalog, not raw keys.
+  assert.ok(text.includes("Not mentioned"));
+  assert.doesNotMatch(text, /table\.cell\./);
+  // No quote, and nothing that would open one.
+  assert.doesNotMatch(text, /This was a randomised controlled trial/);
+  assert.equal(container.querySelector("[data-study-evidence]"), null);
   await unmountAll();
 });

@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(PACKAGE_ROOT, "src");
-const BROWSER_ENTRIES = ["ui/index.ts"];
+const BROWSER_ENTRIES = ["ui/index.ts", "public-evidence.ts"];
 const SERVER_ONLY = [
   join(SRC, "corpus.ts"),
   join(SRC, "anchoring.ts"),
@@ -87,13 +87,15 @@ for (const entry of BROWSER_ENTRIES) {
   });
 }
 
-test("the package exposes only the server entry and the browser entry", () => {
+test("the package exposes only the server entry and the browser entries", () => {
   const { exports } = JSON.parse(
     readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"),
   ) as { exports: Record<string, string> };
   assert.deepEqual(exports, {
     ".": "./src/index.ts",
     "./ui": "./src/ui/index.ts",
+    // Pure, React-free: public-share stripping and its placeholder.
+    "./public-evidence": "./src/public-evidence.ts",
   });
 });
 

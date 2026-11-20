@@ -5,6 +5,7 @@ import type {
   TableFreshness,
   TableRow,
 } from "@sourceweft/contracts/table";
+import { GROUNDED_EVIDENCE_PLACEHOLDER } from "@sourceweft/grounded-generation/public-evidence";
 
 /**
  * Pure helpers behind the table viewer: sorting, per-column visibility
@@ -132,28 +133,16 @@ export function rowFreshness(
 
 /* ------------------------------------------------------------------- payload */
 
-/**
- * The shape of an evidence entry once its text is gone. Only a viewer that
- * never displays evidence (the public share page) may use it.
- */
-const NO_EVIDENCE = {
-  kind: "chunk",
-  sourceId: "-",
-  documentId: "-",
-  chunkId: "-",
-  quote: "-",
-  quoteHash: `sha256:${"0".repeat(64)}`,
-} as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
  * Replaces every found cell's evidence with a placeholder before parsing. The
- * public payload carries no quotes or offsets (and would fail the strict
- * schema); a viewer that never shows evidence must still open it, and must
- * not be able to show a quote that was left in by mistake.
+ * public payload carries no quotes or offsets (the server strips them, see
+ * `publicTableContent`, and the result would fail the strict schema); a viewer
+ * that never shows evidence must still open it, and must not be able to show a
+ * quote that was left in by mistake.
  */
 export function withoutEvidence(payload: unknown): unknown {
   if (!isRecord(payload) || !Array.isArray(payload.rows)) return payload;
@@ -167,7 +156,7 @@ export function withoutEvidence(payload: unknown): unknown {
           Object.entries(row.cells).map(([columnId, cell]) => [
             columnId,
             isRecord(cell) && cell.status === "found"
-              ? { ...cell, evidence: [NO_EVIDENCE] }
+              ? { ...cell, evidence: [GROUNDED_EVIDENCE_PLACEHOLDER] }
               : cell,
           ]),
         ),

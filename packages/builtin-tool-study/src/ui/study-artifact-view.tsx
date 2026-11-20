@@ -12,6 +12,7 @@ import { FlashcardsViewer } from "./flashcards/flashcards-viewer";
 import { MindmapViewer } from "./mindmap/mindmap-viewer";
 import { QuizViewer } from "./quiz/quiz-viewer";
 import { StudyCannotDisplay, StudyErrorBoundary } from "./shared/error-boundary";
+import { parsePublicStudyContent } from "./shared/public-content";
 import { StaleBanner } from "@sourceweft/grounded-generation/ui";
 import { useStudyHost, type StudyVersionRef } from "./study-host";
 
@@ -102,7 +103,12 @@ export function StudyArtifactView({
     );
   }
 
-  const content = parseContent(artifact.artifactType, payload);
+  // The share page (not interactive) gets a payload with no source text and
+  // shows no evidence; a quote left in by mistake is dropped here too.
+  const content =
+    interactive === false
+      ? parsePublicStudyContent(artifact.artifactType, payload)
+      : parseContent(artifact.artifactType, payload);
   if (!content) return <StudyCannotDisplay />;
 
   return (

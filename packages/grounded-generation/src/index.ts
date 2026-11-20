@@ -28,3 +28,9 @@ export {
   resolveOutputLanguage,
 } from "./language";
 export type { CorpusChunk, CorpusChunkInput } from "./types";
+export {
+  GROUNDED_EVIDENCE_PLACEHOLDER,
+  toPublicGroundedEvidence,
+  toPublicGroundedEvidenceList,
+  type PublicGroundedEvidence,
+} from "./public-evidence";

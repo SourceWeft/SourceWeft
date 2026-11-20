@@ -20,6 +20,7 @@ export const CLIENT_NAMESPACES = {
    * privacy, terms). `authLocale` feeds Better Auth's localization through
    * `useMessages()` in `app/providers.tsx`. `authPages.oneTap` is read by
    * `GoogleOneTap`, which mounts in the root providers on every route.
+   * `table` is read by the table viewer on the public share page.
    */
   root: [
     "artifactShare",
@@ -33,6 +34,7 @@ export const CLIENT_NAMESPACES = {
     "header",
     "languageSwitcher",
     "mobileRouteSheet",
+    "table",
     "ui",
   ],
   /** `app/[locale]`: public marketing, MCP and Skills pages. */

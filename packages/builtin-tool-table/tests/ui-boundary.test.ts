@@ -84,13 +84,22 @@ test("./ui never reaches server-only code", () => {
   );
 });
 
-test("./ui reaches the shared package only through its /ui subpath", () => {
+// Both are browser entries the shared package's own boundary test keeps clean.
+const BROWSER_SAFE_SHARED = [
+  "@sourceweft/grounded-generation/ui",
+  "@sourceweft/grounded-generation/public-evidence",
+];
+
+test("./ui reaches the shared package only through its browser subpaths", () => {
   const { external } = reachable(BROWSER_ENTRY);
   const shared = external
     .map(({ specifier }) => specifier)
     .filter((specifier) => specifier.startsWith("@sourceweft/grounded-generation"));
   assert.ok(shared.length > 0);
-  assert.deepEqual(new Set(shared), new Set(["@sourceweft/grounded-generation/ui"]));
+  assert.deepEqual(
+    shared.filter((specifier) => !BROWSER_SAFE_SHARED.includes(specifier)),
+    [],
+  );
 });
 
 test("the package exposes no subpath that leads straight to the engine", () => {
