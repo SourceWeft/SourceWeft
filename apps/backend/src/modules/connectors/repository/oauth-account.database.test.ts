@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, test } from "vitest";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
 import type { ConnectorOAuthAccountStatus } from "../types";
@@ -88,6 +88,7 @@ async function connector(input: {
   teamId: string;
   workspaceId: string;
   oauthAccountId: string;
+  connectorType?: string;
   status?: "active" | "disabled";
 }) {
   const id = randomUUID();
@@ -95,7 +96,7 @@ async function connector(input: {
     id,
     teamId: input.teamId,
     workspaceId: input.workspaceId,
-    connectorType: "google_drive",
+    connectorType: input.connectorType ?? "google_drive",
     name: id,
     oauthAccountId: input.oauthAccountId,
     status: input.status ?? "active",
@@ -555,7 +556,10 @@ test("keep-alive lists active accounts with a refresh token, oldest first", asyn
     connectorTypes,
   });
   const mine = due.filter((row) => ids.has(row.id));
-  assert.deepEqual(mine.map((row) => row.id), [a.id, b.id]);
+  assert.deepEqual(
+    mine.map((row) => row.id),
+    [a.id, b.id],
+  );
 
   const limited = await accounts.listOAuthAccountsDueForKeepAlive({
     refreshedBefore,
@@ -605,4 +609,250 @@ test("keep-alive filters by connector type and returns nothing for an empty list
     connectorTypes: [],
   });
   assert.deepEqual(none, []);
+});
+
+// Personal Data Reporting (#652). Each test uses its own connector type so the
+// shared database's other rows never match.
+const uniqueType = () => `pdr_${randomUUID().slice(0, 8)}`;
+
+test("lists a type's accounts with a provider id in every status, ordered, with the retrieval time falling back to creation", async () => {
+  const scope = await workspace();
+  const type = uniqueType();
+  const created = new Date("2026-02-01T00:00:00.000Z");
+  const retrieved = new Date("2026-05-01T00:00:00.000Z");
+  const second = await account({
+    ...scope,
+    connectorType: type,
+    providerAccountId: "b-acct",
+    status: "revoked",
+    createdAt: created,
+  });
+  const first = await account({
+    ...scope,
+    connectorType: type,
+    providerAccountId: "a-acct",
+    status: "disabled",
+    createdAt: created,
+  });
+  await schema.db
+    .update(schema.connectorOAuthAccounts)
+    .set({ profileRetrievedAt: retrieved })
+    .where(eq(schema.connectorOAuthAccounts.id, first.id));
+  await account({ ...scope, connectorType: type, providerAccountId: null });
+  await account({ ...scope, connectorType: uniqueType() });
+
+  const rows = await accounts.listPersonalDataAccounts({ connectorType: type });
+
+  assert.deepEqual(
+    rows.map((row) => row.id),
+    [first.id, second.id],
+  );
+  assert.equal(rows[0]?.providerAccountId, "a-acct");
+  assert.equal(rows[0]?.status, "disabled");
+  assert.equal(rows[0]?.teamId, scope.teamId);
+  assert.equal(rows[0]?.workspaceId, scope.workspaceId);
+  assert.equal(rows[0]?.connectorType, type);
+  assert.equal(rows[0]?.retrievedAt.getTime(), retrieved.getTime());
+  assert.equal(rows[0]?.reportedAt, null);
+  assert.equal(rows[1]?.status, "revoked");
+  assert.equal(rows[1]?.retrievedAt.getTime(), created.getTime());
+});
+
+test("marking accounts reported touches only the type's matching provider ids", async () => {
+  const scope = await workspace();
+  const type = uniqueType();
+  const otherType = uniqueType();
+  const reportedAt = new Date("2026-06-01T12:00:00.000Z");
+  await account({ ...scope, connectorType: type, providerAccountId: "a" });
+  await account({ ...scope, connectorType: type, providerAccountId: "b" });
+  await account({ ...scope, connectorType: type, providerAccountId: "c" });
+  await account({ ...scope, connectorType: otherType, providerAccountId: "a" });
+
+  const changed = await accounts.markPersonalDataReported({
+    connectorType: type,
+    providerAccountIds: ["a", "b"],
+    reportedAt,
+  });
+  const none = await accounts.markPersonalDataReported({
+    connectorType: type,
+    providerAccountIds: [],
+    reportedAt,
+  });
+
+  assert.equal(changed, 2);
+  assert.equal(none, 0);
+  const reported = new Map(
+    (await accounts.listPersonalDataAccounts({ connectorType: type })).map(
+      (row) => [row.providerAccountId, row.reportedAt?.getTime() ?? null],
+    ),
+  );
+  assert.deepEqual(
+    [...reported],
+    [
+      ["a", reportedAt.getTime()],
+      ["b", reportedAt.getTime()],
+      ["c", null],
+    ],
+  );
+  const [untouched] = await accounts.listPersonalDataAccounts({
+    connectorType: otherType,
+  });
+  assert.equal(untouched?.reportedAt, null);
+});
+
+test("deleting by provider account removes it across workspaces and its connector, and keeps other types and accounts", async () => {
+  const type = uniqueType();
+  const otherType = uniqueType();
+  const one = await workspace();
+  const two = await workspace();
+  const attached = await account({
+    ...one,
+    connectorType: type,
+    providerAccountId: "gone",
+  });
+  const bare = await account({
+    ...two,
+    connectorType: type,
+    providerAccountId: "gone",
+  });
+  const sameIdOtherType = await account({
+    ...one,
+    connectorType: otherType,
+    providerAccountId: "gone",
+  });
+  const otherAccount = await account({
+    ...one,
+    connectorType: type,
+    providerAccountId: "stays",
+  });
+  const connectorId = await connector({
+    ...one,
+    connectorType: type,
+    oauthAccountId: attached.id,
+  });
+
+  const result = await accounts.deleteAccountsByProviderAccount({
+    connectorType: type,
+    providerAccountId: "gone",
+  });
+
+  assert.deepEqual(result, { accountsDeleted: 2, connectorsDeleted: 1 });
+  const remaining = await schema.db
+    .select({ id: schema.connectorOAuthAccounts.id })
+    .from(schema.connectorOAuthAccounts)
+    .where(
+      inArray(schema.connectorOAuthAccounts.id, [
+        attached.id,
+        bare.id,
+        sameIdOtherType.id,
+        otherAccount.id,
+      ]),
+    );
+  assert.deepEqual(
+    remaining.map((row) => row.id).sort(),
+    [sameIdOtherType.id, otherAccount.id].sort(),
+  );
+  const connectors = await schema.db
+    .select({ id: schema.sourceConnectors.id })
+    .from(schema.sourceConnectors)
+    .where(eq(schema.sourceConnectors.id, connectorId));
+  assert.deepEqual(connectors, []);
+
+  assert.deepEqual(
+    await accounts.deleteAccountsByProviderAccount({
+      connectorType: type,
+      providerAccountId: "gone",
+    }),
+    { accountsDeleted: 0, connectorsDeleted: 0 },
+  );
+});
+
+test("updating an account profile overwrites the identity and stamps the retrieval time", async () => {
+  const scope = await workspace();
+  const type = uniqueType();
+  const stored = await account({ ...scope, connectorType: type });
+  const retrievedAt = new Date("2026-07-01T08:00:00.000Z");
+
+  await accounts.updateAccountProfile({
+    ...scope,
+    accountId: stored.id,
+    email: null,
+    displayName: "Fresh name",
+    retrievedAt,
+  });
+
+  const row = await accounts.findOAuthAccountRecord({
+    ...scope,
+    accountId: stored.id,
+  });
+  assert.equal(row?.providerAccountEmail, null);
+  assert.equal(row?.displayName, "Fresh name");
+  const [listed] = await accounts.listPersonalDataAccounts({
+    connectorType: type,
+  });
+  assert.equal(listed?.retrievedAt.getTime(), retrievedAt.getTime());
+
+  await accounts.updateAccountProfile({
+    ...scope,
+    accountId: stored.id,
+    email: "fresh@example.com",
+    displayName: "Fresh name",
+    retrievedAt,
+  });
+  const again = await accounts.findOAuthAccountRecord({
+    ...scope,
+    accountId: stored.id,
+  });
+  assert.equal(again?.providerAccountEmail, "fresh@example.com");
+});
+
+test("scrubbing profiles removes the email, sets the placeholder and is idempotent", async () => {
+  const scope = await workspace();
+  const type = uniqueType();
+  const scrubbed = await account({ ...scope, connectorType: type });
+  const untouched = await account({
+    ...scope,
+    connectorType: type,
+    providerAccountId: "other",
+  });
+  const at = new Date("2026-08-01T00:00:00.000Z");
+
+  const first = await accounts.scrubAccountProfiles({
+    accountIds: [scrubbed.id],
+    placeholderName: "Former user",
+    at,
+  });
+  const second = await accounts.scrubAccountProfiles({
+    accountIds: [scrubbed.id],
+    placeholderName: "Former user",
+    at,
+  });
+  const empty = await accounts.scrubAccountProfiles({
+    accountIds: [],
+    placeholderName: "Former user",
+    at,
+  });
+
+  assert.equal(first, 1);
+  assert.equal(second, 0);
+  assert.equal(empty, 0);
+  const row = await accounts.findOAuthAccountRecord({
+    ...scope,
+    accountId: scrubbed.id,
+  });
+  assert.equal(row?.providerAccountEmail, null);
+  assert.equal(row?.displayName, "Former user");
+  const other = await accounts.findOAuthAccountRecord({
+    ...scope,
+    accountId: untouched.id,
+  });
+  assert.equal(other?.providerAccountEmail, "old@example.com");
+  assert.equal(other?.displayName, "Old name");
+  const rows = await accounts.listPersonalDataAccounts({
+    connectorType: type,
+  });
+  assert.equal(
+    rows.find((r) => r.id === scrubbed.id)?.retrievedAt.getTime(),
+    at.getTime(),
+  );
 });
