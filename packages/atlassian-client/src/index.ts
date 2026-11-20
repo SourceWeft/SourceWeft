@@ -13,6 +13,12 @@ export {
 } from "./http";
 export { exchangeAtlassianCode, refreshAtlassianToken } from "./oauth";
 export {
+  REPORT_ACCOUNTS_MAX_BATCH,
+  reportAccounts,
+  type ReportAccountsResult,
+  type ReportedAccount,
+} from "./report-accounts";
+export {
   getMe,
   listAccessibleResources,
   type AtlassianIdentity,
