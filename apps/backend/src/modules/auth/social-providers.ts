@@ -139,3 +139,21 @@ export function webSignInConfig(
 ): WebSignInConfig {
   return { apple: Boolean(settings.appleServicesId) };
 }
+
+/**
+ * Apple returns the web sign-in as a form POST from its own site
+ * (`response_mode=form_post`), so Better Auth's origin check must trust that
+ * origin for the callback. It is added only to Better Auth's trusted origins
+ * when web Sign in with Apple is on, never to API CORS.
+ */
+export const APPLE_SIGN_IN_ORIGIN = "https://appleid.apple.com";
+
+export function authTrustedOrigins(
+  settings: SocialProviderSettings & { trustedOrigins: readonly string[] },
+): string[] {
+  const origins = [...settings.trustedOrigins];
+  if (settings.appleServicesId && !origins.includes(APPLE_SIGN_IN_ORIGIN)) {
+    origins.push(APPLE_SIGN_IN_ORIGIN);
+  }
+  return origins;
+}
