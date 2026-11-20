@@ -85,9 +85,14 @@ export const FILL_OUTPUT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["columnId", "found", "value", "chunk", "quote"],
+        required: ["columnId", "considered", "found", "value", "chunk", "quote"],
         properties: {
           columnId: { type: "string", description: "The id of the column, as given." },
+          considered: {
+            type: "string",
+            description:
+              "Only for a column that asks for an extreme or a ranking: the distinct values the document states for that question, each once with what it belongs to (for example \"70B Llama-3.1-70B; 8B Llama-3.1-8B\"), at most 200 characters, written before choosing. An empty string for every other column.",
+          },
           found: {
             type: "boolean",
             description: "False when the chunks do not state it.",
