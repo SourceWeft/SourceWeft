@@ -294,25 +294,18 @@ test("Google Sign-In's reversed iOS client is a registered URL scheme", () => {
   );
 });
 
-// The launch image shows the logo alone, as the splash page and the web cover
-// do: the sign-in page below shows the logo with the name, and two names would
-// collide. PNGs, light and dark: launch screens do not draw vector images.
-test("the launch image shows the logo mark alone, in light and dark", () => {
+// The launch image, the splash page and the web cover show the same text
+// wordmark, with no image, so the hand-over between them does not change.
+test("the launch image, splash and web cover show the same text wordmark", () => {
   const storyboard = read(resolve(apple, "LaunchScreen.storyboard"));
-  assert.match(storyboard, /<imageView [^>]*image="LaunchLogo"/);
-  assert.doesNotMatch(storyboard, /<label /);
-  const imageset = resolve(apple, "Assets.xcassets/LaunchLogo.imageset");
-  const { images } = json(resolve(imageset, "Contents.json"));
-  assert.deepEqual(images.map(({ filename }) => filename).sort(), [
-    "launch-logo-dark@2x.png",
-    "launch-logo-dark@3x.png",
-    "launch-logo@2x.png",
-    "launch-logo@3x.png",
-  ]);
-  for (const { filename } of images)
-    assert.equal(
-      readFileSync(resolve(imageset, filename)).subarray(1, 4).toString(),
-      "PNG",
-      filename,
-    );
+  assert.match(storyboard, /<label [^>]*text="SourceWeft"/);
+  assert.doesNotMatch(storyboard, /<imageView /);
+  assert.match(
+    read(resolve(root, "apps/mobile/placeholder-dist/splash.html")),
+    /<div class="mark">SourceWeft<\/div>/,
+  );
+  assert.match(
+    read(resolve(root, "apps/web/app/_components/mobile-launch-cover.tsx")),
+    /content: "SourceWeft"/,
+  );
 });

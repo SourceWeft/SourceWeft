@@ -346,12 +346,9 @@ export function MobileLoginView({ path }: { path: string }) {
       <div className="flex min-h-full flex-col py-[max(1.5rem,env(safe-area-inset-top),env(safe-area-inset-bottom))] [@media(max-height:760px)]:py-4">
         <div className="my-auto w-full">
           <div className="mb-7 flex flex-col items-center text-center [@media(max-height:760px)]:mb-4">
-            <div className="mb-4 flex items-center gap-2.5 [@media(max-height:760px)]:mb-3">
-              <Logo className="h-8 w-8 rounded-lg [@media(max-height:760px)]:h-7 [@media(max-height:760px)]:w-7" />
-              <span className="text-[1.7rem] font-semibold tracking-normal text-foreground [@media(max-height:760px)]:text-2xl">
-                SourceWeft
-              </span>
-            </div>
+            {/* The mark alone: the heading below already names SourceWeft. */}
+            <Logo className="mb-5 h-12 w-12 rounded-xl [@media(max-height:760px)]:mb-3 [@media(max-height:760px)]:h-10 [@media(max-height:760px)]:w-10" />
+
             <h1 className="max-w-72 text-balance text-[1.7rem] font-medium leading-tight tracking-normal text-foreground [@media(max-height:760px)]:text-2xl">
               {copy.description}
             </h1>
