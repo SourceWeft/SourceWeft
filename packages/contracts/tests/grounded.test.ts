@@ -3,7 +3,9 @@ import test from "node:test";
 import { groundedEvidenceSchema } from "../src/grounded-evidence";
 import {
   GroundedGenerationError,
+  GroundedModelTimeoutError,
   isGroundedGenerationError,
+  isGroundedModelTimeout,
 } from "../src/grounded-generation";
 import { studyEvidenceSchema } from "../src/study";
 import {
@@ -58,4 +60,17 @@ test("an error from another module copy is recognised by shape", () => {
     isGroundedGenerationError(Object.assign(new Error("x"), { code: "OTHER" })),
     false,
   );
+});
+
+test("a model call timeout is recognised by name, across module copies", () => {
+  const timeout = new GroundedModelTimeoutError("timed out", { cause: new Error("abort") });
+  assert.equal(isGroundedModelTimeout(timeout), true);
+  assert.equal(timeout.name, "GroundedModelTimeoutError");
+  // Another copy of the class carries the same name.
+  const copy = Object.assign(new Error("timed out"), { name: "GroundedModelTimeoutError" });
+  assert.equal(isGroundedModelTimeout(copy), true);
+  assert.equal(isGroundedModelTimeout(new Error("upstream")), false);
+  assert.equal(isGroundedModelTimeout("GroundedModelTimeoutError"), false);
+  // A timeout is not a generation failure that ends the whole job.
+  assert.equal(isGroundedGenerationError(timeout), false);
 });

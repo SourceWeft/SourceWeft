@@ -6,7 +6,10 @@ import {
   TABLE_PAYLOAD_MAX_BYTES,
   type TableColumn,
 } from "@sourceweft/contracts/table";
-import { GroundedGenerationError } from "@sourceweft/contracts/grounded-generation";
+import {
+  GroundedGenerationError,
+  GroundedModelTimeoutError,
+} from "@sourceweft/contracts/grounded-generation";
 import {
   FILL_CONCURRENCY,
   MAX_UNVERIFIED_SHARE,
@@ -565,6 +568,88 @@ test("one source failing leaves its row failed and fills the rest", async () => 
   assert.deepEqual(content.rows[0]!.cells, {});
   assert.equal(stats.failedRows, 1);
   assert.equal(calls.length, 3);
+});
+
+test("a fill call that timed out is sent once more under its own billing key", async () => {
+  const columns = columnsOf(textColumn("Design"));
+  let attempts = 0;
+  const { model, calls } = stubModel((call) => {
+    attempts += 1;
+    if (attempts === 1) throw new GroundedModelTimeoutError("The operation was aborted due to timeout");
+    return { cells: [answer(columns[0]!.id, "randomised", promptHandles(call.user)[0]!, "randomised")] };
+  });
+  const { content, stats } = await fillTable(deps(model), fillInput(columns, [sourceOf("a", [ATLAS])]));
+  assert.deepEqual(
+    calls.map((call) => call.idempotencyKey),
+    ["table:art_1:v1:a:g0", "table:art_1:v1:a:g0:timeout"],
+  );
+  assert.equal(content.rows[0]!.status, "ok");
+  assert.equal(content.rows[0]!.cells[columns[0]!.id]!.status, "found");
+  assert.equal(stats.modelCalls, 2);
+});
+
+test("a second timeout fails only that row, and other failures are not retried", async () => {
+  const columns = columnsOf(textColumn("Design"));
+  const timesOut = stubModel(() => {
+    throw new GroundedModelTimeoutError("timed out");
+  });
+  const timedOut = await fillTable(deps(timesOut.model), fillInput(columns, [sourceOf("a", [ATLAS])]));
+  assert.equal(timesOut.calls.length, 2);
+  assert.equal(timedOut.content.rows[0]!.status, "failed");
+
+  const breaks = stubModel(() => {
+    throw new Error("upstream hiccup");
+  });
+  const broken = await fillTable(deps(breaks.model), fillInput(columns, [sourceOf("a", [ATLAS])]));
+  assert.equal(breaks.calls.length, 1);
+  assert.equal(broken.content.rows[0]!.status, "failed");
+});
+
+test("a timeout after the job was cancelled is not retried", async () => {
+  const columns = columnsOf(textColumn("Design"));
+  const controller = new AbortController();
+  const { model, calls } = stubModel(() => {
+    controller.abort(new Error("job cancelled"));
+    throw new GroundedModelTimeoutError("aborted");
+  });
+  // A cancelled job rejects with the failure as it came, without a second call.
+  await assert.rejects(
+    fillTable(deps(model, { signal: controller.signal }), fillInput(columns, [sourceOf("a", [ATLAS])])),
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("a merge call that timed out is sent once more under its own billing key", async () => {
+  const columns = columnsOf(numberColumn("Participants"));
+  const source = longSource(
+    "Enrolment reached 1,200 participants in a randomised trial.",
+    "A late note says 1,500 participants and a randomised trial.",
+  );
+  let merges = 0;
+  const { model, calls } = stubModel((call) => {
+    if (isMerge(call)) {
+      merges += 1;
+      if (merges === 1) throw new GroundedModelTimeoutError("timed out");
+      return { choice: 1 };
+    }
+    return {
+      cells: [
+        call.user.includes("1,200 participants")
+          ? answerIfStated(call.user, columns[0]!.id, "1,200", "1,200 participants")
+          : answerIfStated(call.user, columns[0]!.id, "1,500", "1,500 participants"),
+      ],
+    };
+  });
+  const { content } = await fillTable(deps(model), fillInput(columns, [source]));
+  assert.deepEqual(
+    calls.filter(isMerge).map((call) => call.idempotencyKey),
+    [
+      `table:art_1:v1:a:merge:${columns[0]!.id}`,
+      `table:art_1:v1:a:merge:${columns[0]!.id}:timeout`,
+    ],
+  );
+  const cell = content.rows[0]!.cells[columns[0]!.id]!;
+  assert.equal(cell.status === "found" && cell.value, "1,500");
 });
 
 test("an unreadable answer fails the row", async () => {

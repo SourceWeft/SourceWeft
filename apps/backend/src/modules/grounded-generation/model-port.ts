@@ -1,11 +1,13 @@
 import {
   BillingAdmissionError,
   completeStructuredWithDefaultChat,
+  isModelGatewayTimeout,
   requireDefaultModelGatewayProfile,
 } from "../../shared/model-gateway/index";
 import type { ContentBillingPort } from "../content/billing-port";
 import {
   GroundedGenerationError,
+  GroundedModelTimeoutError,
   type GroundedModelPort,
 } from "@sourceweft/contracts/grounded-generation";
 
@@ -34,8 +36,9 @@ export async function describeDefaultChatModel(
 /**
  * `GroundedModelPort` over `completeStructuredWithDefaultChat`: the default chat
  * model, billed to the payer, admission before the call, thinking off. A
- * refused admission becomes `INSUFFICIENT_CREDITS`; any other failure is
- * passed on for the job to retry.
+ * refused admission becomes `INSUFFICIENT_CREDITS`; a call that timed out on
+ * every target becomes `GroundedModelTimeoutError`, which a generator may send
+ * once more; any other failure is passed on for the job to retry.
  */
 export function createGroundedModelPort<Op extends string = string>(input: {
   billing: ContentBillingPort;
@@ -76,6 +79,12 @@ export function createGroundedModelPort<Op extends string = string>(input: {
             "INSUFFICIENT_CREDITS",
             `Not enough credits to generate this ${input.subject ?? "artifact"}`,
             {},
+            { cause: error },
+          );
+        }
+        if (isModelGatewayTimeout(error)) {
+          throw new GroundedModelTimeoutError(
+            error instanceof Error ? error.message : "The model call timed out",
             { cause: error },
           );
         }

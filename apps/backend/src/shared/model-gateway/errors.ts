@@ -13,4 +13,15 @@
  * that only need to classify an error should not have to drag the billed
  * client (and its db/billing dependencies) in with it.
  */
+import { normalizeGatewayError } from "@sourceweft/model-gateway";
+
 export { ModelGatewayError } from "@sourceweft/model-gateway";
+
+/**
+ * Whether a gateway call ended in a timeout: the request's own deadline (a
+ * fetch abort) or a classified `TIMEOUT` surfaced after failover. A pure
+ * classifier, so it opens no path around billing either.
+ */
+export function isModelGatewayTimeout(error: unknown): boolean {
+  return normalizeGatewayError(error).code === "TIMEOUT";
+}
