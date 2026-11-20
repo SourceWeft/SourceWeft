@@ -5,7 +5,7 @@ import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { GeminiChatAdapter } from "../src/adapters/gemini-chat";
 import { GeminiEmbeddingsAdapter } from "../src/adapters/gemini-embeddings";
 import { createModelGateway, ModelGatewayError } from "../src/index";
-import { normalizeGatewayError } from "../src/errors";
+import { isFailoverableError, normalizeGatewayError } from "../src/errors";
 import { makeResolvedTarget } from "./helpers";
 
 const target = makeResolvedTarget({
@@ -282,6 +282,97 @@ test("Gemini host policy rejection is preserved and stops SDK retries and provid
   );
   assert.equal(calls.length, 3);
   assert.ok(calls.every((url) => new URL(url).hostname === "models.internal"));
+});
+
+for (const [label, body, reason] of [
+  [
+    "a candidate blocked by a safety filter",
+    { candidates: [{ finishReason: "SAFETY", index: 0 }] },
+    { finishReason: "SAFETY" },
+  ],
+  [
+    "a rejected prompt",
+    { promptFeedback: { blockReason: "PROHIBITED_CONTENT" } },
+    { blockReason: "PROHIBITED_CONTENT" },
+  ],
+  [
+    "a reply that spent its output budget before any content",
+    { candidates: [{ finishReason: "MAX_TOKENS", index: 0 }] },
+    { finishReason: "MAX_TOKENS" },
+  ],
+] as const) {
+  test(`Gemini non-stream reply with no content (${label}) fails once without retry or failover`, async (t) => {
+    isolate(t);
+    const calls: string[] = [];
+    const gateway = createModelGateway({
+      fetch: async (input, init) => {
+        calls.push(new Request(input, init).url);
+        return Response.json({
+          ...body,
+          usageMetadata: { promptTokenCount: 7, totalTokenCount: 7 },
+        });
+      },
+      maxRetries: 2,
+      providers: {
+        gemini: {
+          kind: "gemini",
+          baseUrl: target.baseUrl,
+          apiKey: "first-key",
+        },
+        second: {
+          kind: "gemini",
+          baseUrl: "https://second.example",
+          apiKey: "second-key",
+        },
+      },
+      modelRoutes: {
+        gemini: {
+          strategy: "priority",
+          targets: [
+            { provider: "gemini", model: target.providerModel, priority: 1 },
+            { provider: "second", model: target.providerModel, priority: 2 },
+          ],
+        },
+      },
+    });
+    await assert.rejects(
+      gateway.chat.complete(payload, { maxRetries: 2 }),
+      (error: unknown) => {
+        assert.ok(ModelGatewayError.isInstance(error));
+        assert.equal(error.code, "BAD_REQUEST");
+        assert.equal(error.retryable, false);
+        assert.equal(isFailoverableError(error), false);
+        assert.equal(error.provider, "gemini");
+        assert.deepEqual(error.metadata, {
+          reason: "empty_content",
+          ...reason,
+        });
+        assert.match(error.message, /no content/i);
+        return true;
+      },
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(new URL(calls[0]!).hostname, "models.internal");
+  });
+}
+
+test("Gemini streaming skips a contentless chunk and still completes", async (t) => {
+  isolate(t);
+  const model = chat(
+    async () =>
+      new Response(
+        [
+          response([{ text: "hello" }]),
+          { candidates: [{ finishReason: "SAFETY", index: 0 }] },
+        ]
+          .map((part) => `data: ${JSON.stringify(part)}\n\n`)
+          .join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  let content = "";
+  for await (const part of await model.stream("hello")) content += part.content;
+  assert.equal(content, "hello");
 });
 
 for (const status of [400, 429, 500]) {

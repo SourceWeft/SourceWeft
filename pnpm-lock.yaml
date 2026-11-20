@@ -65,9 +65,9 @@ patchedDependencies:
   '@google/generative-ai@0.24.1':
     hash: f1c04dafce852c24000cc45bf3d72d885167ceb003077316c2daddc8cf383cb5
     path: patches/@google__generative-ai@0.24.1.patch
-  '@langchain/google-genai@2.2.0':
-    hash: a8215683f614ea93d0d25e1a66717fa0f8ff56963f7559b0be3a2a596d6f26cd
-    path: patches/@langchain__google-genai@2.2.0.patch
+  '@langchain/google-genai@2.3.6':
+    hash: 3a208b6e8c1a6b48aad559fd1cee9c7b6bdec1a37ff097cc19c43b796b881f40
+    path: patches/@langchain__google-genai@2.3.6.patch
   deepagents@1.16.5:
     hash: 4d53ebd124c69a6dee10c3778d79646aa1c3eadf3f70341dfb1d476c915d788a
     path: patches/deepagents@1.16.5.patch
@@ -1958,8 +1958,8 @@ importers:
         specifier: ^1.1.7
         version: 1.1.7(@aws-sdk/credential-provider-node@3.972.79)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@smithy/signature-v4@5.7.0)(ws@8.21.3)
       '@langchain/google-genai':
-        specifier: 2.2.0
-        version: 2.2.0(patch_hash=a8215683f614ea93d0d25e1a66717fa0f8ff56963f7559b0be3a2a596d6f26cd)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))
+        specifier: 2.3.6
+        version: 2.3.6(patch_hash=3a208b6e8c1a6b48aad559fd1cee9c7b6bdec1a37ff097cc19c43b796b881f40)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))
       '@langchain/openai':
         specifier: 1.5.5
         version: 1.5.5(@aws-sdk/credential-provider-node@3.972.79)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@smithy/signature-v4@5.7.0)(ws@8.21.3)
@@ -3745,11 +3745,11 @@ packages:
     peerDependencies:
       '@langchain/core': ^1.0.0
 
-  '@langchain/google-genai@2.2.0':
-    resolution: {integrity: sha512-1mDqbmB6+iC6ZBQY15r5xJg9wPErnQ774inpKh6qi6BrrjadDwaPHoklJW5IXU94edKiDpm1akIzJCrQDWe6yA==}
+  '@langchain/google-genai@2.3.6':
+    resolution: {integrity: sha512-swtEcRAREBgxGUIWG8D49ePA0qEtUwkXpjdTRwPiMPBlyJ1LNkiWjh3Rs0QsyTAkJC3UJNl86Wsgs4gVmwhD5w==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@langchain/core': ^1.2.0
+      '@langchain/core': ^1.3.5
 
   '@langchain/langgraph-checkpoint-postgres@1.1.4':
     resolution: {integrity: sha512-ZP/4osFS/3x+54FrPO+W7wwEkT7cxFknr+QClnXsYuYxt81/5KiaDi4g3CEI+9bQXKbERlvQfXmp5dx470HiYw==}
@@ -13021,7 +13021,7 @@ snapshots:
       - '@smithy/signature-v4'
       - ws
 
-  '@langchain/google-genai@2.2.0(patch_hash=a8215683f614ea93d0d25e1a66717fa0f8ff56963f7559b0be3a2a596d6f26cd)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))':
+  '@langchain/google-genai@2.3.6(patch_hash=3a208b6e8c1a6b48aad559fd1cee9c7b6bdec1a37ff097cc19c43b796b881f40)(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))':
     dependencies:
       '@google/generative-ai': 0.24.1(patch_hash=f1c04dafce852c24000cc45bf3d72d885167ceb003077316c2daddc8cf383cb5)
       '@langchain/core': 1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@6.49.0(patch_hash=0d3f9cd63fe5407206060dce793e901c89b2ce168baf64a48f7d939ea5a078f8)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3)
