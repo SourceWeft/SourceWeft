@@ -577,7 +577,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       const networkOptions = resolveDaytonaNetworkPolicyOptions(
         input.networkPolicy,
       );
-      // TODO(skill-registry R0 §6b/§7.0): `@langchain/daytona@0.2.2`'s
+      // TODO(skill-registry R0 §6b/§7.0): `@langchain/daytona@0.2.3`'s
       // `DaytonaSandbox.initialize()` still only forwards a fixed field set
       // (image/snapshot, language, envVars, auto*Interval, labels, resources)
       // to the underlying `@daytona/sdk` `daytona.create()` and DROPS
