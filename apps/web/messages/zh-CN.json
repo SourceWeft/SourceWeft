@@ -1042,6 +1042,7 @@
       "all": "所有对话",
       "shared": "共享",
       "private": "私密",
+      "scheduled": "定时任务",
       "archived": "归档",
       "clearFilter": "清除{filter}筛选",
       "openActions": "打开对话操作",
@@ -1066,6 +1067,7 @@
       "filterEmpty": {
         "shared": "没有共享对话。",
         "private": "没有私密对话。",
+        "scheduled": "没有定时任务的结果。",
         "archived": "没有归档对话。"
       },
       "loading": "加载中…",
@@ -6741,6 +6743,16 @@
     },
     "composer": {
       "schedule": "按时间安排运行"
+    },
+    "threadNotice": {
+      "from": "来自定时任务“{name}”。",
+      "open": "打开任务",
+      "problem": {
+        "failed": "这次定时任务没有完成。",
+        "timedOut": "这次定时任务用时过长，已被停止。",
+        "cancelled": "这次定时任务已被停止。",
+        "needsApproval": "这次定时任务需要你的批准，而定时任务无法请求批准。"
+      }
     }
   }
 }

@@ -73,6 +73,15 @@ repeated click is the same run. Six an hour per task and twenty per person;
 past that the answer is 429 and nothing is queued. If the request dies before
 dispatching, the scheduler picks the slot up when its lease ends.
 
+## From a conversation back to its run
+
+`GET /v1/workspaces/:workspaceId/agent-task-runs/by-thread/:threadId` answers
+which scheduled run made a conversation and which task it belongs to, for the
+task's owner only (anyone else, and any ordinary conversation, gets a 404). The
+conversation page uses it for the notice at its top. A run carries `detail`
+(`timed_out`, `needs_approval`) in place of the stored error, which can hold
+free text and is never sent.
+
 ## Nobody is present
 
 The chat run is marked `unattended` and the turn pipeline applies

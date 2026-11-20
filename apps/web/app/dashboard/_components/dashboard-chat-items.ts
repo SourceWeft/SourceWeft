@@ -13,6 +13,7 @@ export type ChatThreadLike = {
   executionTarget?: ThreadExecutionTarget;
   parentThreadId?: string | null;
   personaId?: string | null;
+  origin?: ChatItem["origin"] | null;
   children?: ChatThreadLike[] | null;
 };
 
@@ -42,6 +43,7 @@ export function mapThreadToChatItem(item: ChatThreadLike): ChatItem {
     status: "ready",
     parentThreadId: item.parentThreadId ?? null,
     personaId: item.personaId ?? null,
+    ...(item.origin ? { origin: item.origin } : {}),
     // The sidebar nests one level, so a child's own children are dropped. The
     // key is only set when the response carried children: a single-thread
     // response has none, and spreading it over a list item must keep the

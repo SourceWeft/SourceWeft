@@ -11,6 +11,7 @@ import { useLocale, useTranslations } from "next-intl";
 import {
   Archive,
   Bot,
+  CalendarClock,
   ExternalLink,
   Link2,
   PanelRightOpen,
@@ -753,7 +754,9 @@ function ChatList({
       ? t("chats.shared")
       : filter === "archived"
         ? t("chats.archived")
-        : t("chats.private");
+        : filter === "scheduled"
+          ? t("chats.scheduled")
+          : t("chats.private");
 
   const handleClear = async () => {
     if (!onClear || isClearing) return;
@@ -892,6 +895,7 @@ function ChatList({
                   value === "all" ||
                   value === "shared" ||
                   value === "private" ||
+                  value === "scheduled" ||
                   value === "archived"
                 ) {
                   setFilter(value);
@@ -909,6 +913,10 @@ function ChatList({
               <DropdownMenuRadioItem value="private">
                 <Lock className="size-4" />
                 {t("chats.private")}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="scheduled">
+                <CalendarClock className="size-4" />
+                {t("chats.scheduled")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="archived">
                 <Archive className="size-4" />

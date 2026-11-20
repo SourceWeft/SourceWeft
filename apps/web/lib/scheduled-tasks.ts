@@ -52,6 +52,26 @@ export function useAgentTask(workspaceId: string | null, taskId: string) {
   });
 }
 
+/** The scheduled run behind a conversation, kept fresh while it is going. */
+export function useScheduledRunForThread(
+  workspaceId: string | null,
+  threadId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: [...scheduledKeys.all(workspaceId), "thread-run", threadId],
+    queryFn: () => agentTasksClient.findRunForThread(workspaceId!, threadId),
+    enabled: enabled && Boolean(workspaceId),
+    retry: false,
+    refetchInterval: (query) =>
+      ["pending", "dispatching", "queued"].includes(
+        query.state.data?.run.status ?? "",
+      )
+        ? 5_000
+        : false,
+  });
+}
+
 export function useAgentTaskRuns(workspaceId: string | null, taskId: string) {
   return useInfiniteQuery({
     queryKey: scheduledKeys.runs(workspaceId, taskId),

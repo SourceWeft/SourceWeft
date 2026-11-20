@@ -1042,6 +1042,7 @@
       "all": "All chats",
       "shared": "Shared",
       "private": "Private",
+      "scheduled": "Scheduled",
       "archived": "Archived",
       "clearFilter": "Clear {filter} filter",
       "openActions": "Open chat actions",
@@ -1066,6 +1067,7 @@
       "filterEmpty": {
         "shared": "No shared chats.",
         "private": "No private chats.",
+        "scheduled": "No scheduled results.",
         "archived": "No archived chats."
       },
       "loading": "Loading...",
@@ -6741,6 +6743,16 @@
     },
     "composer": {
       "schedule": "Run on a schedule"
+    },
+    "threadNotice": {
+      "from": "From the scheduled task “{name}”.",
+      "open": "Open task",
+      "problem": {
+        "failed": "This scheduled run did not finish.",
+        "timedOut": "This scheduled run took too long and was stopped.",
+        "cancelled": "This scheduled run was stopped.",
+        "needsApproval": "This scheduled run needs your approval, which a scheduled run cannot ask for."
+      }
     }
   }
 }

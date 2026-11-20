@@ -379,6 +379,16 @@ test("run now starts a manual run on a draft, once per click, without moving the
     [first.run.id],
   );
 
+  // The conversation leads back to its run and task, for its owner only.
+  const behind = await f.service.findRunForThread(caller, first.run.threadId!);
+  assert.equal(behind.run.id, first.run.id);
+  assert.equal(behind.task.name, task.name);
+  assert.equal(behind.run.detail, null);
+  assert.equal(
+    await refusal(() => f.service.findRunForThread(caller, randomUUID())),
+    "404 AGENT_TASK_NOT_FOUND",
+  );
+
   // A draft can be tried too; a finished trial is remembered on the task.
   const draft = await f.service.createTask(
     caller,
