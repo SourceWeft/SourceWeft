@@ -14,6 +14,7 @@ import { selectedModelCapabilities } from "../../_components/model-catalog-utils
 import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-skeleton";
 import type { ChatUiState } from "../../_components/chat-ui-state";
 import { ThreadDialogs } from "./thread-dialogs";
+import { ScheduledRunNotice } from "./scheduled-run-notice";
 import { ThreadHeader } from "./thread-header";
 import { ThreadPresenceAvatars } from "./thread-presence-avatars";
 import { ThreadTypingIndicator } from "./thread-typing-indicator";
@@ -169,6 +170,7 @@ export function DashboardChatThreadPageView({
   threadCitations,
   threadId,
   threadTitle,
+  isScheduledRun,
   parentThread,
   openParentThread,
   openThreadInNewWindow,
@@ -305,6 +307,9 @@ export function DashboardChatThreadPageView({
           />
 
           <LocalConversationNotice status={localStatus} />
+          {isScheduledRun ? (
+            <ScheduledRunNotice workspaceId={workspaceId} threadId={threadId} />
+          ) : null}
           {firstTurn.recovery && (
             <div role="alert" className="shrink-0 border-b px-4 py-3 text-sm">
               <p>{firstTurn.recovery.message}</p>

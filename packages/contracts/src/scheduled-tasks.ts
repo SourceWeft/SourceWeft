@@ -277,6 +277,8 @@ export const agentTaskRunSchema = z.object({
   status: scheduleOccurrenceStatusSchema,
   triggerKind: scheduleTriggerKindSchema,
   skipReason: scheduleSkipReasonSchema.nullable(),
+  /** Why a started run ended the way it did, when that is worth telling. */
+  detail: z.enum(["timed_out", "needs_approval"]).nullable(),
   /** The task version that ran; null for a slot that never started. */
   taskVersion: z.number().int().positive().nullable(),
   /** True when this run made up for a slot missed while the platform was down. */
@@ -287,6 +289,15 @@ export const agentTaskRunSchema = z.object({
   updatedAt: z.string(),
 });
 export type AgentTaskRun = z.infer<typeof agentTaskRunSchema>;
+
+/** The scheduled run that made a conversation, with the task it belongs to. */
+export const agentTaskRunForThreadResponseSchema = z.object({
+  run: agentTaskRunSchema,
+  task: z.object({ id: z.string(), name: z.string() }),
+});
+export type AgentTaskRunForThreadResponse = z.infer<
+  typeof agentTaskRunForThreadResponseSchema
+>;
 
 // ── Requests and responses ──────────────────────────────────────────────────
 

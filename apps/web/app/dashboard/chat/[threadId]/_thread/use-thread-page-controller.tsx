@@ -151,6 +151,7 @@ export function useThreadPageController({
   // look one level down as well as at the top level.
   const chatItem = findChatItem([...privateChats, ...sharedChats], threadId);
   const threadTitle = chatItem?.title ?? t("thread.fallbackTitle");
+  const isScheduledRun = chatItem?.origin === "scheduled";
   const parentThreadId = chatItem?.parentThreadId ?? null;
   // A sub-agent conversation shows where it came from. The parent's title is
   // whatever the sidebar currently knows, with a neutral fallback until then.
@@ -1501,6 +1502,7 @@ export function useThreadPageController({
     threadCitations,
     threadId,
     threadTitle,
+    isScheduledRun,
     parentThread,
     openParentThread,
     openThreadInNewWindow,

@@ -15,6 +15,7 @@ const service = vi.hoisted(() => ({
   activateTask: vi.fn(),
   runTaskNow: vi.fn(),
   listTaskRuns: vi.fn(),
+  findRunForThread: vi.fn(),
 }));
 const auth = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
@@ -224,4 +225,36 @@ test("the run history reads its page from the query", async () => {
     { limit: 5, cursor: "abc" },
   ]);
   assert.equal((await request("GET", "/task_1/runs?limit=500")).status, 400);
+});
+
+test("the run behind a conversation is read as the signed-in person, from the path", async () => {
+  service.findRunForThread.mockResolvedValue({
+    run: { id: "run_1" },
+    task: { id: "task_1", name: "Digest" },
+  });
+  const response = await app().request(
+    "/v1/workspaces/ws_1/agent-task-runs/by-thread/thread_1?userId=victim",
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(service.findRunForThread.mock.calls[0], [WHO, "thread_1"]);
+  const found = (await readJson(response)) as { task: { name: string } };
+  assert.equal(found.task.name, "Digest");
+
+  auth.requireSession.mockResolvedValue(null);
+  service.findRunForThread.mockClear();
+  const refused = await app().request(
+    "/v1/workspaces/ws_1/agent-task-runs/by-thread/thread_1",
+  );
+  assert.equal(refused.status, 401);
+  assert.equal(service.findRunForThread.mock.calls.length, 0);
+});
+
+test("a conversation that is not the caller's scheduled run answers 404", async () => {
+  service.findRunForThread.mockRejectedValue(
+    new AgentTaskError(404, "AGENT_TASK_NOT_FOUND", "Task not found"),
+  );
+  const response = await app().request(
+    "/v1/workspaces/ws_1/agent-task-runs/by-thread/thread_9",
+  );
+  assert.equal(response.status, 404);
 });

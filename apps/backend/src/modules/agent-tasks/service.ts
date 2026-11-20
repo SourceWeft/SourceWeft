@@ -25,6 +25,7 @@ import {
   countOccurrences,
   deleteTaskRow,
   findOccurrence,
+  findOccurrenceByThread,
   findOwnedTask,
   insertManualOccurrence,
   insertTask,
@@ -96,6 +97,12 @@ function presentRun(taskId: string, row: AgentTaskOccurrenceRow): AgentTaskRun {
     status: row.status,
     triggerKind: row.triggerKind,
     skipReason: row.skipReason,
+    detail:
+      row.lastError === "run_timeout"
+        ? "timed_out"
+        : row.lastError === "approval_requested"
+          ? "needs_approval"
+          : null,
     taskVersion: row.taskVersion,
     isCatchUp: row.isCatchUp,
     threadId: row.threadId,
@@ -637,6 +644,27 @@ export class AgentTaskService {
       runs: page.map((row) => presentRun(task.id, row)),
       nextCursor:
         rows.length > limit ? encodeRunsCursor(page[page.length - 1]!) : null,
+    };
+  }
+
+  /**
+   * The scheduled run that created a conversation, for the notice a person
+   * sees at the top of it. Only the task's owner finds it; any other
+   * conversation, or somebody else's, is a 404.
+   */
+  async findRunForThread(caller: Caller, threadId: string) {
+    await requireContentWorkspace(caller);
+    const found = await findOccurrenceByThread(threadId);
+    if (!found?.agentTaskId) throw notFound();
+    const owned = await findOwnedTask({
+      taskId: found.agentTaskId,
+      ownerUserId: caller.userId,
+      workspaceId: caller.workspaceId,
+    });
+    if (!owned) throw notFound();
+    return {
+      run: presentRun(owned.task.id, found.occurrence),
+      task: { id: owned.task.id, name: owned.task.name },
     };
   }
 

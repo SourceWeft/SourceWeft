@@ -1042,6 +1042,7 @@
       "all": "所有對話",
       "shared": "共享",
       "private": "私密",
+      "scheduled": "排程任務",
       "archived": "封存",
       "clearFilter": "清除{filter}篩選",
       "openActions": "開啟對話操作",
@@ -1066,6 +1067,7 @@
       "filterEmpty": {
         "shared": "沒有共享對話。",
         "private": "沒有私密對話。",
+        "scheduled": "沒有排程任務的結果。",
         "archived": "沒有已封存對話。"
       },
       "loading": "載入中…",
@@ -6741,6 +6743,16 @@
     },
     "composer": {
       "schedule": "按時間安排執行"
+    },
+    "threadNotice": {
+      "from": "來自排程任務「{name}」。",
+      "open": "開啟任務",
+      "problem": {
+        "failed": "這次排程任務沒有完成。",
+        "timedOut": "這次排程任務用時過長，已被停止。",
+        "cancelled": "這次排程任務已被停止。",
+        "needsApproval": "這次排程任務需要你的核准，而排程任務無法請求核准。"
+      }
     }
   }
 }

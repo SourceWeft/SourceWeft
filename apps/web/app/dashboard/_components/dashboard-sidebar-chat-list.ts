@@ -1,6 +1,6 @@
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
-export type SidebarChatFilter = "all" | "shared" | "private" | "archived";
+export type SidebarChatFilter = "all" | "shared" | "private" | "scheduled" | "archived";
 
 export function getSidebarChatItems({
   privateChats,
@@ -36,7 +36,11 @@ export function getSidebarChatItems({
       (item) =>
         filter === "all" ||
         filter === "archived" ||
-        (filter === "shared" ? isSharedChat(item) : !isSharedChat(item)),
+        (filter === "scheduled"
+          ? item.origin === "scheduled"
+          : filter === "shared"
+            ? isSharedChat(item)
+            : !isSharedChat(item)),
     )
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }

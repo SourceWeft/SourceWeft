@@ -696,6 +696,23 @@ export async function listTaskOccurrences(input: {
     .limit(input.limit);
 }
 
+/** The slot that started a conversation, and the task its schedule belongs to. */
+export async function findOccurrenceByThread(threadId: string) {
+  const [row] = await db
+    .select({
+      occurrence: scheduleOccurrences,
+      agentTaskId: taskSchedules.agentTaskId,
+    })
+    .from(scheduleOccurrences)
+    .innerJoin(
+      taskSchedules,
+      eq(taskSchedules.id, scheduleOccurrences.scheduleId),
+    )
+    .where(eq(scheduleOccurrences.threadId, threadId))
+    .limit(1);
+  return row ?? null;
+}
+
 /** Blocked tasks whose block has not been looked at since `checkedBefore`. */
 export async function listBlockedTasks(input: {
   checkedBefore: Date;

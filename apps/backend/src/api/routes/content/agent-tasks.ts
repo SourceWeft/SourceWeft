@@ -122,6 +122,18 @@ export function registerAgentTaskRoutes(app: Hono) {
     return ApiResponse.success(c, { run }, created ? 201 : 200);
   });
 
+  // Which scheduled run made this conversation; before `/agent-tasks/:id`
+  // routes could ever read the word "by-thread" as an id.
+  app.get("/agent-task-runs/by-thread/:threadId", async (c) =>
+    ApiResponse.success(
+      c,
+      await agentTaskService.findRunForThread(
+        await caller(c),
+        requireRouteParam(c, "threadId"),
+      ),
+    ),
+  );
+
   app.get("/agent-tasks/:id/runs", async (c) => {
     const who = await caller(c);
     const input = parse(listAgentTaskRunsRequestSchema, {

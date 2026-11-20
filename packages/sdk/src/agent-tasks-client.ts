@@ -1,5 +1,6 @@
 import type {
   AgentTaskResponse,
+  AgentTaskRunForThreadResponse,
   CreateAgentTaskRequest,
   ListAgentTaskRunsRequest,
   ListAgentTaskRunsResponse,
@@ -99,6 +100,13 @@ export class AgentTasksClient {
     const query = search.size ? `?${search.toString()}` : "";
     return this.http.get<ListAgentTaskRunsResponse>(
       `${this.item(workspaceId, taskId)}/runs${query}`,
+    );
+  }
+
+  /** The scheduled run that made a conversation, with its task; 404 if none. */
+  findRunForThread(workspaceId: string, threadId: string) {
+    return this.http.get<AgentTaskRunForThreadResponse>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/agent-task-runs/by-thread/${encodeURIComponent(threadId)}`,
     );
   }
 
