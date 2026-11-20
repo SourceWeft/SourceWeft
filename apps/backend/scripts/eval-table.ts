@@ -9,6 +9,14 @@
  *
  *   Writes `<out>/<setId>/run-<n>.json`. Never reads `reference.json`.
  *
+ *   `--chat-target deepinfra --structured-output as-production|strict` sends
+ *   the fill/merge calls (and the anchoring embeddings) to the production
+ *   DeepInfra route instead of the deployment's chat-default, built from code
+ *   constants and DEEPINFRA_API_KEY without reading the database
+ *   (`modules/tables/eval/deepinfra-target.ts`). `as-production` keeps
+ *   production's provider `supports` (no `json_schema_strict`); `strict` adds
+ *   it. Cost is the provider's reported `estimated_cost`, else unknown.
+ *
  * Scoring — compares runs with the human-labelled reference (no model call):
  *
  *   ... scripts/eval-table.ts --score --results <dir> [--judgments <file>] \
@@ -162,7 +170,15 @@ type CallRecord = {
   outputTokens?: number;
   reasoningTokens?: number;
   cacheReadTokens?: number;
+  /** How the gateway obtained the structured answer (strict json_schema, tool, …). */
+  structuredOutputMechanism?: string;
+  structuredOutputFallback?: string;
+  /** The cost the provider reported inline (DeepInfra `usage.estimated_cost`, OpenRouter `cost`). */
   reportedCostUsd: number | null;
+  reportedCost?: { source: string; status: string; inlineUsd?: number; effectiveUsd?: number };
+  /** The profile's price book; null when not looked up or not priced. */
+  priceBookCostUsd: number | null;
+  /** Reported cost when there is one, else the price book, else unknown. */
   costUsd: number | null;
   costSource: string | null;
 };
@@ -200,14 +216,7 @@ type RunFile = {
   run: number;
   startedAt: string;
   wallMs: number;
-  model: {
-    profileAlias: string;
-    modelAlias: string;
-    gatewayConfigId: string;
-    configVersionId: string;
-    routeTargets: { provider: string; model: string; priority?: number; ready: boolean }[];
-    embeddingProfileAlias: string;
-  };
+  model: TransportDescription;
   chunker: { parser: string; chunkSize: number; parserVersion: string };
   sources: { sourceId: string; title: string; file: string; chars: number; chunks: number; tokensEstimated: number }[];
   plan: { calls: number; cellsToFill: number; totalTokens: number; exceedsLimit: boolean };
@@ -242,33 +251,76 @@ const sumKnown = (values: (number | null)[]) =>
     ? null
     : values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
-/* -------------------------------------------------------------- generation */
+/* -------------------------------------------------------------- transports */
 
-async function generate(options: { setDirs: string[]; runs: number; out: string }) {
-  // Production modules are loaded only here: they read the environment and the
-  // database, which the scoring and size modes never need.
+type ChatRequest = import("@sourceweft/model-gateway").ChatCompleteInput;
+type ChatResult = import("@sourceweft/model-gateway").ChatCompleteResult;
+type EmbedResult = import("@sourceweft/model-gateway").EmbedBatchResult;
+type ThinkingConfig = import("@sourceweft/model-gateway").ThinkingConfig;
+
+type TransportDescription = {
+  /** `default-profile`: the deployment's chat-default; `deepinfra`: the production DeepInfra route. */
+  chatTarget: "default-profile" | "deepinfra";
+  structuredOutput: "as-configured" | "as-production" | "strict";
+  profileAlias: string;
+  modelAlias: string;
+  gatewayConfigId: string | null;
+  configVersionId: string;
+  routeTargets: { provider: string; model: string; priority?: number; ready: boolean }[];
+  thinking: ThinkingConfig | undefined;
+  embeddingProfileAlias: string;
+  embeddingTargets: { provider: string; model: string }[];
+  /** What this run read from the database to set up its transport. */
+  databaseReads: string[];
+};
+
+type CallCost = Pick<
+  CallRecord,
+  "reportedCostUsd" | "reportedCost" | "priceBookCostUsd" | "costUsd" | "costSource"
+>;
+
+/** How the evaluation reaches the chat and embedding models; never billed, never recorded. */
+type Transport = {
+  description: TransportDescription;
+  complete(input: ChatRequest, traceId: string): Promise<ChatResult>;
+  embed(texts: string[], traceId: string): Promise<EmbedResult>;
+  chatCost(result: ChatResult): Promise<CallCost>;
+  embeddingCost(result: EmbedResult): Promise<{ costUsd: number | null; costSource: string | null }>;
+};
+
+function reportedCostOf(cost: import("@sourceweft/model-gateway").ModelCallCost | undefined) {
+  const effective = cost?.effectiveUsd;
+  return {
+    reportedCostUsd: typeof effective === "number" && Number.isFinite(effective) ? effective : null,
+    ...(cost
+      ? {
+          reportedCost: {
+            source: cost.source,
+            status: cost.status,
+            ...(cost.inlineUsd === undefined ? {} : { inlineUsd: cost.inlineUsd }),
+            ...(cost.effectiveUsd === undefined ? {} : { effectiveUsd: cost.effectiveUsd }),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The deployment's default chat profile (and default embedding profile), read
+ * from the database the way production reads them, on a gateway client built
+ * from the same routed configuration without the observability sink.
+ */
+async function openDefaultProfileTransport(): Promise<Transport> {
   const [
     { createModelGateway },
-    { loadTableGeneration },
-    { resolveTableLanguage },
-    { createGroundedAnchorPort },
-    { figuresCovered },
-    { textSourceParser },
-    { defaultParsingConfig },
     { requireDefaultModelGatewayProfile },
     { buildRoutedModelGatewayConfig, loadRoutedGatewayConfig, assertGatewayConfigAvailable },
     { prepareEmbeddingProfile, validateEmbeddingResult },
     { resolveChatThinkingWithDefaults },
-    { computeProviderCost, reportedProviderCostUsd },
-    { isTableGenerationError, TableGenerationError },
+    { computeProviderCost },
+    { TableGenerationError },
   ] = await Promise.all([
     import("@sourceweft/model-gateway"),
-    import("../src/modules/tables/capability"),
-    import("../src/modules/tables/service"),
-    import("../src/modules/grounded-generation/anchor-port"),
-    import("../src/modules/citations/figures"),
-    import("../src/modules/sources/parsers/text"),
-    import("../src/modules/sources/parsing-config"),
     import("../src/shared/model-gateway/client"),
     import("../src/shared/model-gateway/runtime"),
     import("../src/shared/model-gateway/embedding-identity"),
@@ -276,7 +328,6 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
     import("../src/modules/content/provider-cost"),
     import("@sourceweft/contracts/table-capability"),
   ]);
-  const { estimateTokens } = await import("@sourceweft/grounded-generation");
 
   // The default chat model or nothing, as `describeDefaultChatModel` decides.
   let chatProfile: Awaited<ReturnType<typeof requireDefaultModelGatewayProfile>>;
@@ -290,27 +341,15 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
   assertGatewayConfigAvailable(routed, chatProfile.gatewayConfigId);
   const embedding = await prepareEmbeddingProfile();
 
-  // The tenant gateway configuration, minus the sink that records each call.
   const chatGateway = createModelGateway(buildRoutedModelGatewayConfig(routed, { observeSink: null }));
   const embeddingGateway = createModelGateway(
     buildRoutedModelGatewayConfig(embedding.routedConfig, { observeSink: null }),
-  );
-  const routeTargets = (routed.modelRoutes[chatProfile.modelAlias]?.targets ?? []).map((target) => ({
-    provider: target.provider,
-    model: target.model,
-    ...(target.priority === undefined ? {} : { priority: target.priority }),
-    ready: routed.providers[target.provider]?.globalReady ?? false,
-  }));
-  console.log(
-    `chat profile ${chatProfile.profileAlias} → model alias ${chatProfile.modelAlias}; route targets: ${
-      routeTargets.map((t) => `${t.provider}/${t.model}${t.ready ? "" : " (not ready)"}`).join(", ") || "none"
-    }; embedding ${embedding.profile.profileAlias}`,
   );
 
   // `enrichChatThinking` in billed-client.ts: thinking off, plus the
   // profile's synced thinking-support facts; a failed lookup keeps it as is.
   const thinkingOff = { mode: "off", enabled: false, includeReasoning: false } as const;
-  let thinking: Awaited<ReturnType<typeof resolveChatThinkingWithDefaults>> = thinkingOff;
+  let thinking: ThinkingConfig | undefined = thinkingOff;
   try {
     thinking = await resolveChatThinkingWithDefaults({
       thinking: thinkingOff,
@@ -322,31 +361,227 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
     console.warn("thinking-support lookup failed; thinking stays off as given", error);
   }
 
-  const parsingConfig = defaultParsingConfig();
-  const generation = await loadTableGeneration();
-
-  const costOf = async (
+  const priceBook = async (
     kind: "chat" | "embedding",
     profileAlias: string,
     gatewayConfigId: string,
-    result: { usage?: Parameters<typeof computeProviderCost>[0]["usage"]; observation?: { cost?: Parameters<typeof computeProviderCost>[0]["cost"] } },
+    result: ChatResult | EmbedResult,
   ) => {
-    const reported = reportedProviderCostUsd(result.observation?.cost) ?? null;
     try {
-      const cost = await computeProviderCost({
-        gatewayConfigId,
-        modelKind: kind,
-        profileAlias,
-        usage: result.usage,
-        cost: result.observation?.cost,
-      });
-      return { reportedCostUsd: reported, costUsd: cost.providerCostUsd, costSource: cost.costSource as string };
+      // No reported cost passed: this is the price book alone.
+      const cost = await computeProviderCost({ gatewayConfigId, modelKind: kind, profileAlias, usage: result.usage });
+      return { costUsd: cost.providerCostUsd, costSource: cost.costSource as string };
     } catch (error) {
-      // Unknown, not guessed: the run's total cost then reads as unknown.
-      console.warn("cost lookup failed", error);
-      return { reportedCostUsd: reported, costUsd: null, costSource: "lookup_failed" };
+      console.warn("price-book lookup failed", error);
+      return { costUsd: null, costSource: "lookup_failed" };
     }
   };
+
+  return {
+    description: {
+      chatTarget: "default-profile",
+      structuredOutput: "as-configured",
+      profileAlias: chatProfile.profileAlias,
+      modelAlias: chatProfile.modelAlias,
+      gatewayConfigId: chatProfile.gatewayConfigId,
+      configVersionId: routed.versionId,
+      routeTargets: (routed.modelRoutes[chatProfile.modelAlias]?.targets ?? []).map((target) => ({
+        provider: target.provider,
+        model: target.model,
+        ...(target.priority === undefined ? {} : { priority: target.priority }),
+        ready: routed.providers[target.provider]?.globalReady ?? false,
+      })),
+      thinking,
+      embeddingProfileAlias: embedding.profile.profileAlias,
+      embeddingTargets: (embedding.routedConfig.modelRoutes[embedding.profile.modelAlias]?.targets ?? []).map(
+        ({ provider, model }) => ({ provider, model }),
+      ),
+      databaseReads: [
+        "default chat profile",
+        "active routed gateway configuration",
+        "default embedding profile",
+        "chat profile thinking support",
+        "price book (per call)",
+      ],
+    },
+    complete: (input, traceId) => chatGateway.chat.complete(input, { traceId }),
+    async embed(texts, traceId) {
+      const profile = embedding.profile;
+      const result = await embeddingGateway.embeddings.embedBatch(
+        {
+          model: profile.profileAlias,
+          profileAlias: profile.profileAlias,
+          texts,
+          dimensions: profile.requestedDimensions ?? undefined,
+          executionMode: "GLOBAL",
+        },
+        { traceId },
+      );
+      validateEmbeddingResult(embedding.identity, result, result.embeddings);
+      return result;
+    },
+    async chatCost(result) {
+      const reported = reportedCostOf(result.observation?.cost);
+      const book = await priceBook("chat", chatProfile.profileAlias, chatProfile.gatewayConfigId, result);
+      return {
+        ...reported,
+        priceBookCostUsd: book.costUsd,
+        costUsd: reported.reportedCostUsd ?? book.costUsd,
+        costSource: reported.reportedCostUsd !== null ? "provider_reported" : book.costSource,
+      };
+    },
+    async embeddingCost(result) {
+      const reported = reportedCostOf(result.observation?.cost).reportedCostUsd;
+      if (reported !== null) return { costUsd: reported, costSource: "provider_reported" };
+      return priceBook("embedding", embedding.profile.profileAlias, embedding.profile.gatewayConfigId, result);
+    },
+  };
+}
+
+/**
+ * The production DeepInfra route (`buildDeepInfraEvalTarget`), built from
+ * code constants and DEEPINFRA_API_KEY alone: no database read. Fails before
+ * any model call if it cannot be built, and fails a call that any other target
+ * answered; it never falls back to the default profile.
+ */
+async function openDeepInfraTransport(structuredOutput: "as-production" | "strict"): Promise<Transport> {
+  const [
+    { createModelGateway },
+    { buildRoutedModelGatewayConfig },
+    { validateEmbeddingResult },
+    { buildDeepInfraEvalTarget },
+    { TableGenerationError },
+  ] = await Promise.all([
+    import("@sourceweft/model-gateway"),
+    import("../src/shared/model-gateway/runtime"),
+    import("../src/shared/model-gateway/embedding-identity"),
+    import("../src/modules/tables/eval/deepinfra-target"),
+    import("@sourceweft/contracts/table-capability"),
+  ]);
+  const target = buildDeepInfraEvalTarget({ apiKey: process.env.DEEPINFRA_API_KEY, structuredOutput });
+  let gateway: ReturnType<typeof createModelGateway>;
+  try {
+    gateway = createModelGateway(buildRoutedModelGatewayConfig(target.routed, { observeSink: null }));
+  } catch (error) {
+    throw new Error("--chat-target deepinfra: the DeepInfra gateway client could not be built", { cause: error });
+  }
+  const expect = (
+    what: string,
+    result: { provider?: string; providerModel?: string },
+    providerModel: string,
+  ) => {
+    if (result.provider !== "deepinfra" || result.providerModel !== providerModel) {
+      // A typed error ends the whole fill instead of failing one row.
+      throw new TableGenerationError(
+        "MODEL_UNAVAILABLE",
+        `--chat-target deepinfra: the ${what} call was answered by ${result.provider ?? "?"}/${result.providerModel ?? "?"}, not deepinfra/${providerModel}`,
+      );
+    }
+  };
+
+  return {
+    description: {
+      chatTarget: "deepinfra",
+      structuredOutput,
+      profileAlias: target.chat.profileAlias,
+      modelAlias: target.chat.modelAlias,
+      gatewayConfigId: null,
+      configVersionId: target.routed.versionId,
+      routeTargets: target.routed.modelRoutes[target.chat.modelAlias]!.targets.map((t) => ({
+        provider: t.provider,
+        model: t.model,
+        ...(t.priority === undefined ? {} : { priority: t.priority }),
+        ready: true,
+      })),
+      thinking: target.chat.thinking,
+      embeddingProfileAlias: target.embedding.profileAlias,
+      embeddingTargets: target.routed.modelRoutes[target.embedding.profileAlias]!.targets.map(
+        ({ provider, model }) => ({ provider, model }),
+      ),
+      databaseReads: [],
+    },
+    async complete(input, traceId) {
+      const result = await gateway.chat.complete(input, { traceId });
+      expect("chat", result, target.chat.providerModel);
+      return result;
+    },
+    async embed(texts, traceId) {
+      const result = await gateway.embeddings.embedBatch(
+        {
+          model: target.embedding.profileAlias,
+          profileAlias: target.embedding.profileAlias,
+          texts,
+          dimensions: target.embedding.requestedDimensions,
+          executionMode: "GLOBAL",
+        },
+        { traceId },
+      );
+      expect("embedding", result, target.embedding.providerModel);
+      validateEmbeddingResult(target.embedding.identity, result, result.embeddings);
+      return result;
+    },
+    // No price book without the database: the reported cost or unknown.
+    async chatCost(result) {
+      const reported = reportedCostOf(result.observation?.cost);
+      return {
+        ...reported,
+        priceBookCostUsd: null,
+        costUsd: reported.reportedCostUsd,
+        costSource: reported.reportedCostUsd !== null ? "provider_reported" : null,
+      };
+    },
+    async embeddingCost(result) {
+      const reported = reportedCostOf(result.observation?.cost).reportedCostUsd;
+      return { costUsd: reported, costSource: reported !== null ? "provider_reported" : null };
+    },
+  };
+}
+
+/* -------------------------------------------------------------- generation */
+
+async function generate(options: {
+  setDirs: string[];
+  runs: number;
+  out: string;
+  chatTarget: { kind: "default-profile" } | { kind: "deepinfra"; structuredOutput: "as-production" | "strict" };
+}) {
+  // Production modules are loaded only here: they read the environment, which
+  // the scoring and size modes never need.
+  const [
+    { loadTableGeneration },
+    { resolveTableLanguage },
+    { createGroundedAnchorPort },
+    { figuresCovered },
+    { textSourceParser },
+    { defaultParsingConfig },
+    { isTableGenerationError },
+    { estimateTokens },
+  ] = await Promise.all([
+    import("../src/modules/tables/capability"),
+    import("../src/modules/tables/service"),
+    import("../src/modules/grounded-generation/anchor-port"),
+    import("../src/modules/citations/figures"),
+    import("../src/modules/sources/parsers/text"),
+    import("../src/modules/sources/parsing-config"),
+    import("@sourceweft/contracts/table-capability"),
+    import("@sourceweft/grounded-generation"),
+  ]);
+
+  const transport =
+    options.chatTarget.kind === "deepinfra"
+      ? await openDeepInfraTransport(options.chatTarget.structuredOutput)
+      : await openDefaultProfileTransport();
+  const described = transport.description;
+  console.log(
+    `chat target ${described.chatTarget} (${described.profileAlias}): ${
+      described.routeTargets.map((t) => `${t.provider}/${t.model}${t.ready ? "" : " (not ready)"}`).join(", ") || "none"
+    }; structured output ${described.structuredOutput}; embedding ${
+      described.embeddingTargets.map((t) => `${t.provider}/${t.model}`).join(", ") || "none"
+    }; database reads: ${described.databaseReads.join(", ") || "none"}`,
+  );
+
+  const parsingConfig = defaultParsingConfig();
+  const generation = await loadTableGeneration();
 
   // Load every set and refuse to overwrite earlier results before spending anything.
   const loaded = [];
@@ -442,20 +677,20 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
         }) {
           const started = Date.now();
           try {
-            const completion = await chatGateway.chat.complete(
+            const completion = await transport.complete(
               {
-                model: chatProfile.modelAlias,
-                profileAlias: chatProfile.profileAlias,
+                model: described.modelAlias,
+                profileAlias: described.profileAlias,
                 messages: [
                   { role: "system", content: call.system },
                   { role: "user", content: call.user },
                 ],
                 structuredOutput: call.schema,
-                ...(thinking ? { thinking } : {}),
+                ...(described.thinking ? { thinking: described.thinking } : {}),
                 maxTokens: call.maxTokens,
                 temperature: 0.2,
               },
-              { traceId },
+              traceId,
             );
             calls.push({
               operation: call.operation,
@@ -469,7 +704,15 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
               ...(completion.usage?.outputTokens === undefined ? {} : { outputTokens: completion.usage.outputTokens }),
               ...(completion.usage?.reasoningTokens === undefined ? {} : { reasoningTokens: completion.usage.reasoningTokens }),
               ...(completion.usage?.cacheReadTokens === undefined ? {} : { cacheReadTokens: completion.usage.cacheReadTokens }),
-              ...(await costOf("chat", chatProfile.profileAlias, chatProfile.gatewayConfigId, completion)),
+              ...(completion.structuredOutputDiagnostics
+                ? {
+                    structuredOutputMechanism: completion.structuredOutputDiagnostics.mechanism,
+                    ...(completion.structuredOutputDiagnostics.fallbackReason
+                      ? { structuredOutputFallback: completion.structuredOutputDiagnostics.fallbackReason }
+                      : {}),
+                  }
+                : {}),
+              ...(await transport.chatCost(completion)),
             });
             return completion.structuredOutput;
           } catch (error) {
@@ -480,6 +723,7 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
               ok: false,
               error: error instanceof Error ? error.message : String(error),
               reportedCostUsd: null,
+              priceBookCostUsd: null,
               costUsd: null,
               costSource: null,
             });
@@ -491,20 +735,9 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
       const anchor = createGroundedAnchorPort({
         embedTexts: async (texts) => {
           const started = Date.now();
-          const profile = embedding.profile;
           try {
-            const result = await embeddingGateway.embeddings.embedBatch(
-              {
-                model: profile.profileAlias,
-                profileAlias: profile.profileAlias,
-                texts,
-                dimensions: profile.requestedDimensions ?? undefined,
-                executionMode: "GLOBAL",
-              },
-              { traceId },
-            );
-            validateEmbeddingResult(embedding.identity, result, result.embeddings);
-            const cost = await costOf("embedding", profile.profileAlias, profile.gatewayConfigId, result);
+            const result = await transport.embed(texts, traceId);
+            const cost = await transport.embeddingCost(result);
             embeddings.push({
               ms: Date.now() - started,
               texts: texts.length,
@@ -550,7 +783,7 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
             sources: sourceInputs,
             language,
             ...(instruction ? { instruction } : {}),
-            modelAlias: chatProfile.modelAlias,
+            modelAlias: described.modelAlias,
             recipe: {
               ...(instruction ? { instruction } : {}),
               columns: columns.map(({ id, name, description, type }) => ({
@@ -618,14 +851,7 @@ async function generate(options: { setDirs: string[]; runs: number; out: string 
         run,
         startedAt: startedAt.toISOString(),
         wallMs,
-        model: {
-          profileAlias: chatProfile.profileAlias,
-          modelAlias: chatProfile.modelAlias,
-          gatewayConfigId: chatProfile.gatewayConfigId,
-          configVersionId: routed.versionId,
-          routeTargets,
-          embeddingProfileAlias: embedding.profile.profileAlias,
-        },
+        model: described,
         chunker: {
           parser: "modules/sources/parsers/text.ts → @sourceweft/builtin-document-parsers chunkSourceContent",
           chunkSize: parsingConfig.chunkSize,
@@ -863,6 +1089,8 @@ const { values: cli } = parseArgs({
     judgments: { type: "string" },
     size: { type: "boolean" },
     db: { type: "boolean" },
+    "chat-target": { type: "string" },
+    "structured-output": { type: "string" },
   },
   strict: true,
 });
@@ -870,6 +1098,7 @@ const { values: cli } = parseArgs({
 function usage(message: string): never {
   console.error(`${message}\n\nUsage:
   eval-table.ts --set <dir> [--set <dir> ...] --runs <n> --out <dir>
+                [--chat-target deepinfra --structured-output as-production|strict]
   eval-table.ts --score --results <dir> [--judgments <file>] [--set <dir> ...] --out <report.md>
   eval-table.ts --size --out <report.md> [--db]`);
   process.exit(2);
@@ -893,7 +1122,27 @@ try {
     if (setDirs.length === 0) usage("at least one --set is required");
     const runs = Number.parseInt(cli.runs ?? "", 10);
     if (!Number.isInteger(runs) || runs < 1) usage("--runs must be a positive integer");
-    await generate({ setDirs, runs, out });
+    const chatTarget = cli["chat-target"];
+    const structuredOutput = cli["structured-output"];
+    if (chatTarget !== undefined && chatTarget !== "deepinfra") {
+      usage("--chat-target accepts only deepinfra");
+    }
+    if (chatTarget === undefined && structuredOutput !== undefined) {
+      usage("--structured-output applies only with --chat-target");
+    }
+    if (chatTarget && structuredOutput !== "as-production" && structuredOutput !== "strict") {
+      // No default: production DeepInfra does not declare json_schema_strict,
+      // so the choice between matching it and forcing strict output is explicit.
+      usage("--chat-target deepinfra needs --structured-output as-production or strict");
+    }
+    await generate({
+      setDirs,
+      runs,
+      out,
+      chatTarget: chatTarget
+        ? { kind: "deepinfra", structuredOutput: structuredOutput as "as-production" | "strict" }
+        : { kind: "default-profile" },
+    });
   }
   process.exit(0);
 } catch (error) {
