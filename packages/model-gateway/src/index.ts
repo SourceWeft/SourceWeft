@@ -59,6 +59,7 @@ export {
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
 export { resolveThinkingMode } from "./thinking";
 export { normalizeModelCallObservation } from "./observation/normalize";
+export { finishReasonFromResponseMetadata } from "./normalize/finish-reason";
 export type {
   ModelCallCost,
   ModelCallCostSource,

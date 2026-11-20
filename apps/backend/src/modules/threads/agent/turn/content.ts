@@ -1,3 +1,4 @@
+import { finishReasonFromResponseMetadata } from "../../../../shared/model-gateway/finish-reason";
 import { toObjectRecord } from "../../../../shared/records";
 export function extractTextDeltas(content: unknown): string[] {
   if (typeof content === "string") {
@@ -96,15 +97,8 @@ export function isAssistantMessageLike(message: unknown): boolean {
 }
 
 export function extractFinishReasonFromMessageChunk(chunk: unknown) {
-  const record = toObjectRecord(chunk);
-  const responseMetadata = toObjectRecord(record?.response_metadata);
-  return (
-    (typeof responseMetadata?.finish_reason === "string"
-      ? responseMetadata.finish_reason
-      : undefined) ??
-    (typeof responseMetadata?.finishReason === "string"
-      ? responseMetadata.finishReason
-      : undefined)
+  return finishReasonFromResponseMetadata(
+    toObjectRecord(chunk)?.response_metadata,
   );
 }
 

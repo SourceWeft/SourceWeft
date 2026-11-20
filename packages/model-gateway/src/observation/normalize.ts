@@ -115,13 +115,6 @@ export function finalizeUsage(
   return compactUsage(finalized);
 }
 
-function normalizedSdkUsage(input: unknown) {
-  if (!isRecord(input)) {
-    return undefined;
-  }
-  return normalizeOpenAICompatibleUsage(input);
-}
-
 /**
  * Anthropic's own usage object cannot be read like an OpenAI-compatible one.
  * Its `input_tokens` leaves out the tokens read from and written to the prompt
@@ -135,18 +128,29 @@ function reportsUsageThroughLangChain(target: ResolvedRequestTarget) {
   return target.providerKind === "anthropic";
 }
 
+/**
+ * Usage as the SDK reports it. That is LangChain's `usage_metadata` when the
+ * message has one, which names the cached and reasoning tokens `cache_read`,
+ * `cache_creation` and `reasoning` where a provider's own usage object says
+ * `cached_tokens` and `reasoning_tokens`. A reply with no provider usage
+ * object to read (a non-streamed Responses API reply) has only this.
+ */
 function normalizeLangChainUsage(input: unknown): UsageInfo | undefined {
-  const usage = normalizedSdkUsage(input);
+  const usage = normalizeOpenAICompatibleUsage(input);
   if (!usage || !isRecord(input)) {
     return usage;
   }
-  const details = input.input_token_details;
+  const inputDetails = input.input_token_details;
+  const reasoningTokens =
+    detailsNumber(input.output_token_details, "reasoning") ??
+    usage.reasoningTokens;
   return {
     ...usage,
     cacheReadTokens:
-      detailsNumber(details, "cache_read") ?? usage.cacheReadTokens,
+      detailsNumber(inputDetails, "cache_read") ?? usage.cacheReadTokens,
     cacheWriteTokens:
-      detailsNumber(details, "cache_creation") ?? usage.cacheWriteTokens,
+      detailsNumber(inputDetails, "cache_creation") ?? usage.cacheWriteTokens,
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
   };
 }
 
@@ -204,7 +208,7 @@ export function normalizeModelCallObservation(input: {
   const protocolUsage = sdkOnly
     ? normalizeLangChainUsage(input.context.sdkUsage)
     : (normalizeOpenAICompatibleUsage(rawUsage) ??
-      normalizedSdkUsage(input.context.sdkUsage));
+      normalizeLangChainUsage(input.context.sdkUsage));
   const base: ModelCallObservation = {
     identity: {
       modelAlias: input.modelAlias,
