@@ -59,7 +59,7 @@
     "@langchain/langgraph-checkpoint": "^1.2.3",
     "@langchain/langgraph-checkpoint-postgres": "^1.1.4",
     "@langchain/mcp-adapters": "2.0.3",
-    "@langchain/openai": "1.5.5",
+    "@langchain/openai": "1.8.4",
     "@langchain/quickjs": "0.6.7",
     "@modelcontextprotocol/client": "2.4.0",
     "@octokit/core": "^7.0.8",

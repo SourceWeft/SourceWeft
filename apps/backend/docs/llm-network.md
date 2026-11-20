@@ -133,7 +133,7 @@ does not invent capabilities or prices for unknown local model IDs. Static
 profiles with manual pricing do not need remote catalog discovery. Local
 deployment does not itself change the application's billing policy.
 
-This path uses a fixed `openai@6.49.0` patch for explicit no-auth construction
+This path uses a fixed `openai@7.55.0` patch for explicit no-auth construction
 and header validation, plus isolation from ambient custom headers. LangChain
 continues to own request conversion, tools, streaming, retries and embeddings.
 Keep the patch and version pin when deploying; see [patch maintenance](../../../patches/README.md).

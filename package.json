@@ -28,7 +28,7 @@
   "pnpm": {
     "overrides": {
       "@google/generative-ai": "0.24.1",
-      "openai": "6.49.0",
+      "openai": "7.55.0",
       "fast-uri": "^3.1.9",
       "body-parser@2": "^2.4.0",
       "qs": "6.16.1",
@@ -107,7 +107,7 @@
     "patchedDependencies": {
       "@google/generative-ai@0.24.1": "patches/@google__generative-ai@0.24.1.patch",
       "@langchain/google-genai@2.3.6": "patches/@langchain__google-genai@2.3.6.patch",
-      "openai@6.49.0": "patches/openai@6.49.0.patch",
+      "openai@7.55.0": "patches/openai@7.55.0.patch",
       "streamdown@2.5.0": "patches/streamdown@2.5.0.patch",
       "@anthropic-ai/sandbox-runtime@0.0.81": "patches/@anthropic-ai__sandbox-runtime@0.0.81.patch",
       "deepagents@1.16.5": "patches/deepagents@1.16.5.patch"
