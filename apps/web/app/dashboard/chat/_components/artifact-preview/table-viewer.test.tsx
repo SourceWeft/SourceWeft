@@ -485,7 +485,7 @@ describe("TableArtifactView", () => {
   }
 
   it("shows progress while generating", async () => {
-    await mount(withHost(recordingHost().host, view({ status: "running" }, { table: { progress: { completed: 7, total: 20 } } })));
+    await mount(withHost(recordingHost().host, view({ status: "running" }, { table: { progress: { stage: "fill", done: 7, total: 20 } } })));
     expect(text()).toContain("table.status.generating completed=7 total=20");
     await unmountAll();
     await mount(withHost(recordingHost().host, view({ status: "pending" }, {})));

@@ -20,10 +20,13 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** `payload.table.progress` while generating; tolerant of anything else. */
+/**
+ * `payload.table.progress` (`{ stage, done, total }`, written by the
+ * generation job) while generating; tolerant of anything else.
+ */
 function readProgress(payload: Record<string, unknown>) {
   const progress = record(record(payload.table)?.progress);
-  const completed = progress?.completed;
+  const completed = progress?.done;
   const total = progress?.total;
   return typeof completed === "number" && typeof total === "number" && total > 0
     ? { completed: Math.min(completed, total), total }

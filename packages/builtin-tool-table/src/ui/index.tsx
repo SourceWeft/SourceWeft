@@ -28,6 +28,14 @@ export const tableArtifactUi: ArtifactUiModule = {
   preview: tablePreview,
 };
 
+export { ColumnEditor, type ColumnEditorProps } from "./column-editor";
+export {
+  blankTableColumn,
+  cleanColumns,
+  columnsProblem,
+  mergeSuggestedColumns,
+  type ColumnsProblem,
+} from "./column-inputs";
 export { TableArtifactView } from "./table-artifact-view";
 export { TableViewer } from "./table-viewer";
 export {

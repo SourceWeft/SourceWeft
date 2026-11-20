@@ -48,7 +48,11 @@ import { McpIcon, SkillIcon } from "../../../../_components/site-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";
-import { minimalSourceItem, type SourceItem } from "../source-types";
+import {
+  expandSelectedSources,
+  minimalSourceItem,
+  type SourceItem,
+} from "../source-types";
 import { artifactMatchesQuery } from "./artifacts";
 import { ManageConnectorsDialog } from "./connectors/manage-dialog";
 import { ConnectorSettingsDialog } from "./connectors/settings-dialog";
@@ -107,6 +111,7 @@ import { useWorkfiles, workfileMatchesQuery } from "./workfiles/use-workfiles";
 import type { ArtifactListItem, ArtifactSummaryItem } from "./types";
 import { useConnectorSyncRuns } from "./use-connector-sync-runs";
 import { getErrorMessage } from "./lib/errors";
+import { GenerateMenu } from "./generate/generate-menu";
 
 export { ArtifactPreviewPanel } from "../artifact-preview/artifact-preview-panel";
 export type { ArtifactListItem, ArtifactSummaryItem } from "./types";
@@ -754,6 +759,39 @@ export function SourcesHub({
     [onArtifactOpen, workspaceId, t],
   );
 
+  // What "Generate" works from: the selection with folders expanded to the
+  // documents inside them.
+  const generateSources = useMemo(
+    () =>
+      expandSelectedSources(sources, selectedIds)
+        .filter((source) => source.sourceType !== "directory")
+        .map((source) => ({ id: source.id, title: source.title })),
+    [selectedIds, sources],
+  );
+
+  // Opens what a Generate entry queued. The hub's artifact list re-reads
+  // itself whenever its tab is shown, so the new artifact is listed there.
+  const handleGenerated = useCallback(
+    async (artifactId: string) => {
+      if (!workspaceId || !onArtifactOpen) {
+        return;
+      }
+      const activeWorkspaceId = workspaceId;
+      try {
+        const { artifact } = await contentClient.getArtifact(
+          activeWorkspaceId,
+          artifactId,
+        );
+        if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+          onArtifactOpen(artifact);
+        }
+      } catch (error) {
+        toast.error(getErrorMessage(error, t("generate.openFailed")));
+      }
+    },
+    [onArtifactOpen, workspaceId, t],
+  );
+
   const editing = Boolean(
     addSourceDialog.isOpen ||
     editingSourceId ||
@@ -1050,6 +1088,12 @@ export function SourcesHub({
                     <FolderPlus className="size-3.5" />
                     <span className="sr-only">{t("sources.createFolder")}</span>
                   </Button>
+                  <GenerateMenu
+                    onCreated={(artifactId) => void handleGenerated(artifactId)}
+                    sources={generateSources}
+                    threadId={mode === "thread" ? threadId : null}
+                    workspaceId={workspaceId}
+                  />
                   <Button
                     disabled={!workspaceId}
                     onClick={() => addSourceDialog.open(null)}

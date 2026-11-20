@@ -3074,7 +3074,16 @@
       "awaitingApproval": "Waiting for approval",
       "couldNotLoad": "Could not load the artifact.",
       "loadFailed": "Failed to load artifacts.",
-      "loadMoreFailed": "Failed to load more artifacts."
+      "loadMoreFailed": "Failed to load more artifacts.",
+      "types": {
+        "audio_overview": "Audio",
+        "video_overview": "Video",
+        "video_presentation": "Video presentation",
+        "table": "Table",
+        "flashcards": "Flashcards",
+        "quiz": "Quiz",
+        "mindmap": "Mind map"
+      }
     },
     "skills": {
       "gallery": "Skills gallery",
@@ -3794,6 +3803,14 @@
         "oauthAccountInUse": "This authorization is attached to another connector and cannot be deleted safely.",
         "removeFailed": "Failed to remove connector."
       }
+    },
+    "generate": {
+      "button": "Generate",
+      "menu": "Generate from the selected sources",
+      "needsSelection": "Select sources to generate from",
+      "needsThread": "Start a conversation to generate from sources",
+      "openFailed": "The table was queued, but it couldn't be opened. Find it under Artifacts.",
+      "table": "Data table"
     }
   },
   "dashboardBlogAdmin": {
@@ -5975,6 +5992,68 @@
       "copied": "Copied",
       "source": "Source",
       "evidenceSuffix": "source quote"
+    },
+    "editor": {
+      "label": "Columns",
+      "name": "Column {position} name",
+      "namePlaceholder": "Column name, e.g. Price",
+      "description": "Column {position} description",
+      "descriptionPlaceholder": "What to look for in each source (optional)",
+      "type": "Column {position} value type",
+      "types": {
+        "text": "Text",
+        "number": "Number",
+        "date": "Date",
+        "boolean": "Yes / no"
+      },
+      "add": "Add column",
+      "remove": "Remove column {position}",
+      "max": "A table has at most {max} columns."
+    },
+    "generate": {
+      "title": "Generate a data table",
+      "regenerateTitle": "Adjust and regenerate",
+      "description": "One row per source and one column per question. Every value comes with a quote from its source.",
+      "sources": "{count, plural, one {# source} other {# sources}}",
+      "moreSources": "+{count} more",
+      "instruction": "What do you want to compare? (optional)",
+      "instructionPlaceholder": "e.g. Compare pricing and warranty terms",
+      "columns": "Columns",
+      "suggest": "Suggest columns",
+      "suggesting": "Suggesting…",
+      "problems": {
+        "none": "Add at least one column.",
+        "nameMissing": "Every column needs a name.",
+        "tooMany": "A table has at most {max} columns.",
+        "tooManySources": "A table compares at most {max} sources. Select fewer sources.",
+        "tooManyCells": "{sources} sources × {columns} columns is {cells} cells; a table holds at most {max}. Use fewer sources or columns."
+      },
+      "estimate": {
+        "loading": "Estimating the size…",
+        "summary": "{sources, plural, one {# source} other {# sources}} · {cells, plural, one {# cell} other {# cells}} to fill",
+        "skipped": "{count, plural, one {# source is} other {# sources are}} not indexed yet and will be skipped.",
+        "exceedsLimit": "The selected sources are too large for one table. Choose fewer or shorter sources.",
+        "failed": "Couldn't estimate the size of this table."
+      },
+      "submit": "Generate table",
+      "regenerateSubmit": "Regenerate",
+      "cancel": "Cancel",
+      "started": "Generating the table. It will also appear under Artifacts.",
+      "reused": "This table is already being generated.",
+      "regenerating": "Regenerating the table. The current version stays until the new one is ready.",
+      "errors": {
+        "TABLE_TOO_MANY_RUNNING": "Too many tables and study sets are generating at once. Wait for one to finish.",
+        "TABLE_NOT_READY": "Only a finished table can be regenerated.",
+        "TABLE_CONTENT_UNREADABLE": "This table can't be read, so it can't be regenerated.",
+        "TABLE_REGENERATION_IN_PROGRESS": "This table is already being regenerated.",
+        "VALIDATION_ERROR": "Check the columns and sources, then try again.",
+        "THREAD_NOT_FOUND": "This conversation is no longer available.",
+        "ARTIFACT_NOT_FOUND": "This table no longer exists.",
+        "recipeUnavailable": "This table can't be adjusted. Generate a new table from the source hub.",
+        "loadFailed": "Couldn't open this table for regeneration.",
+        "suggestFailed": "Couldn't suggest columns. Try again.",
+        "generic": "Couldn't generate the table. Try again."
+      }
     }
   },
   "mobileRouteSheet": {

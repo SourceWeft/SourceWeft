@@ -204,7 +204,11 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                 ) : null}
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
+                <TypeBadge
+                  label={artifactTypeLabel(artifact.artifactType, (key) =>
+                    t(key),
+                  )}
+                />
                 <TypeBadge label={artifact.status} />
                 {artifact.isPublic ? (
                   <TypeBadge label={t("artifacts.public")} tone="public" />

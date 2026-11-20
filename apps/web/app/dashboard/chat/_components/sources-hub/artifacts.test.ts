@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   artifactMatchesQuery,
   artifactPreviewImageMetadata,
+  artifactTypeLabel,
   resolveArtifactDownloadUrl,
   resolveArtifactPageUrl,
   resolveArtifactPreviewImageProxyUrl,
@@ -174,4 +175,17 @@ test("artifact URL helpers respect file capabilities", () => {
     "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
   );
   assert.equal(resolveArtifactDownloadUrl({ artifact: videoProject }), null);
+});
+
+test("artifact type labels name tables and study sets and follow the catalog when given", () => {
+  assert.equal(artifactTypeLabel("table"), "Table");
+  assert.equal(artifactTypeLabel("mindmap"), "Mind map");
+  assert.equal(artifactTypeLabel("flashcards"), "Flashcards");
+  assert.equal(artifactTypeLabel("quiz"), "Quiz");
+  assert.equal(artifactTypeLabel("audio_overview"), "Audio");
+  assert.equal(
+    artifactTypeLabel("table", (key) => `[${key}]`),
+    "[artifacts.types.table]",
+  );
+  assert.equal(artifactTypeLabel("html", (key) => `[${key}]`), "Html");
 });

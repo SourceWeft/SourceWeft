@@ -57,8 +57,9 @@ export type TableHost = {
 };
 
 /**
- * Every translation key the viewer asks the host for, so an app can check its
- * catalogs cover them. `table.error.code.<code>` is listed once per code.
+ * Every translation key the viewer asks the host for, and the column editor
+ * asks its `t` for, so an app can check its catalogs cover them.
+ * `table.error.code.<code>` is listed once per code.
  */
 export const TABLE_TRANSLATION_KEYS = [
   "table.summary",
@@ -105,6 +106,20 @@ export const TABLE_TRANSLATION_KEYS = [
   "table.export.copied",
   "table.export.source",
   "table.export.evidenceSuffix",
+  // The column editor (generate and regenerate dialogs).
+  "table.editor.label",
+  "table.editor.name",
+  "table.editor.namePlaceholder",
+  "table.editor.description",
+  "table.editor.descriptionPlaceholder",
+  "table.editor.type",
+  "table.editor.types.text",
+  "table.editor.types.number",
+  "table.editor.types.date",
+  "table.editor.types.boolean",
+  "table.editor.add",
+  "table.editor.remove",
+  "table.editor.max",
 ] as const;
 
 /** Without translations the key itself is shown. */

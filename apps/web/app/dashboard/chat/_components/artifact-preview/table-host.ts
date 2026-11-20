@@ -7,6 +7,8 @@ import {
   type TableHost,
   type TableTranslate,
 } from "@sourceweft/builtin-tool-table/ui";
+import { contentClient } from "../../../../../lib/sdk";
+import { requestTableRegenerate } from "../table-generate/table-regenerate-store";
 import { openGroundedEvidenceSource } from "./grounded-evidence-source";
 
 const NAMESPACE = "table";
@@ -16,7 +18,7 @@ const NAMESPACE = "table";
  * locales). The namespace is passed as a literal so the per-route message
  * subsets (`i18n/client-messages.ts`) can see which routes need it.
  */
-function useTableTranslate(): TableTranslate {
+export function useTableTranslate(): TableTranslate {
   const t = useTranslations("table");
   return useCallback(
     (key, values) =>
@@ -31,10 +33,11 @@ function useTableTranslate(): TableTranslate {
 }
 
 /**
- * The app's side of the table viewer. Opening a source at a quote is real;
- * checking a quote against the current source text, freshness and regeneration
- * arrive with the generation API, so until then the viewer shows each quote
- * as stored and offers no regenerate control.
+ * The app's side of the table viewer. Opening a source at a quote, freshness
+ * and regeneration are real: regenerating opens the generate dialog
+ * pre-filled from the table's recipe (`TableRegenerateDialogHost`, mounted
+ * next to every capability-owned preview). Checking a quote against the
+ * current source text is not available yet, so each quote shows as stored.
  */
 export const webTableHost: TableHost = {
   interactive: true,
@@ -42,5 +45,7 @@ export const webTableHost: TableHost = {
   openSourceAtEvidence: openGroundedEvidenceSource,
   currentQuoteHash: () =>
     Promise.reject(new Error("Checking a quote against its source is not available yet")),
+  getFreshness: (ref) => contentClient.getTableFreshness(ref.workspaceId, ref.artifactId),
   downloadFile: browserDownload,
+  onRegenerate: requestTableRegenerate,
 };

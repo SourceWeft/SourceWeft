@@ -82,6 +82,7 @@ export function ArtifactPreviewPanel({
 }) {
   const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardChatFiles");
+  const tHub = useTranslations("dashboardSourcesHub");
   const pageUrl = resolveArtifactPageUrl({ artifact, workspaceId });
   const proxyFileUrl = resolveArtifactProxyFileUrl({ artifact, workspaceId });
   const downloadUrl = resolveArtifactDownloadUrl({ artifact, workspaceId });
@@ -336,7 +337,11 @@ export function ArtifactPreviewPanel({
             ) : null}
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-            <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
+            <TypeBadge
+              label={artifactTypeLabel(artifact.artifactType, (key) =>
+                tHub(key),
+              )}
+            />
             <TypeBadge label={artifact.status} />
             <span>
               {formatDisplayDate(new Date(artifact.createdAt), displayLocale)}
