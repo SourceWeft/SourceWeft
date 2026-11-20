@@ -52,5 +52,26 @@
 	<string>SourceWeft saves an image to your photo library when you choose to save it.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>SourceWeft uses speech recognition to turn your voice input into text.</string>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>sourceweft.com</string>
+		<string>localhost</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Google Sign-In</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.9626012186-j74fnf5a37l8hqmdapb1mm90842e4r5a</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>googlechrome</string>
+		<string>safari</string>
+	</array>
 </dict>
 </plist>

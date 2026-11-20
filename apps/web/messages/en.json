@@ -5561,7 +5561,6 @@
       "or": "OR",
       "namePlaceholder": "Full name",
       "emailPlaceholder": "Personal or work email",
-      "appleComingSoon": "Apple sign-in is coming soon.",
       "termsNotice": "By continuing, you agree to SourceWeft's <terms>Terms</terms> and acknowledge our <privacy>Privacy Policy</privacy>.",
       "signUpSuccessNoSession": "Account created, but we could not start your session. Please sign in.",
       "signInErrorNoSession": "Signed in, but your session was not available. Please try again.",

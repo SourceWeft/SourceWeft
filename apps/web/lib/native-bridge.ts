@@ -240,6 +240,17 @@ export const nativeBridge = {
   onDeepLink(handler: NativeListener<DeepLinkPayload>) {
     return listenNative("sourceweft:deep-link", handler);
   },
+  /**
+   * Milliseconds from app start to now, the first time a page asks; null after
+   * that, so only the launch is measured. Mobile app only.
+   */
+  takeLaunchElapsedMs() {
+    return invokeNative<number | null>("take_launch_elapsed_ms");
+  },
+  /** Tells the mobile app whether a session exists, so its next launch opens the right page. */
+  setSessionHint(signedIn: boolean) {
+    return invokeNative<void>("set_session_hint", { signedIn });
+  },
   /** Shows the system's Sign in with Apple sheet. iOS app only. */
   signInWithApple(hashedNonce: string) {
     return invokeNative<AppleSignInCredential>("plugin:apple-sign-in|sign_in", {

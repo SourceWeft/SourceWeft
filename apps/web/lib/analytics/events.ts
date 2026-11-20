@@ -216,6 +216,20 @@ export function trackSourceAdded(input: {
   });
 }
 
+export function trackMobileLaunch(input: {
+  source: "network" | "cache";
+  surface: "sign_in" | "dashboard" | "other";
+  launchMs: number;
+  ttfbMs: number | undefined;
+}) {
+  trackEvent("mobile_launch", {
+    source: input.source,
+    surface: input.surface,
+    launch_ms: input.launchMs,
+    ...(input.ttfbMs === undefined ? {} : { ttfb_ms: input.ttfbMs }),
+  });
+}
+
 export function trackArtifactShared() {
   trackEvent("artifact_shared", {});
 }

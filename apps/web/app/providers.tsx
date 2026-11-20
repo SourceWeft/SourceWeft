@@ -20,6 +20,7 @@ import { Toaster } from "sonner";
 import { DEFAULT_USER_THEME } from "@sourceweft/contracts";
 import { AuthProvider } from "./_components/auth/auth-provider";
 import { GoogleOneTap } from "./google-one-tap";
+import { MobileAppRuntime } from "./_components/mobile-app-runtime";
 import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
 import { authClient } from "../lib/auth-client";
 import {
@@ -262,6 +263,7 @@ export function Providers({
           <DesktopTraySync />
           <SessionRefreshSync />
           <AuthAnalyticsTracker />
+          <MobileAppRuntime />
           <GoogleOneTap />
           <UiLocalizationProvider messages={{ close: t("close") }}>
             <TooltipProvider>

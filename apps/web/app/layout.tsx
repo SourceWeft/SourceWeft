@@ -14,16 +14,18 @@ import {
   isLocale,
 } from "@sourceweft/i18n/locales";
 
-import {
-  CLIENT_NAMESPACES,
-  pickMessages,
-} from "../i18n/client-messages";
+import { CLIENT_NAMESPACES, pickMessages } from "../i18n/client-messages";
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
 import { resolveWebAuthPageConfig } from "../lib/auth/auth-config-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
 import { AnalyticsScripts } from "../lib/analytics/analytics-scripts";
 import { Providers } from "./providers";
 import { DesktopWindowChrome } from "./_components/desktop-window-chrome";
+import {
+  LAUNCH_COVER_SCRIPT,
+  LAUNCH_COVER_STYLE,
+} from "./_components/mobile-launch-cover";
+import { FRAMED_PAGE_SCRIPT } from "./_components/framed-page";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_TITLE,
@@ -105,6 +107,21 @@ export default async function RootLayout({
           }}
         />
         <SeoJsonLd />
+        {/* In the mobile app, keeps its launch screen up until the page has
+            rendered, so the web view never shows a blank page. */}
+        <style id="sourceweft-launch-cover">{LAUNCH_COVER_STYLE}</style>
+        <Script
+          id="sourceweft-launch-cover-script"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: LAUNCH_COVER_SCRIPT }}
+        />
+        {/* Inside a frame (the mobile app's terms and privacy sheet), pages
+            drop the site header and footer. */}
+        <Script
+          id="sourceweft-framed-page-script"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: FRAMED_PAGE_SCRIPT }}
+        />
       </head>
       <AnalyticsScripts config={runtimeConfig.analytics} />
       <body className="flex min-h-svh flex-col antialiased">

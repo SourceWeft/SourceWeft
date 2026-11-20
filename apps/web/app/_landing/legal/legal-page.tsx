@@ -29,11 +29,15 @@ export function LegalPage({
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SourceWeftHeader authState={authState} />
+      {/* In a frame (the mobile app's sheet) the host gives the page its title
+          bar, so the site header and footer are left out. */}
+      <div className="[.sw-framed_&]:hidden">
+        <SourceWeftHeader authState={authState} />
+      </div>
       {/* Legal copy is English-only in the first phase (§12); mark the content
           language explicitly even when the surrounding chrome is localized. */}
       <main lang="en">
-        <div className="mx-auto flex max-w-4xl flex-col px-6 pt-28 pb-14 sm:pt-32 sm:pb-18">
+        <div className="mx-auto flex max-w-4xl flex-col px-6 pt-28 pb-14 sm:pt-32 sm:pb-18 [.sw-framed_&]:pt-6 [.sw-framed_&]:pb-10">
           <header className="border-b border-zinc-200 pb-8 dark:border-white/[0.08]">
             <p className="text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
               Last updated: {lastUpdated}
@@ -69,7 +73,9 @@ export function LegalPage({
           </div>
         </div>
       </main>
-      <SourceWeftFooter authState={authState} />
+      <div className="[.sw-framed_&]:hidden">
+        <SourceWeftFooter authState={authState} />
+      </div>
     </div>
   );
 }

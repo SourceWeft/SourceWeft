@@ -31,6 +31,7 @@ import {
   type MobileSignInMethods,
 } from "../../../lib/mobile-sign-in-methods";
 import { nativeBridge } from "../../../lib/native-bridge";
+import { setMobileSessionHint } from "../../../lib/mobile-app-shell";
 import { publicRuntimeConfig } from "../../../lib/public-runtime-config";
 
 type MobileAuthMode = "sign-in" | "sign-up";
@@ -87,6 +88,13 @@ function hasActiveSession(result: unknown) {
 
 export function MobileLoginView({ path }: { path: string }) {
   const router = useRouter();
+
+  // Someone on this page has no session, so the next launch starts here. Fetch
+  // the dashboard's code meanwhile, so the step after signing in is quick.
+  useEffect(() => {
+    setMobileSessionHint(false);
+    router.prefetch("/dashboard/chat");
+  }, [router]);
   const t = useTranslations("authPages.mobileLogin");
   const tAuthUi = useTranslations("authUi");
   const tSso = useTranslations("authLocale.plugins.sso");
@@ -491,10 +499,6 @@ export function MobileLoginView({ path }: { path: string }) {
               </>
             )}
           </div>
-
-          <p className="mt-3 text-center text-xs text-muted-foreground [@media(max-height:760px)]:mt-2 [@media(max-height:680px)]:hidden">
-            {t("appleComingSoon")}
-          </p>
 
           <p className="mt-6 px-5 text-center text-xs leading-5 text-muted-foreground [@media(max-height:760px)]:mt-3 [@media(max-height:680px)]:px-2 [@media(max-height:680px)]:leading-4">
             {t.rich("termsNotice", {

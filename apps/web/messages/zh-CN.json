@@ -5561,7 +5561,6 @@
       "or": "或",
       "namePlaceholder": "姓名",
       "emailPlaceholder": "个人或工作邮箱",
-      "appleComingSoon": "Apple 登录即将推出。",
       "termsNotice": "继续即表示你同意 SourceWeft 的<terms>服务条款</terms>，并知悉我们的<privacy>隐私政策</privacy>。",
       "signUpSuccessNoSession": "账号已创建，但无法启动你的会话。请登录。",
       "signInErrorNoSession": "已登录，但会话不可用。请重试。",

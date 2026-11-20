@@ -232,3 +232,87 @@ test("Swift library search paths use the default toolchain, not TOOLCHAIN_DIR", 
     assert(text.includes("$(DT_TOOLCHAIN_DIR)/usr/lib/swift"), file);
   }
 });
+
+// WKWebView runs the app's service worker only for app-bound domains, so the
+// hosts the app limits navigation to must be exactly the ones it declares.
+test("the app-bound domains in Info.ios.plist match the hosts the app binds", () => {
+  const plist = read(resolve(tauri, "Info.ios.plist"));
+  const declared = [
+    ...plist
+      .match(/<key>WKAppBoundDomains<\/key>\s*<array>([\s\S]*?)<\/array>/)[1]
+      .matchAll(/<string>([^<]+)<\/string>/g),
+  ].map(([, host]) => host);
+  const bound = [
+    ...read(resolve(tauri, "src/lib.rs"))
+      .match(/const APP_BOUND_HOSTS: \[&str; \d+\] = \[([^\]]+)\]/)[1]
+      .matchAll(/"([^"]+)"/g),
+  ].map(([, host]) => host);
+  assert.deepEqual(declared, bound);
+  assert(bound.includes(new URL(PRODUCTION_ORIGIN).host));
+});
+
+test("the launch image uses the splash page's background, defined for light and dark", () => {
+  const storyboard = read(resolve(apple, "LaunchScreen.storyboard"));
+  assert.match(
+    storyboard,
+    /<color key="backgroundColor" name="LaunchBackground"\/>/,
+  );
+  const colors = json(
+    resolve(apple, "Assets.xcassets/LaunchBackground.colorset/Contents.json"),
+  ).colors;
+  const hex = ({ color: { components: c } }) =>
+    "#" +
+    [c.red, c.green, c.blue]
+      .map((v) =>
+        Math.round(Number(v) * 255)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("");
+  const light = colors.find((entry) => !entry.appearances);
+  const dark = colors.find((entry) => entry.appearances?.[0]?.value === "dark");
+  const splash = read(resolve(mobile, "placeholder-dist/splash.html"));
+  assert.match(splash, new RegExp(`--bg: ${hex(light)};`));
+  assert.match(
+    splash,
+    new RegExp(`prefers-color-scheme: dark\\)[^}]*--bg: ${hex(dark)};`),
+  );
+});
+
+// The Google Sign-In SDK refuses to start unless the app registers its iOS
+// OAuth client, reversed, as a URL scheme. The client is the one the API
+// returns as nativeSignIn.googleIosClientId for sourceweft.com.
+test("Google Sign-In's reversed iOS client is a registered URL scheme", () => {
+  const plist = read(resolve(tauri, "Info.ios.plist"));
+  const types = plist.match(
+    /<key>CFBundleURLTypes<\/key>\s*<array>([\s\S]*?)<\/array>\s*<key>/,
+  )?.[1];
+  assert(types, "Info.ios.plist declares no CFBundleURLTypes");
+  assert.match(
+    types,
+    /<string>com\.googleusercontent\.apps\.\d+-[a-z0-9]+<\/string>/,
+  );
+});
+
+// The launch image shows the logo alone, as the splash page and the web cover
+// do: the sign-in page below shows the logo with the name, and two names would
+// collide. PNGs, light and dark: launch screens do not draw vector images.
+test("the launch image shows the logo mark alone, in light and dark", () => {
+  const storyboard = read(resolve(apple, "LaunchScreen.storyboard"));
+  assert.match(storyboard, /<imageView [^>]*image="LaunchLogo"/);
+  assert.doesNotMatch(storyboard, /<label /);
+  const imageset = resolve(apple, "Assets.xcassets/LaunchLogo.imageset");
+  const { images } = json(resolve(imageset, "Contents.json"));
+  assert.deepEqual(images.map(({ filename }) => filename).sort(), [
+    "launch-logo-dark@2x.png",
+    "launch-logo-dark@3x.png",
+    "launch-logo@2x.png",
+    "launch-logo@3x.png",
+  ]);
+  for (const { filename } of images)
+    assert.equal(
+      readFileSync(resolve(imageset, filename)).subarray(1, 4).toString(),
+      "PNG",
+      filename,
+    );
+});

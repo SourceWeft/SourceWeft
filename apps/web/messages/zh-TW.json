@@ -5561,7 +5561,6 @@
       "or": "或",
       "namePlaceholder": "姓名",
       "emailPlaceholder": "個人或工作電子郵件",
-      "appleComingSoon": "Apple 登入即將推出。",
       "termsNotice": "繼續即表示你同意 SourceWeft 的<terms>服務條款</terms>，並知悉我們的<privacy>隱私政策</privacy>。",
       "signUpSuccessNoSession": "帳號已建立，但無法啟動你的工作階段。請登入。",
       "signInErrorNoSession": "已登入，但工作階段不可用。請重試。",
