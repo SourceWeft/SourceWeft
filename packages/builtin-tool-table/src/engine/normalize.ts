@@ -27,10 +27,37 @@ const MAGNITUDES = new Map<string, number>([
   ["百", 1e2],
   ["万", 1e4],
   ["亿", 1e8],
+  ["十万", 1e5],
+  ["百万", 1e6],
+  ["千万", 1e7],
+  ["十亿", 1e9],
+  ["百亿", 1e10],
+  ["千亿", 1e11],
+  ["万亿", 1e12],
 ]);
-/** Digits (with thousands separators) and an optional magnitude word or suffix. */
-const ARABIC_NUMBER =
-  /(?<![\d.])(-?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?:\s*(thousand|million|billion|trillion)(?![a-z])|(k)(?![a-z])|\s*([千百万亿]))?/gi;
+/** A Chinese magnitude, the compounds first so 百万 is not read as 百. */
+const CJK_MAGNITUDE = "十万|百万|千万|十亿|百亿|千亿|万亿|[千百万亿]";
+const EN_MAGNITUDE = "thousand|million|billion|trillion";
+/**
+ * A unit in brackets right after a figure, as financial tables write it:
+ * `(千元)`, `(百万元)`, `(单位:千元)`, `(人民币百万元)`, `(in millions)`,
+ * `(millions)`. Text is NFKC-normalised first, so full-width brackets and
+ * colons match too. Only a bracket that holds nothing but a unit counts.
+ */
+const BRACKETED_UNIT =
+  `\\s*\\(\\s*(?:` +
+  `(?:in\\s+)?(?:(?:us\\$|\\$|usd|rmb|cny|eur|€|£)\\s*)?(${EN_MAGNITUDE})s?(?:\\s+of\\s+[a-z$]+)?` +
+  `|(?:单位\\s*:\\s*)?(?:人民币|美元|港元|港币)?\\s*(${CJK_MAGNITUDE})\\s*(?:元|美元|港元|港币|人民币|欧元|日元|英镑|股)?` +
+  `)\\s*\\)`;
+/**
+ * Digits (with thousands separators) and an optional magnitude: a word, a `k`
+ * suffix, a Chinese magnitude, or a bracketed unit that directly follows.
+ */
+const ARABIC_NUMBER = new RegExp(
+  `(?<![\\d.])(-?)(\\d{1,3}(?:,\\d{3})+|\\d+)(\\.\\d+)?` +
+    `(?:\\s*(${EN_MAGNITUDE})(?![a-z])|(k)(?![a-z])|\\s*(${CJK_MAGNITUDE})|${BRACKETED_UNIT})?`,
+  "gi",
+);
 const CJK_NUMERAL = /[零〇一二两三四五六七八九十百千万亿]+/g;
 
 function parseCjkNumeral(run: string): number {
@@ -61,10 +88,22 @@ export function extractFigures(raw: string): number[] {
   const found: { at: number; value: number }[] = [];
   text = text.replace(
     ARABIC_NUMBER,
-    (match, sign: string, whole: string, fraction = "", word?: string, k?: string, cjk?: string, at?: number) => {
-      const base = Number.parseFloat(`${whole.replaceAll(",", "")}${fraction}`);
-      const magnitude = MAGNITUDES.get((word ?? k ?? cjk ?? "").toLowerCase()) ?? 1;
-      found.push({ at: at ?? 0, value: Number(((sign ? -1 : 1) * base * magnitude).toPrecision(12)) });
+    (
+      match: string,
+      sign: string,
+      whole: string,
+      fraction: string | undefined,
+      word: string | undefined,
+      k: string | undefined,
+      cjk: string | undefined,
+      bracketedWord: string | undefined,
+      bracketedCjk: string | undefined,
+      at: number,
+    ) => {
+      const base = Number.parseFloat(`${whole.replaceAll(",", "")}${fraction ?? ""}`);
+      const unit = word ?? k ?? cjk ?? bracketedWord ?? bracketedCjk ?? "";
+      const magnitude = MAGNITUDES.get(unit.toLowerCase()) ?? 1;
+      found.push({ at, value: Number(((sign ? -1 : 1) * base * magnitude).toPrecision(12)) });
       return " ".repeat(match.length);
     },
   );
@@ -197,6 +236,36 @@ export function dateCovered(value: string, passage: string): boolean {
   return wanted.every((readings) =>
     readings.some((reading) => stated.some((other) => satisfies(reading, other))),
   );
+}
+
+const precisionOf = (reading: Ymd) => (reading.d !== undefined ? 3 : reading.m !== undefined ? 2 : 1);
+
+/**
+ * The date value a cell keeps, given the passage that backs it; undefined when
+ * the passage does not support it.
+ *
+ * - Covered at its own precision (`dateCovered`): the value as written.
+ * - Otherwise, a value that reads as exactly one date with one reading, where
+ *   the passage states a coarser date that agrees with it (same year, and same
+ *   month when the passage gives one): that coarser date, as ISO at the
+ *   passage's precision (`2025`, `2025-12`). The most precise agreeing reading
+ *   wins. So `2025-12-31` against "截至2025年末" is kept as `2025`.
+ *
+ * Precision is never invented, a disagreeing year or month is never accepted,
+ * and a month without a year (`6月末`) states no date at all.
+ */
+export function coverDate(value: string, passage: string): string | undefined {
+  if (dateCovered(value, passage)) return value;
+  const mentions = parseDate(value);
+  if (mentions?.length !== 1 || mentions[0]!.length !== 1) return undefined;
+  const wanted = mentions[0]![0]!;
+  let best: Ymd | undefined;
+  for (const stated of extractDates(passage).flat()) {
+    if (precisionOf(stated) >= precisionOf(wanted)) continue;
+    if (!satisfies(stated, wanted)) continue;
+    if (!best || precisionOf(stated) > precisionOf(best)) best = stated;
+  }
+  return best && isoOf(best);
 }
 
 /* ---------------------------------------------------------------- booleans */

@@ -184,3 +184,23 @@ test("1.2k and 1,200 cover each other, and a different figure does not", () => {
   assert.equal(figuresCovered("1,300", "1.2k participants"), false);
   assert.equal(figuresCovered("1.2k", "enrolled 12,000"), false);
 });
+
+test("a table value with a bracketed unit is covered by the bare figure its source states", () => {
+  // The table engine hands the port width-normalised text (NFKC).
+  for (const value of [
+    "423,701,834（千元）",
+    "423,701,834（千元）".normalize("NFKC"),
+    "1,050,506百万元",
+    "1,050,506（百万元）".normalize("NFKC"),
+  ]) {
+    assert.equal(
+      figuresCovered(value, "营业收入 | 423,701,834 | 1,050,506"),
+      true,
+      value,
+    );
+  }
+  assert.equal(
+    figuresCovered("432,701,834(千元)", "营业收入 | 423,701,834"),
+    false,
+  );
+});

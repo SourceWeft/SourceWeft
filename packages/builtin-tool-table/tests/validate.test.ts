@@ -4,8 +4,8 @@ import type { GroundedEvidence } from "@sourceweft/contracts/grounded-evidence";
 import {
   answerMatchesLanguage,
   anchorTextOf,
+  keptValue,
   readEntry,
-  typeRuleHolds,
 } from "../src/engine/validate";
 import { figures } from "./helpers";
 
@@ -59,16 +59,22 @@ test("the anchor text is the value and, on its own line, the quote", () => {
   assert.equal(anchorTextOf({ value: "v", quote: null }), "v");
 });
 
-test("type rules are checked against the evidence text", () => {
-  assert.equal(typeRuleHolds({ type: "text" }, "anything", evidenceOf("x"), figures), true);
-  assert.equal(typeRuleHolds({ type: "number" }, "1,200", evidenceOf("1.2k people"), figures), true);
-  assert.equal(typeRuleHolds({ type: "number" }, "１２００", evidenceOf("1,200 people"), figures), true);
-  assert.equal(typeRuleHolds({ type: "number" }, "1,300", evidenceOf("1.2k people"), figures), false);
-  assert.equal(typeRuleHolds({ type: "number" }, "many", evidenceOf("many people"), figures), false);
-  assert.equal(typeRuleHolds({ type: "date" }, "2024-03-05", evidenceOf("5 March 2024"), figures), true);
-  assert.equal(typeRuleHolds({ type: "date" }, "2024-03-06", evidenceOf("5 March 2024"), figures), false);
-  assert.equal(typeRuleHolds({ type: "boolean" }, "Yes", evidenceOf("anything"), figures), true);
-  assert.equal(typeRuleHolds({ type: "boolean" }, "perhaps", evidenceOf("anything"), figures), false);
+test("type rules are checked against the evidence text and keep the value as written", () => {
+  assert.equal(keptValue({ type: "text" }, "anything", evidenceOf("x"), figures), "anything");
+  assert.equal(keptValue({ type: "number" }, "1,200", evidenceOf("1.2k people"), figures), "1,200");
+  assert.equal(keptValue({ type: "number" }, "１２００", evidenceOf("1,200 people"), figures), "１２００");
+  assert.equal(keptValue({ type: "number" }, "1,300", evidenceOf("1.2k people"), figures), undefined);
+  assert.equal(keptValue({ type: "number" }, "many", evidenceOf("many people"), figures), undefined);
+  assert.equal(keptValue({ type: "date" }, "2024-03-05", evidenceOf("5 March 2024"), figures), "2024-03-05");
+  assert.equal(keptValue({ type: "date" }, "2024-03-06", evidenceOf("5 March 2024"), figures), undefined);
+  assert.equal(keptValue({ type: "boolean" }, "Yes", evidenceOf("anything"), figures), "Yes");
+  assert.equal(keptValue({ type: "boolean" }, "perhaps", evidenceOf("anything"), figures), undefined);
+});
+
+test("a date more precise than its evidence is kept at the evidence's precision", () => {
+  assert.equal(keptValue({ type: "date" }, "2025-12-31", evidenceOf("截至2025年末"), figures), "2025");
+  assert.equal(keptValue({ type: "date" }, "2025-12-31", evidenceOf("截至2025年12月"), figures), "2025-12");
+  assert.equal(keptValue({ type: "date" }, "2024-12-31", evidenceOf("截至2025年末"), figures), undefined);
 });
 
 test("the answer language is judged on the text columns together", () => {

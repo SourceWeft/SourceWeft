@@ -56,8 +56,8 @@ import {
 import {
   answerMatchesLanguage,
   anchorTextOf,
+  keptValue,
   readEntry,
-  typeRuleHolds,
 } from "./validate";
 
 /** Billing key of one fill call: one per source and group, bound to the version. */
@@ -304,8 +304,11 @@ async function fillSource(
           (entry) => entry.sourceId === source.sourceId,
         );
         if (own.length === 0) continue;
-        if (!typeRuleHolds(column, candidate.value, own, run.deps.figures)) continue;
-        verified.push({ value: candidate.value, evidence: own });
+        // The value the type rule keeps, which for a date may be coarser than
+        // the model wrote: it is what the cell stores, compares and sorts by.
+        const value = keptValue(column, candidate.value, own, run.deps.figures);
+        if (value === undefined) continue;
+        verified.push({ value, evidence: own });
       }
       const outcome = await resolveColumn({
         type: column.type,

@@ -205,6 +205,25 @@ test("a date cell needs a readable date that the evidence states, in any notatio
   assert.equal((await run("last spring")).status, "unverified");
 });
 
+test("a date cell more precise than its evidence is stored at the precision the source states", async () => {
+  const columns = columnsOf(dateColumn("Reporting date"));
+  const text = "截至2025年末 the randomised trial enrolled 1,200 participants.";
+  const run = async (value: string) => {
+    const { content } = await fillPadded(columns, [sourceOf("a", [text])], (call) => [
+      answer(columns[0]!.id, value, promptHandles(call.user)[0]!, "截至2025年末"),
+    ]);
+    return content.rows[0]!.cells[columns[0]!.id]!;
+  };
+  const kept = await run("2025-12-31");
+  assert.equal(kept.status, "found");
+  if (kept.status === "found") {
+    assert.equal(kept.value, "2025");
+    assert.equal(kept.normalized, "2025");
+    assert.equal(kept.evidence[0]!.quote, "截至2025年末");
+  }
+  assert.equal((await run("2024-12-31")).status, "unverified");
+});
+
 test("a boolean cell must read as yes or no", async () => {
   const columns = columnsOf(booleanColumn("Blinded"));
   const text = "The randomised trial was double blind.";
@@ -317,6 +336,28 @@ test("split-source candidates that agree merge their evidence without a model ca
     assert.deepEqual(cell.evidence.map((entry) => entry.chunkId), ["a-c1", "a-c6"]);
     assert.equal(cell.value, "1,200");
     assert.equal(cell.normalized, 1200);
+  }
+});
+
+test("split-source dates that agree once kept at the source's precision merge without a model call", async () => {
+  const columns = columnsOf(dateColumn("Reporting date"));
+  const source = longSource("截至2025年末，员工总数为1,200人。", "The 2025 annual report lists the staff.");
+  const { model, calls } = stubModel((call) => ({
+    cells: [
+      call.user.includes("截至2025年末")
+        ? answerIfStated(call.user, columns[0]!.id, "2025-12-31", "截至2025年末")
+        : answerIfStated(call.user, columns[0]!.id, "2025", "The 2025 annual report"),
+    ],
+  }));
+  const { content } = await fillTable(deps(model), fillInput(columns, [source]));
+  assert.ok(calls.filter(isFill).length > 1);
+  assert.equal(calls.filter(isMerge).length, 0);
+  const cell = content.rows[0]!.cells[columns[0]!.id]!;
+  assert.equal(cell.status, "found");
+  if (cell.status === "found") {
+    assert.equal(cell.value, "2025");
+    assert.equal(cell.normalized, "2025");
+    assert.deepEqual(cell.evidence.map((entry) => entry.chunkId), ["a-c1", "a-c6"]);
   }
 });
 

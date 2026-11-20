@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSuggestPrompt, defuseDelimiters } from "../src/engine/prompts";
+import { buildFillPrompt, buildSuggestPrompt, defuseDelimiters } from "../src/engine/prompts";
 
 test("source summaries and the instruction go to the user turn, never the system turn", () => {
   const prompt = buildSuggestPrompt({
@@ -32,4 +32,10 @@ test("the suggestion prompt asks for the configured column range and the output 
   assert.match(prompt.user, /Output language \(BCP 47\): zh-CN/);
   assert.match(prompt.system, /4 to 8 columns/);
   assert.ok(!prompt.user.includes("<<<INSTRUCTION>>>"));
+});
+
+test("the fill prompt forbids a date gaining a month or day its source does not state", () => {
+  const prompt = buildFillPrompt({ chunks: [], columns: [], language: "en" });
+  assert.match(prompt.system, /Keep numbers, dates and units exactly as the source writes them/);
+  assert.match(prompt.system, /never add a month or day the source does not state/i);
 });
