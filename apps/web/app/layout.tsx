@@ -25,6 +25,7 @@ import {
   LAUNCH_COVER_SCRIPT,
   LAUNCH_COVER_STYLE,
 } from "./_components/mobile-launch-cover";
+import { FRAMED_PAGE_SCRIPT } from "./_components/framed-page";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_TITLE,
@@ -113,6 +114,13 @@ export default async function RootLayout({
           id="sourceweft-launch-cover-script"
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: LAUNCH_COVER_SCRIPT }}
+        />
+        {/* Inside a frame (the mobile app's terms and privacy sheet), pages
+            drop the site header and footer. */}
+        <Script
+          id="sourceweft-framed-page-script"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: FRAMED_PAGE_SCRIPT }}
         />
       </head>
       <AnalyticsScripts config={runtimeConfig.analytics} />
