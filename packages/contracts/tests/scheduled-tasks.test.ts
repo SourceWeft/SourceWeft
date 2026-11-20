@@ -237,6 +237,7 @@ test("a run record carries why it was skipped and what produced it", () => {
     status: "skipped",
     triggerKind: "schedule",
     skipReason: "missed_platform_down",
+    detail: null,
     taskVersion: null,
     isCatchUp: false,
     threadId: null,
@@ -245,6 +246,15 @@ test("a run record carries why it was skipped and what produced it", () => {
     updatedAt: "2026-12-01T00:00:00.000Z",
   };
   assert.deepEqual(agentTaskRunSchema.parse(run), run);
+  // Only the two told apart outcomes are named; anything else is refused.
+  assert.equal(
+    agentTaskRunSchema.parse({ ...run, detail: "timed_out" }).detail,
+    "timed_out",
+  );
+  assert.equal(
+    agentTaskRunSchema.safeParse({ ...run, detail: "run_timeout" }).success,
+    false,
+  );
   assert.equal(
     agentTaskRunSchema.safeParse({ ...run, skipReason: "overlap" }).success,
     false,
