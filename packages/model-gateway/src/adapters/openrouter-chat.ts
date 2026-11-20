@@ -1,4 +1,5 @@
 import { sdkRetryOptions } from "./gateway-caller";
+import { noAmbientOpenAIIdentity } from "../auth-headers";
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 import type { ProviderRoutingConfig } from "../types";
@@ -127,7 +128,7 @@ export class OpenRouterChatAdapter implements ChatAdapter {
         fetch: captureProviderResponseFetch(
           requireParametersForJsonSchema(options?.fetch),
         ),
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
       },
       modelKwargs: {
         ...(mergeOpenRouterProviderRouting(

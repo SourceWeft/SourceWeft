@@ -17,6 +17,11 @@ their declarations:
   Provider headers retain their existing behavior. No-auth also suppresses
   ambient headers independently.
 
+Every OpenAI SDK adapter, authenticated or not, also passes
+`adminAPIKey: null`, `organization: null` and `project: null`, so the ambient
+`OPENAI_ADMIN_KEY`, `OPENAI_ORGANIZATION`, `OPENAI_ORG_ID` and
+`OPENAI_PROJECT_ID` never reach a Provider. That part needs no patch.
+
 LangChain drops null header values, so constructor-only support plus null auth
 headers is insufficient. The explicit SDK flag controls header validation too.
 Default SDK credential checks remain unchanged. The patch does not replace

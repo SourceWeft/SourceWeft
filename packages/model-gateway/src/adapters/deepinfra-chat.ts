@@ -1,4 +1,5 @@
 import { sdkRetryOptions } from "./gateway-caller";
+import { noAmbientOpenAIIdentity } from "../auth-headers";
 import { ChatOpenAI } from "@langchain/openai";
 import type { ChatAdapter } from "./types";
 import { captureProviderResponseFetch } from "../observation/response-capture";
@@ -63,7 +64,7 @@ export class DeepInfraChatAdapter implements ChatAdapter {
         baseURL: resolveOpenAICompatibleBaseUrl(target.baseUrl),
         defaultHeaders: target.defaultHeaders,
         fetch: captureProviderResponseFetch(options?.fetch),
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
       },
       modelKwargs: buildDeepInfraReasoningKwargs(input),
       __includeRawResponse: true,

@@ -1,4 +1,5 @@
 import { sdkRetryOptions } from "./gateway-caller";
+import { noAmbientOpenAIIdentity } from "../auth-headers";
 import { ChatDeepSeek } from "@langchain/deepseek";
 import { ModelGatewayError } from "../errors";
 import { resolveThinkingMode } from "../thinking";
@@ -88,7 +89,7 @@ export class DeepSeekChatAdapter implements ChatAdapter {
         baseURL: target.baseUrl,
         defaultHeaders: target.defaultHeaders,
         fetch: captureProviderResponseFetch(options?.fetch),
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),
