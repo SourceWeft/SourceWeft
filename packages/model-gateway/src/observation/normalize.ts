@@ -1,11 +1,12 @@
 import { getProviderResponseAdapter } from "../adapters/providers/registry";
 import { extractRawUsage } from "../normalize/extract";
 import {
+  detailsNumber,
   finiteNumber,
   isRecord,
   normalizeOpenAICompatibleUsage,
 } from "../normalize/protocols/openai-compatible";
-import type { UsageInfo } from "../types";
+import type { ResolvedRequestTarget, UsageInfo } from "../types";
 import type {
   ModelCallDiagnostic,
   ModelCallObservation,
@@ -121,6 +122,34 @@ function normalizedSdkUsage(input: unknown) {
   return normalizeOpenAICompatibleUsage(input);
 }
 
+/**
+ * Anthropic's own usage object cannot be read like an OpenAI-compatible one.
+ * Its `input_tokens` leaves out the tokens read from and written to the prompt
+ * cache, where `UsageInfo.inputTokens` includes them. A streamed reply also
+ * splits it between `message_start` and `message_delta`, so the last chunk and
+ * the last usage object on the wire each hold only part of it. LangChain merges
+ * the two events and adds the cache tokens to the input count, so its
+ * `usage_metadata` is the one complete figure for the call.
+ */
+function reportsUsageThroughLangChain(target: ResolvedRequestTarget) {
+  return target.providerKind === "anthropic";
+}
+
+function normalizeLangChainUsage(input: unknown): UsageInfo | undefined {
+  const usage = normalizedSdkUsage(input);
+  if (!usage || !isRecord(input)) {
+    return usage;
+  }
+  const details = input.input_token_details;
+  return {
+    ...usage,
+    cacheReadTokens:
+      detailsNumber(details, "cache_read") ?? usage.cacheReadTokens,
+    cacheWriteTokens:
+      detailsNumber(details, "cache_creation") ?? usage.cacheWriteTokens,
+  };
+}
+
 function mergeObservation(
   base: ModelCallObservation,
   patch: ModelCallObservationPatch | undefined,
@@ -167,11 +196,15 @@ export function normalizeModelCallObservation(input: {
   context: Omit<ProviderResponseContext, "rawUsage">;
   modelAlias: string;
 }): ModelCallObservation {
-  const rawUsage =
-    extractRawUsage(input.context.rawResponse) ?? input.context.capturedUsage;
-  const protocolUsage =
-    normalizeOpenAICompatibleUsage(rawUsage) ??
-    normalizedSdkUsage(input.context.sdkUsage);
+  const sdkOnly = reportsUsageThroughLangChain(input.context.target);
+  const rawUsage = sdkOnly
+    ? undefined
+    : (extractRawUsage(input.context.rawResponse) ??
+      input.context.capturedUsage);
+  const protocolUsage = sdkOnly
+    ? normalizeLangChainUsage(input.context.sdkUsage)
+    : (normalizeOpenAICompatibleUsage(rawUsage) ??
+      normalizedSdkUsage(input.context.sdkUsage));
   const base: ModelCallObservation = {
     identity: {
       modelAlias: input.modelAlias,

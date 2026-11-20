@@ -276,8 +276,14 @@ test("Anthropic uses injected fetch and does not add the ambient auth token", as
   assert.equal(result.raw.content, "hello");
   assert.equal(requests.length, 1);
   assert.equal(requests[0]!.url, "http://models.internal:8080/v1/messages");
-  assert.equal(requests[0]!.headers.get("x-api-key"), "workspace-key");
-  assert.equal(requests[0]!.headers.get("authorization"), null);
+  // Anthropic SDK 1.x sends the key as a bearer token under the dated API
+  // version; the older `x-api-key` header is gone from the request.
+  assert.equal(
+    requests[0]!.headers.get("authorization"),
+    "Bearer workspace-key",
+  );
+  assert.equal(requests[0]!.headers.get("x-api-key"), null);
+  assert.equal(requests[0]!.headers.get("anthropic-version"), "2026-10-21");
   assert.doesNotMatch(JSON.stringify([...requests[0]!.headers]), /ambient-/);
 });
 
@@ -338,8 +344,11 @@ test("Anthropic streaming uses the same injected fetch and explicit credential",
   assert.equal(content, "hello");
   assert.equal(requests.length, 1);
   assert.equal(requests[0]!.url, "http://models.internal:8080/v1/messages");
-  assert.equal(requests[0]!.headers.get("x-api-key"), "workspace-key");
-  assert.equal(requests[0]!.headers.get("authorization"), null);
+  assert.equal(
+    requests[0]!.headers.get("authorization"),
+    "Bearer workspace-key",
+  );
+  assert.equal(requests[0]!.headers.get("x-api-key"), null);
   assert.doesNotMatch(JSON.stringify([...requests[0]!.headers]), /ambient-/);
 });
 

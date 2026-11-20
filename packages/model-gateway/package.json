@@ -16,7 +16,7 @@
     "test:integration": "tsx --test tests/integration/*.integration.test.ts"
   },
   "dependencies": {
-    "@langchain/anthropic": "^1.5.5",
+    "@langchain/anthropic": "^1.6.5",
     "@langchain/core": "^1.4.2",
     "@langchain/deepseek": "^1.1.7",
     "@langchain/google-genai": "2.3.6",
