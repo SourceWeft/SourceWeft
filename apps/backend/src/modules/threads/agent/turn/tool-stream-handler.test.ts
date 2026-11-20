@@ -486,3 +486,98 @@ test("MCP display names survive start, completion and collected trace without ch
   );
   assert.deepEqual(runtime.collectToolCalls()[0]?.mcpDisplay, display);
 });
+
+// The tool result reaches the host as a serialized LangChain ToolMessage, which
+// has a `status` of its own ("success"). A passing validation must still close
+// its step as validated, and a failed one as failed.
+for (const [verdict, payload, title] of [
+  [
+    "passed",
+    {
+      status: "passed",
+      validationInputDigest: "sha256:in",
+      validationReceiptId: "receipt_1",
+    },
+    "Video presentation validated",
+  ],
+  [
+    "failed",
+    {
+      status: "failed",
+      validationInputDigest: "sha256:in",
+      diagnostics: [{ code: "x" }],
+    },
+    "Video presentation validation failed",
+  ],
+] as const) {
+  test(`a ${verdict} validation result closes its step as "${title}"`, async () => {
+    const prepared = createToolLoggingPreparedTurn();
+    const runtime = createTurnRuntime({ prepared });
+    const toolNameByCallId = new Map<string, string>();
+    const callId = `call-verdict-${verdict}`;
+    const toolName = "validate_video_presentation";
+    const startPayload = adaptToolsEvent(
+      {
+        event: "tool-started",
+        tool_call_id: callId,
+        tool_name: toolName,
+        input: "{}",
+      },
+      toolNameByCallId,
+    );
+    assert.ok(startPayload);
+    const startSnapshot = resolveToolsStreamToolCall({
+      payload: startPayload,
+      resolveToolCallSequence: runtime.resolveToolCallSequence,
+      toolCallOrder: runtime.toolCallOrder,
+      toolCallsById: runtime.toolCallsById,
+    });
+    assert.ok(startSnapshot);
+    await collectToolStreamEvents(
+      handleToolStartStreamChunk({
+        prepared,
+        runtime,
+        snapshot: startSnapshot,
+      }),
+    );
+
+    const message = new ToolMessage({
+      content: JSON.stringify(payload),
+      name: toolName,
+      status: "success",
+      tool_call_id: callId,
+    });
+    const finishPayload = adaptToolsEvent(
+      {
+        event: "tool-finished",
+        tool_call_id: callId,
+        output: message,
+      },
+      toolNameByCallId,
+    );
+    assert.ok(finishPayload);
+    const endSnapshot = resolveToolsStreamToolCall({
+      payload: finishPayload,
+      resolveToolCallSequence: runtime.resolveToolCallSequence,
+      toolCallOrder: runtime.toolCallOrder,
+      toolCallsById: runtime.toolCallsById,
+    });
+    assert.ok(endSnapshot);
+    const events = await collectToolStreamEvents(
+      handleToolEndStreamChunk({
+        prepared,
+        runtime,
+        snapshot: endSnapshot,
+      }),
+    );
+    const steps = events.flatMap((event) =>
+      event.type === "thinking-step" ? [event.step] : [],
+    );
+    const validation = steps.find((step) => step.id === "video-validation");
+    assert.equal(validation?.title, title);
+    assert.equal(
+      steps.find((step) => step.id === `tool:${callId}`)?.title,
+      title,
+    );
+  });
+}
