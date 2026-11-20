@@ -79,7 +79,9 @@ export function keptValue(
 /**
  * The answer is in the requested language. Only text columns carry language;
  * the values of one answer are judged together, so a proper noun in an
- * otherwise Chinese answer does not fail it.
+ * otherwise Chinese answer does not fail it. Cells are short and the prompt
+ * keeps names, codes and quotations in their original form, so a Latin word
+ * counts as one unit for Chinese output, not one per letter.
  */
 export function answerMatchesLanguage(
   entries: readonly RawCell[],
@@ -90,5 +92,5 @@ export function answerMatchesLanguage(
     .filter((entry) => entry.found && columns.get(entry.columnId)?.type === "text")
     .map((entry) => entry.value ?? "")
     .join(" ");
-  return matchesOutputLanguage(text, language);
+  return matchesOutputLanguage(text, language, { latinWordUnits: true });
 }
