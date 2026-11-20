@@ -36,7 +36,8 @@ function chineseText(length: number, seed: number): string {
   return text.slice(start, start + length);
 }
 
-const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+const sha256 = (text: string) =>
+  `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
 // The prompt version only feeds fingerprints here; the engine's own constant is
 // not importable from the backend.
@@ -50,59 +51,78 @@ export function buildWorstCaseTable(
   const columnCount = options.columns ?? 8;
   const language = options.language ?? "zh-CN";
 
-  const columns: TableColumn[] = Array.from({ length: columnCount }, (_, index) => {
-    const spec = {
-      name: chineseText(TABLE_LIMITS.columnNameChars, index),
-      description: chineseText(TABLE_LIMITS.columnDescriptionChars, index + 100),
-      type: COLUMN_TYPES[index % COLUMN_TYPES.length]!,
-    };
-    return { id: newTableColumnId(), ...spec, fingerprint: tableColumnFingerprint(spec) };
-  });
-
-  const rows: TableRow[] = Array.from({ length: sourceCount }, (_, rowIndex) => {
-    const sourceId = randomUUID();
-    const documentId = randomUUID();
-    const contentHash = createHash("sha256").update(sourceId).digest("hex");
-    const cells: Record<string, TableCell> = {};
-    columns.forEach((column, columnIndex) => {
-      const seed = rowIndex * columnCount + columnIndex;
-      cells[column.id] = {
-        status: "found",
-        value: chineseText(TABLE_LIMITS.cellChars, seed),
-        normalized: 12_000_000_000 + seed,
-        evidence: Array.from({ length: TABLE_LIMITS.evidencePerCell }, (_, e) => {
-          const quote = chineseText(TABLE_LIMITS.quoteChars, seed * 3 + e + 1);
-          return {
-            kind: "chunk" as const,
-            sourceId,
-            documentId,
-            chunkId: randomUUID(),
-            chunkNo: 100 + e,
-            headingPath: null,
-            quote,
-            startChar: 1000,
-            endChar: 1000 + quote.length,
-            quoteHash: sha256(quote),
-          };
-        }),
-        fingerprint: tableCellFingerprint({
-          columnFingerprint: column.fingerprint,
-          contentHash,
-          promptVersion: PROMPT_VERSION,
-          language,
-        }),
+  const columns: TableColumn[] = Array.from(
+    { length: columnCount },
+    (_, index) => {
+      const spec = {
+        name: chineseText(TABLE_LIMITS.columnNameChars, index),
+        description: chineseText(
+          TABLE_LIMITS.columnDescriptionChars,
+          index + 100,
+        ),
+        type: COLUMN_TYPES[index % COLUMN_TYPES.length]!,
       };
-    });
-    return {
-      id: newTableRowId(),
-      sourceId,
-      documentId,
-      title: chineseText(120, rowIndex + 7),
-      contentHash,
-      status: "ok",
-      cells,
-    };
-  });
+      return {
+        id: newTableColumnId(),
+        ...spec,
+        fingerprint: tableColumnFingerprint(spec),
+      };
+    },
+  );
+
+  const rows: TableRow[] = Array.from(
+    { length: sourceCount },
+    (_, rowIndex) => {
+      const sourceId = randomUUID();
+      const documentId = randomUUID();
+      const contentHash = createHash("sha256").update(sourceId).digest("hex");
+      const cells: Record<string, TableCell> = {};
+      columns.forEach((column, columnIndex) => {
+        const seed = rowIndex * columnCount + columnIndex;
+        cells[column.id] = {
+          status: "found",
+          value: chineseText(TABLE_LIMITS.cellChars, seed),
+          normalized: 12_000_000_000 + seed,
+          evidence: Array.from(
+            { length: TABLE_LIMITS.evidencePerCell },
+            (_, e) => {
+              const quote = chineseText(
+                TABLE_LIMITS.quoteChars,
+                seed * 3 + e + 1,
+              );
+              return {
+                kind: "chunk" as const,
+                sourceId,
+                documentId,
+                chunkId: randomUUID(),
+                chunkNo: 100 + e,
+                headingPath: null,
+                quote,
+                startChar: 1000,
+                endChar: 1000 + quote.length,
+                quoteHash: sha256(quote),
+              };
+            },
+          ),
+          fingerprint: tableCellFingerprint({
+            columnFingerprint: column.fingerprint,
+            contentHash,
+            promptVersion: PROMPT_VERSION,
+            language,
+          }),
+        };
+      });
+      return {
+        id: newTableRowId(),
+        sourceId,
+        documentId,
+        title: chineseText(120, rowIndex + 7),
+        contentHash,
+        status: "ok",
+        cells,
+      };
+    },
+  );
 
   const cellCount = sourceCount * columnCount;
   return {
@@ -140,7 +160,8 @@ export function buildWorstCaseTable(
   };
 }
 
-const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
+const byteLength = (value: unknown) =>
+  new TextEncoder().encode(JSON.stringify(value)).length;
 
 /** The engine's fallback when content is too large: one evidence per cell. */
 function withOneEvidence(content: TableContent): TableContent {
@@ -151,7 +172,9 @@ function withOneEvidence(content: TableContent): TableContent {
       cells: Object.fromEntries(
         Object.entries(row.cells).map(([id, cell]) => [
           id,
-          cell.status === "found" ? { ...cell, evidence: cell.evidence.slice(0, 1) } : cell,
+          cell.status === "found"
+            ? { ...cell, evidence: cell.evidence.slice(0, 1) }
+            : cell,
         ]),
       ),
     })),

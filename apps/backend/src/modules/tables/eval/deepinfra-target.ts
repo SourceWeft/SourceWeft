@@ -29,7 +29,14 @@ import type { RoutedGatewayConfig } from "../../../shared/model-gateway/types";
 
 export type StructuredOutputChoice = "as-production" | "strict";
 
-const PRODUCTION_SUPPORTS = ["chat", "embeddings", "rerank", "asr", "tts", "image"];
+const PRODUCTION_SUPPORTS = [
+  "chat",
+  "embeddings",
+  "rerank",
+  "asr",
+  "tts",
+  "image",
+];
 const CHAT_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
 const EMBEDDING_MODEL = "BAAI/bge-m3";
 
@@ -87,11 +94,25 @@ export function buildDeepInfraEvalTarget(input: {
       modelRoutes: {
         "chat-default": {
           strategy: "priority",
-          targets: [{ provider: "deepinfra", model: CHAT_MODEL, priority: 2, weight: 0 }],
+          targets: [
+            {
+              provider: "deepinfra",
+              model: CHAT_MODEL,
+              priority: 2,
+              weight: 0,
+            },
+          ],
         },
         "embed-default": {
           strategy: "priority",
-          targets: [{ provider: "deepinfra", model: EMBEDDING_MODEL, priority: 1, weight: 100 }],
+          targets: [
+            {
+              provider: "deepinfra",
+              model: EMBEDDING_MODEL,
+              priority: 1,
+              weight: 100,
+            },
+          ],
         },
       },
     },

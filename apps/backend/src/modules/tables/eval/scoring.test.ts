@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {
+  acceptedVerdict,
   booleansMatch,
   cellsToCsv,
   datesMatch,
@@ -52,15 +53,42 @@ describe("number normalisation", () => {
 
 describe("date normalisation", () => {
   test("reads the granularity the writing gives", () => {
-    assert.deepEqual(parseDateValue("2023"), { granularity: "year", iso: "2023" });
-    assert.deepEqual(parseDateValue("2023-05"), { granularity: "month", iso: "2023-05" });
-    assert.deepEqual(parseDateValue("May 2023"), { granularity: "month", iso: "2023-05" });
-    assert.deepEqual(parseDateValue("2023年5月"), { granularity: "month", iso: "2023-05" });
-    assert.deepEqual(parseDateValue("2023年5月12日"), { granularity: "day", iso: "2023-05-12" });
-    assert.deepEqual(parseDateValue("May 12, 2023"), { granularity: "day", iso: "2023-05-12" });
-    assert.deepEqual(parseDateValue("12 May 2023"), { granularity: "day", iso: "2023-05-12" });
-    assert.deepEqual(parseDateValue("2023/5/12"), { granularity: "day", iso: "2023-05-12" });
-    assert.deepEqual(parseDateValue("25/12/2023"), { granularity: "day", iso: "2023-12-25" });
+    assert.deepEqual(parseDateValue("2023"), {
+      granularity: "year",
+      iso: "2023",
+    });
+    assert.deepEqual(parseDateValue("2023-05"), {
+      granularity: "month",
+      iso: "2023-05",
+    });
+    assert.deepEqual(parseDateValue("May 2023"), {
+      granularity: "month",
+      iso: "2023-05",
+    });
+    assert.deepEqual(parseDateValue("2023年5月"), {
+      granularity: "month",
+      iso: "2023-05",
+    });
+    assert.deepEqual(parseDateValue("2023年5月12日"), {
+      granularity: "day",
+      iso: "2023-05-12",
+    });
+    assert.deepEqual(parseDateValue("May 12, 2023"), {
+      granularity: "day",
+      iso: "2023-05-12",
+    });
+    assert.deepEqual(parseDateValue("12 May 2023"), {
+      granularity: "day",
+      iso: "2023-05-12",
+    });
+    assert.deepEqual(parseDateValue("2023/5/12"), {
+      granularity: "day",
+      iso: "2023-05-12",
+    });
+    assert.deepEqual(parseDateValue("25/12/2023"), {
+      granularity: "day",
+      iso: "2023-12-25",
+    });
     assert.equal(parseDateValue("05/06/2023"), null); // day-first or month-first
     assert.equal(parseDateValue("soon"), null);
   });
@@ -95,7 +123,10 @@ describe("boolean normalisation", () => {
 describe("rule verdicts", () => {
   test("text matches only after whitespace and case normalisation, else needs a judgment", () => {
     assert.equal(ruleVerdict("text", "Acme Corp", "  acme   CORP "), "match");
-    assert.equal(ruleVerdict("text", "Acme Corp", "ACME Corporation"), "needs_judgment");
+    assert.equal(
+      ruleVerdict("text", "Acme Corp", "ACME Corporation"),
+      "needs_judgment",
+    );
   });
 
   test("typed columns use their rule and fall back to a judgment when unreadable", () => {
@@ -257,7 +288,10 @@ describe("metrics", () => {
       header,
       "set,run,source,column,type,ref_status,ref_value,got_status,got_value,rule_verdict",
     );
-    assert.equal(first, "s,1,a,name,text,found,Acme Corp,found,ACME Corporation,needs_judgment");
+    assert.equal(
+      first,
+      "s,1,a,name,text,found,Acme Corp,found,ACME Corporation,needs_judgment",
+    );
     const quoted = cellsToCsv([
       { ...result.cells[0]!, got_value: 'say "hi", then\nleave' },
     ]);
@@ -265,11 +299,83 @@ describe("metrics", () => {
   });
 
   test("the report names unjudged cells and failed runs", () => {
-    const report = formatScoreReport(scoreRuns({ sets: [set], runs: [okRun, failedRun] }), {
-      generatedAt: "2026-11-20T00:00:00.000Z",
-      judgmentsFile: null,
-    });
+    const report = formatScoreReport(
+      scoreRuns({ sets: [set], runs: [okRun, failedRun] }),
+      {
+        generatedAt: "2026-11-20T00:00:00.000Z",
+        judgmentsFile: null,
+      },
+    );
     assert.match(report, /Unjudged cells: 1/);
     assert.match(report, /GENERATION_QUALITY_TOO_LOW/);
+  });
+});
+
+describe("accepted alternatives", () => {
+  test("a got value matches the reference value or any accepted alternative under the column's rule", () => {
+    assert.equal(
+      acceptedVerdict("number", { value: "1,200", accept: ["1,250"] }, "1.25k"),
+      "match",
+    );
+    assert.equal(
+      acceptedVerdict(
+        "date",
+        { value: "2024-03", accept: ["2024-04"] },
+        "2024年4月",
+      ),
+      "match",
+    );
+    assert.equal(
+      acceptedVerdict(
+        "text",
+        { value: "比亚迪", accept: ["比亚迪股份有限公司"] },
+        "比亚迪股份有限公司",
+      ),
+      "match",
+    );
+    assert.equal(
+      acceptedVerdict("number", { value: "1,200", accept: ["1,250"] }, "1,400"),
+      "mismatch",
+    );
+    // A text alternative that does not match exactly still needs a person.
+    assert.equal(
+      acceptedVerdict(
+        "text",
+        { value: "比亚迪", accept: ["BYD"] },
+        "比亚迪公司",
+      ),
+      "needs_judgment",
+    );
+    // One unreadable alternative leaves the cell to a judgment, not a mismatch.
+    assert.equal(
+      acceptedVerdict(
+        "number",
+        { value: "1,200", accept: ["about a thousand"] },
+        "1,400",
+      ),
+      "needs_judgment",
+    );
+  });
+
+  test("scoring uses the alternatives and ignores the note", () => {
+    const withAccept: EvalSetScoreInput = {
+      ...set,
+      reference: {
+        ...set.reference,
+        a: {
+          ...set.reference.a!,
+          name: {
+            status: "found",
+            value: "Acme Corp",
+            accept: ["ACME Corporation"],
+            note: "legal name also fine",
+          },
+        },
+      },
+    };
+    const metrics = scoreRuns({ sets: [withAccept], runs: [okRun] }).sets[0]!
+      .metrics;
+    assert.equal(metrics.matched, 2);
+    assert.equal(metrics.unjudged, 0);
   });
 });

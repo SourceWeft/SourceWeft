@@ -5,14 +5,18 @@ import { buildDeepInfraEvalTarget } from "./deepinfra-target";
 test("refuses to build without a DeepInfra key", () => {
   for (const apiKey of [undefined, "", "   "]) {
     assert.throws(
-      () => buildDeepInfraEvalTarget({ apiKey, structuredOutput: "as-production" }),
+      () =>
+        buildDeepInfraEvalTarget({ apiKey, structuredOutput: "as-production" }),
       /DEEPINFRA_API_KEY/,
     );
   }
 });
 
 test("as-production mirrors the production DeepInfra gateway and chat-default target", () => {
-  const target = buildDeepInfraEvalTarget({ apiKey: "k", structuredOutput: "as-production" });
+  const target = buildDeepInfraEvalTarget({
+    apiKey: "k",
+    structuredOutput: "as-production",
+  });
   const provider = target.routed.providers.deepinfra!;
   assert.equal(provider.kind, "deepinfra");
   assert.equal(provider.baseUrl, "https://api.deepinfra.com/v1");
@@ -20,7 +24,14 @@ test("as-production mirrors the production DeepInfra gateway and chat-default ta
   assert.equal(provider.globalReady, true);
   assert.equal(provider.timeoutMs, 30_000);
   assert.equal(provider.maxRetries, 2);
-  assert.deepEqual(provider.supports, ["chat", "embeddings", "rerank", "asr", "tts", "image"]);
+  assert.deepEqual(provider.supports, [
+    "chat",
+    "embeddings",
+    "rerank",
+    "asr",
+    "tts",
+    "image",
+  ]);
   assert.deepEqual(Object.keys(target.routed.providers), ["deepinfra"]);
 
   const chatRoute = target.routed.modelRoutes[target.chat.modelAlias]!;
@@ -28,7 +39,10 @@ test("as-production mirrors the production DeepInfra gateway and chat-default ta
     chatRoute.targets.map(({ provider, model }) => ({ provider, model })),
     [{ provider: "deepinfra", model: "deepseek-ai/DeepSeek-V4.1-Flash-1017" }],
   );
-  assert.equal(target.chat.providerModel, "deepseek-ai/DeepSeek-V4.1-Flash-1017");
+  assert.equal(
+    target.chat.providerModel,
+    "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  );
   // Thinking off, with the production profile's support facts, so the adapter
   // sends reasoning_effort "none".
   assert.deepEqual(target.chat.thinking, {
@@ -49,8 +63,14 @@ test("as-production mirrors the production DeepInfra gateway and chat-default ta
 });
 
 test("strict adds json_schema_strict to the provider and nothing else", () => {
-  const production = buildDeepInfraEvalTarget({ apiKey: "k", structuredOutput: "as-production" });
-  const strict = buildDeepInfraEvalTarget({ apiKey: "k", structuredOutput: "strict" });
+  const production = buildDeepInfraEvalTarget({
+    apiKey: "k",
+    structuredOutput: "as-production",
+  });
+  const strict = buildDeepInfraEvalTarget({
+    apiKey: "k",
+    structuredOutput: "strict",
+  });
   assert.deepEqual(strict.routed.providers.deepinfra!.supports, [
     ...production.routed.providers.deepinfra!.supports,
     "json_schema_strict",

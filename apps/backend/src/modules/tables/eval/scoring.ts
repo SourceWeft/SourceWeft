@@ -54,13 +54,18 @@ function closeEnough(a: number, b: number) {
  * Whether two values state the same figures within 0.5% relative. Null when
  * either states no figure or they state a different number of figures.
  */
-export function numbersMatch(reference: string, answer: string): boolean | null {
+export function numbersMatch(
+  reference: string,
+  answer: string,
+): boolean | null {
   const ref = parseNumberValue(reference);
   const got = parseNumberValue(answer);
   if (!ref || !got || ref.values.length !== got.values.length) return null;
   // "35%" and "0.35": the plain side is a fraction when every figure is ≤ 1.
   const scale = (side: ParsedNumber, other: ParsedNumber) =>
-    !side.percent && other.percent && side.values.every((v) => Math.abs(v) <= 1) ? 100 : 1;
+    !side.percent && other.percent && side.values.every((v) => Math.abs(v) <= 1)
+      ? 100
+      : 1;
   const refScale = scale(ref, got);
   const gotScale = scale(got, ref);
   return ref.values.every((value, index) =>
@@ -75,8 +80,22 @@ export type ParsedDate = { granularity: DateGranularity; iso: string };
 
 const MONTH =
   "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const monthOf = (name: string) => MONTHS.indexOf(name.slice(0, 3).toLowerCase()) + 1;
+const MONTHS = [
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+];
+const monthOf = (name: string) =>
+  MONTHS.indexOf(name.slice(0, 3).toLowerCase()) + 1;
 
 type Ymd = { y: number; m?: number; d?: number };
 type Reading = Ymd | "ambiguous" | null;
@@ -86,14 +105,21 @@ const validDay = (d: number) => d >= 1 && d <= 31;
 const ymd = (y: number, m: number, d: number): Reading =>
   validMonth(m) && validDay(d) ? { y, m, d } : null;
 
-const DATE_PATTERNS: { pattern: RegExp; read: (groups: string[]) => Reading }[] = [
+const DATE_PATTERNS: {
+  pattern: RegExp;
+  read: (groups: string[]) => Reading;
+}[] = [
   {
     // 2023-05-12, 2023/5/12, 2023.05.12, 2023年5月12日
-    pattern: /(?<!\d)(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*[日号號]?(?!\d)/g,
+    pattern:
+      /(?<!\d)(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*[日号號]?(?!\d)/g,
     read: ([y, m, d]) => ymd(+y!, +m!, +d!),
   },
   {
-    pattern: new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`, "gi"),
+    pattern: new RegExp(
+      `\\b(${MONTH})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`,
+      "gi",
+    ),
     read: ([month, d, y]) => ymd(+y!, monthOf(month!), +d!),
   },
   {
@@ -137,7 +163,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 function toParsed(date: Ymd): ParsedDate {
   if (date.m === undefined) return { granularity: "year", iso: String(date.y) };
-  if (date.d === undefined) return { granularity: "month", iso: `${date.y}-${pad(date.m)}` };
+  if (date.d === undefined)
+    return { granularity: "month", iso: `${date.y}-${pad(date.m)}` };
   return { granularity: "day", iso: `${date.y}-${pad(date.m)}-${pad(date.d)}` };
 }
 
@@ -157,26 +184,40 @@ export function parseDateValue(raw: string): ParsedDate | null {
     });
   }
   if (readings.includes("ambiguous")) return null;
-  const dates = [...new Map(
-    readings
-      .filter((reading): reading is Ymd => reading !== null && reading !== "ambiguous")
-      .map((date) => {
-        const parsed = toParsed(date);
-        return [parsed.iso, parsed] as const;
-      }),
-  ).values()];
+  const dates = [
+    ...new Map(
+      readings
+        .filter(
+          (reading): reading is Ymd =>
+            reading !== null && reading !== "ambiguous",
+        )
+        .map((date) => {
+          const parsed = toParsed(date);
+          return [parsed.iso, parsed] as const;
+        }),
+    ).values(),
+  ];
   return dates.length === 1 ? dates[0]! : null;
 }
 
-const GRANULARITY_RANK: Record<DateGranularity, number> = { year: 0, month: 1, day: 2 };
-const ISO_LENGTH: Record<DateGranularity, number> = { year: 4, month: 7, day: 10 };
+const GRANULARITY_RANK: Record<DateGranularity, number> = {
+  year: 0,
+  month: 1,
+  day: 2,
+};
+const ISO_LENGTH: Record<DateGranularity, number> = {
+  year: 4,
+  month: 7,
+  day: 10,
+};
 
 /** Equal at the reference's granularity; null when either side is unreadable. */
 export function datesMatch(reference: string, answer: string): boolean | null {
   const ref = parseDateValue(reference);
   const got = parseDateValue(answer);
   if (!ref || !got) return null;
-  if (GRANULARITY_RANK[got.granularity] < GRANULARITY_RANK[ref.granularity]) return false;
+  if (GRANULARITY_RANK[got.granularity] < GRANULARITY_RANK[ref.granularity])
+    return false;
   return got.iso.slice(0, ISO_LENGTH[ref.granularity]) === ref.iso;
 }
 
@@ -195,7 +236,10 @@ export function parseBooleanValue(raw: string): boolean | null {
   return null;
 }
 
-export function booleansMatch(reference: string, answer: string): boolean | null {
+export function booleansMatch(
+  reference: string,
+  answer: string,
+): boolean | null {
   const ref = parseBooleanValue(reference);
   const got = parseBooleanValue(answer);
   return ref === null || got === null ? null : ref === got;
@@ -210,7 +254,11 @@ function normalizeText(value: string) {
 export type RuleVerdict = "match" | "mismatch" | "needs_judgment";
 
 /** The rule's verdict on two found values of one column type. */
-export function ruleVerdict(type: EvalColumnType, reference: string, answer: string): RuleVerdict {
+export function ruleVerdict(
+  type: EvalColumnType,
+  reference: string,
+  answer: string,
+): RuleVerdict {
   if (normalizeText(reference) === normalizeText(answer)) return "match";
   if (type === "text") return "needs_judgment";
   const result =
@@ -227,8 +275,30 @@ export function ruleVerdict(type: EvalColumnType, reference: string, answer: str
 export type ReferenceCell = {
   status: "found" | "not_found";
   value?: string;
+  /** Other values that are also correct, judged by the same column rule. */
+  accept?: string[];
   quote?: string;
+  /** For the person labelling; never scored. */
+  note?: string;
 };
+
+/**
+ * The verdict against the reference value and its accepted alternatives: a
+ * match with any of them is a match; otherwise a value the rule could not
+ * decide needs a judgment; otherwise a mismatch.
+ */
+export function acceptedVerdict(
+  type: EvalColumnType,
+  reference: Pick<ReferenceCell, "value" | "accept">,
+  answer: string,
+): RuleVerdict {
+  const verdicts = [reference.value ?? "", ...(reference.accept ?? [])]
+    .filter((value, index) => index === 0 || value.trim().length > 0)
+    .map((value) => ruleVerdict(type, value, answer));
+  if (verdicts.includes("match")) return "match";
+  if (verdicts.includes("needs_judgment")) return "needs_judgment";
+  return "mismatch";
+}
 
 export type EvalSetScoreInput = {
   id: string;
@@ -263,11 +333,7 @@ export type EvalRunScoreInput = {
 };
 
 export type GotStatus =
-  | GotCell["status"]
-  | "row_failed"
-  | "row_skipped"
-  | "run_failed"
-  | "missing";
+  GotCell["status"] | "row_failed" | "row_skipped" | "run_failed" | "missing";
 
 export type CellVerdict =
   | RuleVerdict
@@ -299,7 +365,12 @@ export type ScoredCell = {
 
 export type Judgments = Record<string, "match" | "mismatch">;
 
-export function judgmentKey(set: string, run: number, source: string, column: string) {
+export function judgmentKey(
+  set: string,
+  run: number,
+  source: string,
+  column: string,
+) {
   return `${set}/${run}/${source}/${column}`;
 }
 
@@ -395,11 +466,20 @@ function toMetrics(counters: Counters): ScoreMetrics {
     ...rest,
     runSuccessRate: ratio(counters.successfulRuns, counters.runs),
     agreementRate: ratio(counters.matched, counters.refFound),
-    agreementUpperBound: ratio(counters.matched + counters.unjudged, counters.refFound),
-    agreementRateInclFailedRuns: ratio(counters.matched, counters.refFoundInclFailed),
+    agreementUpperBound: ratio(
+      counters.matched + counters.unjudged,
+      counters.refFound,
+    ),
+    agreementRateInclFailedRuns: ratio(
+      counters.matched,
+      counters.refFoundInclFailed,
+    ),
     missRate: ratio(counters.missed, counters.refFound),
     wrongFillRate: ratio(counters.wrongFill, counters.refNotFound),
-    unverifiedShare: ratio(counters.unverified, counters.found + counters.unverified),
+    unverifiedShare: ratio(
+      counters.unverified,
+      counters.found + counters.unverified,
+    ),
     numberExactRate: ratio(counters.numberMatched, counters.numberBothFound),
     agreementMin: runAgreements.length ? Math.min(...runAgreements) : null,
     agreementMax: runAgreements.length ? Math.max(...runAgreements) : null,
@@ -431,7 +511,10 @@ function gotOf(
   if (row === "skipped") return { status: "row_skipped", value: "" };
   const cell = run.cells[source]?.[column];
   if (!cell) return { status: "missing", value: "" };
-  return { status: cell.status, value: cell.status === "found" ? (cell.value ?? "") : "" };
+  return {
+    status: cell.status,
+    value: cell.status === "found" ? (cell.value ?? "") : "",
+  };
 }
 
 function verdictOf(
@@ -451,7 +534,7 @@ function verdictOf(
       return ref.status === "found" ? "miss" : "agree_not_found";
     case "found":
       return ref.status === "found"
-        ? ruleVerdict(type, ref.value ?? "", got.value)
+        ? acceptedVerdict(type, ref, got.value)
         : "wrong_fill";
   }
 }
@@ -483,7 +566,9 @@ export function scoreRuns(input: {
     const runs = input.runs
       .filter((run) => run.setId === set.id)
       .sort((a, b) => a.run - b.run);
-    const typeOf = new Map(set.columns.map((column) => [column.id, column.type]));
+    const typeOf = new Map(
+      set.columns.map((column) => [column.id, column.type]),
+    );
     let labelledFound = 0;
     for (const source of set.sourceIds) {
       for (const column of set.columns) {
@@ -503,7 +588,8 @@ export function scoreRuns(input: {
       counters.refFoundInclFailed += labelledFound;
       if (run.status === "failed") {
         const code = run.errorCode ?? "UNKNOWN";
-        counters.failedRunCodes[code] = (counters.failedRunCodes[code] ?? 0) + 1;
+        counters.failedRunCodes[code] =
+          (counters.failedRunCodes[code] ?? 0) + 1;
       } else {
         counters.successfulRuns += 1;
       }
@@ -561,7 +647,11 @@ export function scoreRuns(input: {
           else if (final === "miss") counters.missed += 1;
           else if (final === "wrong_fill") counters.wrongFill += 1;
 
-          if (type === "number" && ref.status === "found" && got.status === "found") {
+          if (
+            type === "number" &&
+            ref.status === "found" &&
+            got.status === "found"
+          ) {
             counters.numberBothFound += 1;
             if (final === "match") counters.numberMatched += 1;
             else if (final === "needs_judgment") counters.numberUnjudged += 1;
@@ -580,7 +670,9 @@ export function scoreRuns(input: {
     sets,
     overall: toMetrics(overall),
     cells,
-    unusedJudgments: [...judgments.keys()].filter((key) => !usedJudgments.has(key)),
+    unusedJudgments: [...judgments.keys()].filter(
+      (key) => !usedJudgments.has(key),
+    ),
   };
 }
 
@@ -613,38 +705,88 @@ export function cellsToCsv(cells: readonly ScoredCell[]): string {
   return `${lines.join("\r\n")}\r\n`;
 }
 
-const pct = (value: number | null) => (value === null ? "—" : `${(value * 100).toFixed(1)}%`);
+const pct = (value: number | null) =>
+  value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 const usd = (metrics: ScoreMetrics) =>
   metrics.runs > 0 && metrics.runsWithoutCost === metrics.runs
     ? "unknown"
     : `$${metrics.costUsd.toFixed(4)}${metrics.runsWithoutCost ? ` (+${metrics.runsWithoutCost} run(s) with unknown cost)` : ""}`;
-const md = (value: string) => value.replaceAll("|", "\\|").replace(/\s+/g, " ").slice(0, 120);
+const md = (value: string) =>
+  value.replaceAll("|", "\\|").replace(/\s+/g, " ").slice(0, 120);
 
 function metricsTable(metrics: ScoreMetrics): string[] {
   const rows: [string, string][] = [
-    ["Runs (successful / total)", `${metrics.successfulRuns} / ${metrics.runs} (${pct(metrics.runSuccessRate)})`],
-    ["Failed runs by code", Object.entries(metrics.failedRunCodes).map(([code, n]) => `${code} × ${n}`).join(", ") || "none"],
+    [
+      "Runs (successful / total)",
+      `${metrics.successfulRuns} / ${metrics.runs} (${pct(metrics.runSuccessRate)})`,
+    ],
+    [
+      "Failed runs by code",
+      Object.entries(metrics.failedRunCodes)
+        .map(([code, n]) => `${code} × ${n}`)
+        .join(", ") || "none",
+    ],
     ["Filled cells (found)", String(metrics.filled)],
-    ["Agreement (ref found ∧ got found ∧ match) / ref found", pct(metrics.agreementRate)],
-    ["Agreement upper bound (unjudged counted as match)", pct(metrics.agreementUpperBound)],
-    ["Agreement counting failed runs as zero", pct(metrics.agreementRateInclFailedRuns)],
-    ["Per-run agreement min – max", `${pct(metrics.agreementMin)} – ${pct(metrics.agreementMax)}`],
-    ["Miss rate (ref found ∧ got not_found) / ref found", pct(metrics.missRate)],
-    ["Wrong-fill rate (ref not_found ∧ got found) / ref not_found", pct(metrics.wrongFillRate)],
-    ["Unverified share unverified / (found + unverified)", pct(metrics.unverifiedShare)],
-    ["Number exact rate (both found)", `${pct(metrics.numberExactRate)} of ${metrics.numberBothFound} (${metrics.numberUnjudged} unjudged)`],
+    [
+      "Agreement (ref found ∧ got found ∧ match) / ref found",
+      pct(metrics.agreementRate),
+    ],
+    [
+      "Agreement upper bound (unjudged counted as match)",
+      pct(metrics.agreementUpperBound),
+    ],
+    [
+      "Agreement counting failed runs as zero",
+      pct(metrics.agreementRateInclFailedRuns),
+    ],
+    [
+      "Per-run agreement min – max",
+      `${pct(metrics.agreementMin)} – ${pct(metrics.agreementMax)}`,
+    ],
+    [
+      "Miss rate (ref found ∧ got not_found) / ref found",
+      pct(metrics.missRate),
+    ],
+    [
+      "Wrong-fill rate (ref not_found ∧ got found) / ref not_found",
+      pct(metrics.wrongFillRate),
+    ],
+    [
+      "Unverified share unverified / (found + unverified)",
+      pct(metrics.unverifiedShare),
+    ],
+    [
+      "Number exact rate (both found)",
+      `${pct(metrics.numberExactRate)} of ${metrics.numberBothFound} (${metrics.numberUnjudged} unjudged)`,
+    ],
     ["Unjudged cells", String(metrics.unjudged)],
     ["Cells in failed/skipped rows or missing", String(metrics.rowFailedCells)],
-    ["Reference found / not_found / unlabelled positions", `${metrics.refFound} / ${metrics.refNotFound} / ${metrics.unlabelled}`],
+    [
+      "Reference found / not_found / unlabelled positions",
+      `${metrics.refFound} / ${metrics.refNotFound} / ${metrics.unlabelled}`,
+    ],
     ["Model calls", String(metrics.calls)],
-    ["Input / output tokens (reported usage)", `${metrics.inputTokens} / ${metrics.outputTokens}`],
+    [
+      "Input / output tokens (reported usage)",
+      `${metrics.inputTokens} / ${metrics.outputTokens}`,
+    ],
     ["Cost", usd(metrics)],
   ];
-  return ["| Metric | Value |", "|---|---|", ...rows.map(([k, v]) => `| ${k} | ${v} |`)];
+  return [
+    "| Metric | Value |",
+    "|---|---|",
+    ...rows.map(([k, v]) => `| ${k} | ${v} |`),
+  ];
 }
 
-function examples(cells: readonly ScoredCell[], verdict: CellVerdict, limit = 20): string[] {
-  const picked = cells.filter((cell) => cell.final_verdict === verdict).slice(0, limit);
+function examples(
+  cells: readonly ScoredCell[],
+  verdict: CellVerdict,
+  limit = 20,
+): string[] {
+  const picked = cells
+    .filter((cell) => cell.final_verdict === verdict)
+    .slice(0, limit);
   if (picked.length === 0) return ["None."];
   return [
     "| set | run | source | column | type | reference | got |",
@@ -659,7 +801,11 @@ function examples(cells: readonly ScoredCell[], verdict: CellVerdict, limit = 20
 /** The markdown report of one scoring pass. */
 export function formatScoreReport(
   result: ScoreResult,
-  meta: { generatedAt: string; judgmentsFile: string | null; resultsDir?: string },
+  meta: {
+    generatedAt: string;
+    judgmentsFile: string | null;
+    resultsDir?: string;
+  },
 ): string {
   const lines: string[] = [
     "# Data table evaluation: scores",
@@ -668,7 +814,10 @@ export function formatScoreReport(
     "",
     `Unjudged cells: ${result.overall.unjudged}. They are never counted as matches; the agreement upper bound shows what they could add.`,
     ...(result.unusedJudgments.length
-      ? ["", `Judgments that name no cell needing one (ignored): ${result.unusedJudgments.length}.`]
+      ? [
+          "",
+          `Judgments that name no cell needing one (ignored): ${result.unusedJudgments.length}.`,
+        ]
       : []),
     "",
     "## Overall",
@@ -688,7 +837,9 @@ export function formatScoreReport(
     "",
     ...(() => {
       const failed = result.sets.flatMap(({ id, metrics }) =>
-        Object.entries(metrics.failedRunCodes).map(([code, n]) => `- ${id}: ${code} × ${n}`),
+        Object.entries(metrics.failedRunCodes).map(
+          ([code, n]) => `- ${id}: ${code} × ${n}`,
+        ),
       );
       return failed.length ? failed : ["None."];
     })(),
@@ -715,6 +866,7 @@ export function formatScoreReport(
     "- date: ISO at the reference's granularity; an answer coarser than the reference is a mismatch.",
     "- boolean: yes/no/true/false/是/否 (and 有/没有/无/不是).",
     "- text: equal after whitespace/case normalisation, else a person judges it.",
+    "- A reference cell may list `accept` alternatives: matching any of them (or the value) under the column rule is a match.",
     "- A value a typed rule cannot read needs a judgment. Cell metrics use successful runs only; spend includes failed runs.",
     "",
   ];

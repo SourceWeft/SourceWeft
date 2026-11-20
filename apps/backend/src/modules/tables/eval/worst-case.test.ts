@@ -16,7 +16,10 @@ test("the worst case is 50 Chinese sources × 8 full columns, each cell 300 char
       if (cell.status !== "found") continue;
       assert.equal(cell.value.length, TABLE_LIMITS.cellChars);
       // Chinese throughout: three UTF-8 bytes per character.
-      assert.equal(Buffer.byteLength(cell.value, "utf8"), 3 * cell.value.length);
+      assert.equal(
+        Buffer.byteLength(cell.value, "utf8"),
+        3 * cell.value.length,
+      );
       assert.equal(cell.evidence.length, TABLE_LIMITS.evidencePerCell);
       for (const evidence of cell.evidence) {
         assert.equal(evidence.quote.length, TABLE_LIMITS.quoteChars);

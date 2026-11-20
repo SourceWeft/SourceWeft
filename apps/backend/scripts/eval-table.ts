@@ -68,6 +68,7 @@ import {
   tableColumnTypeSchema,
   type TableContent,
 } from "@sourceweft/contracts/table";
+import type { TableCheckpoint } from "@sourceweft/contracts/table-capability";
 import {
   cellsToCsv,
   formatScoreReport,
@@ -77,7 +78,16 @@ import {
   type GotCell,
   type Judgments,
 } from "../src/modules/tables/eval/scoring";
-import { buildWorstCaseTable, measureTableSize } from "../src/modules/tables/eval/worst-case";
+import {
+  diagnoseRun,
+  type AnchorLogEntry,
+  type FigureLogEntry,
+  type RunDiagnosis,
+} from "../src/modules/tables/eval/diagnose";
+import {
+  buildWorstCaseTable,
+  measureTableSize,
+} from "../src/modules/tables/eval/worst-case";
 
 const RUN_FORMAT = "sourceweft.table-eval.run/1";
 
@@ -85,7 +95,9 @@ const RUN_FORMAT = "sourceweft.table-eval.run/1";
 
 const setSchema = z
   .object({
-    id: z.string().regex(/^[A-Za-z0-9._-]+$/, "a set id is used as a directory name"),
+    id: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]+$/, "a set id is used as a directory name"),
     title: z.string(),
     language: z.string().min(2).max(35),
     instruction: z.string().max(TABLE_LIMITS.instructionChars).optional(),
@@ -101,7 +113,13 @@ const setSchema = z
       .min(1)
       .max(TABLE_LIMITS.maxColumns),
     sources: z
-      .array(z.object({ id: z.string().min(1), title: z.string(), file: z.string().min(1) }))
+      .array(
+        z.object({
+          id: z.string().min(1),
+          title: z.string(),
+          file: z.string().min(1),
+        }),
+      )
       .min(1)
       .max(TABLE_LIMITS.maxSources),
   })
@@ -111,10 +129,19 @@ const setSchema = z
         ctx.addIssue({ code: "custom", message: `duplicate ${what} id` });
       }
     };
-    unique(set.columns.map((column) => column.id), "column");
-    unique(set.sources.map((source) => source.id), "source");
+    unique(
+      set.columns.map((column) => column.id),
+      "column",
+    );
+    unique(
+      set.sources.map((source) => source.id),
+      "source",
+    );
     if (set.columns.length * set.sources.length > TABLE_LIMITS.maxCells) {
-      ctx.addIssue({ code: "custom", message: `more than ${TABLE_LIMITS.maxCells} cells` });
+      ctx.addIssue({
+        code: "custom",
+        message: `more than ${TABLE_LIMITS.maxCells} cells`,
+      });
     }
   });
 type EvalSet = z.infer<typeof setSchema>;
@@ -128,7 +155,9 @@ const referenceSchema = z.object({
         .object({
           status: z.enum(["found", "not_found"]),
           value: z.string().optional(),
+          accept: z.array(z.string()).optional(),
           quote: z.string().optional(),
+          note: z.string().optional(),
         })
         .refine((cell) => cell.status !== "found" || !!cell.value?.trim(), {
           message: "a found reference cell needs a value",
@@ -139,10 +168,14 @@ const referenceSchema = z.object({
 
 /** Reads and checks `<dir>/set.json`. */
 async function parseEvalSet(dir: string): Promise<EvalSet> {
-  const raw = JSON.parse(await readFile(join(dir, "set.json"), "utf8")) as unknown;
+  const raw = JSON.parse(
+    await readFile(join(dir, "set.json"), "utf8"),
+  ) as unknown;
   const parsed = setSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new Error(`${join(dir, "set.json")}: ${z.prettifyError(parsed.error)}`);
+    throw new Error(
+      `${join(dir, "set.json")}: ${z.prettifyError(parsed.error)}`,
+    );
   }
   return parsed.data;
 }
@@ -175,12 +208,19 @@ type CallRecord = {
   structuredOutputFallback?: string;
   /** The cost the provider reported inline (DeepInfra `usage.estimated_cost`, OpenRouter `cost`). */
   reportedCostUsd: number | null;
-  reportedCost?: { source: string; status: string; inlineUsd?: number; effectiveUsd?: number };
+  reportedCost?: {
+    source: string;
+    status: string;
+    inlineUsd?: number;
+    effectiveUsd?: number;
+  };
   /** The profile's price book; null when not looked up or not priced. */
   priceBookCostUsd: number | null;
   /** Reported cost when there is one, else the price book, else unknown. */
   costUsd: number | null;
   costSource: string | null;
+  /** The structured answer as the gateway returned it (the tool arguments). */
+  rawOutput?: unknown;
 };
 
 type EmbeddingRecord = {
@@ -210,7 +250,12 @@ type RunFile = {
     dir: string;
     language: string;
     instruction?: string;
-    columns: { id: string; name: string; type: EvalSet["columns"][number]["type"]; engineId: string }[];
+    columns: {
+      id: string;
+      name: string;
+      type: EvalSet["columns"][number]["type"];
+      engineId: string;
+    }[];
     sourceIds: string[];
   };
   run: number;
@@ -218,8 +263,20 @@ type RunFile = {
   wallMs: number;
   model: TransportDescription;
   chunker: { parser: string; chunkSize: number; parserVersion: string };
-  sources: { sourceId: string; title: string; file: string; chars: number; chunks: number; tokensEstimated: number }[];
-  plan: { calls: number; cellsToFill: number; totalTokens: number; exceedsLimit: boolean };
+  sources: {
+    sourceId: string;
+    title: string;
+    file: string;
+    chars: number;
+    chunks: number;
+    tokensEstimated: number;
+  }[];
+  plan: {
+    calls: number;
+    cellsToFill: number;
+    totalTokens: number;
+    exceedsLimit: boolean;
+  };
   status: "ok" | "failed";
   error?: { code: string; name: string; message: string };
   stats?: TableContent["generation"]["stats"];
@@ -230,6 +287,15 @@ type RunFile = {
   calls: CallRecord[];
   embeddings: EmbeddingRecord[];
   semanticAnchorErrors: string[];
+  /** Every anchor port batch: what was asked and what it found. */
+  anchorLog: AnchorLogEntry[];
+  /** Every figure check the engine asked for. */
+  figureLog: FigureLogEntry[];
+  /** Why cells ended unverified and rows failed (see modules/tables/eval/diagnose.ts). */
+  diagnosis: RunDiagnosis;
+  /** For a failed run: the rows the engine finished before failing (its checkpoint). */
+  partialRowStatus?: Record<string, "ok" | "failed" | "skipped">;
+  partialCells?: Record<string, Record<string, RunCell>>;
   totals: {
     calls: number;
     failedCalls: number;
@@ -266,7 +332,12 @@ type TransportDescription = {
   modelAlias: string;
   gatewayConfigId: string | null;
   configVersionId: string;
-  routeTargets: { provider: string; model: string; priority?: number; ready: boolean }[];
+  routeTargets: {
+    provider: string;
+    model: string;
+    priority?: number;
+    ready: boolean;
+  }[];
   thinking: ThinkingConfig | undefined;
   embeddingProfileAlias: string;
   embeddingTargets: { provider: string; model: string }[];
@@ -276,7 +347,11 @@ type TransportDescription = {
 
 type CallCost = Pick<
   CallRecord,
-  "reportedCostUsd" | "reportedCost" | "priceBookCostUsd" | "costUsd" | "costSource"
+  | "reportedCostUsd"
+  | "reportedCost"
+  | "priceBookCostUsd"
+  | "costUsd"
+  | "costSource"
 >;
 
 /** How the evaluation reaches the chat and embedding models; never billed, never recorded. */
@@ -285,20 +360,31 @@ type Transport = {
   complete(input: ChatRequest, traceId: string): Promise<ChatResult>;
   embed(texts: string[], traceId: string): Promise<EmbedResult>;
   chatCost(result: ChatResult): Promise<CallCost>;
-  embeddingCost(result: EmbedResult): Promise<{ costUsd: number | null; costSource: string | null }>;
+  embeddingCost(
+    result: EmbedResult,
+  ): Promise<{ costUsd: number | null; costSource: string | null }>;
 };
 
-function reportedCostOf(cost: import("@sourceweft/model-gateway").ModelCallCost | undefined) {
+function reportedCostOf(
+  cost: import("@sourceweft/model-gateway").ModelCallCost | undefined,
+) {
   const effective = cost?.effectiveUsd;
   return {
-    reportedCostUsd: typeof effective === "number" && Number.isFinite(effective) ? effective : null,
+    reportedCostUsd:
+      typeof effective === "number" && Number.isFinite(effective)
+        ? effective
+        : null,
     ...(cost
       ? {
           reportedCost: {
             source: cost.source,
             status: cost.status,
-            ...(cost.inlineUsd === undefined ? {} : { inlineUsd: cost.inlineUsd }),
-            ...(cost.effectiveUsd === undefined ? {} : { effectiveUsd: cost.effectiveUsd }),
+            ...(cost.inlineUsd === undefined
+              ? {}
+              : { inlineUsd: cost.inlineUsd }),
+            ...(cost.effectiveUsd === undefined
+              ? {}
+              : { effectiveUsd: cost.effectiveUsd }),
           },
         }
       : {}),
@@ -314,7 +400,11 @@ async function openDefaultProfileTransport(): Promise<Transport> {
   const [
     { createModelGateway },
     { requireDefaultModelGatewayProfile },
-    { buildRoutedModelGatewayConfig, loadRoutedGatewayConfig, assertGatewayConfigAvailable },
+    {
+      buildRoutedModelGatewayConfig,
+      loadRoutedGatewayConfig,
+      assertGatewayConfigAvailable,
+    },
     { prepareEmbeddingProfile, validateEmbeddingResult },
     { resolveChatThinkingWithDefaults },
     { computeProviderCost },
@@ -330,25 +420,41 @@ async function openDefaultProfileTransport(): Promise<Transport> {
   ]);
 
   // The default chat model or nothing, as `describeDefaultChatModel` decides.
-  let chatProfile: Awaited<ReturnType<typeof requireDefaultModelGatewayProfile>>;
+  let chatProfile: Awaited<
+    ReturnType<typeof requireDefaultModelGatewayProfile>
+  >;
   try {
     chatProfile = await requireDefaultModelGatewayProfile("chat");
   } catch (error) {
-    throw new TableGenerationError("MODEL_UNAVAILABLE", "The default chat model is not available", {}, { cause: error });
+    throw new TableGenerationError(
+      "MODEL_UNAVAILABLE",
+      "The default chat model is not available",
+      {},
+      { cause: error },
+    );
   }
   const routed = await loadRoutedGatewayConfig();
-  if (!routed) throw new Error("Global model gateway configuration is not synchronized");
+  if (!routed)
+    throw new Error("Global model gateway configuration is not synchronized");
   assertGatewayConfigAvailable(routed, chatProfile.gatewayConfigId);
   const embedding = await prepareEmbeddingProfile();
 
-  const chatGateway = createModelGateway(buildRoutedModelGatewayConfig(routed, { observeSink: null }));
+  const chatGateway = createModelGateway(
+    buildRoutedModelGatewayConfig(routed, { observeSink: null }),
+  );
   const embeddingGateway = createModelGateway(
-    buildRoutedModelGatewayConfig(embedding.routedConfig, { observeSink: null }),
+    buildRoutedModelGatewayConfig(embedding.routedConfig, {
+      observeSink: null,
+    }),
   );
 
   // `enrichChatThinking` in billed-client.ts: thinking off, plus the
   // profile's synced thinking-support facts; a failed lookup keeps it as is.
-  const thinkingOff = { mode: "off", enabled: false, includeReasoning: false } as const;
+  const thinkingOff = {
+    mode: "off",
+    enabled: false,
+    includeReasoning: false,
+  } as const;
   let thinking: ThinkingConfig | undefined = thinkingOff;
   try {
     thinking = await resolveChatThinkingWithDefaults({
@@ -358,7 +464,10 @@ async function openDefaultProfileTransport(): Promise<Transport> {
       gatewayConfigId: chatProfile.gatewayConfigId,
     });
   } catch (error) {
-    console.warn("thinking-support lookup failed; thinking stays off as given", error);
+    console.warn(
+      "thinking-support lookup failed; thinking stays off as given",
+      error,
+    );
   }
 
   const priceBook = async (
@@ -369,8 +478,16 @@ async function openDefaultProfileTransport(): Promise<Transport> {
   ) => {
     try {
       // No reported cost passed: this is the price book alone.
-      const cost = await computeProviderCost({ gatewayConfigId, modelKind: kind, profileAlias, usage: result.usage });
-      return { costUsd: cost.providerCostUsd, costSource: cost.costSource as string };
+      const cost = await computeProviderCost({
+        gatewayConfigId,
+        modelKind: kind,
+        profileAlias,
+        usage: result.usage,
+      });
+      return {
+        costUsd: cost.providerCostUsd,
+        costSource: cost.costSource as string,
+      };
     } catch (error) {
       console.warn("price-book lookup failed", error);
       return { costUsd: null, costSource: "lookup_failed" };
@@ -385,7 +502,9 @@ async function openDefaultProfileTransport(): Promise<Transport> {
       modelAlias: chatProfile.modelAlias,
       gatewayConfigId: chatProfile.gatewayConfigId,
       configVersionId: routed.versionId,
-      routeTargets: (routed.modelRoutes[chatProfile.modelAlias]?.targets ?? []).map((target) => ({
+      routeTargets: (
+        routed.modelRoutes[chatProfile.modelAlias]?.targets ?? []
+      ).map((target) => ({
         provider: target.provider,
         model: target.model,
         ...(target.priority === undefined ? {} : { priority: target.priority }),
@@ -393,9 +512,10 @@ async function openDefaultProfileTransport(): Promise<Transport> {
       })),
       thinking,
       embeddingProfileAlias: embedding.profile.profileAlias,
-      embeddingTargets: (embedding.routedConfig.modelRoutes[embedding.profile.modelAlias]?.targets ?? []).map(
-        ({ provider, model }) => ({ provider, model }),
-      ),
+      embeddingTargets: (
+        embedding.routedConfig.modelRoutes[embedding.profile.modelAlias]
+          ?.targets ?? []
+      ).map(({ provider, model }) => ({ provider, model })),
       databaseReads: [
         "default chat profile",
         "active routed gateway configuration",
@@ -422,18 +542,32 @@ async function openDefaultProfileTransport(): Promise<Transport> {
     },
     async chatCost(result) {
       const reported = reportedCostOf(result.observation?.cost);
-      const book = await priceBook("chat", chatProfile.profileAlias, chatProfile.gatewayConfigId, result);
+      const book = await priceBook(
+        "chat",
+        chatProfile.profileAlias,
+        chatProfile.gatewayConfigId,
+        result,
+      );
       return {
         ...reported,
         priceBookCostUsd: book.costUsd,
         costUsd: reported.reportedCostUsd ?? book.costUsd,
-        costSource: reported.reportedCostUsd !== null ? "provider_reported" : book.costSource,
+        costSource:
+          reported.reportedCostUsd !== null
+            ? "provider_reported"
+            : book.costSource,
       };
     },
     async embeddingCost(result) {
       const reported = reportedCostOf(result.observation?.cost).reportedCostUsd;
-      if (reported !== null) return { costUsd: reported, costSource: "provider_reported" };
-      return priceBook("embedding", embedding.profile.profileAlias, embedding.profile.gatewayConfigId, result);
+      if (reported !== null)
+        return { costUsd: reported, costSource: "provider_reported" };
+      return priceBook(
+        "embedding",
+        embedding.profile.profileAlias,
+        embedding.profile.gatewayConfigId,
+        result,
+      );
     },
   };
 }
@@ -444,7 +578,9 @@ async function openDefaultProfileTransport(): Promise<Transport> {
  * any model call if it cannot be built, and fails a call that any other target
  * answered; it never falls back to the default profile.
  */
-async function openDeepInfraTransport(structuredOutput: "as-production" | "strict"): Promise<Transport> {
+async function openDeepInfraTransport(
+  structuredOutput: "as-production" | "strict",
+): Promise<Transport> {
   const [
     { createModelGateway },
     { buildRoutedModelGatewayConfig },
@@ -458,19 +594,30 @@ async function openDeepInfraTransport(structuredOutput: "as-production" | "stric
     import("../src/modules/tables/eval/deepinfra-target"),
     import("@sourceweft/contracts/table-capability"),
   ]);
-  const target = buildDeepInfraEvalTarget({ apiKey: process.env.DEEPINFRA_API_KEY, structuredOutput });
+  const target = buildDeepInfraEvalTarget({
+    apiKey: process.env.DEEPINFRA_API_KEY,
+    structuredOutput,
+  });
   let gateway: ReturnType<typeof createModelGateway>;
   try {
-    gateway = createModelGateway(buildRoutedModelGatewayConfig(target.routed, { observeSink: null }));
+    gateway = createModelGateway(
+      buildRoutedModelGatewayConfig(target.routed, { observeSink: null }),
+    );
   } catch (error) {
-    throw new Error("--chat-target deepinfra: the DeepInfra gateway client could not be built", { cause: error });
+    throw new Error(
+      "--chat-target deepinfra: the DeepInfra gateway client could not be built",
+      { cause: error },
+    );
   }
   const expect = (
     what: string,
     result: { provider?: string; providerModel?: string },
     providerModel: string,
   ) => {
-    if (result.provider !== "deepinfra" || result.providerModel !== providerModel) {
+    if (
+      result.provider !== "deepinfra" ||
+      result.providerModel !== providerModel
+    ) {
       // A typed error ends the whole fill instead of failing one row.
       throw new TableGenerationError(
         "MODEL_UNAVAILABLE",
@@ -487,7 +634,9 @@ async function openDeepInfraTransport(structuredOutput: "as-production" | "stric
       modelAlias: target.chat.modelAlias,
       gatewayConfigId: null,
       configVersionId: target.routed.versionId,
-      routeTargets: target.routed.modelRoutes[target.chat.modelAlias]!.targets.map((t) => ({
+      routeTargets: target.routed.modelRoutes[
+        target.chat.modelAlias
+      ]!.targets.map((t) => ({
         provider: t.provider,
         model: t.model,
         ...(t.priority === undefined ? {} : { priority: t.priority }),
@@ -495,9 +644,9 @@ async function openDeepInfraTransport(structuredOutput: "as-production" | "stric
       })),
       thinking: target.chat.thinking,
       embeddingProfileAlias: target.embedding.profileAlias,
-      embeddingTargets: target.routed.modelRoutes[target.embedding.profileAlias]!.targets.map(
-        ({ provider, model }) => ({ provider, model }),
-      ),
+      embeddingTargets: target.routed.modelRoutes[
+        target.embedding.profileAlias
+      ]!.targets.map(({ provider, model }) => ({ provider, model })),
       databaseReads: [],
     },
     async complete(input, traceId) {
@@ -517,7 +666,11 @@ async function openDeepInfraTransport(structuredOutput: "as-production" | "stric
         { traceId },
       );
       expect("embedding", result, target.embedding.providerModel);
-      validateEmbeddingResult(target.embedding.identity, result, result.embeddings);
+      validateEmbeddingResult(
+        target.embedding.identity,
+        result,
+        result.embeddings,
+      );
       return result;
     },
     // No price book without the database: the reported cost or unknown.
@@ -527,12 +680,16 @@ async function openDeepInfraTransport(structuredOutput: "as-production" | "stric
         ...reported,
         priceBookCostUsd: null,
         costUsd: reported.reportedCostUsd,
-        costSource: reported.reportedCostUsd !== null ? "provider_reported" : null,
+        costSource:
+          reported.reportedCostUsd !== null ? "provider_reported" : null,
       };
     },
     async embeddingCost(result) {
       const reported = reportedCostOf(result.observation?.cost).reportedCostUsd;
-      return { costUsd: reported, costSource: reported !== null ? "provider_reported" : null };
+      return {
+        costUsd: reported,
+        costSource: reported !== null ? "provider_reported" : null,
+      };
     },
   };
 }
@@ -543,7 +700,9 @@ async function generate(options: {
   setDirs: string[];
   runs: number;
   out: string;
-  chatTarget: { kind: "default-profile" } | { kind: "deepinfra"; structuredOutput: "as-production" | "strict" };
+  chatTarget:
+    | { kind: "default-profile" }
+    | { kind: "deepinfra"; structuredOutput: "as-production" | "strict" };
 }) {
   // Production modules are loaded only here: they read the environment, which
   // the scoring and size modes never need.
@@ -555,7 +714,7 @@ async function generate(options: {
     { textSourceParser },
     { defaultParsingConfig },
     { isTableGenerationError },
-    { estimateTokens },
+    { estimateTokens, assembleCorpus },
   ] = await Promise.all([
     import("../src/modules/tables/capability"),
     import("../src/modules/tables/service"),
@@ -574,9 +733,13 @@ async function generate(options: {
   const described = transport.description;
   console.log(
     `chat target ${described.chatTarget} (${described.profileAlias}): ${
-      described.routeTargets.map((t) => `${t.provider}/${t.model}${t.ready ? "" : " (not ready)"}`).join(", ") || "none"
+      described.routeTargets
+        .map((t) => `${t.provider}/${t.model}${t.ready ? "" : " (not ready)"}`)
+        .join(", ") || "none"
     }; structured output ${described.structuredOutput}; embedding ${
-      described.embeddingTargets.map((t) => `${t.provider}/${t.model}`).join(", ") || "none"
+      described.embeddingTargets
+        .map((t) => `${t.provider}/${t.model}`)
+        .join(", ") || "none"
     }; database reads: ${described.databaseReads.join(", ") || "none"}`,
   );
 
@@ -589,14 +752,18 @@ async function generate(options: {
     const set = await parseEvalSet(dir);
     for (let run = 1; run <= options.runs; run += 1) {
       const file = join(options.out, set.id, `run-${run}.json`);
-      if (existsSync(file)) throw new Error(`${file} exists; choose another --out`);
+      if (existsSync(file))
+        throw new Error(`${file} exists; choose another --out`);
     }
     const sources = [];
     for (const source of set.sources) {
       const path = insideDir(dir, source.file);
       const bytes = await readFile(path);
       const extension = extname(path).toLowerCase();
-      const mimeType = extension === ".md" || extension === ".markdown" ? "text/markdown" : "text/plain";
+      const mimeType =
+        extension === ".md" || extension === ".markdown"
+          ? "text/markdown"
+          : "text/plain";
       const parsed = await textSourceParser.parse({
         fileName: basename(path),
         mimeType,
@@ -622,7 +789,9 @@ async function generate(options: {
           sourceId: source.id,
           documentId,
           title: source.title,
-          contentHash: createHash("sha256").update(parsed.content).digest("hex"),
+          contentHash: createHash("sha256")
+            .update(parsed.content)
+            .digest("hex"),
           indexed: true,
           chunks,
         },
@@ -632,7 +801,10 @@ async function generate(options: {
           file: source.file,
           chars: parsed.content.length,
           chunks: chunks.length,
-          tokensEstimated: chunks.reduce((sum, chunk) => sum + estimateTokens(chunk.text), 0),
+          tokensEstimated: chunks.reduce(
+            (sum, chunk) => sum + estimateTokens(chunk.text),
+            0,
+          ),
         },
       });
     }
@@ -647,14 +819,33 @@ async function generate(options: {
         type,
       })),
     );
-    const engineIdOf = new Map(set.columns.map((column, index) => [column.id, columns[index]!.id]));
+    const engineIdOf = new Map(
+      set.columns.map((column, index) => [column.id, columns[index]!.id]),
+    );
     const sourceInputs = sources.map((source) => source.input);
     const language = resolveTableLanguage({
       requested: set.language,
       sources: sourceInputs,
       uiLocale: set.language,
     });
-    const plan = generation.planFill({ columns, sources: sourceInputs, language });
+    const plan = generation.planFill({
+      columns,
+      sources: sourceInputs,
+      language,
+    });
+    // The handles the engine gives the chunks: one corpus of every source it
+    // reads, numbered in order (fill.ts, no previous version).
+    const handles = assembleCorpus(
+      sourceInputs
+        .filter((source) => source.indexed && source.chunks.length > 0)
+        .flatMap((source) => source.chunks),
+      { maxTotalTokens: Number.POSITIVE_INFINITY },
+    ).chunks.map(({ handle, chunkId, sourceId, text }) => ({
+      handle,
+      chunkId,
+      sourceId,
+      text,
+    }));
     const instruction = set.instruction?.trim();
     await mkdir(join(options.out, set.id), { recursive: true });
 
@@ -664,6 +855,9 @@ async function generate(options: {
       const calls: CallRecord[] = [];
       const embeddings: EmbeddingRecord[] = [];
       const semanticAnchorErrors: string[] = [];
+      const anchorLog: AnchorLogEntry[] = [];
+      const figureLog: FigureLogEntry[] = [];
+      let checkpointRows: TableCheckpoint["rows"] = {};
 
       const model = {
         async completeStructured(call: {
@@ -672,7 +866,11 @@ async function generate(options: {
           referenceId: string;
           system: string;
           user: string;
-          schema: { name: string; description: string; schema: Record<string, unknown> };
+          schema: {
+            name: string;
+            description: string;
+            schema: Record<string, unknown>;
+          };
           maxTokens: number;
         }) {
           const started = Date.now();
@@ -698,21 +896,39 @@ async function generate(options: {
               ms: Date.now() - started,
               ok: true,
               ...(completion.provider ? { provider: completion.provider } : {}),
-              ...(completion.providerModel ? { providerModel: completion.providerModel } : {}),
-              ...(completion.finishReason ? { finishReason: completion.finishReason } : {}),
-              ...(completion.usage?.inputTokens === undefined ? {} : { inputTokens: completion.usage.inputTokens }),
-              ...(completion.usage?.outputTokens === undefined ? {} : { outputTokens: completion.usage.outputTokens }),
-              ...(completion.usage?.reasoningTokens === undefined ? {} : { reasoningTokens: completion.usage.reasoningTokens }),
-              ...(completion.usage?.cacheReadTokens === undefined ? {} : { cacheReadTokens: completion.usage.cacheReadTokens }),
+              ...(completion.providerModel
+                ? { providerModel: completion.providerModel }
+                : {}),
+              ...(completion.finishReason
+                ? { finishReason: completion.finishReason }
+                : {}),
+              ...(completion.usage?.inputTokens === undefined
+                ? {}
+                : { inputTokens: completion.usage.inputTokens }),
+              ...(completion.usage?.outputTokens === undefined
+                ? {}
+                : { outputTokens: completion.usage.outputTokens }),
+              ...(completion.usage?.reasoningTokens === undefined
+                ? {}
+                : { reasoningTokens: completion.usage.reasoningTokens }),
+              ...(completion.usage?.cacheReadTokens === undefined
+                ? {}
+                : { cacheReadTokens: completion.usage.cacheReadTokens }),
               ...(completion.structuredOutputDiagnostics
                 ? {
-                    structuredOutputMechanism: completion.structuredOutputDiagnostics.mechanism,
+                    structuredOutputMechanism:
+                      completion.structuredOutputDiagnostics.mechanism,
                     ...(completion.structuredOutputDiagnostics.fallbackReason
-                      ? { structuredOutputFallback: completion.structuredOutputDiagnostics.fallbackReason }
+                      ? {
+                          structuredOutputFallback:
+                            completion.structuredOutputDiagnostics
+                              .fallbackReason,
+                        }
                       : {}),
                   }
                 : {}),
               ...(await transport.chatCost(completion)),
+              rawOutput: completion.structuredOutput ?? null,
             });
             return completion.structuredOutput;
           } catch (error) {
@@ -732,7 +948,7 @@ async function generate(options: {
         },
       };
 
-      const anchor = createGroundedAnchorPort({
+      const productionAnchor = createGroundedAnchorPort({
         embedTexts: async (texts) => {
           const started = Date.now();
           try {
@@ -743,8 +959,12 @@ async function generate(options: {
               texts: texts.length,
               ok: true,
               ...(result.provider ? { provider: result.provider } : {}),
-              ...(result.providerModel ? { providerModel: result.providerModel } : {}),
-              ...(result.usage?.inputTokens === undefined ? {} : { inputTokens: result.usage.inputTokens }),
+              ...(result.providerModel
+                ? { providerModel: result.providerModel }
+                : {}),
+              ...(result.usage?.inputTokens === undefined
+                ? {}
+                : { inputTokens: result.usage.inputTokens }),
               costUsd: cost.costUsd,
               costSource: cost.costSource,
             });
@@ -762,8 +982,48 @@ async function generate(options: {
           }
         },
         onSemanticError: (error) =>
-          semanticAnchorErrors.push(error instanceof Error ? error.message : String(error)),
+          semanticAnchorErrors.push(
+            error instanceof Error ? error.message : String(error),
+          ),
       });
+
+      // The production ports, observed: each call is logged and passed on unchanged.
+      const anchor: typeof productionAnchor = {
+        async anchor(requests) {
+          const entry: AnchorLogEntry = {
+            requests: requests.map(({ text, chunkId }) => ({ text, chunkId })),
+          };
+          anchorLog.push(entry);
+          try {
+            const results = await productionAnchor.anchor(requests);
+            entry.results = results.map((result) =>
+              result
+                ? { quote: result.quote, confidence: result.confidence }
+                : null,
+            );
+            return results;
+          } catch (error) {
+            entry.error =
+              error instanceof Error ? error.message : String(error);
+            throw error;
+          }
+        },
+      };
+      const figures = {
+        covered(claim: string, passage: string) {
+          const result = figuresCovered(claim, passage);
+          figureLog.push({ claim, passage, result });
+          return result;
+        },
+      };
+      // Production jobs hand the engine a checkpoint store; this one is kept in
+      // memory so a run that fails the quality gate still shows its rows.
+      const checkpoint = {
+        load: async () => null,
+        save: async (value: TableCheckpoint) => {
+          checkpointRows = value.rows;
+        },
+      };
 
       const startedAt = new Date();
       let content: TableContent | undefined;
@@ -773,7 +1033,8 @@ async function generate(options: {
           {
             model,
             anchor,
-            figures: { covered: figuresCovered },
+            figures,
+            checkpoint,
             signal: AbortSignal.timeout(generation.limits.jobTimeoutMs),
           },
           {
@@ -807,30 +1068,75 @@ async function generate(options: {
       }
       const wallMs = Date.now() - startedAt.getTime();
 
-      const rowStatus: RunFile["rowStatus"] = {};
-      const cells: RunFile["cells"] = {};
-      for (const row of content?.rows ?? []) {
-        rowStatus[row.sourceId] = row.status;
-        const byColumn: Record<string, RunCell> = {};
-        for (const column of set.columns) {
-          const cell = row.cells[engineIdOf.get(column.id)!];
-          if (!cell) continue;
-          byColumn[column.id] =
-            cell.status === "found"
-              ? {
-                  status: "found",
-                  value: cell.value,
-                  ...(cell.normalized === undefined ? {} : { normalized: cell.normalized }),
-                  evidence: cell.evidence.map((evidence) => ({
-                    chunkId: evidence.chunkId,
-                    ...(evidence.chunkNo === undefined ? {} : { chunkNo: evidence.chunkNo }),
-                    quote: evidence.quote,
-                  })),
-                }
-              : { status: cell.status };
+      const cellsOf = (rows: readonly TableContent["rows"][number][]) => {
+        const rowStatus: RunFile["rowStatus"] = {};
+        const cells: RunFile["cells"] = {};
+        for (const row of rows) {
+          rowStatus[row.sourceId] = row.status;
+          const byColumn: Record<string, RunCell> = {};
+          for (const column of set.columns) {
+            const cell = row.cells[engineIdOf.get(column.id)!];
+            if (!cell) continue;
+            byColumn[column.id] =
+              cell.status === "found"
+                ? {
+                    status: "found",
+                    value: cell.value,
+                    ...(cell.normalized === undefined
+                      ? {}
+                      : { normalized: cell.normalized }),
+                    evidence: cell.evidence.map((evidence) => ({
+                      chunkId: evidence.chunkId,
+                      ...(evidence.chunkNo === undefined
+                        ? {}
+                        : { chunkNo: evidence.chunkNo }),
+                      quote: evidence.quote,
+                    })),
+                  }
+                : { status: cell.status };
+          }
+          cells[row.sourceId] = byColumn;
         }
-        cells[row.sourceId] = byColumn;
-      }
+        return { rowStatus, cells };
+      };
+      const { rowStatus, cells } = cellsOf(content?.rows ?? []);
+      const partial = content ? null : cellsOf(Object.values(checkpointRows));
+
+      // The rows the engine finished: its content, or for a failed run its
+      // checkpoint plus every readable source missing from it (failed rows are
+      // never checkpointed).
+      const finishedRows =
+        content?.rows ??
+        sourceInputs
+          .filter((source) => source.indexed && source.chunks.length > 0)
+          .map(
+            (source) =>
+              checkpointRows[source.sourceId] ?? {
+                sourceId: source.sourceId,
+                status: "failed" as const,
+                cells: {},
+              },
+          );
+      const diagnosis = diagnoseRun({
+        artifactId,
+        versionNo: 1,
+        language,
+        columns: set.columns.map((column) => ({
+          id: column.id,
+          engineId: engineIdOf.get(column.id)!,
+          type: column.type,
+        })),
+        chunks: handles,
+        calls,
+        anchorLog,
+        figureLog,
+        rows: finishedRows.map((row) => ({
+          sourceId: row.sourceId,
+          status: row.status,
+          cells: row.cells,
+        })),
+        quoteChars: TABLE_LIMITS.quoteChars,
+      });
 
       const record: RunFile = {
         format: RUN_FORMAT,
@@ -853,7 +1159,8 @@ async function generate(options: {
         wallMs,
         model: described,
         chunker: {
-          parser: "modules/sources/parsers/text.ts → @sourceweft/builtin-document-parsers chunkSourceContent",
+          parser:
+            "modules/sources/parsers/text.ts → @sourceweft/builtin-document-parsers chunkSourceContent",
           chunkSize: parsingConfig.chunkSize,
           parserVersion: parsingConfig.parserVersion,
         },
@@ -866,23 +1173,46 @@ async function generate(options: {
         },
         status: failure ? "failed" : "ok",
         ...(failure ? { error: failure } : {}),
-        ...(content ? { stats: content.generation.stats, promptVersion: content.generation.promptVersion } : {}),
+        ...(content
+          ? {
+              stats: content.generation.stats,
+              promptVersion: content.generation.promptVersion,
+            }
+          : {}),
         rowStatus,
         cells,
         calls,
         embeddings,
         semanticAnchorErrors,
+        anchorLog,
+        figureLog,
+        diagnosis,
+        ...(partial
+          ? { partialRowStatus: partial.rowStatus, partialCells: partial.cells }
+          : {}),
         totals: {
           calls: calls.length,
           failedCalls: calls.filter((call) => !call.ok).length,
-          inputTokens: calls.reduce((sum, call) => sum + (call.inputTokens ?? 0), 0),
-          outputTokens: calls.reduce((sum, call) => sum + (call.outputTokens ?? 0), 0),
-          reasoningTokens: calls.reduce((sum, call) => sum + (call.reasoningTokens ?? 0), 0),
+          inputTokens: calls.reduce(
+            (sum, call) => sum + (call.inputTokens ?? 0),
+            0,
+          ),
+          outputTokens: calls.reduce(
+            (sum, call) => sum + (call.outputTokens ?? 0),
+            0,
+          ),
+          reasoningTokens: calls.reduce(
+            (sum, call) => sum + (call.reasoningTokens ?? 0),
+            0,
+          ),
           // A failed call's cost is unknown (the provider may have billed it).
           costUsd: sumKnown(calls.map((call) => call.costUsd)),
           embeddingCalls: embeddings.length,
           embeddingTexts: embeddings.reduce((sum, call) => sum + call.texts, 0),
-          embeddingInputTokens: embeddings.reduce((sum, call) => sum + (call.inputTokens ?? 0), 0),
+          embeddingInputTokens: embeddings.reduce(
+            (sum, call) => sum + (call.inputTokens ?? 0),
+            0,
+          ),
           embeddingCostUsd: sumKnown(embeddings.map((call) => call.costUsd)),
         },
         ...(content ? { content } : {}),
@@ -919,26 +1249,37 @@ async function score(options: {
   const runFiles: RunFile[] = [];
   for (const entry of await readdir(options.results, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    for (const name of (await readdir(join(options.results, entry.name))).sort()) {
+    for (const name of (
+      await readdir(join(options.results, entry.name))
+    ).sort()) {
       if (!/^run-\d+\.json$/.test(name)) continue;
-      const record = JSON.parse(await readFile(join(options.results, entry.name, name), "utf8")) as RunFile;
+      const record = JSON.parse(
+        await readFile(join(options.results, entry.name, name), "utf8"),
+      ) as RunFile;
       if (record.format !== RUN_FORMAT) {
-        throw new Error(`${join(options.results, entry.name, name)} is not a ${RUN_FORMAT} file`);
+        throw new Error(
+          `${join(options.results, entry.name, name)} is not a ${RUN_FORMAT} file`,
+        );
       }
       runFiles.push(record);
     }
   }
-  if (runFiles.length === 0) throw new Error(`no run files under ${options.results}`);
+  if (runFiles.length === 0)
+    throw new Error(`no run files under ${options.results}`);
 
   const sets = new Map<string, EvalSetScoreInput>();
   for (const record of runFiles) {
     if (sets.has(record.set.id)) continue;
     const dir = overrideDirs.get(record.set.id) ?? record.set.dir;
     const parsed = referenceSchema.safeParse(
-      JSON.parse(await readFile(join(dir, "reference.json"), "utf8")) as unknown,
+      JSON.parse(
+        await readFile(join(dir, "reference.json"), "utf8"),
+      ) as unknown,
     );
     if (!parsed.success) {
-      throw new Error(`${join(dir, "reference.json")}: ${z.prettifyError(parsed.error)}`);
+      throw new Error(
+        `${join(dir, "reference.json")}: ${z.prettifyError(parsed.error)}`,
+      );
     }
     sets.set(record.set.id, {
       id: record.set.id,
@@ -960,7 +1301,9 @@ async function score(options: {
         Object.fromEntries(
           Object.entries(byColumn).map(([column, cell]) => [
             column,
-            cell.status === "found" ? { status: "found" as const, value: cell.value ?? "" } : { status: cell.status },
+            cell.status === "found"
+              ? { status: "found" as const, value: cell.value ?? "" }
+              : { status: cell.status },
           ]),
         ),
       ]),
@@ -977,14 +1320,20 @@ async function score(options: {
   if (options.judgments) {
     const parsed = z
       .record(z.string(), z.enum(["match", "mismatch"]))
-      .safeParse(JSON.parse(await readFile(options.judgments, "utf8")) as unknown);
+      .safeParse(
+        JSON.parse(await readFile(options.judgments, "utf8")) as unknown,
+      );
     if (!parsed.success) {
       throw new Error(`${options.judgments}: ${z.prettifyError(parsed.error)}`);
     }
     judgments = parsed.data;
   }
 
-  const result = scoreRuns({ sets: [...sets.values()], runs, ...(judgments ? { judgments } : {}) });
+  const result = scoreRuns({
+    sets: [...sets.values()],
+    runs,
+    ...(judgments ? { judgments } : {}),
+  });
   const csvPath = options.out.replace(/(\.md)?$/i, ".cells.csv");
   await mkdir(dirname(options.out), { recursive: true });
   await writeFile(csvPath, cellsToCsv(result.cells));
@@ -997,7 +1346,8 @@ async function score(options: {
     }),
   );
   const o = result.overall;
-  const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
+  const pct = (v: number | null) =>
+    v === null ? "—" : `${(v * 100).toFixed(1)}%`;
   console.log(
     `${runs.length} runs in ${sets.size} set(s): agreement ${pct(o.agreementRate)} (upper ${pct(o.agreementUpperBound)}, ${o.unjudged} unjudged), ` +
       `miss ${pct(o.missRate)}, wrong fill ${pct(o.wrongFillRate)}, unverified ${pct(o.unverifiedShare)}, ` +
@@ -1027,12 +1377,18 @@ async function size(options: { out: string; db: boolean }) {
     for (let i = 0; i < 10; i += 1) {
       const started = performance.now();
       await db.transaction(async (tx) => {
-        await tx.execute(sql`create temporary table eval_table_size (content jsonb) on commit drop`);
-        await tx.execute(sql`insert into eval_table_size (content) values (${json}::jsonb)`);
+        await tx.execute(
+          sql`create temporary table eval_table_size (content jsonb) on commit drop`,
+        );
+        await tx.execute(
+          sql`insert into eval_table_size (content) values (${json}::jsonb)`,
+        );
         const rows = await tx.execute(
           sql`select content::text as text, pg_column_size(content) as stored from eval_table_size`,
         );
-        const row = (rows as unknown as { rows?: { text: string; stored: number }[] }).rows?.[0] ??
+        const row =
+          (rows as unknown as { rows?: { text: string; stored: number }[] })
+            .rows?.[0] ??
           (rows as unknown as { text: string; stored: number }[])[0];
         storedBytes = Number(row?.stored ?? 0);
         JSON.parse(String(row?.text ?? "null"));
@@ -1121,7 +1477,8 @@ try {
     const setDirs = (cli.set ?? []).map((dir) => resolve(dir));
     if (setDirs.length === 0) usage("at least one --set is required");
     const runs = Number.parseInt(cli.runs ?? "", 10);
-    if (!Number.isInteger(runs) || runs < 1) usage("--runs must be a positive integer");
+    if (!Number.isInteger(runs) || runs < 1)
+      usage("--runs must be a positive integer");
     const chatTarget = cli["chat-target"];
     const structuredOutput = cli["structured-output"];
     if (chatTarget !== undefined && chatTarget !== "deepinfra") {
@@ -1130,22 +1487,33 @@ try {
     if (chatTarget === undefined && structuredOutput !== undefined) {
       usage("--structured-output applies only with --chat-target");
     }
-    if (chatTarget && structuredOutput !== "as-production" && structuredOutput !== "strict") {
+    if (
+      chatTarget &&
+      structuredOutput !== "as-production" &&
+      structuredOutput !== "strict"
+    ) {
       // No default: production DeepInfra does not declare json_schema_strict,
       // so the choice between matching it and forcing strict output is explicit.
-      usage("--chat-target deepinfra needs --structured-output as-production or strict");
+      usage(
+        "--chat-target deepinfra needs --structured-output as-production or strict",
+      );
     }
     await generate({
       setDirs,
       runs,
       out,
       chatTarget: chatTarget
-        ? { kind: "deepinfra", structuredOutput: structuredOutput as "as-production" | "strict" }
+        ? {
+            kind: "deepinfra",
+            structuredOutput: structuredOutput as "as-production" | "strict",
+          }
         : { kind: "default-profile" },
     });
   }
   process.exit(0);
 } catch (error) {
-  console.error(error instanceof Error ? (error.stack ?? error.message) : error);
+  console.error(
+    error instanceof Error ? (error.stack ?? error.message) : error,
+  );
   process.exit(1);
 }
