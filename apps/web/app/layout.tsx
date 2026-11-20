@@ -19,7 +19,7 @@ import {
   pickMessages,
 } from "../i18n/client-messages";
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
-import { resolveRequireEmailVerification } from "../lib/auth/auth-config-server";
+import { resolveWebAuthPageConfig } from "../lib/auth/auth-config-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
 import { AnalyticsScripts } from "../lib/analytics/analytics-scripts";
 import { Providers } from "./providers";
@@ -75,9 +75,9 @@ export default async function RootLayout({
   // Runtime config (base URL, GTM) is injected at container start, so never prerender with build-time values.
   await connection();
   const runtimeConfig = serverPublicRuntimeConfig();
-  const [capabilities, requireEmailVerification] = await Promise.all([
+  const [capabilities, authPageConfig] = await Promise.all([
     resolveDeploymentCapabilities(),
-    resolveRequireEmailVerification(),
+    resolveWebAuthPageConfig(),
   ]);
 
   // The proxy resolves the locale per request and next-intl surfaces it here, so
@@ -111,7 +111,8 @@ export default async function RootLayout({
         <NextIntlClientProvider locale={resolvedLocale} messages={messages}>
           <Providers
             initialCapabilities={capabilities}
-            requireEmailVerification={requireEmailVerification}
+            requireEmailVerification={authPageConfig.requireEmailVerification}
+            appleSignIn={authPageConfig.appleSignIn}
           >
             <DesktopWindowChrome />
             {children}

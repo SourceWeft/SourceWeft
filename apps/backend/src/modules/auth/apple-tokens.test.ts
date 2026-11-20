@@ -12,7 +12,7 @@ const { privateKey, publicKey } = generateKeyPairSync("ec", {
   namedCurve: "prime256v1",
 });
 const settings = {
-  appBundleId: "nicelab.sourceweft.mobile",
+  clientId: "nicelab.sourceweft.mobile",
   teamId: "TEAM123456",
   keyId: "KEY1234567",
   privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
@@ -167,4 +167,19 @@ test("revoking sends the refresh token with its type hint to Apple's revoke endp
   assert.equal(calls[0]!.form.get("token"), "refresh-1");
   assert.equal(calls[0]!.form.get("token_type_hint"), "refresh_token");
   assert.ok(calls[0]!.form.get("client_secret"));
+});
+
+test("calls for the web sign-in are made as its Services ID", async () => {
+  const web = { ...settings, clientId: "com.sourceweft.web" };
+  assert.equal(
+    decode(createAppleClientSecret(web).split(".")[1]!).sub,
+    "com.sourceweft.web",
+  );
+  const { fetchImpl, calls } = fakeFetch(() => ({ status: 200, body: {} }));
+  await revokeAppleRefreshToken(web, "refresh-web", fetchImpl);
+  assert.equal(calls[0]!.form.get("client_id"), "com.sourceweft.web");
+  assert.equal(
+    decode(calls[0]!.form.get("client_secret")!.split(".")[1]!).sub,
+    "com.sourceweft.web",
+  );
 });

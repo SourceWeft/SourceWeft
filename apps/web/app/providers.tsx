@@ -32,6 +32,7 @@ import { magicLinkPlugin } from "../lib/auth/magic-link-plugin";
 import { multiSessionPlugin } from "../lib/auth/multi-session-plugin";
 import { organizationPlugin } from "../lib/auth/organization-plugin";
 import { passkeyPlugin } from "../lib/auth/passkey-plugin";
+import { webSocialProviders } from "../lib/auth/web-sign-in-methods";
 import { ssoPlugin } from "../lib/auth/sso-plugin";
 import { twoFactorPlugin } from "../lib/auth/two-factor-plugin";
 import { getQueryClient } from "../lib/query-client";
@@ -179,11 +180,14 @@ export function Providers({
   children,
   initialCapabilities = null,
   requireEmailVerification = true,
+  appleSignIn = false,
 }: {
   children: React.ReactNode;
   initialCapabilities?: DeploymentCapabilities | null;
-  /** The API's answer (see `resolveRequireEmailVerification`). */
+  /** The API's answer (see `resolveWebAuthPageConfig`). */
   requireEmailVerification?: boolean;
+  /** Offer Sign in with Apple (see `resolveWebAuthPageConfig`). */
+  appleSignIn?: boolean;
 }) {
   const router = useRouter();
   const currentLocale = useLocale();
@@ -252,7 +256,7 @@ export function Providers({
             ssoPlugin(),
           ]}
           redirectTo="/dashboard"
-          socialProviders={["google", "github"]}
+          socialProviders={webSocialProviders({ appleSignIn })}
         >
           <UserSettingsSync />
           <DesktopTraySync />

@@ -55,15 +55,24 @@ Auth and workspace MVP notes:
   ID-token audience (only while the Google web client is configured), and
   `AUTH_APPLE_APP_BUNDLE_ID` names the app whose Apple identity tokens are
   accepted. Neither is a secret. `/v1/auth/config` reports both to the app as
-  `nativeSignIn`. Apple has no client secret here, so the browser redirect flow
-  is not available for it.
+  `nativeSignIn`.
+- Sign in with Apple on the web sign-in page (and so in the desktop app, which
+  signs in through it) is turned on by `AUTH_APPLE_SERVICES_ID`, the Apple
+  Services ID the browser redirect flow runs as. Its return URL is
+  `<NEXT_PUBLIC_API_BASE_URL>/api/auth/callback/apple`, and its primary App ID
+  should be the iOS app so both reach the same account. The same Better Auth
+  Apple provider still accepts the iOS app's identity tokens. `/v1/auth/config`
+  reports it to the page as `webSignIn.apple`.
 - Sign in with Apple also needs the Sign in with Apple key
   (`AUTH_APPLE_TEAM_ID`, `AUTH_APPLE_KEY_ID`, `AUTH_APPLE_PRIVATE_KEY`); a bundle
-  id without it, or the key without a bundle id, fails configuration loading.
+  id or Services ID without it, or the key without either, fails configuration
+  loading.
   After each Apple sign-in the app posts its one-time authorization code to
   `POST /v1/auth/apple/authorization-code`; the backend exchanges it for a
-  refresh token, kept encrypted on the user's `apple` row in `account`. Deleting
-  the account revokes that token at Apple first (App Store guideline 5.1.1(v)),
+  refresh token, kept encrypted on the user's `apple` row in `account`; a web
+  sign-in's refresh token is encrypted there on the way in. Each is stored with
+  the Apple client it was issued to, because Apple revokes a token only as that
+  client. Deleting the account revokes it at Apple first (App Store guideline 5.1.1(v)),
   and any failure aborts the deletion with a retryable error.
 - Workspace APIs are exposed at `/v1/teams/:teamId/workspaces` and `/v1/context/*`.
 - Run `pnpm migrate` to apply Better Auth migrations followed by Drizzle business migrations.
