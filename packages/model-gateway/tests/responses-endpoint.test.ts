@@ -10,6 +10,8 @@ import type { ModelGatewayConfig } from "../src/types";
 // called and the assertions cover what callers rely on either way: the text,
 // the tool call, the token usage and why the reply ended.
 const usage = { input: 20, output: 7, cached: 5, reasoning: 3 };
+/** What the provider says the call cost. Only OpenRouter reports it inline. */
+const providerCostUsd = 0.0123;
 const expectedUsage = {
   inputTokens: usage.input,
   outputTokens: usage.output,
@@ -46,6 +48,7 @@ const chatUsage = {
   total_tokens: usage.input + usage.output,
   prompt_tokens_details: { cached_tokens: usage.cached },
   completion_tokens_details: { reasoning_tokens: usage.reasoning },
+  cost: providerCostUsd,
 };
 const chatFinishReason = (scenario: Scenario) =>
   isCut(scenario) ? "length" : withToolCall(scenario) ? "tool_calls" : "stop";
@@ -130,6 +133,7 @@ const responsesUsage = {
   total_tokens: usage.input + usage.output,
   input_tokens_details: { cached_tokens: usage.cached },
   output_tokens_details: { reasoning_tokens: usage.reasoning },
+  cost: providerCostUsd,
 };
 
 function responsesParts(model: string, scenario: Scenario) {
@@ -260,6 +264,9 @@ function scriptedGateway(
   scenario: Scenario,
 ) {
   const paths: string[] = [];
+  // The gateway picks a provider's own response reader (OpenRouter's inline
+  // cost) by the provider's name, not its kind.
+  const provider = kind === "openrouter" ? "openrouter" : "local";
   const config: ModelGatewayConfig = {
     fetch: async (input, init) => {
       const request = new Request(input, init);
@@ -277,7 +284,7 @@ function scriptedGateway(
     },
     maxRetries: 0,
     providers: {
-      local: {
+      [provider]: {
         kind,
         baseUrl: "http://models.internal:8080/v1",
         apiKey: "workspace-key",
@@ -286,7 +293,7 @@ function scriptedGateway(
     modelRoutes: {
       probe: {
         strategy: "priority",
-        targets: [{ provider: "local", model, priority: 1 }],
+        targets: [{ provider, model, priority: 1 }],
       },
     },
   };
@@ -305,6 +312,7 @@ async function collectStream(run: ReturnType<typeof scriptedGateway>): Promise<{
   name: string;
   args: string;
   usage?: unknown;
+  costUsd?: number;
   finishReason?: string;
   errorCode?: string;
 }> {
@@ -322,6 +330,7 @@ async function collectStream(run: ReturnType<typeof scriptedGateway>): Promise<{
       }
     } else if (event.type === "metadata") {
       collected.usage = event.metadata.usage;
+      collected.costUsd = event.metadata.observation?.cost?.effectiveUsd;
       collected.finishReason = event.metadata.finishReason;
     } else if (event.type === "error") {
       collected.errorCode = event.error.code;
@@ -394,6 +403,22 @@ for (const kind of ["openai", "openai-compatible", "openrouter"] as const) {
       assert.equal(complete.finishReason, "length");
       assert.deepEqual(tokenCounts(complete.usage), expectedUsage);
     });
+
+    if (kind === "openrouter") {
+      test(`${subject}: the cost OpenRouter reports is recorded, streamed or not`, async () => {
+        const streamed = await collectStream(
+          scriptedGateway(kind, model, "text"),
+        );
+        assert.equal(streamed.costUsd, providerCostUsd);
+
+        const run = scriptedGateway(kind, model, "text");
+        const complete = await run.gateway.chat.complete(run.payload, {
+          maxRetries: 0,
+        });
+        assert.equal(complete.observation?.cost?.effectiveUsd, providerCostUsd);
+        assert.deepEqual(tokenCounts(complete.usage), expectedUsage);
+      });
+    }
 
     // The model the agent calls. LangChain repairs the cut arguments of a
     // streamed call into a valid-looking tool call, so the finish reason is

@@ -94,6 +94,8 @@ export interface ProviderResponseContext {
    * longer carries one.
    */
   capturedUsage?: Record<string, unknown>;
+  /** The usage of an Anthropic stream's `message_start`, read off the wire. */
+  capturedStartUsage?: Record<string, unknown>;
   sdkUsage?: unknown;
   responseMetadata?: Record<string, unknown>;
   responseHeaders?: Headers;

@@ -510,18 +510,22 @@ function createObservedLangChainChatModel(input: {
       const code = normalizeGatewayError(surfaced).code;
       const finishReason = guardFinishReason(code);
       const guardUsage = guardUsageFromError(surfaced);
-      const observation = guardUsage
-        ? normalizeModelCallObservation({
-            modelAlias: input.payload.model,
-            context: {
-              target: input.target,
-              modality: "chat",
-              rawResponse: undefined,
-              sdkUsage: guardUsage,
-              responseMetadata: undefined,
-            },
-          })
-        : undefined;
+      // What the call consumed before it failed: the usage the guard had
+      // seen, or failing that what an Anthropic reply reported as it began.
+      const observation =
+        guardUsage || responseCapture.startUsage
+          ? normalizeModelCallObservation({
+              modelAlias: input.payload.model,
+              context: {
+                target: input.target,
+                modality: "chat",
+                rawResponse: undefined,
+                sdkUsage: guardUsage,
+                responseMetadata: undefined,
+                capturedStartUsage: responseCapture.startUsage,
+              },
+            })
+          : undefined;
       await emitGenerationError(input.config, {
         ...buildGenerationErrorEvent({
           traceId: generation.start.traceId,
@@ -567,6 +571,7 @@ function createObservedLangChainChatModel(input: {
         responseMetadata,
         responseHeaders: responseCapture.headers,
         capturedUsage: responseCapture.usage,
+        capturedStartUsage: responseCapture.startUsage,
       },
     });
     observation.traceId = generation.start.traceId;
@@ -766,6 +771,7 @@ async function* observeStream(input: {
           responseMetadata,
           responseHeaders: input.responseCapture.headers,
           capturedUsage: input.responseCapture.usage,
+          capturedStartUsage: input.responseCapture.startUsage,
         },
       }),
     );

@@ -3,11 +3,15 @@ import test, { type TestContext } from "node:test";
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { createLangChainChatModel } from "../src/bridge/utils";
 import { createModelGateway } from "../src/index";
-import { normalizeModelCallObservation } from "../src/observation/normalize";
+import {
+  mergeModelCallObservations,
+  normalizeModelCallObservation,
+} from "../src/observation/normalize";
 import type {
   LangChainChatModelLike,
   ModelGatewayConfig,
   ObserveGenerationEnd,
+  ObserveGenerationError,
   UsageInfo,
 } from "../src/types";
 import {
@@ -300,4 +304,211 @@ test("an Anthropic chunk without LangChain usage reports none", () => {
   });
   assert.equal(observation.usage, undefined);
   assert.equal(observation.provenance.usage, undefined);
+});
+
+// A streamed reply that never reaches `message_delta`: the caller stopped
+// reading, a stream guard cut it, or the connection dropped. LangChain has
+// published no usage by then, so what the provider reported in
+// `message_start` is all there is to record for the call.
+
+/** `cachedStart` in the gateway's convention: the input side of the call. */
+const startTotals: UsageInfo = {
+  inputTokens: 16,
+  outputTokens: 1,
+  totalTokens: 17,
+  cacheReadTokens: 3,
+  cacheWriteTokens: 2,
+};
+
+/** `message_start` and the first text, then the connection drops. */
+function cutStream(startUsage: Record<string, unknown>) {
+  const events = [
+    {
+      type: "message_start",
+      message: {
+        id: "msg",
+        type: "message",
+        role: "assistant",
+        model,
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: startUsage,
+      },
+    },
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    },
+    {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "hello" },
+    },
+  ].map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  const encoder = new TextEncoder();
+  let index = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const next = events[index++];
+        if (next === undefined) {
+          controller.error(new Error("socket hang up"));
+          return;
+        }
+        controller.enqueue(encoder.encode(next));
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
+function errorSink() {
+  const errors: ObserveGenerationError[] = [];
+  const ends: ObserveGenerationEnd[] = [];
+  return {
+    errors,
+    ends,
+    observeSink: {
+      onGenerationStart: () => {},
+      onGenerationEnd: (event: ObserveGenerationEnd) => {
+        ends.push(event);
+      },
+      onGenerationError: (event: ObserveGenerationError) => {
+        errors.push(event);
+      },
+    },
+  };
+}
+
+test("an Anthropic stream that drops before message_delta records the usage from message_start", async (t) => {
+  isolate(t);
+  const sink = errorSink();
+  const gateway = createModelGateway({
+    ...config(async () => cutStream(cachedStart)),
+    observeSink: sink.observeSink,
+  });
+  const seen: string[] = [];
+  for await (const event of gateway.chat.stream(
+    { model: "chat", messages, maxTokens: 32 },
+    { maxRetries: 0 },
+  )) {
+    seen.push(event.type);
+  }
+  assert.equal(seen.at(-1), "error");
+  assert.equal(sink.ends.length, 0);
+  assert.equal(sink.errors.length, 1);
+  assert.deepEqual(sink.errors[0]!.usage, startTotals);
+  assert.equal(
+    sink.errors[0]!.observation?.provenance.usage,
+    "protocol:anthropic.message_start",
+  );
+});
+
+test("an agent-driven Anthropic stream the caller stops reading records the usage from message_start", async (t) => {
+  isolate(t);
+  const sink = errorSink();
+  const agent = (await createLangChainChatModel({
+    modelAlias: "chat",
+    config: {
+      ...config(async () => cutStream(cachedStart)),
+      observeSink: sink.observeSink,
+    },
+  })) as unknown as LangChainChatModelLike;
+  const chunks = (await agent.stream([
+    { role: "user", content: "hello" },
+  ])) as AsyncIterable<unknown>;
+  for await (const chunk of chunks) {
+    void chunk;
+    break;
+  }
+  assert.equal(sink.ends.length, 0);
+  assert.equal(sink.errors.length, 1);
+  assert.deepEqual(sink.errors[0]!.usage, startTotals);
+});
+
+// The agent's own path: `invoke` with a streaming handler attached, which is
+// how LangGraph drives the model.
+for (const shape of ["v2", "v3"] as const) {
+  test(`an agent-driven Anthropic call (${shape} handler) that drops mid-stream records the usage from message_start`, async (t) => {
+    isolate(t);
+    const sink = errorSink();
+    const agent = (await createLangChainChatModel({
+      modelAlias: "chat",
+      config: {
+        ...config(async () => cutStream(cachedStart)),
+        observeSink: sink.observeSink,
+      },
+    })) as unknown as LangChainChatModelLike;
+    await assert.rejects(
+      agent.invoke([{ role: "user", content: "hello" }], {
+        callbacks: [new StreamingHandler(shape)],
+      } as never),
+    );
+    assert.equal(sink.ends.length, 0);
+    assert.equal(sink.errors.length, 1);
+    assert.deepEqual(sink.errors[0]!.usage, startTotals);
+  });
+}
+
+test("Anthropic message_start usage stands in only when LangChain reported none", () => {
+  const target = makeResolvedTarget({
+    provider: "claude",
+    providerKind: "anthropic",
+  });
+  const fromStart = normalizeModelCallObservation({
+    modelAlias: "chat",
+    context: {
+      target,
+      modality: "chat",
+      rawResponse: { content: "hel" },
+      capturedStartUsage: cachedStart,
+    },
+  });
+  assert.deepEqual(fromStart.usage, startTotals);
+  assert.equal(fromStart.provenance.usage, "protocol:anthropic.message_start");
+
+  const complete = normalizeModelCallObservation({
+    modelAlias: "chat",
+    context: {
+      target,
+      modality: "chat",
+      rawResponse: { content: "hello" },
+      capturedStartUsage: cachedStart,
+      sdkUsage: {
+        input_tokens: 16,
+        output_tokens: 25,
+        total_tokens: 41,
+        input_token_details: { cache_creation: 2, cache_read: 3 },
+      },
+    },
+  });
+  assert.deepEqual(complete.usage, cachedTotals);
+  assert.equal(complete.provenance.usage, "protocol:langchain.sdk_usage");
+
+  // A later chunk without usage of its own must not put the partial figure
+  // back in place of the complete one.
+  const merged = mergeModelCallObservations(complete, fromStart);
+  assert.deepEqual(merged.usage, cachedTotals);
+  assert.equal(merged.provenance.usage, "protocol:langchain.sdk_usage");
+  // The other way round, the complete figure replaces the partial one.
+  const upgraded = mergeModelCallObservations(fromStart, complete);
+  assert.deepEqual(upgraded.usage, cachedTotals);
+});
+
+test("a provider other than Anthropic never reads message_start usage", () => {
+  const observation = normalizeModelCallObservation({
+    modelAlias: "chat",
+    context: {
+      target: makeResolvedTarget({
+        provider: "local",
+        providerKind: "openai-compatible",
+      }),
+      modality: "chat",
+      rawResponse: { content: "hel" },
+      capturedStartUsage: cachedStart,
+    },
+  });
+  assert.equal(observation.usage, undefined);
 });

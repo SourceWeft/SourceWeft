@@ -1,5 +1,6 @@
 import { sdkRetryOptions } from "./gateway-caller";
 import { ChatAnthropic } from "@langchain/anthropic";
+import { captureProviderResponseFetch } from "../observation/response-capture";
 import type { ChatAdapter } from "./types";
 
 export class AnthropicChatAdapter implements ChatAdapter {
@@ -19,7 +20,7 @@ export class AnthropicChatAdapter implements ChatAdapter {
       anthropicApiUrl: target.baseUrl,
       clientOptions: {
         timeout: options?.timeoutMs,
-        fetch: options?.fetch,
+        fetch: captureProviderResponseFetch(options?.fetch),
         authToken: null,
         defaultHeaders: target.defaultHeaders,
       },

@@ -154,6 +154,35 @@ function normalizeLangChainUsage(input: unknown): UsageInfo | undefined {
   };
 }
 
+/** Provenance of usage taken from an Anthropic stream's `message_start`. */
+const MESSAGE_START_USAGE = "protocol:anthropic.message_start";
+
+/**
+ * The usage of an Anthropic stream's `message_start`, in the gateway's
+ * convention: `inputTokens` includes the tokens read from and written to the
+ * prompt cache. It covers the input side only (the output count is whatever
+ * the provider had generated when the reply began), so it stands in only for
+ * a reply that ended before LangChain reported any usage.
+ */
+function normalizeAnthropicStartUsage(input: unknown): UsageInfo | undefined {
+  if (!isRecord(input)) {
+    return undefined;
+  }
+  const uncached = finiteNumber(input.input_tokens);
+  if (uncached === undefined) {
+    return undefined;
+  }
+  const cacheReadTokens = finiteNumber(input.cache_read_input_tokens) ?? 0;
+  const cacheWriteTokens = finiteNumber(input.cache_creation_input_tokens) ?? 0;
+  const outputTokens = finiteNumber(input.output_tokens);
+  return {
+    inputTokens: uncached + cacheReadTokens + cacheWriteTokens,
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    cacheReadTokens,
+    cacheWriteTokens,
+  };
+}
+
 function mergeObservation(
   base: ModelCallObservation,
   patch: ModelCallObservationPatch | undefined,
@@ -183,13 +212,23 @@ export function mergeModelCallObservations(
     ...(current.diagnostics ?? []),
     ...(next.diagnostics ?? []),
   ];
+  // `message_start` usage is a stand-in: once a complete figure is known, a
+  // later observation that has only the stand-in must not put it back.
+  const keepCurrentUsage =
+    next.provenance.usage === MESSAGE_START_USAGE &&
+    current.usage !== undefined &&
+    current.provenance.usage !== MESSAGE_START_USAGE;
   return {
     traceId: next.traceId ?? current.traceId,
     spanId: next.spanId ?? current.spanId,
     identity: { ...current.identity, ...next.identity },
-    usage: next.usage ?? current.usage,
+    usage: keepCurrentUsage ? current.usage : (next.usage ?? current.usage),
     cost: next.cost ?? current.cost,
-    provenance: { ...current.provenance, ...next.provenance },
+    provenance: {
+      ...current.provenance,
+      ...next.provenance,
+      ...(keepCurrentUsage ? { usage: current.provenance.usage } : {}),
+    },
     diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
     providerResponseHeaders:
       next.providerResponseHeaders ?? current.providerResponseHeaders,
@@ -205,8 +244,15 @@ export function normalizeModelCallObservation(input: {
     ? undefined
     : (extractRawUsage(input.context.rawResponse) ??
       input.context.capturedUsage);
-  const protocolUsage = sdkOnly
+  const langChainUsage = sdkOnly
     ? normalizeLangChainUsage(input.context.sdkUsage)
+    : undefined;
+  const startUsage =
+    sdkOnly && !langChainUsage
+      ? normalizeAnthropicStartUsage(input.context.capturedStartUsage)
+      : undefined;
+  const protocolUsage = sdkOnly
+    ? (langChainUsage ?? startUsage)
     : (normalizeOpenAICompatibleUsage(rawUsage) ??
       normalizeLangChainUsage(input.context.sdkUsage));
   const base: ModelCallObservation = {
@@ -221,7 +267,9 @@ export function normalizeModelCallObservation(input: {
         ? {
             usage: rawUsage
               ? "protocol:openai-compatible.raw_usage"
-              : "protocol:langchain.sdk_usage",
+              : startUsage
+                ? MESSAGE_START_USAGE
+                : "protocol:langchain.sdk_usage",
           }
         : {}),
     },
