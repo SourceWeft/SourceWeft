@@ -54,6 +54,8 @@
  *   billing scope: nothing is charged and nothing is written to the database.
  *   Cost comes from the call's reported cost or the profile's price book
  *   (`computeProviderCost`, read only).
+ * - A call that timed out becomes `GroundedModelTimeoutError`, as in
+ *   production, so the engine's one timeout retry applies.
  * - One attempt per run: the queue's job retry is not repeated.
  */
 import { createHash } from "node:crypto";
@@ -715,6 +717,8 @@ async function generate(options: {
     { defaultParsingConfig },
     { isTableGenerationError },
     { estimateTokens, assembleCorpus },
+    { isModelGatewayTimeout },
+    { GroundedModelTimeoutError },
   ] = await Promise.all([
     import("../src/modules/tables/capability"),
     import("../src/modules/tables/service"),
@@ -724,6 +728,8 @@ async function generate(options: {
     import("../src/modules/sources/parsing-config"),
     import("@sourceweft/contracts/table-capability"),
     import("@sourceweft/grounded-generation"),
+    import("../src/shared/model-gateway/errors"),
+    import("@sourceweft/contracts/grounded-generation"),
   ]);
 
   const transport =
@@ -943,6 +949,13 @@ async function generate(options: {
               costUsd: null,
               costSource: null,
             });
+            // As the production port does: a timeout the engine may retry once.
+            if (isModelGatewayTimeout(error)) {
+              throw new GroundedModelTimeoutError(
+                error instanceof Error ? error.message : "The model call timed out",
+                { cause: error },
+              );
+            }
             throw error;
           }
         },

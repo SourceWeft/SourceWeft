@@ -13,6 +13,7 @@ import {
 import {
   GroundedGenerationError,
   isGroundedGenerationError,
+  isGroundedModelTimeout,
 } from "@sourceweft/contracts/grounded-generation";
 import type { GroundedEvidence } from "@sourceweft/contracts/grounded-evidence";
 import type {
@@ -123,6 +124,28 @@ async function guarded<T>(
   }
 }
 
+type ModelCall = Parameters<Run["deps"]["model"]["completeStructured"]>[0];
+
+/**
+ * One model call. A call that timed out on every target is sent once more
+ * under its own billing key (`…:timeout`): a stalled provider usually answers
+ * the same request in seconds when it is sent again. A cancelled job is never
+ * retried, and any other failure is thrown as it is.
+ */
+async function completeWithTimeoutRetry(run: Run, call: ModelCall): Promise<unknown> {
+  run.counters.modelCalls += 1;
+  try {
+    return await run.deps.model.completeStructured(call);
+  } catch (error) {
+    if (!isGroundedModelTimeout(error) || run.deps.signal?.aborted) throw error;
+    run.counters.modelCalls += 1;
+    return run.deps.model.completeStructured({
+      ...call,
+      idempotencyKey: `${call.idempotencyKey}:timeout`,
+    });
+  }
+}
+
 /** Runs `worker` over `items`, `limit` at a time; the first error stops new work and is rethrown. */
 async function runPool<T>(
   items: readonly T[],
@@ -201,9 +224,8 @@ async function askGroup(
   });
   for (const retry of [false, true]) {
     throwIfAborted(run.deps.signal);
-    run.counters.modelCalls += 1;
     const raw = await guarded(run.deps.signal, () =>
-      run.deps.model.completeStructured({
+      completeWithTimeoutRetry(run, {
         operation: "table.fill",
         idempotencyKey: fillIdempotencyKey({
           artifactId: run.input.artifactId,
@@ -339,7 +361,6 @@ async function fillSource(
         verified,
         choose: async (options) => {
           throwIfAborted(run.deps.signal);
-          run.counters.modelCalls += 1;
           const prompt = buildMergePrompt({
             column,
             candidates: options.map((option) => ({
@@ -348,7 +369,7 @@ async function fillSource(
             })),
           });
           const raw = await guarded(run.deps.signal, () =>
-            run.deps.model.completeStructured({
+            completeWithTimeoutRetry(run, {
               operation: "table.merge",
               idempotencyKey: mergeIdempotencyKey({
                 artifactId: run.input.artifactId,
