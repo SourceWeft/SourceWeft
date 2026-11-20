@@ -507,6 +507,47 @@ test("a task blocked on missing tools goes back to work when they return", async
   assert.equal((await f.occurrences(taskId)).length, 1);
 });
 
+test("an MCP sign-in the owner must redo blocks the task until they have, then it goes back to work", async () => {
+  const { taskId } = await dueTask();
+  f.state.credentialsExpired = true;
+  const blockedAt = new Date(SLOT.getTime() + 6 * 60_000);
+  await f.tick(blockedAt);
+
+  const [occurrence] = await f.occurrences(taskId);
+  assert.deepEqual(
+    [occurrence!.status, occurrence!.skipReason],
+    ["blocked", "auth_expired"],
+  );
+  const task = await f.taskRow(taskId);
+  assert.deepEqual(
+    [task.status, task.statusReason],
+    ["blocked", "auth_expired"],
+  );
+  assert.deepEqual(
+    f.notifications.map((item) => [item.kind, item.email]),
+    [["task_blocked_auth", false]],
+  );
+  assert.equal(f.started.length, 0);
+  f.notifications.length = 0;
+
+  // Still signed out three days later: it keeps waiting, quietly.
+  await f.schema.db
+    .update(f.schema.agentTasks)
+    .set({ updatedAt: blockedAt })
+    .where(eq(f.schema.agentTasks.id, taskId));
+  await f.tick(new Date(blockedAt.getTime() + 73 * HOUR));
+  assert.deepEqual(
+    [(await f.taskRow(taskId)).status, (await f.taskRow(taskId)).statusReason],
+    ["blocked", "auth_expired"],
+  );
+  assert.deepEqual(kinds(), []);
+
+  f.state.credentialsExpired = false;
+  await f.tick(new Date(blockedAt.getTime() + 74 * HOUR));
+  const back = await f.taskRow(taskId);
+  assert.deepEqual([back.status, back.statusReason], ["active", null]);
+});
+
 test("a finished run tells the owner once; mail is only for what went wrong, and nothing carries the result", async () => {
   const { owner, teamId, taskId, name } = await dueTask();
   await f.tick(new Date(SLOT.getTime() + 6 * 60_000));

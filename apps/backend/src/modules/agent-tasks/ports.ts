@@ -27,6 +27,11 @@ export interface AgentTaskPorts {
   maxActiveTasks(input: { teamId: string; userId: string }): Promise<number>;
   /** Whether the sources and MCP installs the task names still exist. */
   toolsAvailable(task: AgentTaskRow): Promise<boolean>;
+  /**
+   * Whether an MCP install the task names needs a sign-in the owner has not
+   * made or that the server has turned down (`required` or `invalid`).
+   */
+  credentialsExpired(task: AgentTaskRow): Promise<boolean>;
   startTurn(
     input: StartScheduledTurnInput,
   ): Promise<{ thread: { id: string }; run: { id: string } }>;
@@ -112,6 +117,28 @@ export const agentTaskPorts: AgentTaskPorts = {
       if (!request.mcp.installIds.every((id) => usable.has(id))) return false;
     }
     return true;
+  },
+
+  async credentialsExpired(task) {
+    const { installIds } = task.requestJson.mcp;
+    if (installIds.length === 0) return false;
+    const { mcpService, isMcpError } = await import("../mcp");
+    const { items } = await mcpService
+      .listInstalls({
+        workspaceId: task.workspaceId,
+        userId: task.ownerUserId,
+      })
+      .catch((error: unknown) => {
+        if (isMcpError(error)) return { items: [] };
+        throw error;
+      });
+    const wanted = new Set(installIds);
+    return items.some(
+      (install) =>
+        wanted.has(install.id) &&
+        (install.credentialStatus === "required" ||
+          install.credentialStatus === "invalid"),
+    );
   },
 
   async startTurn(input) {

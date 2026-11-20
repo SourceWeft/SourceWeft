@@ -62,6 +62,7 @@ export async function createAgentTaskFixture(label: string) {
   const state = {
     credits: true,
     toolsAvailable: true,
+    credentialsExpired: false,
     maxActiveTasks: 10,
     /** Thrown by the next `startTurn` calls, one per call. */
     startErrors: [] as unknown[],
@@ -82,6 +83,7 @@ export async function createAgentTaskFixture(label: string) {
     hasCredits: async () => state.credits,
     maxActiveTasks: async () => state.maxActiveTasks,
     toolsAvailable: async () => state.toolsAvailable,
+    credentialsExpired: async () => state.credentialsExpired,
     // What `startScheduledTurn` leaves behind, without a queue or a worker:
     // the conversation and a queued chat run, found again on a replay.
     async startTurn(input) {
@@ -267,6 +269,7 @@ export async function createAgentTaskFixture(label: string) {
     stopped.length = 0;
     state.credits = true;
     state.toolsAvailable = true;
+    state.credentialsExpired = false;
     state.maxActiveTasks = 10;
     state.startErrors = [];
     state.now = null;

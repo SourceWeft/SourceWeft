@@ -19,6 +19,7 @@ const KNOWN_KINDS = new Set([
   "task_needs_approval",
   "task_paused_owner_left",
   "task_tools_unavailable",
+  "task_blocked_auth",
   "task_paused_repeated_failure",
 ]);
 
