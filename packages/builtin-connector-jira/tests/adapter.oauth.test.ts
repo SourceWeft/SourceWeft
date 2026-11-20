@@ -189,6 +189,112 @@ test("exchange without a configured client id makes no request", async () => {
   );
 });
 
+test("personal data report forwards to the Atlassian reporting API", async () => {
+  const requests: { url: string; body: unknown; auth: string | null }[] = [];
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    requests.push({
+      url: String(url),
+      body: JSON.parse(String(init?.body)),
+      auth: new Headers(init?.headers).get("Authorization"),
+    });
+    return json({
+      accounts: [
+        { accountId: "account-1", status: "closed" },
+        { accountId: "account-2", status: "updated" },
+      ],
+    });
+  }) as typeof fetch;
+
+  const jira = adapter(fetcher);
+  assert.ok(jira.personalData);
+  const result = await jira.personalData.report({
+    accessToken: "access-token",
+    accounts: [
+      { accountId: "account-1", updatedAt: new Date("2026-11-01T00:00:00.000Z") },
+      { accountId: "account-2", updatedAt: new Date("2026-11-02T00:00:00.000Z") },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    closed: ["account-1"],
+    updated: ["account-2"],
+    ignored: 0,
+    cyclePeriodDays: null,
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.url, "https://api.atlassian.com/app/report-accounts/");
+  assert.equal(requests[0]!.auth, "Bearer access-token");
+  assert.deepEqual(requests[0]!.body, {
+    accounts: [
+      { accountId: "account-1", updatedAt: "2026-11-01T00:00:00.000Z" },
+      { accountId: "account-2", updatedAt: "2026-11-02T00:00:00.000Z" },
+    ],
+  });
+});
+
+test("personal data readProfile re-reads the identity from /me", async () => {
+  const calls: string[] = [];
+  const fetcher = (async (url: string | URL | Request) => {
+    calls.push(String(url));
+    return json({
+      account_id: "account-1",
+      email: "user@example.com",
+      name: "User One",
+    });
+  }) as typeof fetch;
+
+  const jira = adapter(fetcher);
+  assert.ok(jira.personalData);
+  assert.deepEqual(await jira.personalData.readProfile({ accessToken: "access-token" }), {
+    providerAccountId: "account-1",
+    email: "user@example.com",
+    displayName: "User One",
+  });
+  assert.deepEqual(calls, ["https://api.atlassian.com/me"]);
+});
+
+test("personal data readProfile falls back displayName to email, then account id", async () => {
+  let body: Record<string, unknown> = { account_id: "account-1", email: "user@example.com" };
+  const fetcher = (async () => json(body)) as typeof fetch;
+  const jira = adapter(fetcher);
+  assert.ok(jira.personalData);
+
+  assert.deepEqual(await jira.personalData.readProfile({ accessToken: "access-token" }), {
+    providerAccountId: "account-1",
+    email: "user@example.com",
+    displayName: "user@example.com",
+  });
+
+  body = { account_id: "account-1" };
+  assert.deepEqual(await jira.personalData.readProfile({ accessToken: "access-token" }), {
+    providerAccountId: "account-1",
+    email: null,
+    displayName: "account-1",
+  });
+});
+
+test("personal data without a configured client id or secret makes no request", async () => {
+  for (const overrides of [{ clientId: "" }, { clientSecret: "" }]) {
+    const jira = adapter(neverCalledFetcher(), overrides);
+    assert.ok(jira.personalData);
+    const expectUnconfigured = (error: unknown) =>
+      error instanceof AtlassianApiError &&
+      error.statusCode === 503 &&
+      error.code === "JIRA_UNAVAILABLE";
+    await assert.rejects(
+      jira.personalData.report({
+        accessToken: "access-token",
+        accounts: [{ accountId: "account-1", updatedAt: new Date() }],
+      }),
+      expectUnconfigured,
+    );
+    await assert.rejects(
+      jira.personalData.readProfile({ accessToken: "access-token" }),
+      expectUnconfigured,
+    );
+  }
+});
+
 test("discover yields nothing", async () => {
   const jira = adapter(neverCalledFetcher());
   const input: ConnectorDiscoverInput = {
