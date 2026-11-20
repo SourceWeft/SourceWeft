@@ -1,4 +1,5 @@
 import { sdkRetryOptions } from "./gateway-caller";
+import { noAmbientOpenAIIdentity } from "../auth-headers";
 import { ObservedAzureOpenAIEmbeddings } from "./observed-embeddings";
 import type { EmbeddingsAdapter } from "./types";
 
@@ -20,7 +21,7 @@ export class AzureEmbeddingsAdapter implements EmbeddingsAdapter {
       azureOpenAIBasePath: `${target.baseUrl.replace(/\/+$/, "")}/openai/deployments`,
       configuration: {
         fetch: options?.fetch,
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
         ignoreEnvironmentHeaders: true,
       },
       azureOpenAIApiDeploymentName: target.providerModel,

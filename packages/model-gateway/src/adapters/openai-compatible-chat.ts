@@ -2,6 +2,7 @@ import { sdkRetryOptions } from "./gateway-caller";
 import { ChatOpenAI } from "@langchain/openai";
 import {
   buildOpenAICompatibleDefaultHeaders,
+  noAmbientOpenAIIdentity,
   unauthenticatedOpenAIConfiguration,
 } from "../auth-headers";
 import { buildOpenAIReasoningModelKwargs } from "./openai-reasoning";
@@ -28,7 +29,7 @@ export class OpenAICompatibleChatAdapter implements ChatAdapter {
         baseURL: target.baseUrl,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
         fetch: captureProviderResponseFetch(options?.fetch),
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
         ...unauthenticatedOpenAIConfiguration(target),
       },
       modelKwargs: {

@@ -399,9 +399,9 @@ test("an aborted logical call ignores a non-cooperative HTTP response that compl
   assert.equal(JSON.stringify(errors[0]), snapshot);
 });
 
-test("large embedding vectors pass through the real SDK with one parse, no Response clone and no vector copy", async () => {
-  let parses = 0;
-  let parsed: { data: { embedding: number[] }[] } | undefined;
+test("large embedding vectors pass through the real SDK with one body read, one parse, no Response clone and no vector copy", async (t) => {
+  let reads = 0;
+  const parsed: { data: { embedding: number[] }[] }[] = [];
   const vector = Array.from({ length: 100_000 }, (_, index) => index / 100_000);
   const { config } = fixture("openai-compatible", async (input, init) => {
     const responseObject = response(await inputs(input, init), {
@@ -411,22 +411,31 @@ test("large embedding vectors pass through the real SDK with one parse, no Respo
     responseObject.clone = () => {
       throw new Error("must not clone the vector response");
     };
-    const parse = responseObject.json.bind(responseObject);
-    responseObject.json = async () => {
-      parses++;
-      const value = await parse();
-      parsed = value;
-      return value;
-    };
+    // The SDK may read the body as text or as JSON; either way it must read
+    // it once.
+    for (const method of ["json", "text", "arrayBuffer"] as const) {
+      const read = responseObject[method].bind(responseObject);
+      responseObject[method] = (async () => {
+        reads++;
+        return read();
+      }) as never;
+    }
     return responseObject;
+  });
+  const parse = JSON.parse;
+  t.mock.method(JSON, "parse", (text: string, ...rest: []) => {
+    const value = parse(text, ...rest);
+    if (text.length > 100_000) parsed.push(value);
+    return value;
   });
   const result = await createModelGateway(config).embeddings.embed({
     model: "embed",
     text: "large",
     encodingFormat: "float",
   });
-  assert.equal(parses, 1);
-  assert.strictEqual(result.embedding, parsed!.data[0]!.embedding);
+  assert.equal(reads, 1);
+  assert.equal(parsed.length, 1);
+  assert.strictEqual(result.embedding, parsed[0]!.data[0]!.embedding);
   assert.equal(result.embedding.length, 100_000);
   assert.equal(result.usage?.totalTokens, 37);
   assert.ok(JSON.stringify(result.observation).length < 1000);

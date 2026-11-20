@@ -2,7 +2,7 @@
 
 ## OpenAI-compatible local services
 
-`openai@6.49.0` adds two default-off options, covering source, ESM, CommonJS and
+`openai@7.55.0` adds two default-off options, covering source, ESM, CommonJS and
 their declarations:
 
 - `allowUnauthenticated` permits construction and requests without authentication
@@ -17,16 +17,23 @@ their declarations:
   Provider headers retain their existing behavior. No-auth also suppresses
   ambient headers independently.
 
+Every OpenAI SDK adapter, authenticated or not, also passes
+`adminAPIKey: null`, `organization: null` and `project: null`, so the ambient
+`OPENAI_ADMIN_KEY`, `OPENAI_ORGANIZATION`, `OPENAI_ORG_ID` and
+`OPENAI_PROJECT_ID` never reach a Provider. That part needs no patch.
+
 LangChain drops null header values, so constructor-only support plus null auth
 headers is insufficient. The explicit SDK flag controls header validation too.
 Default SDK credential checks remain unchanged. The patch does not replace
 transport, model conversion, retries or streaming, or create a dummy API key.
 
-The root override pins the already-used version, and pnpm applies this patch
-to its peer variants. Review the patch before upgrading OpenAI. Use:
+The root override pins the version (`@langchain/openai` 1.8.4 requires SDK 7),
+and pnpm applies this patch to its peer variants. Review the patch before
+upgrading OpenAI: SDK 7 added a `credential` option beside the patched
+`OPENAI_CUSTOM_HEADERS` line, so that hunk does not apply to SDK 6. Use:
 
 ```sh
-pnpm patch openai@6.49.0 --edit-dir /tmp/openai-sdk-edit
+pnpm patch openai@7.55.0 --edit-dir /tmp/openai-sdk-edit
 pnpm patch-commit /tmp/openai-sdk-edit --patches-dir patches
 pnpm install --frozen-lockfile
 ```

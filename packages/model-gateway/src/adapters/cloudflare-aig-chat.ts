@@ -1,6 +1,9 @@
 import { sdkRetryOptions } from "./gateway-caller";
 import { ChatOpenAI } from "@langchain/openai";
-import { buildOpenAICompatibleDefaultHeaders } from "../auth-headers";
+import {
+  buildOpenAICompatibleDefaultHeaders,
+  noAmbientOpenAIIdentity,
+} from "../auth-headers";
 import type { ChatAdapter } from "./types";
 import { captureProviderResponseFetch } from "../observation/response-capture";
 
@@ -37,7 +40,7 @@ export class CloudflareAIGChatAdapter implements ChatAdapter {
         baseURL: target.baseUrl,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(target),
         fetch: captureProviderResponseFetch(options?.fetch),
-        adminAPIKey: null,
+        ...noAmbientOpenAIIdentity,
       },
       modelKwargs: {
         ...(input.extraBody ?? {}),

@@ -19,6 +19,9 @@ function isolateAmbientCredentials(t: TestContext) {
   const values = {
     OPENAI_API_KEY: "ambient-openai-key-must-not-be-sent",
     OPENAI_ADMIN_KEY: "ambient-admin-key-must-not-be-sent",
+    OPENAI_ORGANIZATION: "ambient-organization-must-not-be-sent",
+    OPENAI_ORG_ID: "ambient-org-id-must-not-be-sent",
+    OPENAI_PROJECT_ID: "ambient-project-must-not-be-sent",
     ANTHROPIC_API_KEY: "ambient-anthropic-key-must-not-be-sent",
     ANTHROPIC_AUTH_TOKEN: "ambient-anthropic-token-must-not-be-sent",
     AZURE_OPENAI_API_KEY: "ambient-azure-key-must-not-be-sent",
