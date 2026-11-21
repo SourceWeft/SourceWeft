@@ -118,6 +118,23 @@ export function delegatedChildChatIds(
 }
 
 /**
+ * Whether deleting the chats `deletedIds` takes `chatId` away as well: it is
+ * one of them, or one of the conversations their delegations opened.
+ */
+export function chatDeletionRemovesChat(
+  items: readonly ChatItem[],
+  deletedIds: readonly string[],
+  chatId: string,
+): boolean {
+  if (!chatId) {
+    return false;
+  }
+  return deletedIds.some(
+    (id) => id === chatId || delegatedChildChatIds(items, id).includes(chatId),
+  );
+}
+
+/**
  * Nests `child` under its parent, newest first, replacing an earlier copy.
  * Returns null when the parent is not in `items`, so the caller can decide
  * where an orphan should show instead.

@@ -18,6 +18,30 @@ const layout = vi.hoisted(() => ({
   toggleConversations: vi.fn(),
 }));
 
+const chatState = vi.hoisted(() => ({
+  activeChatId: "",
+  archivedChats: [] as ChatItem[],
+  privateChats: [] as ChatItem[],
+  sharedChats: [] as ChatItem[],
+  workspaces: [],
+  workspaceId: "w",
+  workspaceName: "Workspace",
+  hasMorePrivateChats: false,
+  isLoadingPrivateChats: false,
+  mode: "new",
+  deleteChat: vi.fn(async () => {}),
+  clearPrivateChats: vi.fn(async () => {}),
+  clearArchivedChats: vi.fn(async () => {}),
+}));
+// The handlers the sidebar hands to the conversation list.
+const panel = vi.hoisted(() => ({
+  props: null as null | {
+    onDeleteChat: (id: string) => Promise<void>;
+    onClearPrivateChats: () => Promise<void>;
+    onClearArchivedChats: () => Promise<void>;
+  },
+}));
+
 vi.mock("next/navigation", () => ({
   usePathname: () => route.pathname,
   useRouter: () => router,
@@ -30,18 +54,7 @@ vi.mock("./dashboard-workspace-layout", () => ({
   useWorkspaceLayout: () => layout,
 }));
 vi.mock("./dashboard-chat-state", () => ({
-  useDashboardChatState: () => ({
-    activeChatId: "",
-    archivedChats: [],
-    privateChats: [],
-    sharedChats: [],
-    workspaces: [],
-    workspaceId: "w",
-    workspaceName: "Workspace",
-    hasMorePrivateChats: false,
-    isLoadingPrivateChats: false,
-    mode: "new",
-  }),
+  useDashboardChatState: () => chatState,
 }));
 vi.mock("./dashboard-mobile-nav-state", () => ({
   useDashboardMobileNav: () => ({ openMain: vi.fn(), openMe: vi.fn() }),
@@ -83,8 +96,12 @@ vi.mock("./dashboard-sidebar-chat-panel", () => ({
     navigation: ReactNode;
     heading: ReactNode;
     footer: ReactNode;
-  }) =>
-    createElement(
+    onDeleteChat: (id: string) => Promise<void>;
+    onClearPrivateChats: () => Promise<void>;
+    onClearArchivedChats: () => Promise<void>;
+  }) => {
+    panel.props = props;
+    return createElement(
       "div",
       {
         "data-panel": "",
@@ -93,10 +110,36 @@ vi.mock("./dashboard-sidebar-chat-panel", () => ({
       props.heading,
       props.navigation,
       props.footer,
-    ),
+    );
+  },
 }));
 
 import { DashboardSidebar } from "./dashboard-sidebar";
+import type { ChatItem } from "./dashboard-chat-types";
+
+function chatItem(id: string, extra: Partial<ChatItem> = {}): ChatItem {
+  return {
+    id,
+    title: id,
+    updatedAt: "2026-09-01T00:00:00.000Z",
+    sourceCount: 0,
+    visibility: "private",
+    status: "ready",
+    parentThreadId: null,
+    personaId: null,
+    ...extra,
+  };
+}
+
+/** A chat whose delegation opened `task` and under which a member created `created`. */
+function chatWithChildren(): ChatItem {
+  return chatItem("parent", {
+    children: [
+      chatItem("task", { parentThreadId: "parent", origin: "subagent" }),
+      chatItem("created", { parentThreadId: "parent", origin: "user" }),
+    ],
+  });
+}
 
 async function render(state: {
   pathname: string;
@@ -113,6 +156,10 @@ async function render(state: {
 }
 
 beforeEach(() => {
+  chatState.privateChats = [];
+  chatState.sharedChats = [];
+  chatState.archivedChats = [];
+  panel.props = null;
   layout.closeConversations.mockReset();
   layout.toggleConversations.mockReset();
   router.push.mockReset();
@@ -265,4 +312,53 @@ test("the web rail keeps its full-height edge", async () => {
   const rail = container.querySelector('[data-testid="navigation-rail"]')!;
   assert.ok(rail.className.includes("border-r"));
   assert.ok(!rail.querySelector('[data-testid="navigation-rail-edge"]'));
+});
+
+test("deleting a chat leaves the open conversation when the delete takes it away", async () => {
+  const cases: Array<[open: string, leaves: boolean]> = [
+    ["parent", true],
+    // Opened by the chat's own delegation: the server deletes it with the chat.
+    ["task", true],
+    // Created by a member under the chat: the server keeps it.
+    ["created", false],
+    ["other", false],
+  ];
+  for (const [open, leaves] of cases) {
+    chatState.privateChats = [chatWithChildren(), chatItem("other")];
+    await render({ pathname: `/dashboard/chat/${open}`, docked: true });
+    router.push.mockReset();
+
+    await act(() => panel.props!.onDeleteChat("parent"));
+
+    assert.deepEqual(
+      router.push.mock.calls,
+      leaves ? [["/dashboard/chat"]] : [],
+      `open conversation: ${open}`,
+    );
+    await unmountAll();
+  }
+});
+
+test("clearing private or archived chats leaves an open conversation their delegations opened", async () => {
+  chatState.privateChats = [chatWithChildren()];
+  await render({ pathname: "/dashboard/chat/task", docked: true });
+  router.push.mockReset();
+  await act(() => panel.props!.onClearPrivateChats());
+  assert.deepEqual(router.push.mock.calls, [["/dashboard/chat"]]);
+  await unmountAll();
+
+  chatState.privateChats = [];
+  chatState.archivedChats = [chatWithChildren()];
+  await render({ pathname: "/dashboard/chat/task", docked: true });
+  router.push.mockReset();
+  await act(() => panel.props!.onClearArchivedChats());
+  assert.deepEqual(router.push.mock.calls, [["/dashboard/chat"]]);
+  await unmountAll();
+
+  // A conversation a member created under a cleared chat is kept.
+  chatState.archivedChats = [chatWithChildren()];
+  await render({ pathname: "/dashboard/chat/created", docked: true });
+  router.push.mockReset();
+  await act(() => panel.props!.onClearArchivedChats());
+  assert.deepEqual(router.push.mock.calls, []);
 });
