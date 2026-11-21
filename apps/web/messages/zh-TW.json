@@ -1108,39 +1108,29 @@
     "mobileMe": {
       "signOut": "登出",
       "signingOut": "正在登出…",
-      "endSession": "結束此工作階段",
-      "observeDescription": "LLM 追蹤、指標和時間軸",
       "panels": {
         "account": {
-          "label": "個人資料",
-          "description": "帳戶、大頭貼、主題和偏好設定"
+          "label": "個人資料"
         },
         "team": {
-          "label": "團隊",
-          "description": "團隊切換、成員和邀請"
+          "label": "團隊"
         },
         "workspace": {
-          "label": "工作區",
-          "description": "誰可以檢視和使用此工作區"
+          "label": "工作區"
         },
         "usage": {
-          "label": "用量",
-          "description": "方案用量和近期活動"
+          "label": "用量"
         },
         "billing": {
-          "label": "帳單",
-          "description": "訂閱、方案和帳單入口"
+          "label": "帳單"
         },
         "approvals": {
-          "label": "核准",
-          "description": "你選擇始終允許的操作"
+          "label": "核准"
         },
         "about": {
-          "label": "關於",
-          "description": "版本和建置詳細資訊"
+          "label": "關於"
         }
-      },
-      "scheduledDescription": "按時間安排執行的提示詞"
+      }
     },
     "members": {
       "dialogTitle": "工作區成員"

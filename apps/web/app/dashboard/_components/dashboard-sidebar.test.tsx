@@ -43,6 +43,12 @@ vi.mock("./dashboard-chat-state", () => ({
     mode: "new",
   }),
 }));
+vi.mock("./dashboard-mobile-nav-state", () => ({
+  useDashboardMobileNav: () => ({ openMain: vi.fn(), openMe: vi.fn() }),
+}));
+vi.mock("./dashboard-mobile-me-entry", () => ({
+  DashboardMobileMeEntry: () => createElement("span", null, "Me"),
+}));
 vi.mock("./dashboard-account-menu", () => ({
   DashboardAccountMenu: () => createElement("span", null, "Account"),
 }));

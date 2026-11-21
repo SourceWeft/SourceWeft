@@ -66,7 +66,7 @@ export function SkillsCatalogSkeletonGrid({
 
 export function McpSkeletonGrid() {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {Array.from({ length: 8 }).map((_, index) => (
         <article
           className="flex min-h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs"

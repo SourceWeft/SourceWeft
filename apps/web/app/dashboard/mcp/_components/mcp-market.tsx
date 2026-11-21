@@ -1675,7 +1675,9 @@ export function McpMarket() {
         {filtersPanel}
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
-          <ScrollArea className="min-h-0 flex-1">
+          {/* Radix lays the viewport's content out as a table, which grows to its widest
+              row; a block keeps the cards inside a phone-width screen. */}
+          <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block">
             <div className="px-4 py-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1704,7 +1706,7 @@ export function McpMarket() {
                     workspaces={dashboardState.workspaces}
                   />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <div
                     aria-label={t("toolbar.deviceFilterAria")}
                     className="flex items-center gap-1"
@@ -1761,7 +1763,7 @@ export function McpMarket() {
                   {items.length === 0 ? t("empty.none") : t("empty.noMatch")}
                 </div>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   {filteredItems.map((item) => (
                     <McpCard
                       categories={categories}

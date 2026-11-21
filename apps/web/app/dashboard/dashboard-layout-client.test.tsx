@@ -73,9 +73,6 @@ vi.mock("./_components/dashboard-mobile-content", () => ({
   DashboardMobileContent: passthrough,
 }));
 vi.mock("./_components/dashboard-sidebar", () => ({ DashboardSidebar: empty }));
-vi.mock("./_components/dashboard-mobile-bottom-nav", () => ({
-  DashboardMobileBottomNav: empty,
-}));
 vi.mock("./_components/dashboard-page-navigation", () => ({
   DashboardPageNavigation: empty,
 }));

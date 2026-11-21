@@ -1108,39 +1108,29 @@
     "mobileMe": {
       "signOut": "退出登录",
       "signingOut": "正在退出登录…",
-      "endSession": "结束此会话",
-      "observeDescription": "LLM 追踪、指标和时间线",
       "panels": {
         "account": {
-          "label": "个人资料",
-          "description": "账户、头像、主题和偏好设置"
+          "label": "个人资料"
         },
         "team": {
-          "label": "团队",
-          "description": "团队切换、成员和邀请"
+          "label": "团队"
         },
         "workspace": {
-          "label": "工作区",
-          "description": "谁可以查看和使用此工作区"
+          "label": "工作区"
         },
         "usage": {
-          "label": "用量",
-          "description": "套餐用量和近期活动"
+          "label": "用量"
         },
         "billing": {
-          "label": "账单",
-          "description": "订阅、套餐和账单门户"
+          "label": "账单"
         },
         "approvals": {
-          "label": "批准",
-          "description": "你选择始终允许的操作"
+          "label": "批准"
         },
         "about": {
-          "label": "关于",
-          "description": "版本和构建详情"
+          "label": "关于"
         }
-      },
-      "scheduledDescription": "按时间安排运行的提示词"
+      }
     },
     "members": {
       "dialogTitle": "工作区成员"

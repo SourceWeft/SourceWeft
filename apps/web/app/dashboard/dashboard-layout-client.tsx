@@ -13,7 +13,6 @@ import { ChatHubProvider } from "./chat/_components/chat-hub-context";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
 import { DashboardChatStateProvider } from "./_components/dashboard-chat-state";
-import { DashboardMobileBottomNav } from "./_components/dashboard-mobile-bottom-nav";
 import { DashboardMobileContent } from "./_components/dashboard-mobile-content";
 import { DashboardMobileNavProvider } from "./_components/dashboard-mobile-nav-state";
 import { DashboardPageNavigation } from "./_components/dashboard-page-navigation";
@@ -270,7 +269,7 @@ export function DashboardLayoutClient({
                   className={
                     embedMode
                       ? "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
-                      : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+                      : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[env(safe-area-inset-bottom)] md:pb-0"
                   }
                 >
                   {embedMode ? (
@@ -284,7 +283,6 @@ export function DashboardLayoutClient({
                     </>
                   )}
                 </main>
-                {embedMode ? null : <DashboardMobileBottomNav />}
               </ChatHubProvider>
             </DashboardWorkspaceLayout>
           </DashboardMobileNavProvider>
