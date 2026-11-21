@@ -3,9 +3,10 @@ import type {
   AgentToolWebProvider,
   AgentToolWebSearchResultItem,
 } from "@sourceweft/contracts/agent-tools";
-import type {
-  GroundedAnchorPort,
-  GroundedModelPort,
+import {
+  GroundedGenerationError,
+  type GroundedAnchorPort,
+  type GroundedModelPort,
 } from "@sourceweft/contracts/grounded-generation";
 import type { LedgerEntry } from "./ledger";
 import { runResearch, type ResearchRepo } from "./loop";
@@ -455,5 +456,235 @@ describe("runResearch", () => {
     expect(result.status).toBe("ready");
     expect(calls[0]!.idempotencyKey).toBe("research:r7:call:6");
     expect(fetchCalls[0]).toBe("https://c");
+  });
+
+  test("a resume at the model-call ceiling issues no model call", async () => {
+    const { web, fetchCalls } = makeWeb({
+      search: () => [hit("https://x/1")],
+      fetch: () => ({ markdown: "text", title: "T" }),
+    });
+    const { model, calls } = makeModel(() => {
+      throw new Error("no model call should be made at the ceiling");
+    });
+    const ledger: LedgerEntry[] = [
+      { id: "e1", url: "https://a", title: "A", points: ["p"], quotes: [] },
+    ];
+    const { repo } = makeRepo();
+
+    const result = await runResearch(
+      {
+        runId: "r8",
+        topic: "T",
+        resume: {
+          plan: ["a"],
+          ledger,
+          progress: { round: 1, searches: 1, pagesRead: 1, modelCalls: 24 },
+        },
+      },
+      { web, model, anchor: noAnchor, repo, now },
+    );
+
+    expect(result).toEqual({ status: "failed", errorCode: "TIME_LIMIT" });
+    expect(calls).toHaveLength(0);
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  test("a resume mid-round issues at most two further calls before the ceiling", async () => {
+    const { web } = makeWeb({
+      search: () => [hit("https://x/1")],
+      fetch: () => ({ markdown: "Some text.", title: "T" }),
+    });
+    const { model, calls } = makeModel((call) => {
+      switch (call.operation) {
+        case "research.queries":
+          return { queries: ["s"] };
+        case "research.select":
+          return { urls: ["https://x/1"] };
+        default:
+          throw new Error(`unexpected ${call.operation}`);
+      }
+    });
+    const { repo } = makeRepo();
+
+    const result = await runResearch(
+      {
+        runId: "r9",
+        topic: "T",
+        resume: {
+          plan: ["a"],
+          ledger: [],
+          progress: { round: 0, searches: 0, pagesRead: 0, modelCalls: 22 },
+        },
+      },
+      { web, model, anchor: noAnchor, repo, now },
+    );
+
+    expect(calls.length).toBeLessThanOrEqual(2);
+    expect(result).toEqual({ status: "failed", errorCode: "NO_RESULTS" });
+  });
+
+  test("the report rewrite loop stops at the model-call ceiling", async () => {
+    const { web } = makeWeb({
+      search: () => [hit("https://x/1")],
+      fetch: () => ({ markdown: "Real quote here.", title: "T" }),
+    });
+    const { model, calls } = makeModel((call) => {
+      if (call.operation === "research.report")
+        return { report: "Bad [[e9|x]]." };
+      throw new Error(`unexpected ${call.operation}`);
+    });
+    const ledger: LedgerEntry[] = [
+      {
+        id: "e1",
+        url: "https://x/1",
+        title: "T",
+        points: ["p"],
+        quotes: ["Real quote here."],
+      },
+    ];
+    const { repo } = makeRepo();
+
+    const result = await runResearch(
+      {
+        runId: "r10",
+        topic: "T",
+        resume: {
+          plan: ["a"],
+          ledger,
+          progress: { round: 4, searches: 1, pagesRead: 1, modelCalls: 22 },
+        },
+      },
+      { web, model, anchor: noAnchor, repo, now },
+    );
+
+    expect(result).toEqual({
+      status: "failed",
+      errorCode: "RESEARCH_QUALITY_TOO_LOW",
+    });
+    expect(calls.filter((c) => c.operation === "research.report")).toHaveLength(
+      2,
+    );
+  });
+
+  test("insufficient credits with an empty ledger fails", async () => {
+    const { web } = makeWeb({
+      search: () => [hit("https://x/1")],
+      fetch: () => ({ markdown: "text", title: "T" }),
+    });
+    const { model } = makeModel((call) => {
+      if (call.operation === "research.plan") {
+        throw new GroundedGenerationError("INSUFFICIENT_CREDITS", "no credits");
+      }
+      throw new Error(`unexpected ${call.operation}`);
+    });
+    const { repo } = makeRepo();
+
+    const result = await runResearch(
+      { runId: "r11", topic: "T" },
+      { web, model, anchor: noAnchor, repo, now },
+    );
+
+    expect(result).toEqual({
+      status: "failed",
+      errorCode: "INSUFFICIENT_CREDITS",
+    });
+  });
+
+  test("insufficient credits with a ledger tries the report once more, then fails", async () => {
+    const { web } = makeWeb({
+      search: () => [hit("https://x/1")],
+      fetch: () => ({ markdown: "Real quote here.", title: "T" }),
+    });
+    let reportCalls = 0;
+    const { model } = makeModel((call) => {
+      switch (call.operation) {
+        case "research.queries":
+          throw new GroundedGenerationError(
+            "INSUFFICIENT_CREDITS",
+            "no credits",
+          );
+        case "research.report":
+          reportCalls += 1;
+          throw new GroundedGenerationError(
+            "INSUFFICIENT_CREDITS",
+            "no credits",
+          );
+        default:
+          throw new Error(`unexpected ${call.operation}`);
+      }
+    });
+    const ledger: LedgerEntry[] = [
+      {
+        id: "e1",
+        url: "https://x/1",
+        title: "T",
+        points: ["p"],
+        quotes: ["Real quote here."],
+      },
+    ];
+    const { repo } = makeRepo();
+
+    const result = await runResearch(
+      {
+        runId: "r12",
+        topic: "T",
+        resume: {
+          plan: ["a"],
+          ledger,
+          progress: { round: 0, searches: 0, pagesRead: 0, modelCalls: 5 },
+        },
+      },
+      { web, model, anchor: noAnchor, repo, now },
+    );
+
+    expect(result).toEqual({
+      status: "failed",
+      errorCode: "INSUFFICIENT_CREDITS",
+    });
+    expect(reportCalls).toBe(1);
+  });
+
+  test("running out of time before a report fails with TIME_LIMIT", async () => {
+    const { web } = makeWeb({
+      search: () => [hit("https://x/1")],
+      fetch: () => ({ markdown: "Some text here.", title: "T" }),
+    });
+    const { model } = makeModel((call) => {
+      switch (call.operation) {
+        case "research.plan":
+          return { subquestions: ["a"] };
+        case "research.queries":
+          return { queries: ["s"] };
+        case "research.select":
+          return { urls: ["https://x/1"] };
+        case "research.digest":
+          return {
+            pages: [
+              {
+                url: "https://x/1",
+                points: ["p"],
+                quotes: ["Some text here."],
+              },
+            ],
+            enough: false,
+            missing: ["more"],
+          };
+        default:
+          throw new Error(`unexpected ${call.operation}`);
+      }
+    });
+    let ticks = 0;
+    const clock = () => {
+      ticks += 1;
+      return ticks <= 2 ? 0 : 700_000;
+    };
+    const { repo } = makeRepo();
+
+    const result = await runResearch(
+      { runId: "r13", topic: "T" },
+      { web, model, anchor: noAnchor, repo, now: clock },
+    );
+
+    expect(result).toEqual({ status: "failed", errorCode: "TIME_LIMIT" });
   });
 });

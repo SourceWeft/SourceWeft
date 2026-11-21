@@ -79,7 +79,7 @@ export type ResearchResult =
   | { status: "cancelled" }
   | { status: "failed"; errorCode: ResearchErrorCode };
 
-type RoundOutcome = "enough" | "continue" | "web_failed";
+type RoundOutcome = "enough" | "continue" | "web_failed" | "budget_spent";
 
 /**
  * The deep-research loop: plan → each round (search queries → search → select →
@@ -157,8 +157,15 @@ export async function runResearch(
     progress.modelCalls >= limits.maxModelCalls ||
     deps.now() - startedAt >= limits.maxMillis;
 
+  // The billed-call ceiling, checked before every model call. It is distinct
+  // from `budgetReached` because `modelCalls` is persisted: a run that crashed
+  // and resumed must not re-bill past it, so the cap is enforced per call, not
+  // only at the top of the round loop.
+  const hasModelBudget = () => progress.modelCalls < limits.maxModelCalls;
+
   const runRound = async (): Promise<RoundOutcome> => {
     phase = "searching";
+    if (!hasModelBudget()) return "budget_spent";
     const queriesOut = await callModel({
       operation: "research.queries",
       ...buildQueriesPrompt({ topic, plan: plan ?? [], gaps }),
@@ -197,6 +204,7 @@ export async function runResearch(
     }
 
     phase = "reading";
+    if (!hasModelBudget()) return "budget_spent";
     const selectOut = await callModel({
       operation: "research.select",
       ...buildSelectPrompt({
@@ -248,6 +256,7 @@ export async function runResearch(
       return "continue";
     }
 
+    if (!hasModelBudget()) return "budget_spent";
     const digestOut = await callModel({
       operation: "research.digest",
       ...buildDigestPrompt({
@@ -316,7 +325,9 @@ export async function runResearch(
       if (outcome === "web_failed") {
         return { status: "failed", errorCode: "WEB_PROVIDER_UNAVAILABLE" };
       }
-      if (outcome === "enough") break;
+      // "budget_spent" stops the round mid-way with no model budget left; both
+      // it and "enough" leave the loop for the report, which guards itself.
+      if (outcome === "enough" || outcome === "budget_spent") break;
     }
   } catch (error) {
     if (
@@ -344,6 +355,12 @@ export async function runResearch(
   if (deps.now() - startedAt >= limits.maxMillis) {
     return { status: "failed", errorCode: "TIME_LIMIT" };
   }
+  // No model budget left to write even a first report: the model-call ceiling
+  // is a run-level limit like time, so it fails the same way as running out of
+  // time before any report could be written.
+  if (!hasModelBudget()) {
+    return { status: "failed", errorCode: "TIME_LIMIT" };
+  }
 
   // On resume the ledger holds pages whose text is no longer in memory; fetch
   // them once, just for verification, skipping any that fail.
@@ -363,6 +380,9 @@ export async function runResearch(
   let unknownIds: string[] = [];
   for (let attempt = 0; attempt < REPORT_MAX_ATTEMPTS; attempt += 1) {
     if (await cancelled()) return { status: "cancelled" };
+    // A rewrite needs its own call budget; stop here when none is left rather
+    // than re-billing a resumed run past the ceiling.
+    if (!hasModelBudget()) break;
 
     let reportOut;
     try {
