@@ -625,7 +625,18 @@ type TrackedTask = {
   subagentType: string | undefined;
   brief: string;
   collector: SubagentTranscriptCollector;
-  childThread: Promise<ThreadRecord | null>;
+  /**
+   * The child thread a paused run of this call left behind, looked up when the
+   * call starts. `null` when the lookup itself failed: no thread is opened
+   * then, since a second one could duplicate the first.
+   */
+  pausedChildThread: Promise<{ thread: ThreadRecord | null } | null>;
+  /**
+   * The call's child thread, opened once the delegate does something (or the
+   * call pauses or finishes with a result). A call the `task` tool rejects
+   * before any delegate runs never opens one.
+   */
+  childThread: Promise<ThreadRecord | null> | null;
   /** Whether the child thread already holds the brief (a pause wrote it). */
   briefPersisted: boolean;
   /** The pause's brief write, awaited before the transcript follows it. */
@@ -674,12 +685,45 @@ export function createSubagentProjector(input: {
     userId: input.prepared.userId,
   });
 
-  function track(promise: Promise<unknown>) {
+  function track<T>(promise: Promise<T>): Promise<T> {
     const tracked = promise.finally(() => {
       pending.delete(tracked);
     });
     pending.add(tracked);
     return tracked;
+  }
+
+  /**
+   * The call's child thread: the one a paused run left, else a new one. Opened
+   * at most once per call, on first use.
+   */
+  function openChildThread(tracked: TrackedTask) {
+    tracked.childThread ??= track(
+      tracked.pausedChildThread
+        .then((paused) => {
+          if (!paused) {
+            return null;
+          }
+          return (
+            paused.thread ??
+            createChildThread({
+              parent: input.prepared.thread,
+              userId: input.prepared.userId,
+              subagentType: tracked.subagentType,
+              brief: tracked.brief,
+            })
+          );
+        })
+        .catch((error: unknown) => {
+          logger.warn("Failed to create sub-agent child thread", {
+            ...logContext(),
+            taskCallId: tracked.taskCallId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        }),
+    );
+    return tracked.childThread;
   }
 
   function taskForChildNamespace(namespace: unknown): TrackedTask | null {
@@ -692,13 +736,19 @@ export function createSubagentProjector(input: {
     const taskCallId = taskCallIdByNamespaceKey.get(
       keyOf(segments.slice(0, -1)),
     );
-    return taskCallId ? (tasksByCallId.get(taskCallId) ?? null) : null;
+    const task = taskCallId ? (tasksByCallId.get(taskCallId) ?? null) : null;
+    if (task) {
+      // The delegate is at work: from here on the call has a conversation.
+      void openChildThread(task);
+    }
+    return task;
   }
 
   return {
     /**
-     * The parent's `task` tool call started: open a child thread for it, or
-     * continue the one a paused run of the same call opened.
+     * The parent's `task` tool call started: track it, and look up the child
+     * thread a paused run of the same call opened. A new child thread is
+     * opened only once the delegate does something.
      */
     startTask(task: {
       taskCallId: string;
@@ -728,41 +778,38 @@ export function createSubagentProjector(input: {
         subagentType,
         brief,
         collector: new SubagentTranscriptCollector(),
-        childThread: Promise.resolve(null),
+        pausedChildThread: Promise.resolve(null),
+        childThread: null,
         briefPersisted: false,
         briefWrite: null,
         finished: false,
         paused: false,
       };
-      tracked.childThread = (async () => {
-        // Resumed in a later run: the paused run left the child thread holding
-        // the brief under this call id.
-        const existing = await findChildThread({
+      // Resumed in a later run: the paused run left the child thread holding
+      // the brief under this call id.
+      tracked.pausedChildThread = track(
+        findChildThread({
           teamId: scope.teamId,
           workspaceId: scope.workspaceId,
           parentThreadId:
             input.prepared.thread.parentThreadId ?? input.prepared.thread.id,
           taskCallId: task.taskCallId,
-        });
-        if (existing) {
-          tracked.briefPersisted = true;
-          return existing;
-        }
-        return createChildThread({
-          parent: input.prepared.thread,
-          userId: input.prepared.userId,
-          subagentType,
-          brief,
-        });
-      })().catch((error: unknown) => {
-        logger.warn("Failed to create sub-agent child thread", {
-          ...logContext(),
-          taskCallId: task.taskCallId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return null;
-      });
-      track(tracked.childThread);
+        })
+          .then((existing) => {
+            if (existing) {
+              tracked.briefPersisted = true;
+            }
+            return { thread: existing };
+          })
+          .catch((error: unknown) => {
+            logger.warn("Failed to look up a paused sub-agent child thread", {
+              ...logContext(),
+              taskCallId: task.taskCallId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+          }),
+      );
       tasksByCallId.set(task.taskCallId, tracked);
       if (segments.length > 0) {
         taskCallIdByNamespaceKey.set(namespaceKey, task.taskCallId);
@@ -784,7 +831,7 @@ export function createSubagentProjector(input: {
         return;
       }
       tracked.briefWrite = track(
-        tracked.childThread
+        openChildThread(tracked)
           .then(async (childThread) => {
             if (!childThread || tracked.briefPersisted) {
               return;
@@ -855,17 +902,25 @@ export function createSubagentProjector(input: {
      * The parent's `task` call finished: persist the transcript into the child
      * thread. Resolves to the child thread id (so the caller can tag the tool
      * result) or null when nothing was projected.
+     *
+     * A call that `failed` before its delegate did anything has no
+     * conversation to keep, so no child thread is opened for it; only a thread
+     * its paused run already opened is closed.
      */
     async finishTask(task: {
       taskCallId: string;
       report: string | null;
+      failed?: boolean;
     }): Promise<string | null> {
       const tracked = tasksByCallId.get(task.taskCallId);
       if (!tracked || tracked.finished) {
         return null;
       }
       tracked.finished = true;
-      const childThread = await tracked.childThread;
+      const childThread =
+        task.failed && !tracked.childThread
+          ? ((await tracked.pausedChildThread)?.thread ?? null)
+          : await openChildThread(tracked);
       if (!childThread) {
         return null;
       }

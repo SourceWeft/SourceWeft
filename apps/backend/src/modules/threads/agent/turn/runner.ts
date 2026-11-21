@@ -400,6 +400,7 @@ export async function* invokeDeepAgentTurn(input: {
               report: finished
                 ? readTaskReport(legacyToolPayload.output)
                 : null,
+              failed: !finished,
             });
             if (childThreadId && finished) {
               legacyToolPayload.output = attachChildThreadToTaskOutput(
