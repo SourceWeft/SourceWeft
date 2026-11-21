@@ -13,7 +13,9 @@ import { createRetrievalTool } from "./tool-runtime";
  */
 type CapabilityAgentToolFactoryInput = {
   readonly toolIds?: readonly string[];
-  readonly context?: Partial<Pick<AgentToolTurnContext, "isToolDenied">>;
+  readonly context?: Partial<
+    Pick<AgentToolTurnContext, "isToolDenied" | "shouldBindAgentTool">
+  >;
   readonly services?: Partial<Pick<AgentToolHostServices, "retrieval">>;
 };
 
@@ -23,6 +25,18 @@ function includesTool(input: CapabilityAgentToolFactoryInput, toolId: string) {
   return !input.toolIds || input.toolIds.includes(toolId);
 }
 
+/**
+ * The host hands the factory every tool id in the manifest; whether this turn
+ * binds the tool is the turn's decision. Source search is on by default, but a
+ * tool command turn binds only the tools its workflow names, and binding a tool
+ * the turn did not select is a host error (CAPABILITY_TOOL_BINDING_UNEXPECTED).
+ * A host that does not answer the question (an older one, a test) keeps the
+ * default.
+ */
+function shouldBind(input: CapabilityAgentToolFactoryInput, toolId: string) {
+  return input.context?.shouldBindAgentTool?.(toolId) ?? true;
+}
+
 export function createCapabilityAgentTools(
   input: CapabilityAgentToolFactoryInput,
 ) {
@@ -30,6 +44,7 @@ export function createCapabilityAgentTools(
   if (
     !retrieval ||
     !includesTool(input, SEARCH_SOURCES_TOOL_ID) ||
+    !shouldBind(input, SEARCH_SOURCES_TOOL_ID) ||
     input.context?.isToolDenied?.(SEARCH_SOURCES_TOOL_ID) === true
   ) {
     return { tools: [] };

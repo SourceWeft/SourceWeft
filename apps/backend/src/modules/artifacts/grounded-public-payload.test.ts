@@ -41,8 +41,9 @@ function assertNoSourceText(payload: unknown) {
   assert.ok(!serialized.includes(QUOTE), "the quote text is gone");
 }
 
-test("a shared table keeps values, column names and source titles, and no evidence text", async () => {
+test("a shared table keeps values, column names and source titles, and no evidence text or recipe", async () => {
   const content = tableContentFixture({
+    instruction: "Owner's private brief",
     sources: [
       { sourceId: "s1", documentId: "d1", contentHash: "h1", title: "Atlas trial report" },
       { sourceId: "s2", documentId: "d2", contentHash: "h2", title: "Beacon cohort" },
@@ -50,6 +51,11 @@ test("a shared table keeps values, column names and source titles, and no eviden
   });
   const payload = (await publicPayload("table", content)) as typeof content;
   assertNoSourceText(payload);
+  const serialized = JSON.stringify(payload);
+  for (const field of ["generation", "recipe", "instruction", "description"]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${field}"`), field);
+  }
+  assert.ok(!serialized.includes("private brief"));
   assert.deepEqual(
     payload.columns.map((column) => column.name),
     ["Design", "Participants"],

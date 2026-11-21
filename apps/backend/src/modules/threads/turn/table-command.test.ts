@@ -22,7 +22,7 @@ test("/table is a visible capability command with a workflow", async () => {
   assert.equal(table.visible, true);
   assert.equal(table.category, "Artifacts");
   assert.ok(table.workflow, "a tool command needs a workflow to be listed");
-  assert.deepEqual(table.workflow.defaultTools, ["generate_table"]);
+  assert.deepEqual(table.workflow.defaultTools, ["generate_table", "search_sources"]);
   assert.equal(table.workflow.initialToolPolicy, "auto");
   assert.deepEqual(table.workflow.successCriteria, { kind: "none" });
 });
@@ -38,7 +38,7 @@ test("/table resolves on the backend to a tool workflow around generate_table", 
   assert.equal(resolved.canonicalName, "/generate_table");
   const workflow = resolved.workflow!;
   assert.equal(workflow.kind, "tool_workflow");
-  assert.deepEqual(workflow.defaultTools, ["generate_table"]);
+  assert.deepEqual(workflow.defaultTools, ["generate_table", "search_sources"]);
   assert.equal(workflow.initialToolPolicy, "auto");
   assert.deepEqual(workflow.successCriteria, { kind: "none" });
   assert.equal(workflow.execution, "agent");

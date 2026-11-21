@@ -139,6 +139,28 @@ test("the public payload keeps values, column names and types, and source titles
   assert.equal(payload.language, "en");
 });
 
+test("the public payload carries no generation recipe, instruction or column descriptions", async () => {
+  const withRecipe = JSON.parse(JSON.stringify(anchored)) as typeof anchored;
+  withRecipe.generation.recipe.instruction = "Owner's private brief for the Q3 review";
+  withRecipe.columns[0]!.description = "Seat price before the negotiated discount";
+  withRecipe.generation.recipe.columns = [
+    { name: "Price", type: "number", description: "Seat price before the negotiated discount" },
+  ];
+  const payload = (await publicPayload(withRecipe)) as Record<string, unknown>;
+  const serialized = JSON.stringify(payload);
+  for (const field of ["generation", "recipe", "instruction", "description", "stats"]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${field}"`), field);
+  }
+  assert.doesNotMatch(serialized, /private brief|negotiated discount/);
+  assert.deepEqual(Object.keys(payload).sort(), [
+    "columns",
+    "kind",
+    "language",
+    "rows",
+    "schemaVersion",
+  ]);
+});
+
 test("the public payload drops whatever is not table content", async () => {
   const payload = await publicPayload({
     ...anchored,

@@ -35,16 +35,27 @@ function publicCell(cell: TableCell) {
 }
 
 /**
- * What a public share hands an anonymous browser: the validated content (so
- * nothing outside the table's schema travels, such as a generation checkpoint)
- * with every cell's evidence reduced to where it was cited from. Values,
- * normalized values, column names and types, and source titles stay; the
- * quotes, their offsets and digests do not. The share viewer never shows
- * evidence and parses this with placeholders in its place.
+ * What a public share hands an anonymous browser: only what the share viewer
+ * renders. Column ids, names and types (with the fingerprints the schema
+ * requires), and rows with their source titles, statuses, values and
+ * normalized values; every cell's evidence is reduced to where it was cited
+ * from. Built from the validated content field by field, so nothing else
+ * travels: not the quotes, their offsets or digests, not the column
+ * descriptions, and not `generation` (the owner's instruction and the rest of
+ * the recipe, the model and the stats, none of which the viewer shows). The
+ * share viewer parses this with placeholders in place of what was dropped.
  */
 export function publicTableContent(content: TableContent): Record<string, unknown> {
   return {
-    ...content,
+    schemaVersion: content.schemaVersion,
+    kind: content.kind,
+    language: content.language,
+    columns: content.columns.map(({ id, name, type, fingerprint }) => ({
+      id,
+      name,
+      type,
+      fingerprint,
+    })),
     rows: content.rows.map((row) => ({
       ...row,
       cells: Object.fromEntries(
