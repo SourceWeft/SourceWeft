@@ -15,8 +15,9 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
-import { MemorySaver } from "@langchain/langgraph";
+import { isGraphBubbleUp, MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, type SubAgent } from "deepagents";
+import { createMiddleware } from "langchain";
 import { z } from "zod";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 import type { PreparedThreadTurn } from "../..";
@@ -335,4 +336,166 @@ test("a delegate paused for approval surfaces one interrupt and a paused, not fa
     taskEvents.map((payload) => payload.event),
     ["on_tool_start"],
   );
+}, 30_000);
+
+test("a task call the tool rejects opens no child thread; the retried call opens one", async () => {
+  // The model names a sub-agent type that does not exist, the `task` tool
+  // refuses before any delegate runs, and the model calls again with a valid
+  // type. As in the thread agent, a tool error goes back to the model.
+  let taskCalls = 0;
+  const model = new ScriptedChatModel((messages) => {
+    const last = messages.at(-1);
+    const inSubagent = messages.some(
+      (message) =>
+        typeof message.content === "string" &&
+        message.content.includes(ECHO_MARKER),
+    );
+    if (inSubagent) {
+      return last instanceof ToolMessage
+        ? "done"
+        : new AIMessage({
+            content: "",
+            tool_calls: [{ id: "echo-1", name: "echo", args: { text: "hi" } }],
+          });
+    }
+    if (taskCalls >= 2) {
+      return "done";
+    }
+    taskCalls += 1;
+    return new AIMessage({
+      content: "",
+      tool_calls: [
+        {
+          id: `task-${taskCalls}`,
+          name: "task",
+          args: {
+            description: "echo something back. Then stop.",
+            subagent_type: taskCalls === 1 ? "false" : "echoer",
+          },
+        },
+      ],
+    });
+  });
+  const returnToolErrors = createMiddleware({
+    name: "ReturnToolErrors",
+    wrapToolCall: async (request, handler) => {
+      try {
+        return await handler(request);
+      } catch (error) {
+        if (isGraphBubbleUp(error)) throw error;
+        return new ToolMessage({
+          content: String(error),
+          tool_call_id: request.toolCall.id ?? "",
+          status: "error",
+        });
+      }
+    },
+  });
+  const parentAgent = createDeepAgent({
+    model: model as never,
+    tools: [],
+    checkpointer: new MemorySaver(),
+    subagents: [buildEchoSubagent()],
+    middleware: [returnToolErrors],
+  } as never);
+
+  const created: unknown[] = [];
+  const persisted: string[] = [];
+  const projector = createSubagentProjector({
+    prepared: {
+      userId: "user_1",
+      modelAlias: "chat-default",
+      workspace: { id: "workspace_1", organizationId: "team_1" },
+      thread: {
+        id: "thread_parent",
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        visibility: "workspace",
+        parentThreadId: null,
+        modelSettings: {},
+      },
+    } as unknown as PreparedThreadTurn,
+    toolTraces: new Map(),
+    seedCheckpoint: async () => null,
+    findChildThread: async () => null,
+    createChildThread: async (input) => {
+      created.push(input);
+      return { id: "thread_child", parentThreadId: "thread_parent" } as never;
+    },
+    persist: async (input) => {
+      persisted.push(input.taskCallId);
+      return { checkpoint: null, assistantRows: 0 };
+    },
+  });
+
+  const run = (await (
+    parentAgent as never as {
+      streamEvents: (input: unknown, config: unknown) => Promise<unknown>;
+    }
+  ).streamEvents(
+    { messages: [new HumanMessage("please echo")] },
+    {
+      configurable: { thread_id: "thread_parent" },
+      version: "v3",
+      recursionLimit: 25,
+    },
+  )) as AsyncIterable<V3Event>;
+  const toolNameByCallId = new Map<string, string>();
+  const taskEvents: string[] = [];
+  const finished: Array<string | null> = [];
+  for await (const event of run) {
+    const method = event?.method;
+    if (typeof method !== "string") continue;
+    const namespace = Array.isArray(event.params?.namespace)
+      ? event.params?.namespace
+      : [];
+    const data = event.params?.data;
+    const subagentEvent = isSubagentNamespace(namespace);
+    if (subagentEvent && method !== "tools") {
+      if (method === "messages") {
+        projector.observeMessages(namespace, data);
+      }
+      continue;
+    }
+    if (method !== "tools") continue;
+    const payload = adaptToolsEvent(data, toolNameByCallId);
+    if (!payload) continue;
+    if (subagentEvent) {
+      projector.observeTool(namespace, payload);
+      continue;
+    }
+    if (payload.name !== TASK_TOOL_NAME) continue;
+    const taskCallId = String(payload.toolCallId);
+    taskEvents.push(`${taskCallId}:${payload.event}`);
+    if (payload.event === "on_tool_start") {
+      projector.startTask({ taskCallId, namespace, input: payload.input });
+    } else if (
+      payload.event === "on_tool_end" ||
+      payload.event === "on_tool_error"
+    ) {
+      const ended = payload.event === "on_tool_end";
+      finished.push(
+        await projector.finishTask({
+          taskCallId,
+          report: ended ? readTaskReport(payload.output) : null,
+          failed: !ended,
+        }),
+      );
+    }
+  }
+  await projector.flush();
+
+  assert.deepEqual(taskEvents, [
+    "task-1:on_tool_start",
+    "task-1:on_tool_error",
+    "task-2:on_tool_start",
+    "task-2:on_tool_end",
+  ]);
+  assert.deepEqual(finished, [null, "thread_child"]);
+  assert.equal(created.length, 1);
+  assert.equal(
+    (created[0] as { subagentType?: string }).subagentType,
+    "echoer",
+  );
+  assert.deepEqual(persisted, ["task-2"]);
 }, 30_000);
