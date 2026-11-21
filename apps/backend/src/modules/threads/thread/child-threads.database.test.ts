@@ -202,3 +202,112 @@ test("deleting the parent keeps the child and clears its parent link", async () 
   assert.equal(found?.parentThreadId, null);
   assert.equal(found?.personaId, "explore");
 });
+
+async function createDelegateThread(parentId: string, createdBy: string) {
+  return repository.createThreadRecord({
+    teamId,
+    workspaceId,
+    title: "Delegated task",
+    createdBy,
+    visibility: "workspace",
+    parentThreadId: parentId,
+    personaId: "general-purpose",
+    origin: "subagent",
+  });
+}
+
+function findThread(threadId: string) {
+  return repository.findThreadRecord({ threadId, teamId, workspaceId });
+}
+
+test("deleting a thread also deletes the sub-agent threads its task calls opened", async () => {
+  const parent = await createParent();
+  const ownDelegate = await createDelegateThread(parent.id, owner);
+  // A shared thread's turn can be run by another member; the transcript still
+  // belongs to the thread.
+  const memberDelegate = await createDelegateThread(parent.id, viewer);
+  const otherParent = await createParent();
+  const otherDelegate = await createDelegateThread(otherParent.id, owner);
+
+  const deleted = await repository.deleteThreadRecord({
+    threadId: parent.id,
+    teamId,
+    workspaceId,
+    viewerUserId: owner,
+    isContentAdmin: false,
+  });
+
+  assert.equal(deleted, true);
+  assert.equal(await findThread(parent.id), null);
+  assert.equal(await findThread(ownDelegate.id), null);
+  assert.equal(await findThread(memberDelegate.id), null);
+  assert.equal((await findThread(otherParent.id))?.id, otherParent.id);
+  assert.equal(
+    (await findThread(otherDelegate.id))?.parentThreadId,
+    otherParent.id,
+  );
+});
+
+test("deleting a thread keeps a sub-agent thread a member created under it", async () => {
+  const parent = await createParent();
+  const created = await repository.createThreadRecord({
+    teamId,
+    workspaceId,
+    title: "Explore",
+    createdBy: owner,
+    visibility: "workspace",
+    parentThreadId: parent.id,
+    personaId: "explore",
+  });
+
+  const deleted = await repository.deleteThreadRecord({
+    threadId: parent.id,
+    teamId,
+    workspaceId,
+    viewerUserId: owner,
+    isContentAdmin: false,
+  });
+
+  assert.equal(deleted, true);
+  const found = await findThread(created.id);
+  assert.equal(found?.id, created.id);
+  assert.equal(found?.parentThreadId, null);
+  assert.equal(found?.origin, "user");
+});
+
+test("a delete the caller may not perform removes neither the thread nor its sub-agent threads", async () => {
+  const parent = await createParent();
+  const delegate = await createDelegateThread(parent.id, viewer);
+
+  // A plain member may delete only threads they created.
+  const deleted = await repository.deleteThreadRecord({
+    threadId: parent.id,
+    teamId,
+    workspaceId,
+    viewerUserId: viewer,
+    isContentAdmin: false,
+  });
+
+  assert.equal(deleted, false);
+  assert.equal((await findThread(parent.id))?.id, parent.id);
+  assert.equal((await findThread(delegate.id))?.parentThreadId, parent.id);
+});
+
+test("deleting a sub-agent thread itself leaves its parent and siblings alone", async () => {
+  const parent = await createParent();
+  const first = await createDelegateThread(parent.id, owner);
+  const second = await createDelegateThread(parent.id, owner);
+
+  const deleted = await repository.deleteThreadRecord({
+    threadId: first.id,
+    teamId,
+    workspaceId,
+    viewerUserId: owner,
+    isContentAdmin: false,
+  });
+
+  assert.equal(deleted, true);
+  assert.equal(await findThread(first.id), null);
+  assert.equal((await findThread(parent.id))?.id, parent.id);
+  assert.equal((await findThread(second.id))?.parentThreadId, parent.id);
+});

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  delegatedChildChatIds,
   findChatItem,
   flattenChatItems,
   insertChildChatItem,
@@ -89,6 +90,28 @@ test("findChatItem, mapChatItems and removeChatItem reach nested children", () =
   assert.deepEqual(withoutChild[0]?.children, []);
   assert.equal(withoutChild.length, 2);
   assert.equal(removeChatItem(items, "b").length, 1);
+});
+
+test("delegatedChildChatIds lists only the conversations a chat's delegations opened", () => {
+  const items = [
+    chat("a", {
+      children: [
+        chat("a-task", { parentThreadId: "a", origin: "subagent" }),
+        chat("a-created", { parentThreadId: "a", origin: "user" }),
+        chat("a-unknown", { parentThreadId: "a" }),
+      ],
+    }),
+    chat("b", {
+      children: [chat("b-task", { parentThreadId: "b", origin: "subagent" })],
+    }),
+    chat("c"),
+  ];
+
+  assert.deepEqual(delegatedChildChatIds(items, "a"), ["a-task"]);
+  assert.deepEqual(delegatedChildChatIds(items, "c"), []);
+  // A nested conversation has no children of its own, and an unknown id has none.
+  assert.deepEqual(delegatedChildChatIds(items, "a-task"), []);
+  assert.deepEqual(delegatedChildChatIds(items, "zzz"), []);
 });
 
 test("insertChildChatItem nests under a loaded parent and reports a missing one", () => {

@@ -32,6 +32,7 @@ import {
   type WorkspaceSwitchTransitionState,
 } from "./dashboard-chat-transitions";
 import {
+  delegatedChildChatIds,
   findChatItem,
   insertChildChatItem,
   mapChatItems,
@@ -995,10 +996,33 @@ export function DashboardChatStateProvider({
     async (id: string) => {
       if (!workspaceId) return;
 
+      // The server deletes the conversations the chat's delegations opened
+      // along with it, so an open one is left as well.
+      const delegatedIds = new Set(
+        delegatedChildChatIds(
+          [...privateChats, ...sharedChats, ...archivedChats],
+          id,
+        ),
+      );
+
       await contentClient.deleteThread(workspaceId, id);
       removeChatFromState(id);
+
+      setActiveChatId((value) => {
+        if (!delegatedIds.has(value)) return value;
+        setMode("new");
+        setThreadTitle(t("newChat.title"));
+        return "";
+      });
     },
-    [workspaceId, removeChatFromState],
+    [
+      workspaceId,
+      privateChats,
+      sharedChats,
+      archivedChats,
+      removeChatFromState,
+      t,
+    ],
   );
 
   const setChatVisibility = useCallback(
@@ -1046,7 +1070,12 @@ export function DashboardChatStateProvider({
   );
 
   const clearPrivateChats = useCallback(async () => {
-    const privateIds = new Set(privateChats.map((item) => item.id));
+    const privateIds = new Set(
+      privateChats.flatMap((item) => [
+        item.id,
+        ...delegatedChildChatIds(privateChats, item.id),
+      ]),
+    );
 
     if (privateIds.size === 0) return;
 
@@ -1093,7 +1122,12 @@ export function DashboardChatStateProvider({
   ]);
 
   const clearArchivedChats = useCallback(async () => {
-    const archivedIds = new Set(archivedChats.map((item) => item.id));
+    const archivedIds = new Set(
+      archivedChats.flatMap((item) => [
+        item.id,
+        ...delegatedChildChatIds(archivedChats, item.id),
+      ]),
+    );
 
     if (archivedIds.size === 0) return;
 
