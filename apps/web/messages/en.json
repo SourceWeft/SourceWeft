@@ -147,7 +147,7 @@
         },
         "create": {
           "title": "Create work you can build on",
-          "description": "Turn your material into reports, presentations, study guides, and more. Review the output, ask for changes, and return to saved conversations and files to keep working.",
+          "description": "Turn your material into reports, presentations, study guides, comparison tables, and more. Review the output, ask for changes, and return to saved conversations and files to keep working.",
           "bullets": [
             "Reports, presentations, and creative outputs",
             "Review and refine generated results",
@@ -237,7 +237,7 @@
         },
         "artifacts": {
           "title": "AI should help people make durable artifacts",
-          "body": "Beyond chat, SourceWeft is designed to turn source material into study guides, FAQs, timelines, briefings, and audio overviews you can revisit."
+          "body": "Beyond chat, SourceWeft is designed to turn source material into study guides, FAQs, timelines, briefings, comparison tables, and audio overviews you can revisit."
         }
       }
     },

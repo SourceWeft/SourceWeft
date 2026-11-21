@@ -42,18 +42,19 @@ Multi-agent & Sub-agents · Skills & MCP · Sandbox · Cross-platform · Self-ho
 - **Sandboxed execution.** Run approved commands and process files in an isolated, temporary execution environment, then collect outputs back into your working files. Requires a configured runtime and approval; see the [execution guide](docker/sandbox-execution.md).
 - **Multiple models & BYOK.** Choose supported model providers and bring your own API keys. Configure models for chat and indexing to fit your deployment.
 - **Across devices & remote access.** Work through the web app or macOS, Windows, and Linux desktop clients. Access your deployed workstation remotely and return to saved conversations and files across devices.
-- **Creation & working files.** Produce reports, presentations, HTML pages, learning guides, audio overviews, and images. Review results, ask for changes, and keep refining the work in the same place.
+- **Creation & working files.** Produce reports, presentations, HTML pages, learning guides, comparison tables, audio overviews, and images. Review results, ask for changes, and keep refining the work in the same place.
 - **Knowledge & verifiable citations.** Bring in PDFs, web pages, notes, YouTube, Notion, Google Drive, Dropbox, GitHub, Linear, Jira, Confluence, Gmail, Slack, and more. Give agents the sources a task needs and follow citations back to the original material.
 - **Self-hosting & team collaboration.** Deploy for yourself or your organization, manage your database and file storage, and organize shared workspaces with roles and access controls. External models and tools process the data sent to them according to your configuration.
 
 ## Use Cases
 
-| Start with                        | Work toward                                                       |
-| --------------------------------- | ----------------------------------------------------------------- |
-| Papers, web pages, and notes      | Research briefings with key claims, citations, and open questions |
-| Course material, videos, and PDFs | Study guides, FAQs, and quiz drafts                               |
-| Product docs and team notes       | Reports, presentations, blog drafts, and launch materials         |
-| Connected team sources            | Traceable answers about decisions, projects, and shared context   |
+| Start with                           | Work toward                                                                |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| Papers, web pages, and notes         | Research briefings with key claims, citations, and open questions          |
+| Course material, videos, and PDFs    | Study guides, FAQs, and quiz drafts                                        |
+| Contracts, product pages, or reports | Comparison tables with a quoted source behind every value, exported to CSV |
+| Product docs and team notes          | Reports, presentations, blog drafts, and launch materials                  |
+| Connected team sources               | Traceable answers about decisions, projects, and shared context            |
 
 ## Get Started
 
