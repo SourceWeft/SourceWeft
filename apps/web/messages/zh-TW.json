@@ -6031,6 +6031,7 @@
       "estimate": {
         "loading": "正在估算規模…",
         "summary": "{sources} 個來源 · 需填寫 {cells} 個儲存格",
+        "regenerateSummary": "{sources} 個來源 · {columns} 欄；未改動的儲存格會沿用",
         "skipped": "{count} 個來源尚未建立索引，將被跳過。",
         "exceedsLimit": "所選來源太大，一張表容納不下。請減少來源，或選擇較短的來源。",
         "failed": "無法估算這張表的規模。"

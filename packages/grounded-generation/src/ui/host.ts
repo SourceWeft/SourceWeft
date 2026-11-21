@@ -57,8 +57,11 @@ export type GroundedHost = {
     context: { workspaceId: string; artifactId: string },
   ): Promise<string | null>;
   getFreshness(ref: GroundedVersionRef): Promise<GroundedFreshness>;
-  /** Present when the app can regenerate (retry a failure, refresh a stale artifact). */
-  readonly requestRegenerate?: (ref: GroundedVersionRef) => void;
+  /**
+   * Present when the app can regenerate (retry a failure, refresh a stale
+   * artifact). A returned promise keeps the button busy until it settles.
+   */
+  readonly requestRegenerate?: (ref: GroundedVersionRef) => void | Promise<void>;
 };
 
 /** Without translations the key itself is shown. */

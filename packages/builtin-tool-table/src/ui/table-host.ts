@@ -52,8 +52,12 @@ export type TableHost = {
   /** Whether the table still matches its sources. Absent means not checked. */
   getFreshness?(ref: TableVersionRef): Promise<TableFreshness>;
   downloadFile(fileName: string, mimeType: string, text: string): void;
-  /** Present when the app can regenerate (retry a failure, refresh a stale table). */
-  readonly onRegenerate?: (ref: TableVersionRef) => void;
+  /**
+   * Present when the app can regenerate (retry a failure, refresh a stale
+   * table). A returned promise keeps the button busy until it settles (the
+   * app is loading what its dialog needs).
+   */
+  readonly onRegenerate?: (ref: TableVersionRef) => void | Promise<void>;
 };
 
 /**

@@ -66,9 +66,10 @@ export function GenerateMenu({
             {t("generate.button")}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="min-w-44">
           {entries.map((entry) => (
             <DropdownMenuItem
+              className="whitespace-nowrap"
               key={entry.id}
               onSelect={() => setActive({ entry, sources })}
             >

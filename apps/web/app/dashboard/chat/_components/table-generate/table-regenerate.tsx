@@ -9,6 +9,7 @@ import { invalidateArtifactDetail } from "../sources-hub/artifacts/artifact-deta
 import type { ArtifactListItem } from "../sources-hub/types";
 import { TableGenerateDialog, type TableGenerateSource } from "./table-generate-dialog";
 import {
+  answerTableRegenerate,
   clearTableRegenerate,
   registerTableRegenerateHost,
   subscribeTableRegenerate,
@@ -82,6 +83,7 @@ export function TableRegenerateDialogHost() {
           return;
         }
         setRecipe({ ...read, token, workspaceId, artifactId, threadId: artifact.threadId });
+        answerTableRegenerate(token);
       })
       .catch(() => {
         if (cancelled) return;

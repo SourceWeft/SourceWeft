@@ -6031,6 +6031,7 @@
       "estimate": {
         "loading": "正在估算规模…",
         "summary": "{sources} 个来源 · 需填写 {cells} 个单元格",
+        "regenerateSummary": "{sources} 个来源 · {columns} 列；未改动的单元格会沿用",
         "skipped": "{count} 个来源尚未建立索引，将被跳过。",
         "exceedsLimit": "所选来源太大，一张表容纳不下。请减少来源，或选择较短的来源。",
         "failed": "无法估算这张表的规模。"

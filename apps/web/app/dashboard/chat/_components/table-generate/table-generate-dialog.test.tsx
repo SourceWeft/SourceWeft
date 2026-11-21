@@ -104,6 +104,14 @@ describe("TableGenerateDialog", () => {
     await renderDialog();
     expect(nameInputs()).toHaveLength(1);
     expect(submitButton().disabled).toBe(true);
+    // Nothing is pointed out before the person edits a column.
+    expect(text()).not.toContain("Every column needs a name.");
+    expect(text()).not.toContain("Estimating the size");
+
+    typeInto(nameInputs()[0]!, "Pri");
+    typeInto(nameInputs()[0]!, "");
+    await flush(2);
+    expect(submitButton().disabled).toBe(true);
     expect(text()).toContain("Every column needs a name.");
 
     await act(async () =>

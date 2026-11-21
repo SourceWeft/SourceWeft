@@ -6031,6 +6031,7 @@
       "estimate": {
         "loading": "Estimating the size…",
         "summary": "{sources, plural, one {# source} other {# sources}} · {cells, plural, one {# cell} other {# cells}} to fill",
+        "regenerateSummary": "{sources, plural, one {# source} other {# sources}} · {columns, plural, one {# column} other {# columns}}; unchanged cells are reused",
         "skipped": "{count, plural, one {# source is} other {# sources are}} not indexed yet and will be skipped.",
         "exceedsLimit": "The selected sources are too large for one table. Choose fewer or shorter sources.",
         "failed": "Couldn't estimate the size of this table."

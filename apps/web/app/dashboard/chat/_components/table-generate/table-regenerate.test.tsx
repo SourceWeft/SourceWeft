@@ -99,6 +99,9 @@ describe("regenerating a table", () => {
       "workspace-1",
       expect.objectContaining({ threadId: "thread-1" }),
     );
+    // The estimate counts every cell; a regeneration reuses the unchanged ones.
+    expect(text()).toContain("3 sources · 4 columns; unchanged cells are reused");
+    expect(text()).not.toContain("cells to fill");
 
     await act(async () => button("Regenerate").click());
     await flush(5);
@@ -114,6 +117,30 @@ describe("regenerating a table", () => {
     });
     expect(toasts.success).toHaveBeenCalled();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  test("the request settles once the dialog is open, so the viewer can show it is busy", async () => {
+    let finishLoading: (value: unknown) => void = () => {};
+    sdk.contentClient.getArtifact.mockReturnValue(
+      new Promise((resolve) => {
+        finishLoading = resolve;
+      }),
+    );
+    await mountWithIntl(<TableRegenerateDialogHost />);
+    let settled = false;
+    await act(async () => {
+      void Promise.resolve(webTableHost.onRegenerate!(version)).then(() => {
+        settled = true;
+      });
+    });
+    await flush(5);
+    expect(settled).toBe(false);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    await act(async () => finishLoading(storedArtifact()));
+    await flush(5);
+    expect(settled).toBe(true);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   test("only one dialog opens when the preview is mounted twice", async () => {

@@ -25,6 +25,13 @@ type State = {
 let state: State = { request: null, owner: null };
 let nextToken = 1;
 const hosts: symbol[] = [];
+/** Settles the promise `requestTableRegenerate` returned, by request token. */
+const settlers = new Map<number, () => void>();
+
+function settle(token: number) {
+  settlers.get(token)?.();
+  settlers.delete(token);
+}
 const listeners = new Set<() => void>();
 
 function setState(next: Partial<State>) {
@@ -43,19 +50,38 @@ export function tableRegenerateState(): State {
   return state;
 }
 
-export function requestTableRegenerate(ref: TableVersionRef) {
+/**
+ * Asks for the regenerate dialog. The promise settles once the request is
+ * answered (the dialog is open, or the table could not be loaded), so the
+ * viewer's button can stay busy meanwhile. With no dialog host mounted
+ * nothing can answer, so it settles at once.
+ */
+export function requestTableRegenerate(ref: TableVersionRef): Promise<void> {
+  if (state.request) settle(state.request.token);
+  const token = nextToken++;
+  const answered = new Promise<void>((resolve) => {
+    settlers.set(token, resolve);
+  });
   setState({
     request: {
       workspaceId: ref.workspaceId,
       artifactId: ref.artifactId,
       artifactVersionId: ref.artifactVersionId,
-      token: nextToken++,
+      token,
     },
   });
+  if (!state.owner) settle(token);
+  return answered;
+}
+
+/** The dialog for this request is showing. */
+export function answerTableRegenerate(token: number) {
+  settle(token);
 }
 
 /** Ends the request (dialog closed, or the table could not be loaded). */
 export function clearTableRegenerate(token: number) {
+  settle(token);
   if (state.request?.token === token) setState({ request: null });
 }
 

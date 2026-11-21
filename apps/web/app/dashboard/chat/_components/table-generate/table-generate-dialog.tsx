@@ -112,11 +112,15 @@ export function TableGenerateDialog({
   const [suggesting, setSuggesting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [estimate, setEstimate] = useState<EstimateState | null>(null);
+  // A missing column or name is pointed out only once the person edits the
+  // columns; the submit button stays off either way.
+  const [columnsEdited, setColumnsEdited] = useState(false);
 
   // Each opening starts from the pre-fill (or one blank column), never from the last edit.
   useEffect(() => {
     if (!open) return;
     setColumns(initialColumns ? [...initialColumns] : [blankTableColumn()]);
+    setColumnsEdited(false);
     setInstruction(initialInstruction ?? "");
     setEstimate(null);
   }, [open, initialColumns, initialInstruction]);
@@ -307,7 +311,10 @@ export function TableGenerateDialog({
             <ColumnEditor
               disabled={suggesting || submitting}
               max={TABLE_LIMITS.maxColumns}
-              onChange={setColumns}
+              onChange={(next) => {
+                setColumns(next);
+                setColumnsEdited(true);
+              }}
               t={editorT}
               value={columns}
             />
@@ -315,7 +322,11 @@ export function TableGenerateDialog({
 
           <div aria-live="polite" className="grid gap-1 text-sm">
             {problem ? (
-              <p className="text-destructive">{problem}</p>
+              columnProblem === "none" || columnProblem === "nameMissing" ? (
+                columnsEdited ? <p className="text-destructive">{problem}</p> : null
+              ) : (
+                <p className="text-destructive">{problem}</p>
+              )
             ) : !current ? (
               <p className="text-muted-foreground">{t("generate.estimate.loading")}</p>
             ) : current.status === "failed" ? (
@@ -323,10 +334,17 @@ export function TableGenerateDialog({
             ) : (
               <>
                 <p className="text-muted-foreground">
-                  {t("generate.estimate.summary", {
-                    sources: current.value.sources,
-                    cells: current.value.cells,
-                  })}
+                  {target.kind === "regenerate"
+                    ? // The estimate cannot see the current version, so it
+                      // counts every cell; a regeneration reuses unchanged ones.
+                      t("generate.estimate.regenerateSummary", {
+                        sources: current.value.sources,
+                        columns: current.value.columns,
+                      })
+                    : t("generate.estimate.summary", {
+                        sources: current.value.sources,
+                        cells: current.value.cells,
+                      })}
                 </p>
                 {current.value.skippedSources > 0 ? (
                   <p className="text-muted-foreground">

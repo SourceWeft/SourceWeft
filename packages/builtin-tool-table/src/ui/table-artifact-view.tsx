@@ -4,6 +4,7 @@ import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import { CircleAlert, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import type { ArtifactPreviewArtifactView } from "@sourceweft/contracts/artifact-ui";
 import { groundedErrorCodeSchema } from "@sourceweft/contracts/grounded-generation";
+import { usePendingAction } from "@sourceweft/grounded-generation/ui";
 import {
   parseTableContent,
   type TableContent,
@@ -98,6 +99,7 @@ export function TableArtifactView({
     [workspaceId, artifactId, artifactVersionId],
   );
   const [freshness, setFreshness] = useState<TableFreshness | undefined>();
+  const [retrying, trackRetry] = usePendingAction();
   const ready = artifact.status === "ready" || artifact.status === "archived";
   const getFreshness = host.getFreshness;
   const checkFreshness = surfaceInteractive && host.interactive && ready;
@@ -142,12 +144,18 @@ export function TableArtifactView({
         <p>{t(`table.error.code.${code.success ? code.data : "UNKNOWN"}`)}</p>
         {host.onRegenerate && surfaceInteractive && host.interactive ? (
           <Button
-            onClick={() => host.onRegenerate?.(version)}
+            aria-busy={retrying || undefined}
+            disabled={retrying}
+            onClick={() => trackRetry(host.onRegenerate?.(version))}
             size="sm"
             type="button"
             variant="outline"
           >
-            <RefreshCw aria-hidden />
+            {retrying ? (
+              <LoaderCircle aria-hidden className="animate-spin" />
+            ) : (
+              <RefreshCw aria-hidden />
+            )}
             {t("table.error.retry")}
           </Button>
         ) : null}
