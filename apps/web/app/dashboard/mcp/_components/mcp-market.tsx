@@ -736,7 +736,7 @@ function McpCard({
   return (
     <article
       className={cn(
-        "group flex min-h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
+        "group flex flex-col rounded-xl border border-border bg-background p-3 shadow-xs transition-colors hover:bg-accent/20 sm:min-h-[286px] sm:rounded-2xl sm:p-4",
         highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
       id={`mcp-card-${market.identifier}`}
@@ -744,13 +744,13 @@ function McpCard({
       <div className="flex items-start gap-2">
         <button
           aria-label={t("card.viewDetailsAria", { name: market.name })}
-          className="-m-1 flex min-w-0 flex-1 items-start gap-3 rounded-lg p-1 text-left outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring"
+          className="-m-1 flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-1 text-left outline-none transition-colors hover:bg-accent/30 focus-visible:ring-2 focus-visible:ring-ring sm:gap-3"
           onClick={() => onOpenDetails(item)}
           type="button"
         >
           <span
             className={cn(
-              "flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-sm",
+              "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-sm sm:size-9",
               showRegistryIcon
                 ? "border border-border bg-white"
                 : trusted
@@ -771,12 +771,12 @@ function McpCard({
                 src={market.iconUrl ?? undefined}
               />
             ) : (
-              <McpIcon className="h-4.5 w-4.5" />
+              <McpIcon className="size-4 sm:size-4.5" />
             )}
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <h3 className="truncate text-sm font-semibold leading-6 text-foreground">
+              <h3 className="truncate text-sm font-semibold leading-5 text-foreground sm:leading-6">
                 {market.name}
               </h3>
               {installed ? (
@@ -844,7 +844,7 @@ function McpCard({
       </div>
 
       <button
-        className="mt-3 line-clamp-3 min-h-[60px] text-left text-xs leading-5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="mt-2 line-clamp-2 text-left text-xs leading-[1.125rem] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:mt-3 sm:line-clamp-3 sm:min-h-[60px] sm:leading-5"
         onClick={() => onOpenDetails(item)}
         type="button"
         {...(cardText.ai
@@ -867,7 +867,8 @@ function McpCard({
         ) : null}
       </button>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      {/* One row on a phone: badges past the width are clipped, not wrapped. */}
+      <div className="mt-2 flex gap-1 overflow-hidden *:shrink-0 sm:mt-3 sm:flex-wrap sm:gap-1.5">
         {market.official ? (
           <Badge className="h-5 px-1.5 text-[10px]" variant="default">
             {t("badges.official")}
@@ -896,13 +897,13 @@ function McpCard({
       </div>
 
       {!trusted ? (
-        <div className="mt-3 flex max-h-11 gap-2 overflow-hidden rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-4 text-amber-800 dark:text-amber-200">
+        <div className="mt-2 flex max-h-11 gap-2 overflow-hidden rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-4 text-amber-800 sm:mt-3 dark:text-amber-200">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="line-clamp-2">{t("card.unverifiedWarning")}</span>
         </div>
       ) : null}
 
-      <div className="mt-auto flex min-h-11 items-center justify-end border-t border-border pt-3">
+      <div className="mt-2.5 flex min-h-9 items-center justify-end border-t border-border pt-2.5 sm:mt-auto sm:min-h-11 sm:pt-3">
         {install ? (
           <>
             <div className="flex items-center justify-end gap-1.5">
@@ -1763,7 +1764,7 @@ export function McpMarket() {
                   {items.length === 0 ? t("empty.none") : t("empty.noMatch")}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
                   {filteredItems.map((item) => (
                     <McpCard
                       categories={categories}

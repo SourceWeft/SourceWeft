@@ -299,7 +299,8 @@ export function UsagePanel() {
     <div className="w-full max-w-2xl divide-y divide-border/60">
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-3 pb-7 pt-1">
-        <p className="text-base font-semibold text-foreground">
+        {/* The phone Me page already titles this panel in its header. */}
+        <p className="text-base font-semibold text-foreground in-data-[settings-surface=page]:hidden">
           {copy.usage.title}
         </p>
         <OrgSwitcher />
@@ -308,7 +309,7 @@ export function UsagePanel() {
       {/* ── Plan + credits ── */}
       <div className="py-7">
         <div className="overflow-hidden rounded-lg border border-border">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
             <p className="text-sm font-medium text-foreground">
               {formatCopy(copy.usage.planLabel, { plan: data.plan })}
             </p>
@@ -399,7 +400,8 @@ export function UsagePanel() {
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
                   {copy.usage.table.detail}
                 </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
+                {/* Below sm the date moves under the detail text. */}
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground max-sm:hidden">
                   {copy.usage.table.date}
                 </th>
                 <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">
@@ -414,7 +416,7 @@ export function UsagePanel() {
                     <td className="px-4 py-2.5">
                       <SettingsSkeletonBlock className="h-3 w-44 max-w-full" />
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-2.5 max-sm:hidden">
                       <SettingsSkeletonBlock className="h-3 w-24" />
                     </td>
                     <td className="px-4 py-2.5">
@@ -427,8 +429,11 @@ export function UsagePanel() {
                   <tr key={row.key}>
                     <td className="px-4 py-2.5 text-foreground">
                       {row.detail}
+                      <span className="mt-0.5 block text-xs text-muted-foreground sm:hidden">
+                        {row.date}
+                      </span>
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground">
+                    <td className="px-4 py-2.5 text-muted-foreground max-sm:hidden">
                       {row.date}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-foreground">
@@ -441,7 +446,9 @@ export function UsagePanel() {
                   <td className="px-4 py-2.5 text-foreground">
                     {emptyActivityLabel}
                   </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">--</td>
+                  <td className="px-4 py-2.5 text-muted-foreground max-sm:hidden">
+                    --
+                  </td>
                   <td className="px-4 py-2.5 text-right font-medium text-foreground">
                     --
                   </td>

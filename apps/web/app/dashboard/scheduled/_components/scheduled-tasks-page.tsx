@@ -19,6 +19,7 @@ import {
 } from "../../../../lib/scheduled-tasks";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { NotificationList } from "./notification-list";
+import { ScheduledTaskListSkeleton } from "./scheduled-tasks-skeleton";
 import { TaskFormDialog } from "./task-form-dialog";
 import { TaskMenu } from "./task-menu";
 import { TaskStatusBadge, TaskStatusReason } from "./task-status";
@@ -38,6 +39,12 @@ export function ScheduledTasksPage() {
   );
 
   const items = (tasks.data ?? []).filter((task) => task.status !== "archived");
+  // Loading until the first answer arrives: `isPending`, not `isLoading`,
+  // because a query paused for the network (a phone gone offline) is not
+  // "loading" yet has no data, and must not read as "no tasks yet". With no
+  // workspace at all the query never runs, so that case is not loading.
+  const loading =
+    !hasWorkspaceHydrated || (Boolean(workspaceId) && tasks.isPending);
 
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4 overflow-y-auto p-4 md:p-6">
@@ -62,8 +69,11 @@ export function ScheduledTasksPage() {
         </TabsList>
 
         <TabsContent value="tasks" className="mt-4">
-          {!hasWorkspaceHydrated || tasks.isLoading ? (
-            <p className="text-sm text-muted-foreground">{t("page.loading")}</p>
+          {loading ? (
+            <div role="status" aria-busy="true">
+              <span className="sr-only">{t("page.loading")}</span>
+              <ScheduledTaskListSkeleton />
+            </div>
           ) : tasks.isError ? (
             <p className="text-sm text-destructive" role="alert">
               {t("page.loadError")}

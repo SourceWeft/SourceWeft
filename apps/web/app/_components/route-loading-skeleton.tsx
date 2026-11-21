@@ -9,6 +9,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChatHeaderSkeleton } from "./chat-header-skeleton";
 import { CatalogRouteSkeleton } from "./catalog-loading-skeleton";
 import { TraceListSkeletonRows } from "../dashboard/observability/trace-loading-skeleton";
+import { ScheduledTasksRouteSkeleton } from "../dashboard/scheduled/_components/scheduled-tasks-skeleton";
 
 type SkeletonProps = {
   className?: string;
@@ -107,6 +108,8 @@ export function DashboardSkeletonContentForPath({
     return <CatalogRouteSkeleton kind="mcp" />;
   if (pathname.startsWith("/dashboard/mcp/"))
     return <SkillDetailSkeletonContent kind="mcp" />;
+  if (pathname.replace(/\/+$/, "") === "/dashboard/scheduled")
+    return <ScheduledTasksRouteSkeleton />;
   if (pathname.startsWith("/dashboard/billing")) {
     return (
       <BillingSkeletonContent

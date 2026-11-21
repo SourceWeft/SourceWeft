@@ -18,6 +18,7 @@ import {
   TaskStatusBadge,
   TaskStatusReason,
 } from "./task-status";
+import { ScheduledTaskDetailSkeleton } from "./scheduled-tasks-skeleton";
 import { useScheduleText } from "./use-schedule-text";
 
 export function TaskDetail({ taskId }: { taskId: string }) {
@@ -38,12 +39,10 @@ export function TaskDetail({ taskId }: { taskId: string }) {
     </Button>
   );
 
-  if (!hasWorkspaceHydrated || task.isLoading) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">
-        {t("page.loading")}
-      </div>
-    );
+  // `isPending`, not `isLoading`: a first fetch paused for the network has no
+  // data yet and must not fall through to "could not load".
+  if (!hasWorkspaceHydrated || (Boolean(workspaceId) && task.isPending)) {
+    return <ScheduledTaskDetailSkeleton label={t("page.loading")} />;
   }
   if (task.isError || !task.data) {
     return (

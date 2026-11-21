@@ -2,7 +2,7 @@
 import { disconnectLocalHostSession } from "../../../../lib/local-host-session";
 
 import * as React from "react";
-import { ChevronDown } from "lucide-react";
+import { Camera, ChevronDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -35,11 +35,17 @@ export function AccountPanel({
   userEmail,
   userImage,
   initials,
+  layout = "dialog",
 }: {
   userName?: string;
   userEmail?: string;
   userImage?: string | null;
   initials: string;
+  /**
+   * "dialog" is the desktop settings center; "page" is the phone Me page,
+   * which shows the panel full screen under its own header.
+   */
+  layout?: "dialog" | "page";
 }) {
   const t = useTranslations("dashboardSettings");
   const router = useRouter();
@@ -203,12 +209,271 @@ export function AccountPanel({
     }
   }
 
+  const busy =
+    isDirty || isSaving || isDeleting || isSigningOut || isThemeSaving;
+  const currentTheme = theme ?? DEFAULT_USER_THEME;
+  const resetProfile = () => {
+    setDisplayName(userName ?? "");
+    setAvatarPreview(userImage ?? null);
+    setAvatarDirty(false);
+    setNameError(null);
+  };
+  const avatarFileInput = (
+    <input
+      accept="image/png,image/jpeg,image/webp,image/gif"
+      className="hidden"
+      onChange={handleAvatarFile}
+      ref={fileInputRef}
+      type="file"
+    />
+  );
+  const avatarContent = avatarPreview ? (
+    <RawImage
+      alt="Avatar"
+      className="h-full w-full object-cover"
+      src={avatarPreview}
+    />
+  ) : (
+    <span className="flex h-full w-full items-center justify-center">
+      {initials}
+    </span>
+  );
+
+  // Phone layout (the Me page): one column, full-width controls with 44px tap
+  // targets, 16px inputs so iOS does not zoom on focus, and the irreversible
+  // action alone at the bottom. Each group is a single card; the Me page
+  // renders this panel without a card of its own.
+  if (layout === "page") {
+    const groupClass =
+      "space-y-4 rounded-2xl border border-border/60 bg-card p-4";
+    const groupTitleClass =
+      "px-1 pb-2 text-[13px] font-medium text-muted-foreground";
+    return (
+      <div
+        className="w-full space-y-7"
+        data-layout="page"
+        data-update-unsaved={busy}
+      >
+        {/* ── Profile ── */}
+        <section className="space-y-5">
+          <div className="flex flex-col items-center gap-2 pt-1">
+            {avatarFileInput}
+            <button
+              aria-label={t("account.changeAvatar")}
+              className="relative size-24 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              onClick={() => fileInputRef.current?.click()}
+              type="button"
+            >
+              <span className="block size-full overflow-hidden rounded-full border border-border bg-muted text-2xl font-semibold text-foreground">
+                {avatarContent}
+              </span>
+              <span
+                aria-hidden
+                className="absolute bottom-0 right-0 flex size-8 items-center justify-center rounded-full border-2 border-background bg-primary text-primary-foreground"
+              >
+                <Camera className="size-4" />
+              </span>
+            </button>
+            <button
+              className="min-h-11 px-3 text-[15px] font-medium text-primary"
+              onClick={() => fileInputRef.current?.click()}
+              type="button"
+            >
+              {t("account.changeAvatar")}
+            </button>
+          </div>
+
+          <div className={groupClass}>
+            <div>
+              <label
+                className="mb-2 block text-[13px] font-medium text-muted-foreground"
+                htmlFor="display-name"
+              >
+                {t("account.displayName")}
+              </label>
+              <input
+                className={cn(
+                  "h-11 w-full rounded-xl border bg-background px-3.5 text-base text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring",
+                  nameError ? "border-destructive" : "border-border",
+                )}
+                id="display-name"
+                onChange={(e) => {
+                  setDisplayName(e.target.value);
+                  if (nameError) setNameError(null);
+                }}
+                placeholder={t("account.displayNamePlaceholder")}
+                type="text"
+                value={displayName}
+              />
+              {nameError ? (
+                <p className="mt-1.5 text-[13px] text-destructive">
+                  {nameError}
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <p className="mb-1 text-[13px] font-medium text-muted-foreground">
+                {t("account.signedInAccount")}
+              </p>
+              <p className="break-all text-[15px] text-foreground">
+                {userEmail}
+              </p>
+            </div>
+            {isDirty ? (
+              <div className="flex flex-col gap-2 pt-1">
+                <Button
+                  className="h-11 w-full text-[15px]"
+                  disabled={isSaving}
+                  onClick={() => void handleSave()}
+                  type="button"
+                >
+                  {isSaving ? t("account.saving") : t("account.saveChanges")}
+                </Button>
+                <Button
+                  className="h-11 w-full text-[15px]"
+                  disabled={isSaving}
+                  onClick={resetProfile}
+                  type="button"
+                  variant="ghost"
+                >
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {/* ── Appearance ── */}
+        <section>
+          <p className={groupTitleClass}>{t("appearance.title")}</p>
+          <div className={groupClass}>
+            <div>
+              <p className="text-[15px] text-foreground">
+                {t("appearance.theme.label")}
+              </p>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
+                {t("appearance.theme.description")}
+              </p>
+            </div>
+            <div className="grid grid-cols-3 rounded-xl border border-border bg-muted/40 p-1">
+              {(["light", "system", "dark"] as const).map((themeOption) => (
+                <button
+                  aria-pressed={currentTheme === themeOption}
+                  className={cn(
+                    "h-9 rounded-lg text-sm transition-colors",
+                    currentTheme === themeOption
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground",
+                  )}
+                  disabled={isThemeSaving}
+                  key={themeOption}
+                  onClick={() => void handleThemeChange(themeOption)}
+                  type="button"
+                >
+                  {t(`appearance.theme.${themeOption}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Language ── */}
+        <section>
+          <p className={groupTitleClass}>{t("language.title")}</p>
+          <div className={groupClass}>
+            <div>
+              <label
+                className="block text-[15px] text-foreground"
+                htmlFor="interface-language"
+              >
+                {t("language.label")}
+              </label>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
+                {t("language.description")}
+              </p>
+            </div>
+            <div className="relative">
+              <select
+                className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-border bg-background pl-3.5 pr-9 text-base text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={isLanguageSaving}
+                id="interface-language"
+                onChange={(event) =>
+                  void handleLanguageChange(event.target.value as UserLanguage)
+                }
+                value={language}
+              >
+                <option value="system">{t("language.system")}</option>
+                {LOCALE_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {getLocaleMeta(id).nativeLabel}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            </div>
+            <div className="flex items-start justify-between gap-3 border-t border-border/60 pt-4">
+              <div className="min-w-0">
+                <p className="text-[15px] text-foreground">
+                  {t("language.responseLabel")}
+                </p>
+                <p className="mt-0.5 text-[13px] text-muted-foreground">
+                  {t("language.responseUnavailable")}
+                </p>
+              </div>
+              <span className="shrink-0 text-[13px] text-muted-foreground">
+                {t("language.comingSoon")}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Account: sign out, then the irreversible action last ── */}
+        <section>
+          <p className={groupTitleClass}>{t("account.accountTitle")}</p>
+          <div className="space-y-3">
+            <Button
+              className="h-11 w-full rounded-xl text-[15px]"
+              disabled={isSigningOut}
+              onClick={() => void handleSignOut()}
+              type="button"
+              variant="outline"
+            >
+              {isSigningOut ? t("account.signingOut") : t("account.signOut")}
+            </Button>
+            <div
+              className="space-y-3 rounded-2xl border border-destructive/25 bg-destructive/5 p-4"
+              data-testid="account-danger-zone"
+            >
+              <div>
+                <p className="text-[15px] font-medium text-destructive">
+                  {t("account.deleteAccount")}
+                </p>
+                <p className="mt-0.5 text-[13px] text-muted-foreground">
+                  {t("account.deleteAccountDescription")}
+                </p>
+              </div>
+              <Button
+                className="h-11 w-full rounded-xl text-[15px]"
+                disabled={isDeleting}
+                onClick={() => void handleDeleteAccount()}
+                type="button"
+                variant="destructive"
+              >
+                {isDeleting
+                  ? t("account.deleting")
+                  : t("account.deleteAccount")}
+              </Button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div
       className="w-full max-w-2xl divide-y divide-border/60"
-      data-update-unsaved={
-        isDirty || isSaving || isDeleting || isSigningOut || isThemeSaving
-      }
+      data-update-unsaved={busy}
     >
       {/* ── Profile ── */}
       <div className="pb-7 pt-1">
@@ -218,30 +483,14 @@ export function AccountPanel({
         <div className="flex gap-5">
           {/* Avatar */}
           <div className="shrink-0">
-            <input
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              className="hidden"
-              onChange={handleAvatarFile}
-              ref={fileInputRef}
-              type="file"
-            />
+            {avatarFileInput}
             <button
               className="group relative h-14 w-14 overflow-hidden rounded-full border border-border bg-muted text-sm font-semibold text-foreground"
               onClick={() => fileInputRef.current?.click()}
               title={t("account.changeAvatar")}
               type="button"
             >
-              {avatarPreview ? (
-                <RawImage
-                  alt="Avatar"
-                  className="h-full w-full object-cover"
-                  src={avatarPreview}
-                />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center">
-                  {initials}
-                </span>
-              )}
+              {avatarContent}
               <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
                 {t("account.changeAvatarOverlay")}
               </span>
@@ -285,12 +534,7 @@ export function AccountPanel({
                 </Button>
                 <Button
                   disabled={isSaving}
-                  onClick={() => {
-                    setDisplayName(userName ?? "");
-                    setAvatarPreview(userImage ?? null);
-                    setAvatarDirty(false);
-                    setNameError(null);
-                  }}
+                  onClick={resetProfile}
                   size="sm"
                   type="button"
                   variant="ghost"

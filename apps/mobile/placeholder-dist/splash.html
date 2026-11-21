@@ -22,7 +22,7 @@
       .below { position: fixed; left: 24px; right: 24px; top: calc(50% + 32px);
         display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
       .bar { width: 44px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--muted) 35%, transparent);
-        overflow: hidden; position: relative; opacity: 0; animation: appear .2s ease-out .4s forwards; }
+        overflow: hidden; position: relative; }
       .bar::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: 2px; background: var(--fg);
         animation: slide 1.1s ease-in-out infinite; }
       .status { font-size: 14px; line-height: 20px; color: var(--muted); min-height: 20px; }
@@ -30,7 +30,6 @@
         border: 0; border-radius: 999px; padding: 10px 22px; }
       [hidden] { display: none !important; }
       @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
-      @keyframes appear { to { opacity: 1; } }
       @media (prefers-reduced-motion: reduce) { .bar::after { animation: none; width: 100%; opacity: .5; } }
     </style>
   </head>

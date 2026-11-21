@@ -22,6 +22,7 @@ import { authClient } from "../../lib/auth-client";
 import { AiDataConsentGate } from "./_components/ai-data-consent-gate";
 import { isEmbedMode } from "../../lib/thread-embed-params";
 import { setMobileSessionHint } from "../../lib/mobile-app-shell";
+import { useVisibleViewportHeight } from "../../lib/visible-viewport";
 import { useIsHydrated } from "../_components/auth/use-is-hydrated";
 
 // Only chat surfaces read the registry, so marketing pages no longer pay for
@@ -69,6 +70,7 @@ export function DashboardLayoutClient({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  useVisibleViewportHeight();
   const isAuxiliaryWindow =
     pathname === "/dashboard/hub-window" ||
     pathname === "/dashboard/preview-window";
@@ -251,7 +253,7 @@ export function DashboardLayoutClient({
 
   if (isAuxiliaryWindow) {
     return (
-      <main className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      <main className="h-[var(--sw-visible-height,100dvh)] min-h-0 overflow-hidden bg-background text-foreground">
         {children}
       </main>
     );
@@ -259,7 +261,7 @@ export function DashboardLayoutClient({
 
   return (
     <AiDataConsentGate userId={data?.user?.id}>
-      <SidebarProvider className="!h-dvh !min-h-0 overflow-hidden overscroll-none">
+      <SidebarProvider className="!h-[var(--sw-visible-height,100dvh)] !min-h-0 overflow-hidden overscroll-none">
         <DashboardChatStateProvider>
           <DashboardMobileNavProvider>
             <DashboardWorkspaceLayout>

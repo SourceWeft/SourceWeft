@@ -16,11 +16,12 @@ vi.mock("next/link", () => ({
     <a href={href}>{children as never}</a>
   ),
 }));
+const chatState = vi.hoisted(() => ({
+  workspaceId: "ws_1" as string | null,
+  hasWorkspaceHydrated: true,
+}));
 vi.mock("../../_components/dashboard-chat-state", () => ({
-  useDashboardChatState: () => ({
-    workspaceId: "ws_1",
-    hasWorkspaceHydrated: true,
-  }),
+  useDashboardChatState: () => chatState,
 }));
 vi.mock("./notification-list", () => ({ NotificationList: () => null }));
 vi.mock("./task-form-dialog", () => ({
@@ -57,11 +58,56 @@ beforeEach(() => {
 afterEach(async () => {
   await unmountAll();
   vi.clearAllMocks();
+  chatState.workspaceId = "ws_1";
+  chatState.hasWorkspaceHydrated = true;
+});
+
+test("while the first load is pending the list shows skeleton rows, not the empty state", async () => {
+  hooks.useAgentTasks.mockReturnValue({
+    data: undefined,
+    isPending: true,
+    isLoading: true,
+    isError: false,
+  });
+  const { container } = await mountWithIntl(<ScheduledTasksPage />);
+  expect(
+    container.querySelector('[role="status"][aria-busy="true"]'),
+  ).not.toBeNull();
+  expect(container.querySelectorAll("li")).toHaveLength(3);
+  expect(container.textContent).not.toContain("No scheduled tasks yet");
+});
+
+test("a load paused for the network still reads as loading, not as no tasks", async () => {
+  // TanStack Query: a paused first fetch is pending but not `isLoading`.
+  hooks.useAgentTasks.mockReturnValue({
+    data: undefined,
+    isPending: true,
+    isLoading: false,
+    isError: false,
+  });
+  const { container } = await mountWithIntl(<ScheduledTasksPage />);
+  expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("No scheduled tasks yet");
+});
+
+test("before the workspace is known the list waits instead of claiming it is empty", async () => {
+  chatState.hasWorkspaceHydrated = false;
+  chatState.workspaceId = null;
+  hooks.useAgentTasks.mockReturnValue({
+    data: undefined,
+    isPending: true,
+    isLoading: false,
+    isError: false,
+  });
+  const { container } = await mountWithIntl(<ScheduledTasksPage />);
+  expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("No scheduled tasks yet");
 });
 
 test("each task shows its name, status, rule and next run, and links to its page", async () => {
   hooks.useAgentTasks.mockReturnValue({
     data: [task()],
+    isPending: false,
     isLoading: false,
     isError: false,
   });
@@ -79,6 +125,7 @@ test("a blocked task says why, a deleted one is not listed", async () => {
       task({ status: "blocked", statusReason: "tools_unavailable" }),
       task({ id: "t2", name: "Gone", status: "archived" }),
     ],
+    isPending: false,
     isLoading: false,
     isError: false,
   });
@@ -90,6 +137,7 @@ test("a blocked task says why, a deleted one is not listed", async () => {
 test("with no tasks the page offers to create one", async () => {
   hooks.useAgentTasks.mockReturnValue({
     data: [],
+    isPending: false,
     isLoading: false,
     isError: false,
   });
@@ -106,6 +154,7 @@ test("with no tasks the page offers to create one", async () => {
 test("a failed load says so", async () => {
   hooks.useAgentTasks.mockReturnValue({
     data: undefined,
+    isPending: false,
     isLoading: false,
     isError: true,
   });
