@@ -351,14 +351,32 @@ export async function deleteThreadRecord(input: {
   const deletableClause = input.isContentAdmin
     ? threadVisibilityClause(4)
     : `(created_by = $4 or created_by is null)`;
+  //
+  // The sub-agent threads the thread's own `task` calls opened go with it, in
+  // the same statement and only when the thread itself is deleted. They are
+  // transcripts of its turns, so the caller's right to delete the thread covers
+  // them whoever ran the turn. A sub-agent thread a member created under it is
+  // their own conversation: it stays, and the foreign key clears its parent.
   const result = await database.query<{ id: string }>(
     `
-      delete from threads
-      where id = $1
-        and team_id = $2
-        and workspace_id = $3
-        and ${deletableClause}
-      returning id
+      with deleted_thread as (
+        delete from threads
+        where id = $1
+          and team_id = $2
+          and workspace_id = $3
+          and ${deletableClause}
+        returning id
+      ),
+      deleted_delegate_threads as (
+        delete from threads
+        where parent_thread_id = $1
+          and team_id = $2
+          and workspace_id = $3
+          and origin = 'subagent'
+          and exists (select 1 from deleted_thread)
+        returning id
+      )
+      select id from deleted_thread
     `,
     [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
   );

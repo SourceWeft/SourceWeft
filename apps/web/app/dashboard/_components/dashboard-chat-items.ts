@@ -103,6 +103,21 @@ export function removeChatItem(items: ChatItem[], id: string): ChatItem[] {
 }
 
 /**
+ * The conversations a chat's own delegations opened. The server deletes them
+ * together with the chat; a sub-agent conversation a member created under it
+ * is kept.
+ */
+export function delegatedChildChatIds(
+  items: readonly ChatItem[],
+  id: string,
+): string[] {
+  const parent = items.find((item) => item.id === id);
+  return (parent?.children ?? [])
+    .filter((child) => child.origin === "subagent")
+    .map((child) => child.id);
+}
+
+/**
  * Nests `child` under its parent, newest first, replacing an earlier copy.
  * Returns null when the parent is not in `items`, so the caller can decide
  * where an orphan should show instead.
