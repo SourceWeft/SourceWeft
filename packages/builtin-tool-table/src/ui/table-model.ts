@@ -5,6 +5,7 @@ import type {
   TableFreshness,
   TableRow,
 } from "@sourceweft/contracts/table";
+import { GROUNDED_EVIDENCE_PLACEHOLDER } from "@sourceweft/grounded-generation/public-evidence";
 
 /**
  * Pure helpers behind the table viewer: sorting, per-column visibility
@@ -132,33 +133,46 @@ export function rowFreshness(
 
 /* ------------------------------------------------------------------- payload */
 
-/**
- * The shape of an evidence entry once its text is gone. Only a viewer that
- * never displays evidence (the public share page) may use it.
- */
-const NO_EVIDENCE = {
-  kind: "chunk",
-  sourceId: "-",
-  documentId: "-",
-  chunkId: "-",
-  quote: "-",
-  quoteHash: `sha256:${"0".repeat(64)}`,
-} as const;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
- * Replaces every found cell's evidence with a placeholder before parsing. The
- * public payload carries no quotes or offsets (and would fail the strict
- * schema); a viewer that never shows evidence must still open it, and must
- * not be able to show a quote that was left in by mistake.
+ * Stands in for the generation metadata a public payload does not carry. The
+ * viewer never reads it; the strict schema requires it.
+ */
+const NO_GENERATION = {
+  promptVersion: "-",
+  modelAlias: "-",
+  stats: {
+    sources: 0,
+    columns: 0,
+    found: 0,
+    notFound: 0,
+    unverified: 0,
+    reusedCells: 0,
+    failedRows: 0,
+    skippedRows: 0,
+    modelCalls: 0,
+    tokensEstimated: 0,
+  },
+  recipe: { columns: [{ name: "-", type: "text" }], sourceIds: ["-"] },
+} as const;
+
+/**
+ * Narrows a payload to what a viewer that never shows evidence may hold, so it
+ * parses with the strict schema: every found cell's evidence becomes a
+ * placeholder and `generation` becomes a placeholder too. The public payload
+ * carries neither the quotes nor the recipe (the server strips them, see
+ * `publicTableContent`); a viewer that never shows evidence must still open
+ * it, and must not be able to show a quote or the owner's instruction that
+ * was left in by mistake.
  */
 export function withoutEvidence(payload: unknown): unknown {
   if (!isRecord(payload) || !Array.isArray(payload.rows)) return payload;
   return {
     ...payload,
+    generation: NO_GENERATION,
     rows: payload.rows.map((row: unknown) => {
       if (!isRecord(row) || !isRecord(row.cells)) return row;
       return {
@@ -167,7 +181,7 @@ export function withoutEvidence(payload: unknown): unknown {
           Object.entries(row.cells).map(([columnId, cell]) => [
             columnId,
             isRecord(cell) && cell.status === "found"
-              ? { ...cell, evidence: [NO_EVIDENCE] }
+              ? { ...cell, evidence: [GROUNDED_EVIDENCE_PLACEHOLDER] }
               : cell,
           ]),
         ),

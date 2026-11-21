@@ -242,3 +242,15 @@ test("a payload without evidence quotes opens once its evidence is replaced", ()
   assert.doesNotMatch(JSON.stringify(withQuote), /"quote":"q"/);
   assert.equal(withoutEvidence("not a table"), "not a table");
 });
+
+test("a payload without generation metadata opens, and a recipe left in is not kept", () => {
+  const content = table([1]);
+  const { generation: _generation, ...withoutGeneration } = JSON.parse(JSON.stringify(content));
+  assert.throws(() => parseTableContent(withoutGeneration));
+  assert.equal(parseTableContent(withoutEvidence(withoutGeneration)).rows.length, 1);
+
+  const leaked = JSON.parse(JSON.stringify(content));
+  leaked.generation.recipe.instruction = "the owner's private brief";
+  const parsed = parseTableContent(withoutEvidence(leaked));
+  assert.doesNotMatch(JSON.stringify(parsed), /private brief/);
+});

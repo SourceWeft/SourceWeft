@@ -8,6 +8,7 @@ import {
   parseStudyContentForArtifact,
   type StudyArtifactType,
 } from "@sourceweft/contracts/study";
+import { publicStudyContent } from "./ui/shared/public-content";
 import { downloadStem } from "./ui/shared/util";
 
 /**
@@ -41,6 +42,11 @@ function studyArtifactViewHandler(
             fileName: `${downloadStem(artifact.title, "study")}.${artifactType}.json`,
           }
         : null;
+    },
+    // The share page shows the generated content, never a source quote.
+    buildPublicPayload: ({ artifact }) => {
+      const content = parseContent(artifactType, artifact);
+      return content ? publicStudyContent(content) : null;
     },
   };
 }

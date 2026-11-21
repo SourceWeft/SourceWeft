@@ -19,6 +19,7 @@ import { Preview } from "@sourceweft/preview/react";
 import { createPublicArtifactRecordsTransport } from "../../../lib/artifact-records-transport";
 import { contentClient } from "../../../lib/sdk";
 import { useArtifactStorageText } from "../../../lib/use-artifact-storage-text";
+import { ShareCapabilityHosts } from "./share-capability-hosts";
 
 type SharedArtifact = PublicSharedArtifactResponse["artifact"];
 
@@ -262,7 +263,9 @@ export function SharedArtifactViewer({
               }
             />
           )}
-          <div className="min-h-0 flex-1">{preview}</div>
+          <div className="min-h-0 flex-1">
+            <ShareCapabilityHosts>{preview}</ShareCapabilityHosts>
+          </div>
         </div>
       </div>
 
