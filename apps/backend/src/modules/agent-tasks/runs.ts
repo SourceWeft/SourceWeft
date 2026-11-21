@@ -415,13 +415,9 @@ async function decideAndStart(
       now,
     });
     if (blocked) {
-      await notifyOwner(
-        ports,
-        blocked,
-        "task_tools_unavailable",
-        { state: "blocked" },
-        { inAppOnly: true },
-      );
+      await notifyOwner(ports, blocked, "task_tools_unavailable", {
+        state: "blocked",
+      });
     }
     return;
   }
@@ -438,13 +434,7 @@ async function decideAndStart(
       now,
     });
     if (blocked) {
-      await notifyOwner(
-        ports,
-        blocked,
-        "task_blocked_auth",
-        {},
-        { inAppOnly: true },
-      );
+      await notifyOwner(ports, blocked, "task_blocked_auth", {});
     }
     return;
   }
