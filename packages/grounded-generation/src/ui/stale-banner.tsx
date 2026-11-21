@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RefreshCw, TriangleAlert } from "lucide-react";
+import { LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   useGroundedHost,
   type GroundedFreshness,
   type GroundedVersionRef,
 } from "./host";
+import { usePendingAction } from "./pending-action";
 
 /**
  * Says when an input source changed (or was deleted) since generation. It
@@ -18,6 +19,7 @@ export function StaleBanner({ version }: { version: GroundedVersionRef }) {
   const host = useGroundedHost();
   const t = host.useTranslate();
   const [freshness, setFreshness] = useState<GroundedFreshness["status"]>("unknown");
+  const [regenerating, trackRegenerate] = usePendingAction();
   const { workspaceId, artifactId, artifactVersionId } = version;
 
   useEffect(() => {
@@ -52,12 +54,20 @@ export function StaleBanner({ version }: { version: GroundedVersionRef }) {
       </span>
       {freshness === "stale" && regenerate ? (
         <Button
-          onClick={() => regenerate({ workspaceId, artifactId, artifactVersionId })}
+          aria-busy={regenerating || undefined}
+          disabled={regenerating}
+          onClick={() =>
+            trackRegenerate(regenerate({ workspaceId, artifactId, artifactVersionId }))
+          }
           size="xs"
           type="button"
           variant="outline"
         >
-          <RefreshCw aria-hidden />
+          {regenerating ? (
+            <LoaderCircle aria-hidden className="animate-spin" />
+          ) : (
+            <RefreshCw aria-hidden />
+          )}
           {t("study.stale.regenerate")}
         </Button>
       ) : null}

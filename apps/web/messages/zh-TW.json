@@ -3074,7 +3074,16 @@
       "awaitingApproval": "等待核准",
       "couldNotLoad": "無法載入該製品。",
       "loadFailed": "載入製品失敗。",
-      "loadMoreFailed": "載入更多製品失敗。"
+      "loadMoreFailed": "載入更多製品失敗。",
+      "types": {
+        "audio_overview": "音訊",
+        "video_overview": "影片",
+        "video_presentation": "影片演示",
+        "table": "資料表",
+        "flashcards": "閃卡",
+        "quiz": "測驗",
+        "mindmap": "思維導圖"
+      }
     },
     "skills": {
       "gallery": "技能庫",
@@ -3794,6 +3803,14 @@
         "oauthAccountInUse": "此授權已關聯到其他連接器，無法安全刪除。",
         "removeFailed": "移除連接器失敗。"
       }
+    },
+    "generate": {
+      "button": "產生",
+      "menu": "用所選來源產生",
+      "needsSelection": "先選擇要使用的來源",
+      "needsThread": "開始對話後才能用來源產生",
+      "openFailed": "資料表已加入佇列，但無法開啟。請在製品中檢視。",
+      "table": "資料表"
     }
   },
   "dashboardBlogAdmin": {
@@ -5975,6 +5992,69 @@
       "copied": "已複製",
       "source": "來源",
       "evidenceSuffix": "原文片段"
+    },
+    "editor": {
+      "label": "欄定義",
+      "name": "第 {position} 欄的欄名",
+      "namePlaceholder": "欄名，例如：價格",
+      "description": "第 {position} 欄的說明",
+      "descriptionPlaceholder": "在每個來源中要找什麼（選填）",
+      "type": "第 {position} 欄的值類型",
+      "types": {
+        "text": "文字",
+        "number": "數字",
+        "date": "日期",
+        "boolean": "是 / 否"
+      },
+      "add": "新增欄",
+      "remove": "刪除第 {position} 欄",
+      "max": "一張表最多 {max} 欄。"
+    },
+    "generate": {
+      "title": "產生資料表",
+      "regenerateTitle": "調整並重新產生",
+      "description": "每個來源一列，每個問題一欄，每個值都附有來源原文片段。",
+      "sources": "{count} 個來源",
+      "moreSources": "另外 {count} 個",
+      "instruction": "想比較什麼？（選填）",
+      "instructionPlaceholder": "例如：比較價格和保修條款",
+      "columns": "欄定義",
+      "suggest": "建議欄",
+      "suggesting": "正在建議…",
+      "problems": {
+        "none": "至少新增一欄。",
+        "nameMissing": "每一欄都需要欄名。",
+        "tooMany": "一張表最多 {max} 欄。",
+        "tooManySources": "一張表最多比較 {max} 個來源，請減少所選來源。",
+        "tooManyCells": "{sources} 個來源 × {columns} 欄共 {cells} 個儲存格，一張表最多 {max} 個。請減少來源或欄。"
+      },
+      "estimate": {
+        "loading": "正在估算規模…",
+        "summary": "{sources} 個來源 · 需填寫 {cells} 個儲存格",
+        "regenerateSummary": "{sources} 個來源 · {columns} 欄；未改動的儲存格會沿用",
+        "skipped": "{count} 個來源尚未建立索引，將被跳過。",
+        "exceedsLimit": "所選來源太大，一張表容納不下。請減少來源，或選擇較短的來源。",
+        "failed": "無法估算這張表的規模。"
+      },
+      "submit": "產生資料表",
+      "regenerateSubmit": "重新產生",
+      "cancel": "取消",
+      "started": "正在產生資料表，也會出現在製品中。",
+      "reused": "這張表已經在產生中。",
+      "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
+      "errors": {
+        "TABLE_TOO_MANY_RUNNING": "同時產生的資料表和學習產物太多，請等其中一個完成。",
+        "TABLE_NOT_READY": "只有已完成的資料表才能重新產生。",
+        "TABLE_CONTENT_UNREADABLE": "無法讀取這張表，因此不能重新產生。",
+        "TABLE_REGENERATION_IN_PROGRESS": "這張表已經在重新產生中。",
+        "VALIDATION_ERROR": "請檢查欄定義和來源後重試。",
+        "THREAD_NOT_FOUND": "這個對話已不可用。",
+        "ARTIFACT_NOT_FOUND": "這張表已不存在。",
+        "recipeUnavailable": "這張表無法調整。請從來源中心產生一張新表。",
+        "loadFailed": "無法開啟這張表以重新產生。",
+        "suggestFailed": "無法建議欄，請重試。",
+        "generic": "無法產生資料表，請重試。"
+      }
     }
   },
   "mobileRouteSheet": {

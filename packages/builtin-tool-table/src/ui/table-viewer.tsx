@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Columns3,
+  LoaderCircle,
   RefreshCw,
   TriangleAlert,
 } from "lucide-react";
@@ -13,6 +14,7 @@ import type { TableContent, TableFreshness, TableRow } from "@sourceweft/contrac
 import {
   GroundedHostProvider,
   StaleBanner,
+  usePendingAction,
 } from "@sourceweft/grounded-generation/ui";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -97,6 +99,7 @@ export function TableViewer({
   );
   const hiddenHere = content.columns.filter((column) => hidden.has(column.id)).length;
   const canRegenerate = surfaceInteractive && host.interactive && host.onRegenerate;
+  const [regenerating, trackRegenerate] = usePendingAction();
 
   function toggleColumn(columnId: string) {
     setHidden((current) => {
@@ -211,12 +214,18 @@ export function TableViewer({
           </Button>
           {canRegenerate ? (
             <Button
-              onClick={() => host.onRegenerate?.(version)}
+              aria-busy={regenerating || undefined}
+              disabled={regenerating}
+              onClick={() => trackRegenerate(host.onRegenerate?.(version))}
               size="sm"
               type="button"
               variant="outline"
             >
-              <RefreshCw aria-hidden />
+              {regenerating ? (
+                <LoaderCircle aria-hidden className="animate-spin" />
+              ) : (
+                <RefreshCw aria-hidden />
+              )}
               {t("table.toolbar.regenerate")}
             </Button>
           ) : null}

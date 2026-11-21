@@ -485,7 +485,7 @@ describe("TableArtifactView", () => {
   }
 
   it("shows progress while generating", async () => {
-    await mount(withHost(recordingHost().host, view({ status: "running" }, { table: { progress: { completed: 7, total: 20 } } })));
+    await mount(withHost(recordingHost().host, view({ status: "running" }, { table: { progress: { stage: "fill", done: 7, total: 20 } } })));
     expect(text()).toContain("table.status.generating completed=7 total=20");
     await unmountAll();
     await mount(withHost(recordingHost().host, view({ status: "pending" }, {})));
@@ -503,6 +503,46 @@ describe("TableArtifactView", () => {
     await mount(withHost(recordingHost().host, view({ status: "failed", errorCode: "SOMETHING_NEW" })));
     expect(text()).toContain("table.error.code.UNKNOWN");
     expect(buttons("table.error.retry")).toHaveLength(0);
+  });
+
+  it("keeps the regenerate buttons busy while the host is still answering", async () => {
+    let answer: () => void = () => {};
+    const onRegenerate = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const getFreshness = vi.fn(async () => ({
+      state: "stale" as const,
+      changedSourceIds: ["source-1"],
+      deletedSourceIds: [],
+    }));
+    await mount(withHost(recordingHost({ onRegenerate, getFreshness }).host, view()));
+    await flush(5);
+    const toolbar = button("table.toolbar.regenerate");
+    const banner = button("table.stale.regenerate");
+    await act(async () => toolbar.click());
+    expect(toolbar.disabled).toBe(true);
+    expect(banner.disabled).toBe(false);
+    await act(async () => answer());
+    await flush(2);
+    expect(toolbar.disabled).toBe(false);
+
+    await act(async () => banner.click());
+    expect(banner.disabled).toBe(true);
+    await act(async () => answer());
+    await flush(2);
+    expect(banner.disabled).toBe(false);
+
+    await unmountAll();
+    await mount(withHost(recordingHost({ onRegenerate }).host, view({ status: "failed", errorCode: "MODEL_UNAVAILABLE" })));
+    const retry = button("table.error.retry");
+    await act(async () => retry.click());
+    expect(retry.disabled).toBe(true);
+    await act(async () => answer());
+    await flush(2);
+    expect(retry.disabled).toBe(false);
   });
 
   it("shows a message instead of crashing on an invalid payload", async () => {

@@ -3074,7 +3074,16 @@
       "awaitingApproval": "等待审批",
       "couldNotLoad": "无法加载该制品。",
       "loadFailed": "加载制品失败。",
-      "loadMoreFailed": "加载更多制品失败。"
+      "loadMoreFailed": "加载更多制品失败。",
+      "types": {
+        "audio_overview": "音频",
+        "video_overview": "视频",
+        "video_presentation": "视频演示",
+        "table": "数据表",
+        "flashcards": "闪卡",
+        "quiz": "测验",
+        "mindmap": "思维导图"
+      }
     },
     "skills": {
       "gallery": "技能库",
@@ -3794,6 +3803,14 @@
         "oauthAccountInUse": "此授权已关联到其他连接器，无法安全删除。",
         "removeFailed": "移除连接器失败。"
       }
+    },
+    "generate": {
+      "button": "生成",
+      "menu": "用所选来源生成",
+      "needsSelection": "先选择要使用的来源",
+      "needsThread": "开始对话后才能用来源生成",
+      "openFailed": "数据表已加入队列，但无法打开。请在制品中查看。",
+      "table": "数据表"
     }
   },
   "dashboardBlogAdmin": {
@@ -5975,6 +5992,69 @@
       "copied": "已复制",
       "source": "来源",
       "evidenceSuffix": "原文片段"
+    },
+    "editor": {
+      "label": "列定义",
+      "name": "第 {position} 列的列名",
+      "namePlaceholder": "列名，例如：价格",
+      "description": "第 {position} 列的说明",
+      "descriptionPlaceholder": "在每个来源中要找什么（可选）",
+      "type": "第 {position} 列的值类型",
+      "types": {
+        "text": "文本",
+        "number": "数字",
+        "date": "日期",
+        "boolean": "是 / 否"
+      },
+      "add": "添加列",
+      "remove": "删除第 {position} 列",
+      "max": "一张表最多 {max} 列。"
+    },
+    "generate": {
+      "title": "生成数据表",
+      "regenerateTitle": "调整并重新生成",
+      "description": "每个来源一行，每个问题一列，每个值都附有来源原文片段。",
+      "sources": "{count} 个来源",
+      "moreSources": "另外 {count} 个",
+      "instruction": "想比较什么？（可选）",
+      "instructionPlaceholder": "例如：比较价格和保修条款",
+      "columns": "列定义",
+      "suggest": "建议列",
+      "suggesting": "正在建议…",
+      "problems": {
+        "none": "至少添加一列。",
+        "nameMissing": "每一列都需要列名。",
+        "tooMany": "一张表最多 {max} 列。",
+        "tooManySources": "一张表最多比较 {max} 个来源，请减少所选来源。",
+        "tooManyCells": "{sources} 个来源 × {columns} 列共 {cells} 个单元格，一张表最多 {max} 个。请减少来源或列。"
+      },
+      "estimate": {
+        "loading": "正在估算规模…",
+        "summary": "{sources} 个来源 · 需填写 {cells} 个单元格",
+        "regenerateSummary": "{sources} 个来源 · {columns} 列；未改动的单元格会沿用",
+        "skipped": "{count} 个来源尚未建立索引，将被跳过。",
+        "exceedsLimit": "所选来源太大，一张表容纳不下。请减少来源，或选择较短的来源。",
+        "failed": "无法估算这张表的规模。"
+      },
+      "submit": "生成数据表",
+      "regenerateSubmit": "重新生成",
+      "cancel": "取消",
+      "started": "正在生成数据表，也会出现在制品中。",
+      "reused": "这张表已经在生成中。",
+      "regenerating": "正在重新生成。新版本完成前仍显示当前版本。",
+      "errors": {
+        "TABLE_TOO_MANY_RUNNING": "同时生成的数据表和学习产物太多，请等其中一个完成。",
+        "TABLE_NOT_READY": "只有已完成的数据表才能重新生成。",
+        "TABLE_CONTENT_UNREADABLE": "无法读取这张表，因此不能重新生成。",
+        "TABLE_REGENERATION_IN_PROGRESS": "这张表已经在重新生成中。",
+        "VALIDATION_ERROR": "请检查列定义和来源后重试。",
+        "THREAD_NOT_FOUND": "这个对话已不可用。",
+        "ARTIFACT_NOT_FOUND": "这张表已不存在。",
+        "recipeUnavailable": "这张表无法调整。请从来源中心生成一张新表。",
+        "loadFailed": "无法打开这张表以重新生成。",
+        "suggestFailed": "无法建议列，请重试。",
+        "generic": "无法生成数据表，请重试。"
+      }
     }
   },
   "mobileRouteSheet": {

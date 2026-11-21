@@ -4,6 +4,7 @@ import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
 import { CircleAlert, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import type { ArtifactPreviewArtifactView } from "@sourceweft/contracts/artifact-ui";
 import { groundedErrorCodeSchema } from "@sourceweft/contracts/grounded-generation";
+import { usePendingAction } from "@sourceweft/grounded-generation/ui";
 import {
   parseTableContent,
   type TableContent,
@@ -20,10 +21,13 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** `payload.table.progress` while generating; tolerant of anything else. */
+/**
+ * `payload.table.progress` (`{ stage, done, total }`, written by the
+ * generation job) while generating; tolerant of anything else.
+ */
 function readProgress(payload: Record<string, unknown>) {
   const progress = record(record(payload.table)?.progress);
-  const completed = progress?.completed;
+  const completed = progress?.done;
   const total = progress?.total;
   return typeof completed === "number" && typeof total === "number" && total > 0
     ? { completed: Math.min(completed, total), total }
@@ -95,6 +99,7 @@ export function TableArtifactView({
     [workspaceId, artifactId, artifactVersionId],
   );
   const [freshness, setFreshness] = useState<TableFreshness | undefined>();
+  const [retrying, trackRetry] = usePendingAction();
   const ready = artifact.status === "ready" || artifact.status === "archived";
   const getFreshness = host.getFreshness;
   const checkFreshness = surfaceInteractive && host.interactive && ready;
@@ -139,12 +144,18 @@ export function TableArtifactView({
         <p>{t(`table.error.code.${code.success ? code.data : "UNKNOWN"}`)}</p>
         {host.onRegenerate && surfaceInteractive && host.interactive ? (
           <Button
-            onClick={() => host.onRegenerate?.(version)}
+            aria-busy={retrying || undefined}
+            disabled={retrying}
+            onClick={() => trackRetry(host.onRegenerate?.(version))}
             size="sm"
             type="button"
             variant="outline"
           >
-            <RefreshCw aria-hidden />
+            {retrying ? (
+              <LoaderCircle aria-hidden className="animate-spin" />
+            ) : (
+              <RefreshCw aria-hidden />
+            )}
             {t("table.error.retry")}
           </Button>
         ) : null}
