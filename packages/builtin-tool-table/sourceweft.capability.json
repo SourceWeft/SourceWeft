@@ -24,6 +24,7 @@
           "table"
         ],
         "category": "Artifacts",
+        "iconName": "table",
         "visibleWhen": "enabled",
         "workflow": {
           "execution": "agent",

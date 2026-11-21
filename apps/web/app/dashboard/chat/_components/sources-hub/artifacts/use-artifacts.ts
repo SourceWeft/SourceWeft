@@ -20,6 +20,14 @@ const workspaceArtifactsRefreshInFlight = new Map<
   ReturnType<typeof contentClient.listArtifactSummaries>
 >();
 const WORKSPACE_ARTIFACTS_CACHE_BUCKET = "artifact-summaries-v1";
+/** How often a list with a generating artifact is re-read. */
+const GENERATING_REFRESH_MS = 5_000;
+/** How long one watch lasts; reopening the hub or a new artifact starts another. */
+const GENERATING_WATCH_LIMIT_MS = 15 * 60_000;
+
+function isGenerating(status: ArtifactSummaryItem["status"]) {
+  return status === "pending" || status === "running";
+}
 
 type WorkspaceArtifactsCacheValue = {
   items: ArtifactSummaryItem[];
@@ -306,6 +314,62 @@ export function useArtifacts(input: {
       },
     );
   }, [currentWorkspaceIdRef]);
+
+  // While an artifact on the list is still generating, re-read the first page
+  // now and then and replace those rows, so a card turns ready (or failed)
+  // without a manual refresh. Quietly, like the approval patch above: no
+  // loading state, loaded pages stay. The watch gives up after a while so a
+  // run that never settles does not poll forever.
+  const generatingIds = artifacts
+    .filter((artifact) => isGenerating(artifact.status))
+    .map((artifact) => artifact.id)
+    .join(",");
+  useEffect(() => {
+    if (!enabled || !workspaceId || !generatingIds) return;
+    const watchedIn = workspaceId;
+    const startedAt = Date.now();
+    let stopped = false;
+    const timer = setInterval(async () => {
+      if (Date.now() - startedAt > GENERATING_WATCH_LIMIT_MS) {
+        clearInterval(timer);
+        return;
+      }
+      try {
+        const fresh = await contentClient.listArtifactSummaries(watchedIn, {
+          limit: 100,
+        });
+        if (stopped || currentWorkspaceIdRef.current !== watchedIn) return;
+        const watched = new Set(generatingIds.split(","));
+        const rows = new Map(
+          fresh.items
+            .filter((item) => watched.has(item.id))
+            .map((item) => [item.id, item]),
+        );
+        const patch = (items: ArtifactSummaryItem[]) =>
+          items.map((item) => rows.get(item.id) ?? item);
+        const cachedItems = workspaceArtifactsCache.get(watchedIn);
+        if (cachedItems) {
+          const patched = patch(cachedItems);
+          workspaceArtifactsCache.set(watchedIn, patched);
+          setCachedWorkspaceHubValue<WorkspaceArtifactsCacheValue>(
+            WORKSPACE_ARTIFACTS_CACHE_BUCKET,
+            watchedIn,
+            {
+              items: patched,
+              nextCursor: workspaceArtifactsCursorCache.get(watchedIn) ?? null,
+            },
+          );
+        }
+        setArtifacts(patch);
+      } catch {
+        // The next tick, or the next full refresh, tries again.
+      }
+    }, GENERATING_REFRESH_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [currentWorkspaceIdRef, enabled, generatingIds, workspaceId]);
 
   return {
     artifacts,

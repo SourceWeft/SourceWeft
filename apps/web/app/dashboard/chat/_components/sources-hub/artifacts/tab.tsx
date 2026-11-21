@@ -209,7 +209,10 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                     t(key),
                   )}
                 />
-                <TypeBadge label={artifact.status} />
+                <TypeBadge
+                  label={t(`artifacts.status.${artifact.status}`)}
+                  tone={artifact.status === "failed" ? "attention" : "default"}
+                />
                 {artifact.isPublic ? (
                   <TypeBadge label={t("artifacts.public")} tone="public" />
                 ) : null}
