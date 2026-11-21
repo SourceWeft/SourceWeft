@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { HttpClientError } from "@sourceweft/sdk";
 import type { TableColumnInput } from "@sourceweft/contracts/table";
@@ -10,13 +11,15 @@ const sdk = vi.hoisted(() => ({
     estimateTable: vi.fn(),
     generateTable: vi.fn(),
     regenerateTable: vi.fn(),
+    listSourceMentions: vi.fn(),
+    getSource: vi.fn(),
   },
 }));
 const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toasts }));
 vi.mock("../../../../../lib/sdk", () => sdk);
 
-import { button, flush, mountWithIntl, typeInto, unmountAll } from "@/test/react";
+import { button, flush, mountWithIntl, typeInto, unmountAll, withIntl } from "@/test/react";
 import { TableGenerateDialog } from "./table-generate-dialog";
 
 const sources = (count: number) =>
@@ -26,7 +29,10 @@ const sources = (count: number) =>
   }));
 
 const columns = (count: number): TableColumnInput[] =>
-  Array.from({ length: count }, (_, index) => ({ name: `Column ${index + 1}`, type: "text" }));
+  Array.from({ length: count }, (_, index) => ({
+    name: `Column ${index + 1}`,
+    type: "text",
+  }));
 
 function estimate(overrides: Record<string, unknown> = {}) {
   return {
@@ -44,19 +50,22 @@ function estimate(overrides: Record<string, unknown> = {}) {
 const onQueued = vi.fn();
 const onOpenChange = vi.fn();
 
-async function renderDialog(
-  props: Partial<Parameters<typeof TableGenerateDialog>[0]> = {},
-) {
+async function renderDialog(props: Partial<Parameters<typeof TableGenerateDialog>[0]> = {}) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   await mountWithIntl(
-    <TableGenerateDialog
-      open
-      onOpenChange={onOpenChange}
-      onQueued={onQueued}
-      sources={sources(2)}
-      target={{ kind: "generate", threadId: "thread-1" }}
-      workspaceId="workspace-1"
-      {...props}
-    />,
+    <QueryClientProvider client={client}>
+      <TableGenerateDialog
+        open
+        onOpenChange={onOpenChange}
+        onQueued={onQueued}
+        sources={sources(2)}
+        target={{ kind: "generate", threadId: "thread-1" }}
+        workspaceId="workspace-1"
+        {...props}
+      />
+    </QueryClientProvider>,
   );
   await flush(3);
 }
@@ -84,6 +93,13 @@ function text() {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   sdk.contentClient.estimateTable.mockResolvedValue(estimate());
+  sdk.contentClient.listSourceMentions.mockResolvedValue({
+    items: [
+      { id: "source-1", title: "Source 1" },
+      { id: "source-new", title: "New source" },
+    ],
+    nextCursor: null,
+  });
   sdk.contentClient.generateTable.mockResolvedValue({
     artifactId: "artifact-9",
     versionNo: 1,
@@ -140,7 +156,10 @@ describe("TableGenerateDialog", () => {
       columns: [{ name: "Price", type: "text" }],
     });
     expect(toasts.success).toHaveBeenCalled();
-    expect(onQueued).toHaveBeenCalledWith({ artifactId: "artifact-9", versionNo: 1 });
+    expect(onQueued).toHaveBeenCalledWith({
+      artifactId: "artifact-9",
+      versionNo: 1,
+    });
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -154,7 +173,10 @@ describe("TableGenerateDialog", () => {
     });
     await renderDialog();
     typeInto(nameInputs()[0]!, "Price");
-    typeInto(document.querySelector<HTMLTextAreaElement>("#table-instruction")!, " Compare phones ");
+    typeInto(
+      document.querySelector<HTMLTextAreaElement>("#table-instruction")!,
+      " Compare phones ",
+    );
     await act(async () => button("Suggest columns").click());
     await flush(5);
 
@@ -164,9 +186,9 @@ describe("TableGenerateDialog", () => {
     });
     expect(nameInputs().map((input) => input.value)).toEqual(["Price", "Launch date", "Warranty"]);
     expect(
-      [...document.querySelectorAll<HTMLInputElement>('input[name="table-column-description"]')].map(
-        (input) => input.value,
-      ),
+      [
+        ...document.querySelectorAll<HTMLInputElement>('input[name="table-column-description"]'),
+      ].map((input) => input.value),
     ).toEqual(["", "", "Length of cover"]);
   });
 
@@ -233,5 +255,87 @@ describe("TableGenerateDialog", () => {
     expect(toasts.error).toHaveBeenLastCalledWith(
       "Too many tables and study sets are generating at once. Wait for one to finish.",
     );
+  });
+
+  test("regenerating sends the sources after one is removed and another added", async () => {
+    sdk.contentClient.regenerateTable.mockResolvedValue({
+      artifactId: "artifact-9",
+      versionNo: 2,
+      status: "pending",
+    });
+    await renderDialog({
+      initialColumns: columns(1),
+      target: {
+        kind: "regenerate",
+        threadId: "thread-1",
+        artifactId: "artifact-9",
+      },
+    });
+    expect(text()).toContain("2 sources");
+    expect(text()).toContain("Source 1");
+    expect(text()).toContain("Source 2");
+    // The titles the dialog opened with need no lookup.
+    expect(sdk.contentClient.getSource).not.toHaveBeenCalled();
+
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label="2 sources: Source 2 ×"]')!.click(),
+    );
+    expect(text()).toContain("1 source");
+    await act(async () => button("Add source").click());
+    await flush(5);
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="checkbox"]')]
+        .find((option) => option.textContent?.includes("New source"))!
+        .click(),
+    );
+    expect(text()).toContain("2 sources");
+    await settleEstimate();
+    await act(async () => button("Regenerate").click());
+    await flush(5);
+    expect(sdk.contentClient.regenerateTable).toHaveBeenCalledWith("workspace-1", "artifact-9", {
+      sourceIds: ["source-1", "source-new"],
+      columns: [{ name: "Column 1", type: "text" }],
+      instruction: "",
+    });
+  });
+
+  test("with every source removed the dialog says so and cannot be submitted", async () => {
+    await renderDialog({ initialColumns: columns(1) });
+    for (const title of ["Source 1", "Source 2"]) {
+      await act(async () =>
+        document.querySelector<HTMLButtonElement>(`[aria-label$=": ${title} ×"]`)!.click(),
+      );
+    }
+    await settleEstimate();
+    expect(text()).toContain("Add at least one source.");
+    expect(submitButton().disabled).toBe(true);
+    expect(button("Suggest columns").disabled).toBe(true);
+  });
+
+  test("a re-render with fresh props while open keeps the person's edits", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const element = () => (
+      <QueryClientProvider client={client}>
+        <TableGenerateDialog
+          open
+          onOpenChange={onOpenChange}
+          sources={sources(2)}
+          target={{ kind: "generate", threadId: "thread-1" }}
+          workspaceId="workspace-1"
+        />
+      </QueryClientProvider>
+    );
+    const handle = await mountWithIntl(element());
+    typeInto(nameInputs()[0]!, "Price");
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[aria-label$=": Source 2 ×"]')!.click(),
+    );
+    // The hub re-renders with a new (equal) sources array, as a refresh does.
+    await handle.render(withIntl(element()));
+    await flush(2);
+    expect(nameInputs()[0]!.value).toBe("Price");
+    expect(text()).toContain("1 source");
   });
 });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const sdk = vi.hoisted(() => ({
   contentClient: {
@@ -8,6 +9,8 @@ const sdk = vi.hoisted(() => ({
     estimateTable: vi.fn(),
     generateTable: vi.fn(),
     regenerateTable: vi.fn(),
+    listSourceMentions: vi.fn(async () => ({ items: [], nextCursor: null })),
+    getSource: vi.fn(),
   },
 }));
 const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -77,13 +80,16 @@ describe("GenerateMenu", () => {
   });
 
   test("opens the table dialog with the selected source ids", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     await mountWithIntl(
-      <GenerateMenu
-        onCreated={vi.fn()}
-        sources={selected}
-        threadId="thread-1"
-        workspaceId="workspace-1"
-      />,
+      <QueryClientProvider client={client}>
+        <GenerateMenu
+          onCreated={vi.fn()}
+          sources={selected}
+          threadId="thread-1"
+          workspaceId="workspace-1"
+        />
+      </QueryClientProvider>,
     );
     expect(generateButton().disabled).toBe(false);
     await act(async () => button("Data table").click());

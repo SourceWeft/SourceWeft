@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { act } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const sdk = vi.hoisted(() => ({
   contentClient: {
+    listSourceMentions: vi.fn(async () => ({ items: [], nextCursor: null })),
+    getSource: vi.fn(),
     getArtifact: vi.fn(),
     estimateTable: vi.fn(),
     regenerateTable: vi.fn(),
@@ -20,6 +23,15 @@ import { button, flush, mountWithIntl, typeInto, unmountAll } from "@/test/react
 import { webTableHost } from "../artifact-preview/table-host";
 import { COLUMN_IDS, tableFixtureEn } from "../artifact-preview/table-test-fixtures";
 import { TableRegenerateDialogHost } from "./table-regenerate";
+
+function mountHost() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return mountWithIntl(
+    <QueryClientProvider client={client}>
+      <TableRegenerateDialogHost />
+    </QueryClientProvider>,
+  );
+}
 
 const version = {
   workspaceId: "workspace-1",
@@ -81,7 +93,7 @@ afterEach(async () => {
 
 describe("regenerating a table", () => {
   test("regenerate opens the dialog pre-filled from the recipe and sends column ids back", async () => {
-    await mountWithIntl(<TableRegenerateDialogHost />);
+    await mountHost();
     await requestRegenerate();
 
     expect(sdk.contentClient.getArtifact).toHaveBeenCalledWith("workspace-1", "artifact-1");
@@ -126,7 +138,7 @@ describe("regenerating a table", () => {
         finishLoading = resolve;
       }),
     );
-    await mountWithIntl(<TableRegenerateDialogHost />);
+    await mountHost();
     let settled = false;
     await act(async () => {
       void Promise.resolve(webTableHost.onRegenerate!(version)).then(() => {
@@ -144,8 +156,8 @@ describe("regenerating a table", () => {
   });
 
   test("only one dialog opens when the preview is mounted twice", async () => {
-    await mountWithIntl(<TableRegenerateDialogHost />);
-    await mountWithIntl(<TableRegenerateDialogHost />);
+    await mountHost();
+    await mountHost();
     await requestRegenerate();
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
   });
@@ -154,7 +166,7 @@ describe("regenerating a table", () => {
     sdk.contentClient.getArtifact.mockResolvedValue(
       storedArtifact({ status: "failed", payloadJson: { table: { progress: { done: 0, total: 3 } } } }),
     );
-    await mountWithIntl(<TableRegenerateDialogHost />);
+    await mountHost();
     await requestRegenerate();
     expect(toasts.error).toHaveBeenCalledWith(
       "This table can't be adjusted. Generate a new table from the source hub.",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import {
 import { Label } from "@sourceweft/ui-web/components/ui/label";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { contentClient } from "../../../../../lib/sdk";
+import { WorkspaceSourcePicker } from "../../../_components/resource-picker";
 import { useTableTranslate } from "../artifact-preview/table-host";
 
 /** Where the request goes: a new table in a thread, or the next version of one. */
@@ -40,6 +41,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string;
   target: TableGenerateTarget;
+  /** The sources the dialog opens with; the person can remove some or add others. */
   sources: readonly TableGenerateSource[];
   /** Pre-fill (a regeneration passes the recipe's columns, ids included). */
   initialColumns?: readonly TableColumnInput[];
@@ -49,7 +51,6 @@ type Props = {
 
 /** Waits for typing to pause before asking the server for the size. */
 const ESTIMATE_DELAY_MS = 400;
-const SOURCE_TITLES_SHOWN = 5;
 
 /** Codes the request routes answer with that have their own table wording. */
 const TABLE_REQUEST_CODES = new Set([
@@ -69,9 +70,7 @@ function requestErrorMessage(
   t: TableT,
   error: unknown,
   fallback:
-    | "generate.errors.generic"
-    | "generate.errors.suggestFailed"
-    | "generate.estimate.failed",
+    "generate.errors.generic" | "generate.errors.suggestFailed" | "generate.estimate.failed",
 ) {
   const code = error instanceof HttpClientError ? error.code : null;
   if (code && groundedErrorCodeSchema.safeParse(code).success) {
@@ -115,34 +114,49 @@ export function TableGenerateDialog({
   // A missing column or name is pointed out only once the person edits the
   // columns; the submit button stays off either way.
   const [columnsEdited, setColumnsEdited] = useState(false);
+  const [sourceIds, setSourceIds] = useState<string[]>(() => sources.map((source) => source.id));
+  const knownTitles = useMemo(
+    () => new Map(sources.map((source) => [source.id, source.title])),
+    [sources],
+  );
 
-  // Each opening starts from the pre-fill (or one blank column), never from the last edit.
+  // Each opening starts from the pre-fill (or one blank column), never from the
+  // last edit. Only the opening resets: a parent that re-renders with fresh
+  // props while the dialog is open (the hub refreshing its sources) must not
+  // undo what the person changed.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    const opening = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (!opening) return;
     setColumns(initialColumns ? [...initialColumns] : [blankTableColumn()]);
     setColumnsEdited(false);
+    setSourceIds(sources.map((source) => source.id));
     setInstruction(initialInstruction ?? "");
     setEstimate(null);
-  }, [open, initialColumns, initialInstruction]);
+  }, [open, initialColumns, initialInstruction, sources]);
 
-  const sourceIds = useMemo(() => sources.map((source) => source.id), [sources]);
   const trimmedInstruction = instruction.trim();
-  const cells = sources.length * columns.length;
+  const cells = sourceIds.length * columns.length;
   const columnProblem = columnsProblem(columns, TABLE_LIMITS.maxColumns);
   const problem = columnProblem
     ? columnProblem === "tooMany"
       ? t("generate.problems.tooMany", { max: TABLE_LIMITS.maxColumns })
       : t(`generate.problems.${columnProblem}`)
-    : sources.length > TABLE_LIMITS.maxSources
-      ? t("generate.problems.tooManySources", { max: TABLE_LIMITS.maxSources })
-      : cells > TABLE_LIMITS.maxCells
-        ? t("generate.problems.tooManyCells", {
-            sources: sources.length,
-            columns: columns.length,
-            cells,
-            max: TABLE_LIMITS.maxCells,
+    : sourceIds.length === 0
+      ? t("generate.problems.noSources")
+      : sourceIds.length > TABLE_LIMITS.maxSources
+        ? t("generate.problems.tooManySources", {
+            max: TABLE_LIMITS.maxSources,
           })
-        : null;
+        : cells > TABLE_LIMITS.maxCells
+          ? t("generate.problems.tooManyCells", {
+              sources: sourceIds.length,
+              columns: columns.length,
+              cells,
+              max: TABLE_LIMITS.maxCells,
+            })
+          : null;
 
   const threadId = target.threadId;
   const estimateRequest = useMemo(
@@ -184,10 +198,7 @@ export function TableGenerateDialog({
   }, [canEstimate, estimateKey, workspaceId, t]);
 
   const current = !problem && estimate?.key === estimateKey ? estimate : null;
-  const canSubmit =
-    !submitting &&
-    current?.status === "ready" &&
-    !current.value.exceedsLimit;
+  const canSubmit = !submitting && current?.status === "ready" && !current.value.exceedsLimit;
 
   async function suggest() {
     setSuggesting(true);
@@ -227,7 +238,10 @@ export function TableGenerateDialog({
             : t("generate.started"),
       );
       onOpenChange(false);
-      onQueued?.({ artifactId: queued.artifactId, versionNo: queued.versionNo });
+      onQueued?.({
+        artifactId: queued.artifactId,
+        versionNo: queued.versionNo,
+      });
     } catch (error) {
       toast.error(requestErrorMessage(t, error, "generate.errors.generic"));
     } finally {
@@ -235,43 +249,38 @@ export function TableGenerateDialog({
     }
   }
 
-  const shownSources = sources.slice(0, SOURCE_TITLES_SHOWN);
-  const hiddenSources = sources.length - shownSources.length;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            {target.kind === "regenerate"
-              ? t("generate.regenerateTitle")
-              : t("generate.title")}
+            {target.kind === "regenerate" ? t("generate.regenerateTitle") : t("generate.title")}
           </DialogTitle>
           <DialogDescription>{t("generate.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="grid min-w-0 gap-4">
-          <section className="grid min-w-0 gap-1.5">
-            <p className="text-sm font-medium">
-              {t("generate.sources", { count: sources.length })}
-            </p>
-            <ul className="flex min-w-0 flex-wrap gap-1.5 text-xs text-muted-foreground">
-              {shownSources.map((source) => (
-                <li
-                  className="max-w-full truncate rounded-md border bg-muted/30 px-2 py-0.5"
-                  key={source.id}
-                  title={source.title}
-                >
-                  {source.title}
-                </li>
-              ))}
-              {hiddenSources > 0 ? (
-                <li className="px-1 py-0.5">
-                  {t("generate.moreSources", { count: hiddenSources })}
-                </li>
-              ) : null}
-            </ul>
-          </section>
+          <WorkspaceSourcePicker
+            disabled={suggesting || submitting}
+            enabled={open}
+            knownTitles={knownTitles}
+            labels={{
+              label: t("generate.sources", { count: sourceIds.length }),
+              addLabel: t("generate.addSource"),
+              searchLabel: t("generate.searchSources"),
+              emptyLabel: t("generate.noSources"),
+              moreLabel: t("generate.moreResults"),
+              limitLabel: t("generate.sourcesLimit", {
+                max: TABLE_LIMITS.maxSources,
+              }),
+              untitled: t("generate.untitledSource"),
+              unavailable: t("generate.unavailableSource"),
+            }}
+            limit={TABLE_LIMITS.maxSources}
+            onChange={setSourceIds}
+            value={sourceIds}
+            workspaceId={workspaceId}
+          />
 
           <div className="grid gap-1.5">
             <Label htmlFor="table-instruction">{t("generate.instruction")}</Label>
@@ -291,8 +300,8 @@ export function TableGenerateDialog({
               <Button
                 disabled={
                   suggesting ||
-                  sources.length === 0 ||
-                  sources.length > TABLE_LIMITS.maxSources ||
+                  sourceIds.length === 0 ||
+                  sourceIds.length > TABLE_LIMITS.maxSources ||
                   columns.length >= TABLE_LIMITS.maxColumns
                 }
                 onClick={() => void suggest()}
@@ -324,7 +333,9 @@ export function TableGenerateDialog({
           <div aria-live="polite" className="grid gap-1 text-sm">
             {problem ? (
               columnProblem === "none" || columnProblem === "nameMissing" ? (
-                columnsEdited ? <p className="text-destructive">{problem}</p> : null
+                columnsEdited ? (
+                  <p className="text-destructive">{problem}</p>
+                ) : null
               ) : (
                 <p className="text-destructive">{problem}</p>
               )
@@ -368,9 +379,7 @@ export function TableGenerateDialog({
           </Button>
           <Button disabled={!canSubmit} onClick={() => void submit()} type="button">
             {submitting ? <Loader2 aria-hidden className="animate-spin" /> : null}
-            {target.kind === "regenerate"
-              ? t("generate.regenerateSubmit")
-              : t("generate.submit")}
+            {target.kind === "regenerate" ? t("generate.regenerateSubmit") : t("generate.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

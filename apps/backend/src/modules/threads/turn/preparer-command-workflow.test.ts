@@ -43,7 +43,7 @@ test("capability workflow discovery exposes manifest artifact tool commands from
       {
         actionKind: "tool",
         aliases: ["table"],
-        iconName: undefined,
+        iconName: "table",
         targetId: "generate_table",
         visible: true,
       },
