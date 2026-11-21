@@ -200,24 +200,6 @@ export function DashboardSidebarSkeleton({
   );
 }
 
-export function DashboardMobileBottomNavSkeleton() {
-  return (
-    <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1.5 md:hidden">
-      <div className="grid grid-cols-5 gap-1">
-        {Array.from({ length: 5 }).map((_, index) => (
-          <div
-            className="flex h-11 flex-col items-center justify-center gap-1"
-            key={index}
-          >
-            <SkeletonBlock className="size-5 rounded-md" />
-            <SkeletonLine className="w-9" />
-          </div>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
 function DashboardDeferredContent() {
   return <main className="h-full min-h-0 overflow-hidden bg-card" />;
 }

@@ -1108,39 +1108,29 @@
     "mobileMe": {
       "signOut": "Sign out",
       "signingOut": "Signing out...",
-      "endSession": "End this session",
-      "observeDescription": "LLM traces, metrics, and timeline",
       "panels": {
         "account": {
-          "label": "Profile",
-          "description": "Account, avatar, theme, and preferences"
+          "label": "Profile"
         },
         "team": {
-          "label": "Team",
-          "description": "Team switcher, members, and invitations"
+          "label": "Team"
         },
         "workspace": {
-          "label": "Workspace",
-          "description": "Who can see and work in this workspace"
+          "label": "Workspace"
         },
         "usage": {
-          "label": "Usage",
-          "description": "Plan usage and recent activity"
+          "label": "Usage"
         },
         "billing": {
-          "label": "Billing",
-          "description": "Subscription, plan, and billing portal"
+          "label": "Billing"
         },
         "approvals": {
-          "label": "Approvals",
-          "description": "Actions you chose to always allow"
+          "label": "Approvals"
         },
         "about": {
-          "label": "About",
-          "description": "Version and build details"
+          "label": "About"
         }
-      },
-      "scheduledDescription": "Prompts that run on a schedule"
+      }
     },
     "members": {
       "dialogTitle": "Workspace members"
@@ -6058,7 +6048,8 @@
     }
   },
   "mobileRouteSheet": {
-    "supplementaryPage": "Supplementary SourceWeft page"
+    "supplementaryPage": "Supplementary SourceWeft page",
+    "loading": "Loading…"
   },
   "authLocale": {
     "core": {

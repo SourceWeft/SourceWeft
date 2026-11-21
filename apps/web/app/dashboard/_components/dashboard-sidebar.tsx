@@ -30,6 +30,8 @@ import {
 import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
+import { DashboardMobileMeEntry } from "./dashboard-mobile-me-entry";
+import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
 import { useDashboardChatState } from "./dashboard-chat-state";
 import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
@@ -131,13 +133,23 @@ export function DashboardSidebar() {
   const router = useRouter();
   const { openMobile, setOpenMobile } = useSidebar();
   const {
-    closeConversations,
+    closeConversations: closeConversationPanel,
     conversationOverlayOpen,
     conversationsDocked,
     desktopTitlebar,
     conversationWidth,
     railWidth,
   } = useWorkspaceLayout();
+  const { openMain, openMe } = useDashboardMobileNav();
+  // Going somewhere from the drawer also leaves the phone's Me page.
+  const closeConversations = () => {
+    openMain();
+    closeConversationPanel();
+  };
+  const openMePage = () => {
+    openMe();
+    closeConversationPanel();
+  };
   const overlayRef = React.useRef<HTMLElement>(null);
   const [search, setSearch] = React.useState("");
   // Member management is per-workspace, not an account setting — it opens as
@@ -527,7 +539,7 @@ export function DashboardSidebar() {
         data-testid="conversation-overlay-backdrop"
         style={{ left: railWidth }}
         className="absolute inset-y-0 right-0 z-30 bg-black/10 animate-in fade-in-0 duration-150"
-        onClick={closeConversations}
+        onClick={closeConversationPanel}
       />
       <aside
         ref={overlayRef}
@@ -559,7 +571,7 @@ export function DashboardSidebar() {
             className="size-8 shrink-0 text-muted-foreground"
             aria-label={t("sidebar.hideConversations")}
             title={t("sidebar.hideConversations")}
-            onClick={closeConversations}
+            onClick={closeConversationPanel}
           >
             <PanelLeftClose className="size-4" />
           </Button>,
@@ -606,15 +618,15 @@ export function DashboardSidebar() {
                 size="icon-xs"
                 className="size-8 shrink-0 text-muted-foreground"
                 aria-label={t("sidebar.hideSidebar")}
-                onClick={closeConversations}
+                onClick={closeConversationPanel}
               >
                 <PanelLeftClose className="size-4" />
               </Button>
             }
             navigation={renderNavigation()}
             footer={
-              <div className="shrink-0 border-t border-sidebar-border/60 p-3">
-                <DashboardAccountMenu expanded />
+              <div className="shrink-0 border-t border-sidebar-border/60 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                <DashboardMobileMeEntry onOpen={openMePage} />
               </div>
             }
           />

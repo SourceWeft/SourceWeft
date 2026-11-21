@@ -9,8 +9,8 @@ export function resolveWorkspaceLayout(
   conversationRoute = true,
 ) {
   const mode = width >= 1440 ? "wide" : width >= 1120 ? "standard" : "compact";
-  // PC widths keep the navigation rail on every route; phones use the drawer
-  // and the bottom navigation instead.
+  // PC widths keep the navigation rail on every route; phones use
+  // the drawer instead.
   const railWidth = width >= 768 ? 56 : 0;
   // Keep the menu readable while preserving enough room for the chat canvas.
   const conversationWidth = 280;
