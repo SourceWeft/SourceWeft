@@ -315,6 +315,7 @@ export function TableGenerateDialog({
                 setColumns(next);
                 setColumnsEdited(true);
               }}
+              showErrors={columnsEdited}
               t={editorT}
               value={columns}
             />

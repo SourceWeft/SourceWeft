@@ -20,6 +20,8 @@ export type ColumnEditorProps = {
   /** Translations for the `table.editor.*` keys. */
   t: TableTranslate;
   disabled?: boolean;
+  /** Mark a blank name as invalid; off until the person has edited the columns. */
+  showErrors?: boolean;
 };
 
 const SELECT_CLASS =
@@ -37,6 +39,7 @@ export function ColumnEditor({
   max = TABLE_LIMITS.maxColumns,
   t,
   disabled = false,
+  showErrors = true,
 }: ColumnEditorProps) {
   const update = (index: number, patch: Partial<TableColumnInput>) =>
     onChange(value.map((column, i) => (i === index ? { ...column, ...patch } : column)));
@@ -48,7 +51,7 @@ export function ColumnEditor({
       <legend className="sr-only">{t("table.editor.label")}</legend>
       {value.map((column, index) => {
         const position = index + 1;
-        const nameMissing = column.name.trim() === "";
+        const nameMissing = showErrors && column.name.trim() === "";
         return (
           <div
             className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-2 rounded-lg border bg-muted/20 p-2"

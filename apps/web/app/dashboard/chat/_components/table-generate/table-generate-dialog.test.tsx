@@ -107,12 +107,14 @@ describe("TableGenerateDialog", () => {
     // Nothing is pointed out before the person edits a column.
     expect(text()).not.toContain("Every column needs a name.");
     expect(text()).not.toContain("Estimating the size");
+    expect(nameInputs()[0]!.getAttribute("aria-invalid")).toBeNull();
 
     typeInto(nameInputs()[0]!, "Pri");
     typeInto(nameInputs()[0]!, "");
     await flush(2);
     expect(submitButton().disabled).toBe(true);
     expect(text()).toContain("Every column needs a name.");
+    expect(nameInputs()[0]!.getAttribute("aria-invalid")).toBe("true");
 
     await act(async () =>
       document.querySelector<HTMLButtonElement>('[aria-label="Remove column 1"]')!.click(),
