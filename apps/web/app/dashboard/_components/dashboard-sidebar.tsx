@@ -32,6 +32,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { DashboardAccountMenu } from "./dashboard-account-menu";
 import { DashboardMobileMeEntry } from "./dashboard-mobile-me-entry";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
+import { chatDeletionRemovesChat } from "./dashboard-chat-items";
 import { useDashboardChatState } from "./dashboard-chat-state";
 import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
@@ -191,17 +192,28 @@ export function DashboardSidebar() {
     routeThreadId ||
     (pathname === "/dashboard/chat" && mode === "thread" ? activeChatId : "");
 
+  // Read before the delete: the lists no longer hold the chat afterwards. The
+  // server deletes the conversations a chat's delegations opened along with
+  // it, so an open one of those is left as well.
   const handleDeleteChat = async (id: string) => {
+    const shouldResetRoute = chatDeletionRemovesChat(
+      [...privateChats, ...sharedChats, ...archivedChats],
+      [id],
+      activeThreadId,
+    );
+
     await deleteChat(id);
 
-    if (id === activeThreadId) {
+    if (shouldResetRoute) {
       router.push("/dashboard/chat");
     }
   };
 
   const handleClearPrivateChats = async () => {
-    const shouldResetRoute = privateChats.some(
-      (item) => item.id === activeThreadId,
+    const shouldResetRoute = chatDeletionRemovesChat(
+      privateChats,
+      privateChats.map((item) => item.id),
+      activeThreadId,
     );
 
     await clearPrivateChats();
@@ -212,8 +224,10 @@ export function DashboardSidebar() {
   };
 
   const handleClearArchivedChats = async () => {
-    const shouldResetRoute = archivedChats.some(
-      (item) => item.id === activeThreadId,
+    const shouldResetRoute = chatDeletionRemovesChat(
+      archivedChats,
+      archivedChats.map((item) => item.id),
+      activeThreadId,
     );
 
     await clearArchivedChats();
