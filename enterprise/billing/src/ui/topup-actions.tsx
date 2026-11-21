@@ -40,7 +40,7 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
       <p className="text-sm text-muted-foreground">
         {copy.checkout.topup.description}
       </p>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"
           disabled={busy}

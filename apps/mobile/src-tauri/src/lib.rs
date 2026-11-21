@@ -221,6 +221,7 @@ fn show_launch_screen_behind(window: &tauri::WebviewWindow) {
                 return;
             }
             let launch_view: *mut AnyObject = msg_send![&*launch, view];
+            let _: () = msg_send![&*launch_view, setTag: LAUNCH_VIEW_TAG];
             let _: () =
                 msg_send![&*launch_view, setTranslatesAutoresizingMaskIntoConstraints: false];
             let _: () = msg_send![&*host, insertSubview: launch_view, atIndex: 0usize];
@@ -237,10 +238,141 @@ fn show_launch_screen_behind(window: &tauri::WebviewWindow) {
                 let constraint: *mut AnyObject = msg_send![&*mine, constraintEqualToAnchor: theirs];
                 let _: () = msg_send![&*constraint, setActive: true];
             }
+            add_loading_bar(launch_view);
             let clear: *mut AnyObject = msg_send![class!(UIColor), clearColor];
             let _: () = msg_send![&*web_view, setBackgroundColor: clear];
             let scroll: *mut AnyObject = msg_send![&*web_view, scrollView];
             let _: () = msg_send![&*scroll, setBackgroundColor: clear];
+        }
+    });
+}
+
+/// Tag of the launch screen view put behind the web view, to find it again.
+#[cfg(target_os = "ios")]
+const LAUNCH_VIEW_TAG: isize = 0x5357_4c53;
+
+/// Adds the splash page's loading bar under the launch screen's wordmark: a 44 by 3 point
+/// track with a segment sliding across it, at the same place and pace as in splash.html and
+/// the web app's launch cover. The launch image itself cannot animate, so the bar appears
+/// once the app runs.
+///
+/// SAFETY: `launch_view` is the live launch screen view, and this runs on the main thread.
+#[cfg(target_os = "ios")]
+unsafe fn add_loading_bar(launch_view: *mut objc2::runtime::AnyObject) {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    const WIDTH: f64 = 44.0;
+    const HEIGHT: f64 = 3.0;
+    const SEGMENT: f64 = WIDTH * 0.4;
+    // splash.html puts the bar's top 32 points below the middle of the web view's span.
+    const BELOW_CENTRE: f64 = 32.0 + HEIGHT / 2.0;
+
+    // The storyboard's first subview is the hidden span the web view lays its pages out in.
+    let subviews: *mut AnyObject = msg_send![&*launch_view, subviews];
+    let span: *mut AnyObject = msg_send![&*subviews, firstObject];
+    if span.is_null() {
+        return;
+    }
+    let track: *mut AnyObject = msg_send![class!(UIView), new];
+    let segment: *mut AnyObject = msg_send![class!(UIView), new];
+    for view in [track, segment] {
+        let _: () = msg_send![&*view, setTranslatesAutoresizingMaskIntoConstraints: false];
+        let _: () = msg_send![&*view, setUserInteractionEnabled: false];
+        let layer: *mut AnyObject = msg_send![&*view, layer];
+        let _: () = msg_send![&*layer, setCornerRadius: HEIGHT / 2.0];
+    }
+    let grey: *mut AnyObject =
+        msg_send![class!(UIColor), colorWithRed: 0.451f64, green: 0.451f64, blue: 0.451f64, alpha: 0.35f64];
+    let _: () = msg_send![&*track, setBackgroundColor: grey];
+    let _: () = msg_send![&*track, setClipsToBounds: true];
+    let label: *mut AnyObject = msg_send![class!(UIColor), labelColor];
+    let _: () = msg_send![&*segment, setBackgroundColor: label];
+    let _: () = msg_send![&*launch_view, addSubview: track];
+    let _: () = msg_send![&*track, addSubview: segment];
+
+    let anchor = |view: *mut AnyObject, name: &str| -> *mut AnyObject {
+        let selector = objc2::runtime::Sel::register(&std::ffi::CString::new(name).unwrap());
+        msg_send![&*view, performSelector: selector]
+    };
+    let activate = |constraint: *mut AnyObject| {
+        let _: () = msg_send![&*constraint, setActive: true];
+    };
+    activate(msg_send![&*anchor(track, "widthAnchor"), constraintEqualToConstant: WIDTH]);
+    activate(msg_send![&*anchor(track, "heightAnchor"), constraintEqualToConstant: HEIGHT]);
+    activate(msg_send![
+        &*anchor(track, "centerXAnchor"),
+        constraintEqualToAnchor: anchor(launch_view, "centerXAnchor")
+    ]);
+    activate(msg_send![
+        &*anchor(track, "centerYAnchor"),
+        constraintEqualToAnchor: anchor(span, "centerYAnchor"),
+        constant: BELOW_CENTRE
+    ]);
+    activate(msg_send![&*anchor(segment, "widthAnchor"), constraintEqualToConstant: SEGMENT]);
+    activate(msg_send![&*anchor(segment, "heightAnchor"), constraintEqualToConstant: HEIGHT]);
+    activate(msg_send![
+        &*anchor(segment, "leadingAnchor"),
+        constraintEqualToAnchor: anchor(track, "leadingAnchor")
+    ]);
+    activate(msg_send![
+        &*anchor(segment, "topAnchor"),
+        constraintEqualToAnchor: anchor(track, "topAnchor")
+    ]);
+
+    let ns_string = |text: &std::ffi::CStr| -> *mut AnyObject {
+        msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()]
+    };
+    let slide: *mut AnyObject = msg_send![
+        class!(CABasicAnimation),
+        animationWithKeyPath: ns_string(c"transform.translation.x")
+    ];
+    let from: *mut AnyObject = msg_send![class!(NSNumber), numberWithDouble: -SEGMENT];
+    let to: *mut AnyObject = msg_send![class!(NSNumber), numberWithDouble: SEGMENT * 2.5];
+    let easing: *mut AnyObject = msg_send![
+        class!(CAMediaTimingFunction),
+        functionWithName: ns_string(c"easeInEaseOut")
+    ];
+    let _: () = msg_send![&*slide, setFromValue: from];
+    let _: () = msg_send![&*slide, setToValue: to];
+    let _: () = msg_send![&*slide, setDuration: 1.1f64];
+    let _: () = msg_send![&*slide, setRepeatCount: f32::INFINITY];
+    let _: () = msg_send![&*slide, setTimingFunction: easing];
+    // Kept when the app goes to the background, so the bar still moves on return.
+    let _: () = msg_send![&*slide, setRemovedOnCompletion: false];
+    let layer: *mut AnyObject = msg_send![&*segment, layer];
+    let _: () = msg_send![&*layer, addAnimation: slide, forKey: ns_string(c"slide")];
+}
+
+/// Takes the launch screen away from behind the web view once the web app is on screen, and
+/// gives the web view the system background instead. Otherwise anything that shows past the
+/// page, such as the scroll iOS does when the keyboard opens, reveals the wordmark and bar.
+#[cfg(target_os = "ios")]
+fn hide_launch_screen_behind(window: &tauri::WebviewWindow) {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    let _ = window.with_webview(|webview| {
+        let web_view = webview.inner() as *mut AnyObject;
+        let controller = webview.view_controller() as *mut AnyObject;
+        if web_view.is_null() || controller.is_null() {
+            return;
+        }
+        // SAFETY: live UIKit objects owned by the window; with_webview runs on the main thread.
+        unsafe {
+            let host: *mut AnyObject = msg_send![&*controller, view];
+            if host.is_null() {
+                return;
+            }
+            let launch: *mut AnyObject = msg_send![&*host, viewWithTag: LAUNCH_VIEW_TAG];
+            if launch.is_null() {
+                return;
+            }
+            let _: () = msg_send![&*launch, removeFromSuperview];
+            let background: *mut AnyObject = msg_send![class!(UIColor), systemBackgroundColor];
+            let _: () = msg_send![&*web_view, setBackgroundColor: background];
+            let scroll: *mut AnyObject = msg_send![&*web_view, scrollView];
+            let _: () = msg_send![&*scroll, setBackgroundColor: background];
         }
     });
 }
@@ -497,8 +629,14 @@ fn mobile_info(app: AppHandle) -> MobileInfo {
 /// Milliseconds from process start to this call, the first time it is called; later calls
 /// return nothing, so only the launch itself is measured, not later page loads.
 #[tauri::command]
-fn take_launch_elapsed_ms() -> Option<u64> {
+fn take_launch_elapsed_ms(app: AppHandle) -> Option<u64> {
     WEB_READY.store(true, Ordering::SeqCst);
+    #[cfg(target_os = "ios")]
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        hide_launch_screen_behind(&window);
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = app;
     if LAUNCH_REPORTED.swap(true, Ordering::SeqCst) {
         return None;
     }

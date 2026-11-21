@@ -502,8 +502,8 @@ function SkillCard({
   return (
     <article
       className={cn(
-        "group flex flex-col overflow-hidden rounded-2xl border border-border bg-background px-4 pb-4 pt-4 shadow-xs transition-colors hover:border-border/90 hover:bg-accent/20",
-        compact ? "min-h-[190px]" : "min-h-[202px]",
+        "group flex flex-col overflow-hidden rounded-xl border border-border bg-background p-3 shadow-xs transition-colors hover:border-border/90 hover:bg-accent/20 sm:rounded-2xl sm:p-4",
+        compact ? "sm:min-h-[190px]" : "sm:min-h-[202px]",
       )}
     >
       <button
@@ -511,9 +511,9 @@ function SkillCard({
         onClick={() => onOpenDetails(item)}
         type="button"
       >
-        <div className="flex min-w-0 items-center gap-3">
-          <SkillAvatar item={item} />
-          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-6 text-foreground">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <SkillAvatar className="size-8 sm:size-9" item={item} />
+          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-foreground sm:leading-6">
             {item.displayName}
           </h3>
           {canManageInstall ? (
@@ -530,11 +530,12 @@ function SkillCard({
           )}
         </div>
 
-        <p className="mt-3 line-clamp-3 min-h-[60px] text-xs leading-5 text-muted-foreground">
+        <p className="mt-2 line-clamp-2 text-xs leading-[1.125rem] text-muted-foreground sm:mt-3 sm:line-clamp-3 sm:min-h-[60px] sm:leading-5">
           {item.description}
         </p>
 
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {/* One row on a phone: badges past the width are clipped, not wrapped. */}
+        <div className="mt-2 flex items-center gap-1 overflow-hidden *:shrink-0 sm:mt-3 sm:flex-wrap sm:gap-1.5">
           <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
             {publisherLabel(item.sourceType, t)}
           </Badge>
@@ -609,7 +610,7 @@ function SkillCard({
 
       {isRegistry && item.sourceUrl ? (
         <a
-          className="mt-2 inline-flex w-fit max-w-full items-center gap-1 truncate text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+          className="mt-1.5 inline-flex w-fit max-w-full items-center gap-1 truncate text-[11px] sm:mt-2 text-muted-foreground hover:text-foreground hover:underline"
           href={item.sourceUrl}
           onClick={(event) => event.stopPropagation()}
           rel="noreferrer noopener"
@@ -620,7 +621,7 @@ function SkillCard({
         </a>
       ) : null}
 
-      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3">
+      <div className="mt-2.5 grid grid-cols-2 gap-2 border-t border-border pt-2.5 sm:mt-4 sm:pt-3">
         <Button
           className="min-w-0 rounded-full px-2"
           onClick={() => onOpenDetails(item)}
@@ -808,9 +809,7 @@ function SkillsGalleryView({
   const [items, setItems] = React.useState<SkillCatalogItem[]>([]);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
   // How many community skills the filters match in all, from the first page.
-  const [registryTotal, setRegistryTotal] = React.useState<number | null>(
-    null,
-  );
+  const [registryTotal, setRegistryTotal] = React.useState<number | null>(null);
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   // Set by a failed page load so the sentinel does not hammer a failing
   // endpoint; the "Load more" button stays as the retry.
@@ -1259,7 +1258,7 @@ function SkillsGalleryView({
   const showSectionHeadings =
     !excludesBoundedSkills(browseState) && sectionList.length > 1;
   const gridClassName = cn(
-    "grid gap-4",
+    "grid gap-2.5 sm:gap-4",
     variant === "modal"
       ? "grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]"
       : "grid-cols-[repeat(auto-fill,minmax(260px,1fr))] 2xl:grid-cols-4",

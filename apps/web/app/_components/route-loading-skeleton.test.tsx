@@ -12,6 +12,8 @@ import {
   McpSkeletonGrid,
   SkillsCatalogSkeletonGrid,
 } from "./catalog-loading-skeleton";
+import { ScheduledTasksRouteSkeleton } from "../dashboard/scheduled/_components/scheduled-tasks-skeleton";
+import ScheduledLoading from "../dashboard/scheduled/loading";
 import { SettingsCenterPanelSkeleton } from "../dashboard/_components/dashboard-settings-center-modal-skeleton";
 
 import { AuthLoadingCard } from "./auth-loading-skeleton";
@@ -58,6 +60,22 @@ describe("dashboard loading boundaries", () => {
       ).toContain(grid);
     },
   );
+
+  it("uses the same scheduled-tasks skeleton for session and route loading", () => {
+    const route = renderToStaticMarkup(<ScheduledLoading />);
+    expect(route).toBe(renderToStaticMarkup(<ScheduledTasksRouteSkeleton />));
+    expect(
+      renderToStaticMarkup(
+        <DashboardSkeletonContentForPath pathname="/dashboard/scheduled/" />,
+      ),
+    ).toBe(route);
+    // Same centred column and padding as the page, not a full-width block.
+    const column = parse(<ScheduledLoading />).querySelector(
+      '[data-testid="scheduled-tasks-skeleton"]',
+    );
+    expect(column?.className).toContain("max-w-4xl");
+    expect(column?.className).toContain("p-4 md:p-6");
+  });
 
   it.each([
     null,

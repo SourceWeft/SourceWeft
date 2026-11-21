@@ -368,7 +368,8 @@ export function BillingPanel() {
       <div className="w-full max-w-2xl divide-y divide-border/60">
         {/* ── Header ── */}
         <div className="flex items-center justify-between gap-3 pb-7 pt-1">
-          <p className="text-base font-semibold text-foreground">
+          {/* The phone Me page already titles this panel in its header. */}
+          <p className="text-base font-semibold text-foreground in-data-[settings-surface=page]:hidden">
             {copy.billing.title}
           </p>
           <OrgSwitcher />

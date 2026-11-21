@@ -150,10 +150,10 @@ export function DashboardMobileMe() {
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:hidden">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/70 px-3">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border/70 px-1.5">
         {activePanel ? (
           <Button
-            className="size-8 shrink-0"
+            className="size-10 shrink-0"
             onClick={() => setActivePanel(null)}
             size="icon"
             type="button"
@@ -166,7 +166,7 @@ export function DashboardMobileMe() {
           <Button
             aria-expanded={conversationsOpen}
             aria-label={drawerLabel}
-            className="size-8 shrink-0"
+            className="size-10 shrink-0"
             data-conversations-toggle
             onClick={toggleConversations}
             size="icon"
@@ -177,14 +177,18 @@ export function DashboardMobileMe() {
             <PanelLeftOpen className="size-4" />
           </Button>
         )}
-        <h1 className="min-w-0 truncate text-sm font-semibold text-foreground">
+        <h1 className="min-w-0 truncate text-[15px] font-semibold text-foreground">
           {activePanel
             ? t(`mobileMe.panels.${activePanel}.label`)
             : t("nav.me")}
         </h1>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 pt-5">
+      {/* Keyed so opening or leaving a panel starts at the top. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 pt-5"
+        key={activePanel ?? "list"}
+      >
         {!activePanel ? (
           <div className="space-y-6">
             <MeGroup>
@@ -289,10 +293,14 @@ export function DashboardMobileMe() {
             </MeGroup>
           </div>
         ) : (
-          <div className="min-w-0 rounded-2xl border border-border/60 bg-card p-4">
+          // No card around the panel: the panels group their own content, so
+          // wrapping them again would nest cards. `data-settings-surface`
+          // lets a panel hide its own title, which the header above repeats.
+          <div className="min-w-0" data-settings-surface="page">
             {activePanel === "account" ? (
               <AccountPanel
                 initials={initials}
+                layout="page"
                 userEmail={userEmail}
                 userImage={userImage}
                 userName={userName}
