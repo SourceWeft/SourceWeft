@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { chunks, db, documents, sources } from "@sourceweft/db";
 import { currentDocumentCondition } from "../sources/current-document-condition";
+import { sourceVersionToken } from "./freshness";
 import {
   GroundedGenerationError,
   type GroundedCorpusChunk,
@@ -11,7 +12,10 @@ export type GroundedSourceSnapshot = {
   sourceId: string;
   documentId: string;
   title: string;
-  /** `sources.content_hash` at generation time. */
+  /**
+   * The source's version token at generation time (`sourceVersionToken`):
+   * its content hash, or its current revision or document when it has none.
+   */
   contentHash: string;
 };
 
@@ -119,6 +123,7 @@ export async function loadGroundedCorpus(input: {
       chunkId: chunks.id,
       sourceId: chunks.sourceId,
       documentId: chunks.documentId,
+      revisionId: documents.sourceRevisionId,
       chunkNo: chunks.chunkNo,
       headingPath: chunks.headingPath,
       language: chunks.language,
@@ -150,25 +155,41 @@ export async function loadGroundedCorpus(input: {
     );
   }
 
-  const documentBySource = new Map<string, string>();
+  const documentBySource = new Map<string, { documentId: string; revisionId: string | null }>();
   for (const row of ordered) {
     if (!documentBySource.has(row.sourceId)) {
-      documentBySource.set(row.sourceId, row.documentId);
+      documentBySource.set(row.sourceId, {
+        documentId: row.documentId,
+        revisionId: row.revisionId,
+      });
     }
   }
   const snapshots: GroundedSourceSnapshot[] = indexed
     .filter((id) => documentBySource.has(id))
     .map((id) => {
       const row = byId.get(id)!;
+      const document = documentBySource.get(id)!;
       return {
         sourceId: id,
-        documentId: documentBySource.get(id)!,
+        documentId: document.documentId,
         title: row.title,
-        // An indexed source always has a hash; "unknown" keeps the snapshot
-        // valid and simply reads as stale against any real hash later.
-        contentHash: row.contentHash ?? "unknown",
+        contentHash: sourceVersionToken({
+          contentHash: row.contentHash,
+          revisionId: document.revisionId,
+          documentId: document.documentId,
+        }),
       };
     });
 
-  return { chunks: ordered, sources: snapshots };
+  // The revision only feeds the version token; chunks keep their own shape.
+  const corpusChunks: GroundedCorpusChunk[] = ordered.map((row) => ({
+    chunkId: row.chunkId,
+    sourceId: row.sourceId,
+    documentId: row.documentId,
+    chunkNo: row.chunkNo,
+    headingPath: row.headingPath,
+    language: row.language,
+    text: row.text,
+  }));
+  return { chunks: corpusChunks, sources: snapshots };
 }

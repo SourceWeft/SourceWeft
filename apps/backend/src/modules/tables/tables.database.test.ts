@@ -556,6 +556,63 @@ test("freshness reports a changed source as stale and a deleted source as source
   });
 });
 
+test("an uploaded file without a content hash reads fresh after generation; a new upload marks it changed, a parse retry does not", async () => {
+  const { loadSourceVersionTokens } = await import("../grounded-generation/freshness");
+  const upload = await addSource({ title: "Upload", chunks: ["u"], hash: null });
+  const tokenNow = async () =>
+    (await loadSourceVersionTokens({ teamId, workspaceId, ids: [upload.sourceId] })).get(upload.sourceId);
+
+  // What generation stores and what freshness reads are the same token.
+  const loaded = await loader.loadTableSources({ teamId, workspaceId, sourceIds: [upload.sourceId] });
+  const stored = loaded.sources[0]!.contentHash;
+  assert.equal(stored, `document:${upload.documentId}`);
+  assert.equal(await tokenNow(), stored);
+
+  const opened = await requests.requestTableArtifact(generateRequest({ sourceIds: [upload.sourceId] }));
+  await job.processTableJob(jobPayload(opened.artifactId, 1, { sourceIds: [upload.sourceId] }), {
+    billing: {} as never,
+    generate: stubGenerate(
+      storedContent({
+        sources: [{ sourceId: upload.sourceId, documentId: upload.documentId, contentHash: stored }],
+      }),
+    ),
+  });
+  const read = () => requests.getTableFreshness({ workspaceId, userId, artifactId: opened.artifactId });
+  assert.deepEqual(await read(), { state: "fresh", changedSourceIds: [], deletedSourceIds: [] });
+
+  // A new upload: a revision with its own document.
+  const revisionId = `rev_${randomUUID()}`;
+  await schema.db.insert(schema.sourceRevisions).values({
+    id: revisionId,
+    teamId,
+    workspaceId,
+    sourceId: upload.sourceId,
+    revisionNo: 1,
+  });
+  const addDocument = (secondsLater: number) =>
+    schema.db.insert(schema.documents).values({
+      id: `doc_${randomUUID()}`,
+      teamId,
+      workspaceId,
+      sourceId: upload.sourceId,
+      sourceRevisionId: revisionId,
+      contentText: "u2",
+      status: "ready",
+      createdAt: new Date(Date.now() + secondsLater * 1_000),
+    });
+  await addDocument(1);
+  assert.equal(await tokenNow(), `revision:${revisionId}`);
+  assert.deepEqual(await read(), {
+    state: "stale",
+    changedSourceIds: [upload.sourceId],
+    deletedSourceIds: [],
+  });
+
+  // Parsing the same upload again makes a newer document in the same revision.
+  await addDocument(2);
+  assert.equal(await tokenNow(), `revision:${revisionId}`);
+});
+
 test("freshness of a table nobody can see, or of another type, is not found", async () => {
   const opened = await requests.requestTableArtifact(generateRequest());
   await job.processTableJob(jobPayload(opened.artifactId), {
