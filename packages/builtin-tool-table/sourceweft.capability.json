@@ -5,5 +5,46 @@
   "name": "Table",
   "version": "1.0.0",
   "entry": "./src/index.ts",
-  "tools": []
+  "tools": [
+    {
+      "id": "generate_table",
+      "title": "Data Table",
+      "description": "Queue a data table comparing the conversation's sources: one row per source, one column per question.",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object"
+      },
+      "risk": "write",
+      "options": [],
+      "command": {
+        "title": "Data Table",
+        "aliases": [
+          "table"
+        ],
+        "category": "Artifacts",
+        "visibleWhen": "enabled",
+        "workflow": {
+          "execution": "agent",
+          "initialToolPolicy": "auto",
+          "promptIntro": "Build a data table that compares this conversation's sources: one row per source, one column per question. generate_table queues the table; the cells are filled in the background from the source text.",
+          "defaultTools": [
+            "generate_table"
+          ],
+          "permissionOverrides": {},
+          "successCriteria": {
+            "kind": "none"
+          },
+          "additionalPromptLines": [
+            "The table covers the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_table reads them itself: pass no source names, paths or ids.",
+            "From the user's request, propose 2 to 12 columns. Give each a short name, a one-line description of what to extract from every source, and a type: text, number, date or boolean.",
+            "If the request does not make clear what to compare, ask one short question and suggest a set of columns instead of calling generate_table.",
+            "If generate_table reports that there are no sources, ask the user to select or @mention the sources to compare.",
+            "After generate_table returns, tell the user the table is being generated and will appear in the Hub's Artifacts tab when ready. Do not state or guess any cell values."
+          ]
+        }
+      }
+    }
+  ]
 }
