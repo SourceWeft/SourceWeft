@@ -1,0 +1,17 @@
+---
+subject: 定时任务无法运行：{{taskName}}
+heading: 你的定时任务无法运行
+preview: {{taskName}} 使用的来源或已连接账号已不可用。
+action: 打开任务
+url: {{url}}
+---
+
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  你的定时任务 <strong>{{taskName}}</strong> 无法运行，因为它使用的来源或已连接账号已不可用。它们恢复后会自动继续，期间错过的运行不会补跑。
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  如果连续三天仍不可用，任务会被暂停。你可以修复这些来源或已连接账号，或把它们从任务中移除，然后恢复任务。
+</p>

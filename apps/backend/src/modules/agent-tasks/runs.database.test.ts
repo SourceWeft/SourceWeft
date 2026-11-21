@@ -467,7 +467,7 @@ test("missing tools block the task, and after 72 hours without them it pauses", 
   );
   assert.deepEqual(
     f.notifications.map((item) => [item.kind, item.payload?.state, item.email]),
-    [["task_tools_unavailable", "blocked", false]],
+    [["task_tools_unavailable", "blocked", undefined]],
   );
   assert.equal(f.started.length, 0);
   f.notifications.length = 0;
@@ -484,8 +484,8 @@ test("missing tools block the task, and after 72 hours without them it pauses", 
     ["paused", "tools_unavailable"],
   );
   assert.deepEqual(
-    f.notifications.map((item) => [item.kind, item.payload?.state]),
-    [["task_tools_unavailable", "paused"]],
+    f.notifications.map((item) => [item.kind, item.payload?.state, item.email]),
+    [["task_tools_unavailable", "paused", false]],
   );
 });
 
@@ -525,7 +525,7 @@ test("an MCP sign-in the owner must redo blocks the task until they have, then i
   );
   assert.deepEqual(
     f.notifications.map((item) => [item.kind, item.email]),
-    [["task_blocked_auth", false]],
+    [["task_blocked_auth", undefined]],
   );
   assert.equal(f.started.length, 0);
   f.notifications.length = 0;

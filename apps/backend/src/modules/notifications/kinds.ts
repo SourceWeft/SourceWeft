@@ -69,17 +69,19 @@ export const NOTIFICATION_KINDS = {
     path: taskPath,
   },
   // The sources or MCP servers a task names are gone: blocked at first,
-  // paused after three days (`payload.state`). In-app only.
+  // paused after three days (`payload.state`). The blocked state is mailed,
+  // since that is when the owner can still fix it; the pause is in-app only
+  // (the caller turns email off for it).
   task_tools_unavailable: {
-    defaultEmail: false,
-    template: null,
+    defaultEmail: true,
+    template: "notification.task-tools-unavailable",
     path: taskPath,
   },
-  // An MCP server the task uses needs the owner to sign in again. In-app
-  // only; the task resumes by itself once they have.
+  // An MCP server the task uses needs the owner to sign in again; the task
+  // resumes by itself once they have.
   task_blocked_auth: {
-    defaultEmail: false,
-    template: null,
+    defaultEmail: true,
+    template: "notification.task-blocked-auth",
     path: taskPath,
   },
   task_paused_repeated_failure: {

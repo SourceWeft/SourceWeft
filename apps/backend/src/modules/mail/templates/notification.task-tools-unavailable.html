@@ -1,0 +1,17 @@
+---
+subject: Scheduled task cannot run: {{taskName}}
+heading: Your scheduled task cannot run
+preview: {{taskName}} uses a source or connected account that is no longer available.
+action: Open the task
+url: {{url}}
+---
+
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  Your scheduled task <strong>{{taskName}}</strong> cannot run because a source or connected account it uses is no longer available. It starts again by itself once they are back. Runs missed in the meantime are not made up.
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  If it stays unavailable for three days, the task is paused. You can fix its sources or connected accounts, or remove them from the task, and then resume it.
+</p>
