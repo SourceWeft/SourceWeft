@@ -13,6 +13,13 @@ const ids = readdirSync(new URL("./templates/", import.meta.url))
   )
   .map((name) => name.replace(/\.html$/, ""));
 
+/**
+ * Templates whose mail is not about one named task or ticket: the
+ * assistant's "messages not handled" mail goes to its steward and names no
+ * ticket, so its subject carries no `taskName`.
+ */
+const WITHOUT_TASK_NAME = new Set(["notification.assistant-unavailable"]);
+
 const variables = {
   baseUrl: "https://app.sourceweft.test",
   url: "https://app.sourceweft.test/dashboard/scheduled/abc?x=1&y=2",
@@ -43,7 +50,11 @@ describe("notification mail templates", () => {
         const rendered = renderMailTemplate(id, variables, locale);
         assert.doesNotMatch(rendered.html, /\{\{|<b>digest/);
         assert.match(rendered.html, new RegExp(`<html lang="${locale}">`));
-        assert.ok(rendered.subject.includes("Weekly <b>digest</b>"));
+        if (WITHOUT_TASK_NAME.has(id)) {
+          assert.doesNotMatch(rendered.subject, /\{\{|Weekly/);
+        } else {
+          assert.ok(rendered.subject.includes("Weekly <b>digest</b>"));
+        }
         assert.ok(rendered.text.includes(variables.url));
         assert.match(rendered.html, /class="button"[^>]*style=/);
         assert.doesNotMatch(rendered.text, /<table|<p /);
@@ -55,7 +66,10 @@ describe("notification mail templates", () => {
     for (const id of ids) {
       const rendered = renderMailTemplate(id, variables, "zh-TW");
       assert.doesNotMatch(rendered.html, /[运执户错览导]|定时/);
-      assert.match(rendered.html, /排程任務|排程/);
+      // Scheduled-task mail names the feature by its Taiwan term.
+      if (id.startsWith("notification.task-")) {
+        assert.match(rendered.html, /排程任務|排程/);
+      }
     }
   });
 });

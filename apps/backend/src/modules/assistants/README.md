@@ -57,9 +57,9 @@ used as both the feed item's id and its trigger's (the trigger's primary key
 and its `dedupe_key`). A double-click or a network retry therefore produces
 exactly one feed item and one trigger: the replay is detected before any
 write and handed back with `created: false`, never a 409. `kickAssistant`
-(injected into `AssistantService`, a no-op until Task 7 supplies the real
-one that wakes the Router) is called once, only for a genuinely new message,
-after the write commits.
+(injected into `AssistantService`; the production singleton passes
+`dispatch.ts#kickAssistant`, which never throws) is called once, only for a
+genuinely new message, after the write commits.
 
 ## Tickets
 
@@ -70,3 +70,30 @@ going; `retryTicket` inserts one more trigger already `decided` and routed
 straight to the ticket (skipping evaluation) and clears its consecutive
 failure count. The retry's own trigger id is derived from the ticket and the
 caller's idempotency key, so a repeated click adds no second event.
+
+## Worker and dispatch
+
+- `worker/tools.ts`: `report`, the Worker's one tool. One transaction moves
+  the ticket (`ready`/`dropped` → `idle`, `waiting`/`blocked`/`failed` →
+  `waiting_person`, `outcome` = the status), stores the summary, adds a
+  `worker_report` event (`status: summary`) for the Router and a
+  `ticket_update` feed item; a `question` then notifies the payer
+  (`assistant_question`). Refusals and failures come back as tool results,
+  never thrown.
+- `worker/prompt.ts`, `worker/render.ts`: the Worker's fixed instructions
+  (the system started the turn, no person is there) and the message each
+  worker run starts with, framed as data like the Router's batch.
+- `register-turn-providers.ts`: the `assistant_router` and
+  `assistant_ticket` origin turn providers, registered when the worker
+  process starts. Each reads only its own `hostContext` keys and fails the
+  turn when they do not resolve.
+- `dispatch.ts`: `runAssistantTick` (the scheduler, every tick) and
+  `kickAssistant` (right after a member's message). Per active assistant,
+  under a per-assistant advisory lock: steward check (a steward who lost
+  access pauses it, `steward_left`, without stopping running work), settle
+  the Router's ended run, settle each ticket's ended worker run (no report,
+  credit cap, credits, repeated failure, time limit), start worker runs
+  within the slots (one reserved for a member's input; a payer without
+  credits is blocked without taking a slot), then start the Router on its
+  next batch (a payer without credits is passed over; a 409 gives the batch
+  back with no attempt counted).

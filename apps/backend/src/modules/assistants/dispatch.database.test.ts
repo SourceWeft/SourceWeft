@@ -1,0 +1,759 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, test } from "vitest";
+import {
+  createAssistantFixture,
+  type AssistantFixture,
+} from "../../test/assistant-fixture";
+import type { deterministicId as DeterministicId } from "../agent-tasks/runs";
+import { ContentError } from "../content/errors";
+import type { AssistantPorts } from "./ports";
+import type {
+  claimAndStartRouterBatch,
+  kickAssistant,
+  runAssistantTick,
+} from "./dispatch";
+import type { routerBatchKey } from "./router/batch";
+
+let f: AssistantFixture;
+// `./dispatch` imports `db`; loaded after the fixture repoints DATABASE_URL
+// at this test's own database (see router/router.database.test.ts).
+let tick: typeof runAssistantTick;
+let kick: typeof kickAssistant;
+let claimAndStart: typeof claimAndStartRouterBatch;
+let batchKeyOf: typeof routerBatchKey;
+// `agent-tasks/runs` imports `db` too: never statically, or it would bind
+// the shared dev database before the fixture repoints DATABASE_URL.
+let deterministicId: typeof DeterministicId;
+
+beforeAll(async () => {
+  f = await createAssistantFixture("asst_dispatch");
+  const dispatch = await import("./dispatch");
+  tick = dispatch.runAssistantTick;
+  kick = dispatch.kickAssistant;
+  claimAndStart = dispatch.claimAndStartRouterBatch;
+  batchKeyOf = (await import("./router/batch")).routerBatchKey;
+  deterministicId = (await import("../agent-tasks/runs")).deterministicId;
+}, 120_000);
+
+beforeEach(async () => {
+  f.reset();
+  // Every tick walks every active assistant in the database; earlier tests'
+  // assistants are paused so each test sees only its own.
+  await f.schema.db
+    .update(f.schema.assistants)
+    .set({ status: "paused", statusReason: "by_admin" });
+});
+
+afterAll(async () => {
+  await f?.close();
+});
+
+const minutesAgo = (base: Date, minutes: number) =>
+  new Date(base.getTime() - minutes * 60_000);
+
+/** A team workspace with its assistant enabled, a steward and two members. */
+async function setup() {
+  const steward = randomUUID();
+  const a = randomUUID();
+  const b = randomUUID();
+  const { teamId, workspaceId } = await f.workspace(
+    [
+      [steward, "owner"],
+      [a, "member"],
+      [b, "member"],
+    ],
+    { kind: "team" },
+  );
+  const assistant = await f.service.enable({ workspaceId, userId: steward });
+  return { steward, a, b, teamId, workspaceId, assistant };
+}
+
+type Setup = Awaited<ReturnType<typeof setup>>;
+
+/** A queued ticket with one decided, undelivered event routed to it. */
+async function queuedTicket(
+  s: Setup,
+  input: {
+    payer: string;
+    sourceKind?: "member_message" | "worker_report";
+    at: Date;
+    title?: string;
+  },
+) {
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: input.payer,
+    stage: "queued",
+    title: input.title,
+    createdAt: input.at,
+  });
+  await routeEvent(s, ticket.id, {
+    payer: input.payer,
+    sourceKind: input.sourceKind ?? "worker_report",
+    at: input.at,
+  });
+  return ticket;
+}
+
+async function routeEvent(
+  s: Setup,
+  ticketId: string,
+  input: {
+    payer: string;
+    sourceKind: "member_message" | "worker_report";
+    at: Date;
+    text?: string;
+  },
+) {
+  return f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: input.payer,
+    sourceKind: input.sourceKind,
+    authorUserId: input.sourceKind === "member_message" ? input.payer : null,
+    status: "decided",
+    routedTicketId: ticketId,
+    createdAt: input.at,
+    text: input.text ?? "Please look into it",
+  });
+}
+
+function startsOf(origin: "assistant_router" | "assistant_ticket", workspaceId?: string) {
+  return f.started.filter(
+    (input) =>
+      input.origin === origin &&
+      (workspaceId === undefined || input.workspaceId === workspaceId),
+  );
+}
+
+async function assistantRow(s: Setup) {
+  return (await f.assistantRow(s.workspaceId))!;
+}
+
+// ── Worker dispatch: slots ──────────────────────────────────────────────
+
+test("three queued tickets and two slots: the first tick starts two; the third takes the reserved slot only for a member's input", async () => {
+  const s = await setup();
+  const now = new Date();
+  const t1 = await queuedTicket(s, { payer: s.a, at: minutesAgo(now, 30), title: "One" });
+  const t2 = await queuedTicket(s, { payer: s.a, at: minutesAgo(now, 20), title: "Two" });
+  const t3 = await queuedTicket(s, { payer: s.b, at: minutesAgo(now, 10), title: "Three" });
+
+  await tick(now, f.ports);
+  const first = startsOf("assistant_ticket", s.workspaceId);
+  assert.deepEqual(
+    first.map((input) => input.hostContext?.ticketId),
+    [t1.id, t2.id],
+  );
+  const routerThread = await f.schema.db
+    .select()
+    .from(f.schema.threads)
+    .where(eq(f.schema.threads.id, s.assistant.routerThreadId));
+  assert.deepEqual(first[0], {
+    ...first[0],
+    origin: "assistant_ticket",
+    workspaceId: s.workspaceId,
+    userId: s.a,
+    threadId: t1.workerThreadId,
+    idempotencyKey: deterministicId("assistant-ticket-run", t1.id, "initial"),
+    creditCap: 500,
+    hostContext: { assistantId: s.assistant.id, ticketId: t1.id },
+    title: "One",
+    visibility: routerThread[0]!.visibility,
+  });
+  assert.match(first[0]!.content, /Please look into it/);
+  for (const ticket of [t1, t2]) {
+    const row = (await f.ticketRow(ticket.id))!;
+    assert.equal(row.stage, "working");
+    assert.ok(row.currentRunId);
+  }
+  assert.equal((await f.ticketRow(t3.id))!.stage, "queued");
+  const delivered = (await f.triggerRows(s.assistant.id)).filter(
+    (row) => row.routedTicketId === t1.id,
+  );
+  assert.ok(delivered.every((row) => row.deliveredAt !== null));
+
+  // A worker's report routed to the third ticket does not get the reserved
+  // slot...
+  await routeEvent(s, t3.id, { payer: s.b, sourceKind: "worker_report", at: now });
+  f.reset();
+  await tick(new Date(now.getTime() + 60_000), f.ports);
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+  assert.equal((await f.ticketRow(t3.id))!.stage, "queued");
+
+  // ...a member's message does.
+  await routeEvent(s, t3.id, { payer: s.b, sourceKind: "member_message", at: now });
+  f.reset();
+  await tick(new Date(now.getTime() + 120_000), f.ports);
+  const third = startsOf("assistant_ticket", s.workspaceId);
+  assert.deepEqual(third.map((input) => input.hostContext?.ticketId), [t3.id]);
+  assert.equal((await f.ticketRow(t3.id))!.stage, "working");
+
+  // All three slots are now taken: nothing more starts, member input or not.
+  const t4 = await queuedTicket(s, { payer: s.a, sourceKind: "member_message", at: now });
+  f.reset();
+  await tick(new Date(now.getTime() + 180_000), f.ports);
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+  assert.equal((await f.ticketRow(t4.id))!.stage, "queued");
+});
+
+test("a new event routed to an idle ticket is delivered as an append, keyed by its event ids", async () => {
+  const s = await setup();
+  const now = new Date();
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    stage: "idle",
+  });
+  // Delivered long ago, with the ticket's first run.
+  await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    status: "decided",
+    routedTicketId: ticket.id,
+    deliveredAt: minutesAgo(now, 60),
+    createdAt: minutesAgo(now, 61),
+  });
+  const e2 = await routeEvent(s, ticket.id, { payer: s.a, sourceKind: "member_message", at: minutesAgo(now, 2), text: "Also cover pricing" });
+  const e1 = await routeEvent(s, ticket.id, { payer: s.a, sourceKind: "member_message", at: minutesAgo(now, 1), text: "And the FAQ" });
+
+  await tick(now, f.ports);
+  const [start] = startsOf("assistant_ticket", s.workspaceId);
+  assert.ok(start);
+  assert.equal(
+    start.idempotencyKey,
+    deterministicId("assistant-ticket-run", ticket.id, [e1.id, e2.id].sort().join(",")),
+  );
+  assert.match(start.content, /Also cover pricing/);
+  assert.match(start.content, /And the FAQ/);
+  assert.equal((await f.ticketRow(ticket.id))!.stage, "working");
+});
+
+// ── Worker runs that ended ──────────────────────────────────────────────
+
+/** Dispatches one queued ticket and returns it with its run id. */
+async function workingTicket(s: Setup, payer = s.a) {
+  const now = new Date();
+  const ticket = await queuedTicket(s, { payer, at: minutesAgo(now, 5) });
+  await tick(now, f.ports);
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "working");
+  f.reset();
+  return { ticket: row, runId: row.currentRunId! };
+}
+
+test("a run that completed without a report leaves the ticket waiting for a person, with an ended_without_report event", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  await f.setRunStatus(runId, { status: "completed" });
+
+  await tick(new Date(), f.ports);
+
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "waiting_person");
+  assert.equal(row.currentRunId, null);
+  const reports = (await f.triggerRows(s.assistant.id)).filter(
+    (trigger) => trigger.sourceKind === "worker_report" && trigger.ticketId === ticket.id,
+  );
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0]!.text, "ended_without_report");
+  assert.equal(reports[0]!.payerUserId, s.a);
+
+  // A second tick adds nothing more.
+  await tick(new Date(), f.ports);
+  assert.equal(
+    (await f.triggerRows(s.assistant.id)).filter(
+      (trigger) => trigger.sourceKind === "worker_report" && trigger.ticketId === ticket.id,
+    ).length,
+    1,
+  );
+});
+
+test("a run that completed after the worker reported only clears the run", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  await f.schema.db
+    .update(f.schema.assistantTickets)
+    .set({ stage: "idle", outcome: "ready" })
+    .where(eq(f.schema.assistantTickets.id, ticket.id));
+  await f.setRunStatus(runId, { status: "completed" });
+
+  await tick(new Date(), f.ports);
+
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "idle");
+  assert.equal(row.currentRunId, null);
+  assert.equal(
+    (await f.triggerRows(s.assistant.id)).filter((t) => t.sourceKind === "worker_report").length,
+    1, // only the one the ticket was created from
+  );
+});
+
+test("RUN_CREDIT_CAP_EXCEEDED blocks the ticket on its credit cap and notifies the payer", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  await f.setRunStatus(runId, { status: "failed", errorCode: "RUN_CREDIT_CAP_EXCEEDED" });
+
+  await tick(new Date(), f.ports);
+
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "waiting_person");
+  assert.equal(row.outcome, "blocked");
+  assert.equal(row.blockedReason, "credit_cap");
+  assert.equal(row.currentRunId, null);
+  assert.equal(row.consecutiveFailures, 0);
+  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0]!.userId, s.a);
+  assert.equal(blocked[0]!.payload?.ticketId, ticket.id);
+  assert.equal(blocked[0]!.payload?.reason, "credit_cap");
+  // Nothing restarts it on its own.
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+});
+
+test("a run refused for credits blocks the ticket on insufficient credits", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  await f.setRunStatus(runId, { status: "failed", errorCode: "BILLING_ADMISSION_DENIED" });
+
+  await tick(new Date(), f.ports);
+
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "waiting_person");
+  assert.equal(row.outcome, "blocked");
+  assert.equal(row.blockedReason, "insufficient_credits");
+  assert.equal(
+    f.notifications.filter((n) => n.kind === "assistant_ticket_blocked").length,
+    1,
+  );
+});
+
+test("three failed runs in a row block the ticket for repeated failure; each failure before that retries under a new key", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  const runIds = [runId];
+  const keys = new Set<string>();
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await f.setRunStatus(runIds[runIds.length - 1]!, { status: "failed", errorCode: "MODEL_UPSTREAM_ERROR" });
+    f.reset();
+    await tick(new Date(), f.ports);
+    const row = (await f.ticketRow(ticket.id))!;
+    assert.equal(row.consecutiveFailures, attempt);
+    const restarts = startsOf("assistant_ticket", s.workspaceId);
+    if (attempt < 3) {
+      assert.equal(restarts.length, 1, `retry after failure ${attempt}`);
+      assert.equal(row.stage, "working");
+      keys.add(restarts[0]!.idempotencyKey);
+      runIds.push(row.currentRunId!);
+      assert.notEqual(row.currentRunId, runIds[runIds.length - 2]);
+    } else {
+      assert.equal(restarts.length, 0);
+      assert.equal(row.stage, "waiting_person");
+      assert.equal(row.outcome, "blocked");
+      assert.equal(row.blockedReason, "repeated_failure");
+      assert.equal(row.currentRunId, null);
+      const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+      assert.equal(blocked.length, 1);
+      assert.equal(blocked[0]!.payload?.reason, "repeated_failure");
+    }
+  }
+  assert.equal(keys.size, 2);
+});
+
+test("a run past its time limit is stopped and cleared once it ends", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  const now = new Date();
+  await f.setRunStatus(runId, { status: "running", startedAt: minutesAgo(now, 46) });
+
+  await tick(now, f.ports);
+  assert.deepEqual(f.stopped, [
+    {
+      workspaceId: s.workspaceId,
+      threadId: ticket.workerThreadId,
+      runId,
+      userId: s.a,
+    },
+  ]);
+  assert.equal((await f.ticketRow(ticket.id))!.currentRunId, runId);
+
+  // A run still within its limit is left alone.
+  f.reset();
+  await f.setRunStatus(runId, { status: "running", startedAt: minutesAgo(now, 44) });
+  await tick(now, f.ports);
+  assert.equal(f.stopped.length, 0);
+});
+
+// ── Credits (Review Focus 3) ────────────────────────────────────────────
+
+test("a payer without credits: their ticket is blocked and notified without taking a slot, and another payer's ticket still starts", async () => {
+  const s = await setup();
+  const now = new Date();
+  const ofA = await queuedTicket(s, { payer: s.a, at: minutesAgo(now, 10) });
+  const ofB = await queuedTicket(s, { payer: s.b, at: minutesAgo(now, 5) });
+  f.state.noCreditsFor.add(s.a);
+
+  await tick(now, f.ports);
+
+  const rowA = (await f.ticketRow(ofA.id))!;
+  assert.equal(rowA.stage, "waiting_person");
+  assert.equal(rowA.outcome, "blocked");
+  assert.equal(rowA.blockedReason, "insufficient_credits");
+  assert.equal((await f.ticketRow(ofB.id))!.stage, "working");
+  assert.deepEqual(
+    startsOf("assistant_ticket", s.workspaceId).map((input) => input.userId),
+    [s.b],
+  );
+  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0]!.userId, s.a);
+  assert.equal(blocked[0]!.payload?.reason, "insufficient_credits");
+
+  // Still out of credits: no second notification for the same block.
+  f.reset();
+  f.state.noCreditsFor.add(s.a);
+  await tick(now, f.ports);
+  assert.equal(f.notifications.length, 0);
+
+  // Credits are back: the ticket starts with what is still undelivered.
+  f.reset();
+  await tick(now, f.ports);
+  assert.deepEqual(
+    startsOf("assistant_ticket", s.workspaceId).map((input) => input.hostContext?.ticketId),
+    [ofA.id],
+  );
+});
+
+test("A without credits: A's batch stays pending with no attempt counted, and B's batch starts in the same tick", async () => {
+  const s = await setup();
+  const fromA = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "From A", idempotencyKey: "a-1" },
+  );
+  const fromB = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.b },
+    { text: "From B", idempotencyKey: "b-1" },
+  );
+  f.state.noCreditsFor.add(s.a);
+
+  await tick(new Date(), f.ports);
+
+  const triggerA = (await f.triggerRow(fromA.item.id))!;
+  assert.equal(triggerA.status, "pending_eval");
+  assert.equal(triggerA.evalAttempts, 0);
+  assert.equal(triggerA.routerBatchKey, null);
+
+  const routerStarts = startsOf("assistant_router", s.workspaceId);
+  assert.equal(routerStarts.length, 1);
+  const batchKey = batchKeyOf([fromB.item.id]);
+  assert.deepEqual(routerStarts[0], {
+    ...routerStarts[0],
+    origin: "assistant_router",
+    existingThread: true,
+    threadId: s.assistant.routerThreadId,
+    userId: s.b,
+    idempotencyKey: batchKey,
+    hostContext: { assistantId: s.assistant.id, batchKey },
+  });
+  // B's event is the batch; A's appears at most as recent feed context.
+  assert.ok(routerStarts[0]!.content.includes(`<assistant-trigger id=${fromB.item.id} `));
+  assert.ok(!routerStarts[0]!.content.includes(`<assistant-trigger id=${fromA.item.id} `));
+
+  const triggerB = (await f.triggerRow(fromB.item.id))!;
+  assert.equal(triggerB.status, "in_eval");
+  assert.equal(triggerB.routerBatchKey, batchKey);
+  const assistant = await assistantRow(s);
+  assert.equal(assistant.currentRouterBatchKey, batchKey);
+  assert.ok(assistant.currentRouterRunId);
+});
+
+// ── Router busy / 409 (Review Focus 1) ──────────────────────────────────
+
+test("A and B write while the Router is busy: nothing starts; then A's batch, then B's, and neither is lost", async () => {
+  const s = await setup();
+  // The Router is busy with an earlier run.
+  const earlier = await f.ports.startTurn({
+    origin: "assistant_router",
+    existingThread: true,
+    workspaceId: s.workspaceId,
+    userId: s.steward,
+    threadId: s.assistant.routerThreadId,
+    idempotencyKey: "earlier-batch",
+    title: "Workspace assistant",
+    content: "earlier",
+  });
+  await f.setRunStatus(earlier.run.id, { status: "running" });
+  await f.setCurrentRouterRun(s.assistant.id, { runId: earlier.run.id, batchKey: "earlier-batch" });
+
+  const fromA = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "From A", idempotencyKey: "a-1" },
+  );
+  const fromB = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.b },
+    { text: "From B", idempotencyKey: "b-1" },
+  );
+
+  f.reset();
+  await tick(new Date(), f.ports);
+  assert.equal(startsOf("assistant_router", s.workspaceId).length, 0);
+  assert.equal((await f.triggerRow(fromA.item.id))!.status, "pending_eval");
+  assert.equal((await f.triggerRow(fromB.item.id))!.status, "pending_eval");
+
+  // The earlier run ends; the next tick reconciles it and starts A's batch.
+  await f.setRunStatus(earlier.run.id, { status: "completed" });
+  await tick(new Date(), f.ports);
+  let starts = startsOf("assistant_router", s.workspaceId);
+  assert.deepEqual(starts.map((input) => input.userId), [s.a]);
+  const runA = (await assistantRow(s)).currentRouterRunId!;
+  assert.notEqual(runA, earlier.run.id);
+  assert.equal((await f.triggerRow(fromA.item.id))!.status, "in_eval");
+  assert.equal((await f.triggerRow(fromB.item.id))!.status, "pending_eval");
+
+  // The Router decides A's message; its run ends; the next tick starts B's.
+  await f.schema.db
+    .update(f.schema.assistantTriggers)
+    .set({ status: "decided" })
+    .where(eq(f.schema.assistantTriggers.id, fromA.item.id));
+  await f.setRunStatus(runA, { status: "completed" });
+  f.reset();
+  await tick(new Date(), f.ports);
+  starts = startsOf("assistant_router", s.workspaceId);
+  assert.deepEqual(starts.map((input) => input.userId), [s.b]);
+  assert.equal((await f.triggerRow(fromA.item.id))!.status, "decided");
+  assert.equal((await f.triggerRow(fromB.item.id))!.status, "in_eval");
+});
+
+test("a 409 from starting the Router puts the batch back to pending_eval without counting an attempt", async () => {
+  const s = await setup();
+  const message = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
+  f.state.startErrors.push(
+    new ContentError(409, "CHAT_RUN_ALREADY_ACTIVE", "A chat run is already active for this thread"),
+  );
+
+  await tick(new Date(), f.ports);
+
+  assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
+  const trigger = (await f.triggerRow(message.item.id))!;
+  assert.equal(trigger.status, "pending_eval");
+  assert.equal(trigger.evalAttempts, 0);
+  assert.equal(trigger.routerBatchKey, null);
+  const assistant = await assistantRow(s);
+  assert.equal(assistant.currentRouterRunId, null);
+  assert.equal(assistant.currentRouterBatchKey, null);
+
+  // The next tick tries again and starts it.
+  f.reset();
+  await tick(new Date(), f.ports);
+  assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
+  assert.equal((await f.triggerRow(message.item.id))!.status, "in_eval");
+});
+
+test("any other failure to start the Router counts as an evaluation attempt", async () => {
+  const s = await setup();
+  const message = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
+  f.state.startErrors.push(new ContentError(503, "HOST_TURN_START_FAILED", "The run could not be queued"));
+
+  await tick(new Date(), f.ports);
+
+  const trigger = (await f.triggerRow(message.item.id))!;
+  assert.equal(trigger.status, "pending_eval");
+  assert.equal(trigger.evalAttempts, 1);
+  assert.equal(trigger.routerBatchKey, null);
+  assert.equal((await assistantRow(s)).currentRouterRunId, null);
+});
+
+test("a claim that gets fewer events than selected gives them back and starts nothing", async () => {
+  const s = await setup();
+  const free = await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+  });
+  const taken = await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    status: "in_eval",
+    routerBatchKey: "someone-else",
+  });
+  const assistant = await assistantRow(s);
+
+  const result = await claimAndStart(
+    assistant,
+    { payerUserId: s.a, triggerIds: [free.id, taken.id] },
+    f.ports,
+  );
+
+  assert.equal(result, "claim_short");
+  assert.equal(f.started.length, 0);
+  const freeRow = (await f.triggerRow(free.id))!;
+  assert.equal(freeRow.status, "pending_eval");
+  assert.equal(freeRow.routerBatchKey, null);
+  assert.equal(freeRow.evalAttempts, 0);
+  const takenRow = (await f.triggerRow(taken.id))!;
+  assert.equal(takenRow.status, "in_eval");
+  assert.equal(takenRow.routerBatchKey, "someone-else");
+  assert.equal((await assistantRow(s)).currentRouterRunId, null);
+});
+
+test("a claimed batch whose run was never recorded is started again under the same key", async () => {
+  const s = await setup();
+  const trigger = await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    text: "Orphaned",
+  });
+  const batchKey = batchKeyOf([trigger.id]);
+  await f.schema.db
+    .update(f.schema.assistantTriggers)
+    .set({ status: "in_eval", routerBatchKey: batchKey })
+    .where(eq(f.schema.assistantTriggers.id, trigger.id));
+
+  await tick(new Date(), f.ports);
+
+  const starts = startsOf("assistant_router", s.workspaceId);
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0]!.idempotencyKey, batchKey);
+  assert.equal(starts[0]!.userId, s.a);
+  const assistant = await assistantRow(s);
+  assert.equal(assistant.currentRouterBatchKey, batchKey);
+  assert.ok(assistant.currentRouterRunId);
+});
+
+test("a Router run that finished before its id was recorded is reconciled by the next tick", async () => {
+  const s = await setup();
+  const message = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
+  await tick(new Date(), f.ports);
+  const assistant = await assistantRow(s);
+  // The Router's run ended without deciding the message.
+  await f.setRunStatus(assistant.currentRouterRunId!, { status: "completed" });
+
+  f.reset();
+  await tick(new Date(), f.ports);
+  const trigger = (await f.triggerRow(message.item.id))!;
+  assert.equal(trigger.evalAttempts, 1);
+  // Requeued, and started again in the same tick as a fresh batch.
+  assert.equal(trigger.status, "in_eval");
+  assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
+  assert.notEqual((await assistantRow(s)).currentRouterRunId, assistant.currentRouterRunId);
+});
+
+// ── Steward left (Review Focus 4) ───────────────────────────────────────
+
+test("a steward who lost access pauses the assistant; nothing new starts and running work is not stopped", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  await f.setRunStatus(runId, { status: "running", startedAt: new Date() });
+  await queuedTicket(s, { payer: s.b, at: new Date() });
+  await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
+  await f.removeMember(s.teamId, s.steward);
+  f.reset();
+
+  await tick(new Date(), f.ports);
+
+  const assistant = await assistantRow(s);
+  assert.equal(assistant.status, "paused");
+  assert.equal(assistant.statusReason, "steward_left");
+  assert.equal(assistant.version, 2);
+  assert.equal(f.started.length, 0);
+  assert.equal(f.stopped.length, 0);
+  assert.equal((await f.ticketRow(ticket.id))!.currentRunId, runId);
+  const audit = f.audits.find((entry) => entry.action === "assistant.paused");
+  assert.ok(audit);
+  assert.equal(audit.actorUserId, null);
+  assert.equal(audit.targetId, s.assistant.id);
+  assert.deepEqual(audit.metadata, { reason: "steward_left", stewardUserId: s.steward });
+
+  // Paused: later ticks start nothing either.
+  await tick(new Date(), f.ports);
+  assert.equal(f.started.length, 0);
+});
+
+// ── Isolation between assistants ────────────────────────────────────────
+
+test("one assistant failing mid-tick does not stop the others", async () => {
+  const first = await setup();
+  const second = await setup();
+  const { runId } = await workingTicket(first);
+  await f.setRunStatus(runId, { status: "failed", errorCode: "RUN_CREDIT_CAP_EXCEEDED" });
+  const queued = await queuedTicket(second, { payer: second.a, at: new Date() });
+  f.reset();
+
+  const failingNotify: AssistantPorts = {
+    ...f.ports,
+    async notify() {
+      throw new Error("mail is down");
+    },
+  };
+  await tick(new Date(), failingNotify);
+
+  // The block itself committed even though its notification failed...
+  const blocked = (await f.schema.db
+    .select()
+    .from(f.schema.assistantTickets)
+    .where(eq(f.schema.assistantTickets.assistantId, first.assistant.id)))[0]!;
+  assert.equal(blocked.blockedReason, "credit_cap");
+  // ...and the other assistant's ticket still started.
+  assert.equal((await f.ticketRow(queued.id))!.stage, "working");
+});
+
+// ── The immediate kick ──────────────────────────────────────────────────
+
+test("kickAssistant starts the Router's batch right away, and only logs when it cannot", async () => {
+  const s = await setup();
+  const message = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
+  await kick(s.assistant.id, f.ports);
+  assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
+  assert.equal((await f.triggerRow(message.item.id))!.status, "in_eval");
+
+  // The Router is now busy: a second kick starts nothing and does not throw.
+  const other = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.b },
+    { text: "Again", idempotencyKey: "m-2" },
+  );
+  f.reset();
+  await kick(s.assistant.id, f.ports);
+  assert.equal(f.started.length, 0);
+  assert.equal((await f.triggerRow(other.item.id))!.status, "pending_eval");
+
+  // A kick that fails resolves anyway: the tick is the backstop.
+  await f.setRunStatus((await assistantRow(s)).currentRouterRunId!, { status: "completed" });
+  const failing: AssistantPorts = {
+    ...f.ports,
+    async hasCredits() {
+      throw new Error("billing is down");
+    },
+  };
+  await kick(s.assistant.id, failing);
+  await kick(randomUUID(), f.ports);
+});

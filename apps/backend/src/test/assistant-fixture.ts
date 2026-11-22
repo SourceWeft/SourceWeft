@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { AssistantNotifyInput, AssistantPorts } from "../modules/assistants";
 import type { StartHostTurnInput } from "../modules/threads";
 import type { TeamAuditEntry } from "../modules/team-audit/types";
@@ -21,6 +21,9 @@ export async function createAssistantFixture(label: string) {
   process.env.DATABASE_URL = isolated.url;
   const schema = await import("@sourceweft/db");
   const assistants = await import("../modules/assistants");
+  const { createThreadRecord, findThreadRecord } = await import(
+    "../modules/threads/thread/repository"
+  );
 
   const notifications: AssistantNotifyInput[] = [];
   const audits: TeamAuditEntry[] = [];
@@ -34,17 +37,77 @@ export async function createAssistantFixture(label: string) {
   const kicked: string[] = [];
   const state = {
     credits: true,
+    /** Payers who have no credits left, on top of `credits` (all payers). */
+    noCreditsFor: new Set<string>(),
+    /** Thrown by the next `startTurn` calls, one per call. */
+    startErrors: [] as unknown[],
   };
 
   const ports: AssistantPorts = {
     workspaceAccess: assistants.assistantPorts.workspaceAccess,
-    hasCredits: async () => state.credits,
+    hasCredits: async ({ userId }) =>
+      state.credits && !state.noCreditsFor.has(userId),
+    // What `startHostTurn` leaves behind, without a queue or a worker: the
+    // conversation (unless it already exists) and a queued chat run, found
+    // again by its idempotency key on a replay.
     async startTurn(input) {
       started.push(input);
+      const error = state.startErrors.shift();
+      if (error) throw error;
+      const [workspace] = await schema.db
+        .select()
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, input.workspaceId));
+      const scope = {
+        teamId: workspace!.organizationId,
+        workspaceId: input.workspaceId,
+      };
+      if (input.existingThread) {
+        const existing = await findThreadRecord({
+          ...scope,
+          threadId: input.threadId,
+        });
+        if (!existing || existing.origin !== input.origin) {
+          throw new Error(`Test startTurn: no ${input.origin} thread ${input.threadId}`);
+        }
+      } else {
+        await createThreadRecord({
+          id: input.threadId,
+          ...scope,
+          title: input.title,
+          createdBy: input.userId,
+          origin: input.origin,
+          ...(input.visibility ? { visibility: input.visibility } : {}),
+        });
+      }
+      const inserted = await schema.db
+        .insert(schema.chatThreadRuns)
+        .values({
+          id: randomUUID(),
+          ...scope,
+          threadId: input.threadId,
+          userId: input.userId,
+          idempotencyKey: input.idempotencyKey,
+          mode: "send",
+          streamKey: `test:${randomUUID()}`,
+          status: "queued",
+          requestJson: { content: input.content, unattended: true },
+        })
+        .onConflictDoNothing()
+        .returning();
+      const [run] = await schema.db
+        .select()
+        .from(schema.chatThreadRuns)
+        .where(
+          and(
+            eq(schema.chatThreadRuns.workspaceId, input.workspaceId),
+            eq(schema.chatThreadRuns.idempotencyKey, input.idempotencyKey),
+          ),
+        );
       return {
         thread: { id: input.threadId },
-        run: { id: randomUUID() },
-        created: true,
+        run: { id: run!.id },
+        created: inserted.length > 0,
       };
     },
     async stopRun(input) {
@@ -199,6 +262,9 @@ export async function createAssistantFixture(label: string) {
     routerBatchKey?: string | null;
     evalAttempts?: number;
     routedTicketId?: string | null;
+    ticketId?: string | null;
+    deliveredAt?: Date | null;
+    createdAt?: Date;
   }) {
     const id = input.id ?? randomUUID();
     await schema.db.insert(schema.assistantTriggers).values({
@@ -215,6 +281,9 @@ export async function createAssistantFixture(label: string) {
       routerBatchKey: input.routerBatchKey ?? null,
       evalAttempts: input.evalAttempts ?? 0,
       routedTicketId: input.routedTicketId ?? null,
+      ticketId: input.ticketId ?? null,
+      deliveredAt: input.deliveredAt ?? null,
+      ...(input.createdAt ? { createdAt: input.createdAt } : {}),
     });
     return (await triggerRow(id))!;
   }
@@ -247,9 +316,12 @@ export async function createAssistantFixture(label: string) {
     workspaceId: string;
     assistantId: string;
     payerUserId: string;
+    title?: string;
     stage?: "queued" | "working" | "waiting_person" | "idle" | "ended";
     currentRunId?: string | null;
     consecutiveFailures?: number;
+    creditCap?: number;
+    createdAt?: Date;
   }) {
     const id = input.id ?? randomUUID();
     await schema.db.insert(schema.assistantTickets).values({
@@ -258,20 +330,74 @@ export async function createAssistantFixture(label: string) {
       workspaceId: input.workspaceId,
       assistantId: input.assistantId,
       workerThreadId: randomUUID(),
-      title: "Triage the inbox",
+      title: input.title ?? "Triage the inbox",
       goal: "Keep the inbox at zero",
       payerUserId: input.payerUserId,
       origin: "explicit",
       stage: input.stage ?? "working",
-      creditCap: "500",
+      creditCap: String(input.creditCap ?? 500),
       consecutiveFailures: input.consecutiveFailures ?? 0,
       currentRunId: input.currentRunId ?? null,
+      ...(input.createdAt
+        ? { createdAt: input.createdAt, updatedAt: input.createdAt }
+        : {}),
     });
     const [row] = await schema.db
       .select()
       .from(schema.assistantTickets)
       .where(eq(schema.assistantTickets.id, id));
     return row!;
+  }
+
+  async function ticketRow(id: string) {
+    const [row] = await schema.db
+      .select()
+      .from(schema.assistantTickets)
+      .where(eq(schema.assistantTickets.id, id));
+    return row ?? null;
+  }
+
+  async function runRow(id: string) {
+    const [row] = await schema.db
+      .select()
+      .from(schema.chatThreadRuns)
+      .where(eq(schema.chatThreadRuns.id, id));
+    return row ?? null;
+  }
+
+  /** Moves a chat run along as the worker would (finished, failed, ...). */
+  async function setRunStatus(
+    runId: string,
+    input: {
+      status:
+        | "queued"
+        | "running"
+        | "completed"
+        | "failed"
+        | "cancelled";
+      errorCode?: string | null;
+      startedAt?: Date | null;
+    },
+  ) {
+    await schema.db
+      .update(schema.chatThreadRuns)
+      .set({
+        status: input.status,
+        errorCode: input.errorCode ?? null,
+        ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+        ...(["completed", "failed", "cancelled"].includes(input.status)
+          ? { finishedAt: new Date() }
+          : {}),
+      })
+      .where(eq(schema.chatThreadRuns.id, runId));
+  }
+
+  /** Takes a person out of an organization (and so out of its workspaces). */
+  async function removeMember(organizationId: string, userId: string) {
+    await schema.database.query(
+      'delete from member where "organizationId" = $1 and "userId" = $2',
+      [organizationId, userId],
+    );
   }
 
   function reset() {
@@ -281,6 +407,8 @@ export async function createAssistantFixture(label: string) {
     stopped.length = 0;
     kicked.length = 0;
     state.credits = true;
+    state.noCreditsFor.clear();
+    state.startErrors.length = 0;
   }
 
   return {
@@ -306,6 +434,10 @@ export async function createAssistantFixture(label: string) {
     decisionRows,
     insertTicket,
     insertTrigger,
+    ticketRow,
+    runRow,
+    setRunStatus,
+    removeMember,
     setCurrentRouterRun,
     reset,
     async close() {

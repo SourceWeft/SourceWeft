@@ -220,10 +220,10 @@ const recallSchema = z.object({
  * running).
  *
  * Deliberately not checked here: whether `assistant.current_router_batch_key`
- * still equals `batchKey`. Task 7 is what decides exactly when that column
- * gets written relative to starting this turn, and adding the check now
- * risks assuming an ordering Task 7 may not guarantee; left for Task 7 (or
- * a later pass) to add once that ordering is settled.
+ * equals `batchKey`. The dispatch tick (`dispatch.ts`) writes that column
+ * only after `startTurn` returns, so a worker can begin this turn before it
+ * is written; the batch's own `in_eval` rows under `batchKey` are what tie
+ * the turn to its batch.
  */
 export async function resolveRouterToolsContext(
   ctx: OriginTurnContext,

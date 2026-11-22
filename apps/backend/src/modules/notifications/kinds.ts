@@ -50,6 +50,17 @@ function researchPath() {
 }
 
 /**
+ * The workspace assistant's page; a notification about one ticket opens it
+ * on that ticket (`payload.ticketId`).
+ */
+function assistantPath({ payload }: PathInput) {
+  const ticketId = payload.ticketId;
+  return typeof ticketId === "string" && ticketId
+    ? `/dashboard/assistant?ticket=${encodeURIComponent(ticketId)}`
+    : "/dashboard/assistant";
+}
+
+/**
  * The notification kinds. Adding a kind is one entry here (plus a template
  * when it can be emailed); the table and the service stay unchanged.
  */
@@ -124,6 +135,33 @@ export const NOTIFICATION_KINDS = {
     defaultEmail: false,
     template: null,
     path: conversationPath,
+  },
+  // The workspace assistant's Router replied to a member's message in the
+  // shared feed. In-app only: the reply is right there in the feed.
+  assistant_reply: {
+    defaultEmail: false,
+    template: null,
+    path: assistantPath,
+  },
+  // A ticket's worker asked its payer a question and is waiting for them.
+  assistant_question: {
+    defaultEmail: true,
+    template: "notification.assistant-question",
+    path: assistantPath,
+  },
+  // A ticket stopped on its own: its credit cap, the payer's credits, or
+  // repeated failed runs (`payload.reason`).
+  assistant_ticket_blocked: {
+    defaultEmail: true,
+    template: "notification.assistant-ticket-blocked",
+    path: assistantPath,
+  },
+  // Messages the Router could not decide after every retry; sent to the
+  // steward.
+  assistant_unavailable: {
+    defaultEmail: true,
+    template: "notification.assistant-unavailable",
+    path: assistantPath,
   },
 } as const satisfies Record<string, NotificationKindDefinition>;
 

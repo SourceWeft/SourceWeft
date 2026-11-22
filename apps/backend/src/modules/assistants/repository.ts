@@ -1,11 +1,26 @@
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   assistantDecisions,
   assistantFeedItems,
   assistantTickets,
   assistantTriggers,
   assistants,
+  chatThreadRuns,
   db,
+  threads,
 } from "@sourceweft/db";
 import type {
   AssistantDecisionAction,
@@ -687,4 +702,338 @@ export async function resetTicketFailuresRow(
     .where(eq(assistantTickets.id, input.ticketId))
     .returning();
   return row!;
+}
+
+// ── dispatch (scheduler tick) ────────────────────────────────────────────
+
+/** Tenant + assistant scope every dispatch query carries. */
+export type AssistantScope = {
+  assistantId: string;
+  teamId: string;
+  workspaceId: string;
+};
+
+/** Every active assistant, across tenants: the tick's own work list. Each
+ * row is then handled with its own tenant scope. */
+export async function listActiveAssistantRows(): Promise<AssistantRow[]> {
+  return db
+    .select()
+    .from(assistants)
+    .where(eq(assistants.status, "active"))
+    .orderBy(asc(assistants.createdAt), asc(assistants.id));
+}
+
+/** One assistant by id within its tenant, optionally locked. */
+export async function findAssistantRowById(
+  input: { id: string; teamId?: string; workspaceId?: string },
+  executor: Executor = db,
+  options: { forUpdate?: boolean } = {},
+): Promise<AssistantRow | null> {
+  const query = executor
+    .select()
+    .from(assistants)
+    .where(
+      and(
+        eq(assistants.id, input.id),
+        input.teamId ? eq(assistants.teamId, input.teamId) : undefined,
+        input.workspaceId
+          ? eq(assistants.workspaceId, input.workspaceId)
+          : undefined,
+      ),
+    )
+    .limit(1);
+  const [row] = options.forUpdate ? await query.for("update") : await query;
+  return row ?? null;
+}
+
+/**
+ * Takes a per-assistant advisory lock for the length of `tx`, without
+ * waiting: false when another tick or kick is already working on this
+ * assistant. Released by PostgreSQL when `tx` ends, also if the process dies.
+ */
+export async function tryLockAssistant(
+  tx: AssistantTx,
+  assistantId: string,
+): Promise<boolean> {
+  const result = await tx.execute<{ acquired: boolean }>(
+    sql`select pg_try_advisory_xact_lock(hashtextextended(${`assistant-dispatch:${assistantId}`}, 0)) as acquired`,
+  );
+  return result.rows[0]?.acquired === true;
+}
+
+export type AssistantChatRun = Pick<
+  typeof chatThreadRuns.$inferSelect,
+  | "id"
+  | "threadId"
+  | "userId"
+  | "status"
+  | "errorCode"
+  | "startedAt"
+  | "createdAt"
+>;
+
+/** A chat run (`chat_thread_runs`) by id, scoped to the assistant's tenant. */
+export async function findChatRunRow(input: {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+}): Promise<AssistantChatRun | null> {
+  const [row] = await db
+    .select({
+      id: chatThreadRuns.id,
+      threadId: chatThreadRuns.threadId,
+      userId: chatThreadRuns.userId,
+      status: chatThreadRuns.status,
+      errorCode: chatThreadRuns.errorCode,
+      startedAt: chatThreadRuns.startedAt,
+      createdAt: chatThreadRuns.createdAt,
+    })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.id, input.runId),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/** The visibility of a conversation, scoped to its tenant; null when gone. */
+export async function findThreadVisibility(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+}): Promise<"private" | "workspace" | null> {
+  const [row] = await db
+    .select({ visibility: threads.visibility })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.id, input.threadId),
+        eq(threads.teamId, input.teamId),
+        eq(threads.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return row.visibility === "workspace" ? "workspace" : "private";
+}
+
+/** One ticket within its tenant and assistant, optionally locked. */
+export async function findScopedTicketRow(
+  input: AssistantScope & { ticketId: string },
+  executor: Executor = db,
+  options: { forUpdate?: boolean } = {},
+): Promise<AssistantTicketRow | null> {
+  const query = executor
+    .select()
+    .from(assistantTickets)
+    .where(
+      and(
+        eq(assistantTickets.id, input.ticketId),
+        eq(assistantTickets.assistantId, input.assistantId),
+        eq(assistantTickets.teamId, input.teamId),
+        eq(assistantTickets.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  const [row] = options.forUpdate ? await query.for("update") : await query;
+  return row ?? null;
+}
+
+/** Writes a ticket's columns, within its tenant and assistant. */
+export async function updateScopedTicketRow(
+  executor: Executor,
+  input: AssistantScope & { ticketId: string },
+  values: Partial<typeof assistantTickets.$inferInsert>,
+): Promise<AssistantTicketRow | null> {
+  const [row] = await executor
+    .update(assistantTickets)
+    .set(values)
+    .where(
+      and(
+        eq(assistantTickets.id, input.ticketId),
+        eq(assistantTickets.assistantId, input.assistantId),
+        eq(assistantTickets.teamId, input.teamId),
+        eq(assistantTickets.workspaceId, input.workspaceId),
+      ),
+    )
+    .returning();
+  return row ?? null;
+}
+
+/** Tickets that still name a worker run the tick has not settled. */
+export async function listTicketRowsWithRun(
+  scope: AssistantScope,
+): Promise<AssistantTicketRow[]> {
+  return db
+    .select()
+    .from(assistantTickets)
+    .where(
+      and(
+        eq(assistantTickets.assistantId, scope.assistantId),
+        eq(assistantTickets.teamId, scope.teamId),
+        eq(assistantTickets.workspaceId, scope.workspaceId),
+        isNotNull(assistantTickets.currentRunId),
+      ),
+    );
+}
+
+/** How many worker slots are taken: tickets in the `working` stage. */
+export async function countWorkingTicketRows(
+  scope: AssistantScope,
+): Promise<number> {
+  const [row] = await db
+    .select({ value: count() })
+    .from(assistantTickets)
+    .where(
+      and(
+        eq(assistantTickets.assistantId, scope.assistantId),
+        eq(assistantTickets.teamId, scope.teamId),
+        eq(assistantTickets.workspaceId, scope.workspaceId),
+        eq(assistantTickets.stage, "working"),
+      ),
+    );
+  return Number(row?.value ?? 0);
+}
+
+/** Tickets that may get a worker run: neither working nor ended. */
+export async function listDispatchableTicketRows(
+  scope: AssistantScope,
+): Promise<AssistantTicketRow[]> {
+  return db
+    .select()
+    .from(assistantTickets)
+    .where(
+      and(
+        eq(assistantTickets.assistantId, scope.assistantId),
+        eq(assistantTickets.teamId, scope.teamId),
+        eq(assistantTickets.workspaceId, scope.workspaceId),
+        ne(assistantTickets.stage, "working"),
+        ne(assistantTickets.stage, "ended"),
+      ),
+    );
+}
+
+/** Events the Router routed to a ticket that no worker run has been given
+ * yet (`routed_ticket_id` set, `delivered_at` empty), oldest first. */
+export async function listUndeliveredRoutedTriggerRows(
+  scope: AssistantScope,
+): Promise<AssistantTriggerRow[]> {
+  return db
+    .select()
+    .from(assistantTriggers)
+    .where(
+      and(
+        eq(assistantTriggers.assistantId, scope.assistantId),
+        eq(assistantTriggers.teamId, scope.teamId),
+        eq(assistantTriggers.workspaceId, scope.workspaceId),
+        isNotNull(assistantTriggers.routedTicketId),
+        isNull(assistantTriggers.deliveredAt),
+      ),
+    )
+    .orderBy(asc(assistantTriggers.createdAt), asc(assistantTriggers.id));
+}
+
+/** Whether any event routed to this ticket was ever delivered to a run. */
+export async function ticketHasDeliveredTrigger(
+  scope: AssistantScope & { ticketId: string },
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: assistantTriggers.id })
+    .from(assistantTriggers)
+    .where(
+      and(
+        eq(assistantTriggers.assistantId, scope.assistantId),
+        eq(assistantTriggers.teamId, scope.teamId),
+        eq(assistantTriggers.workspaceId, scope.workspaceId),
+        eq(assistantTriggers.routedTicketId, scope.ticketId),
+        isNotNull(assistantTriggers.deliveredAt),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
+/** Marks events as handed to a worker run. Only ones still undelivered. */
+export async function markTriggersDeliveredRows(
+  executor: Executor,
+  input: AssistantScope & { ids: string[]; now: Date },
+): Promise<void> {
+  if (input.ids.length === 0) return;
+  await executor
+    .update(assistantTriggers)
+    .set({ deliveredAt: input.now })
+    .where(
+      and(
+        eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
+        inArray(assistantTriggers.id, input.ids),
+        isNull(assistantTriggers.deliveredAt),
+      ),
+    );
+}
+
+/** Every event waiting for the Router (`pending_eval`), for `selectNextBatch`. */
+export async function listPendingEvalTriggerRows(
+  scope: AssistantScope,
+): Promise<AssistantTriggerRow[]> {
+  return db
+    .select()
+    .from(assistantTriggers)
+    .where(
+      and(
+        eq(assistantTriggers.assistantId, scope.assistantId),
+        eq(assistantTriggers.teamId, scope.teamId),
+        eq(assistantTriggers.workspaceId, scope.workspaceId),
+        eq(assistantTriggers.status, "pending_eval"),
+      ),
+    )
+    .orderBy(asc(assistantTriggers.createdAt), asc(assistantTriggers.id));
+}
+
+/** Every event claimed into some Router batch (`in_eval`), oldest first. */
+export async function listAllInEvalTriggerRows(
+  scope: AssistantScope,
+): Promise<AssistantTriggerRow[]> {
+  return db
+    .select()
+    .from(assistantTriggers)
+    .where(
+      and(
+        eq(assistantTriggers.assistantId, scope.assistantId),
+        eq(assistantTriggers.teamId, scope.teamId),
+        eq(assistantTriggers.workspaceId, scope.workspaceId),
+        eq(assistantTriggers.status, "in_eval"),
+      ),
+    )
+    .orderBy(asc(assistantTriggers.createdAt), asc(assistantTriggers.id));
+}
+
+/**
+ * Gives a claimed batch back: its events still `in_eval` under `batchKey`
+ * return to `pending_eval` with no batch key, and — unlike
+ * `requeueOrExpireInEvalTriggerRows` — no evaluation attempt counted, since
+ * the Router never looked at them.
+ */
+export async function releaseInEvalTriggerRows(
+  executor: Executor,
+  input: AssistantScope & { routerBatchKey: string },
+): Promise<AssistantTriggerRow[]> {
+  return executor
+    .update(assistantTriggers)
+    .set({ status: "pending_eval", routerBatchKey: null })
+    .where(
+      and(
+        eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
+        eq(assistantTriggers.routerBatchKey, input.routerBatchKey),
+        eq(assistantTriggers.status, "in_eval"),
+      ),
+    )
+    .returning();
 }

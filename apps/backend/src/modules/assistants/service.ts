@@ -137,12 +137,13 @@ export class AssistantService {
   constructor(
     private readonly ports: AssistantPorts = assistantPorts,
     /**
-     * Wakes the Router so it looks at what is waiting for it. A no-op here;
-     * Task 7 injects the real one. Called after a brand-new member message
-     * commits, never on a replay.
+     * Wakes the Router so it looks at what is waiting for it. A no-op by
+     * default (tests); the production singleton below passes
+     * `dispatch.ts#kickAssistant`, which never throws. Called after a
+     * brand-new member message commits, never on a replay.
      */
     private readonly kickAssistant: (assistantId: string) => Promise<void> = async () => {
-      /* no-op until Task 7 */
+      /* no-op unless wired */
     },
   ) {}
 
@@ -635,4 +636,12 @@ export class AssistantService {
   }
 }
 
-export const assistantService = new AssistantService();
+export const assistantService = new AssistantService(
+  assistantPorts,
+  // Loaded lazily: the dispatch module pulls in the Router's tools and
+  // rendering, which a plain read of the assistant never needs.
+  async (assistantId) => {
+    const { kickAssistant } = await import("./dispatch");
+    await kickAssistant(assistantId);
+  },
+);

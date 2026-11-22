@@ -6,3 +6,5 @@ export {
   type AssistantPorts,
 } from "./ports";
 export { AssistantService, assistantService } from "./service";
+export { kickAssistant, runAssistantTick } from "./dispatch";
+export { registerAssistantTurnProviders } from "./register-turn-providers";

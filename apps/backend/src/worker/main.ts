@@ -57,6 +57,7 @@ import {
   interruptActiveChatRuns,
 } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
+import { registerAssistantTurnProviders } from "../modules/assistants";
 
 validateBillingStartup();
 await syncGlobalModelGatewayConfigAtStartup({ syncPricing: false });
@@ -65,6 +66,9 @@ await ensureModelConfigAvailable();
 // Connectors are contributed by capabilities, so registering them reads
 // manifests. Await it before serving so the registry is never consulted empty.
 await connectorAdaptersReady();
+// Workspace assistant conversations get their tools and instructions from
+// these providers; a turn in one without its provider fails.
+registerAssistantTurnProviders();
 // Chat-run and billing counters are incremented in this process; without the
 // flush they would accumulate and never appear in the logs.
 metrics.startPeriodicFlush();
