@@ -38,8 +38,10 @@ function researchNoteTitle(topic: string): string {
  * The report kept verbatim — its `[n]` markers stay as plain text — with a
  * numbered Sources list appended so each marker resolves to a page url without
  * the run: `[n]` lines up with Sources entry n (the nth verified citation).
- * A report that cites nothing instead lists every page that was read, so the
- * note is self-contained either way.
+ * Two citations of the same page are two Sources entries with the same url by
+ * design, so every marker keeps its own numbered line. A report that cites
+ * nothing instead lists every page that was read, so the note is self-contained
+ * either way.
  */
 function buildResearchNoteMarkdown(run: ResearchRun): string {
   const body = (run.report ?? "").trimEnd();
@@ -180,41 +182,62 @@ export async function saveResearchReportAsNote(input: {
 
   const noteId = randomUUID();
   let winner: NoteRow | null = null;
-  await db.transaction(async (tx) => {
-    // There is no unique column to lean on the way a saved chat answer leans on
-    // its message id, so concurrent saves of the same run are serialised on the
-    // run id: the first inserts, a racing second finds it here and inserts
-    // nothing.
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`research-note:${run.id}`}, 0))`,
-    );
-    const raced = await findSavedResearchNote(
-      {
+  try {
+    await db.transaction(async (tx) => {
+      // There is no unique column to lean on the way a saved chat answer leans
+      // on its message id, so concurrent saves of the same run are serialised
+      // on the run id: the first inserts, a racing second finds it here and
+      // inserts nothing.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`research-note:${run.id}`}, 0))`,
+      );
+      const raced = await findSavedResearchNote(
+        {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          runId: run.id,
+        },
+        tx,
+      );
+      if (raced?.sourceId) {
+        winner = raced;
+        return;
+      }
+      await tx.insert(notes).values({
+        id: noteId,
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
-        runId: run.id,
-      },
-      tx,
-    );
-    if (raced?.sourceId) {
-      winner = raced;
-      return;
-    }
-    await tx.insert(notes).values({
-      id: noteId,
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      threadId: null,
-      sourceMessageId: null,
-      sourceId: source.id,
-      noteType: "generated",
-      title,
-      contentText: markdown,
-      contentJson: { researchRunId: run.id, sources: run.sources },
-      isEditable: true,
-      createdBy: input.userId,
+        threadId: null,
+        sourceMessageId: null,
+        sourceId: source.id,
+        noteType: "generated",
+        title,
+        contentText: markdown,
+        contentJson: { researchRunId: run.id, sources: run.sources },
+        isEditable: true,
+        createdBy: input.userId,
+      });
     });
-  });
+  } catch (error) {
+    // The note row did not land, so nothing points at the source we indexed:
+    // remove it before surfacing the failure, exactly as the index-failure path
+    // above does. Only this call's own source is dropped — the race winner
+    // returns from the callback and never throws, so it cannot reach here. A
+    // cleanup failure is logged, not thrown, so it never masks the original.
+    await contentSourceService
+      .deleteSource({
+        workspaceId: workspace.id,
+        sourceId: source.id,
+        userId: input.userId,
+      })
+      .catch((cleanupError: unknown) =>
+        logger.warn(
+          "Could not remove the source of a failed research note save",
+          { err: cleanupError, sourceId: source.id },
+        ),
+      );
+    throw error;
+  }
 
   if (winner) {
     // A concurrent save won; keep its note and drop the duplicate source.

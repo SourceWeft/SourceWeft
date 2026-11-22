@@ -34,7 +34,7 @@ let teamId: string;
 let workspaceId: string;
 
 beforeAll(async () => {
-  isolated = await createIsolatedTestDatabase("research_note_save");
+  isolated = await createIsolatedTestDatabase("res_note_save");
   process.env.DATABASE_URL = isolated.url;
   schema = await import("@sourceweft/db");
   service = await import("./research-report");
@@ -198,6 +198,25 @@ test("a failed index leaves no source and no note behind", async () => {
   state.indexSource.mockRejectedValue(new Error("embedding down"));
 
   await assert.rejects(save(runId), /embedding down/);
+
+  assert.equal((await noteSourcesInWorkspace()).length, 0);
+  const notes = await schema.db
+    .select()
+    .from(schema.notes)
+    .where(eq(schema.notes.workspaceId, workspaceId));
+  assert.equal(notes.length, 0);
+});
+
+test("a failed note insert removes the just-indexed source", async () => {
+  const runId = await insertRun();
+  // The source is created and indexed before the note row; force that insert's
+  // transaction to throw and the source it left behind must be cleaned up.
+  const txSpy = vi
+    .spyOn(schema.db, "transaction")
+    .mockRejectedValueOnce(new Error("note insert failed"));
+
+  await assert.rejects(save(runId), /note insert failed/);
+  txSpy.mockRestore();
 
   assert.equal((await noteSourcesInWorkspace()).length, 0);
   const notes = await schema.db
