@@ -188,7 +188,9 @@ function textSummary(value: unknown) {
           ? record.text
           : record.type === "image_url"
             ? "[image]"
-            : "";
+            : record.type === "video_url"
+              ? "[video]"
+              : "";
       })
       .filter(Boolean)
       .join("\n");

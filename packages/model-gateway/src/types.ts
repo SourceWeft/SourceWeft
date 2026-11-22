@@ -301,6 +301,12 @@ export type GatewayMessageContentPart =
       image_url: {
         url: string;
       };
+    }
+  | {
+      type: "video_url";
+      video_url: {
+        url: string;
+      };
     };
 
 export interface GatewayRequestMetadata {
