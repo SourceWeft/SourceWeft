@@ -352,13 +352,14 @@ test("retrying a ticket routes one decided event to it and clears its failure co
     consecutiveFailures: 3,
   });
 
-  const { ticket: retried } = await f.service.retryTicket(
+  const { ticket: retried, created } = await f.service.retryTicket(
     ownerCaller,
     ticket.id,
     { idempotencyKey: randomUUID() },
   );
 
   assert.equal(retried.consecutiveFailures, 0);
+  assert.equal(created, true);
 
   const triggers = await f.triggerRows(assistant.id);
   const routed = triggers.filter((row) => row.routedTicketId === ticket.id);
@@ -378,9 +379,15 @@ test("retrying with the same idempotency key adds no second event", async () => 
   });
   const idempotencyKey = randomUUID();
 
-  await f.service.retryTicket(ownerCaller, ticket.id, { idempotencyKey });
-  await f.service.retryTicket(ownerCaller, ticket.id, { idempotencyKey });
+  const first = await f.service.retryTicket(ownerCaller, ticket.id, {
+    idempotencyKey,
+  });
+  const second = await f.service.retryTicket(ownerCaller, ticket.id, {
+    idempotencyKey,
+  });
 
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
   const triggers = await f.triggerRows(assistant.id);
   const routed = triggers.filter((row) => row.routedTicketId === ticket.id);
   assert.equal(routed.length, 1);

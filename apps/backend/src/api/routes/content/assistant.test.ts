@@ -109,7 +109,7 @@ beforeEach(() => {
   service.postMessage.mockResolvedValue({ item: feedItem, created: true });
   service.listTickets.mockResolvedValue({ tickets: [ticketEntity] });
   service.closeTicket.mockResolvedValue({ ticket: ticketEntity });
-  service.retryTicket.mockResolvedValue({ ticket: ticketEntity });
+  service.retryTicket.mockResolvedValue({ ticket: ticketEntity, created: true });
 });
 
 test("every route refuses a request without a session and touches nothing", async () => {
@@ -250,11 +250,28 @@ test("close and retry require an idempotencyKey and pass the ticket id", async (
       .status,
     200,
   );
-  assert.equal(
-    (await request("POST", "/tickets/ticket_1/retry", { idempotencyKey: "k" }))
-      .status,
-    200,
-  );
+});
+
+test("retryTicket answers 201 when a new retry was recorded and 200 on an idempotent replay", async () => {
+  service.retryTicket.mockResolvedValue({
+    ticket: ticketEntity,
+    created: true,
+  });
+  const created = await request("POST", "/tickets/ticket_1/retry", {
+    idempotencyKey: "k",
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual(await readJson(created), { ticket: ticketEntity });
+
+  service.retryTicket.mockResolvedValue({
+    ticket: ticketEntity,
+    created: false,
+  });
+  const replayed = await request("POST", "/tickets/ticket_1/retry", {
+    idempotencyKey: "k",
+  });
+  assert.equal(replayed.status, 200);
+  assert.deepEqual(await readJson(replayed), { ticket: ticketEntity });
 });
 
 test("AssistantError is mapped to its status code and error code", async () => {

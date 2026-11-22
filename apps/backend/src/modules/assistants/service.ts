@@ -585,13 +585,16 @@ export class AssistantService {
    * router evaluation, and clears its failure count — the member's signal
    * that it is worth another attempt. `idempotencyKey` derives the trigger's
    * id, so a repeated click adds no second event (the failure count is
-   * simply reset again, which is harmless).
+   * simply reset again, which is harmless); `created` tells the caller
+   * whether this call is the one that recorded the retry (`true`) or an
+   * idempotent replay of one that already had (`false`), the same
+   * created/replayed distinction `postMessage` reports.
    */
   async retryTicket(
     caller: Caller,
     ticketId: string,
     input: TicketActionRequest,
-  ): Promise<{ ticket: AssistantTicket }> {
+  ): Promise<{ ticket: AssistantTicket; created: boolean }> {
     const { access, assistant, ticket } = await this.requireTicket(
       caller,
       ticketId,
@@ -607,6 +610,7 @@ export class AssistantService {
     );
     const now = new Date();
     let updated: AssistantTicketRow;
+    let created = false;
     try {
       updated = await db.transaction(async (tx) => {
         const existingTrigger = await findTriggerRow(
@@ -619,6 +623,7 @@ export class AssistantService {
           tx,
         );
         if (!existingTrigger) {
+          created = true;
           await insertTriggerRow(tx, {
             id: triggerId,
             teamId: assistant.teamId,
@@ -638,10 +643,11 @@ export class AssistantService {
     } catch (error) {
       if (!uniqueViolation(error)) throw error;
       // Raced with another identical retry; the trigger is already there.
+      created = false;
       updated = await resetTicketFailuresRow(db, { ticketId: ticket.id, now });
     }
 
-    return { ticket: presentTicket(updated) };
+    return { ticket: presentTicket(updated), created };
   }
 }
 

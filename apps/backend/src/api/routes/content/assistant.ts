@@ -110,16 +110,15 @@ export function registerAssistantRoutes(app: Hono) {
     );
   });
 
-  // `retryTicket` resets an existing ticket's failure count; it never
-  // reports back whether its (idempotent) trigger event already existed, so
-  // unlike `postMessage` this always answers 200, not 201.
   app.post("/assistant/tickets/:ticketId/retry", async (c) => {
     const who = await caller(c);
     const ticketId = requireRouteParam(c, "ticketId");
     const input = parse(ticketActionRequestSchema, await body(c));
-    return ApiResponse.success(
-      c,
-      await assistantService.retryTicket(who, ticketId, input),
+    const { ticket, created } = await assistantService.retryTicket(
+      who,
+      ticketId,
+      input,
     );
+    return ApiResponse.success(c, { ticket }, created ? 201 : 200);
   });
 }
