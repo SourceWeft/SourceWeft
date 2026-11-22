@@ -227,6 +227,7 @@ test("all sidebar action branches have real translations in every supported loca
       "openInNewWindow",
       "openBesideParent",
       "export",
+      "share",
     ] as const) {
       assert.notEqual(t(key), `dashboardNav.chats.${key}`);
       assert.ok(t(key).length > 0);
@@ -240,6 +241,7 @@ test("sidebar rendering rejects each missing action key even if catalogs would o
     "openInNewWindow",
     "openBesideParent",
     "export",
+    "share",
   ]) {
     const broken = structuredClone(messages);
     Reflect.deleteProperty(broken.dashboardNav.chats, key);

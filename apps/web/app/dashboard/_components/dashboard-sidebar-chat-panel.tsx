@@ -30,6 +30,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Share,
   Share2,
   Trash2,
   Users,
@@ -91,6 +92,7 @@ import {
 import { contentClient } from "../../../lib/sdk";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 import { DashboardPersonaManager } from "./dashboard-persona-manager";
+import { ShareChatDialog } from "./share-chat-dialog";
 
 function WorkspaceSwitcher({
   workspaceId,
@@ -474,6 +476,7 @@ function ChatListRow({
   onUnarchive,
   onDelete,
   onExport,
+  onShare,
   onOpenInNewWindow,
   onOpenInPanel,
   onRename,
@@ -498,6 +501,8 @@ function ChatListRow({
   onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
   /** Downloads the chat as Markdown (a zip when it has images). */
   onExport?: (id: string) => Promise<void>;
+  /** Opens the public-share dialog for this chat (not offered on nested rows). */
+  onShare?: (id: string, title: string) => void;
   /** A sub-agent conversation rendered under its parent row. */
   nested?: boolean;
   onAddSubagent?: (id: string, title: string) => void;
@@ -762,6 +767,12 @@ function ChatListRow({
                 <span>{t("chats.export")}</span>
               </DropdownMenuItem>
             ) : null}
+            {!nested && onShare ? (
+              <DropdownMenuItem onSelect={() => onShare(item.id, item.title)}>
+                <Share className="size-4" />
+                <span>{t("chats.share")}</span>
+              </DropdownMenuItem>
+            ) : null}
             {onSetVisibility ? (
               <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
                 {shared ? (
@@ -851,6 +862,7 @@ function ChatList({
   onClearArchived,
   onDelete,
   onExport,
+  onShare,
   onOpenInNewWindow,
   onOpenInPanel,
   onRename,
@@ -868,6 +880,8 @@ function ChatList({
   onRename?: (id: string, title: string) => Promise<void>;
   onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
   onExport?: (id: string) => Promise<void>;
+  /** Opens the public-share dialog for this chat (not offered on nested rows). */
+  onShare?: (id: string, title: string) => void;
   search: string;
   searchOpen: boolean;
   onToggleSearch: () => void;
@@ -980,6 +994,7 @@ function ChatList({
         onUnarchive={isArchived ? onUnarchive : undefined}
         onDelete={onDelete}
         onExport={onExport}
+        onShare={onShare}
         onOpenInNewWindow={onOpenInNewWindow}
         onRename={isArchived ? undefined : onRename}
         onSetVisibility={isArchived ? undefined : onSetVisibility}
@@ -1214,6 +1229,7 @@ function ChatList({
                       searchState.removeResult(id);
                     }}
                     onExport={onExport}
+                    onShare={onShare}
                     onOpenInNewWindow={onOpenInNewWindow}
                     onOpen={onOpen}
                     onPrefetch={onPrefetch}
@@ -1398,6 +1414,10 @@ export function DashboardSidebarChatPanel({
   );
   const searchState = useChatSearch(search, searchChats);
   const exportChat = useChatExport(workspaceId);
+  const [shareChat, setShareChat] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [personaPicker, setPersonaPicker] = useState<{
     parentThreadId: string | null;
     parentTitle: string | null;
@@ -1527,6 +1547,7 @@ export function DashboardSidebarChatPanel({
         onRename={onRenameChat}
         onTogglePin={onTogglePinChat}
         onExport={exportChat}
+        onShare={(id, title) => setShareChat({ id, title })}
         pinnedIds={pinnedChatIds}
         searchState={searchState}
         onOpenInNewWindow={onOpenChatInNewWindow}
@@ -1555,6 +1576,17 @@ export function DashboardSidebarChatPanel({
         refreshToken={personaRefreshToken}
         workspaceId={workspaceId}
       />
+      {workspaceId ? (
+        <ShareChatDialog
+          chatId={shareChat?.id ?? ""}
+          chatTitle={shareChat?.title ?? ""}
+          onOpenChange={(open) => {
+            if (!open) setShareChat(null);
+          }}
+          open={shareChat !== null}
+          workspaceId={workspaceId}
+        />
+      ) : null}
       <DashboardPersonaManager
         onChanged={() => setPersonaRefreshToken((value) => value + 1)}
         onOpenChange={setPersonaManagerOpen}

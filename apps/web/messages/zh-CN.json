@@ -1067,6 +1067,7 @@
       "export": "导出为 Markdown",
       "exporting": "正在准备导出…",
       "exportError": "无法导出此对话。",
+      "share": "分享",
       "delete": "删除",
       "nowPrivate": "对话已设为私密",
       "nowVisible": "对话现在对工作区可见",
@@ -1101,7 +1102,23 @@
       "clearAllButton": "清除全部",
       "addSubagent": "添加子智能体",
       "openInNewWindow": "在新窗口中打开",
-      "openBesideParent": "在父会话旁打开"
+      "openBesideParent": "在父会话旁打开",
+      "shareDialog": {
+        "title": "分享对话",
+        "notSharedDescription": "拿到链接的人可以看到这个对话现在的样子。之后的新消息不会公开，除非你更新链接。",
+        "createLink": "创建链接",
+        "copy": "复制",
+        "copied": "已复制",
+        "updateLink": "更新链接",
+        "stopSharing": "停止分享",
+        "stopSharingConfirm": "停止分享这个对话？链接将失效。",
+        "snapshotFrom": "快照时间：{date}",
+        "allowSearchEngines": "允许搜索引擎收录",
+        "allowSearchEnginesOff": "关闭时，只有拿到链接的人能看到。",
+        "views": "{count} 次浏览",
+        "updateError": "无法更新分享设置。",
+        "forbidden": "只有对话的创建者或工作区管理员可以分享。"
+      }
     },
     "account": {
       "accountAndSettings": "账户与设置",

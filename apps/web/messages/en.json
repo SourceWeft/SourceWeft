@@ -1067,6 +1067,7 @@
       "export": "Export as Markdown",
       "exporting": "Preparing export…",
       "exportError": "Couldn't export this chat.",
+      "share": "Share",
       "delete": "Delete",
       "nowPrivate": "Chat is now private",
       "nowVisible": "Chat is now visible to the workspace",
@@ -1101,7 +1102,23 @@
       "clearAllButton": "Clear all",
       "addSubagent": "Add sub-agent",
       "openInNewWindow": "Open in new window",
-      "openBesideParent": "Open beside parent"
+      "openBesideParent": "Open beside parent",
+      "shareDialog": {
+        "title": "Share chat",
+        "notSharedDescription": "Anyone with the link can see this chat as it is now. Later messages stay private until you update the link.",
+        "createLink": "Create link",
+        "copy": "Copy",
+        "copied": "Copied",
+        "updateLink": "Update link",
+        "stopSharing": "Stop sharing",
+        "stopSharingConfirm": "Stop sharing this chat? The link will stop working.",
+        "snapshotFrom": "Snapshot from {date}",
+        "allowSearchEngines": "Allow search engines",
+        "allowSearchEnginesOff": "Off: only people with the link can find it.",
+        "views": "{count, plural, one {# view} other {# views}}",
+        "updateError": "Couldn't update sharing.",
+        "forbidden": "Only the chat's creator or a workspace admin can share it."
+      }
     },
     "account": {
       "accountAndSettings": "Account and settings",

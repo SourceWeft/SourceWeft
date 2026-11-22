@@ -1067,6 +1067,7 @@
       "export": "匯出為 Markdown",
       "exporting": "正在準備匯出…",
       "exportError": "無法匯出此對話。",
+      "share": "分享",
       "delete": "刪除",
       "nowPrivate": "對話已設為私密",
       "nowVisible": "對話現在對工作區可見",
@@ -1101,7 +1102,23 @@
       "clearAllButton": "清除全部",
       "addSubagent": "新增子代理程式",
       "openInNewWindow": "在新視窗中開啟",
-      "openBesideParent": "在父工作階段旁開啟"
+      "openBesideParent": "在父工作階段旁開啟",
+      "shareDialog": {
+        "title": "分享對話",
+        "notSharedDescription": "拿到連結的人可以看到這個對話現在的樣子。之後的新訊息不會公開，除非你更新連結。",
+        "createLink": "建立連結",
+        "copy": "複製",
+        "copied": "已複製",
+        "updateLink": "更新連結",
+        "stopSharing": "停止分享",
+        "stopSharingConfirm": "停止分享這個對話？連結將失效。",
+        "snapshotFrom": "快照時間：{date}",
+        "allowSearchEngines": "允許搜尋引擎收錄",
+        "allowSearchEnginesOff": "關閉時，只有拿到連結的人能看到。",
+        "views": "{count} 次瀏覽",
+        "updateError": "無法更新分享設定。",
+        "forbidden": "只有對話的建立者或工作區管理員可以分享。"
+      }
     },
     "account": {
       "accountAndSettings": "帳戶與設定",
