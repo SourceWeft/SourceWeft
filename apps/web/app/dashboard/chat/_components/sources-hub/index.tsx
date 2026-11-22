@@ -16,7 +16,6 @@ import {
   Loader2,
   RotateCcw,
   Search,
-  Telescope,
   SquareCheckBig,
   SquareMinus,
   Trash2,
@@ -99,6 +98,7 @@ import {
   useSourceDiscoveryAvailable,
 } from "./discovery/source-discovery-dialog";
 import { ResearchDialog } from "./research/research-dialog";
+import { ResearchEntry } from "./research/research-entry";
 import { useSources } from "./sources/use-sources";
 import {
   DeleteWorkfileDialog,
@@ -509,6 +509,13 @@ export function SourcesHub({
     activeCitationIndex,
     searchQuery: deferredSearchQueries.Citations,
   });
+  const researchExistingUrls = useMemo(
+    () =>
+      sources.flatMap((source) =>
+        typeof source.externalUri === "string" ? [source.externalUri] : [],
+      ),
+    [sources],
+  );
   const filteredSourceCount = useMemo(
     () => countFilteredSources(sources, deferredSearchQueries.Sources),
     [deferredSearchQueries.Sources, sources],
@@ -1119,18 +1126,11 @@ export function SourcesHub({
                       {t("discovery.add")}
                     </Button>
                   ) : null}
-                  {discoveryAvailable ? (
-                    <Button
-                      disabled={!workspaceId}
-                      onClick={() => setResearchOpen(true)}
-                      size="xs"
-                      type="button"
-                      variant="outline"
-                    >
-                      <Telescope className="size-3.5" />
-                      {t("research.add")}
-                    </Button>
-                  ) : null}
+                  <ResearchEntry
+                    available={discoveryAvailable}
+                    disabled={!workspaceId}
+                    onOpen={() => setResearchOpen(true)}
+                  />
                 </div>
               </div>
 
@@ -1527,6 +1527,8 @@ export function SourcesHub({
 
       {workspaceId && discoveryAvailable ? (
         <ResearchDialog
+          existingUrls={researchExistingUrls}
+          onImported={() => void refreshSources()}
           onOpenChange={setResearchOpen}
           onSaved={() => void refreshSources()}
           open={researchOpen}

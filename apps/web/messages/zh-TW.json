@@ -3833,6 +3833,10 @@
       "saveNote": "將報告儲存為筆記",
       "saved": "報告已儲存為筆記",
       "saveFailed": "無法儲存報告，請重試。",
+      "sources": "報告引用的網頁",
+      "importSources": "{count, plural, =0 {匯入所選來源} other {匯入 # 個所選來源}}",
+      "savedLabel": "已儲存",
+      "image": "圖片",
       "newResearch": "新的研究",
       "error": {
         "WEB_PROVIDER_UNAVAILABLE": "網頁搜尋暫時不可用。",

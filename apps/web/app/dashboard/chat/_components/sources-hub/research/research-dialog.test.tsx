@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResearchRun } from "@sourceweft/contracts/source-research";
 
@@ -21,7 +21,14 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { ResearchDialog } from "./research-dialog";
 import { ResearchCard } from "./research-card";
-import { click, flush, mountWithIntl, unmountAll } from "@/test/react";
+import {
+  click,
+  flush,
+  mountWithIntl,
+  typeInto,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
 
 function run(patch: Partial<ResearchRun> = {}): ResearchRun {
   return {
@@ -91,28 +98,97 @@ test("dialog starts a run and polls it to a ready report", async () => {
   try {
     startResearch.mockResolvedValue({ run: run({ status: "queued" }) });
     getResearch.mockResolvedValue({
-      run: run({ status: "ready", report: "The report body" }),
+      run: run({ status: "ready", report: "The **report** body" }),
     });
     await mountWithIntl(
       createElement(ResearchDialog, {
+        existingUrls: [],
+        onImported: vi.fn(),
         onSaved: vi.fn(),
         onOpenChange: () => {},
         open: true,
         workspaceId: "w1",
       }),
     );
-    const input = document.body.querySelector("input") as HTMLInputElement;
-    Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )!.set!.call(input, "solid state batteries");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(
+      document.body.querySelector("input") as HTMLInputElement,
+      "solid state batteries",
+    );
     await flush();
     await click(buttonNamed("Start research")!);
     await flush();
     expect(startResearch).toHaveBeenCalledWith("w1", "solid state batteries");
-    expect(text()).toContain("The report body");
+    await flush(5);
+    expect(text()).toContain("body");
+    expect(
+      document.body.querySelector('[data-streamdown="strong"]')?.textContent,
+    ).toBe("report");
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("Enter while composing text does not start a run", async () => {
+  await mountWithIntl(
+    createElement(ResearchDialog, {
+      existingUrls: [],
+      onImported: vi.fn(),
+      onSaved: vi.fn(),
+      onOpenChange: () => {},
+      open: true,
+      workspaceId: "w1",
+    }),
+  );
+  const input = document.body.querySelector("input") as HTMLInputElement;
+  typeInto(input, "电池");
+  await flush();
+  await act(async () => {
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+      }),
+    );
+  });
+  expect(startResearch).not.toHaveBeenCalled();
+});
+
+test("a saved report stays saved when the dialog is closed and reopened", async () => {
+  startResearch.mockResolvedValue({ run: run({ status: "queued" }) });
+  getResearch.mockResolvedValue({
+    run: run({ status: "ready", report: "Body [1]" }),
+  });
+  saveResearchNote.mockResolvedValue({
+    noteId: "n",
+    sourceId: "s",
+    title: "t",
+    alreadySaved: false,
+  });
+  const props = {
+    existingUrls: [],
+    onImported: vi.fn(),
+    onSaved: vi.fn(),
+    onOpenChange: () => {},
+    workspaceId: "w1",
+  };
+  const mounted = await mountWithIntl(
+    createElement(ResearchDialog, { ...props, open: true }),
+  );
+  typeInto(document.body.querySelector("input")!, "batteries");
+  await flush();
+  await click(buttonNamed("Start research")!);
+  await flush(5);
+  await click(buttonNamed("Save report as a note")!);
+  await flush(3);
+  await mounted.render(
+    withIntl(createElement(ResearchDialog, { ...props, open: false })),
+  );
+  await mounted.render(
+    withIntl(createElement(ResearchDialog, { ...props, open: true })),
+  );
+  await flush(5);
+  expect(saveResearchNote).toHaveBeenCalledTimes(1);
+  expect(buttonNamed("Save report as a note")).toBeUndefined();
+  expect(buttonNamed("Saved")).toBeTruthy();
 });

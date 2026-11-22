@@ -3833,6 +3833,10 @@
       "saveNote": "Save report as a note",
       "saved": "Report saved as a note",
       "saveFailed": "Could not save the report. Try again.",
+      "sources": "Pages the report used",
+      "importSources": "{count, plural, =0 {Import selected sources} one {Import # selected source} other {Import # selected sources}}",
+      "savedLabel": "Saved",
+      "image": "Image",
       "newResearch": "New research",
       "error": {
         "WEB_PROVIDER_UNAVAILABLE": "Web search is not available right now.",
