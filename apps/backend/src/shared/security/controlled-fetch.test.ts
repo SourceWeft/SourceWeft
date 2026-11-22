@@ -267,3 +267,132 @@ test("credentialed URLs fail without echoing their credentials", async () => {
     },
   );
 });
+
+const credentialHeaders = {
+  authorization: "Bearer X",
+  cookie: "c=1",
+  "proxy-authorization": "p",
+  "x-trace": "t-1",
+};
+
+test("cross-origin redirects stay rejected when the option is unset", async () => {
+  let reached = false;
+  const targetPort = await serve((_req, res) => {
+    reached = true;
+    res.end("other origin");
+  });
+  const target = `http://127.0.0.1:${targetPort}`;
+  const port = await serve((_req, res) => {
+    res.writeHead(302, { location: `${target}/feed` });
+    res.end();
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  const requests = scope({
+    enforceAddressChecks: true,
+    allowedInternalOrigins: [origin, target],
+  });
+  await assert.rejects(
+    requests.fetch(origin),
+    (error: unknown) =>
+      error instanceof EndpointPolicyError && error.reason === "redirect",
+  );
+  assert.equal(reached, false);
+});
+
+test("allowCrossOriginRedirects follows a cross-origin hop and drops credential headers only", async () => {
+  let targetHeaders: Record<string, unknown> = {};
+  let originHeaders: Record<string, unknown> = {};
+  const targetPort = await serve((req, res) => {
+    targetHeaders = { ...req.headers };
+    res.end("feed body");
+  });
+  const target = `http://127.0.0.1:${targetPort}`;
+  const port = await serve((req, res) => {
+    originHeaders = { ...req.headers };
+    res.writeHead(302, { location: `${target}/feed` });
+    res.end();
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  const requests = scope(
+    { enforceAddressChecks: true, allowedInternalOrigins: [origin, target] },
+    { allowCrossOriginRedirects: true },
+  );
+  const response = await requests.fetch(origin, { headers: credentialHeaders });
+  assert.equal(await response.text(), "feed body");
+  for (const name of ["authorization", "cookie", "proxy-authorization"]) {
+    assert.ok(name in originHeaders, `origin A must see ${name}`);
+    assert.ok(!(name in targetHeaders), `target B must not see ${name}`);
+  }
+  assert.equal(targetHeaders["x-trace"], "t-1");
+  requests.throwIfDenied();
+});
+
+test("allowCrossOriginRedirects still enforces the endpoint policy on the target", async () => {
+  let reached = false;
+  const targetPort = await serve((_req, res) => {
+    reached = true;
+    res.end("leak");
+  });
+  const target = `http://127.0.0.1:${targetPort}`;
+  const port = await serve((_req, res) => {
+    res.writeHead(302, { location: `${target}/feed` });
+    res.end();
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  const requests = scope(
+    { enforceAddressChecks: true, allowedInternalOrigins: [origin] },
+    { allowCrossOriginRedirects: true },
+  );
+  await assert.rejects(
+    requests.fetch(origin, { headers: credentialHeaders }),
+    EndpointPolicyError,
+  );
+  assert.equal(reached, false);
+  assert.throws(() => requests.throwIfDenied(), EndpointPolicyError);
+});
+
+test("allowCrossOriginRedirects keeps the cap of 3 redirects", async () => {
+  let hits = 0;
+  const port = await serve((_req, res) => {
+    hits++;
+    res.writeHead(302, { location: "/again" });
+    res.end();
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  const requests = scope(
+    { enforceAddressChecks: true, allowedInternalOrigins: [origin] },
+    { allowCrossOriginRedirects: true },
+  );
+  await assert.rejects(
+    requests.fetch(origin),
+    (error: unknown) =>
+      error instanceof EndpointPolicyError && error.reason === "redirect",
+  );
+  assert.equal(hits, 4, "the initial request plus three followed redirects");
+});
+
+test("allowCrossOriginRedirects keeps headers on a same-origin redirect", async () => {
+  let endHeaders: Record<string, unknown> = {};
+  const port = await serve((req, res) => {
+    if (req.url === "/start") {
+      res.writeHead(302, { location: "/end" });
+      res.end();
+      return;
+    }
+    endHeaders = { ...req.headers };
+    res.end("same origin");
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  const requests = scope(
+    { enforceAddressChecks: true, allowedInternalOrigins: [origin] },
+    { allowCrossOriginRedirects: true },
+  );
+  const response = await requests.fetch(`${origin}/start`, {
+    headers: credentialHeaders,
+  });
+  assert.equal(await response.text(), "same origin");
+  assert.equal(endHeaders.authorization, "Bearer X");
+  assert.equal(endHeaders.cookie, "c=1");
+  assert.equal(endHeaders["proxy-authorization"], "p");
+  assert.equal(endHeaders["x-trace"], "t-1");
+});
