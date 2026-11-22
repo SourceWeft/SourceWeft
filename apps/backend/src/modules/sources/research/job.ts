@@ -140,20 +140,26 @@ export async function processResearchJob(
     scopeKind: "worker-job",
     subject: SUBJECT,
   });
+  // Each report attempt anchors a different draft, so the embedding batch needs
+  // its own idempotency key per call — one shared key would dedupe a later
+  // attempt's texts to the first attempt's embeddings.
+  let anchorBatch = 0;
   const anchor = createGroundedAnchorPort({
     // The by-meaning pass for cross-language evidence: recorded, not charged,
     // like citation anchoring in chat.
-    embedTexts: (texts) =>
-      completeEmbeddingBatch({
+    embedTexts: (texts) => {
+      anchorBatch += 1;
+      return completeEmbeddingBatch({
         billing: deps.billing,
         teamId: payer.billingOrganizationId,
         workspaceId,
         actorUserId: payer.userId,
         scopeId: input.scopeId,
         feature: CITATION_ANCHORING_FEATURE,
-        idempotencyKey: `research:${runId}:anchor`,
+        idempotencyKey: `research:${runId}:anchor:${anchorBatch}`,
         texts,
-      }),
+      });
+    },
     onSemanticError: (error) =>
       logger.warn("Research evidence by-meaning anchoring failed", {
         err: error,

@@ -14,6 +14,7 @@ import {
 } from "../../content/queue";
 import {
   createRun,
+  finishFailed,
   requestCancel,
   type ResearchRunRow,
 } from "./repository";
@@ -22,6 +23,11 @@ export type CreateResearchInput = {
   workspaceId: string;
   userId: string;
   topic: string;
+  /**
+   * The originating request id. Accepted for interface parity with the rest of
+   * the content API; it is not an idempotency key here — a double-submit is
+   * bounded by the per-user concurrency limit, not by this id.
+   */
   requestId: string;
 };
 
@@ -55,8 +61,9 @@ export type CreateResearchResult =
  *
  * Admission and the row insert run under a transaction-scoped advisory lock
  * keyed on the owning organization, so two simultaneous requests cannot both
- * pass the concurrency limit and each insert a run. The lock only serialises;
- * the count and insert commit on the pool and are visible to the next holder.
+ * pass the concurrency limit and each insert a run. The lock, the count and the
+ * insert all run on the transaction's own connection, so nothing is serialised
+ * across a second pooled connection.
  */
 export async function createResearch(
   input: CreateResearchInput,
@@ -107,7 +114,9 @@ export async function createResearch(
           workspaceId: workspace.id,
           userId: input.userId,
         },
-        { countRuns, hasCredits },
+        // Count on the lock-holding connection so the limit sees everything
+        // committed before this lock was granted.
+        { countRuns: (filter) => countRuns(filter, tx), hasCredits },
       );
       if (!admission.ok) {
         if (admission.code === "INSUFFICIENT_CREDITS") {
@@ -125,25 +134,38 @@ export async function createResearch(
             : {}),
         };
       }
-      const run = await createRun({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        userId: input.userId,
-        topic: input.topic,
-      });
+      const run = await createRun(
+        {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          userId: input.userId,
+          topic: input.topic,
+        },
+        tx,
+      );
       return { kind: "ok", run };
     },
   );
 
-  // Enqueue after the lock is released: the run is committed, so a failed
-  // enqueue leaves a queued run to be retried rather than holding the lock.
+  // Enqueue after the lock is released: the run is committed, so the lock is
+  // not held across the queue round-trip.
   if (outcome.kind === "ok") {
-    await (deps.enqueue ?? enqueueResearchJob)({
-      runId: outcome.run.id,
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      userId: input.userId,
-    });
+    try {
+      await (deps.enqueue ?? enqueueResearchJob)({
+        runId: outcome.run.id,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: input.userId,
+      });
+    } catch (error) {
+      // The run is committed but has no worker job. Left queued it would hold
+      // the requester's single concurrency slot forever, so settle it as failed
+      // (a terminal state frees the slot) and surface the dispatch failure to
+      // the caller. No enum code denotes a queue-dispatch failure; the run's
+      // generic "transient backend failure, retry" marker is MODEL_UNAVAILABLE.
+      await finishFailed(outcome.run.id, "MODEL_UNAVAILABLE");
+      throw error;
+    }
   }
   return outcome;
 }

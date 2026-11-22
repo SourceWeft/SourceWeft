@@ -222,3 +222,27 @@ test("createResearch admits, records a queued run and enqueues it once", async (
   }
   assert.equal(enqueued, 1);
 });
+
+test("createResearch settles the run failed and rethrows when enqueue fails", async () => {
+  const boom = new Error("queue is down");
+  await assert.rejects(
+    service.createResearch(
+      { workspaceId, userId, topic: "Fusion", requestId: "req-3" },
+      {
+        billing,
+        getProvider: async () => web,
+        hasCredits: async () => true,
+        enqueue: async () => {
+          throw boom;
+        },
+      },
+    ),
+    /queue is down/,
+  );
+  // The committed run must not be left queued (it would hold the concurrency
+  // slot forever); it is settled failed so the slot is freed.
+  const runs = await repo.listRuns({ teamId, workspaceId, limit: 10 });
+  const run = runs.find((r) => r.topic === "Fusion");
+  assert.equal(run?.status, "failed");
+  assert.equal(run?.errorCode, "MODEL_UNAVAILABLE");
+});

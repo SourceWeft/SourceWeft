@@ -19,11 +19,16 @@ interface RunScope {
   workspaceId: string;
 }
 
-/** Creates a queued run. */
+/**
+ * Creates a queued run. Accepts an executor so the insert can run on the same
+ * connection as the admission count under an advisory lock; defaults to the
+ * shared pool for every other caller.
+ */
 export async function createRun(
   input: RunScope & { userId: string; topic: string },
+  executor: Pick<typeof db, "insert"> = db,
 ): Promise<ResearchRunRow> {
-  const [row] = await db
+  const [row] = await executor
     .insert(sourceResearchRuns)
     .values({
       id: randomUUID(),

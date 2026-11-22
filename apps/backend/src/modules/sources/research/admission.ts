@@ -26,9 +26,14 @@ export type ResearchAdmissionResult =
 const ACTIVE_STATUSES = ["queued", "running"] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Counts research_runs rows matching the filter. */
+/**
+ * Counts research_runs rows matching the filter. Accepts an executor so admit +
+ * count + insert can share one connection under an advisory lock; defaults to
+ * the shared pool for every other caller.
+ */
 export async function countResearchRuns(
   filter: ResearchRunCountFilter,
+  executor: Pick<typeof db, "select"> = db,
 ): Promise<number> {
   const conditions = [
     filter.teamId ? eq(sourceResearchRuns.teamId, filter.teamId) : undefined,
@@ -40,7 +45,7 @@ export async function countResearchRuns(
       : undefined,
     filter.since ? gte(sourceResearchRuns.createdAt, filter.since) : undefined,
   ].filter((condition) => condition !== undefined);
-  const [row] = await db
+  const [row] = await executor
     .select({ value: count() })
     .from(sourceResearchRuns)
     .where(and(...conditions));
