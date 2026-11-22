@@ -11,6 +11,7 @@ import type { ResearchJobPayload } from "../../content/queue";
 import { createGroundedAnchorPort } from "../../grounded-generation/anchor-port";
 import { createGroundedModelPort } from "../../grounded-generation/model-port";
 import { defaultPayerPorts } from "../../content/payer-ports";
+import { notify, type NotificationKind } from "../../notifications";
 import { resolveGuidePayer, type GuidePayer } from "../guide-payer";
 import { createDefaultWebProvider } from "../web-provider";
 import { runResearch, type ResearchRepo } from "./loop";
@@ -26,6 +27,8 @@ import {
 } from "./repository";
 
 const SUBJECT = "report";
+export const RESEARCH_NOTIFICATION_REF = "source_research";
+const NOTIFICATION_TOPIC_MAX_CHARS = 200;
 
 /** The run-state the job drives, injected so the logic is testable without a DB. */
 export type ResearchJobRepo = ResearchRepo & {
@@ -67,6 +70,8 @@ export type ResearchJobDeps = {
     teamId: string;
     userId: string;
   }) => Promise<GuidePayer | null>;
+  /** Overridable for tests; production writes the in-app notification. */
+  notify?: typeof notify;
   now?: () => number;
 };
 
@@ -104,6 +109,33 @@ export async function processResearchJob(
   const { runId, teamId, workspaceId, userId } = input;
   const repo = deps.repo ?? defaultRepo;
 
+  // In-app only, once, and only by the execution that settled the run. A
+  // notification never decides how the run ended, so a failure here is logged.
+  const notifyOwner = async (
+    kind: Extract<NotificationKind, "research_ready" | "research_failed">,
+    settled: boolean,
+    topic: string,
+  ) => {
+    if (!settled) return;
+    try {
+      await (deps.notify ?? notify)({
+        kind,
+        teamId,
+        userId,
+        ref: { kind: RESEARCH_NOTIFICATION_REF, id: runId },
+        // Only the topic: never the report or its citations.
+        payload: { topic: topic.slice(0, NOTIFICATION_TOPIC_MAX_CHARS) },
+        email: false,
+      });
+    } catch (error) {
+      logger.error("Failed to notify about a research run", {
+        runId,
+        kind,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const started = await repo.markRunning(runId);
   const run = await repo.findRun({ teamId, workspaceId, id: runId });
   if (!run) {
@@ -121,13 +153,21 @@ export async function processResearchJob(
     userId,
   });
   if (!payer) {
-    await repo.finishFailed(runId, "ACCESS_LOST");
+    await notifyOwner(
+      "research_failed",
+      await repo.finishFailed(runId, "ACCESS_LOST"),
+      run.topic,
+    );
     return;
   }
 
   const web = deps.web ?? (await createDefaultWebProvider());
   if (!web) {
-    await repo.finishFailed(runId, "WEB_PROVIDER_UNAVAILABLE");
+    await notifyOwner(
+      "research_failed",
+      await repo.finishFailed(runId, "WEB_PROVIDER_UNAVAILABLE"),
+      run.topic,
+    );
     return;
   }
 
@@ -202,22 +242,34 @@ export async function processResearchJob(
       throw error;
     }
     logger.warn("Research run failed on its final attempt", { err: error, runId });
-    await repo.finishFailed(runId, "MODEL_UNAVAILABLE");
+    await notifyOwner(
+      "research_failed",
+      await repo.finishFailed(runId, "MODEL_UNAVAILABLE"),
+      run.topic,
+    );
     return;
   }
 
   switch (result.status) {
     case "ready":
-      await repo.finishReady(runId, {
-        report: result.report,
-        citations: result.citations,
-      });
+      await notifyOwner(
+        "research_ready",
+        await repo.finishReady(runId, {
+          report: result.report,
+          citations: result.citations,
+        }),
+        run.topic,
+      );
       return;
     case "cancelled":
       await repo.finishCancelled(runId);
       return;
     case "failed":
-      await repo.finishFailed(runId, result.errorCode);
+      await notifyOwner(
+        "research_failed",
+        await repo.finishFailed(runId, result.errorCode),
+        run.topic,
+      );
       return;
   }
 }

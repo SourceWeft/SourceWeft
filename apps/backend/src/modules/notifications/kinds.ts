@@ -33,6 +33,11 @@ function runPath(input: PathInput) {
     : taskPath(input);
 }
 
+/** A research run lives in the sources panel of the chat workspace. */
+function researchPath() {
+  return "/dashboard/chat";
+}
+
 /**
  * The notification kinds. Adding a kind is one entry here (plus a template
  * when it can be emailed); the table and the service stay unchanged.
@@ -88,6 +93,18 @@ export const NOTIFICATION_KINDS = {
     defaultEmail: true,
     template: "notification.task-paused-repeated-failure",
     path: taskPath,
+  },
+  // A deep-research run in the sources panel finished or failed (a cancelled
+  // one sends nothing). In-app only; the payload is the topic, never the report.
+  research_ready: {
+    defaultEmail: false,
+    template: null,
+    path: researchPath,
+  },
+  research_failed: {
+    defaultEmail: false,
+    template: null,
+    path: researchPath,
   },
 } as const satisfies Record<string, NotificationKindDefinition>;
 

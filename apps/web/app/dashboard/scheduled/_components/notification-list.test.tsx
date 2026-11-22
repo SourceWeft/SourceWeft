@@ -92,6 +92,46 @@ test("a row that is already read is not marked again, and repeats are counted", 
   expect(markRead).not.toHaveBeenCalled();
 });
 
+test("research notifications name the topic", async () => {
+  hooks.useNotifications.mockReturnValue({
+    data: {
+      pages: [
+        {
+          notifications: [
+            item({
+              id: "r1",
+              kind: "research_ready",
+              ref: { kind: "source_research", id: "run1" },
+              payload: { topic: "Solid-state batteries" },
+              path: "/dashboard/chat",
+            }),
+            item({
+              id: "r2",
+              kind: "research_failed",
+              ref: { kind: "source_research", id: "run2" },
+              payload: { topic: "Fusion" },
+              path: "/dashboard/chat",
+            }),
+          ],
+          nextCursor: null,
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+  });
+  const { container } = await mountWithIntl(
+    <NotificationList workspaceId="ws_1" />,
+  );
+  expect(container.textContent).toContain(
+    'Your research on "Solid-state batteries" is ready.',
+  );
+  expect(container.textContent).toContain(
+    'Your research on "Fusion" could not be completed.',
+  );
+});
+
 test("an unknown kind still reads sensibly", async () => {
   hooks.useNotifications.mockReturnValue({
     data: {

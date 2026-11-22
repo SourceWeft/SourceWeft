@@ -21,6 +21,8 @@ const KNOWN_KINDS = new Set([
   "task_tools_unavailable",
   "task_blocked_auth",
   "task_paused_repeated_failure",
+  "research_ready",
+  "research_failed",
 ]);
 
 export function useNotificationText() {
@@ -28,8 +30,10 @@ export function useNotificationText() {
   return (item: NotificationItem) => {
     const taskName =
       typeof item.payload.taskName === "string" ? item.payload.taskName : "";
+    const topic =
+      typeof item.payload.topic === "string" ? item.payload.topic : "";
     const kind = KNOWN_KINDS.has(item.kind) ? item.kind : "unknown";
-    return t(`notification.${kind}`, { taskName });
+    return t(`notification.${kind}`, { taskName, topic });
   };
 }
 

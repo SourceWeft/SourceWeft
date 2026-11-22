@@ -7057,6 +7057,8 @@
       "task_tools_unavailable": "「{taskName}」無法執行：它使用的資料或 MCP 服務不可用。",
       "task_blocked_auth": "「{taskName}」無法執行：需要重新登入它使用的已連接帳號。",
       "task_paused_repeated_failure": "「{taskName}」連續失敗後已暫停。",
+      "research_ready": "你關於「{topic}」的研究已完成。",
+      "research_failed": "你關於「{topic}」的研究未能完成。",
       "unknown": "關於「{taskName}」的更新。"
     },
     "composer": {
