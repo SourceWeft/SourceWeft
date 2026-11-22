@@ -38,6 +38,14 @@ export function generationMaxTokens(kind: StudyKind, items: number): number {
   );
 }
 
+/**
+ * Items one generation call may be asked for. A larger share is split over
+ * consecutive parts of the source: one structured answer must arrive within
+ * the gateway's per-call timeout (30 s), and with a quote per item 26 cards
+ * took longer than that. Mind maps stay one call per group.
+ */
+export const MAX_ITEMS_PER_CALL = { flashcards: 10, quiz: 6 } as const;
+
 /** A generation keeps at least this share of the requested items... */
 export const MIN_KEEP_RATIO = 0.6;
 /** ...and at least this many (or the whole request, when it is smaller). */

@@ -17,6 +17,7 @@ import {
   FLASHCARD_VERIFY_EVERY,
   FLASHCARD_VERIFY_MIN,
   generationMaxTokens,
+  MAX_ITEMS_PER_CALL,
   OVERGENERATE_FACTOR,
   SINGLE_PASS_MAX_INPUT_TOKENS,
   STUDY_PROMPT_VERSIONS,
@@ -27,6 +28,7 @@ import {
   allocateGroupQuotas,
   assembleCorpus,
   groupCorpus,
+  splitForCallSize,
   StudyInputTooLargeError,
   type CorpusGroup,
 } from "./corpus";
@@ -166,7 +168,7 @@ export async function generateStudyContent(
   }
   const mode =
     corpus.totalTokens <= SINGLE_PASS_MAX_INPUT_TOKENS ? "single" : "mapreduce";
-  const groups: CorpusGroup[] =
+  const corpusGroups: CorpusGroup[] =
     mode === "single"
       ? [{ index: 0, chunks: corpus.chunks, tokens: corpus.totalTokens }]
       : groupCorpus(corpus.chunks);
@@ -175,10 +177,15 @@ export async function generateStudyContent(
   const requested = input.options.count;
   const target =
     kind === "mindmap" ? requested : Math.ceil(requested * OVERGENERATE_FACTOR);
-  const quotas = allocateGroupQuotas(
+  const corpusQuotas = allocateGroupQuotas(
     target,
-    groups.map((group) => group.tokens),
+    corpusGroups.map((group) => group.tokens),
   );
+  // Cards and questions: no call is asked for more than it answers in time.
+  const { groups, quotas } =
+    kind === "mindmap"
+      ? { groups: corpusGroups, quotas: corpusQuotas }
+      : splitForCallSize(corpusGroups, corpusQuotas, MAX_ITEMS_PER_CALL[kind]);
 
   const ids = new StudyIdAllocator(kind, input.previousIds);
   const loaded = await deps.checkpoint?.load();
