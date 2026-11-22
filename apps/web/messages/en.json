@@ -7136,6 +7136,22 @@
     "stopped": "Stopped",
     "madeWith": "Made with SourceWeft",
     "unavailable": "This share isn't available",
-    "sources": "Sources"
+    "sources": "Sources",
+    "artifactKinds": {
+      "file": "File",
+      "html": "Page",
+      "report": "Report",
+      "slides": "Slides",
+      "mindmap": "Mind map",
+      "podcast": "Podcast",
+      "audio_overview": "Audio overview",
+      "video_overview": "Video overview",
+      "video_presentation": "Video presentation",
+      "flashcards": "Flashcards",
+      "quiz": "Quiz",
+      "table": "Table",
+      "infographic": "Infographic",
+      "image": "Image"
+    }
   }
 }

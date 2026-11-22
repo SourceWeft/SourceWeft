@@ -1,10 +1,7 @@
-"use client";
-
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { getFormatter, getTranslations } from "next-intl/server";
 import type { PublicSharedChat } from "@sourceweft/contracts";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
-import { formatDisplayDate } from "../../../lib/i18n/format";
 
 /**
  * Same shape as the share dialog's `SNAPSHOT_DATE_OPTIONS`
@@ -12,24 +9,67 @@ import { formatDisplayDate } from "../../../lib/i18n/format";
  * rather than imported because that module is a client dialog with its own
  * dependency surface, and this is the only other place the "as of" format is
  * needed. Exported so the test can compute the exact expected string.
+ *
+ * No `Intl.DateTimeFormatOptions` annotation: that type's `timeZoneName`
+ * admits newer values (`"shortOffset"`, …) that `next-intl`'s own
+ * `DateTimeFormatOptions` doesn't yet, so annotating it that way makes this
+ * object fail to type-check as an argument to `formatter.dateTime` even
+ * though it never sets `timeZoneName` at all. `as const` keeps the literal
+ * values precise without that wider, incompatible shape.
  */
-export const AS_OF_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+export const AS_OF_DATE_OPTIONS = {
   year: "numeric",
   month: "short",
   day: "numeric",
   hour: "numeric",
   minute: "numeric",
-};
+} as const;
 
 type SharedMessage = PublicSharedChat["messages"][number];
 
 /**
- * The backend sends the artifact's raw type id (e.g. "video_presentation"),
- * never localized — titlecase it rather than pulling in the dashboard's
- * `artifactTypeLabel`/i18n catalog, which this anonymous, no-session page has
- * no reason to depend on.
+ * Every artifact kind the backend can currently send (`artifactTypeSchema` in
+ * `@sourceweft/contracts`). Kept as a local list — rather than importing that
+ * schema — so a future kind the backend adds before this page knows about it
+ * degrades to a title-cased identifier instead of a crash or an `undefined`
+ * catalog lookup.
  */
-function artifactKindLabel(kind: string) {
+const KNOWN_ARTIFACT_KINDS = [
+  "file",
+  "html",
+  "report",
+  "slides",
+  "mindmap",
+  "podcast",
+  "audio_overview",
+  "video_overview",
+  "video_presentation",
+  "flashcards",
+  "quiz",
+  "table",
+  "infographic",
+  "image",
+] as const;
+type KnownArtifactKind = (typeof KNOWN_ARTIFACT_KINDS)[number];
+
+function isKnownArtifactKind(kind: string): kind is KnownArtifactKind {
+  return (KNOWN_ARTIFACT_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * The visitor-locale label for an artifact kind, from
+ * `sharedChat.artifactKinds.*`. A kind this page doesn't know about yet (the
+ * backend added one more recently than this catalog) falls back to its
+ * identifier, title-cased — always English, since there is no catalog entry
+ * to translate.
+ */
+function artifactKindLabel(
+  kind: string,
+  translate: (key: `artifactKinds.${KnownArtifactKind}`) => string,
+) {
+  if (isKnownArtifactKind(kind)) {
+    return translate(`artifactKinds.${kind}`);
+  }
   return kind
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -52,12 +92,11 @@ function SharedChatFootnotes({
         {citations.map((citation) => (
           <li key={citation.n}>
             {citation.url ? (
-              // The spec'd rel is exactly "nofollow noopener" (no
-              // "noreferrer"): noopener alone already blocks window.opener
-              // access, and the citation target itself — not a referrer
-              // leak — is the thing being disclosed here.
-              // eslint-disable-next-line react/jsx-no-target-blank
-              <a href={citation.url} rel="nofollow noopener" target="_blank">
+              <a
+                href={citation.url}
+                rel="nofollow noopener noreferrer"
+                target="_blank"
+              >
                 {citation.n}. {citation.title}
               </a>
             ) : (
@@ -74,8 +113,10 @@ function SharedChatFootnotes({
 
 function SharedChatArtifactCards({
   artifacts,
+  kindLabel,
 }: {
   artifacts: SharedMessage["artifacts"];
+  kindLabel: (kind: string) => string;
 }) {
   if (artifacts.length === 0) {
     return null;
@@ -83,7 +124,7 @@ function SharedChatArtifactCards({
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {artifacts.map((artifact, index) => {
-        const label = `${artifactKindLabel(artifact.kind)} · ${artifact.title}`;
+        const label = `${kindLabel(artifact.kind)} · ${artifact.title}`;
         return artifact.publicUrl ? (
           <a
             className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
@@ -135,13 +176,16 @@ function SharedChatMessageImages({
 
 function SharedChatMessage({
   assistantLabel,
+  kindLabel,
+  labels,
   message,
 }: {
   assistantLabel: string;
+  kindLabel: (kind: string) => string;
+  labels: { stopped: string; sources: string; user: string };
   message: SharedMessage;
 }) {
-  const t = useTranslations("sharedChat");
-  const roleLabel = message.role === "user" ? t("user") : assistantLabel;
+  const roleLabel = message.role === "user" ? labels.user : assistantLabel;
 
   return (
     <article className="flex flex-col gap-1.5">
@@ -150,25 +194,43 @@ function SharedChatMessage({
       </span>
       <MessageResponse>{message.content}</MessageResponse>
       {message.stopped ? (
-        <p className="text-xs italic text-muted-foreground">{t("stopped")}</p>
+        <p className="text-xs italic text-muted-foreground">
+          {labels.stopped}
+        </p>
       ) : null}
       <SharedChatMessageImages
         content={message.content}
         images={message.images}
       />
-      <SharedChatArtifactCards artifacts={message.artifacts} />
+      <SharedChatArtifactCards
+        artifacts={message.artifacts}
+        kindLabel={kindLabel}
+      />
       <SharedChatFootnotes
         citations={message.citations}
-        sourcesLabel={t("sources")}
+        sourcesLabel={labels.sources}
       />
     </article>
   );
 }
 
-export function SharedChatView({ chat }: { chat: PublicSharedChat }) {
-  const t = useTranslations("sharedChat");
-  const locale = useLocale();
+/**
+ * Server component: no client-side re-formatting of `takenAt` means the
+ * server's rendered text is the only text, so there is nothing for React to
+ * hydration-mismatch against a visitor's browser timezone. `MessageResponse`
+ * is its own `"use client"` component further down the tree, which is fine —
+ * a server component can render a client one.
+ */
+export async function SharedChatView({ chat }: { chat: PublicSharedChat }) {
+  const t = await getTranslations("sharedChat");
+  const format = await getFormatter();
   const assistantLabel = chat.assistantName ?? t("assistant");
+  const labels = {
+    sources: t("sources"),
+    stopped: t("stopped"),
+    user: t("user"),
+  };
+  const kindLabel = (kind: string) => artifactKindLabel(kind, t);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-6 px-4 py-8">
@@ -176,11 +238,7 @@ export function SharedChatView({ chat }: { chat: PublicSharedChat }) {
         <h1 className="text-lg font-semibold">{chat.title}</h1>
         <p className="text-xs text-muted-foreground">
           {t("sharedOnAsOf", {
-            date: formatDisplayDate(
-              new Date(chat.takenAt),
-              locale,
-              AS_OF_DATE_OPTIONS,
-            ),
+            date: format.dateTime(new Date(chat.takenAt), AS_OF_DATE_OPTIONS),
           })}
         </p>
       </header>
@@ -189,7 +247,9 @@ export function SharedChatView({ chat }: { chat: PublicSharedChat }) {
         {chat.messages.map((message, index) => (
           <SharedChatMessage
             assistantLabel={assistantLabel}
+            kindLabel={kindLabel}
             key={index}
+            labels={labels}
             message={message}
           />
         ))}
@@ -208,8 +268,8 @@ export function SharedChatView({ chat }: { chat: PublicSharedChat }) {
   );
 }
 
-export function SharedChatUnavailable() {
-  const t = useTranslations("sharedChat");
+export async function SharedChatUnavailable() {
+  const t = await getTranslations("sharedChat");
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-2 px-4 text-center">
       <p className="text-sm text-muted-foreground">{t("unavailable")}</p>

@@ -7136,6 +7136,22 @@
     "stopped": "已停止",
     "madeWith": "由 SourceWeft 製作",
     "unavailable": "這個分享不可用",
-    "sources": "來源"
+    "sources": "來源",
+    "artifactKinds": {
+      "file": "檔案",
+      "html": "網頁",
+      "report": "報告",
+      "slides": "投影片",
+      "mindmap": "心智圖",
+      "podcast": "Podcast",
+      "audio_overview": "音訊概覽",
+      "video_overview": "影片概覽",
+      "video_presentation": "影片演示",
+      "flashcards": "閃卡",
+      "quiz": "測驗",
+      "table": "表格",
+      "infographic": "資訊圖",
+      "image": "圖片"
+    }
   }
 }

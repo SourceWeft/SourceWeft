@@ -7136,6 +7136,22 @@
     "stopped": "已停止",
     "madeWith": "由 SourceWeft 制作",
     "unavailable": "这个分享不可用",
-    "sources": "来源"
+    "sources": "来源",
+    "artifactKinds": {
+      "file": "文件",
+      "html": "网页",
+      "report": "报告",
+      "slides": "幻灯片",
+      "mindmap": "思维导图",
+      "podcast": "播客",
+      "audio_overview": "音频概览",
+      "video_overview": "视频概览",
+      "video_presentation": "视频演示",
+      "flashcards": "闪卡",
+      "quiz": "测验",
+      "table": "表格",
+      "infographic": "信息图",
+      "image": "图片"
+    }
   }
 }
