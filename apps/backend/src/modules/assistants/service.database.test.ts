@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, test } from "vitest";
 import {
   createAssistantFixture,
@@ -116,6 +117,60 @@ test("enabling an already-enabled workspace is refused, even by the same admin",
   assert.ok(row);
 });
 
+test("two different admins racing to enable the same workspace: exactly one wins, the other is a typed 409, never a raw 500", async () => {
+  // A sequential "A enables, then B enables" never reaches the vulnerable
+  // code at all: B's own pre-check (`findAssistantRow`) already sees A's
+  // committed row and throws 409 before ever touching the Router thread.
+  // The bug only lives in the window where both calls' pre-checks see
+  // nothing yet and both reach `createThreadRecord` for the same
+  // deterministic thread id — which only real concurrency can exercise.
+  const owner = randomUUID();
+  const secondAdmin = randomUUID();
+  const { workspaceId } = await f.workspace(
+    [
+      [owner, "owner"],
+      [secondAdmin, "admin"],
+    ],
+    { kind: "team" },
+  );
+  const callerA = { workspaceId, userId: owner };
+  const callerB = { workspaceId, userId: secondAdmin };
+
+  const [resultA, resultB] = await Promise.allSettled([
+    f.service.enable(callerA),
+    f.service.enable(callerB),
+  ]);
+  const settled: PromiseSettledResult<unknown>[] = [resultA, resultB];
+
+  const fulfilled = settled.filter((result) => result.status === "fulfilled");
+  const rejected = settled.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1, "exactly one enable succeeds");
+  assert.equal(rejected.length, 1, "exactly one enable is refused");
+
+  const { statusCode, code } = (rejected[0] as PromiseRejectedResult)
+    .reason as {
+    statusCode?: number;
+    code?: string;
+  };
+  assert.equal(statusCode, 409);
+  assert.equal(code, "ASSISTANT_ALREADY_ENABLED");
+
+  // Exactly one assistant row, pointing at exactly one Router thread.
+  const row = await f.assistantRow(workspaceId);
+  assert.ok(row);
+  const threads = await f.schema.db
+    .select()
+    .from(f.schema.threads)
+    .where(
+      and(
+        eq(f.schema.threads.workspaceId, workspaceId),
+        eq(f.schema.threads.origin, "assistant_router"),
+      ),
+    );
+  assert.equal(threads.length, 1);
+  assert.equal(threads[0]!.id, row!.routerThreadId);
+});
+
 test("get on someone else's workspace is a 404, not a 403", async () => {
   const { workspaceId } = await teamWithOwnerAndMember();
   const outsider = randomUUID();
@@ -162,6 +217,36 @@ test("the same idempotency key posted twice leaves one feed item and one trigger
   assert.equal(triggers[0]!.status, "pending_eval");
 
   assert.deepEqual(f.kicked, [assistant.id]);
+});
+
+test("a feed cursor naming another tenant's item is ignored, not a cross-tenant leak or an error", async () => {
+  const tenantA = await teamWithOwnerAndMember();
+  await f.service.enable(tenantA.ownerCaller);
+  const { item: itemA } = await f.service.postMessage(tenantA.ownerCaller, {
+    text: "Tenant A's own message",
+    idempotencyKey: randomUUID(),
+  });
+
+  const tenantB = await teamWithOwnerAndMember();
+  await f.service.enable(tenantB.ownerCaller);
+  const { item: itemB } = await f.service.postMessage(tenantB.ownerCaller, {
+    text: "Tenant B's own message",
+    idempotencyKey: randomUUID(),
+  });
+
+  // Naming tenant B's own feed item as the cursor for tenant A's feed must
+  // not reach across tenants: the lookup is scoped (team, workspace,
+  // assistant), so the cursor is simply not found and treated as none at
+  // all — tenant A's page comes back from the top, never tenant B's rows.
+  const page = await f.service.listFeed(tenantA.ownerCaller, {
+    before: itemB.id,
+  });
+  assert.deepEqual(page.items.map((item) => item.id), [itemA.id]);
+
+  const otherPage = await f.service.listFeed(tenantB.ownerCaller, {
+    before: itemA.id,
+  });
+  assert.deepEqual(otherPage.items.map((item) => item.id), [itemB.id]);
 });
 
 test("a paused assistant refuses a new member message", async () => {

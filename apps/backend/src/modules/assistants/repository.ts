@@ -101,14 +101,26 @@ export async function updateAssistantRow(
 
 // ── feed items ───────────────────────────────────────────────────────────
 
+/**
+ * One feed item, scoped to its tenant and assistant (every caller already
+ * has all three at hand) — a bare id lookup would let an id from another
+ * workspace or team match, which tenant isolation never allows.
+ */
 export async function findFeedItemRow(
-  id: string,
+  input: { id: string; teamId: string; workspaceId: string; assistantId: string },
   executor: Executor = db,
 ): Promise<AssistantFeedItemRow | null> {
   const [row] = await executor
     .select()
     .from(assistantFeedItems)
-    .where(eq(assistantFeedItems.id, id))
+    .where(
+      and(
+        eq(assistantFeedItems.id, input.id),
+        eq(assistantFeedItems.teamId, input.teamId),
+        eq(assistantFeedItems.workspaceId, input.workspaceId),
+        eq(assistantFeedItems.assistantId, input.assistantId),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -148,16 +160,26 @@ export async function insertFeedItemRow(
 
 /**
  * A page of one assistant's feed, newest first. `before` names a feed item
- * already seen; an unknown one is treated as no cursor at all (the newest
- * page) rather than an error, since it can only be a stale link.
+ * already seen; one that is unknown, or belongs to another workspace or
+ * team (the lookup is tenant-scoped, see `findFeedItemRow`), is treated as
+ * no cursor at all (the newest page) rather than an error or a 404, since
+ * either case can only be a stale or foreign link, never a page the caller
+ * is owed more of.
  */
 export async function listFeedItemRows(input: {
+  teamId: string;
+  workspaceId: string;
   assistantId: string;
   before?: string;
   limit: number;
 }): Promise<AssistantFeedItemRow[]> {
   const beforeRow = input.before
-    ? await findFeedItemRow(input.before)
+    ? await findFeedItemRow({
+        id: input.before,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        assistantId: input.assistantId,
+      })
     : null;
   return db
     .select()
@@ -182,14 +204,22 @@ export async function listFeedItemRows(input: {
 
 // ── triggers ─────────────────────────────────────────────────────────────
 
+/** One trigger, scoped to its tenant and assistant — see `findFeedItemRow`. */
 export async function findTriggerRow(
-  id: string,
+  input: { id: string; teamId: string; workspaceId: string; assistantId: string },
   executor: Executor = db,
 ): Promise<AssistantTriggerRow | null> {
   const [row] = await executor
     .select()
     .from(assistantTriggers)
-    .where(eq(assistantTriggers.id, id))
+    .where(
+      and(
+        eq(assistantTriggers.id, input.id),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
+        eq(assistantTriggers.assistantId, input.assistantId),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }

@@ -200,6 +200,21 @@ export class AssistantService {
    * its creation is idempotent (same id, `on conflict do nothing`), creating
    * it first and failing the transaction after (e.g. a concurrent enable)
    * only ever leaves behind a harmless, unreferenced row.
+   *
+   * Two container admins racing to enable the same workspace both compute
+   * the same deterministic thread id. `createThreadRecord`'s own replay path
+   * (used by every caller, not something to change here) re-reads the row by
+   * `created_by = caller`, so the *loser* of the race — whose insert hit the
+   * winner's `on conflict do nothing` — finds no row of its own and throws a
+   * plain, untyped `Error`. We look the thread up first and skip creating it
+   * when it is already there; if it still isn't there yet and creation then
+   * fails, we look again rather than assume the failure is real — the
+   * winner's commit and our lookup are not ordered, so a thread that exists
+   * now is the race resolving in our favor, harmless, and left for the
+   * `assistants`-row transaction below (which already turns a concurrent
+   * insert into `ASSISTANT_ALREADY_ENABLED`) to settle who actually enabled
+   * it. Only a thread that is still missing after that recheck is a genuine
+   * failure, and is rethrown rather than swallowed.
    */
   async enable(caller: Caller): Promise<Assistant> {
     const access = await this.requireAccess(caller);
@@ -214,19 +229,33 @@ export class AssistantService {
     if (existing) throw alreadyEnabled();
 
     const routerThreadId = deterministicId("assistant-router", caller.workspaceId);
-    const visibility = await this.routerThreadVisibility(access.teamId);
-    const { createThreadRecord } = await import(
+    const { createThreadRecord, findThreadRecord } = await import(
       "../threads/thread/repository"
     );
-    await createThreadRecord({
-      id: routerThreadId,
-      teamId: access.teamId,
-      workspaceId: caller.workspaceId,
-      title: "Workspace assistant",
-      createdBy: caller.userId,
-      origin: "assistant_router",
-      ...(visibility ? { visibility } : {}),
+    const threadScope = { teamId: access.teamId, workspaceId: caller.workspaceId };
+    const priorThread = await findThreadRecord({
+      ...threadScope,
+      threadId: routerThreadId,
     });
+    if (!priorThread) {
+      const visibility = await this.routerThreadVisibility(access.teamId);
+      try {
+        await createThreadRecord({
+          id: routerThreadId,
+          ...threadScope,
+          title: "Workspace assistant",
+          createdBy: caller.userId,
+          origin: "assistant_router",
+          ...(visibility ? { visibility } : {}),
+        });
+      } catch (error) {
+        const nowThere = await findThreadRecord({
+          ...threadScope,
+          threadId: routerThreadId,
+        });
+        if (!nowThere) throw error;
+      }
+    }
 
     const now = new Date();
     let row: AssistantRow;
@@ -409,7 +438,12 @@ export class AssistantService {
       caller.userId,
       input.idempotencyKey,
     );
-    const existing = await findFeedItemRow(id);
+    const existing = await findFeedItemRow({
+      id,
+      teamId: assistant.teamId,
+      workspaceId: assistant.workspaceId,
+      assistantId: assistant.id,
+    });
     if (existing) return { item: presentFeedItem(existing), created: false };
 
     if (assistant.status === "paused") throw pausedError();
@@ -443,7 +477,12 @@ export class AssistantService {
     } catch (error) {
       if (uniqueViolation(error)) {
         // Raced with another request carrying the same idempotency key.
-        const replay = await findFeedItemRow(id);
+        const replay = await findFeedItemRow({
+          id,
+          teamId: assistant.teamId,
+          workspaceId: assistant.workspaceId,
+          assistantId: assistant.id,
+        });
         if (replay) return { item: presentFeedItem(replay), created: false };
       }
       throw error;
@@ -461,6 +500,8 @@ export class AssistantService {
     const assistant = await this.requireAssistant(caller, access);
     const limit = input.limit ?? DEFAULT_FEED_PAGE;
     const rows = await listFeedItemRows({
+      teamId: assistant.teamId,
+      workspaceId: assistant.workspaceId,
       assistantId: assistant.id,
       before: input.before,
       limit: limit + 1,
@@ -558,7 +599,15 @@ export class AssistantService {
     let updated: AssistantTicketRow;
     try {
       updated = await db.transaction(async (tx) => {
-        const existingTrigger = await findTriggerRow(triggerId, tx);
+        const existingTrigger = await findTriggerRow(
+          {
+            id: triggerId,
+            teamId: assistant.teamId,
+            workspaceId: assistant.workspaceId,
+            assistantId: assistant.id,
+          },
+          tx,
+        );
         if (!existingTrigger) {
           await insertTriggerRow(tx, {
             id: triggerId,
