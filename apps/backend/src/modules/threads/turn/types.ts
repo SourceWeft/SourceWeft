@@ -201,6 +201,13 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
    * `agent/middleware/run-credit-cap.ts`.
    */
   creditCap?: number;
+  /**
+   * Host-set values for the conversation's origin provider (e.g. which batch
+   * or ticket the run is for). Set by the host when it starts the run, never
+   * exposed in an HTTP request schema; at most 1 KB serialized. See
+   * `agent/origin-providers.ts`.
+   */
+  hostContext?: Record<string, string>;
 };
 
 export type AgentCheckpointRef = {
@@ -315,6 +322,8 @@ export type PreparedThreadTurn = {
   unattended?: true;
   /** Host-set credit ceiling for this run; see `StreamThreadEventInput.creditCap`. */
   creditCap?: number;
+  /** Host-set origin-provider values; see `StreamThreadEventInput.hostContext`. */
+  hostContext?: Record<string, string>;
   mcpInstallIds: string[];
   enabledSkills: EnabledSkillDescriptor[];
   invokedSkillIds: string[];

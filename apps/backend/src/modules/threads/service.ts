@@ -6,7 +6,7 @@ import { findCitationByMessageRank } from "../citations";
 import { sharingService } from "../sharing";
 import { revokeShareLink } from "../sharing/store";
 import { ContentError } from "../content/errors";
-import type { MessageRecord } from "../content/types";
+import type { MessageRecord, ThreadRecord } from "../content/types";
 import { requireContentWorkspace } from "../workspace/guards";
 import { workspaceService } from "../workspace";
 import { canViewThread } from "../workspace/content-visibility";
@@ -75,7 +75,7 @@ import {
   filterOrganizationMemberIds,
   findUserIdentitiesByIds,
 } from "../workspace/store";
-import type { ChatThreadRunMode } from "./durable/types";
+import type { ChatThreadRunMode, ChatThreadRunRecord } from "./durable/types";
 import type { StreamThreadEventInput } from "./turn/types";
 import { projectThreadMessageForClient } from "./message-client-view";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
@@ -219,6 +219,214 @@ const DEFAULT_THREAD_SEARCH_LIMIT = 30;
  */
 const SCHEDULED_TURN_START_KEYS = 5;
 const CHAT_RUN_START_FAILED_CODE = "CHAT_RUN_START_FAILED";
+
+/** Largest serialized `hostContext` a host may attach to a run, in bytes. */
+const HOST_CONTEXT_MAX_BYTES = 1024;
+
+/**
+ * A turn a host starts for a conversation it owns: a scheduled run, or a
+ * workspace assistant's Router or ticket run. Same contract as
+ * `StartScheduledTurnInput`, plus what differs between hosts.
+ */
+export type StartHostTurnInput = StartScheduledTurnInput & {
+  origin: "scheduled" | "assistant_router" | "assistant_ticket";
+  /** Visibility of a newly created conversation. Default private. */
+  visibility?: "private" | "workspace";
+  /** Queue priority of the run's job. Default the scheduled-run priority. */
+  jobPriority?: number;
+  /** Host-set credit ceiling for the run; see `StreamThreadEventInput.creditCap`. */
+  creditCap?: number;
+  /**
+   * Host-set values handed to the origin provider with the turn (see
+   * `agent/origin-providers.ts`). At most 1 KB serialized.
+   */
+  hostContext?: Record<string, string>;
+  /**
+   * The conversation already exists and is reused, possibly by a different
+   * member than the one who created it (a Router conversation, created once by
+   * its host). Nothing is created: the conversation must exist in this
+   * workspace with this origin and be visible to `userId`, or the start is
+   * refused with 404. Its title, visibility, model settings and source
+   * selection are left as they are, so `sourceIds` may not be given.
+   */
+  existingThread?: boolean;
+};
+
+function assertHostContext(hostContext: StartHostTurnInput["hostContext"]) {
+  if (hostContext === undefined) return;
+  const valid =
+    hostContext !== null &&
+    typeof hostContext === "object" &&
+    !Array.isArray(hostContext) &&
+    Object.values(hostContext).every((value) => typeof value === "string");
+  if (!valid) {
+    throw new ContentError(
+      400,
+      "HOST_CONTEXT_INVALID",
+      "Host context must map names to strings",
+    );
+  }
+  if (
+    Buffer.byteLength(JSON.stringify(hostContext), "utf8") >
+    HOST_CONTEXT_MAX_BYTES
+  ) {
+    throw new ContentError(
+      400,
+      "HOST_CONTEXT_TOO_LARGE",
+      `Host context is larger than ${HOST_CONTEXT_MAX_BYTES} bytes`,
+    );
+  }
+}
+
+/**
+ * Starts a host-owned turn: an ordinary durable chat run, as `userId`, in a
+ * conversation of the host's origin. The run goes through the same queue,
+ * worker and turn pipeline as a turn a person sends; it is marked
+ * `unattended`, so it binds read-class tools only, plus whatever the origin's
+ * provider adds (see `agent/origin-providers.ts`).
+ *
+ * Safe to call again with the same ids. Thread creation and run creation
+ * are not one transaction: a crash in between leaves an empty conversation
+ * that the next call picks up.
+ */
+export async function startHostTurn(input: StartHostTurnInput): Promise<{
+  thread: ThreadRecord;
+  run: ChatThreadRunRecord;
+  created: boolean;
+}> {
+  assertHostContext(input.hostContext);
+  if (
+    input.creditCap !== undefined &&
+    !(Number.isFinite(input.creditCap) && input.creditCap >= 0)
+  ) {
+    throw new ContentError(
+      400,
+      "CREDIT_CAP_INVALID",
+      "A run's credit cap must be a non-negative number",
+    );
+  }
+  if (input.existingThread && (input.sourceIds?.length ?? 0) > 0) {
+    throw new ContentError(
+      400,
+      "HOST_TURN_SOURCES_ON_EXISTING_THREAD",
+      "Sources can only be selected when the conversation is created",
+    );
+  }
+  const workspace = await requireContentWorkspace({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+  });
+  const scope = {
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+  };
+
+  let idempotencyKey: string | null = null;
+  for (let attempt = 0; attempt < SCHEDULED_TURN_START_KEYS; attempt += 1) {
+    const key =
+      attempt === 0
+        ? input.idempotencyKey
+        : `${input.idempotencyKey}:retry-${attempt}`;
+    const existingRun = await findChatThreadRunByIdempotencyKey({
+      ...scope,
+      idempotencyKey: key,
+    });
+    if (!existingRun) {
+      idempotencyKey = key;
+      break;
+    }
+    const existingThread = await findThreadRecord({
+      ...scope,
+      threadId: existingRun.threadId,
+    });
+    if (
+      existingRun.userId !== input.userId ||
+      existingRun.threadId !== input.threadId ||
+      !existingThread
+    ) {
+      throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
+    }
+    const neverStarted =
+      existingRun.status === "failed" &&
+      existingRun.errorCode === CHAT_RUN_START_FAILED_CODE;
+    if (!neverStarted) {
+      return { thread: existingThread, run: existingRun, created: false };
+    }
+  }
+  if (!idempotencyKey) {
+    throw new ContentError(
+      503,
+      input.origin === "scheduled"
+        ? "SCHEDULED_TURN_START_FAILED"
+        : "HOST_TURN_START_FAILED",
+      input.origin === "scheduled"
+        ? "The scheduled run could not be queued"
+        : "The run could not be queued",
+    );
+  }
+
+  let thread: ThreadRecord;
+  if (input.existingThread) {
+    const existing = await findThreadRecord({
+      ...scope,
+      threadId: input.threadId,
+    });
+    if (
+      !existing ||
+      existing.origin !== input.origin ||
+      !canViewThread(input.userId, existing)
+    ) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+    thread = existing;
+  } else {
+    const modelSettings = await pruneUnavailableThreadModelAliases(
+      normalizeThreadModelSettings(input.modelSettings),
+    );
+    await validateThreadModelSettings(modelSettings);
+    thread = await createThreadRecord({
+      id: input.threadId,
+      ...scope,
+      title: normalizeContentTitle(input.title, "New Thread"),
+      createdBy: input.userId,
+      modelSettings: await resolveThreadModelSettingsSnapshots(modelSettings),
+      origin: input.origin,
+      ...(input.visibility ? { visibility: input.visibility } : {}),
+    });
+    // A turn may only read sources its conversation has selected.
+    await seedThreadSourceSelection({
+      ...scope,
+      threadId: thread.id,
+      sourceIds: input.sourceIds ?? [],
+    });
+  }
+
+  const request: StreamThreadEventInput = {
+    workspaceId: input.workspaceId,
+    threadId: thread.id,
+    userId: input.userId,
+    content: input.content,
+    tools: input.tools,
+    timezone: input.timezone,
+    idempotencyKey,
+    llm: input.llm,
+    unattended: true,
+    ...(input.creditCap !== undefined ? { creditCap: input.creditCap } : {}),
+    ...(input.hostContext !== undefined
+      ? { hostContext: { ...input.hostContext } }
+      : {}),
+  };
+  const { run, created } = await durableChatRunService.getOrCreateRun({
+    workspaceId: input.workspaceId,
+    threadId: thread.id,
+    userId: input.userId,
+    idempotencyKey,
+    mode: "send",
+    request,
+    jobPriority: input.jobPriority ?? SCHEDULED_TURN_JOB_PRIORITY,
+  });
+  return { thread, run, created };
+}
 
 class ContentThreadService {
   async listThreads(input: {
@@ -1038,101 +1246,10 @@ class ContentThreadService {
    * same queue, worker and turn pipeline as a turn a person sends; the only
    * differences are the conversation's origin, the lower queue priority and
    * the `unattended` mark that makes the turn bind read-class tools only.
-   *
-   * Safe to call again with the same ids. Thread creation and run creation
-   * are not one transaction: a crash in between leaves an empty conversation
-   * that the next call picks up.
+   * See `startHostTurn`.
    */
   async startScheduledTurn(input: StartScheduledTurnInput) {
-    const workspace = await requireContentWorkspace({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-    });
-    const scope = {
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-    };
-
-    let idempotencyKey: string | null = null;
-    for (let attempt = 0; attempt < SCHEDULED_TURN_START_KEYS; attempt += 1) {
-      const key =
-        attempt === 0
-          ? input.idempotencyKey
-          : `${input.idempotencyKey}:retry-${attempt}`;
-      const existingRun = await findChatThreadRunByIdempotencyKey({
-        ...scope,
-        idempotencyKey: key,
-      });
-      if (!existingRun) {
-        idempotencyKey = key;
-        break;
-      }
-      const existingThread = await findThreadRecord({
-        ...scope,
-        threadId: existingRun.threadId,
-      });
-      if (
-        existingRun.userId !== input.userId ||
-        existingRun.threadId !== input.threadId ||
-        !existingThread
-      ) {
-        throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
-      }
-      const neverStarted =
-        existingRun.status === "failed" &&
-        existingRun.errorCode === CHAT_RUN_START_FAILED_CODE;
-      if (!neverStarted) {
-        return { thread: existingThread, run: existingRun, created: false };
-      }
-    }
-    if (!idempotencyKey) {
-      throw new ContentError(
-        503,
-        "SCHEDULED_TURN_START_FAILED",
-        "The scheduled run could not be queued",
-      );
-    }
-
-    const modelSettings = await pruneUnavailableThreadModelAliases(
-      normalizeThreadModelSettings(input.modelSettings),
-    );
-    await validateThreadModelSettings(modelSettings);
-    const thread = await createThreadRecord({
-      id: input.threadId,
-      ...scope,
-      title: normalizeContentTitle(input.title, "New Thread"),
-      createdBy: input.userId,
-      modelSettings: await resolveThreadModelSettingsSnapshots(modelSettings),
-      origin: "scheduled",
-    });
-    // A turn may only read sources its conversation has selected.
-    await seedThreadSourceSelection({
-      ...scope,
-      threadId: thread.id,
-      sourceIds: input.sourceIds ?? [],
-    });
-
-    const request: StreamThreadEventInput = {
-      workspaceId: input.workspaceId,
-      threadId: thread.id,
-      userId: input.userId,
-      content: input.content,
-      tools: input.tools,
-      timezone: input.timezone,
-      idempotencyKey,
-      llm: input.llm,
-      unattended: true,
-    };
-    const { run, created } = await durableChatRunService.getOrCreateRun({
-      workspaceId: input.workspaceId,
-      threadId: thread.id,
-      userId: input.userId,
-      idempotencyKey,
-      mode: "send",
-      request,
-      jobPriority: SCHEDULED_TURN_JOB_PRIORITY,
-    });
-    return { thread, run, created };
+    return startHostTurn({ ...input, origin: "scheduled" });
   }
 
   async getCitationDetail(input: {
@@ -1158,11 +1275,24 @@ class ContentThreadService {
       throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     }
 
-    const thread = await findThreadRecord({ teamId: workspace.organizationId, workspaceId: workspace.id, threadId: citation.threadId });
-    if (!thread || !canViewThread(input.userId, thread)) throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
+    const thread = await findThreadRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: citation.threadId,
+    });
+    if (!thread || !canViewThread(input.userId, thread))
+      throw new ContentError(404, "CITATION_NOT_FOUND", "Citation not found");
     const snapshot = toObjectRecord(citation.metadataJson);
-    if (!snapshot) throw new ContentError(500, "CITATION_INVALID", "Citation metadata is invalid.");
-    const fileReference = snapshot.fileReference === undefined ? undefined : fileReferenceSchema.parse(snapshot.fileReference);
+    if (!snapshot)
+      throw new ContentError(
+        500,
+        "CITATION_INVALID",
+        "Citation metadata is invalid.",
+      );
+    const fileReference =
+      snapshot.fileReference === undefined
+        ? undefined
+        : fileReferenceSchema.parse(snapshot.fileReference);
     const sourceTitleSnapshot = getMetadataString(snapshot, "sourceTitle");
     const chunkNoSnapshot = getMetadataNumber(snapshot, "chunkNo");
     const excerptSnapshot = getMetadataString(snapshot, "excerpt");
@@ -1192,7 +1322,10 @@ class ContentThreadService {
         // An anchored quote is the raw passage, markup included.
         excerpt: hasSpan
           ? cleanCitationExcerpt(citation.quoteText ?? "")
-          : (citation.quoteText ?? citation.chunkContent ?? excerptSnapshot ?? ""),
+          : (citation.quoteText ??
+            citation.chunkContent ??
+            excerptSnapshot ??
+            ""),
         content: contentSnapshot,
         ...(support ? { support } : {}),
         ...(hasSpan

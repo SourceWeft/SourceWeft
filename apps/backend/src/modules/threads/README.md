@@ -107,6 +107,19 @@ sandbox, no `askUser`, nothing that asks for approval, no automatic title, and
 a `<scheduled_run>` block in the runtime prompt. A later turn a person sends
 in the same conversation is an ordinary attended turn.
 
+`startScheduledTurn` is a thin wrapper over `startHostTurn`, which other hosts
+(the workspace assistant) use with their own origin (`assistant_router`,
+`assistant_ticket`), visibility, queue priority, `creditCap` and a small
+host-only `hostContext` (at most 1 KB). With `existingThread: true` it reuses
+a conversation the host created earlier instead of creating one, so another
+member can start the next run in it. A host equips turns in its conversations
+by registering an origin provider at worker startup
+(`agent/origin-providers.ts`): `replaceTools: true` binds the provider's tools
+only (no sub-agents, no `task`, read-only filesystem), `replaceTools: false`
+adds them on top of the unattended allow-list; either can append a runtime
+prompt fragment. Threads never imports the host. `assistant_router`
+conversations are left out of the chat list.
+
 ## Traps
 
 1. **Stale detection has two thresholds.** A `queued` run with no `jobId` is

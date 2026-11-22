@@ -272,6 +272,9 @@ export async function listThreadRecordsByWorkspace(input: {
         and workspace_id = $2
         and archived = ${input.archived ? "true" : "false"}
         and parent_thread_id is null
+        -- A workspace assistant's Router conversation is its own working
+        -- thread, not a chat anyone opened; it stays out of the chat list.
+        and origin <> 'assistant_router'
         and ${visibility}
         ${input.archived ? "" : `and not exists (${VIEWER_PIN_SQL})`}
         ${cursorSql}

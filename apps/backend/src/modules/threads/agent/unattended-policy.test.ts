@@ -118,6 +118,19 @@ test("a tool that would ask for approval is never bound, even an allow-listed on
   );
 });
 
+test("a host's extra tools are allowed on top of the allow-list, but never a gated one", () => {
+  assert.deepEqual(
+    filterToolsForUnattendedRun(
+      named("search_sources", "report", "publish_artifact", "say"),
+      {
+        gatedToolNames: new Set(["say"]),
+        extraAllowed: new Set(["report", "say"]),
+      },
+    ).map((tool) => tool.name),
+    ["search_sources", "report"],
+  );
+});
+
 test("the filesystem is read-only: read tools on a deny-write policy", () => {
   assert.deepEqual(UNATTENDED_FILESYSTEM_PERMISSIONS.at(-1), {
     operations: ["write"],

@@ -2013,6 +2013,9 @@ export async function prepareThreadTurn(
     failurePersistence: input.failurePersistence ?? "persist-error-turn",
     ...(input.unattended ? { unattended: true as const } : {}),
     ...(input.creditCap !== undefined ? { creditCap: input.creditCap } : {}),
+    ...(input.hostContext !== undefined
+      ? { hostContext: input.hostContext }
+      : {}),
     // The web client sends the MCP selection inside tools.mcp (sources-hub
     // picker); the top-level field remains for API callers. Without this
     // fallback the picker selection never reached the turn at all.
