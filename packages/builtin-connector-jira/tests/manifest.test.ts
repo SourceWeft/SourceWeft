@@ -36,8 +36,8 @@ test("backend manifest exposes the Jira scopes, auth params, empty sync resource
   });
 
   assert.equal(manifest.type, "jira");
-  assert.deepEqual(manifest.auth.scopes, [...JIRA_SCOPES]);
-  assert.equal(manifest.auth.scopes.length, 4);
+  assert.deepEqual(oauth2Auth(manifest).scopes, [...JIRA_SCOPES]);
+  assert.equal(oauth2Auth(manifest).scopes.length, 4);
   assert.deepEqual(oauth2Auth(manifest).authorizationParams, {
     audience: "api.atlassian.com",
     prompt: "consent",

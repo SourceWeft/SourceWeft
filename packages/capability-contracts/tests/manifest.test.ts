@@ -448,6 +448,68 @@ test("capability-manifest.connector parses connector metadata contributions", ()
   );
 });
 
+test("capability-manifest.connector parses a none auth connector", () => {
+  const manifest = capabilityManifestSchema.parse({
+    schemaVersion: 1,
+    id: "sourceweft/rss",
+    kind: "connector",
+    name: "RSS Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "rss",
+        title: "RSS / Atom feed",
+        auth: { kind: "none" },
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [{ type: "feed_item", title: "Feed item" }],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  });
+
+  assert.equal(manifest.kind, "connector");
+  assert.deepEqual(manifest.contributes.connectors[0]?.auth, { kind: "none" });
+});
+
+test("capability-manifest.connector applies oauth2 auth defaults", () => {
+  const manifest = capabilityManifestSchema.parse({
+    schemaVersion: 1,
+    id: "sourceweft/notion",
+    kind: "connector",
+    name: "Notion Connector",
+    version: "0.1.0",
+    connectors: [
+      {
+        id: "notion",
+        title: "Notion",
+        auth: {
+          kind: "oauth2",
+          authorizationUrl: "https://www.notion.so/install-integration",
+          tokenUrl: "https://api.notion.com/v1/oauth/token",
+        },
+        sync: {
+          supportsIncremental: true,
+          defaultFrequencyMinutes: 360,
+          resources: [{ type: "notion_page", title: "Notion page" }],
+        },
+        actions: [],
+        configSchema: {},
+      },
+    ],
+  });
+
+  const auth = manifest.contributes.connectors[0]?.auth;
+  assert.equal(auth?.kind, "oauth2");
+  if (auth?.kind === "oauth2") {
+    assert.deepEqual(auth.scopes, []);
+    assert.equal(auth.sendScope, true);
+  }
+});
+
 test("capability-manifest.connector rejects malformed connector metadata", () => {
   const result = parseCapabilityManifest({
     schemaVersion: 1,

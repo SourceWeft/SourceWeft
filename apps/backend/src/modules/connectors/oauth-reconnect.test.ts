@@ -65,6 +65,7 @@ const registry = {
       : {
           getManifest: () => manifest,
           exchangeOAuthCode: mocks.exchange,
+          refreshOAuthToken: vi.fn(),
         },
 };
 const service = new ConnectorOAuthService(registry as never);

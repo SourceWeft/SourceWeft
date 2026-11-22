@@ -82,7 +82,7 @@ test("exchange maps the GitHub user", async () => {
     redirectUri: "https://sourceweft.example/v1/connectors/oauth/github/callback",
     scopes: [],
   };
-  const token = await adapter(fetcher).exchangeOAuthCode(input);
+  const token = await adapter(fetcher).exchangeOAuthCode!(input);
 
   assert.equal(token.accessToken, "at-1");
   assert.equal(token.refreshToken, "rt-1");
@@ -103,7 +103,7 @@ test("refresh delegates and returns the rotated token", async () => {
       json({ access_token: "at-2", refresh_token: "rt-rotated", expires_in: 28800 }),
   });
   const input: OAuthRefreshInput = { refreshToken: "rt-old", scopes: [] };
-  const token = await adapter(fetcher).refreshOAuthToken(input);
+  const token = await adapter(fetcher).refreshOAuthToken!(input);
 
   assert.equal(token.accessToken, "at-2");
   assert.equal(token.refreshToken, "rt-rotated");
@@ -122,7 +122,7 @@ test("refresh delegates and returns the rotated token", async () => {
 test("refresh without a configured secret makes no request", async () => {
   const { fetcher, calls } = router({});
   await assert.rejects(
-    adapter(fetcher, { clientSecret: "" }).refreshOAuthToken({
+    adapter(fetcher, { clientSecret: "" }).refreshOAuthToken!({
       refreshToken: "rt",
       scopes: [],
     }),
@@ -137,7 +137,7 @@ test("refresh without a configured secret makes no request", async () => {
 test("exchange without a configured client id makes no request", async () => {
   const { fetcher, calls } = router({});
   await assert.rejects(
-    adapter(fetcher, { clientId: "" }).exchangeOAuthCode({
+    adapter(fetcher, { clientId: "" }).exchangeOAuthCode!({
       code: "c",
       redirectUri: "u",
       scopes: [],

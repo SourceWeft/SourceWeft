@@ -99,7 +99,7 @@ test("exchange maps the Atlassian account", async () => {
     redirectUri: "https://sourceweft.example/v1/connectors/oauth/jira/callback",
     scopes: ["read:jira-work"],
   };
-  const token = await jira.exchangeOAuthCode(input);
+  const token = await jira.exchangeOAuthCode!(input);
 
   assert.equal(token.accessToken, "access-token");
   assert.equal(token.refreshToken, "refresh-token");
@@ -125,7 +125,7 @@ test("exchange falls back displayName to email, then account id", async () => {
   }) as typeof fetch;
 
   const jira = adapter(fetcher);
-  const token = await jira.exchangeOAuthCode({
+  const token = await jira.exchangeOAuthCode!({
     code: "auth-code",
     redirectUri: "https://sourceweft.example/v1/connectors/oauth/jira/callback",
     scopes: [],
@@ -156,7 +156,7 @@ test("refresh delegates and returns the rotated token", async () => {
     refreshToken: "old-refresh-token",
     scopes: [],
   };
-  const token = await jira.refreshOAuthToken(input);
+  const token = await jira.refreshOAuthToken!(input);
   assert.equal(token.accessToken, "new-access-token");
   assert.equal(token.refreshToken, "new-refresh-token");
   // Refresh delegates verbatim: it does not call /me or add identity fields.
@@ -166,7 +166,7 @@ test("refresh delegates and returns the rotated token", async () => {
 test("refresh without a configured secret makes no request", async () => {
   const jira = adapter(neverCalledFetcher(), { clientSecret: "" });
   await assert.rejects(
-    jira.refreshOAuthToken({ refreshToken: "old-refresh-token", scopes: [] }),
+    jira.refreshOAuthToken!({ refreshToken: "old-refresh-token", scopes: [] }),
     (error: unknown) =>
       error instanceof AtlassianApiError &&
       error.statusCode === 503 &&
@@ -177,7 +177,7 @@ test("refresh without a configured secret makes no request", async () => {
 test("exchange without a configured client id makes no request", async () => {
   const jira = adapter(neverCalledFetcher(), { clientId: "" });
   await assert.rejects(
-    jira.exchangeOAuthCode({
+    jira.exchangeOAuthCode!({
       code: "auth-code",
       redirectUri: "https://sourceweft.example/v1/connectors/oauth/jira/callback",
       scopes: [],

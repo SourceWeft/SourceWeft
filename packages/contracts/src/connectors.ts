@@ -112,9 +112,19 @@ const brokeredAuthManifestSchema = z.object({
   scopes: z.array(z.string().min(1)),
 });
 
+/**
+ * A connector that needs no account authorization (e.g. a public feed). It
+ * has no OAuth exchange or refresh; its source is read with the connector's
+ * own configuration alone.
+ */
+const noneAuthManifestSchema = z.object({
+  kind: z.literal("none"),
+});
+
 const connectorAuthManifestSchema = z.discriminatedUnion("kind", [
   oauth2AuthManifestSchema,
   brokeredAuthManifestSchema,
+  noneAuthManifestSchema,
 ]);
 
 export const connectorResourceSpecSchema = z.object({
@@ -1030,8 +1040,10 @@ export interface ConnectorPersonalDataSupport {
 export interface ConnectorAdapter {
   capabilityId?: string;
   getManifest(): ConnectorManifest;
-  exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
-  refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  /** Standard OAuth2 only; absent on `none` and brokered adapters. */
+  exchangeOAuthCode?(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
+  /** Standard OAuth2 only; absent on `none` and brokered adapters. */
+  refreshOAuthToken?(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
   /**
    * Brokered auth only: start a broker-hosted authorization attempt and
    * return the URL to send the owner to.

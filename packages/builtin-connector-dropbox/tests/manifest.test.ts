@@ -34,7 +34,7 @@ test("backend manifest exposes the Dropbox scopes, client id and redirect uri", 
   });
 
   assert.equal(manifest.type, "dropbox");
-  assert.deepEqual(manifest.auth.scopes, [...DROPBOX_SCOPES]);
+  assert.deepEqual(oauth2Auth(manifest).scopes, [...DROPBOX_SCOPES]);
   assert.deepEqual(oauth2Auth(manifest).authorizationParams, {
     token_access_type: "offline",
     client_id: "app-key",

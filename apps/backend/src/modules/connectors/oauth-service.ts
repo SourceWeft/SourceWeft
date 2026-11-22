@@ -8,6 +8,7 @@ import {
   type TeamSecretCipher,
 } from "../../shared/team-secrets";
 import { ConnectorError, toConnectorError } from "./errors";
+import { requireOAuthMethods } from "./oauth-methods";
 import { isRetryableOAuthRefreshError } from "./oauth-refresh-error";
 import { requireConnectorWorkspace } from "./permissions";
 import {
@@ -292,7 +293,10 @@ export class ConnectorOAuthService {
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
     assertOAuth2Manifest(manifest);
-    const tokenSet = await adapter.exchangeOAuthCode({
+    const tokenSet = await requireOAuthMethods(
+      adapter,
+      input.connectorType,
+    ).exchangeOAuthCode({
       code: input.code,
       redirectUri: resolveCallbackUrl({
         manifest,
@@ -370,7 +374,10 @@ export class ConnectorOAuthService {
           "OAuth callback code is required",
         );
       }
-      tokenSet = await adapter.exchangeOAuthCode({
+      tokenSet = await requireOAuthMethods(
+        adapter,
+        input.connectorType,
+      ).exchangeOAuthCode({
         code: input.code,
         redirectUri: resolveCallbackUrl({
           manifest,
@@ -432,7 +439,10 @@ export class ConnectorOAuthService {
     tokenSet: OAuthTokenSet;
   }) {
     const { tokenSet } = input;
-    const scopes = normalizeScopes(tokenSet, input.manifest.auth.scopes);
+    // `none` connectors never store an authorization, so they declare no scopes.
+    const manifestScopes =
+      input.manifest.auth.kind === "none" ? [] : input.manifest.auth.scopes;
+    const scopes = normalizeScopes(tokenSet, manifestScopes);
     const displayName =
       tokenSet.displayName ??
       tokenSet.providerAccountEmail ??
@@ -915,7 +925,10 @@ export class ConnectorOAuthService {
     // rotated the single-use token never marks the account.
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
-    const providerCall = adapter.refreshOAuthToken({
+    const providerCall = requireOAuthMethods(
+      adapter,
+      locked.connectorType,
+    ).refreshOAuthToken({
       refreshToken,
       scopes: locked.scopes,
     });
