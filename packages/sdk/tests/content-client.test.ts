@@ -139,6 +139,40 @@ test("skill submissions address the async ingest endpoints with encoded ids and 
   assert.equal("submitRegistrySkill" in client, false);
 });
 
+test("research methods address the source-research routes with encoded ids", async () => {
+  const calls: [string, string, unknown?][] = [];
+  const record = (method: string) => async (path: string, body?: unknown) => {
+    calls.push(body === undefined ? [method, path] : [method, path, body]);
+    return {};
+  };
+  const client = new ContentClient({
+    get: record("GET"),
+    post: record("POST"),
+  } as never);
+
+  await client.startResearch("ws / 1", "solid-state batteries");
+  await client.listResearch("ws / 1");
+  await client.getResearch("ws / 1", "run/1");
+  await client.cancelResearch("ws / 1", "run/1");
+  await client.saveResearchNote("ws / 1", "run/1");
+
+  assert.deepEqual(calls, [
+    [
+      "POST",
+      "/v1/workspaces/ws%20%2F%201/source-research",
+      { topic: "solid-state batteries" },
+    ],
+    ["GET", "/v1/workspaces/ws%20%2F%201/source-research"],
+    ["GET", "/v1/workspaces/ws%20%2F%201/source-research/run%2F1"],
+    ["POST", "/v1/workspaces/ws%20%2F%201/source-research/run%2F1/cancel", {}],
+    [
+      "POST",
+      "/v1/workspaces/ws%20%2F%201/source-research/run%2F1/save-note",
+      {},
+    ],
+  ]);
+});
+
 test("workspace category lists ask for the reader's language", async () => {
   const { client, paths } = recordingClient();
   await client.listWorkspaceMarketMcpCategories("workspace", {

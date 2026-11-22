@@ -29,6 +29,7 @@ import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { processSourceGuideGenerateJob } from "./processors/source-guide";
 import { processStudyGenerateJob } from "./processors/study";
 import { processTableGenerateJob } from "./processors/table";
+import { processSourceResearchJob } from "./processors/research";
 import { processSkillOverviewGenerateJob } from "./processors/skill-overview-generate";
 import { SKILL_OVERVIEW_GENERATE_JOB } from "../modules/skills/market/overview-queue";
 import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
@@ -82,6 +83,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "source-guide-generate": processSourceGuideGenerateJob,
   "study-generate": processStudyGenerateJob,
   "table-generate": processTableGenerateJob,
+  "source-research": processSourceResearchJob,
   [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
   [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
   [MCP_OVERVIEW_GENERATE_JOB]: processMcpOverviewGenerateJob,

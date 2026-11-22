@@ -27,6 +27,7 @@
     "./user-settings": "./src/user-settings.ts",
     "./api-response": "./src/api-response.ts",
     "./sources": "./src/sources.ts",
+    "./source-research": "./src/source-research.ts",
     "./dictation": "./src/dictation.ts",
     "./grounded-evidence": "./src/grounded-evidence.ts",
     "./grounded-generation": "./src/grounded-generation.ts",
