@@ -33,3 +33,19 @@ export function groundedRequestKey(
     .slice(0, 40);
   return `${prefix}:${hash}`;
 }
+
+/** Where a request's artifact stands when the request returns. */
+export type GroundedRequestArtifactStatus = "pending" | "running" | "ready";
+
+/**
+ * The status a request reports for its artifact: a new one is always
+ * `pending`; a reused one reports its row's status (anything but running or
+ * ready, read in a race with a failure, still counts as pending).
+ */
+export function groundedRequestArtifactStatus(
+  reused: boolean,
+  rowStatus: string | null | undefined,
+): GroundedRequestArtifactStatus {
+  if (!reused) return "pending";
+  return rowStatus === "ready" || rowStatus === "running" ? rowStatus : "pending";
+}

@@ -15,6 +15,7 @@ import {
 import { Preview } from "@sourceweft/preview/react";
 import { GroundedEvidenceSourcePreview } from "./grounded-evidence-source";
 import { TableRegenerateDialogHost } from "../table-generate/table-regenerate";
+import { StudyRegenerateDialogHost } from "../study-generate/study-regenerate";
 
 export const artifactPreviewRenderers: ArtifactPreviewRenderer[] = [
   videoFilePreviewRenderer,
@@ -63,6 +64,8 @@ export function resolveArtifactPreviewRenderer(
           <GroundedEvidenceSourcePreview />
           {/* Where a table viewer's "regenerate" lands. */}
           <TableRegenerateDialogHost />
+          {/* Where a study viewer's "regenerate" lands. */}
+          <StudyRegenerateDialogHost />
         </>
       ),
     };

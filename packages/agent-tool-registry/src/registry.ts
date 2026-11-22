@@ -27,6 +27,7 @@ import { publishArtifactAgentToolDefs } from "@sourceweft/builtin-tool-publish-a
 import { videoPresentationAgentToolDefs } from "@sourceweft/builtin-tool-video-presentation/agent-tool-defs";
 import { pptDeckAgentToolDefs } from "@sourceweft/builtin-skill-ppt-deck/agent-tool-defs";
 import { tableAgentToolDefs } from "@sourceweft/builtin-tool-table/agent-tool-defs";
+import { studyAgentToolDefs } from "@sourceweft/builtin-tool-study/agent-tool-defs";
 import { defineAgentTool } from "@sourceweft/contracts/agent-tools";
 
 /**
@@ -65,6 +66,7 @@ export const AGENT_TOOLS = [
   ...videoPresentationAgentToolDefs,
   ...pptDeckAgentToolDefs,
   ...tableAgentToolDefs,
+  ...studyAgentToolDefs,
   ...sandboxAgentToolDefs,
   ...LOCAL_AGENT_TOOLS,
 ] as const;

@@ -386,6 +386,8 @@ export async function listOwnQuizAttempts(input: {
   userId: string;
   artifactId: string;
   limit: number;
+  /** Only the attempts at this version. */
+  versionNo?: number;
 }): Promise<QuizAttemptRow[]> {
   return db
     .select()
@@ -394,6 +396,9 @@ export async function listOwnQuizAttempts(input: {
       and(
         eq(studyQuizAttempts.userId, input.userId),
         eq(studyQuizAttempts.artifactId, input.artifactId),
+        input.versionNo === undefined
+          ? undefined
+          : eq(studyQuizAttempts.versionNo, input.versionNo),
       ),
     )
     .orderBy(desc(studyQuizAttempts.startedAt), desc(studyQuizAttempts.id))

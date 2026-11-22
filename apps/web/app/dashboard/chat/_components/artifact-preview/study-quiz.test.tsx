@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   QuizViewer,
   StudyHostProvider,
@@ -130,6 +130,61 @@ describe("QuizViewer", () => {
     expect(button("study.quiz.practiceMistakes")).toBeUndefined();
   });
 
+  it("submitting waits for an autosave on its way, and its late refusal is not a failed save", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const pending: Array<{ reject: (error: Error) => void }> = [];
+      const order: string[] = [];
+      const host = createRecordingStudyHost({
+        saveQuizAnswers: (input) => {
+          if (input.finish) {
+            order.push("finish");
+            return Promise.resolve({
+              id: input.attemptId,
+              artifactId: "artifact-1",
+              versionNo: 1,
+              itemIds: allIds,
+              answers: { ...input.answers },
+              score: 3,
+              total: 3,
+              startedAt: "2026-11-15T00:00:00.000Z",
+              finishedAt: "2026-11-15T00:10:00.000Z",
+            });
+          }
+          order.push("autosave");
+          return new Promise((_resolve, reject) => pending.push({ reject }));
+        },
+      });
+      await renderQuiz(host);
+      await press("study.quiz.start");
+      await flush(3);
+      await answerAll({ multiRight: true });
+      // The debounced autosave leaves and has not come back.
+      await act(async () => {
+        // Past the 600 ms autosave debounce.
+        vi.advanceTimersByTime(700);
+      });
+      await flush(2);
+      expect(order).toEqual(["autosave"]);
+
+      const submitted = press("study.quiz.submit");
+      await flush(3);
+      // Finishing waits for the autosave rather than racing it.
+      expect(order).toEqual(["autosave"]);
+
+      // The server refuses the autosave (say, the attempt was finished
+      // elsewhere first): that is not a failed save of this submit.
+      pending[0]!.reject(new Error("STUDY_ATTEMPT_FINISHED"));
+      await submitted;
+      await flush(4);
+      expect(order).toEqual(["autosave", "finish"]);
+      expect(text()).not.toContain("study.quiz.saveFailed");
+      expect(text()).toContain("study.quiz.result.score correct=3 total=3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resumes an unfinished attempt after a reload", async () => {
     const host = createRecordingStudyHost({
       latestQuizAttempt: async () => ({
@@ -153,6 +208,18 @@ describe("QuizViewer", () => {
       (node) => node.textContent?.trim() === "Oxygen",
     );
     expect(oxygen?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("says the answers are not saved when the attempt cannot be opened", async () => {
+    const host = createRecordingStudyHost({
+      startQuizAttempt: () => Promise.reject(new Error("no version to record against")),
+    });
+    await renderQuiz(host);
+    await press("study.quiz.start");
+    await flush(3);
+    // The quiz still runs, and the person is told nothing is being kept.
+    expect(text()).toContain("study.quiz.questionOf current=1 total=4");
+    expect(text()).toContain("study.quiz.saveFailed");
   });
 
   it("answers locally and records nothing when not interactive", async () => {

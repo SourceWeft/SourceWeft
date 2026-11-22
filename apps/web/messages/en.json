@@ -3809,8 +3809,11 @@
       "menu": "Generate from the selected sources",
       "needsSelection": "Select sources to generate from",
       "needsThread": "Start a conversation to generate from sources",
-      "openFailed": "The table was queued, but it couldn't be opened. Find it under Artifacts.",
-      "table": "Data table"
+      "openFailed": "Generation started, but the result couldn't be opened. Find it under Artifacts.",
+      "table": "Data table",
+      "flashcards": "Flashcards",
+      "quiz": "Quiz",
+      "mindmap": "Mind map"
     },
     "research": {
       "add": "Research",
@@ -6098,6 +6101,196 @@
         "loadFailed": "Couldn't open this table for regeneration.",
         "suggestFailed": "Couldn't suggest columns. Try again.",
         "generic": "Couldn't generate the table. Try again."
+      }
+    }
+  },
+  "study": {
+    "status": {
+      "queued": "Waiting to start…",
+      "generating": "Working… {completed} of {total} steps done"
+    },
+    "error": {
+      "generateAgain": "To try again, select the sources in the source hub and generate it again.",
+      "cannotDisplay": "This study set can't be displayed.",
+      "code": {
+        "INSUFFICIENT_CREDITS": "Not enough credits to generate this.",
+        "INPUT_TOO_LARGE": "The selected sources are too large for one study set. Choose fewer or shorter sources.",
+        "NO_INDEXED_SOURCES": "None of the selected sources is indexed yet.",
+        "MODEL_UNAVAILABLE": "The model is unavailable right now. Try again later.",
+        "GENERATION_QUALITY_TOO_LOW": "Too few items could be verified against the sources, so nothing was created.",
+        "SOURCE_NOT_READABLE": "A selected source could not be read.",
+        "UNKNOWN": "This could not be generated."
+      }
+    },
+    "evidence": {
+      "show": "Show source quote",
+      "hide": "Hide source quote",
+      "sourceChanged": "The source has changed since this was generated. The quote below is from that time.",
+      "openSource": "Open in source"
+    },
+    "stale": {
+      "message": "A source changed after this was generated. Regenerate to update it.",
+      "sourceDeleted": "A source was deleted. This set still works.",
+      "regenerate": "Regenerate"
+    },
+    "flashcards": {
+      "label": "Flashcards",
+      "mode": {
+        "browse": "Browse",
+        "review": "Review"
+      },
+      "progress": "{current} / {total}",
+      "exportAnki": "Export for Anki (CSV)",
+      "showFront": "Show the front",
+      "showBack": "Show the answer",
+      "showingFront": "Showing the front",
+      "showingBack": "Showing the answer",
+      "gradeFailed": "Your answer couldn't be saved. Try again.",
+      "nothingDue": "Nothing is due for review right now.",
+      "done": "Session done: {graded, plural, one {# card} other {# cards}} reviewed out of {total}.",
+      "restart": "Start again",
+      "previous": "Previous card",
+      "next": "Next card",
+      "hintFlip": "Space or Enter to flip",
+      "hintGrade": "1–4 to rate how well you knew it",
+      "gradeLabel": "How well did you know it?",
+      "grade": {
+        "again": "Again",
+        "hard": "Hard",
+        "good": "Good",
+        "easy": "Easy"
+      }
+    },
+    "quiz": {
+      "loading": "Loading the quiz…",
+      "intro": "{total, plural, one {# question} other {# questions}}. Answers are checked when you submit.",
+      "start": "Start",
+      "saveFailed": "Your answers couldn't be saved. They are kept on this page.",
+      "questionOf": "Question {current} of {total}",
+      "previous": "Previous",
+      "submit": "Submit",
+      "next": "Next",
+      "true": "True",
+      "false": "False",
+      "chooseOne": "Choose one answer",
+      "chooseAll": "Choose every correct answer",
+      "yourAnswer": "Your answer",
+      "referenceAnswer": "Reference answer",
+      "showReference": "Show the reference answer",
+      "selfGrade": {
+        "knew": "I got it",
+        "missed": "I missed it"
+      },
+      "result": {
+        "score": "{correct} of {total} correct",
+        "selfGraded": "Open questions: you got {knew} of {total}"
+      },
+      "practiceMistakes": "Practise the mistakes",
+      "restart": "Start again",
+      "verdict": {
+        "correct": "Correct",
+        "wrong": "Wrong",
+        "self": {
+          "knew": "You said you got it",
+          "missed": "You said you missed it",
+          "none": "Not graded"
+        }
+      },
+      "correctAnswer": "Answer:"
+    },
+    "mindmap": {
+      "view": {
+        "map": "Map",
+        "outline": "Outline"
+      },
+      "exportMarkdown": "Export Markdown",
+      "exportJson": "Export JSON",
+      "detailLabel": "Selected idea",
+      "askPrompt": "Tell me more about \"{label}\" from my sources.",
+      "askInChat": "Ask in chat",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "outlineLabel": "Mind map outline"
+    },
+    "generate": {
+      "title": {
+        "flashcards": "Generate flashcards",
+        "quiz": "Generate a quiz",
+        "mindmap": "Generate a mind map"
+      },
+      "description": {
+        "flashcards": "Cards for spaced-repetition review. Each card cites the passage it comes from.",
+        "quiz": "Questions with explanations. Each question cites the passage it comes from.",
+        "mindmap": "The main ideas and how they connect. Each idea cites the passage it comes from."
+      },
+      "regenerateTitle": "Adjust and regenerate",
+      "regenerateSources": "From the same {count, plural, one {# source} other {# sources}} as the current version.",
+      "sources": "{count, plural, one {# source} other {# sources}}",
+      "addSource": "Add source",
+      "searchSources": "Search sources",
+      "noSources": "No matching sources.",
+      "moreResults": "Show more",
+      "sourcesLimit": "Use at most {max} sources.",
+      "untitledSource": "Untitled source",
+      "unavailableSource": "Unavailable source",
+      "size": {
+        "label": "Amount",
+        "fewer": "Fewer",
+        "standard": "Standard",
+        "more": "More",
+        "flashcards": "{size} · {count} cards",
+        "quiz": "{size} · {count} questions",
+        "mindmap": "{size} · up to {count} ideas"
+      },
+      "difficulty": {
+        "label": "Difficulty",
+        "easy": "Easy",
+        "mixed": "Mixed",
+        "hard": "Hard"
+      },
+      "focus": {
+        "label": "Focus (optional)",
+        "placeholder": "e.g. Definitions and key dates",
+        "counter": "{used} / {max}",
+        "tooLong": "Keep the focus to {max} characters or fewer."
+      },
+      "language": {
+        "label": "Language",
+        "follow": "Same as the sources"
+      },
+      "problems": {
+        "noSources": "Add at least one source.",
+        "tooManySources": "Use at most {max} sources. Select fewer sources."
+      },
+      "estimate": {
+        "loading": "Estimating the size…",
+        "summary": {
+          "flashcards": "Up to {count, plural, one {# card} other {# cards}} from {sources, plural, one {# source} other {# sources}}",
+          "quiz": "Up to {count, plural, one {# question} other {# questions}} from {sources, plural, one {# source} other {# sources}}",
+          "mindmap": "Up to {count, plural, one {# idea} other {# ideas}} from {sources, plural, one {# source} other {# sources}}"
+        },
+        "parts": "Long sources are read in {groups} parts, so this takes a little longer.",
+        "exceedsLimit": "The selected sources are too large for one study set. Choose fewer or shorter sources.",
+        "failed": "Couldn't estimate the size."
+      },
+      "submit": "Generate",
+      "regenerateSubmit": "Regenerate",
+      "cancel": "Cancel",
+      "started": "Generating. It will also appear under Artifacts.",
+      "reused": "This is already being generated.",
+      "regenerating": "Regenerating. The current version stays until the new one is ready.",
+      "manageBilling": "Manage billing",
+      "errors": {
+        "STUDY_TOO_MANY_RUNNING": "Too many tables and study sets are generating at once. Wait for one to finish.",
+        "STUDY_NOT_READY": "Only a finished study set can be regenerated.",
+        "STUDY_CONTENT_UNREADABLE": "This study set can't be read, so it can't be regenerated.",
+        "STUDY_REGENERATION_IN_PROGRESS": "This study set is already being regenerated.",
+        "VALIDATION_ERROR": "Check the options and sources, then try again.",
+        "THREAD_NOT_FOUND": "This conversation is no longer available.",
+        "ARTIFACT_NOT_FOUND": "This study set no longer exists.",
+        "recipeUnavailable": "This study set can't be adjusted. Generate a new one from the source hub.",
+        "loadFailed": "Couldn't open this study set for regeneration.",
+        "generic": "Couldn't generate this. Try again."
       }
     }
   },

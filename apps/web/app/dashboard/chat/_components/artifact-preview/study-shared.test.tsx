@@ -122,9 +122,11 @@ function view(
     errorCode: string | null;
     payload: Record<string, unknown>;
     artifactType: string;
+    interactive: boolean;
   }> = {},
 ) {
   return createElement(StudyArtifactView, {
+    ...(overrides.interactive === false ? { interactive: false } : {}),
     artifact: {
       id: "artifact-1",
       workspaceId: "workspace-1",
@@ -165,24 +167,69 @@ describe("StudyArtifactView", () => {
         createRecordingStudyHost(),
         view({
           status: "running",
-          payload: { study: { progress: { completed: 2, total: 5 } } },
+          payload: { study: { progress: { stage: "generate", done: 2, total: 5 } } },
         }),
       ),
     );
     expect(text()).toContain("study.status.generating completed=2 total=5");
   });
 
-  it("names the failure and offers a retry when the host can regenerate", async () => {
+  it("names a failed first generation and offers no retry it cannot do", async () => {
+    // A failed artifact has no recipe, and only a ready one can regenerate.
     const host = createRecordingStudyHost({ requestRegenerate: () => {} });
     await mount(
+      withHost(host, view({ status: "failed", errorCode: "MODEL_UNAVAILABLE", payload: {} })),
+    );
+    expect(text()).toContain("study.error.code.MODEL_UNAVAILABLE");
+    expect(text()).toContain("study.error.generateAgain");
+    expect(document.querySelectorAll("button")).toHaveLength(0);
+    expect(document.querySelector("[data-study-billing]")).toBeNull();
+  });
+
+  it("links to billing when the generation ran out of credits and the app sells them", async () => {
+    const billing = { href: "/dashboard/billing", label: "Manage billing" };
+    await mount(
       withHost(
-        host,
+        createRecordingStudyHost({ useBillingLink: () => billing }),
         view({ status: "failed", errorCode: "INSUFFICIENT_CREDITS", payload: {} }),
       ),
     );
     expect(text()).toContain("study.error.code.INSUFFICIENT_CREDITS");
-    await act(async () => button("study.error.retry").click());
-    expect(host.callsTo("requestRegenerate")).toEqual([version]);
+    const link = document.querySelector<HTMLAnchorElement>("[data-study-billing]");
+    expect(link?.getAttribute("href")).toBe("/dashboard/billing");
+    expect(link?.textContent).toBe("Manage billing");
+    await unmountAll();
+
+    // Where nothing may be sold, or on the share page, there is no link.
+    await mount(
+      withHost(
+        createRecordingStudyHost({ useBillingLink: () => null }),
+        view({ status: "failed", errorCode: "INSUFFICIENT_CREDITS", payload: {} }),
+      ),
+    );
+    expect(document.querySelector("[data-study-billing]")).toBeNull();
+    await unmountAll();
+    await mount(
+      withHost(
+        createRecordingStudyHost({ useBillingLink: () => billing }),
+        view({
+          status: "failed",
+          errorCode: "INSUFFICIENT_CREDITS",
+          payload: {},
+          interactive: false,
+        }),
+      ),
+    );
+    expect(document.querySelector("[data-study-billing]")).toBeNull();
+    // Another failure never links to billing.
+    await unmountAll();
+    await mount(
+      withHost(
+        createRecordingStudyHost({ useBillingLink: () => billing }),
+        view({ status: "failed", errorCode: "INPUT_TOO_LARGE", payload: {} }),
+      ),
+    );
+    expect(document.querySelector("[data-study-billing]")).toBeNull();
   });
 
   it("maps an unknown failure code to the generic message", async () => {

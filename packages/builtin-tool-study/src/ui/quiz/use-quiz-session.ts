@@ -51,6 +51,10 @@ export function useQuizSession({
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The save on its way to the server, so finishing waits for it. */
+  const inFlight = useRef<Promise<unknown> | null>(null);
+  /** The attempt is being (or was) finished: later autosaves are moot. */
+  const finishing = useRef(false);
   const { workspaceId, artifactId, artifactVersionId } = version;
   const knownIds = new Set(allIds);
 
@@ -64,6 +68,7 @@ export function useQuizSession({
         const itemIds = attempt?.itemIds.filter((id) => knownIds.has(id)) ?? [];
         if (attempt && !attempt.finishedAt && itemIds.length > 0) {
           const answers = { ...attempt.answers };
+          finishing.current = false;
           setSession({
             phase: "answering",
             attemptId: attempt.id,
@@ -91,33 +96,56 @@ export function useQuizSession({
     [],
   );
 
+  /**
+   * Saves the answers; `finish` closes the attempt. Finishing first waits for
+   * an autosave already on its way, so the two never race: a finished attempt
+   * refuses every later change, and that refusal of a moot autosave is not a
+   * failed save.
+   */
   const save = useCallback(
     async (finish: boolean) => {
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
+      if (!interactive || !sessionRef.current.attemptId) return true;
+      if (finish) {
+        finishing.current = true;
+        await inFlight.current?.catch(() => {});
+      } else if (finishing.current) {
+        return true;
+      }
       const { attemptId, answers } = sessionRef.current;
-      if (!interactive || !attemptId) return true;
+      if (!attemptId) return true;
+      const request = host.saveQuizAnswers({
+        workspaceId,
+        attemptId,
+        answers,
+        ...(finish ? { finish: true } : {}),
+      });
+      inFlight.current = request;
       try {
-        await host.saveQuizAnswers({
-          attemptId,
-          answers,
-          ...(finish ? { finish: true } : {}),
-        });
+        await request;
         return true;
       } catch {
+        if (!finish && finishing.current) return true;
         setSession((current) => ({ ...current, saveFailed: true }));
         return false;
+      } finally {
+        if (inFlight.current === request) inFlight.current = null;
       }
     },
-    [host, interactive],
+    [host, interactive, workspaceId],
   );
 
   const start = useCallback(
     async (itemIds: readonly string[] = allIds) => {
       let attemptId: string | null = null;
       let ids = [...itemIds];
+      // The quiz still runs when the attempt cannot be opened on the server,
+      // but the person is told its answers are not being saved.
+      let saveFailed = false;
+      finishing.current = false;
       if (interactive) {
         try {
           const attempt = await host.startQuizAttempt({
@@ -129,7 +157,7 @@ export function useQuizSession({
           attemptId = attempt.id;
           if (attempt.itemIds.length > 0) ids = attempt.itemIds;
         } catch {
-          setSession((current) => ({ ...current, saveFailed: true }));
+          saveFailed = true;
         }
       }
       setSession({
@@ -138,7 +166,7 @@ export function useQuizSession({
         itemIds: ids,
         index: 0,
         answers: {},
-        saveFailed: false,
+        saveFailed,
       });
     },
     [artifactId, artifactVersionId, host, interactive, workspaceId, items],

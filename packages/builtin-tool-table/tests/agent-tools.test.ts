@@ -12,7 +12,13 @@ import {
 
 type Call = Parameters<AgentToolGroundedArtifactServices["requestGeneration"]>[0];
 
-function groundedArtifacts(sourceIds: readonly string[] = ["s1", "s2"]) {
+function groundedArtifacts(
+  sourceIds: readonly string[] = ["s1", "s2"],
+  receipt: { reused: boolean; status: "pending" | "running" | "ready" } = {
+    reused: false,
+    status: "pending",
+  },
+) {
   const calls: Call[] = [];
   let listed = 0;
   const service: AgentToolGroundedArtifactServices = {
@@ -22,7 +28,7 @@ function groundedArtifacts(sourceIds: readonly string[] = ["s1", "s2"]) {
     },
     requestGeneration: async (input) => {
       calls.push(input);
-      return { artifactId: "artifact-1", versionNo: 1, status: "pending", reused: false };
+      return { artifactId: "artifact-1", versionNo: 1, ...receipt };
     },
   };
   return { service, calls, listed: () => listed };
@@ -201,4 +207,42 @@ test("with no sources in the turn the tool asks for them and requests nothing", 
   assert.match(String(result.message), /select or @mention/i);
   assert.equal(grounded.listed(), 1);
   assert.deepEqual(grounded.calls, []);
+});
+
+test("more sources than one table can compare: the tool says so with the limit and requests nothing", async () => {
+  const sourceIds = Array.from({ length: TABLE_LIMITS.maxSources + 1 }, (_, index) => `s${index}`);
+  const grounded = groundedArtifacts(sourceIds);
+  const [tool] = bind(grounded.service);
+  const result = (await tool!.invoke({ columns: COLUMNS, userLanguage: "en" })) as Record<
+    string,
+    unknown
+  >;
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "TOO_MANY_SOURCES");
+  assert.equal(result.sources, TABLE_LIMITS.maxSources + 1);
+  assert.equal(result.maxSources, TABLE_LIMITS.maxSources);
+  assert.match(String(result.message), new RegExp(`${TABLE_LIMITS.maxSources} or fewer`));
+  assert.match(String(result.message), /narrow the selection/);
+  assert.deepEqual(grounded.calls, []);
+});
+
+test("a repeat of a table that is already ready says so instead of promising it", async () => {
+  const grounded = groundedArtifacts(["s1", "s2"], { reused: true, status: "ready" });
+  const [tool] = bind(grounded.service);
+  const result = (await tool!.invoke({ columns: COLUMNS, userLanguage: "en" })) as Record<
+    string,
+    unknown
+  >;
+  assert.equal(result.status, "ready");
+  assert.match(String(result.nextStep), /already ready/);
+  assert.doesNotMatch(String(result.nextStep), /when it is ready|being generated/);
+});
+
+test("the /table workflow tells the agent to narrow too many sources", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../sourceweft.capability.json", import.meta.url), "utf8"),
+  ) as { tools: { command: { workflow: { additionalPromptLines: string[] } } }[] };
+  const prompt = manifest.tools[0]!.command.workflow.additionalPromptLines.join("\n");
+  assert.match(prompt, /too many sources/);
+  assert.match(prompt, /narrow the selection/);
 });

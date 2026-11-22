@@ -34,3 +34,12 @@ export {
   toPublicGroundedEvidenceList,
   type PublicGroundedEvidence,
 } from "./public-evidence";
+export {
+  bindGroundedArtifactTool,
+  requestGroundedArtifactFromTurn,
+  type GroundedArtifactToolBinding,
+  type GroundedArtifactToolFactoryInput,
+  type GroundedArtifactToolOutcome,
+  type GroundedRequestParse,
+  type GroundedToolRequest,
+} from "./agent-tool";

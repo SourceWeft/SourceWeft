@@ -1618,6 +1618,9 @@ importers:
       '@sourceweft/ui-web':
         specifier: workspace:*
         version: link:../ui
+      langchain:
+        specifier: ^1.6.7
+        version: 1.6.7(@langchain/core@1.4.2(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@7.55.0(patch_hash=509537e792ef9c3dd206267d526aa65ef1cd6cbed933ac3a0c13b85b4d60e6be)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(undici@6.29.1)(ws@8.21.3)(zod@4.6.7))(ws@8.21.3))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-proto@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(openai@7.55.0(patch_hash=509537e792ef9c3dd206267d526aa65ef1cd6cbed933ac3a0c13b85b4d60e6be)(@aws-sdk/credential-provider-node@3.972.79)(@smithy/signature-v4@5.7.0)(undici@6.29.1)(ws@8.21.3)(zod@4.6.7))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(ws@8.21.3)
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.8)

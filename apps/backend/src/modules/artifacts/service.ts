@@ -772,6 +772,9 @@ export class ContentArtifactsService {
     if (!input.handler?.resolveVersionMedia)
       return {
         ...base,
+        // Name the version this detail shows: a viewer records learning state
+        // (quiz attempts, card grades) against it and cannot do so without it.
+        artifactVersionId: base.artifactVersionId ?? version?.versionId ?? null,
         payloadJson: { ...base.payloadJson, versionFiles: null },
       };
     const unavailable = () => ({

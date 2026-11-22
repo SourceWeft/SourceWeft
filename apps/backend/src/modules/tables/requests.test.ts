@@ -95,6 +95,7 @@ test("a request opens a table artifact, follows its thread's visibility and queu
     artifactId: "art_1",
     versionNo: 1,
     status: "pending",
+    artifactStatus: "pending",
     visibility: "private",
     reused: false,
   });
@@ -133,6 +134,22 @@ test("the same request within five minutes returns the same artifact and enqueue
   expect(mocks.enqueueTableGenerateJob).not.toHaveBeenCalled();
   // A repeat starts nothing, so the running limit is not consulted for it.
   expect(mocks.countRunningGroundedJobs).toHaveBeenCalledTimes(1);
+});
+
+test("a repeat of a table that is already ready reports it as ready", async () => {
+  mocks.findArtifactRecordByRequestKey.mockResolvedValue({ id: "art_1" });
+  mocks.findArtifactRecord.mockResolvedValue({
+    id: "art_1",
+    currentVersionNo: 1,
+    visibility: "private",
+    status: "ready",
+  });
+  const again = await requestTableArtifact(generate());
+  assert.equal(again.reused, true);
+  // The accepted request's status is unchanged for the API; where the
+  // artifact stands is reported beside it.
+  assert.equal(again.status, "pending");
+  assert.equal(again.artifactStatus, "ready");
 });
 
 test("the request key ignores source order and changes with the columns, the instruction and the window", () => {

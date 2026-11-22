@@ -208,6 +208,15 @@ export const STUDY_SIZES = ["fewer", "standard", "more"] as const;
 export const studySizeSchema = z.enum(STUDY_SIZES);
 export type StudySize = z.infer<typeof studySizeSchema>;
 
+/** Item counts per size step; mind maps count nodes below the root. */
+export const STUDY_SIZE_COUNTS: Readonly<
+  Record<StudyArtifactType, Readonly<Record<StudySize, number>>>
+> = {
+  flashcards: { fewer: 10, standard: 20, more: 40 },
+  quiz: { fewer: 5, standard: 10, more: 20 },
+  mindmap: { fewer: 20, standard: 40, more: 80 },
+};
+
 export const STUDY_DIFFICULTIES = ["easy", "mixed", "hard"] as const;
 export const studyDifficultySchema = z.enum(STUDY_DIFFICULTIES);
 export type StudyDifficulty = z.infer<typeof studyDifficultySchema>;
@@ -493,6 +502,15 @@ export const reviewProgressQuerySchema = z
     message: "Name the version by at most one of versionNo or artifactVersionId",
     path: ["artifactVersionId"],
   });
+
+/**
+ * Attempts query: every version's attempts by default, or only those of the
+ * version a client holds (what a viewer resumes from).
+ */
+export const quizAttemptListQuerySchema = z.object({
+  artifactVersionId: z.string().min(1).optional(),
+});
+export type QuizAttemptListQuery = z.infer<typeof quizAttemptListQuerySchema>;
 
 export const reviewQueueQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),

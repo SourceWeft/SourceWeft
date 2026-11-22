@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import * as agentToolRegistry from "@sourceweft/agent-tool-registry";
+import { findCapabilityToolCommandWorkflow } from "./capability-command-workflows";
 import {
   renderSkillCommandWorkflow,
   renderToolCommandWorkflow,
 } from "./command-registry";
+import { resolveToolCommandName } from "./thread-command";
 
 test("renderSkillCommandWorkflow renders manifest workflow metadata", () => {
   const workflow = renderSkillCommandWorkflow({
@@ -180,4 +182,37 @@ test("renderSkillCommandWorkflow keeps a manifest-declared artifact success crit
     artifactType: "custom_report",
     toolName: "publish_report",
   });
+});
+
+test("/flashcards, /quiz and /mindmap are registered for real, not only as fixtures", async () => {
+  // The fixtures above stub the registry; this reads the real one and the
+  // study capability manifest's real workflows.
+  vi.restoreAllMocks();
+  for (const [alias, toolName] of [
+    ["flashcards", "generate_flashcards"],
+    ["quiz", "generate_quiz"],
+    ["mindmap", "generate_mindmap"],
+  ] as const) {
+    const slash = agentToolRegistry.getAgentToolSlashCommand(toolName);
+    assert.equal(slash?.supportsCommand, true);
+    assert.deepEqual(slash?.aliases, [alias]);
+    assert.equal(resolveToolCommandName(`/${alias}`), toolName);
+
+    const workflow = renderToolCommandWorkflow({
+      arguments: "about chapter 1",
+      canonicalName: `/${toolName}`,
+      displayName: slash!.displayName,
+      toolName,
+      workflow: await findCapabilityToolCommandWorkflow(toolName),
+    });
+    assert.ok(workflow, `/${alias} renders a workflow`);
+    assert.deepEqual(workflow.defaultTools, [toolName]);
+    assert.deepEqual(workflow.successCriteria, { kind: "none" });
+    assert.ok(
+      workflow.renderedPrompt.startsWith(
+        `<sourceweft_command name="/${toolName}" kind="tool_workflow" tool="${toolName}">`,
+      ),
+    );
+    assert.match(workflow.renderedPrompt, /about chapter 1/);
+  }
 });

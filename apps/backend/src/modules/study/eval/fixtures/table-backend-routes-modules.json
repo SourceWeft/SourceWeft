@@ -1,0 +1,51 @@
+{
+  "id": "table-backend-routes-modules",
+  "title": "SourceWeft backend route and module tables",
+  "language": "en",
+  "category": "table",
+  "licenses": [
+    "sourceweft-repo-docs"
+  ],
+  "chunks": [
+    {
+      "chunkNo": 0,
+      "headingPath": "api/routes > routes",
+      "text": "Purpose of this directory:\n\n- Define API route handlers grouped by endpoint domain.\n- Keep `main.ts` focused on wiring and request lifecycle."
+    },
+    {
+      "chunkNo": 1,
+      "headingPath": "api/routes > routes > Route → Module Mapping",
+      "text": "| Route file | Primary module | Notes |\n|---|---|---|\n| `auth-meta.ts` | `auth` | OAuth provider metadata (public endpoint) |\n| `billing.ts` | `billing` | Checkout sessions, webhooks, subscription queries |\n| `dashboard.ts` | `workspace` | Dashboard workspace listing |\n| `health.ts` | — | Readiness / liveness check |\n| `sitemaps.ts` | `catalog-sitemap` | Public lightweight catalog shard index and entries |\n| `jobs.ts` | — (shared) | Job polling (source parse, sync, etc.) |\n| `workspace.ts` | `workspace` | Workspace CRUD |\n| `llm-observability.ts` | `llm-observability` | LLM span / trace / generation queries |\n| `connectors-oauth.ts` | `connectors` | OAuth callback + state init |\n| `connectors-webhooks.ts` | `connectors` | Third-party webhook receivers |\n| `content/agent-confirmations.ts` | `agent-confirmations` | Human-in-the-loop tool approval |\n| `content/agent-tasks.ts` | `agent-tasks` | Scheduled tasks: CRUD, pause / resume / activate, run now, run history |\n| `content/artifacts.ts` | `artifacts` | Artifact metadata, source JSON, assets |\n| `content/byok.ts` | `byok` | Bring-Your-Own-Key credential / model management |\n| `content/connectors.ts` | `connectors` | Connector lifecycle + action management |\n| `content/mcp.ts` | `mcp` | MCP tool install, run, approval |\n| `content/model-gateway.ts` | `model-gateway` (package) | Model gateway profile / route queries |\n| `content/skills.ts` | `skills` | Skill listing, enablement, validation |\n| `content/sources.ts` | `sources` | Source ingestion, parsing, retrieval |\n| `content/threads.ts` | `threads` | Thread + message CRUD, chat runs |\n| `content/working-files.ts` | `working-files` | Agent working file lifecycle |"
+    },
+    {
+      "chunkNo": 2,
+      "headingPath": "api/routes > routes > Internal Modules (no direct API routes)",
+      "text": "These modules provide services consumed by other modules and are **not** directly exposed via HTTP:\n\n| Module | Consumed by |\n|---|---|\n| `blog` | `sync-notion-blog.ts` (script); web app reads blog directly from Postgres |\n| `citations` | `threads` — citation storage and retrieval |\n| `content` | Shared kernel — types, errors, billing port, queue helpers |\n| `invocations` | `threads` — agent invocation runtime, pipelines, policies |\n| `mail` | `billing`, `ops` — email notification delivery |\n| `onboarding` | `auth` — first sign-in organization provisioning |\n| `ops` | `billing`, `threads` — operational alerts |"
+    },
+    {
+      "chunkNo": 3,
+      "headingPath": "api/routes > routes > Conventions",
+      "text": "- Route handlers delegate to module services — never contain business logic.\n- Request validation uses Zod schemas from `@sourceweft/contracts`.\n- Auth / workspace context is extracted in middleware, not in routes.\n- New routes are added under `content/` by default; only expose a top-level route when the endpoint needs a unique path prefix or middleware stack."
+    },
+    {
+      "chunkNo": 4,
+      "headingPath": "modules > modules",
+      "text": "Domain and infrastructure modules for the backend. Each module exposes a clear\nservice interface via its `index.ts` barrel export."
+    },
+    {
+      "chunkNo": 5,
+      "headingPath": "modules > modules > Domain modules",
+      "text": "| Module | Purpose |\n|---|---|\n| `threads` | Thread CRUD, agent turns, SSE streaming, durable chat runs |\n| `sources` | Source CRUD, parsing (PDF, audio, web, etc.), indexing, retrieval |\n| `skills` | Workspace skill catalog and custom skill management |\n| `catalog-overview` | AI overview engine shared by catalog kinds (skills; MCP next): system-model calls, fenced all-locale publication, jobs |\n| `artifacts` | Generated artifacts (images, slides, presentations) |\n| `connectors` | External data source connectors and sync orchestration |\n| `schedules` | Generic schedule engine (materialize, claim, lease, retry) that connector sync plugs into |\n| `mcp` | MCP (Model Context Protocol) server management |\n| `invocations` | Invocation pipeline: slash commands, tools, skills, MCP |\n| `byok` | Bring Your Own Key credential management |\n| `working-files` | Thread-scoped working file storage |\n| `workspace` | Workspace and organization management |\n| `auth` | Authentication configuration (Better Auth) |\n| `blog` | Notion-powered blog sync |\n| `citations` | Citation storage and retrieval |\n| `agent-confirmations` | Tool approval confirmation flow |\n| `onboarding` | Organization provisioning and personal team setup |"
+    },
+    {
+      "chunkNo": 6,
+      "headingPath": "modules > modules > Infrastructure modules",
+      "text": "| Module | Purpose |\n|---|---|\n| `billing` | Team-scoped credits and pages metering |\n| `llm-observability` | LLM call tracing and observability |\n| `mail` | Provider-agnostic mail service (Plunk adapter) |\n| `notifications` | Per-person inbox with throttled email (`notify(kind, ...)`) |\n| `ops` | Alerting and operational notifications |"
+    },
+    {
+      "chunkNo": 7,
+      "headingPath": "modules > modules > Shared kernel",
+      "text": "| Module | Purpose |\n|---|---|\n| `content` | Domain types, errors, job definitions, billing port, model gateway utilities |"
+    }
+  ]
+}
