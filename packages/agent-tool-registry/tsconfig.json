@@ -18,6 +18,9 @@
       "@sourceweft/builtin-connector-dropbox": [
         "../builtin-connector-dropbox/src/index.ts"
       ],
+      "@sourceweft/builtin-connector-rss": [
+        "../builtin-connector-rss/src/index.ts"
+      ],
       "@sourceweft/builtin-connector-github": [
         "../builtin-connector-github/src/index.ts"
       ],
