@@ -4,6 +4,19 @@ import type { TeamAuditEntry } from "../team-audit/types";
 import { workspaceRoleSatisfies } from "../workspace/types";
 
 /**
+ * `NotifyInput` with the Router's own kinds added ahead of the shared
+ * registry (`modules/notifications/kinds.ts`): Task 7 registers
+ * `assistant_reply` and `assistant_unavailable` there (templates, email
+ * defaults). Until then this module's own `kind` type carries them so the
+ * Router's tools (`router/tools.ts`) and `reconcileRouterRun`
+ * (`router/reconcile.ts`) type-check against the names the brief fixes,
+ * without widening the shared registry's type for every other caller.
+ */
+export type AssistantNotifyInput = Omit<NotifyInput, "kind"> & {
+  kind: NotifyInput["kind"] | "assistant_reply" | "assistant_unavailable";
+};
+
+/**
  * Everything the assistants module needs from the rest of the backend: who
  * may act in a workspace and how, whether they still have credits, starting
  * and stopping a host-owned turn, notifying a person, and the team audit
@@ -35,7 +48,7 @@ export interface AssistantPorts {
     runId: string;
     userId: string;
   }): Promise<void>;
-  notify(input: NotifyInput): Promise<unknown>;
+  notify(input: AssistantNotifyInput): Promise<unknown>;
   audit(entry: TeamAuditEntry): Promise<void>;
 }
 
@@ -97,7 +110,11 @@ export const assistantPorts: AssistantPorts = {
 
   async notify(input) {
     const { notify } = await import("../notifications");
-    return notify(input);
+    // `AssistantNotifyInput` carries the Router's two kinds ahead of Task
+    // 7 registering them in `modules/notifications/kinds.ts`. The cast is
+    // narrow (this function only) and goes away once that registration
+    // lands and `NotifyInput["kind"]` already includes them.
+    return notify(input as NotifyInput);
   },
 
   async audit(entry) {

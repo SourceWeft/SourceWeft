@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import type { AssistantPorts } from "../modules/assistants";
-import type { NotifyInput } from "../modules/notifications";
+import type { AssistantNotifyInput, AssistantPorts } from "../modules/assistants";
 import type { StartHostTurnInput } from "../modules/threads";
 import type { TeamAuditEntry } from "../modules/team-audit/types";
 import { createIsolatedTestDatabase } from "./isolated-database";
@@ -23,7 +22,7 @@ export async function createAssistantFixture(label: string) {
   const schema = await import("@sourceweft/db");
   const assistants = await import("../modules/assistants");
 
-  const notifications: NotifyInput[] = [];
+  const notifications: AssistantNotifyInput[] = [];
   const audits: TeamAuditEntry[] = [];
   const started: StartHostTurnInput[] = [];
   const stopped: Array<{
@@ -168,6 +167,79 @@ export async function createAssistantFixture(label: string) {
       .where(eq(schema.assistantTriggers.assistantId, assistantId));
   }
 
+  async function triggerRow(id: string) {
+    const [row] = await schema.db
+      .select()
+      .from(schema.assistantTriggers)
+      .where(eq(schema.assistantTriggers.id, id));
+    return row ?? null;
+  }
+
+  async function decisionRows(assistantId: string) {
+    return schema.db
+      .select()
+      .from(schema.assistantDecisions)
+      .where(eq(schema.assistantDecisions.assistantId, assistantId));
+  }
+
+  /** Inserts a trigger directly, in any status — Task 6's Router is what
+   * normally produces these (a member message, via `postMessage`, or a
+   * worker report, in Task 7); this fixture skips straight to the row so
+   * router tests do not need a real conversation behind each one. */
+  async function insertTrigger(input: {
+    id?: string;
+    teamId: string;
+    workspaceId: string;
+    assistantId: string;
+    sourceKind?: "member_message" | "worker_report";
+    payerUserId: string;
+    authorUserId?: string | null;
+    text?: string;
+    status?: "pending_eval" | "in_eval" | "decided" | "unavailable";
+    routerBatchKey?: string | null;
+    evalAttempts?: number;
+    routedTicketId?: string | null;
+  }) {
+    const id = input.id ?? randomUUID();
+    await schema.db.insert(schema.assistantTriggers).values({
+      id,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      assistantId: input.assistantId,
+      sourceKind: input.sourceKind ?? "member_message",
+      payerUserId: input.payerUserId,
+      authorUserId: input.authorUserId ?? input.payerUserId,
+      dedupeKey: id,
+      text: input.text ?? "Hello",
+      status: input.status ?? "pending_eval",
+      routerBatchKey: input.routerBatchKey ?? null,
+      evalAttempts: input.evalAttempts ?? 0,
+      routedTicketId: input.routedTicketId ?? null,
+    });
+    return (await triggerRow(id))!;
+  }
+
+  /** Sets `assistants.current_router_run_id`/`current_router_batch_key`
+   * directly — Task 7's scheduler tick normally does this once it starts
+   * the Router's turn; router tests that exercise `reconcileRouterRun`
+   * skip straight to the state it expects. */
+  async function setCurrentRouterRun(
+    assistantId: string,
+    input: { runId: string | null; batchKey: string | null },
+  ) {
+    await schema.db
+      .update(schema.assistants)
+      .set({
+        currentRouterRunId: input.runId,
+        currentRouterBatchKey: input.batchKey,
+      })
+      .where(eq(schema.assistants.id, assistantId));
+    return (await schema.db
+      .select()
+      .from(schema.assistants)
+      .where(eq(schema.assistants.id, assistantId)))[0]!;
+  }
+
   /** Inserts a ticket directly: ticket creation is Task 6-7's Router, not this task's. */
   async function insertTicket(input: {
     id?: string;
@@ -230,7 +302,11 @@ export async function createAssistantFixture(label: string) {
     assistantRow,
     feedItemRows,
     triggerRows,
+    triggerRow,
+    decisionRows,
     insertTicket,
+    insertTrigger,
+    setCurrentRouterRun,
     reset,
     async close() {
       await schema.database.end();
