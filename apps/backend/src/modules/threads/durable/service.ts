@@ -35,6 +35,8 @@ import {
   updateChatThreadRunProgress,
 } from "./repository";
 import { chatRunStreamManager } from "./stream-manager";
+import { findThreadRecord } from "../thread/repository";
+import { assertTurnAllowedInThread } from "../thread/host-owned";
 import { SOURCEWEFT_WEB_RUN_STOP_SUFFIX } from "./constants";
 import type {
   ChatRunSnapshot,
@@ -329,6 +331,15 @@ export class DurableChatRunService {
       }
       return { run: existing, created: false };
     }
+
+    // Only the host starts turns in a conversation it owns; refused here,
+    // before a run row exists, and again by the turn preparer.
+    const thread = await findThreadRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+    });
+    if (thread) assertTurnAllowedInThread(thread, input.request);
 
     const active = await findActiveChatThreadRun({
       teamId: workspace.organizationId,

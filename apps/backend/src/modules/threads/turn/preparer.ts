@@ -36,6 +36,7 @@ import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
 } from "../thread/repository";
+import { assertTurnAllowedInThread } from "../thread/host-owned";
 import {
   applyPersonaToolAllowlist,
   applyUnattendedToolPolicy,
@@ -1289,6 +1290,9 @@ export async function prepareThreadTurn(
   if (!thread) {
     throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
   }
+  // Every client turn (send, edit, regenerate, resume; durable or direct)
+  // passes here: a host-owned conversation only runs the host's turns.
+  assertTurnAllowedInThread(thread, input);
 
   if (thread.executionTarget?.kind === "local") {
     const { requireLocalConversationReady } =

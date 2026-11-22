@@ -17,6 +17,8 @@ let isolated:
   Awaited<ReturnType<typeof createIsolatedTestDatabase>> | undefined;
 let schema: typeof import("@sourceweft/db");
 let startHostTurn: typeof import("./service").startHostTurn;
+let durableChatRunService: typeof import("./durable/service").durableChatRunService;
+let prepareThreadTurn: typeof import("./turn/preparer").prepareThreadTurn;
 let repository: typeof import("./thread/repository");
 const originalDatabaseUrl = process.env.DATABASE_URL;
 
@@ -31,6 +33,8 @@ beforeAll(async () => {
   schema = await import("@sourceweft/db");
   ({ startHostTurn } = await import("./service"));
   repository = await import("./thread/repository");
+  ({ durableChatRunService } = await import("./durable/service"));
+  ({ prepareThreadTurn } = await import("./turn/preparer"));
 }, 120_000);
 
 beforeEach(async () => {
@@ -268,4 +272,103 @@ test("host context larger than 1 KB is refused before anything is created", asyn
     .where(eq(schema.threads.id, threadId));
   assert.equal(threads.length, 0);
   assert.equal((await runs()).length, 0);
+});
+
+test("a member's own turn into an assistant conversation is refused on every path; the host's still starts", async () => {
+  const hostOwned = (error: { statusCode?: number; code?: string }) =>
+    error.statusCode === 403 && error.code === "THREAD_HOST_OWNED";
+  const router = await routerThread();
+  const ticket = await startHostTurn({
+    workspaceId,
+    userId: steward,
+    threadId: randomUUID(),
+    idempotencyKey: key(),
+    title: "Ticket",
+    content: "Work the ticket",
+    origin: "assistant_ticket",
+    visibility: "workspace",
+  });
+  const runsBefore = (await runs()).length;
+
+  for (const threadId of [router.id, ticket.thread.id]) {
+    for (const userId of [steward, colleague]) {
+      // Durable entry shared by send, edit, regenerate and resume.
+      for (const mode of ["send", "edit", "refresh", "resume"] as const) {
+        const idempotencyKey = key();
+        await assert.rejects(
+          durableChatRunService.getOrCreateRun({
+            workspaceId,
+            threadId,
+            userId,
+            idempotencyKey,
+            mode,
+            request: {
+              workspaceId,
+              threadId,
+              userId,
+              content: "hello",
+              idempotencyKey,
+            },
+          }),
+          hostOwned,
+          `${mode} ${threadId}`,
+        );
+      }
+      // The turn preparer every turn passes, durable or direct.
+      await assert.rejects(
+        prepareThreadTurn({
+          workspaceId,
+          threadId,
+          userId,
+          content: "hello",
+          idempotencyKey: key(),
+        }),
+        hostOwned,
+      );
+    }
+  }
+  assert.equal((await runs()).length, runsBefore);
+  assert.equal(enqueue.mock.calls.length, 1);
+
+  // The ticket's own run is over; the host starts the next one.
+  await schema.db
+    .update(schema.chatThreadRuns)
+    .set({ status: "completed", finishedAt: new Date() })
+    .where(eq(schema.chatThreadRuns.id, ticket.run.id));
+  const next = await startHostTurn({
+    workspaceId,
+    userId: colleague,
+    threadId: router.id,
+    idempotencyKey: key(),
+    title: "ignored",
+    content: "batch",
+    origin: "assistant_router",
+    existingThread: true,
+  });
+  assert.equal(next.created, true);
+});
+
+test("a member's turn into an ordinary conversation still starts", async () => {
+  const mine = await repository.createThreadRecord({
+    teamId,
+    workspaceId,
+    title: "Mine",
+    createdBy: colleague,
+  });
+  const idempotencyKey = key();
+  const { created } = await durableChatRunService.getOrCreateRun({
+    workspaceId,
+    threadId: mine.id,
+    userId: colleague,
+    idempotencyKey,
+    mode: "send",
+    request: {
+      workspaceId,
+      threadId: mine.id,
+      userId: colleague,
+      content: "hello",
+      idempotencyKey,
+    },
+  });
+  assert.equal(created, true);
 });

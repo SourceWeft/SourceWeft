@@ -114,14 +114,26 @@ import {
   type OriginTurnContext,
   type OriginTurnProvider,
 } from "../origin-providers";
+import { isHostOwnedThreadOrigin } from "../../thread/host-owned";
 
 const MAX_RUNTIME_SOURCE_REFERENCES = 50;
 
-/** The provider a host registered for this conversation's origin, if any. */
+/**
+ * The provider a host registered for this conversation's origin, if any. A
+ * host-owned conversation without one means the host is not wired into this
+ * worker; its turn fails instead of running without the host's tools and
+ * instructions.
+ */
 function originTurnProviderFor(
   prepared: PreparedThreadTurn,
 ): OriginTurnProvider | undefined {
-  return getOriginTurnProvider(prepared.thread.origin);
+  const provider = getOriginTurnProvider(prepared.thread.origin);
+  if (!provider && isHostOwnedThreadOrigin(prepared.thread.origin)) {
+    throw new Error(
+      `No origin turn provider is registered for '${prepared.thread.origin}' conversations.`,
+    );
+  }
+  return provider;
 }
 
 /** Whether this turn's tools are the origin provider's only (a Router). */
@@ -622,9 +634,12 @@ export async function buildRuntimePromptContext(
     publishedArtifacts,
   });
 
-  const basePrompt = prepared.unattended
-    ? `${runtimePrompt}\n${SCHEDULED_RUN_PROMPT}`
-    : runtimePrompt;
+  // A host-owned conversation's provider prompt says who is (not) present;
+  // the scheduled-run block would contradict its tools, so it is left out.
+  const basePrompt =
+    prepared.unattended && !isHostOwnedThreadOrigin(prepared.thread.origin)
+      ? `${runtimePrompt}\n${SCHEDULED_RUN_PROMPT}`
+      : runtimePrompt;
   const originPrompt = originProvider
     ? await originProvider.prompt(originTurnContextFor(prepared))
     : "";

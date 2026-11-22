@@ -116,8 +116,12 @@ function shape(agent: AgentParams, runtimePrompt: string) {
         tools: names(middleware.tools),
       })),
     })),
-    runtimePromptTail: runtimePrompt.slice(-400),
-    runtimePromptLength: runtimePrompt.length,
+    // Booleans only, so unrelated prompt edits do not break the snapshot;
+    // the same-run comparison below compares the whole prompt.
+    scheduledRunBlock: runtimePrompt.includes("<scheduled_run>"),
+    endsWithScheduledRunBlock: runtimePrompt
+      .trimEnd()
+      .endsWith("</scheduled_run>"),
   };
 }
 
@@ -232,6 +236,8 @@ test("a replace-tools origin binds only its provider's tools, no sub-agents and 
       "read_file",
     ]);
     assert.ok(runtimePrompt.trimEnd().endsWith(ROUTER_PROMPT));
+    // The provider prompt takes the place of the scheduled-run block.
+    assert.equal(runtimePrompt.includes("<scheduled_run>"), false);
     // The prompt names no tool the turn does not have.
     for (const absent of ["web_search", "mcp__docs__search"]) {
       assert.equal(runtimePrompt.includes(absent), false, absent);
@@ -280,7 +286,7 @@ test("an additive origin in an unattended run gets the unattended allow-list plu
       "general-purpose",
       "plan",
     ]);
-    assert.ok(runtimePrompt.includes("</scheduled_run>"));
+    assert.equal(runtimePrompt.includes("<scheduled_run>"), false);
     assert.ok(runtimePrompt.trimEnd().endsWith(WORKER_PROMPT));
     assert.deepEqual(seen.at(-1)?.hostContext, {});
   } finally {
@@ -304,6 +310,7 @@ test("a provider registered for another origin leaves an ordinary turn exactly a
   try {
     const { agent, runtimePrompt } = await assembleTurn({ unattended: true });
     assert.deepEqual(shape(agent, runtimePrompt), shape(before, beforePrompt));
+    assert.equal(runtimePrompt, beforePrompt);
   } finally {
     unregisterOriginTurnProvider("assistant_router");
   }
@@ -345,4 +352,66 @@ test("registering two providers for one origin is a wiring error", () => {
   } finally {
     unregisterOriginTurnProvider("assistant_ticket");
   }
+});
+
+test("a scheduled turn keeps the scheduled-run block", async () => {
+  const { runtimePrompt } = await assembleTurn({
+    unattended: true,
+    origin: "scheduled",
+  });
+  assert.ok(runtimePrompt.trimEnd().endsWith("</scheduled_run>"));
+});
+
+test("a host-owned conversation whose host is not wired fails the turn", async () => {
+  for (const origin of ["assistant_router", "assistant_ticket"]) {
+    await assert.rejects(
+      assembleTurn({ unattended: true, origin }),
+      new RegExp(`No origin turn provider is registered for '${origin}'`),
+    );
+  }
+});
+
+test("the task exclusion hides `task` from the model and refuses a call to it", async () => {
+  const { createOriginToolExclusionMiddleware } =
+    await import("./origin-providers");
+  const middleware = createOriginToolExclusionMiddleware() as unknown as {
+    wrapModelCall: (
+      request: { tools?: unknown[] },
+      handler: (request: { tools?: unknown[] }) => unknown,
+    ) => unknown;
+    wrapToolCall: (
+      request: { toolCall: { name: string; id?: string; args: unknown } },
+      handler: (request: unknown) => unknown,
+    ) => unknown;
+  };
+
+  const seenRequests: Array<{ tools?: unknown[] }> = [];
+  await middleware.wrapModelCall(
+    { tools: [{ name: "say" }, { name: "task" }, { name: "open_ticket" }] },
+    (request) => {
+      seenRequests.push(request);
+      return "model-result";
+    },
+  );
+  assert.deepEqual(names(seenRequests[0]!.tools as Named[]), [
+    "open_ticket",
+    "say",
+  ]);
+
+  const handler = vi.fn(() => "tool-result");
+  const refused = (await middleware.wrapToolCall(
+    { toolCall: { name: "task", id: "call_1", args: {} } },
+    handler,
+  )) as { status?: string; tool_call_id?: string; name?: string };
+  assert.equal(handler.mock.calls.length, 0);
+  assert.equal(refused.status, "error");
+  assert.equal(refused.tool_call_id, "call_1");
+  assert.equal(refused.name, "task");
+
+  const passed = await middleware.wrapToolCall(
+    { toolCall: { name: "say", id: "call_2", args: {} } },
+    handler,
+  );
+  assert.equal(passed, "tool-result");
+  assert.equal(handler.mock.calls.length, 1);
 });

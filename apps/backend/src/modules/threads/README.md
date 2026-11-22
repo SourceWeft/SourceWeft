@@ -120,6 +120,14 @@ adds them on top of the unattended allow-list; either can append a runtime
 prompt fragment. Threads never imports the host. `assistant_router`
 conversations are left out of the chat list.
 
+`assistant_router` and `assistant_ticket` conversations are host-owned
+(`thread/host-owned.ts`): only `startHostTurn` runs turns there. A member's
+send, edit, regenerate or resume is refused with 403 `THREAD_HOST_OWNED`, in
+`durableChatRunService.getOrCreateRun` (before a run row exists) and again in
+`prepareThreadTurn` (every durable or direct turn). Their turns get the
+provider's prompt instead of the `<scheduled_run>` block, and a host-owned
+turn with no registered provider fails rather than running unequipped.
+
 ## Traps
 
 1. **Stale detection has two thresholds.** A `queued` run with no `jobId` is
