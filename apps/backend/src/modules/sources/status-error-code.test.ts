@@ -34,9 +34,9 @@ test("a content error keeps its code and a plain error has none", () => {
   assert.equal(
     buildSourceParseFailureError({
       source,
-      error: new ContentError(422, "WEB_SOURCE_YOUTUBE_UNSUPPORTED", "no"),
+      error: new ContentError(422, "YOUTUBE_URL_UNSUPPORTED", "no"),
     }).code,
-    "WEB_SOURCE_YOUTUBE_UNSUPPORTED",
+    "YOUTUBE_URL_UNSUPPORTED",
   );
   assert.equal(
     buildSourceParseFailureError({ source, error: new Error("boom") }).code,

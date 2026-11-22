@@ -8,6 +8,7 @@ import { logger } from "../../shared/logger";
 import type { ContentBillingPort } from "../content/billing-port";
 import { ContentError } from "../content/errors";
 import { getSourceParser, type ParsedDocument } from "./parsers";
+import { YOUTUBE_SOURCE_MIME_TYPE } from "@sourceweft/builtin-document-parsers/youtube";
 import {
   webFetchSourceParser,
   WEB_FETCH_SOURCE_MIME_TYPE,
@@ -51,6 +52,16 @@ import {
   buildSourceParseLogContext,
 } from "./parse-diagnostics";
 import { computeContentHash } from "./content-hash";
+import { createBilledVideoModelPort } from "./youtube/model-port";
+import { createYouTubeSourceParser } from "./youtube/providers";
+
+/**
+ * Source types whose content comes from their `externalUri` rather than a
+ * stored upload, so a reparse needs no stored bytes.
+ */
+function isUrlBackedSource(source: SourceRecord) {
+  return source.sourceType === "web_url" || source.sourceType === "youtube";
+}
 
 function mergeStatusMetadata(
   source: SourceRecord,
@@ -187,7 +198,7 @@ export class SourceParsingService {
     forceRefresh?: boolean;
   }) {
     const { source } = await requireContentSource(input);
-    if (!source.storageKey && source.sourceType !== "web_url") {
+    if (!source.storageKey && !isUrlBackedSource(source)) {
       return null;
     }
     return this.reparseSource(input);
@@ -201,14 +212,14 @@ export class SourceParsingService {
     forceRefresh?: boolean;
   }) {
     const { workspace, source } = await requireContentSource(input);
-    if (!source.storageKey && source.sourceType !== "web_url") {
+    if (!source.storageKey && !isUrlBackedSource(source)) {
       throw new ContentError(
         400,
         "SOURCE_NOT_UPLOADED",
         "Source has no uploaded file to reparse",
       );
     }
-    if (source.sourceType === "web_url" && !source.externalUri) {
+    if (isUrlBackedSource(source) && !source.externalUri) {
       throw new ContentError(
         400,
         "WEB_SOURCE_URL_MISSING",
@@ -308,6 +319,14 @@ export class SourceParsingService {
     try {
       if (source.sourceType === "web_url") {
         await this.processWebUrlSourceParseJob({
+          input,
+          source,
+        });
+        return;
+      }
+
+      if (source.sourceType === "youtube") {
+        await this.processYouTubeSourceParseJob({
           input,
           source,
         });
@@ -486,6 +505,73 @@ export class SourceParsingService {
 
     await this.completeParsedSource({
       input: input.input,
+      source: input.source,
+      parsed,
+      parsingConfig,
+    });
+  }
+
+  /**
+   * Transcribes a YouTube video source. The transcription is a billed model
+   * call charged to the job's user under its own ledger key; the source's
+   * pages are then charged at indexing like any other source.
+   */
+  private async processYouTubeSourceParseJob(input: {
+    input: SourceParseJobPayload;
+    source: SourceRecord;
+  }) {
+    const job = input.input;
+    const parsingConfig = defaultParsingConfig(
+      input.source.parsingConfig ?? undefined,
+    );
+    const processingSource = await updateSourceStatusForLatestRevision({
+      teamId: job.teamId,
+      workspaceId: job.workspaceId,
+      sourceId: job.sourceId,
+      sourceRevisionId: job.sourceRevisionId,
+      status: "processing",
+      error: {},
+      metadata: mergeStatusMetadata(input.source, {
+        progress: 20,
+        currentStep: "parsing",
+      }),
+    });
+    if (!processingSource) {
+      return;
+    }
+
+    const idempotencyKey =
+      job.idempotencyKey?.trim() ||
+      `source_parse_${job.sourceId}_${job.sourceRevisionId}`;
+    const port = await createBilledVideoModelPort({
+      billing: this.billing,
+      teamId: job.teamId,
+      workspaceId: job.workspaceId,
+      userId: job.userId,
+      sourceId: job.sourceId,
+      idempotencyKey,
+    });
+    const externalUri = input.source.externalUri ?? "";
+    const parsed = await createYouTubeSourceParser(port).parse({
+      fileName: input.source.title,
+      mimeType: input.source.mimeType || YOUTUBE_SOURCE_MIME_TYPE,
+      fileSize: Buffer.byteLength(externalUri, "utf8"),
+      content: Buffer.from(externalUri, "utf8"),
+      config: parsingConfig,
+      sourceExternalUri: input.source.externalUri ?? undefined,
+      forceRefresh: job.forceRefresh,
+      preferInputTitle: input.source.metadata.userTitleProvided === true,
+      sourceId: job.sourceId,
+      sourceRevisionId: job.sourceRevisionId,
+      teamId: job.teamId,
+      workspaceId: job.workspaceId,
+      userId: job.userId,
+      idempotencyKey,
+      billing: this.billing,
+    });
+
+    await this.completeParsedSource({
+      input: job,
       source: input.source,
       parsed,
       parsingConfig,

@@ -17,6 +17,9 @@ const fixtures = vi.hoisted(() => ({
   enqueue: vi.fn(),
   index: vi.fn(),
   resume: vi.fn(),
+  createVideoPort: vi.fn(),
+  createYouTubeParser: vi.fn(),
+  youtubeParse: vi.fn(),
   rejectRevisionWrite: false,
 }));
 vi.mock("./repository", () => ({
@@ -64,7 +67,16 @@ vi.mock("./parsers/providers/registry", () => ({
     resume: fixtures.resume,
   }),
 }));
+vi.mock("./youtube/model-port", () => ({
+  createBilledVideoModelPort: fixtures.createVideoPort,
+}));
+vi.mock("./youtube/providers", () => ({
+  createYouTubeSourceParser: fixtures.createYouTubeParser,
+}));
 import { SourceParsingService } from "./parsing-service";
+import { requireContentSource } from "./guards";
+import { createSourceRevisionRecord, updateSourceRecord } from "./repository";
+import { enqueueSourceParseJob } from "../content/queue";
 
 beforeEach(() => {
   fixtures.source = {
@@ -93,6 +105,11 @@ beforeEach(() => {
     .mockResolvedValue({ kind: "completed", document: fixtures.parsed });
   fixtures.enqueue.mockReset().mockResolvedValue(undefined);
   fixtures.parse.mockReset().mockResolvedValue(fixtures.parsed);
+  fixtures.createVideoPort.mockReset().mockResolvedValue({ port: "video" });
+  fixtures.youtubeParse.mockReset().mockResolvedValue(fixtures.parsed);
+  fixtures.createYouTubeParser
+    .mockReset()
+    .mockReturnValue({ parse: fixtures.youtubeParse });
 });
 function service() {
   return new SourceParsingService(
@@ -350,3 +367,101 @@ for (const rejectWrite of [false, true]) {
     }
   });
 }
+
+const YOUTUBE_URI = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
+
+function youtubeSource() {
+  Object.assign(fixtures.source, {
+    sourceType: "youtube",
+    title: "YouTube video jNQXAC9IVRw",
+    mimeType: "text/x-sourceweft-youtube",
+    storageKey: null,
+    storageBucket: null,
+    externalUri: YOUTUBE_URI,
+    sizeBytes: Buffer.byteLength(YOUTUBE_URI),
+    metadata: { userTitleProvided: true, videoId: "jNQXAC9IVRw" },
+  });
+}
+
+test("youtube branch passes billing and completes with transcript content", async () => {
+  youtubeSource();
+  fixtures.parsed.content = "# Talk\n\n[0:00](link) hello";
+  const billing = { name: "billing-port" };
+  await new SourceParsingService(
+    { indexSourceRevision: fixtures.index } as never,
+    billing as never,
+  ).processSourceParseJob(job);
+
+  assert.deepEqual(fixtures.createVideoPort.mock.calls[0]![0], {
+    billing,
+    teamId: "team",
+    workspaceId: "workspace",
+    userId: "user",
+    sourceId: "source",
+    idempotencyKey: "key",
+  });
+  assert.deepEqual(fixtures.createYouTubeParser.mock.calls[0]![0], {
+    port: "video",
+  });
+
+  const parseInput = fixtures.youtubeParse.mock.calls[0]![0];
+  assert.equal(parseInput.billing, billing);
+  assert.equal(parseInput.sourceExternalUri, YOUTUBE_URI);
+  assert.equal(parseInput.preferInputTitle, true);
+  assert.equal(parseInput.mimeType, "text/x-sourceweft-youtube");
+  assert.equal(parseInput.idempotencyKey, "key");
+  assert.equal(fixtures.parse.mock.calls.length, 0);
+
+  assert.equal(contentUpdate().contentText, "# Talk\n\n[0:00](link) hello");
+  assert.equal(fixtures.index.mock.calls.length, 1);
+  const last = fixtures.updates.at(-1)!;
+  assert.equal(
+    (last.metadata as Record<string, unknown>).currentStep,
+    "completed",
+  );
+});
+
+test("a youtube parse without a job key bills under a per-revision key", async () => {
+  youtubeSource();
+  const { idempotencyKey: _omitted, ...withoutKey } = job;
+  await service().processSourceParseJob(withoutKey);
+  assert.equal(
+    fixtures.createVideoPort.mock.calls[0]![0].idempotencyKey,
+    "source_parse_source_revision",
+  );
+});
+
+test("a failed youtube transcription fails the source with its code", async () => {
+  youtubeSource();
+  const failure = Object.assign(new Error("private video"), {
+    code: "YOUTUBE_VIDEO_UNAVAILABLE",
+  });
+  fixtures.youtubeParse.mockRejectedValue(failure);
+  await assert.rejects(service().processSourceParseJob(job), /private video/);
+  assert.equal(fixtures.index.mock.calls.length, 0);
+});
+
+test("a youtube source can be reparsed without stored bytes", async () => {
+  youtubeSource();
+  vi.mocked(requireContentSource).mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+    source: { ...fixtures.source, id: "source" },
+  } as never);
+  vi.mocked(updateSourceRecord).mockResolvedValue(fixtures.source as never);
+  vi.mocked(createSourceRevisionRecord).mockResolvedValue({
+    id: "revision-2",
+    revisionNo: 2,
+  } as never);
+  vi.mocked(enqueueSourceParseJob).mockResolvedValue({ id: "job-2" } as never);
+
+  const result = await service().tryQueueSourceReparse({
+    workspaceId: "workspace",
+    sourceId: "source",
+    userId: "user",
+  });
+  assert.ok(result);
+  assert.equal(
+    vi.mocked(enqueueSourceParseJob).mock.calls.at(-1)![0].idempotencyKey,
+    "source_parse_source_2",
+  );
+});

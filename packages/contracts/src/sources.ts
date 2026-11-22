@@ -471,6 +471,26 @@ export const createSourceResponseSchema = z.object({
   source: sourceSchema,
 });
 
+/**
+ * Every error code a YouTube source can answer with — when its link is added
+ * (`createUrlSource`), when its transcript is made (the source's failure
+ * code), or when a playlist/channel is listed — for the web's messages.
+ * `YOUTUBE_COLLECTION_URL` carries `details.kind` (`"playlist" | "channel"`).
+ */
+export const YOUTUBE_SOURCE_ERROR_CODES = [
+  "YOUTUBE_URL_UNSUPPORTED",
+  "YOUTUBE_COLLECTION_URL",
+  "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED",
+  "YOUTUBE_VIDEO_UNAVAILABLE",
+  "YOUTUBE_NO_SPEECH",
+  "YOUTUBE_TRANSCRIPT_FAILED",
+  "YOUTUBE_LISTING_FAILED",
+  "YOUTUBE_CHANNEL_NOT_FOUND",
+] as const;
+
+export type YouTubeSourceErrorCode =
+  (typeof YOUTUBE_SOURCE_ERROR_CODES)[number];
+
 export const createUrlSourceRequestSchema = z.object({
   url: z.string().trim().min(1).max(4096),
   title: z.string().trim().min(1).max(200).optional(),
