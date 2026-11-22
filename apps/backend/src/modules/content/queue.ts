@@ -334,6 +334,46 @@ export async function enqueueTableGenerateJob(payload: TableGenerateJobPayload) 
   return { created: true as const };
 }
 
+export const RESEARCH_JOB = "source-research";
+/** Queue attempts of one research run; the loop resumes from its saved ledger. */
+export const RESEARCH_JOB_ATTEMPTS = 2;
+
+/**
+ * One deep-research run to execute. Built by the server from an authorized
+ * request; the processor re-reads the run row and takes its tenancy from there.
+ */
+export type ResearchJobPayload = {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+};
+
+export function researchJobId(runId: string) {
+  return `research_${runId}`;
+}
+
+/**
+ * Queues one research run. The job id is the run, so a redelivered or repeated
+ * request for the same run finds the first job instead of adding another:
+ * `created: false` tells the caller it was already queued.
+ */
+export async function enqueueResearchJob(payload: ResearchJobPayload) {
+  const jobId = researchJobId(payload.runId);
+  const existing = await jobsQueue.getJob(jobId);
+  if (existing) {
+    return { created: false as const };
+  }
+  await jobsQueue.add(RESEARCH_JOB, payload, {
+    jobId,
+    attempts: RESEARCH_JOB_ATTEMPTS,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  });
+  return { created: true as const };
+}
+
 const THREAD_CHAT_RUN_JOB_ID_PREFIX = `${THREAD_CHAT_RUN_JOB}_`;
 
 /** The deterministic queue job id of a durable chat run. */

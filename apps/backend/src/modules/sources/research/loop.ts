@@ -72,6 +72,13 @@ export type ResearchInput = {
   runId: string;
   topic: string;
   resume?: ResearchResume;
+  /**
+   * When the run first started, in ms since the epoch. The wall-clock budget is
+   * measured from here so a resumed run (a queue retry after a crash) does not
+   * restart its clock. Defaults to the current time when the run has no recorded
+   * start, which is the behaviour of a fresh run.
+   */
+  startedAtMs?: number;
 };
 
 export type ResearchResult =
@@ -95,7 +102,7 @@ export async function runResearch(
 ): Promise<ResearchResult> {
   const { runId, topic } = input;
   const limits = RESEARCH_LIMITS;
-  const startedAt = deps.now();
+  const startedAt = input.startedAtMs ?? deps.now();
   const referenceId = `research:${runId}`;
 
   let plan: string[] | null = input.resume?.plan ?? null;
