@@ -1,5 +1,6 @@
 import {
   AgentTasksClient,
+  AssistantClient,
   BillingClient,
   DeploymentClient,
   ConnectorsClient,
@@ -35,4 +36,5 @@ export const workspaceClient = new WorkspaceClient(httpClient);
 export const localDevicesClient = new LocalDevicesClient(httpClient);
 export const llmObservabilityClient = new LlmObservabilityClient(httpClient);
 export const agentTasksClient = new AgentTasksClient(httpClient);
+export const assistantClient = new AssistantClient(httpClient);
 export const notificationsClient = new NotificationsClient(httpClient);

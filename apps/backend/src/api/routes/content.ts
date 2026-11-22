@@ -6,6 +6,7 @@ import { registerArtifactRecordExportRoutes } from "./content/artifact-records-e
 import { registerArtifactSharedCollectionRoutes } from "./content/artifact-shared-collections";
 import { registerAgentConfirmationRoutes } from "./content/agent-confirmations";
 import { registerAgentTaskRoutes } from "./content/agent-tasks";
+import { registerAssistantRoutes } from "./content/assistant";
 import { registerByokRoutes } from "./content/byok";
 import { registerCapabilityRoutes } from "./content/capabilities";
 import { registerConnectorRoutes } from "./content/connectors";
@@ -34,6 +35,7 @@ export function registerContentRoutes(app: Hono) {
 
   registerAgentConfirmationRoutes(workspaceRoutes);
   registerAgentTaskRoutes(workspaceRoutes);
+  registerAssistantRoutes(workspaceRoutes);
   registerNotificationRoutes(workspaceRoutes);
   registerArtifactRoutes(workspaceRoutes);
   registerArtifactRecordRoutes(workspaceRoutes);

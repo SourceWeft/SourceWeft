@@ -1,4 +1,5 @@
 import { AgentTasksClient } from "./agent-tasks-client";
+import { AssistantClient } from "./assistant-client";
 import { DeploymentClient } from "./deployment-client";
 import { BillingClient } from "./billing-client";
 import { ConnectorsClient } from "./connectors-client";
@@ -15,6 +16,7 @@ import { WorkspaceClient } from "./workspace-client";
 export type SourceweftClient = {
   readonly http: HttpClient;
   readonly agentTasks: AgentTasksClient;
+  readonly assistant: AssistantClient;
   readonly billing: BillingClient;
   readonly deployment: DeploymentClient;
   readonly connectors: ConnectorsClient;
@@ -44,6 +46,7 @@ export function createSourceweftClient(baseUrl: string): SourceweftClient {
   return {
     http,
     agentTasks: new AgentTasksClient(http),
+    assistant: new AssistantClient(http),
     billing: new BillingClient(http),
     deployment: new DeploymentClient(http),
     connectors: new ConnectorsClient(http),

@@ -22,6 +22,7 @@ Purpose of this directory:
 | `content/agent-confirmations.ts` | `agent-confirmations` | Human-in-the-loop tool approval |
 | `content/agent-tasks.ts` | `agent-tasks` | Scheduled tasks: CRUD, pause / resume / activate, run now, run history |
 | `content/artifacts.ts` | `artifacts` | Artifact metadata, source JSON, assets |
+| `content/assistant.ts` | `assistants` | Workspace assistant: enable/get/update, feed, messages, tickets |
 | `content/byok.ts` | `byok` | Bring-Your-Own-Key credential / model management |
 | `content/connectors.ts` | `connectors` | Connector lifecycle + action management |
 | `content/mcp.ts` | `mcp` | MCP tool install, run, approval |
