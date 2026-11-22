@@ -174,6 +174,44 @@ describe("StudyArtifactView", () => {
     expect(text()).toContain("study.status.generating completed=2 total=5");
   });
 
+  it("says when the last regeneration failed and still shows the previous version", async () => {
+    const requestRegenerate = vi.fn();
+    const host = createRecordingStudyHost({ requestRegenerate });
+    await mount(
+      withHost(
+        host,
+        view({
+          payload: {
+            ...(flashcardsFixtureEn as Record<string, unknown>),
+            study: { regeneration: { versionNo: 2, status: "failed", errorCode: "GENERATION_QUALITY_TOO_LOW" } },
+          },
+        }),
+      ),
+    );
+    await flush(3);
+    expect(text()).toContain("study.regenerationFailed.message");
+    expect(text()).toContain("study.error.code.GENERATION_QUALITY_TOO_LOW");
+    expect(document.querySelector("[data-study-flashcards]")).not.toBeNull();
+    await act(async () => button("study.stale.regenerate").click());
+    expect(requestRegenerate).toHaveBeenCalledWith(version);
+
+    // The share page never shows it.
+    await unmountAll();
+    await mount(
+      withHost(
+        host,
+        view({
+          interactive: false,
+          payload: {
+            ...(flashcardsFixtureEn as Record<string, unknown>),
+            study: { regeneration: { versionNo: 2, status: "failed", errorCode: "MODEL_UNAVAILABLE" } },
+          },
+        }),
+      ),
+    );
+    expect(text()).not.toContain("study.regenerationFailed.message");
+  });
+
   it("names a failed first generation and offers no retry it cannot do", async () => {
     // A failed artifact has no recipe, and only a ready one can regenerate.
     const host = createRecordingStudyHost({ requestRegenerate: () => {} });

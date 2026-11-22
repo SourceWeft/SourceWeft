@@ -33,6 +33,14 @@ function runPath(input: PathInput) {
     : taskPath(input);
 }
 
+/** The conversation an artifact was asked for in, else the chat home. */
+function conversationPath({ payload }: PathInput) {
+  const threadId = payload.threadId;
+  return typeof threadId === "string" && threadId
+    ? `/dashboard/chat/${encodeURIComponent(threadId)}`
+    : "/dashboard/chat";
+}
+
 /**
  * There is no deep link to the research card yet, so a research notification
  * leads to the chat landing page, where the sources panel lives.
@@ -108,6 +116,14 @@ export const NOTIFICATION_KINDS = {
     defaultEmail: false,
     template: null,
     path: researchPath,
+  },
+  // A table or study set generated in the background after the conversation
+  // moved on could not be made (or remade): in-app only, leading to the
+  // conversation it was asked in. `payload.title` names it.
+  artifact_generation_failed: {
+    defaultEmail: false,
+    template: null,
+    path: conversationPath,
   },
 } as const satisfies Record<string, NotificationKindDefinition>;
 

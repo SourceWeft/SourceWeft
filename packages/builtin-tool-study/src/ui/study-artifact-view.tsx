@@ -12,7 +12,11 @@ import { MindmapViewer } from "./mindmap/mindmap-viewer";
 import { QuizViewer } from "./quiz/quiz-viewer";
 import { StudyCannotDisplay, StudyErrorBoundary } from "./shared/error-boundary";
 import { parsePublicStudyContent } from "./shared/public-content";
-import { StaleBanner } from "@sourceweft/grounded-generation/ui";
+import {
+  readRegenerationFailure,
+  RegenerationFailedBanner,
+  StaleBanner,
+} from "@sourceweft/grounded-generation/ui";
 import { useStudyHost, type StudyHost, type StudyVersionRef } from "./study-host";
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -149,12 +153,16 @@ export function StudyArtifactView({
       ? parsePublicStudyContent(artifact.artifactType, payload)
       : parseContent(artifact.artifactType, payload);
   if (!content) return <StudyCannotDisplay />;
+  const regenerationFailure = readRegenerationFailure(payload, "study");
 
   return (
     <StudyErrorBoundary>
       <div className="flex h-full min-h-0 flex-col gap-2">
         {interactive !== false ? (
-          <div className="px-4 pt-3 empty:hidden">
+          <div className="grid gap-2 px-4 pt-3 empty:hidden">
+            {regenerationFailure ? (
+              <RegenerationFailedBanner failure={regenerationFailure} version={version} />
+            ) : null}
             <StaleBanner version={version} />
           </div>
         ) : null}

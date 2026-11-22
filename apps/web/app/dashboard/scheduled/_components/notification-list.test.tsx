@@ -171,3 +171,45 @@ test("with nothing unread the bell has no badge", async () => {
     "Notifications",
   );
 });
+
+test("a failed background generation names what failed and leads to its conversation", async () => {
+  hooks.useNotifications.mockReturnValue({
+    data: {
+      pages: [
+        {
+          notifications: [
+            item({
+              id: "n2",
+              kind: "artifact_generation_failed",
+              ref: { kind: "artifact", id: "a1" },
+              payload: { title: "Flashcards: Cedar Beacon", threadId: "th1", regeneration: false },
+              path: "/dashboard/chat/th1",
+            }),
+            item({
+              id: "n3",
+              kind: "artifact_generation_failed",
+              ref: { kind: "artifact", id: "a2" },
+              payload: { title: "Quiz: Orchid", threadId: "th1", regeneration: true },
+              path: "/dashboard/chat/th1",
+            }),
+          ],
+          nextCursor: null,
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+  });
+  const { container } = await mountWithIntl(
+    <NotificationList workspaceId="ws_1" />,
+  );
+  expect(container.textContent).toContain(
+    "\"Flashcards: Cedar Beacon\" could not be generated.",
+  );
+  expect(container.textContent).toContain(
+    "\"Quiz: Orchid\" could not be regenerated. The previous version is kept",
+  );
+  container.querySelector("button")!.click();
+  expect(nav.push).toHaveBeenCalledWith("/dashboard/chat/th1");
+});

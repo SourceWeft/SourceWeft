@@ -28,6 +28,15 @@ const KNOWN_KINDS = new Set([
 export function useNotificationText() {
   const t = useTranslations("dashboardScheduled");
   return (item: NotificationItem) => {
+    // A table or study set generated in the background that failed: named by
+    // its title, and whether it was a first generation or a regeneration.
+    if (item.kind === "artifact_generation_failed") {
+      const title =
+        typeof item.payload.title === "string" ? item.payload.title : "";
+      return item.payload.regeneration === true
+        ? t("notification.artifact_regeneration_failed", { title })
+        : t("notification.artifact_generation_failed", { title });
+    }
     const taskName =
       typeof item.payload.taskName === "string" ? item.payload.taskName : "";
     const topic =
