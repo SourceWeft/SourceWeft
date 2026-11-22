@@ -38,6 +38,7 @@ import {
   connectorCatalogCategories,
   connectorCatalogForAvailableTypes,
 } from "./catalog";
+import { AddFeedDialog } from "./add-feed-dialog";
 import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
 import type { GmailUsageMode } from "./gmail-mode";
 import {
@@ -57,6 +58,7 @@ import type {
   ConnectorReadinessState,
   ConnectorWebhookConfig,
   ConnectorWebhookEventItem,
+  FeedCheckResult,
 } from "./types";
 
 export type ManageConnectorsTab = "all" | "active";
@@ -100,14 +102,15 @@ export function ManageConnectorsDialog({
   initialTab,
   isLoading,
   loadingError,
-  onAddFeed,
   onCancelConnector,
   onConnectConnector,
   onCopyWebhook,
+  onCheckFeed,
   onCreateConnector,
   onDisconnectConnector,
   onOpenChange,
   onOpenSettings,
+  onSubmitFeed,
   onSyncConnector,
   onToggleConnectorStatus,
   open,
@@ -124,18 +127,18 @@ export function ManageConnectorsDialog({
   initialTab: ManageConnectorsTab;
   isLoading: boolean;
   loadingError: string | null;
-  /** Opens the add-feed flow for an add-only catalog item (`addMode`). */
-  onAddFeed?: (item: ConnectorCatalogItem) => void;
   onCancelConnector: (item: ConnectorCatalogItem) => void;
   onConnectConnector: (
     item: ConnectorCatalogItem,
     gmailMode?: GmailUsageMode,
   ) => void;
+  onCheckFeed: (feedUrl: string) => Promise<FeedCheckResult>;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
   onOpenSettings: (connector: ConnectorItem) => void;
+  onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -152,6 +155,10 @@ export function ManageConnectorsDialog({
   const [gmailMode, setGmailMode] = useState<GmailUsageMode>("tools");
   const [pendingGmailBrokerNotice, setPendingGmailBrokerNotice] =
     useState<ConnectorCatalogItem | null>(null);
+  // Add-only catalog item (`addMode`) whose add dialog is open.
+  const [pendingFeed, setPendingFeed] = useState<ConnectorCatalogItem | null>(
+    null,
+  );
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
@@ -342,7 +349,7 @@ export function ManageConnectorsDialog({
                                 connector={connector}
                                 item={item}
                                 key={item.id}
-                                onAddFeed={onAddFeed}
+                                onAddFeed={setPendingFeed}
                                 onCancelConnector={onCancelConnector}
                                 onConfigure={() => {
                                   if (connector) {
@@ -494,6 +501,14 @@ export function ManageConnectorsDialog({
           </div>
         </DialogContent>
       </Dialog>
+      <AddFeedDialog
+        onAdd={onSubmitFeed}
+        onCheck={onCheckFeed}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingFeed(null);
+        }}
+        open={pendingFeed !== null}
+      />
       <GmailBrokerNoticeDialog
         item={pendingGmailBrokerNotice}
         onContinue={(item) => {

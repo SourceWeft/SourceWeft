@@ -3293,7 +3293,19 @@
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
       "rss": {
-        "feedUrl": "Feed URL"
+        "feedUrl": "Feed URL",
+        "dialog": {
+          "description": "Enter the URL of a public RSS or Atom feed. SourceWeft checks it first, then indexes its posts and keeps them in sync.",
+          "nameLabel": "Name (optional)",
+          "check": "Check feed",
+          "checking": "Checking...",
+          "found": "Feed found",
+          "itemCount": "{count, plural, one {# item} other {# items}}",
+          "invalidUrl": "Enter an https:// feed URL without a username or password.",
+          "checkFailed": "Could not check this feed. Try again.",
+          "nameConflict": "A connector with this name or this feed already exists in this workspace. Change the name, or use the existing one.",
+          "addFailed": "Failed to add the feed."
+        }
       },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",

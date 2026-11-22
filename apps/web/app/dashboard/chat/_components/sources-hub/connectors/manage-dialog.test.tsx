@@ -3,7 +3,13 @@
 import { createElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { click, mountWithIntl, unmountAll } from "@/test/react";
+import {
+  click,
+  flush,
+  mountWithIntl,
+  typeInto,
+  unmountAll,
+} from "@/test/react";
 import { ManageConnectorsDialog } from "./manage-dialog";
 import type { ConnectorManifestInfo } from "./types";
 
@@ -21,12 +27,14 @@ function baseProps(
 ) {
   const handlers = {
     onCancelConnector: vi.fn(),
+    onCheckFeed: vi.fn(),
     onConnectConnector: vi.fn(),
     onCopyWebhook: vi.fn(),
     onCreateConnector: vi.fn(),
     onDisconnectConnector: vi.fn(),
     onOpenChange: vi.fn(),
     onOpenSettings: vi.fn(),
+    onSubmitFeed: vi.fn(),
     onSyncConnector: vi.fn(),
     onToggleConnectorStatus: vi.fn(),
   };
@@ -219,4 +227,50 @@ test("reconnecting a Composio-brokered Gmail shows the broker notice, like a fir
     expect.objectContaining({ id: "gmail" }),
     "tools",
   );
+});
+
+test("the RSS card opens the add-feed dialog and the dialog's callbacks reach the hook", async () => {
+  const { props, handlers } = baseProps({ availableConnectorTypes: ["rss"] });
+  handlers.onCheckFeed.mockResolvedValue({
+    ready: true,
+    reason: "",
+    message: "",
+    title: "Example Blog",
+    itemCount: 3,
+  });
+  handlers.onSubmitFeed.mockResolvedValue(undefined);
+  await mountWithIntl(createElement(ManageConnectorsDialog, props));
+  const rssCard = Array.from(document.querySelectorAll("article")).find(
+    (node) => node.querySelector("h4")?.textContent?.trim() === "RSS / Atom",
+  )!;
+
+  expect(document.querySelector('input[name="feedUrl"]')).toBeNull();
+  await click(buttonWithText(rssCard, "Add feed"));
+
+  const urlField = document.querySelector<HTMLInputElement>(
+    'input[name="feedUrl"]',
+  )!;
+  expect(urlField).not.toBeNull();
+  typeInto(urlField, "https://example.com/feed.xml");
+  await flush(3);
+  await click(buttonWithText(document.body, "Check feed"));
+  await flush(5);
+  expect(handlers.onCheckFeed).toHaveBeenCalledWith(
+    "https://example.com/feed.xml",
+  );
+
+  const dialog = document.querySelector('[role="dialog"][data-state="open"]');
+  const addButtons = Array.from(document.querySelectorAll("button")).filter(
+    (node) => node.textContent?.trim() === "Add feed" && !rssCard.contains(node),
+  );
+  expect(dialog).not.toBeNull();
+  await click(addButtons[addButtons.length - 1]!);
+  await flush(5);
+
+  expect(handlers.onSubmitFeed).toHaveBeenCalledWith({
+    name: "Example Blog",
+    feedUrl: "https://example.com/feed.xml",
+  });
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(document.querySelector('input[name="feedUrl"]')).toBeNull();
 });

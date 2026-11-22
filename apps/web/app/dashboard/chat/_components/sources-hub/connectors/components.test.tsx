@@ -37,6 +37,7 @@ async function card(input: {
   supportsIndexing?: boolean;
 }) {
   const handlers = {
+    onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),

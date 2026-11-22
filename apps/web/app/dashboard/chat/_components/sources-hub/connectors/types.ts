@@ -74,6 +74,14 @@ export type ConnectorReadinessState = {
   message: string;
 };
 
+/** Outcome of the pre-create feed check: the readiness verdict plus, when the
+ * feed was read, its title and item count (both from the check metadata). */
+export type FeedCheckResult = ConnectorReadinessState & {
+  ready: boolean;
+  title: string | null;
+  itemCount: number | null;
+};
+
 /**
  * Per-connector-type facts derived from its manifest (see
  * `connectorsClient.listManifests`): whether the adapter declares any sync

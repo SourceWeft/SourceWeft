@@ -3293,7 +3293,19 @@
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
       "rss": {
-        "feedUrl": "訂閱源網址"
+        "feedUrl": "訂閱源網址",
+        "dialog": {
+          "description": "輸入公開 RSS 或 Atom 訂閱源的網址。SourceWeft 會先檢查訂閱源，再為其中的文章建立索引並保持同步。",
+          "nameLabel": "名稱（選填）",
+          "check": "檢查訂閱源",
+          "checking": "檢查中…",
+          "found": "已找到訂閱源",
+          "itemCount": "{count, plural, other {# 篇文章}}",
+          "invalidUrl": "請輸入以 https:// 開頭的訂閱源網址，且不要包含使用者名稱或密碼。",
+          "checkFailed": "無法檢查此訂閱源，請重試。",
+          "nameConflict": "此工作區中已存在同名連接器，或已新增過相同的訂閱源。請更改名稱，或使用已有的連接器。",
+          "addFailed": "新增訂閱源失敗。"
+        }
       },
       "gmail": {
         "modeTitle": "選擇 Gmail 用途",

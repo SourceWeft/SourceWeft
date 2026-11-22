@@ -550,8 +550,9 @@ export const ConnectorCatalogCard = memoComponent(
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
     connector: ConnectorItem | null;
-    /** Add-only cards (`item.addMode`) call this instead of starting OAuth. */
-    onAddFeed?: (item: ConnectorCatalogItem) => void;
+    /** Add-only cards (`item.addMode`) call this instead of starting OAuth.
+     * Required so an add-only card can never render a button that does nothing. */
+    onAddFeed: (item: ConnectorCatalogItem) => void;
     onCancelConnector: (item: ConnectorCatalogItem) => void;
     onConfigure: () => void;
     onConnectConnector: (item: ConnectorCatalogItem) => void;
@@ -593,7 +594,7 @@ export const ConnectorCatalogCard = memoComponent(
 
     function handleAction() {
       if (item.addMode) {
-        onAddFeed?.(item);
+        onAddFeed(item);
         return;
       }
       if (canReconnect) {

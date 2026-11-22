@@ -45,6 +45,7 @@ import type {
   ConnectorReadinessState,
   ConnectorWebhookConfig,
   ConnectorWebhookEventItem,
+  FeedCheckResult,
 } from "./types";
 
 const CONNECTOR_OAUTH_URL_PARAMS = [
@@ -1391,6 +1392,66 @@ export function useConnectors(input: {
     ],
   );
 
+  const handleCheckFeed = useCallback(
+    async (feedUrl: string): Promise<FeedCheckResult> => {
+      if (!workspaceId) {
+        toast.error(t("toasts.connectors.noWorkspace"));
+        return {
+          ready: false,
+          reason: "no_workspace",
+          message: "",
+          title: null,
+          itemCount: null,
+        };
+      }
+      const result = await connectorsClient.checkConfig(workspaceId, {
+        connectorType: "rss",
+        configJson: { feedUrl },
+      });
+      const title = result.metadata?.title;
+      const itemCount = result.metadata?.itemCount;
+      return {
+        ready: result.ready,
+        reason: result.reason ?? "",
+        message: result.message ?? "",
+        title: typeof title === "string" && title.trim() ? title : null,
+        itemCount: typeof itemCount === "number" ? itemCount : null,
+      };
+    },
+    [workspaceId, t],
+  );
+
+  // Rejects on any create failure (including the 409 duplicate) so the add
+  // dialog stays open and shows the reason; a failed first-sync start does not
+  // reject, because the connector exists by then and the sync path reports it.
+  const handleAddFeed = useCallback(
+    async (input: { name: string; feedUrl: string }) => {
+      if (!workspaceId) {
+        const message = t("toasts.connectors.noWorkspace");
+        toast.error(message);
+        throw new Error(message);
+      }
+      const created = await connectorsClient.create(workspaceId, {
+        connectorType: "rss",
+        name: input.name,
+        configJson: { feedUrl: input.feedUrl },
+        periodicIndexingEnabled: true,
+        indexingFrequencyMinutes: 360,
+      });
+      trackConnectorConnected({ connectorType: "rss" });
+      await refreshConnectors();
+      toast.success(
+        t("toasts.connectors.connectedFallback", {
+          name: created.connector.name,
+        }),
+      );
+      await handleSyncConnector(
+        mapConnectorToUi(created.connector, t, displayLocale),
+      );
+    },
+    [displayLocale, handleSyncConnector, refreshConnectors, workspaceId, t],
+  );
+
   const handleToggleConnectorStatus = useCallback(
     async (connector: ConnectorItem) => {
       if (!workspaceId) return;
@@ -1551,6 +1612,8 @@ export function useConnectors(input: {
     handleCancelConnector,
     handleCopyWebhook,
     handleSyncConnector,
+    handleCheckFeed,
+    handleAddFeed,
     handleToggleConnectorStatus,
     handleSaveConnectorSettings,
     handleConfirmDisconnectConnector,

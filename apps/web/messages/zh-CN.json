@@ -3293,7 +3293,19 @@
       },
       "settingsDescription": "连接器设置、执行历史和提供方事件。",
       "rss": {
-        "feedUrl": "订阅源网址"
+        "feedUrl": "订阅源网址",
+        "dialog": {
+          "description": "输入公开 RSS 或 Atom 订阅源的网址。SourceWeft 会先检查订阅源，再为其中的文章建立索引并保持同步。",
+          "nameLabel": "名称（可选）",
+          "check": "检查订阅源",
+          "checking": "检查中…",
+          "found": "已找到订阅源",
+          "itemCount": "{count, plural, other {# 篇文章}}",
+          "invalidUrl": "请输入以 https:// 开头的订阅源网址，且不要包含用户名或密码。",
+          "checkFailed": "无法检查此订阅源，请重试。",
+          "nameConflict": "此工作区中已存在同名连接器，或已添加过相同的订阅源。请更改名称，或使用已有的连接器。",
+          "addFailed": "添加订阅源失败。"
+        }
       },
       "gmail": {
         "modeTitle": "选择 Gmail 用途",
