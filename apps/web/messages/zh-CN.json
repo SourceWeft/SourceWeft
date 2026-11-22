@@ -7128,5 +7128,14 @@
         "needsApproval": "这次定时任务需要你的批准，而定时任务无法请求批准。"
       }
     }
+  },
+  "sharedChat": {
+    "sharedOnAsOf": "在 SourceWeft 上分享 · 内容截至 {date}",
+    "user": "用户",
+    "assistant": "助手",
+    "stopped": "已停止",
+    "madeWith": "由 SourceWeft 制作",
+    "unavailable": "这个分享不可用",
+    "sources": "来源"
   }
 }

@@ -21,7 +21,8 @@ export const CLIENT_NAMESPACES = {
    * `useMessages()` in `app/providers.tsx`. `authPages.oneTap` is read by
    * `GoogleOneTap`, which mounts in the root providers on every route.
    * `table` and `study` are read by the table and study viewers on the
-   * public share page.
+   * public share page. `sharedChat` is read by the public shared-chat page
+   * (`app/chat/[token]`), which has no provider of its own either.
    */
   root: [
     "artifactShare",
@@ -35,6 +36,7 @@ export const CLIENT_NAMESPACES = {
     "header",
     "languageSwitcher",
     "mobileRouteSheet",
+    "sharedChat",
     "study",
     "table",
     "ui",

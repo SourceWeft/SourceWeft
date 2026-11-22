@@ -7128,5 +7128,14 @@
         "needsApproval": "This scheduled run needs your approval, which a scheduled run cannot ask for."
       }
     }
+  },
+  "sharedChat": {
+    "sharedOnAsOf": "Shared on SourceWeft · as of {date}",
+    "user": "User",
+    "assistant": "Assistant",
+    "stopped": "Stopped",
+    "madeWith": "Made with SourceWeft",
+    "unavailable": "This share isn't available",
+    "sources": "Sources"
   }
 }
