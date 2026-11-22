@@ -64,6 +64,15 @@ export function QuizViewer({
           items={sessionItems}
           onPracticeMistakes={() => void quiz.start(score.wrongItemIds)}
           onRestart={() => void quiz.start()}
+          {...(interactive && host.deriveCardsFromMistakes && session.attemptId && !session.saveFailed
+            ? {
+                onMakeCards: () =>
+                  host.deriveCardsFromMistakes!({
+                    workspaceId: version.workspaceId,
+                    attemptId: session.attemptId!,
+                  }),
+              }
+            : {})}
           score={score}
           t={t}
           version={version}

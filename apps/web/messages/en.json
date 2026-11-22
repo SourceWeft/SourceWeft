@@ -6218,6 +6218,10 @@
         "selfGraded": "Open questions: you got {knew} of {total}"
       },
       "practiceMistakes": "Practise the mistakes",
+      "mistakesToCards": "Make flashcards from mistakes",
+      "mistakesToCardsDone": "Made {count, plural, one {# flashcard} other {# flashcards}} from your mistakes.",
+      "mistakesToCardsOpen": "Open the deck",
+      "mistakesToCardsFailed": "The flashcards couldn't be made. Try again.",
       "restart": "Start again",
       "verdict": {
         "correct": "Correct",

@@ -6218,6 +6218,10 @@
         "selfGraded": "问答题：自评答对 {knew} / {total} 题"
       },
       "practiceMistakes": "重练错题",
+      "mistakesToCards": "把错题做成闪卡",
+      "mistakesToCardsDone": "已用错题做成 {count} 张闪卡。",
+      "mistakesToCardsOpen": "打开闪卡",
+      "mistakesToCardsFailed": "没能做成闪卡，请重试。",
       "restart": "重新开始",
       "verdict": {
         "correct": "正确",
