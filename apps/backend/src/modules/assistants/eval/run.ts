@@ -17,6 +17,7 @@
  *
  * Run: pnpm --filter @sourceweft/backend exec tsx src/modules/assistants/eval/run.ts [--out result.json]
  */
+import "./require-eval-database";
 import "../../../shared/config";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -145,7 +146,12 @@ function isIdle(busy: Busy) {
 }
 
 async function failedRunsSince(workspaceId: string, since: Date) {
-  return query<{ id: string; thread_id: string; error_code: string | null; error_message: string | null }>(
+  return query<{
+    id: string;
+    thread_id: string;
+    error_code: string | null;
+    error_message: string | null;
+  }>(
     `select id, thread_id, error_code, left(error_message, 300) as error_message
        from chat_thread_runs
       where workspace_id = $1 and status = 'failed' and created_at >= $2
@@ -165,7 +171,10 @@ async function waitIdle(
   let lastLog = 0;
   for (;;) {
     const busy = await busyState(assistantId);
-    for (const run of await failedRunsSince(workspaceId, new Date(started - 60_000))) {
+    for (const run of await failedRunsSince(
+      workspaceId,
+      new Date(started - 60_000),
+    )) {
       if (seenFailures.has(run.id)) continue;
       seenFailures.add(run.id);
       console.log(
@@ -182,12 +191,16 @@ async function waitIdle(
       idleSince = null;
     }
     if (now - started > PHASE_TIMEOUT_MS) {
-      console.log(`  [${label}] still busy after ${PHASE_TIMEOUT_MS / 60_000} min: ${JSON.stringify(busy)}`);
+      console.log(
+        `  [${label}] still busy after ${PHASE_TIMEOUT_MS / 60_000} min: ${JSON.stringify(busy)}`,
+      );
       return { timedOut: true, ms: now - started };
     }
     if (now - lastLog > 30_000) {
       lastLog = now;
-      console.log(`  [${label}] waiting ${Math.round((now - started) / 1000)}s ${JSON.stringify(busy)}`);
+      console.log(
+        `  [${label}] waiting ${Math.round((now - started) / 1000)}s ${JSON.stringify(busy)}`,
+      );
     }
     await sleep(POLL_INTERVAL_MS);
   }
@@ -262,7 +275,8 @@ async function score(input: {
     const expectedTicketId = message.target
       ? (byKey.get(message.target)?.routedTicketId ?? null)
       : null;
-    const action = trigger?.status === "decided" ? (decision?.action ?? null) : null;
+    const action =
+      trigger?.status === "decided" ? (decision?.action ?? null) : null;
     let correct = false;
     if (message.kind === "request") correct = action === "create_ticket";
     else if (message.kind === "chatter") correct = action === "ignore";
@@ -292,14 +306,20 @@ async function score(input: {
     byKey.set(message.key, outcome);
   }
 
-  const ofKind = (kind: P1Message["kind"]) => outcomes.filter((o) => o.kind === kind);
+  const ofKind = (kind: P1Message["kind"]) =>
+    outcomes.filter((o) => o.kind === kind);
   const rate = (rows: TriggerOutcome[]) =>
     rows.length === 0 ? 1 : rows.filter((o) => o.correct).length / rows.length;
 
-  const reportTriggers = triggers.filter((row) => row.source_kind === "worker_report");
+  const reportTriggers = triggers.filter(
+    (row) => row.source_kind === "worker_report",
+  );
   const reportActions: Record<string, number> = {};
   for (const row of reportTriggers) {
-    const action = row.status === "decided" ? (decisionOf(row.id)?.action ?? "?") : row.status;
+    const action =
+      row.status === "decided"
+        ? (decisionOf(row.id)?.action ?? "?")
+        : row.status;
     reportActions[action] = (reportActions[action] ?? 0) + 1;
   }
 
@@ -365,15 +385,22 @@ async function score(input: {
     [input.workspaceId, input.routerThreadId],
   );
 
-  const undecidedMembers = outcomes.filter((o) => o.status !== "decided").length;
+  const undecidedMembers = outcomes.filter(
+    (o) => o.status !== "decided",
+  ).length;
   const metrics = {
     requestRecall: rate(ofKind("request")),
     followupRouting: rate(ofKind("followup")),
     cancelRouting: rate(ofKind("cancel")),
-    followupAndCancelRouting: rate([...ofKind("followup"), ...ofKind("cancel")]),
+    followupAndCancelRouting: rate([
+      ...ofKind("followup"),
+      ...ofKind("cancel"),
+    ]),
     chatterIgnored: rate(ofKind("chatter")),
     undecidedMemberEvents: undecidedMembers,
-    undecidedReportEvents: reportTriggers.filter((row) => row.status !== "decided").length,
+    undecidedReportEvents: reportTriggers.filter(
+      (row) => row.status !== "decided",
+    ).length,
     workerReportDecisions: reportActions,
     ticketsCreated: Number(tickets!.count),
     routerSays: Number(says!.count),
@@ -383,7 +410,8 @@ async function score(input: {
   };
   const pass =
     metrics.requestRecall >= THRESHOLDS.requestRecall &&
-    metrics.undecidedMemberEvents + metrics.undecidedReportEvents <= THRESHOLDS.undecided &&
+    metrics.undecidedMemberEvents + metrics.undecidedReportEvents <=
+      THRESHOLDS.undecided &&
     metrics.followupRouting >= THRESHOLDS.followupRouting &&
     metrics.chatterIgnored >= THRESHOLDS.chatterIgnored;
   return { metrics, pass, outcomes };
@@ -410,7 +438,9 @@ async function main() {
       try {
         await runAssistantTick();
       } catch (error) {
-        console.log(`  tick failed: ${error instanceof Error ? error.message : String(error)}`);
+        console.log(
+          `  tick failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
       await sleep(TICK_INTERVAL_MS);
     }
@@ -424,7 +454,10 @@ async function main() {
       for (const message of phase) {
         const posted = await assistantService.postMessage(
           { workspaceId, userId: users[message.member] },
-          { text: message.text, idempotencyKey: `p1-eval:${runId}:${message.key}` },
+          {
+            text: message.text,
+            idempotencyKey: `p1-eval:${runId}:${message.key}`,
+          },
         );
         triggerIds.set(message.key, posted.item.id);
       }
@@ -441,7 +474,10 @@ async function main() {
   // Paused once scored, so a later run's ticks leave this one alone.
   const { assistant: current } = await assistantService.get(owner);
   if (current) {
-    await assistantService.update(owner, { version: current.version, action: "pause" });
+    await assistantService.update(owner, {
+      version: current.version,
+      action: "pause",
+    });
   }
 
   const result = await score({
@@ -454,17 +490,37 @@ async function main() {
   const { metrics } = result;
   const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
   console.log("");
-  console.log(`P1 eval ${runId} finished in ${Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000)}s`);
-  console.log(`  explicit-request recall   ${pct(metrics.requestRecall)} (threshold 100%)`);
-  console.log(`  follow-up routing         ${pct(metrics.followupRouting)} (threshold >= 85%)`);
+  console.log(
+    `P1 eval ${runId} finished in ${Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000)}s`,
+  );
+  console.log(
+    `  explicit-request recall   ${pct(metrics.requestRecall)} (threshold 100%)`,
+  );
+  console.log(
+    `  follow-up routing         ${pct(metrics.followupRouting)} (threshold >= 85%)`,
+  );
   console.log(`  cancellation routing      ${pct(metrics.cancelRouting)}`);
-  console.log(`  chatter ignored           ${pct(metrics.chatterIgnored)} (threshold >= 85%)`);
-  console.log(`  undecided events          ${metrics.undecidedMemberEvents} member + ${metrics.undecidedReportEvents} worker report (threshold 0)`);
-  console.log(`  worker report decisions   ${JSON.stringify(metrics.workerReportDecisions)}`);
-  console.log(`  tickets created           ${metrics.ticketsCreated}; router say ${metrics.routerSays}`);
-  console.log(`  router runs               ${metrics.router.runs} (failed ${metrics.router.failed}), consumed_credits ${metrics.router.consumedCredits}`);
-  console.log(`  worker runs               ${metrics.workers.runs} (failed ${metrics.workers.failed}), consumed_credits ${metrics.workers.consumedCredits}`);
-  console.log(`  phase timeouts            ${phases.filter((p) => p.timedOut).length}`);
+  console.log(
+    `  chatter ignored           ${pct(metrics.chatterIgnored)} (threshold >= 85%)`,
+  );
+  console.log(
+    `  undecided events          ${metrics.undecidedMemberEvents} member + ${metrics.undecidedReportEvents} worker report (threshold 0)`,
+  );
+  console.log(
+    `  worker report decisions   ${JSON.stringify(metrics.workerReportDecisions)}`,
+  );
+  console.log(
+    `  tickets created           ${metrics.ticketsCreated}; router say ${metrics.routerSays}`,
+  );
+  console.log(
+    `  router runs               ${metrics.router.runs} (failed ${metrics.router.failed}), consumed_credits ${metrics.router.consumedCredits}`,
+  );
+  console.log(
+    `  worker runs               ${metrics.workers.runs} (failed ${metrics.workers.failed}), consumed_credits ${metrics.workers.consumedCredits}`,
+  );
+  console.log(
+    `  phase timeouts            ${phases.filter((p) => p.timedOut).length}`,
+  );
   console.log(`  RESULT                    ${result.pass ? "PASS" : "FAIL"}`);
   for (const outcome of result.outcomes.filter((o) => !o.correct)) {
     console.log(

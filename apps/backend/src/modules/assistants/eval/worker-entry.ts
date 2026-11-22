@@ -10,6 +10,7 @@
  *
  * Run: pnpm --filter @sourceweft/backend exec tsx src/modules/assistants/eval/worker-entry.ts
  */
+import "./require-eval-database";
 import { tool } from "langchain";
 import { z } from "zod";
 import {
