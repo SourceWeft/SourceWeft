@@ -20,6 +20,7 @@ import {
   Button,
   buttonVariants,
 } from "@sourceweft/ui-web/components/ui/button";
+import { saveBlob } from "../../../../../lib/save-blob";
 import { contentClient } from "../../../../../lib/sdk";
 import { getErrorMessage } from "../sources-hub/lib/errors";
 import type { ArtifactListItem } from "../sources-hub/types";
@@ -31,19 +32,6 @@ export function pageDataFileName(title: string, scope: ArtifactRecordScope) {
     .replace(/^[-.]+|[-.]+$/gu, "")
     .slice(0, 60);
   return `${base || "artifact"}-${scope}-data.json`;
-}
-
-function saveBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.rel = "noopener";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoke after the browser has had the chance to start the download.
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 /**

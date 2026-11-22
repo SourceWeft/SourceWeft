@@ -233,6 +233,28 @@ export const searchThreadsRequestSchema = z.object({
   limit: z.number().int().min(1).max(50).optional(),
 });
 
+export const exportThreadLocaleSchema = z.enum(["en", "zh-CN", "zh-TW"]);
+
+function isValidTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Query for `GET /threads/:id/export`: the labels' language and the clock. */
+export const exportThreadRequestSchema = z.object({
+  locale: exportThreadLocaleSchema.default("en"),
+  timeZone: z
+    .string()
+    .trim()
+    .min(1)
+    .default("UTC")
+    .refine(isValidTimeZone, "Unknown time zone"),
+});
+
 export const threadSearchResultSchema = z.object({
   thread: threadWithChatPreferencesSchema,
   archived: z.boolean(),
@@ -330,6 +352,8 @@ export type RenameThreadRequest = z.infer<typeof renameThreadRequestSchema>;
 export type RenameThreadResponse = z.infer<typeof renameThreadResponseSchema>;
 export type PinThreadResponse = z.infer<typeof pinThreadResponseSchema>;
 export type SearchThreadsRequest = z.infer<typeof searchThreadsRequestSchema>;
+export type ExportThreadLocale = z.infer<typeof exportThreadLocaleSchema>;
+export type ExportThreadRequest = z.infer<typeof exportThreadRequestSchema>;
 export type ThreadSearchResult = z.infer<typeof threadSearchResultSchema>;
 export type SearchThreadsResponse = z.infer<typeof searchThreadsResponseSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;

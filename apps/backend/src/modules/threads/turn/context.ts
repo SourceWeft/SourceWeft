@@ -10,19 +10,9 @@ import { findThreadRecord } from "../thread/repository";
 import { listMessageRecordsByThread } from "../message-repository";
 import { readTurnOptionsSnapshotTools } from "./tool-selection";
 import { toObjectRecord } from "../../../shared/records";
+import { collapseSupersededMessages } from "./superseded-messages";
 
-export function collapseSupersededMessages(items: MessageRecord[]) {
-  const supersededIds = new Set(
-    items
-      .map((item) => item.parentMessageId)
-      .filter(
-        (value): value is string =>
-          typeof value === "string" && value.length > 0,
-      ),
-  );
-
-  return items.filter((item) => !supersededIds.has(item.id));
-}
+export { collapseSupersededMessages };
 
 function resolveMessageRootId(input: {
   messageById: Map<string, MessageRecord>;

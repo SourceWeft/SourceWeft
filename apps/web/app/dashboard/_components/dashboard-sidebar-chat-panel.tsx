@@ -14,6 +14,7 @@ import {
   ArchiveRestore,
   Bot,
   CalendarClock,
+  Download,
   ExternalLink,
   Link2,
   PanelRightOpen,
@@ -77,6 +78,7 @@ import {
   type SidebarChatFilter,
 } from "./dashboard-sidebar-chat-list";
 import { mapThreadToChatItem } from "./dashboard-chat-items";
+import { useChatExport } from "./use-chat-export";
 import { useChatSearch, type ChatSearchState } from "./use-chat-search";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatShortRelativeTime } from "../../../lib/relative-time";
@@ -471,6 +473,7 @@ function ChatListRow({
   onArchive,
   onUnarchive,
   onDelete,
+  onExport,
   onOpenInNewWindow,
   onOpenInPanel,
   onRename,
@@ -493,6 +496,8 @@ function ChatListRow({
   searchMatch?: { snippet: string | null; archived: boolean };
   onRename?: (id: string, title: string) => Promise<void>;
   onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
+  /** Downloads the chat as Markdown (a zip when it has images). */
+  onExport?: (id: string) => Promise<void>;
   /** A sub-agent conversation rendered under its parent row. */
   nested?: boolean;
   onAddSubagent?: (id: string, title: string) => void;
@@ -751,6 +756,12 @@ function ChatListRow({
                 <span>{pinned ? t("chats.unpin") : t("chats.pin")}</span>
               </DropdownMenuItem>
             ) : null}
+            {onExport ? (
+              <DropdownMenuItem onSelect={() => void onExport(item.id)}>
+                <Download className="size-4" />
+                <span>{t("chats.export")}</span>
+              </DropdownMenuItem>
+            ) : null}
             {onSetVisibility ? (
               <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
                 {shared ? (
@@ -839,6 +850,7 @@ function ChatList({
   onClearPrivate,
   onClearArchived,
   onDelete,
+  onExport,
   onOpenInNewWindow,
   onOpenInPanel,
   onRename,
@@ -855,6 +867,7 @@ function ChatList({
   searchState?: ChatSearchState;
   onRename?: (id: string, title: string) => Promise<void>;
   onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
+  onExport?: (id: string) => Promise<void>;
   search: string;
   searchOpen: boolean;
   onToggleSearch: () => void;
@@ -966,6 +979,7 @@ function ChatList({
         onArchive={onArchive}
         onUnarchive={isArchived ? onUnarchive : undefined}
         onDelete={onDelete}
+        onExport={onExport}
         onOpenInNewWindow={onOpenInNewWindow}
         onRename={isArchived ? undefined : onRename}
         onSetVisibility={isArchived ? undefined : onSetVisibility}
@@ -984,6 +998,7 @@ function ChatList({
           nested
           onArchive={onArchive}
           onDelete={onDelete}
+          onExport={onExport}
           onOpenInNewWindow={onOpenInNewWindow}
           onOpenInPanel={onOpenInPanel}
           onSetVisibility={isArchived ? undefined : onSetVisibility}
@@ -1198,6 +1213,7 @@ function ChatList({
                       await onDelete(id);
                       searchState.removeResult(id);
                     }}
+                    onExport={onExport}
                     onOpenInNewWindow={onOpenInNewWindow}
                     onOpen={onOpen}
                     onPrefetch={onPrefetch}
@@ -1381,6 +1397,7 @@ export function DashboardSidebarChatPanel({
     [workspaceId],
   );
   const searchState = useChatSearch(search, searchChats);
+  const exportChat = useChatExport(workspaceId);
   const [personaPicker, setPersonaPicker] = useState<{
     parentThreadId: string | null;
     parentTitle: string | null;
@@ -1509,6 +1526,7 @@ export function DashboardSidebarChatPanel({
         onUnarchive={onUnarchiveChat}
         onRename={onRenameChat}
         onTogglePin={onTogglePinChat}
+        onExport={exportChat}
         pinnedIds={pinnedChatIds}
         searchState={searchState}
         onOpenInNewWindow={onOpenChatInNewWindow}

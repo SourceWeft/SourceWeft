@@ -10,6 +10,7 @@ import {
   listThreadMessagesRequestSchema,
   archiveThreadRequestSchema,
   renameThreadRequestSchema,
+  exportThreadRequestSchema,
   searchThreadsRequestSchema,
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
@@ -38,6 +39,8 @@ import type {
   StreamThreadEventInput,
 } from "../../../modules/threads";
 import { listSavedNotes, saveAnswerAsNote } from "../../../modules/notes";
+import { contentDispositionAttachment } from "../../../modules/threads/export/file-name";
+import { exportThread } from "../../../modules/threads/export/service";
 import { THREAD_TITLE_GENERATE_JOB } from "../../../modules/content/queue";
 import { presentJobState } from "../../../shared/job-status";
 import { jobsQueue } from "../../../shared/queue";
@@ -239,6 +242,44 @@ export function registerThreadRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result);
+  });
+
+  // A download, not JSON: the Markdown itself, or a zip when it has images.
+  app.get("/threads/:id/export", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = exportThreadRequestSchema.safeParse({
+      locale: c.req.query("locale"),
+      timeZone: c.req.query("timeZone"),
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await exportThread({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      locale: parsed.data.locale,
+      timeZone: parsed.data.timeZone,
+    });
+
+    c.header("Cache-Control", "no-store");
+    c.header(
+      "Content-Disposition",
+      contentDispositionAttachment(result.fileName),
+    );
+    if (result.kind === "markdown") {
+      c.header("Content-Type", "text/markdown; charset=utf-8");
+      return c.body(result.text);
+    }
+    c.header("Content-Type", "application/zip");
+    return c.body(result.stream);
   });
 
   app.post("/threads", async (c) => {
