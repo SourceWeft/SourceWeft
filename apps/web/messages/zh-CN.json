@@ -3811,6 +3811,39 @@
       "needsThread": "开始对话后才能用来源生成",
       "openFailed": "数据表已加入队列，但无法打开。请在制品中查看。",
       "table": "数据表"
+    },
+    "research": {
+      "add": "深度研究",
+      "title": "深度研究",
+      "description": "描述一个主题，SourceWeft 会在后台搜索网页、阅读内容并撰写带引用的报告。",
+      "topicPlaceholder": "例如：固态电池商业化",
+      "costNote": "深度研究会消耗积分，可能需要几分钟。运行期间可以关闭此窗口。",
+      "start": "开始研究",
+      "starting": "正在启动…",
+      "startFailed": "无法启动研究，请稍后重试。",
+      "cancel": "取消",
+      "cancelled": "此研究已取消。",
+      "progress": "已搜索 {searches} 次 · 已读 {pages} 个网页",
+      "phase": {
+        "planning": "规划中",
+        "searching": "搜索中",
+        "reading": "阅读网页中",
+        "reporting": "撰写报告中"
+      },
+      "saveNote": "将报告保存为笔记",
+      "saved": "报告已保存为笔记",
+      "saveFailed": "无法保存报告，请重试。",
+      "newResearch": "新的研究",
+      "error": {
+        "WEB_PROVIDER_UNAVAILABLE": "网页搜索暂时不可用。",
+        "NO_RESULTS": "搜索没有找到与该主题相关的可用网页，请换个方式描述。",
+        "RESEARCH_QUALITY_TOO_LOW": "找到的资料不够可靠，无法撰写报告，请尝试更具体的主题。",
+        "INSUFFICIENT_CREDITS": "积分不足，无法进行此研究。",
+        "MODEL_UNAVAILABLE": "研究所用的模型暂时不可用，请稍后重试。",
+        "TIME_LIMIT": "研究在完成前已达到时间上限。",
+        "ACCESS_LOST": "你已不再拥有该工作区的访问权限，研究已停止。",
+        "UNKNOWN": "研究失败。"
+      }
     }
   },
   "dashboardBlogAdmin": {

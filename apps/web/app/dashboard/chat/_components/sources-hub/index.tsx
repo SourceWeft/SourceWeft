@@ -16,6 +16,7 @@ import {
   Loader2,
   RotateCcw,
   Search,
+  Telescope,
   SquareCheckBig,
   SquareMinus,
   Trash2,
@@ -97,6 +98,7 @@ import {
   SourceDiscoveryDialog,
   useSourceDiscoveryAvailable,
 } from "./discovery/source-discovery-dialog";
+import { ResearchDialog } from "./research/research-dialog";
 import { useSources } from "./sources/use-sources";
 import {
   DeleteWorkfileDialog,
@@ -364,6 +366,7 @@ export function SourcesHub({
   const addSourceDialog = useAddSourceDialogState();
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const discoveryAvailable = useSourceDiscoveryAvailable(workspaceId);
+  const [researchOpen, setResearchOpen] = useState(false);
   const {
     sources,
     refreshSources,
@@ -1116,6 +1119,18 @@ export function SourcesHub({
                       {t("discovery.add")}
                     </Button>
                   ) : null}
+                  {discoveryAvailable ? (
+                    <Button
+                      disabled={!workspaceId}
+                      onClick={() => setResearchOpen(true)}
+                      size="xs"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Telescope className="size-3.5" />
+                      {t("research.add")}
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
@@ -1506,6 +1521,15 @@ export function SourcesHub({
           onImported={() => void refreshSources()}
           onOpenChange={setDiscoveryOpen}
           open={discoveryOpen}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+
+      {workspaceId && discoveryAvailable ? (
+        <ResearchDialog
+          onOpenChange={setResearchOpen}
+          onSaved={() => void refreshSources()}
+          open={researchOpen}
           workspaceId={workspaceId}
         />
       ) : null}

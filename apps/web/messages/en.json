@@ -3811,6 +3811,39 @@
       "needsThread": "Start a conversation to generate from sources",
       "openFailed": "The table was queued, but it couldn't be opened. Find it under Artifacts.",
       "table": "Data table"
+    },
+    "research": {
+      "add": "Research",
+      "title": "Deep research",
+      "description": "Describe a topic. SourceWeft searches the web, reads pages and writes a cited report in the background.",
+      "topicPlaceholder": "e.g. solid-state battery commercialization",
+      "costNote": "Deep research uses your credits and can take several minutes. You can close this window while it runs.",
+      "start": "Start research",
+      "starting": "Starting…",
+      "startFailed": "Could not start the research. Try again in a moment.",
+      "cancel": "Cancel",
+      "cancelled": "This research was cancelled.",
+      "progress": "{searches, plural, one {# search} other {# searches}} · {pages, plural, one {# page read} other {# pages read}}",
+      "phase": {
+        "planning": "Planning",
+        "searching": "Searching",
+        "reading": "Reading pages",
+        "reporting": "Writing the report"
+      },
+      "saveNote": "Save report as a note",
+      "saved": "Report saved as a note",
+      "saveFailed": "Could not save the report. Try again.",
+      "newResearch": "New research",
+      "error": {
+        "WEB_PROVIDER_UNAVAILABLE": "Web search is not available right now.",
+        "NO_RESULTS": "The search found no usable pages for this topic. Try describing it differently.",
+        "RESEARCH_QUALITY_TOO_LOW": "The findings were not reliable enough to write a report. Try a more specific topic.",
+        "INSUFFICIENT_CREDITS": "You do not have enough credits to run this research.",
+        "MODEL_UNAVAILABLE": "The research model is unavailable right now. Try again later.",
+        "TIME_LIMIT": "The research reached its time limit before it could finish.",
+        "ACCESS_LOST": "You no longer have access to this workspace, so the research was stopped.",
+        "UNKNOWN": "The research failed."
+      }
     }
   },
   "dashboardBlogAdmin": {
