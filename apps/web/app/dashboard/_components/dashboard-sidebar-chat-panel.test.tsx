@@ -226,6 +226,7 @@ test("all sidebar action branches have real translations in every supported loca
       "addSubagent",
       "openInNewWindow",
       "openBesideParent",
+      "export",
     ] as const) {
       assert.notEqual(t(key), `dashboardNav.chats.${key}`);
       assert.ok(t(key).length > 0);
@@ -234,7 +235,12 @@ test("all sidebar action branches have real translations in every supported loca
 });
 
 test("sidebar rendering rejects each missing action key even if catalogs would otherwise align", () => {
-  for (const key of ["addSubagent", "openInNewWindow", "openBesideParent"]) {
+  for (const key of [
+    "addSubagent",
+    "openInNewWindow",
+    "openBesideParent",
+    "export",
+  ]) {
     const broken = structuredClone(messages);
     Reflect.deleteProperty(broken.dashboardNav.chats, key);
     assert.throws(
