@@ -1270,6 +1270,9 @@ importers:
       '@sourceweft/capability-contracts':
         specifier: workspace:*
         version: link:../capability-contracts
+      fast-xml-parser:
+        specifier: 5.7.3
+        version: 5.7.3
       pdfjs-dist:
         specifier: ^6.2.108
         version: 6.2.108
