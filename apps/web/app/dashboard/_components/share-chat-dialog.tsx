@@ -48,6 +48,8 @@ const SNAPSHOT_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
   year: "numeric",
   month: "short",
   day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
 };
 
 /**
@@ -81,12 +83,21 @@ export function ShareChatDialog({
   const [forbidden, setForbidden] = React.useState(false);
   const [confirmingStop, setConfirmingStop] = React.useState(false);
 
+  // The dialog is a single, unkeyed instance reused across chats (the panel
+  // just swaps which chat it's open for). A result for a chat the dialog has
+  // since moved away from must never be applied — this ref always holds the
+  // chat id the current render is actually showing, so an async handler can
+  // tell a stale response apart from a current one after it awaits.
+  const chatIdRef = React.useRef(chatId);
+  chatIdRef.current = chatId;
+
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setForbidden(false);
     setConfirmingStop(false);
     setCopied(false);
+    setBusy(false);
     setLoading(true);
     void client
       .getThreadShare(workspaceId, chatId)
@@ -105,32 +116,38 @@ export function ShareChatDialog({
   }, [open, workspaceId, chatId, client]);
 
   async function handleShare() {
+    const requestChatId = chatId;
     setBusy(true);
     setForbidden(false);
     try {
       const result = await client.shareThread(workspaceId, chatId, {});
+      if (chatIdRef.current !== requestChatId) return;
       setShare(result.share);
     } catch (error) {
+      if (chatIdRef.current !== requestChatId) return;
       if ((error as { status?: number }).status === 403) {
         setForbidden(true);
       } else {
         toast.error(t("chats.shareDialog.updateError"));
       }
     } finally {
-      setBusy(false);
+      if (chatIdRef.current === requestChatId) setBusy(false);
     }
   }
 
   async function handleAllowSearchEngines(allow: boolean) {
     if (!share) return;
+    const requestChatId = chatId;
     const previous = share;
     setShare({ ...share, noindex: !allow });
     try {
       const result = await client.updateThreadShare(workspaceId, chatId, {
         noindex: !allow,
       });
+      if (chatIdRef.current !== requestChatId) return;
       setShare(result.share);
     } catch {
+      if (chatIdRef.current !== requestChatId) return;
       setShare(previous);
       toast.error(t("chats.shareDialog.updateError"));
     }
@@ -148,15 +165,18 @@ export function ShareChatDialog({
   }
 
   async function handleConfirmStopSharing() {
+    const requestChatId = chatId;
     setBusy(true);
     try {
       await client.revokeThreadShare(workspaceId, chatId);
+      if (chatIdRef.current !== requestChatId) return;
       setShare(null);
       setConfirmingStop(false);
     } catch {
+      if (chatIdRef.current !== requestChatId) return;
       toast.error(t("chats.shareDialog.updateError"));
     } finally {
-      setBusy(false);
+      if (chatIdRef.current === requestChatId) setBusy(false);
     }
   }
 

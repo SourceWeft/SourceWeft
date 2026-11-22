@@ -2,7 +2,14 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ThreadShare } from "@sourceweft/contracts";
 
-import { button, click, flush, mountWithIntl, unmountAll } from "@/test/react";
+import {
+  button,
+  click,
+  flush,
+  mountWithIntl,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
 import { formatDisplayDate } from "../../../lib/i18n/format";
 
 const toasts = vi.hoisted(() => ({ error: vi.fn() }));
@@ -14,12 +21,23 @@ import {
 } from "./share-chat-dialog";
 
 // Mirrors the component's own date formatting so the test can assert the
-// snapshot line changes without hard-coding a locale string.
+// snapshot line changes without hard-coding a locale string. Includes the
+// time (hour/minute), matching the spec's "Snapshot from <date time>".
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
   year: "numeric",
   month: "short",
   day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function makeShare(patch: Partial<ThreadShare> = {}): ThreadShare {
   return {
@@ -52,7 +70,7 @@ function fakeClient(
 }
 
 async function mountDialog(client: ShareChatDialogClient) {
-  await mountWithIntl(
+  const handle = await mountWithIntl(
     <ShareChatDialog
       open
       onOpenChange={() => {}}
@@ -63,6 +81,7 @@ async function mountDialog(client: ShareChatDialogClient) {
     />,
   );
   await flush(2);
+  return handle;
 }
 
 beforeEach(() => {
@@ -195,4 +214,70 @@ test("a non-forbidden error toasts a generic message", async () => {
   expect(document.body.textContent).not.toContain(
     "Only the chat's creator or a workspace admin can share it.",
   );
+});
+
+test("a stale share result for a chat the dialog has moved on from is ignored", async () => {
+  const shareA = makeShare({ targetId: "chat-a", token: "tok-a" });
+  const shareB = makeShare({
+    targetId: "chat-b",
+    token: "tok-b",
+    url: "https://sourceweft.test/s/tok-b",
+  });
+  const pendingShareA = deferred<{ share: ThreadShare }>();
+
+  const client = fakeClient({
+    getThreadShare: vi.fn((_workspaceId: string, chatId: string) =>
+      Promise.resolve({ share: chatId === "chat-b" ? shareB : null }),
+    ),
+    shareThread: vi.fn().mockReturnValue(pendingShareA.promise),
+  });
+
+  const handle = await mountWithIntl(
+    <ShareChatDialog
+      open
+      onOpenChange={() => {}}
+      workspaceId="ws-1"
+      chatId="chat-a"
+      chatTitle="Chat A"
+      client={client}
+    />,
+  );
+  await flush(2);
+
+  // Start sharing chat A; the request is left pending.
+  await click(button("Create link", document));
+  expect(client.shareThread).toHaveBeenCalledWith("ws-1", "chat-a", {});
+
+  // The dialog switches to chat B before A's request resolves (the same
+  // instance, re-rendered with new props, exactly as the sidebar panel
+  // reuses one unkeyed dialog across chats).
+  await handle.render(
+    withIntl(
+      <ShareChatDialog
+        open
+        onOpenChange={() => {}}
+        workspaceId="ws-1"
+        chatId="chat-b"
+        chatTitle="Chat B"
+        client={client}
+      />,
+    ),
+  );
+  await flush(2);
+
+  expect(
+    document.body.querySelector<HTMLInputElement>("input[readonly]")?.value,
+  ).toBe(shareB.url);
+  // Busy from A's still-pending request must not disable B's button either.
+  expect(button("Update link", document)?.hasAttribute("disabled")).toBe(
+    false,
+  );
+
+  // Now A's stale share resolves; it must not overwrite B's displayed link.
+  pendingShareA.resolve({ share: shareA });
+  await flush(2);
+
+  expect(
+    document.body.querySelector<HTMLInputElement>("input[readonly]")?.value,
+  ).toBe(shareB.url);
 });
