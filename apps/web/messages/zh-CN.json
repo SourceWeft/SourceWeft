@@ -5975,7 +5975,7 @@
       "generating": "已完成 {completed} / {total} 个来源"
     },
     "error": {
-      "retry": "重试",
+      "generateAgain": "如需重试，请在资料中心选择这些资料，重新生成一个表格。",
       "cannotDisplay": "无法显示这张表。",
       "code": {
         "INSUFFICIENT_CREDITS": "积分不足，无法生成这张表。",
@@ -6065,6 +6065,9 @@
         "suggestFailed": "无法建议列，请重试。",
         "generic": "无法生成数据表，请重试。"
       }
+    },
+    "regenerationFailed": {
+      "message": "上次重新生成失败，当前显示的仍是上一版表格。"
     }
   },
   "study": {
@@ -6255,6 +6258,9 @@
         "loadFailed": "无法打开这份学习内容以重新生成。",
         "generic": "无法生成，请重试。"
       }
+    },
+    "regenerationFailed": {
+      "message": "上次重新生成失败，当前显示的仍是上一个版本。"
     }
   },
   "mobileRouteSheet": {
@@ -7020,6 +7026,8 @@
       "task_tools_unavailable": "“{taskName}”无法运行：它使用的资料或 MCP 服务不可用。",
       "task_blocked_auth": "“{taskName}”无法运行：需要重新登录它使用的已连接账号。",
       "task_paused_repeated_failure": "“{taskName}”连续失败后已暂停。",
+      "artifact_generation_failed": "“{title}”生成失败。在资料中心的“制品”中打开它，可查看原因。",
+      "artifact_regeneration_failed": "“{title}”重新生成失败，上一个版本仍保留。打开它可查看原因。",
       "unknown": "关于“{taskName}”的更新。"
     },
     "composer": {

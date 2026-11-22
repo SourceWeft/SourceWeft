@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   findArtifactVersionContent: vi.fn(),
   linkArtifactVersionParent: vi.fn(),
   recordArtifactInputSources: vi.fn(),
+  notify: vi.fn(),
 }));
 
 vi.mock("../artifacts/repository", () => ({
@@ -26,6 +27,10 @@ vi.mock("./artifact-store", () => ({
   findArtifactVersionContent: mocks.findArtifactVersionContent,
   linkArtifactVersionParent: mocks.linkArtifactVersionParent,
   recordArtifactInputSources: mocks.recordArtifactInputSources,
+}));
+
+vi.mock("../notifications", () => ({
+  notify: mocks.notify,
 }));
 
 import { runArtifactGenerationJob } from "./job";
@@ -119,4 +124,79 @@ test("any other error is rethrown for the queue to retry", async () => {
   );
   expect(mocks.failArtifact).not.toHaveBeenCalled();
   expect(mocks.writeArtifactPayloadKey).not.toHaveBeenCalled();
+});
+
+test("the person who asked is told when a first generation fails", async () => {
+  mocks.findArtifactRecord.mockResolvedValue(artifact());
+  await runArtifactGenerationJob({
+    job,
+    namespace: "table",
+    generate: async () => {
+      throw new GroundedGenerationError("GENERATION_QUALITY_TOO_LOW", "4 of 8");
+    },
+  });
+  expect(mocks.notify).toHaveBeenCalledTimes(1);
+  expect(mocks.notify.mock.calls[0]![0]).toEqual({
+    kind: "artifact_generation_failed",
+    teamId: "team",
+    userId: "user",
+    ref: { kind: "artifact", id: "art" },
+    payload: {
+      title: "A table",
+      artifactType: "table",
+      threadId: "thread",
+      errorCode: "GENERATION_QUALITY_TOO_LOW",
+      regeneration: false,
+    },
+  });
+});
+
+test("a failed regeneration is announced too, and nothing is said on success or retry", async () => {
+  mocks.findArtifactRecord.mockResolvedValue(
+    artifact({ status: "ready", currentVersionNo: 1 }),
+  );
+  await runArtifactGenerationJob({
+    job: { ...job, versionNo: 2 },
+    namespace: "table",
+    generate: async () => {
+      throw new GroundedGenerationError("INSUFFICIENT_CREDITS", "no credits");
+    },
+  });
+  expect(mocks.notify).toHaveBeenCalledTimes(1);
+  expect(mocks.notify.mock.calls[0]![0].payload).toMatchObject({
+    errorCode: "INSUFFICIENT_CREDITS",
+    regeneration: true,
+  });
+
+  mocks.notify.mockReset();
+  mocks.findArtifactRecord.mockResolvedValue(artifact());
+  await assert.rejects(
+    runArtifactGenerationJob({
+      job: { ...job, isFinalAttempt: false },
+      namespace: "table",
+      generate: async () => {
+        throw new Error("upstream 502");
+      },
+    }),
+  );
+  mocks.findArtifactRecord.mockResolvedValue(artifact());
+  await runArtifactGenerationJob({
+    job,
+    namespace: "table",
+    generate: async () => ({ content: {}, sources: [] }),
+  });
+  expect(mocks.notify).not.toHaveBeenCalled();
+});
+
+test("a notice that cannot be stored never fails the job", async () => {
+  mocks.findArtifactRecord.mockResolvedValue(artifact());
+  mocks.notify.mockRejectedValue(new Error("database down"));
+  const result = await runArtifactGenerationJob({
+    job,
+    namespace: "table",
+    generate: async () => {
+      throw new GroundedGenerationError("INPUT_TOO_LARGE", "too large");
+    },
+  });
+  assert.deepEqual(result, { status: "failed", errorCode: "INPUT_TOO_LARGE" });
 });

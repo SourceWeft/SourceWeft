@@ -1022,6 +1022,19 @@ export async function updateArtifactsVisibilityForThread(
   return rows.length;
 }
 
+/**
+ * A failed generation stays listed for the person who asked for it, so a job
+ * that fails after the conversation moved on (a table or study set generated
+ * in the background) is not silently lost: the list shows it as failed and
+ * opening it says why. Everyone else never sees dead entries, and a list with
+ * no viewer leaves failures out.
+ */
+function failedOnlyForTheirOwner(viewerUserId: string | undefined) {
+  return viewerUserId
+    ? or(ne(artifacts.status, "failed"), eq(artifacts.createdBy, viewerUserId))
+    : ne(artifacts.status, "failed");
+}
+
 export async function listArtifactRecords(input: {
   teamId: string;
   workspaceId: string;
@@ -1032,12 +1045,7 @@ export async function listArtifactRecords(input: {
   const conditions = [
     eq(artifacts.teamId, input.teamId),
     eq(artifacts.workspaceId, input.workspaceId),
-    // A generation that failed leaves a `failed` row so the originating thread
-    // can still surface the error inline (that path queries by threadId, not
-    // this list). The workspace-wide Artifacts gallery, however, should not
-    // carry dead entries — exclude them here so a failed run is not browsable
-    // as an artifact.
-    ne(artifacts.status, "failed"),
+    failedOnlyForTheirOwner(input.viewerUserId),
     input.viewerUserId
       ? visibleContentWhere(
           { userId: input.viewerUserId },
@@ -1096,7 +1104,7 @@ export async function listArtifactSummaryRecords(input: {
   const conditions = [
     eq(artifacts.teamId, input.teamId),
     eq(artifacts.workspaceId, input.workspaceId),
-    ne(artifacts.status, "failed"),
+    failedOnlyForTheirOwner(input.viewerUserId),
     input.threadId ? eq(artifacts.threadId, input.threadId) : undefined,
     input.viewerUserId
       ? visibleContentWhere(

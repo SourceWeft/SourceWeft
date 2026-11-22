@@ -1,16 +1,15 @@
 "use client";
 
 import { Component, useEffect, useMemo, useState, type ReactNode } from "react";
-import { CircleAlert, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { CircleAlert, LoaderCircle, TriangleAlert } from "lucide-react";
 import type { ArtifactPreviewArtifactView } from "@sourceweft/contracts/artifact-ui";
 import { groundedErrorCodeSchema } from "@sourceweft/contracts/grounded-generation";
-import { usePendingAction } from "@sourceweft/grounded-generation/ui";
+import { readRegenerationFailure } from "@sourceweft/grounded-generation/ui";
 import {
   parseTableContent,
   type TableContent,
   type TableFreshness,
 } from "@sourceweft/contracts/table";
-import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { type TableVersionRef, useTableHost } from "./table-host";
 import { withoutEvidence } from "./table-model";
 import { TableViewer } from "./table-viewer";
@@ -99,7 +98,6 @@ export function TableArtifactView({
     [workspaceId, artifactId, artifactVersionId],
   );
   const [freshness, setFreshness] = useState<TableFreshness | undefined>();
-  const [retrying, trackRetry] = usePendingAction();
   const ready = artifact.status === "ready" || artifact.status === "archived";
   const getFreshness = host.getFreshness;
   const checkFreshness = surfaceInteractive && host.interactive && ready;
@@ -134,6 +132,8 @@ export function TableArtifactView({
   }
 
   if (artifact.status === "failed") {
+    // A first generation that failed has no recipe to regenerate from, so
+    // the way to try again is a new table from the source hub.
     const code = groundedErrorCodeSchema.safeParse(artifact.errorCode);
     return (
       <div
@@ -142,22 +142,8 @@ export function TableArtifactView({
       >
         <TriangleAlert aria-hidden className="size-5 text-destructive" />
         <p>{t(`table.error.code.${code.success ? code.data : "UNKNOWN"}`)}</p>
-        {host.onRegenerate && surfaceInteractive && host.interactive ? (
-          <Button
-            aria-busy={retrying || undefined}
-            disabled={retrying}
-            onClick={() => trackRetry(host.onRegenerate?.(version))}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {retrying ? (
-              <LoaderCircle aria-hidden className="animate-spin" />
-            ) : (
-              <RefreshCw aria-hidden />
-            )}
-            {t("table.error.retry")}
-          </Button>
+        {surfaceInteractive && host.interactive ? (
+          <p className="text-muted-foreground">{t("table.error.generateAgain")}</p>
         ) : null}
       </div>
     );
@@ -172,6 +158,7 @@ export function TableArtifactView({
         content={content}
         freshness={freshness}
         interactive={interactive}
+        regenerationFailure={readRegenerationFailure(payload, "table")}
         title={title}
         version={version}
       />

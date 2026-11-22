@@ -33,6 +33,14 @@ function runPath(input: PathInput) {
     : taskPath(input);
 }
 
+/** The conversation an artifact was asked for in, else the chat home. */
+function conversationPath({ payload }: PathInput) {
+  const threadId = payload.threadId;
+  return typeof threadId === "string" && threadId
+    ? `/dashboard/chat/${encodeURIComponent(threadId)}`
+    : "/dashboard/chat";
+}
+
 /**
  * The notification kinds. Adding a kind is one entry here (plus a template
  * when it can be emailed); the table and the service stay unchanged.
@@ -88,6 +96,14 @@ export const NOTIFICATION_KINDS = {
     defaultEmail: true,
     template: "notification.task-paused-repeated-failure",
     path: taskPath,
+  },
+  // A table or study set generated in the background after the conversation
+  // moved on could not be made (or remade): in-app only, leading to the
+  // conversation it was asked in. `payload.title` names it.
+  artifact_generation_failed: {
+    defaultEmail: false,
+    template: null,
+    path: conversationPath,
   },
 } as const satisfies Record<string, NotificationKindDefinition>;
 

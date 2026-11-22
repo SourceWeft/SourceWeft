@@ -120,6 +120,7 @@ export const STUDY_TRANSLATION_KEYS = [
   "study.error.code.GENERATION_QUALITY_TOO_LOW",
   "study.error.code.SOURCE_NOT_READABLE",
   "study.error.code.UNKNOWN",
+  "study.regenerationFailed.message",
   "study.evidence.show",
   "study.evidence.hide",
   "study.evidence.sourceChanged",
