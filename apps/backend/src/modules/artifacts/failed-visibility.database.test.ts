@@ -19,7 +19,7 @@ const ids = {
 };
 
 beforeAll(async () => {
-  isolated = await createIsolatedTestDatabase("failed_visibility");
+  isolated = await createIsolatedTestDatabase("failed_listing");
   process.env.DATABASE_URL = isolated.url;
   schema = await import("@sourceweft/db");
   artifacts = await import("./repository");
