@@ -6779,7 +6779,7 @@
         "lastPage": "末页",
         "pageOf": "第 {{page}} 页，共 {{pages}} 页",
         "rowsPerPage": "每页行数",
-        "columns": "列",
+        "columns": "栏",
         "selectedCount": "已选择 {{count}} 项",
         "selectRow": "选择此行",
         "selectAllRows": "选择本页所有行",
