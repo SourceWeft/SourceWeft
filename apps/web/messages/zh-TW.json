@@ -6177,7 +6177,21 @@
         "hard": "困難",
         "good": "良好",
         "easy": "簡單"
-      }
+      },
+      "hintBrowse": "切換到「複習」才能評分",
+      "summary": "新卡 {new} 張 · 學習中 {learning} 張 · 已學會 {learned} 張",
+      "status": {
+        "new": "新卡",
+        "learning": "學習中",
+        "learned": "已學會"
+      },
+      "due": {
+        "now": "已到期",
+        "minutes": "{count} 分鐘後複習",
+        "hours": "{count} 小時後複習",
+        "days": "{count} 天後複習"
+      },
+      "nextDue": "下一張：{when}。"
     },
     "quiz": {
       "loading": "正在載入測驗…",
