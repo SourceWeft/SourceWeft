@@ -1,4 +1,10 @@
-import type { ArtifactType, ExportThreadLocale } from "@sourceweft/contracts";
+import type {
+  artifactTypeSchema,
+  ExportThreadLocale,
+} from "@sourceweft/contracts";
+import type { z } from "zod";
+
+export type ArtifactType = z.infer<typeof artifactTypeSchema>;
 
 export type ExportLabels = {
   exportedFrom: string;
