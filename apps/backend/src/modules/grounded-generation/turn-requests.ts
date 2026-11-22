@@ -1,6 +1,12 @@
 import type { AgentToolGroundedArtifactReceipt } from "@sourceweft/contracts/agent-tools";
+import {
+  STUDY_ARTIFACT_TYPES,
+  studyGenerateRequestSchema,
+  type StudyKind,
+} from "@sourceweft/contracts/study";
 import { tableGenerateRequestSchema } from "@sourceweft/contracts/table";
 import { ContentError } from "../content/errors";
+import { requestStudyArtifact } from "../study/requests";
 import { requestTableArtifact } from "../tables/requests";
 
 /**
@@ -14,8 +20,10 @@ import { requestTableArtifact } from "../tables/requests";
  * one named in the request, and the request is validated here against the
  * type's contract because a model wrote it.
  *
- * A type without an entry has no grounded generation and is refused. Study
- * artifacts add their entry here when their tool lands.
+ * A type without an entry has no grounded generation and is refused.
+ *
+ * None of this calls a model, so nothing a tool starts here is billed to the
+ * chat turn: the queued job bills the actor on its own (`worker-job`) scope.
  */
 
 export type GroundedTurnRequest = {
@@ -35,6 +43,33 @@ function invalidRequest(artifactType: string, details: unknown): never {
     details,
     recoverable: false,
   });
+}
+
+/**
+ * One requester per study type. The type is the one the host was asked for:
+ * a request naming another type cannot open it under this one.
+ */
+function studyTurnRequester(artifactType: StudyKind): GroundedTurnRequester {
+  return async (input) => {
+    const parsed = studyGenerateRequestSchema.safeParse({
+      ...input.request,
+      artifactType,
+      threadId: input.threadId,
+    });
+    if (!parsed.success) invalidRequest(artifactType, parsed.error.flatten());
+    const result = await requestStudyArtifact({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      uiLocale: input.uiLocale,
+      request: parsed.data,
+    });
+    return {
+      artifactId: result.artifactId,
+      versionNo: result.versionNo,
+      status: result.status,
+      reused: result.reused,
+    };
+  };
 }
 
 const GROUNDED_TURN_REQUESTERS: Readonly<Record<string, GroundedTurnRequester>> = {
@@ -57,6 +92,9 @@ const GROUNDED_TURN_REQUESTERS: Readonly<Record<string, GroundedTurnRequester>> 
       reused: result.reused,
     };
   },
+  ...Object.fromEntries(
+    STUDY_ARTIFACT_TYPES.map((artifactType) => [artifactType, studyTurnRequester(artifactType)]),
+  ),
 };
 
 export function requestGroundedArtifactForTurn(

@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./export": "./src/export/index.ts",
     "./testing": "./src/testing/index.ts",
-    "./ui": "./src/ui/index.tsx"
+    "./ui": "./src/ui/index.tsx",
+    "./agent-tool-defs": "./src/agent-tool-defs.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -18,6 +19,7 @@
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/grounded-generation": "workspace:*",
     "@sourceweft/ui-web": "workspace:*",
+    "langchain": "^1.6.7",
     "lucide-react": "^0.562.0",
     "ts-fsrs": "5.4.2",
     "typescript": "5.9.2",
