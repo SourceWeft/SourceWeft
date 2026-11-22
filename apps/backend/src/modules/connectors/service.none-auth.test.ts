@@ -177,6 +177,16 @@ describe("createConnector for a none connector", () => {
     assert.equal(checkSyncReadiness.mock.calls.length, 0);
   });
 
+  test("rejects an empty-string OAuth account id and persists nothing", async () => {
+    const error = await rejection(
+      create(service(noneRegistry()), { oauthAccountId: "" }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_OAUTH_ACCOUNT_NOT_ALLOWED");
+    assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
+
   test("persists a ready connector with oauthAccountId null", async () => {
     const result = await create(service(noneRegistry()));
 

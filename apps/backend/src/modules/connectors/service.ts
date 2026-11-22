@@ -148,7 +148,7 @@ export class ConnectorService {
     });
     const manifest = this.registry.getManifest(input.connectorType);
     const isNone = manifest.auth?.kind === "none";
-    if (isNone && input.oauthAccountId) {
+    if (isNone && input.oauthAccountId != null) {
       throw new ConnectorError(
         400,
         "CONNECTOR_OAUTH_ACCOUNT_NOT_ALLOWED",
