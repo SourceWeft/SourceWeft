@@ -1,6 +1,3 @@
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import type { ConnectorRegistry } from "./registry";

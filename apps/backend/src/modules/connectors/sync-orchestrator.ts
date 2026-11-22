@@ -1,4 +1,3 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { createHash } from "node:crypto";
 import type { ContentBillingPort } from "../content/billing-port";
 import { SourceIndexingService } from "../sources";
@@ -281,10 +280,6 @@ export class ConnectorSyncOrchestrator {
     this.indexingService = new SourceIndexingService(billing);
   }
 
-  private get access() {
-    return new ConnectorAccessPolicy(undefined, this.registry);
-  }
-
   async enqueueManualRun(input: {
     workspaceId: string;
     userId: string;
@@ -322,7 +317,6 @@ export class ConnectorSyncOrchestrator {
       );
     }
 
-    await this.access.requireConnection(connector, input.userId);
     const readiness = await this.checkReadiness({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -651,25 +645,6 @@ export class ConnectorSyncOrchestrator {
     if (connector.syncBlock?.reason !== "PAGES_LIMIT_EXCEEDED") {
       return { queued: false as const, reason: "not_quota_blocked" };
     }
-    try {
-      await this.access.requireConnection(connector);
-    } catch (error) {
-      if (
-        !(error instanceof ConnectorError) ||
-        ![
-          "CONNECTOR_PREVIEW_ACCESS_DENIED",
-          "CONNECTOR_PREVIEW_OWNER_REQUIRED",
-        ].includes(error.code)
-      )
-        throw error;
-      // These records share a bounded oldest-first queue with eligible work.
-      // Advance the check timestamp so denied previews cannot starve that work.
-      await markConnectorSyncBlockChecked({
-        connectorId: connector.id,
-        checkedAt: new Date(),
-      });
-      return { queued: false as const, reason: "preview_denied" };
-    }
     const billingUserId = await this.resolveBillingActor({
       teamId: connector.teamId,
       ownerUserId: connector.createdBy,
@@ -849,17 +824,6 @@ export class ConnectorSyncOrchestrator {
       try {
         const checkAccess = async () => {
           const actor = run.createdBy;
-          if (
-            connector.connectorType === "gmail" &&
-            run.triggerType === "manual" &&
-            !actor
-          )
-            throw new ConnectorError(
-              403,
-              "CONNECTOR_PREVIEW_ACTOR_REQUIRED",
-              "Manual Gmail sync requires an actor",
-            );
-          await this.access.requireConnection(connector, actor ?? undefined);
           if (connector.connectorType === "gmail" && actor)
             await requireConnectorWorkspace({
               workspaceId: input.workspaceId,
@@ -1684,7 +1648,6 @@ export class ConnectorSyncOrchestrator {
       };
     }
 
-    await this.access.requireConnection(connector, input.userId);
     const adapter = this.registry.getAdapter(connector.connectorType);
     if (!adapter.checkSyncReadiness) {
       return { ready: true };

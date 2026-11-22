@@ -1,6 +1,3 @@
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { ConnectorRegistry } from "./registry";
@@ -92,7 +89,6 @@ function service() {
         },
       }),
     } as unknown as ConnectorRegistry,
-    undefined,
     {
       revokeStoredAuthorization: mocks.revokeStoredAuthorization,
     } as unknown as ConnectorOAuthService,
@@ -467,7 +463,6 @@ test("hard delete still removes the connector locally when its adapter is switch
     {
       getManifest: () => ({ type: "gmail", displayName: "Gmail" }),
     } as unknown as ConnectorRegistry,
-    undefined,
     new ConnectorOAuthService(new ConnectorRegistry()),
   );
 
@@ -479,4 +474,17 @@ test("hard delete still removes the connector locally when its adapter is switch
 
   assert.equal(result.hardDeleted, true);
   assert.equal(mocks.hardDeleteSourceConnectorRecord.mock.calls.length, 1);
+});
+
+test("Gmail is listed with every other registered connector, for any user", () => {
+  // Gmail used to be hidden behind a per-user preview flag; registration
+  // alone now decides whether a connector is offered.
+  const manifests = [
+    { type: "gmail", displayName: "Gmail" },
+    { type: "notion", displayName: "Notion" },
+  ];
+  const listed = new ConnectorService({
+    listManifests: () => manifests,
+  } as unknown as ConnectorRegistry).listManifests();
+  assert.deepEqual(listed, { items: manifests });
 });

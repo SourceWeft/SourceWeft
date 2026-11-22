@@ -8,7 +8,7 @@ import { userSettingsClient } from "./sdk";
 export const userSettingsQueryKey = (userId: string | undefined) =>
   ["user-settings", userId ?? null] as const;
 
-/** Shared by appearance sync and preview consumers; never reuse another account's data. */
+/** Shared by appearance sync and the account settings panel; never reuse another account's data. */
 export function useUserSettings() {
   const { data: session, isPending } = authClient.useSession();
   const userId = isPending ? undefined : session?.user?.id;
@@ -24,16 +24,6 @@ export function useUserSettings() {
   return { ...query, data: userId ? query.data : undefined };
 }
 
-/** UI hint only. Connector manifests and backend execution remain authoritative. */
-export function usePreviewFeature(feature: "gmail"): boolean {
-  const settings = useUserSettings();
-  return (
-    !settings.isFetching &&
-    !settings.isError &&
-    settings.data?.settings.preview?.[feature] === true
-  );
-}
-
 export function useUpdateUserSettings() {
   const { data: session } = authClient.useSession();
   const client = useQueryClient();
@@ -41,7 +31,7 @@ export function useUpdateUserSettings() {
   return async (input: UpdateUserSettingsRequest) => {
     const result = await userSettingsClient.updateSettings(input);
     // Refetch instead of retaining a mutation result: simultaneous appearance
-    // writes can complete out of order, and preview may have changed meanwhile.
+    // writes can complete out of order.
     await client.invalidateQueries({ queryKey: userSettingsQueryKey(userId) });
     return result;
   };

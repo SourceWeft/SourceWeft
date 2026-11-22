@@ -9,7 +9,6 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   workspace: vi.fn(),
-  requireAvailable: vi.fn(),
   createState: vi.fn(),
   consume: vi.fn(),
   createAccount: vi.fn(),
@@ -18,9 +17,6 @@ const mocks = vi.hoisted(() => ({
   reauthorize: vi.fn(),
 }));
 
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 vi.mock("./permissions", () => ({
   requireConnectorWorkspace: mocks.workspace,
 }));
@@ -152,7 +148,6 @@ beforeEach(() => {
   mocks.workspace.mockResolvedValue({
     workspace: { id: "workspace", organizationId: "team" },
   });
-  mocks.requireAvailable.mockResolvedValue(undefined);
   mocks.createState.mockResolvedValue({ id: "state-row" });
   mocks.findReauthorizable.mockResolvedValue(null);
   mocks.createAccount.mockImplementation(async (input: { scopes: string[] }) => ({
@@ -169,11 +164,10 @@ it("drives connect, callback, runtime token, a search action, and revoke through
     broker: broker as never,
   });
   const registry = new ConnectorRegistry([adapter as never]);
-  const service = new ConnectorOAuthService(registry, {
-    requireAvailable: mocks.requireAvailable,
-  } as never);
+  const service = new ConnectorOAuthService(registry);
 
   // 1. start — the broker opens a link for the gmail toolkit with our owner ref.
+  // Any workspace manager may connect Gmail; no per-user flag is consulted.
   const started = await service.start({
     workspaceId: "workspace",
     userId: "user",

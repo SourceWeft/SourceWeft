@@ -14,16 +14,8 @@ export const DEFAULT_USER_THEME = "system" as const;
 export const userLanguageSchema = z.enum(["system", "en", "zh-CN", "zh-TW"]);
 export const DEFAULT_USER_LANGUAGE = "system" as const;
 
-export const previewFeatureSchema = z.enum(["gmail"]);
-export type PreviewFeature = z.infer<typeof previewFeatureSchema>;
-export const previewFlagsSchema = z
-  .object({ gmail: z.boolean().default(false) })
-  .strict();
-export type PreviewFlags = z.infer<typeof previewFlagsSchema>;
-
 export const DEFAULT_USER_SETTINGS = {
   appearance: { theme: DEFAULT_USER_THEME, language: DEFAULT_USER_LANGUAGE },
-  preview: { gmail: false },
 } as const;
 
 export const userSettingsSchema = z
@@ -35,7 +27,6 @@ export const userSettingsSchema = z
       })
       .strip()
       .default(DEFAULT_USER_SETTINGS.appearance),
-    preview: previewFlagsSchema.default(DEFAULT_USER_SETTINGS.preview),
   })
   .strip();
 

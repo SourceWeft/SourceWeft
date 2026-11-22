@@ -1,6 +1,3 @@
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 const loggerMocks = vi.hoisted(() => ({
   debug: vi.fn(),
   info: vi.fn(),
