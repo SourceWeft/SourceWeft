@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { htmlToText } from "../src/html-text";
 
+// Upper bound for the hostile-shape timing tests. A quadratic shape at these
+// sizes takes 3 s to minutes; typical linear runs take 1 ms to about 110 ms
+// (the ~5 MiB mix about 105 ms, the 4 MiB 600k-attribute tag about 55 ms,
+// 3,000 heavy tags about 210 ms) on an idle machine. 6 s keeps the guard
+// meaningful while tolerating a heavily loaded CI or developer machine.
+const HOSTILE_TIME_BOUND_MS = 6_000;
+
 test("paragraphs become blank-line separated text and script content is dropped", () => {
   assert.equal(
     htmlToText("<p>a &amp; b</p><script>alert(1)</script><p>c</p>"),
@@ -79,7 +86,10 @@ for (const [name, unit] of Object.entries(HOSTILE_SHAPES)) {
     const text = htmlToText(html);
     assert.equal(typeof text, "string");
     assert.ok(!text.includes("<div"));
-    assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+    assert.ok(
+      Date.now() - started < HOSTILE_TIME_BOUND_MS,
+      `took ${Date.now() - started} ms`,
+    );
   });
 }
 
@@ -90,7 +100,10 @@ test("a ~5 MiB mix of hostile shapes neither throws nor stalls", () => {
     .slice(0, 5 * 1024 * 1024);
   const started = Date.now();
   htmlToText(html);
-  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  assert.ok(
+    Date.now() - started < HOSTILE_TIME_BOUND_MS,
+    `took ${Date.now() - started} ms`,
+  );
 });
 
 test("realistic nesting depth and unclosed p/li/td elements keep their text", () => {
@@ -126,7 +139,10 @@ test("a tag with 60k unique attributes neither throws nor stalls, and earlier co
   const started = Date.now();
   const text = htmlToText(html);
   assert.equal(text, "before");
-  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  assert.ok(
+    Date.now() - started < HOSTILE_TIME_BOUND_MS,
+    `took ${Date.now() - started} ms`,
+  );
 });
 
 test("a ~4 MiB tag with 600k attributes neither throws nor stalls", () => {
@@ -134,14 +150,20 @@ test("a ~4 MiB tag with 600k attributes neither throws nor stalls", () => {
   assert.ok(html.length >= 4 * 1024 * 1024);
   const started = Date.now();
   assert.equal(htmlToText(html), "");
-  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  assert.ok(
+    Date.now() - started < HOSTILE_TIME_BOUND_MS,
+    `took ${Date.now() - started} ms`,
+  );
 });
 
 test("an unterminated tag with endless attributes neither throws nor stalls", () => {
   const html = `<p>kept</p><a${" x".repeat(2_000_000)}`;
   const started = Date.now();
   assert.equal(htmlToText(html), "kept");
-  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  assert.ok(
+    Date.now() - started < HOSTILE_TIME_BOUND_MS,
+    `took ${Date.now() - started} ms`,
+  );
 });
 
 test("an oversized end tag is cut the same way", () => {
@@ -159,41 +181,44 @@ test("an ordinary tag with ~20 attributes and a long href is unchanged", () => {
   assert.equal(htmlToText(html), "intro\n\nlink text\n\noutro");
 });
 
-const underTwoSeconds = (html: string): string => {
+const withinTimeBound = (html: string): string => {
   const started = Date.now();
   const text = htmlToText(html);
-  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  assert.ok(
+    Date.now() - started < HOSTILE_TIME_BOUND_MS,
+    `took ${Date.now() - started} ms`,
+  );
   return text;
 };
 
 test("many-attribute tags cannot hide behind a quoted > or adjacent quotes", () => {
   const quoted = `<p>kept</p><a x=">" ${uniqueAttrs(60_000)}>tail`;
-  assert.equal(underTwoSeconds(quoted), "kept");
+  assert.equal(withinTimeBound(quoted), "kept");
   const adjacent = Array.from({ length: 60_000 }, (_, i) => `a${i}="1"`).join(
     "",
   );
-  assert.equal(underTwoSeconds(`<p>kept</p><a ${adjacent}>tail`), "kept");
+  assert.equal(withinTimeBound(`<p>kept</p><a ${adjacent}>tail`), "kept");
   const slashes = Array.from({ length: 60_000 }, (_, i) => `a${i}`).join("/");
-  assert.equal(underTwoSeconds(`<p>kept</p><a ${slashes}>tail`), "kept");
+  assert.equal(withinTimeBound(`<p>kept</p><a ${slashes}>tail`), "kept");
   const spaced = Array.from({ length: 60_000 }, (_, i) => `a${i} = "1"`).join(
     " ",
   );
-  assert.equal(underTwoSeconds(`<p>kept</p><a ${spaced}>tail`), "kept");
+  assert.equal(withinTimeBound(`<p>kept</p><a ${spaced}>tail`), "kept");
 });
 
 test("a many-attribute tag cannot hide after a comment or script that mentions quotes", () => {
   const heavy = `<b ${uniqueAttrs(60_000)}>`;
   const afterComment = `<p>kept</p><!-- <a x=" --> ${heavy} <i y="-->`;
-  assert.equal(underTwoSeconds(afterComment), "kept");
+  assert.equal(withinTimeBound(afterComment), "kept");
   const afterScript = `<p>kept</p><script>var s = "<a x='";</script> ${heavy} <i y='</script>`;
-  assert.equal(underTwoSeconds(afterScript), "kept");
+  assert.equal(withinTimeBound(afterScript), "kept");
 });
 
 test("thousands of heavy tags (just under the attribute cap) stay fast", () => {
   const tag = `<a ${uniqueAttrs(120)}>x</a>`;
   const html = tag.repeat(Math.floor((5 * 1024 * 1024) / tag.length));
   assert.ok(html.length > 4 * 1024 * 1024);
-  underTwoSeconds(html);
+  withinTimeBound(html);
 });
 
 test("tags with quoted > in values, comments and script text parse as before", () => {

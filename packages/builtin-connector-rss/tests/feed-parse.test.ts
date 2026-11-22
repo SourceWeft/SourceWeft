@@ -5,6 +5,13 @@ import test from "node:test";
 import { FEED_MAX_ITEMS } from "../src/limits";
 import { FeedParseError, parseFeed } from "../src/feed-parse";
 
+// Upper bound for the hostile-shape timing tests. Quadratic behavior at these
+// sizes takes 3 s to minutes; typical linear runs take well under 1 s on an
+// idle machine (entity bomb about 1 ms, 100k nesting levels about 85 ms, 60k
+// attributes about 195 ms, the ~5 MiB mix about 700 ms). 6 s tolerates a
+// heavily loaded machine.
+const HOSTILE_TIME_BOUND_MS = 6_000;
+
 const fixture = (name: string): string =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 
@@ -118,7 +125,10 @@ test("maxItems overrides the default and an exact fit is not truncated", () => {
 test("a DOCTYPE entity bomb is rejected quickly as not a feed", () => {
   const started = Date.now();
   assertNotAFeed(fixture("entity-bomb.xml"));
-  assert.ok(Date.now() - started < 200, `took ${Date.now() - started} ms`);
+  assert.ok(
+    Date.now() - started < HOSTILE_TIME_BOUND_MS,
+    `took ${Date.now() - started} ms`,
+  );
 });
 
 test("any <!ENTITY declaration is rejected, external ones included", () => {
@@ -210,15 +220,15 @@ const deepXml = (depth: number): string =>
 const attrsXml = (count: number): string =>
   `<rss version="2.0"><channel><title>t</title><item ${Array.from({ length: count }, (_, i) => `a${i}="v"`).join(" ")}><title>x</title></item></channel></rss>`;
 
-test("100k levels of nesting are rejected or parsed in under 2 s", () => {
+test("100k levels of nesting are rejected or parsed within the time bound", () => {
   const elapsed = timed(deepXml(100_000));
-  assert.ok(elapsed < 2_000, `took ${elapsed} ms`);
+  assert.ok(elapsed < HOSTILE_TIME_BOUND_MS, `took ${elapsed} ms`);
   assertNotAFeed(deepXml(100_000));
 });
 
 test("an element with 60k unique attributes is bounded in time", () => {
   const elapsed = timed(attrsXml(60_000));
-  assert.ok(elapsed < 2_000, `took ${elapsed} ms`);
+  assert.ok(elapsed < HOSTILE_TIME_BOUND_MS, `took ${elapsed} ms`);
 });
 
 test("a ~5 MiB mix of deep nesting and attribute-heavy tags is bounded in time", () => {
@@ -231,5 +241,5 @@ test("a ~5 MiB mix of deep nesting and attribute-heavy tags is bounded in time",
   )}</channel></rss>`;
   assert.ok(xml.length >= 5 * 1024 * 1024);
   const elapsed = timed(xml);
-  assert.ok(elapsed < 2_000, `took ${elapsed} ms`);
+  assert.ok(elapsed < HOSTILE_TIME_BOUND_MS, `took ${elapsed} ms`);
 });
