@@ -50,6 +50,11 @@ const WRITE_RULES: WriteRule[] = [
   // Guest management does its own content-admin check in GuestService.
   { pattern: /^\/guests(\/|$)/, requirement: { plane: "none" } },
   { pattern: /^\/sources\/status$/, requirement: { plane: "none" } },
+  // Pins are personal: anyone who can read the chat may pin it for themselves.
+  {
+    pattern: /^\/threads\/[^/]+\/pin$/,
+    requirement: { plane: "content", role: "viewer" },
+  },
   // Artifact page storage: a viewer may write their own `user` records, and
   // shared writes, approvals and consent each need a different role, so the
   // records service checks the role per operation.

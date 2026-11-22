@@ -9,6 +9,8 @@ import {
   endThreadQuestionsRequestSchema,
   listThreadMessagesRequestSchema,
   archiveThreadRequestSchema,
+  renameThreadRequestSchema,
+  searchThreadsRequestSchema,
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
   streamThreadRequestSchema,
@@ -165,6 +167,13 @@ function assertJobStringField(data: unknown, field: string, expected: string) {
   }
 }
 
+/** "true" and "false" become booleans; anything else is left to fail validation. */
+function parseBooleanQuery(value: string | undefined) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+}
+
 export function registerThreadRoutes(app: Hono) {
   app.get("/threads", async (c) => {
     const session = await requireSession(c);
@@ -172,24 +181,23 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    const archivedQuery = c.req.query("archived");
     const parsedQuery = listThreadsRequestSchema.safeParse({
       cursor: c.req.query("cursor"),
       limit: c.req.query("limit")
         ? Number.parseInt(c.req.query("limit") as string, 10)
         : undefined,
-      // Only "true" and "false" are accepted; anything else fails validation.
-      archived:
-        archivedQuery === "true"
-          ? true
-          : archivedQuery === "false"
-            ? false
-            : archivedQuery,
+      archived: parseBooleanQuery(c.req.query("archived")),
+      pinned: parseBooleanQuery(c.req.query("pinned")),
     });
     if (!parsedQuery.success) {
       throw ApiError.validation(
         parsedQuery.error.flatten() as Record<string, unknown>,
       );
+    }
+    if (parsedQuery.data.archived && parsedQuery.data.pinned) {
+      throw ApiError.validation({
+        formErrors: ["archived and pinned cannot be combined"],
+      });
     }
 
     const result = await contentThreadService.listThreads({
@@ -198,6 +206,36 @@ export function registerThreadRoutes(app: Hono) {
       limit: parsedQuery.data.limit,
       cursor: parsedQuery.data.cursor,
       archived: parsedQuery.data.archived,
+      pinned: parsedQuery.data.pinned,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  // Registered before `/threads/:id` so "search" is never read as an id.
+  app.get("/threads/search", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = searchThreadsRequestSchema.safeParse({
+      q: c.req.query("q") ?? "",
+      limit: c.req.query("limit")
+        ? Number.parseInt(c.req.query("limit") as string, 10)
+        : undefined,
+    });
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentThreadService.searchThreads({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      q: parsed.data.q,
+      limit: parsed.data.limit,
     });
 
     return ApiResponse.success(c, result);
@@ -528,6 +566,51 @@ export function registerThreadRoutes(app: Hono) {
 
     return ApiResponse.success(c, result);
   });
+
+  app.patch("/threads/:id/title", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = renameThreadRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentThreadService.renameThread({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      title: parsed.data.title,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  for (const [method, pinned] of [
+    ["put", true],
+    ["delete", false],
+  ] as const) {
+    app[method]("/threads/:id/pin", async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+
+      const result = await contentThreadService.setThreadPinned({
+        workspaceId: requireRouteParam(c, "workspaceId"),
+        threadId: requireRouteParam(c, "id"),
+        userId: getSessionUserId(session),
+        pinned,
+      });
+
+      return ApiResponse.success(c, result);
+    });
+  }
 
   app.patch("/threads/:id/visibility", async (c) => {
     const session = await requireSession(c);
