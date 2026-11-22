@@ -6174,7 +6174,21 @@
         "hard": "Hard",
         "good": "Good",
         "easy": "Easy"
-      }
+      },
+      "hintBrowse": "Switch to Review to grade cards",
+      "summary": "{new} new · {learning} learning · {learned} learned",
+      "status": {
+        "new": "New",
+        "learning": "Learning",
+        "learned": "Learned"
+      },
+      "due": {
+        "now": "due now",
+        "minutes": "due in {count, plural, one {# minute} other {# minutes}}",
+        "hours": "due in {count, plural, one {# hour} other {# hours}}",
+        "days": "due in {count, plural, one {# day} other {# days}}"
+      },
+      "nextDue": "Next card {when}."
     },
     "quiz": {
       "loading": "Loading the quiz…",

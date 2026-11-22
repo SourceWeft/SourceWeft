@@ -6174,7 +6174,21 @@
         "hard": "困难",
         "good": "良好",
         "easy": "简单"
-      }
+      },
+      "hintBrowse": "切换到「复习」才能评分",
+      "summary": "新卡 {new} 张 · 学习中 {learning} 张 · 已学会 {learned} 张",
+      "status": {
+        "new": "新卡",
+        "learning": "学习中",
+        "learned": "已学会"
+      },
+      "due": {
+        "now": "已到期",
+        "minutes": "{count} 分钟后复习",
+        "hours": "{count} 小时后复习",
+        "days": "{count} 天后复习"
+      },
+      "nextDue": "下一张：{when}。"
     },
     "quiz": {
       "loading": "正在加载测验…",

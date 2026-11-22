@@ -1,26 +1,80 @@
 "use client";
 
-import { useRef, type KeyboardEvent, type TouchEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type TouchEvent } from "react";
 import { ChevronLeft, ChevronRight, Download, RotateCcw } from "lucide-react";
 import type { ReviewGrade, StudyContent } from "@sourceweft/contracts/study";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { exportFlashcardsCsv } from "../../export/anki-csv";
 import { EvidencePopover } from "@sourceweft/grounded-generation/ui";
 import { downloadStem, isViewerShortcut } from "../shared/util";
-import { useStudyHost, type StudyVersionRef } from "../study-host";
+import {
+  useStudyHost,
+  type ReviewStateView,
+  type StudyTranslate,
+  type StudyVersionRef,
+} from "../study-host";
 import { Flashcard } from "./flashcard";
 import { ReviewControls } from "./review-controls";
-import { useFlashcardSession, type FlashcardMode } from "./use-flashcard-session";
+import {
+  cardStatus,
+  deckSummary,
+  dueCardIds,
+  nextDueAt,
+  useFlashcardSession,
+  type FlashcardMode,
+} from "./use-flashcard-session";
 
 type FlashcardsContent = Extract<StudyContent, { kind: "flashcards" }>;
 
 const SWIPE_DISTANCE = 60;
+const MINUTE = 60_000;
+
+/** The current time, refreshed every minute so due labels stay true. */
+function useNow() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), MINUTE);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/** "Due now", or how long until a card is due, in minutes, hours or days. */
+export function dueLabel(due: number, now: number, t: StudyTranslate) {
+  const minutes = Math.ceil((due - now) / MINUTE);
+  if (minutes <= 0) return t("study.flashcards.due.now");
+  if (minutes < 60) return t("study.flashcards.due.minutes", { count: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return t("study.flashcards.due.hours", { count: hours });
+  return t("study.flashcards.due.days", { count: Math.round(hours / 24) });
+}
+
+/** Where one card stands, with its due time once it has been graded. */
+function CardStatusLine({
+  state,
+  now,
+  t,
+}: {
+  state: ReviewStateView | undefined;
+  now: number;
+  t: StudyTranslate;
+}) {
+  const status = cardStatus(state);
+  return (
+    <p className="text-center text-xs text-muted-foreground" data-card-status={status}>
+      {t(`study.flashcards.status.${status}`)}
+      {state && status !== "new" ? ` · ${dueLabel(Date.parse(state.dueAt), now, t)}` : null}
+    </p>
+  );
+}
 
 /**
- * Flashcards in two modes: browse every card, or review only the cards that
- * are new or due. Space/Enter flips, 1–4 grades a flipped card, arrow keys
- * move; on touch, swiping a flipped card right grades it Good and left Again.
- * Grading only exists when the viewer is interactive.
+ * Flashcards in two modes: browse every card with where it stands, changing
+ * nothing, or review the cards that are new or due and grade them. A deck
+ * with saved progress opens on its review. Space/Enter flips, 1–4 grades a
+ * flipped card in review, arrow keys move; on touch, swiping a flipped review
+ * card right grades it Good and left Again. Progress and grading only exist
+ * when the viewer is interactive.
  */
 export function FlashcardsViewer({
   content,
@@ -45,6 +99,8 @@ export function FlashcardsViewer({
   });
   const { state, current, done } = session;
   const touchStartX = useRef<number | null>(null);
+  const now = useNow();
+  const reviewing = interactive && state.mode === "review";
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!isViewerShortcut(event)) return;
@@ -74,6 +130,9 @@ export function FlashcardsViewer({
   const modes: FlashcardMode[] = interactive ? ["browse", "review"] : ["browse"];
   const total = state.queue.length;
   const gradedCount = Object.keys(state.graded).length;
+  const summary = deckSummary(content.items, state.progress);
+  const dueCount = dueCardIds(content.items, state.progress, now).length;
+  const nextDue = nextDueAt(content.items, state.progress, now);
 
   return (
     <div
@@ -101,6 +160,14 @@ export function FlashcardsViewer({
                 variant={state.mode === mode ? "secondary" : "ghost"}
               >
                 {t(`study.flashcards.mode.${mode}`)}
+                {mode === "review" && dueCount > 0 ? (
+                  <span
+                    className="rounded-full bg-primary px-1.5 text-xs leading-5 text-primary-foreground tabular-nums"
+                    data-due-count
+                  >
+                    {dueCount}
+                  </span>
+                ) : null}
               </Button>
             ))}
           </div>
@@ -130,6 +197,16 @@ export function FlashcardsViewer({
         </Button>
       </div>
 
+      {interactive ? (
+        <p className="text-xs text-muted-foreground" data-deck-summary>
+          {t("study.flashcards.summary", {
+            new: summary.new,
+            learning: summary.learning,
+            learned: summary.learned,
+          })}
+        </p>
+      ) : null}
+
       {total > 0 ? (
         <div
           aria-hidden
@@ -155,9 +232,12 @@ export function FlashcardsViewer({
       ) : null}
 
       {total === 0 ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">
-          {t("study.flashcards.nothingDue")}
-        </p>
+        <div className="flex flex-col items-center gap-1 py-10 text-center text-sm text-muted-foreground">
+          <p>{t("study.flashcards.nothingDue")}</p>
+          {nextDue !== null ? (
+            <p data-next-due>{t("study.flashcards.nextDue", { when: dueLabel(nextDue, now, t) })}</p>
+          ) : null}
+        </div>
       ) : done ? (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p className="text-base font-medium">
@@ -170,6 +250,9 @@ export function FlashcardsViewer({
         </div>
       ) : current ? (
         <>
+          {interactive && !reviewing ? (
+            <CardStatusLine now={now} state={state.progress[current.id]} t={t} />
+          ) : null}
           <Flashcard
             flipped={state.flipped}
             item={current}
@@ -188,7 +271,13 @@ export function FlashcardsViewer({
               <ChevronLeft aria-hidden />
             </Button>
             <span className="text-xs text-muted-foreground">
-              {t(state.flipped ? "study.flashcards.hintGrade" : "study.flashcards.hintFlip")}
+              {t(
+                !state.flipped || !interactive
+                  ? "study.flashcards.hintFlip"
+                  : reviewing
+                    ? "study.flashcards.hintGrade"
+                    : "study.flashcards.hintBrowse",
+              )}
             </span>
             <Button
               aria-label={t("study.flashcards.next")}
@@ -201,7 +290,7 @@ export function FlashcardsViewer({
               <ChevronRight aria-hidden />
             </Button>
           </div>
-          {state.flipped && interactive ? (
+          {state.flipped && reviewing ? (
             <ReviewControls onGrade={session.grade} t={t} />
           ) : null}
           {state.flipped ? (
