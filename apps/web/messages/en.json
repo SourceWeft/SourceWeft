@@ -6012,7 +6012,7 @@
       "generating": "Completed {completed} of {total} sources"
     },
     "error": {
-      "retry": "Try again",
+      "generateAgain": "To try again, select the sources in the source hub and generate a new table.",
       "cannotDisplay": "This table can't be displayed.",
       "code": {
         "INSUFFICIENT_CREDITS": "Not enough credits to generate this table.",
@@ -6102,6 +6102,9 @@
         "suggestFailed": "Couldn't suggest columns. Try again.",
         "generic": "Couldn't generate the table. Try again."
       }
+    },
+    "regenerationFailed": {
+      "message": "The last regeneration failed, so this is still the previous table."
     }
   },
   "study": {
@@ -6292,6 +6295,9 @@
         "loadFailed": "Couldn't open this study set for regeneration.",
         "generic": "Couldn't generate this. Try again."
       }
+    },
+    "regenerationFailed": {
+      "message": "The last regeneration failed, so this is still the previous version."
     }
   },
   "mobileRouteSheet": {
@@ -7057,6 +7063,8 @@
       "task_tools_unavailable": "\"{taskName}\" cannot run: a source or MCP server it uses is unavailable.",
       "task_blocked_auth": "\"{taskName}\" cannot run: a connected account needs to be signed in again.",
       "task_paused_repeated_failure": "\"{taskName}\" was paused after repeated failures.",
+      "artifact_generation_failed": "\"{title}\" could not be generated. Open it in the Hub's Artifacts tab to see why.",
+      "artifact_regeneration_failed": "\"{title}\" could not be regenerated. The previous version is kept; open it to see why.",
       "unknown": "Update about \"{taskName}\"."
     },
     "composer": {

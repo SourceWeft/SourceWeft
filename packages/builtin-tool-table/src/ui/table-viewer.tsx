@@ -13,8 +13,10 @@ import {
 import type { TableContent, TableFreshness, TableRow } from "@sourceweft/contracts/table";
 import {
   GroundedHostProvider,
+  RegenerationFailedBanner,
   StaleBanner,
   usePendingAction,
+  type RegenerationFailure,
 } from "@sourceweft/grounded-generation/ui";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -67,6 +69,7 @@ export function TableViewer({
   content,
   freshness,
   interactive,
+  regenerationFailure,
   title,
   version = NO_VERSION,
 }: {
@@ -74,6 +77,8 @@ export function TableViewer({
   freshness?: TableFreshness;
   /** False narrows the host: the share page shows values only. */
   interactive?: boolean;
+  /** The last regeneration failed: this is still the previous version. */
+  regenerationFailure?: RegenerationFailure | null;
   title?: string | null;
   /** Which artifact version this is; the host maps it to its own ids. */
   version?: TableVersionRef;
@@ -257,7 +262,10 @@ export function TableViewer({
         ) : null}
 
         {surfaceInteractive ? (
-          <div className="empty:hidden">
+          <div className="grid gap-2 empty:hidden">
+            {regenerationFailure ? (
+              <RegenerationFailedBanner failure={regenerationFailure} version={version} />
+            ) : null}
             <StaleBanner version={version} />
           </div>
         ) : null}

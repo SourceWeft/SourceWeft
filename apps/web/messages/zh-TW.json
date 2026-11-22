@@ -6012,7 +6012,7 @@
       "generating": "已完成 {completed} / {total} 個來源"
     },
     "error": {
-      "retry": "重試",
+      "generateAgain": "如需重試，請在資料中心選擇這些資料，重新產生一個表格。",
       "cannotDisplay": "無法顯示這張表。",
       "code": {
         "INSUFFICIENT_CREDITS": "點數不足，無法產生這張表。",
@@ -6102,6 +6102,9 @@
         "suggestFailed": "無法建議欄，請重試。",
         "generic": "無法產生資料表，請重試。"
       }
+    },
+    "regenerationFailed": {
+      "message": "上次重新產生失敗，目前顯示的仍是上一版表格。"
     }
   },
   "study": {
@@ -6292,6 +6295,9 @@
         "loadFailed": "無法開啟這份學習內容以重新產生。",
         "generic": "無法產生，請重試。"
       }
+    },
+    "regenerationFailed": {
+      "message": "上次重新產生失敗，目前顯示的仍是上一個版本。"
     }
   },
   "mobileRouteSheet": {
@@ -7057,6 +7063,8 @@
       "task_tools_unavailable": "「{taskName}」無法執行：它使用的資料或 MCP 服務不可用。",
       "task_blocked_auth": "「{taskName}」無法執行：需要重新登入它使用的已連接帳號。",
       "task_paused_repeated_failure": "「{taskName}」連續失敗後已暫停。",
+      "artifact_generation_failed": "「{title}」產生失敗。在資料中心的「製品」中開啟它，可檢視原因。",
+      "artifact_regeneration_failed": "「{title}」重新產生失敗，上一個版本仍保留。開啟它可檢視原因。",
       "unknown": "關於「{taskName}」的更新。"
     },
     "composer": {

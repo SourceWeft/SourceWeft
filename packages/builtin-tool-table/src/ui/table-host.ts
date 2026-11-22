@@ -92,7 +92,8 @@ export const TABLE_TRANSLATION_KEYS = [
   "table.stale.regenerate",
   "table.status.queued",
   "table.status.generating",
-  "table.error.retry",
+  "table.error.generateAgain",
+  "table.regenerationFailed.message",
   "table.error.cannotDisplay",
   "table.error.code.INSUFFICIENT_CREDITS",
   "table.error.code.INPUT_TOO_LARGE",
@@ -180,13 +181,16 @@ export function useTableHost(): TableHost {
 }
 
 /**
- * The shared components ask for `study.evidence.*` and `study.stale.*`; the
+ * The shared components ask for `study.evidence.*`, `study.stale.*`,
+ * `study.regenerationFailed.*` and `study.error.code.*`; the
  * table shows its own wording under `table.*`, so the app needs one namespace
  * for tables and no dependence on the study catalog.
  */
 const GROUNDED_KEY_PREFIXES: readonly (readonly [string, string])[] = [
   ["study.evidence.", "table.evidence."],
   ["study.stale.", "table.stale."],
+  ["study.regenerationFailed.", "table.regenerationFailed."],
+  ["study.error.code.", "table.error.code."],
 ];
 
 function tableKeyFor(key: string): string {

@@ -492,17 +492,44 @@ describe("TableArtifactView", () => {
     expect(text()).toContain("table.status.queued");
   });
 
-  it("words a failure by its code and offers to retry only when the host can", async () => {
+  it("words a failure by its code and says how to try again, with no retry that cannot work", async () => {
     const onRegenerate = vi.fn();
     await mount(withHost(recordingHost({ onRegenerate }).host, view({ status: "failed", errorCode: "INPUT_TOO_LARGE" })));
     expect(text()).toContain("table.error.code.INPUT_TOO_LARGE");
-    await act(async () => button("table.error.retry").click());
-    expect(onRegenerate).toHaveBeenCalledWith(version);
+    expect(text()).toContain("table.error.generateAgain");
+    // A failed first generation has no recipe to regenerate from.
+    expect(document.querySelectorAll("button")).toHaveLength(0);
 
     await unmountAll();
     await mount(withHost(recordingHost().host, view({ status: "failed", errorCode: "SOMETHING_NEW" })));
     expect(text()).toContain("table.error.code.UNKNOWN");
-    expect(buttons("table.error.retry")).toHaveLength(0);
+  });
+
+  it("says when the last regeneration failed and keeps showing the previous table", async () => {
+    const onRegenerate = vi.fn();
+    await mount(
+      withHost(
+        recordingHost({ onRegenerate }).host,
+        view({}, {
+          ...tableFixtureEn,
+          table: { regeneration: { versionNo: 2, status: "failed", errorCode: "INSUFFICIENT_CREDITS" } },
+        }),
+      ),
+    );
+    expect(text()).toContain("table.regenerationFailed.message");
+    expect(text()).toContain("table.error.code.INSUFFICIENT_CREDITS");
+    expect(document.querySelector('[role="region"]')).not.toBeNull();
+    await act(async () => button("table.stale.regenerate").click());
+    expect(onRegenerate).toHaveBeenCalledWith(version);
+
+    await unmountAll();
+    await mount(
+      withHost(
+        recordingHost({ onRegenerate }).host,
+        view({}, { ...tableFixtureEn, table: { regeneration: { versionNo: 2, status: "running" } } }),
+      ),
+    );
+    expect(text()).not.toContain("table.regenerationFailed.message");
   });
 
   it("keeps the regenerate buttons busy while the host is still answering", async () => {
@@ -534,15 +561,6 @@ describe("TableArtifactView", () => {
     await act(async () => answer());
     await flush(2);
     expect(banner.disabled).toBe(false);
-
-    await unmountAll();
-    await mount(withHost(recordingHost({ onRegenerate }).host, view({ status: "failed", errorCode: "MODEL_UNAVAILABLE" })));
-    const retry = button("table.error.retry");
-    await act(async () => retry.click());
-    expect(retry.disabled).toBe(true);
-    await act(async () => answer());
-    await flush(2);
-    expect(retry.disabled).toBe(false);
   });
 
   it("shows a message instead of crashing on an invalid payload", async () => {

@@ -1,6 +1,7 @@
 import { ArtifactError } from "@sourceweft/contracts/artifact-errors";
 import { isGroundedGenerationError } from "@sourceweft/contracts/grounded-generation";
 import { logger } from "../../shared/logger";
+import { notify } from "../notifications";
 import { completeArtifact, failArtifact } from "../artifacts/publish";
 import {
   findArtifactRecord,
@@ -183,6 +184,45 @@ export async function runArtifactGenerationJob(input: {
         errorCode,
       });
     }
+    await notifyGenerationFailed({ artifact, job, errorCode, isFirst });
     return { status: "failed", errorCode };
+  }
+}
+
+/** Titles longer than this are cut so the payload stays small. */
+const NOTIFICATION_TITLE_MAX = 200;
+
+/**
+ * Tells the person who asked that the generation failed. The job runs after
+ * the conversation has moved on, so nothing else reaches them: without this a
+ * failure is only visible to someone who goes looking. A failed notice never
+ * fails the job.
+ */
+async function notifyGenerationFailed(input: {
+  artifact: ArtifactRecord;
+  job: { teamId: string; threadId: string; userId: string; artifactType: string };
+  errorCode: string;
+  isFirst: boolean;
+}) {
+  const { artifact, job } = input;
+  try {
+    await notify({
+      kind: "artifact_generation_failed",
+      teamId: job.teamId,
+      userId: job.userId,
+      ref: { kind: "artifact", id: artifact.id },
+      payload: {
+        title: (artifact.title ?? job.artifactType).slice(0, NOTIFICATION_TITLE_MAX),
+        artifactType: job.artifactType,
+        threadId: artifact.threadId ?? job.threadId,
+        errorCode: input.errorCode,
+        regeneration: !input.isFirst,
+      },
+    });
+  } catch (error) {
+    logger.warn("Could not record the generation failure notice", {
+      artifactId: artifact.id,
+      err: error,
+    });
   }
 }
