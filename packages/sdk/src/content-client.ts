@@ -21,6 +21,7 @@ import type {
   SourceDiscoveryResponse,
   SourceGuideResponse,
 } from "@sourceweft/contracts/sources";
+import type { ResearchRun } from "@sourceweft/contracts/source-research";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
 import type {
   DeriveCardsResponse,
@@ -729,6 +730,41 @@ export class ContentClient {
     return this.http.post<SourceDiscoveryResponse>(
       `/v1/workspaces/${encode(workspaceId)}/source-discovery`,
       { topic },
+    );
+  }
+
+  /** Starts a deep-research run in the background. */
+  startResearch(workspaceId: string, topic: string) {
+    return this.http.post<{ run: ResearchRun }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research`,
+      { topic },
+    );
+  }
+
+  getResearch(workspaceId: string, id: string) {
+    return this.http.get<{ run: ResearchRun }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research/${encode(id)}`,
+    );
+  }
+
+  listResearch(workspaceId: string) {
+    return this.http.get<{ runs: ResearchRun[] }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research`,
+    );
+  }
+
+  cancelResearch(workspaceId: string, id: string) {
+    return this.http.post<{ cancelled: boolean }>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research/${encode(id)}/cancel`,
+      {},
+    );
+  }
+
+  /** Saves a `ready` run's report as a note, indexed like any other source. */
+  saveResearchNote(workspaceId: string, id: string) {
+    return this.http.post<SavedAnswerNote>(
+      `/v1/workspaces/${encode(workspaceId)}/source-research/${encode(id)}/save-note`,
+      {},
     );
   }
 

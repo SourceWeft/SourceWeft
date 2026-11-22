@@ -15,9 +15,16 @@ import {
 import {
   createRun,
   finishFailed,
+  findRun,
+  listRuns,
   requestCancel,
   type ResearchRunRow,
 } from "./repository";
+import { toResearchRun } from "./mapper";
+import type { ResearchRun } from "@sourceweft/contracts/source-research";
+
+/** The newest runs returned by the list endpoint when no limit is given. */
+const LIST_RESEARCH_LIMIT = 50;
 
 export type CreateResearchInput = {
   workspaceId: string;
@@ -190,4 +197,51 @@ export async function cancelResearch(
     workspaceId: workspace.id,
     id: input.id,
   });
+}
+
+export type GetResearchInput = {
+  workspaceId: string;
+  userId: string;
+  id: string;
+};
+
+/**
+ * Reads one run the caller can reach. Workspace access is checked first, then
+ * the run is looked up scoped to that workspace, so a run in another workspace
+ * is indistinguishable from one that does not exist: both are 404.
+ */
+export async function getResearch(input: GetResearchInput): Promise<ResearchRun> {
+  const workspace = await requireContentWorkspace(input);
+  const row = await findRun({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    id: input.id,
+  });
+  if (!row) {
+    throw new ContentError(
+      404,
+      "RESEARCH_NOT_FOUND",
+      "Research run not found",
+    );
+  }
+  return toResearchRun(row);
+}
+
+export type ListResearchInput = {
+  workspaceId: string;
+  userId: string;
+  limit?: number;
+};
+
+/** The current workspace's runs, newest first. */
+export async function listResearch(
+  input: ListResearchInput,
+): Promise<ResearchRun[]> {
+  const workspace = await requireContentWorkspace(input);
+  const rows = await listRuns({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    limit: input.limit ?? LIST_RESEARCH_LIMIT,
+  });
+  return rows.map(toResearchRun);
 }

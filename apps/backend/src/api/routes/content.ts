@@ -18,6 +18,7 @@ import {
 } from "./content/mcp";
 import { registerNotificationRoutes } from "./content/notifications";
 import { registerSourceRoutes } from "./content/sources";
+import { registerSourceResearchRoutes } from "./content/source-research";
 import { registerSkillRoutes } from "./content/skills";
 import { registerSkillSubmissionRoutes } from "./content/skill-submissions";
 import { registerSkillClaimRoutes } from "./content/skill-claims";
@@ -41,6 +42,7 @@ export function registerContentRoutes(app: Hono) {
   registerArtifactSharedCollectionRoutes(workspaceRoutes);
   registerCapabilityRoutes(workspaceRoutes);
   registerSourceRoutes(workspaceRoutes);
+  registerSourceResearchRoutes(workspaceRoutes);
   registerDictationRoutes(workspaceRoutes);
   registerStudyRoutes(workspaceRoutes);
   registerTableRoutes(workspaceRoutes);
