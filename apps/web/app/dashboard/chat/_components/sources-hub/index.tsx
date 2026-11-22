@@ -97,6 +97,8 @@ import {
   SourceDiscoveryDialog,
   useSourceDiscoveryAvailable,
 } from "./discovery/source-discovery-dialog";
+import { ResearchDialog } from "./research/research-dialog";
+import { ResearchEntry } from "./research/research-entry";
 import { useSources } from "./sources/use-sources";
 import {
   DeleteWorkfileDialog,
@@ -364,6 +366,7 @@ export function SourcesHub({
   const addSourceDialog = useAddSourceDialogState();
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const discoveryAvailable = useSourceDiscoveryAvailable(workspaceId);
+  const [researchOpen, setResearchOpen] = useState(false);
   const {
     sources,
     refreshSources,
@@ -506,6 +509,13 @@ export function SourcesHub({
     activeCitationIndex,
     searchQuery: deferredSearchQueries.Citations,
   });
+  const researchExistingUrls = useMemo(
+    () =>
+      sources.flatMap((source) =>
+        typeof source.externalUri === "string" ? [source.externalUri] : [],
+      ),
+    [sources],
+  );
   const filteredSourceCount = useMemo(
     () => countFilteredSources(sources, deferredSearchQueries.Sources),
     [deferredSearchQueries.Sources, sources],
@@ -1116,6 +1126,11 @@ export function SourcesHub({
                       {t("discovery.add")}
                     </Button>
                   ) : null}
+                  <ResearchEntry
+                    available={discoveryAvailable}
+                    disabled={!workspaceId}
+                    onOpen={() => setResearchOpen(true)}
+                  />
                 </div>
               </div>
 
@@ -1506,6 +1521,17 @@ export function SourcesHub({
           onImported={() => void refreshSources()}
           onOpenChange={setDiscoveryOpen}
           open={discoveryOpen}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+
+      {workspaceId && discoveryAvailable ? (
+        <ResearchDialog
+          existingUrls={researchExistingUrls}
+          onImported={() => void refreshSources()}
+          onOpenChange={setResearchOpen}
+          onSaved={() => void refreshSources()}
+          open={researchOpen}
           workspaceId={workspaceId}
         />
       ) : null}

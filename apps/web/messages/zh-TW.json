@@ -3814,6 +3814,43 @@
       "flashcards": "閃卡",
       "quiz": "測驗",
       "mindmap": "心智圖"
+    },
+    "research": {
+      "add": "深度研究",
+      "title": "深度研究",
+      "description": "描述一個主題，SourceWeft 會在背景搜尋網頁、閱讀內容並撰寫帶引用的報告。",
+      "topicPlaceholder": "例如：固態電池商業化",
+      "costNote": "深度研究會消耗點數，可能需要幾分鐘。執行期間可以關閉此視窗。",
+      "start": "開始研究",
+      "starting": "正在啟動…",
+      "startFailed": "無法啟動研究，請稍後重試。",
+      "cancel": "取消",
+      "cancelled": "此研究已取消。",
+      "progress": "已搜尋 {searches} 次 · 已讀 {pages} 個網頁",
+      "phase": {
+        "planning": "規劃中",
+        "searching": "搜尋中",
+        "reading": "閱讀網頁中",
+        "reporting": "撰寫報告中"
+      },
+      "saveNote": "將報告儲存為筆記",
+      "saved": "報告已儲存為筆記",
+      "saveFailed": "無法儲存報告，請重試。",
+      "sources": "報告引用的網頁",
+      "importSources": "{count, plural, =0 {匯入所選來源} other {匯入 # 個所選來源}}",
+      "savedLabel": "已儲存",
+      "image": "圖片",
+      "newResearch": "新的研究",
+      "error": {
+        "WEB_PROVIDER_UNAVAILABLE": "網頁搜尋暫時無法使用。",
+        "NO_RESULTS": "搜尋沒有找到與該主題相關的可用網頁，請換個方式描述。",
+        "RESEARCH_QUALITY_TOO_LOW": "找到的資料不夠可靠，無法撰寫報告，請嘗試更具體的主題。",
+        "INSUFFICIENT_CREDITS": "點數不足，無法進行此研究。",
+        "MODEL_UNAVAILABLE": "研究所用的模型暫時無法使用，請稍後重試。",
+        "TIME_LIMIT": "研究在完成前已達到時間上限。",
+        "ACCESS_LOST": "你已不再擁有該工作區的存取權限，研究已停止。",
+        "UNKNOWN": "研究失敗。"
+      }
     }
   },
   "dashboardBlogAdmin": {
