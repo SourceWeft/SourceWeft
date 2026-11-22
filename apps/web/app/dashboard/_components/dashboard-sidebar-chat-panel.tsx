@@ -486,8 +486,11 @@ function ChatListRow({
   item: ChatItem;
   /** Set on a pinned chat: the menu offers Unpin instead of Pin. */
   pinned?: boolean;
-  /** Shown instead of the status line for a search result. */
-  searchMatch?: { snippet: string; archived: boolean };
+  /**
+   * A search result: the matching message line (null for a title match) and
+   * whether the chat is archived. Replaces the status line when either is set.
+   */
+  searchMatch?: { snippet: string | null; archived: boolean };
   onRename?: (id: string, title: string) => Promise<void>;
   onTogglePin?: (id: string, pinned: boolean) => Promise<void>;
   /** A sub-agent conversation rendered under its parent row. */
@@ -513,6 +516,12 @@ function ChatListRow({
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(item.title);
   const renameRequestedRef = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Select the whole title once the field is shown, so typing replaces it.
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.select();
+  }, [renaming]);
   const status = item.status || "ready";
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt, locale);
   const shared = isSharedChat(item);
@@ -577,6 +586,7 @@ function ChatListRow({
     return (
       <SidebarMenuItem className={cn("relative px-2", nested && "pl-6")}>
         <SidebarInput
+          ref={renameInputRef}
           autoFocus
           aria-label={t("chats.renameLabel")}
           className="h-8 text-[13px]"
@@ -584,7 +594,6 @@ function ChatListRow({
           value={draftTitle}
           onBlur={() => void commitRename()}
           onChange={(event) => setDraftTitle(event.target.value)}
-          onFocus={(event) => event.currentTarget.select()}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -661,16 +670,18 @@ function ChatListRow({
                   </Tooltip>
                 ) : null}
               </div>
-              {searchMatch ? (
+              {searchMatch && (searchMatch.snippet || searchMatch.archived) ? (
                 <div className="mt-1 flex items-start gap-1.5 text-[11px] leading-4 text-muted-foreground">
                   {searchMatch.archived ? (
                     <span className="shrink-0 rounded-sm border border-sidebar-border px-1 text-[10px]">
                       {t("chats.archivedBadge")}
                     </span>
                   ) : null}
-                  <span className="line-clamp-2 min-w-0">
-                    {searchMatch.snippet}
-                  </span>
+                  {searchMatch.snippet ? (
+                    <span className="line-clamp-2 min-w-0">
+                      {searchMatch.snippet}
+                    </span>
+                  ) : null}
                 </div>
               ) : (
                 <div className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground/80">
@@ -1172,7 +1183,10 @@ function ChatList({
                     canArchive={false}
                     item={mapThreadToChatItem(result.thread)}
                     searchMatch={{
-                      snippet: result.match.snippet,
+                      snippet:
+                        result.match.kind === "message"
+                          ? result.match.snippet
+                          : null,
                       archived: result.archived,
                     }}
                     onArchive={onArchive}
