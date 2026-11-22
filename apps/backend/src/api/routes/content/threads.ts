@@ -6,6 +6,7 @@ import type { Hono } from "hono";
 import {
   createPersonaRequestSchema,
   createThreadRequestSchema,
+  createThreadShareRequestSchema,
   endThreadQuestionsRequestSchema,
   listThreadMessagesRequestSchema,
   archiveThreadRequestSchema,
@@ -21,6 +22,7 @@ import {
   updatePersonaRequestSchema,
   updateThreadChatPreferencesRequestSchema,
   updateThreadModelSettingsRequestSchema,
+  updateThreadShareRequestSchema,
   updateThreadVisibilityRequestSchema,
   listSavedNotesRequestSchema,
 } from "@sourceweft/contracts";
@@ -38,6 +40,8 @@ import type {
   ResumeThreadInput,
   StreamThreadEventInput,
 } from "../../../modules/threads";
+import { threadShareService } from "../../../modules/threads/share/service";
+import type { ShareMutationResult } from "../../../modules/sharing";
 import { listSavedNotes, saveAnswerAsNote } from "../../../modules/notes";
 import { contentDispositionAttachment } from "../../../modules/threads/export/file-name";
 import { exportThread } from "../../../modules/threads/export/service";
@@ -54,6 +58,19 @@ import {
   ensureObjectBody,
   requireRouteParam,
 } from "./helpers";
+
+/** `not_found` hides existence from callers who lack access to the chat. */
+function unwrapThreadShareResult<T>(result: ShareMutationResult<T>): T {
+  if (result.ok) {
+    return result.value;
+  }
+  if (result.reason === "forbidden") {
+    throw ApiError.forbidden(
+      "Only the chat's creator or a workspace admin can share it.",
+    );
+  }
+  throw new ApiError(404, "THREAD_NOT_FOUND", "Thread not found");
+}
 
 type DurableThreadRequestInput =
   | StreamThreadEventInput
@@ -675,6 +692,90 @@ export function registerThreadRoutes(app: Hono) {
     });
 
     return ApiResponse.success(c, result);
+  });
+
+  app.get("/threads/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await threadShareService.getThreadShare({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, { share: unwrapThreadShareResult(result) });
+  });
+
+  app.post("/threads/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = createThreadShareRequestSchema.safeParse(
+      ensureObjectBody(await c.req.json().catch(() => ({}))),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await threadShareService.shareThread({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      noindex: parsed.data.noindex,
+    });
+
+    return ApiResponse.success(
+      c,
+      { share: unwrapThreadShareResult(result) },
+      201,
+    );
+  });
+
+  app.patch("/threads/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const parsed = updateThreadShareRequestSchema.safeParse(
+      ensureObjectBody(await c.req.json().catch(() => ({}))),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await threadShareService.updateThreadShare({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      noindex: parsed.data.noindex,
+    });
+
+    return ApiResponse.success(c, { share: unwrapThreadShareResult(result) });
+  });
+
+  app.delete("/threads/:id/share", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await threadShareService.revokeThreadShare({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, { revoked: unwrapThreadShareResult(result) });
   });
 
   app.get("/messages/:messageId/citations/:rank", async (c) => {
