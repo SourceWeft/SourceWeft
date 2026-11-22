@@ -164,3 +164,26 @@ test("ConnectorRegistry leaves a brokered adapter unconstrained", () => {
 
   assert.equal(registry.getManifest("brokered-fake").auth.kind, "brokered");
 });
+
+test("ConnectorRegistry accepts the RSS adapter as a none adapter without OAuth methods", async () => {
+  const { createConnectorAdapters } = await import(
+    "@sourceweft/builtin-connector-rss"
+  );
+  const contribution = await createConnectorAdapters({
+    env: {
+      baseUrl: "https://api.sourceweft.example",
+      get: () => undefined,
+    },
+    publicFetch: () => ({
+      fetch: (async () => new Response(null, { status: 500 })) as typeof fetch,
+      close: async () => {},
+    }),
+  });
+  assert.equal(contribution.adapters.length, 1);
+  const rss = contribution.adapters[0]!;
+  assert.equal(rss.exchangeOAuthCode, undefined);
+  assert.equal(rss.refreshOAuthToken, undefined);
+
+  const registry = new ConnectorRegistry([rss]);
+  assert.equal(registry.getManifest("rss").auth.kind, "none");
+});

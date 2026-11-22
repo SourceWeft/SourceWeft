@@ -8,7 +8,12 @@ export type FeedFetchFailure =
   | "feed_http_error"
   | "feed_unreachable";
 
-export type RssAdapterReason = FeedFetchFailure | FeedUrlRejection;
+/** Reasons a readiness check may report: only failures of the feed itself. */
+export type RssReadinessReason = FeedFetchFailure | FeedUrlRejection;
+
+/** Everything {@link RssAdapterError} can carry. The extra reason is a fixed
+ * platform answer, not a feed failure, so it is never a readiness reason. */
+export type RssAdapterReason = RssReadinessReason | "rss_actions_unsupported";
 
 const FAILURES: Record<
   RssAdapterReason,
@@ -41,6 +46,10 @@ const FAILURES: Record<
     statusCode: 502,
     message: "The feed server could not be reached.",
   },
+  rss_actions_unsupported: {
+    statusCode: 400,
+    message: "RSS feeds do not support actions.",
+  },
 };
 
 /**
@@ -60,7 +69,8 @@ export class RssAdapterError extends Error {
     super(failure.message);
     this.name = "RssAdapterError";
     this.statusCode = failure.statusCode;
-    this.code = reason;
+    this.code =
+      reason === "rss_actions_unsupported" ? "RSS_ACTIONS_UNSUPPORTED" : reason;
     this.reason = reason;
   }
 }
