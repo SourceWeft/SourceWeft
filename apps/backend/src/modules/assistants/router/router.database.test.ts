@@ -112,6 +112,7 @@ test("create_ticket writes the ticket, one decision per trigger, and one feed it
     assistant.id,
     { payerUserId: member, triggerIds: [t1.id, t2.id] },
     batchKey,
+    { teamId, workspaceId },
   );
 
   const ctx = routerCtx({
@@ -244,9 +245,14 @@ test("route_to_ticket on an owned ticket writes one decision per trigger and rou
     workspaceId,
     assistantId: assistant.id,
     payerUserId: member,
-    status: "in_eval",
   });
   const batchKey = routerBatchKeyFn([t1.id]);
+  await claimBatchFn(
+    assistant.id,
+    { payerUserId: member, triggerIds: [t1.id] },
+    batchKey,
+    { teamId, workspaceId },
+  );
   const ctx = routerCtx({
     teamId,
     workspaceId,
@@ -284,9 +290,14 @@ test("ignore writes one decision per trigger with the given reason and decides t
     workspaceId,
     assistantId: assistant.id,
     payerUserId: member,
-    status: "in_eval",
   });
   const batchKey = routerBatchKeyFn([t1.id]);
+  await claimBatchFn(
+    assistant.id,
+    { payerUserId: member, triggerIds: [t1.id] },
+    batchKey,
+    { teamId, workspaceId },
+  );
   const ctx = routerCtx({
     teamId,
     workspaceId,
@@ -411,9 +422,14 @@ test("recall finds a ticket by id prefix and returns its full text plus routed t
     workspaceId,
     assistantId: assistant.id,
     payerUserId: member,
-    status: "in_eval",
   });
   const batchKey = routerBatchKeyFn([t1.id]);
+  await claimBatchFn(
+    assistant.id,
+    { payerUserId: member, triggerIds: [t1.id] },
+    batchKey,
+    { teamId, workspaceId },
+  );
   const ctx = routerCtx({
     teamId,
     workspaceId,
@@ -472,6 +488,7 @@ test("triggers left in_eval are requeued with eval_attempts += 1, then marked un
     assistant.id,
     { payerUserId: member, triggerIds: [t1.id, t2.id, t3.id] },
     batchKey,
+    { teamId, workspaceId },
   );
   let runId = randomUUID();
   await f.setCurrentRouterRun(assistant.id, { runId, batchKey });
@@ -509,6 +526,7 @@ test("triggers left in_eval are requeued with eval_attempts += 1, then marked un
       assistant.id,
       { payerUserId: member, triggerIds: [t2.id, t3.id] },
       batchKey,
+      { teamId, workspaceId },
     );
     runId = randomUUID();
     await f.setCurrentRouterRun(assistant.id, { runId, batchKey });
@@ -544,9 +562,64 @@ test("reconcileRouterRun is a no-op for a run that is not the assistant's curren
   assert.equal(f.notifications.length, 0);
 });
 
+test("a delayed reconcile for a stale run never clears a newer run's bookkeeping or touches its triggers", async () => {
+  const { teamId, workspaceId, assistant, member } = await setupAssistant();
+  const t1 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+    status: "in_eval",
+  });
+  const run1BatchKey = routerBatchKeyFn([t1.id]);
+  const run1Id = randomUUID();
+  await f.setCurrentRouterRun(assistant.id, {
+    runId: run1Id,
+    batchKey: run1BatchKey,
+  });
+  // The caller captured this snapshot while run1 was still current...
+  const staleSnapshot = (await f.assistantRow(workspaceId))!;
+  assert.equal(staleSnapshot.currentRouterRunId, run1Id);
+
+  // ...but by the time it calls reconcile, run2 has already started (t1 is
+  // still in_eval under run1's batch key — run1's own reconcile just never
+  // happened yet, or got delayed past run2's start).
+  const t2 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+    status: "in_eval",
+  });
+  const run2BatchKey = routerBatchKeyFn([t2.id]);
+  const run2Id = randomUUID();
+  await f.setCurrentRouterRun(assistant.id, {
+    runId: run2Id,
+    batchKey: run2BatchKey,
+  });
+
+  // The delayed call still names run1 and carries the stale snapshot.
+  const result = await reconcileRouterRunFn(
+    staleSnapshot,
+    { id: run1Id },
+    f.ports,
+  );
+  assert.deepEqual(result, { requeued: 0, unavailable: 0 });
+
+  // run2's bookkeeping is untouched.
+  const assistantAfter = (await f.assistantRow(workspaceId))!;
+  assert.equal(assistantAfter.currentRouterRunId, run2Id);
+  assert.equal(assistantAfter.currentRouterBatchKey, run2BatchKey);
+  // Neither trigger was touched by the stale call.
+  assert.equal((await f.triggerRow(t1.id))!.status, "in_eval");
+  assert.equal((await f.triggerRow(t1.id))!.evalAttempts, 0);
+  assert.equal((await f.triggerRow(t2.id))!.status, "in_eval");
+  assert.equal(f.notifications.length, 0);
+});
+
 // ── resolveRouterToolsContext ────────────────────────────────────────────
 
-test("resolveRouterToolsContext throws when hostContext is missing the Router fields", async () => {
+test("resolveRouterToolsContext throws when hostContext is missing assistantId or batchKey", async () => {
   await assert.rejects(() =>
     resolveRouterToolsContextFn({
       workspaceId: randomUUID(),
@@ -571,27 +644,73 @@ test("resolveRouterToolsContext throws when the assistant does not exist in this
       hostContext: {
         assistantId: randomUUID(),
         batchKey: "key",
-        batchTriggerIds: JSON.stringify(["a"]),
       },
     }),
   );
 });
 
-test("resolveRouterToolsContext resolves a valid hostContext into the Router tools context", async () => {
+test("resolveRouterToolsContext throws when no in_eval triggers exist for the given batchKey", async () => {
   const { teamId, workspaceId, assistant } = await setupAssistant();
+  await assert.rejects(() =>
+    resolveRouterToolsContextFn({
+      workspaceId,
+      teamId,
+      threadId: randomUUID(),
+      runId: randomUUID(),
+      userId: randomUUID(),
+      hostContext: {
+        assistantId: assistant.id,
+        batchKey: "a-batch-key-nothing-is-claimed-under",
+      },
+    }),
+  );
+});
+
+test("resolveRouterToolsContext loads batchTriggerIds from the database, not from hostContext", async () => {
+  const { teamId, workspaceId, assistant, member } = await setupAssistant();
+  const t1 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+  });
+  const t2 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+  });
+  const batchKey = routerBatchKeyFn([t1.id, t2.id]);
+  await claimBatchFn(
+    assistant.id,
+    { payerUserId: member, triggerIds: [t1.id, t2.id] },
+    batchKey,
+    { teamId, workspaceId },
+  );
+  // A third, unrelated in_eval trigger under a *different* batch key must
+  // not leak into this batch's resolved triggerIds.
+  await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+    status: "in_eval",
+    routerBatchKey: "some-other-batch",
+  });
+
   const resolved = await resolveRouterToolsContextFn({
     workspaceId,
     teamId,
     threadId: randomUUID(),
     runId: randomUUID(),
     userId: randomUUID(),
+    // hostContext carries only assistantId/batchKey — no batchTriggerIds.
     hostContext: {
       assistantId: assistant.id,
-      batchKey: "key-1",
-      batchTriggerIds: JSON.stringify(["t1", "t2"]),
+      batchKey,
     },
   });
   assert.equal(resolved.assistantId, assistant.id);
-  assert.equal(resolved.batchKey, "key-1");
-  assert.deepEqual(resolved.batchTriggerIds, ["t1", "t2"]);
+  assert.equal(resolved.batchKey, batchKey);
+  assert.deepEqual(new Set(resolved.batchTriggerIds), new Set([t1.id, t2.id]));
 });

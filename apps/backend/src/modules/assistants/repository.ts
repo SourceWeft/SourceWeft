@@ -274,7 +274,13 @@ export async function insertTriggerRow(
  */
 export async function claimTriggerRows(
   executor: Executor,
-  input: { assistantId: string; triggerIds: string[]; batchKey: string },
+  input: {
+    assistantId: string;
+    teamId: string;
+    workspaceId: string;
+    triggerIds: string[];
+    batchKey: string;
+  },
 ): Promise<AssistantTriggerRow[]> {
   if (input.triggerIds.length === 0) return [];
   return executor
@@ -283,6 +289,8 @@ export async function claimTriggerRows(
     .where(
       and(
         eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
         inArray(assistantTriggers.id, input.triggerIds),
         eq(assistantTriggers.status, "pending_eval"),
       ),
@@ -321,13 +329,23 @@ export async function findTriggerRowsByIds(
 
 /**
  * Marks triggers decided: `status` → `decided`, `routed_ticket_id` set to
- * the ticket the decision routed them to (`null` for `ignore`). Callers
- * already validated tenant scope and batch membership via
- * `findTriggerRowsByIds`.
+ * the ticket the decision routed them to (`null` for `ignore`). Scoped to
+ * tenant, assistant *and* the batch doing the deciding (`status = 'in_eval'
+ * and router_batch_key = routerBatchKey`), so a trigger already decided —
+ * by this batch or a stale/duplicate one — is never matched twice: callers
+ * compare the returned row count against how many ids they asked for and
+ * roll back if they differ (see `router/tools.ts`).
  */
 export async function markTriggersDecidedRows(
   executor: Executor,
-  input: { ids: string[]; assistantId: string; routedTicketId: string | null },
+  input: {
+    ids: string[];
+    teamId: string;
+    workspaceId: string;
+    assistantId: string;
+    routerBatchKey: string;
+    routedTicketId: string | null;
+  },
 ): Promise<AssistantTriggerRow[]> {
   if (input.ids.length === 0) return [];
   return executor
@@ -336,7 +354,11 @@ export async function markTriggersDecidedRows(
     .where(
       and(
         eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
         inArray(assistantTriggers.id, input.ids),
+        eq(assistantTriggers.status, "in_eval"),
+        eq(assistantTriggers.routerBatchKey, input.routerBatchKey),
       ),
     )
     .returning();
@@ -344,11 +366,16 @@ export async function markTriggersDecidedRows(
 
 /**
  * The triggers still `in_eval` under one router batch: the ones the Router's
- * run ended without deciding. `reconcileRouterRun` (router/reconcile.ts)
- * requeues or expires exactly these.
+ * run ended without deciding (or, read before the Router's turn starts, the
+ * batch's own membership — `router/tools.ts`'s `resolveRouterToolsContext`
+ * uses this to load `batchTriggerIds` from `batchKey` rather than trust a
+ * client-supplied list). `reconcileRouterRun` (router/reconcile.ts`) requeues
+ * or expires exactly what this returns.
  */
 export async function listInEvalTriggerRows(input: {
   assistantId: string;
+  teamId: string;
+  workspaceId: string;
   routerBatchKey: string;
 }): Promise<AssistantTriggerRow[]> {
   return db
@@ -357,6 +384,8 @@ export async function listInEvalTriggerRows(input: {
     .where(
       and(
         eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
         eq(assistantTriggers.routerBatchKey, input.routerBatchKey),
         eq(assistantTriggers.status, "in_eval"),
       ),
@@ -374,6 +403,8 @@ export async function requeueOrExpireInEvalTriggerRows(
   executor: Executor,
   input: {
     assistantId: string;
+    teamId: string;
+    workspaceId: string;
     routerBatchKey: string;
     evalMaxAttempts: number;
   },
@@ -388,6 +419,8 @@ export async function requeueOrExpireInEvalTriggerRows(
     .where(
       and(
         eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
         eq(assistantTriggers.routerBatchKey, input.routerBatchKey),
         eq(assistantTriggers.status, "in_eval"),
       ),
@@ -399,6 +432,8 @@ export async function requeueOrExpireInEvalTriggerRows(
  * for `recall`'s "what is linked to this ticket" summary. */
 export async function findTriggerRowsRoutedToTicket(input: {
   assistantId: string;
+  teamId: string;
+  workspaceId: string;
   ticketId: string;
   limit: number;
 }): Promise<AssistantTriggerRow[]> {
@@ -408,6 +443,8 @@ export async function findTriggerRowsRoutedToTicket(input: {
     .where(
       and(
         eq(assistantTriggers.assistantId, input.assistantId),
+        eq(assistantTriggers.teamId, input.teamId),
+        eq(assistantTriggers.workspaceId, input.workspaceId),
         eq(assistantTriggers.routedTicketId, input.ticketId),
       ),
     )
@@ -419,6 +456,8 @@ export async function findTriggerRowsRoutedToTicket(input: {
 
 export async function findTicketRowsByIdPrefix(input: {
   assistantId: string;
+  teamId: string;
+  workspaceId: string;
   prefix: string;
   limit: number;
 }): Promise<AssistantTicketRow[]> {
@@ -428,6 +467,8 @@ export async function findTicketRowsByIdPrefix(input: {
     .where(
       and(
         eq(assistantTickets.assistantId, input.assistantId),
+        eq(assistantTickets.teamId, input.teamId),
+        eq(assistantTickets.workspaceId, input.workspaceId),
         sql`${assistantTickets.id} like ${`${input.prefix}%`}`,
       ),
     )
@@ -560,6 +601,8 @@ export async function insertTicketRow(
  */
 export async function listRelatedTicketCandidateRows(input: {
   assistantId: string;
+  teamId: string;
+  workspaceId: string;
   payerUserId: string;
   limit: number;
 }): Promise<AssistantTicketRow[]> {
@@ -568,11 +611,19 @@ export async function listRelatedTicketCandidateRows(input: {
     select 1 from ${assistantDecisions}
     where ${assistantDecisions.ticketId} = ${assistantTickets.id}
       and ${assistantDecisions.action} = 'route_to_ticket'
+      and ${assistantDecisions.teamId} = ${input.teamId}
+      and ${assistantDecisions.workspaceId} = ${input.workspaceId}
   )`;
   return db
     .select()
     .from(assistantTickets)
-    .where(eq(assistantTickets.assistantId, input.assistantId))
+    .where(
+      and(
+        eq(assistantTickets.assistantId, input.assistantId),
+        eq(assistantTickets.teamId, input.teamId),
+        eq(assistantTickets.workspaceId, input.workspaceId),
+      ),
+    )
     .orderBy(desc(samePayer), desc(wasRouted), desc(assistantTickets.updatedAt))
     .limit(input.limit);
 }

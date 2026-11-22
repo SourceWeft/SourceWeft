@@ -31,9 +31,11 @@ import {
   insertDecisionRow,
   insertFeedItemRow,
   insertTicketRow,
+  listInEvalTriggerRows,
   markTriggersDecidedRows,
   type AssistantTicketRow,
   type AssistantTriggerRow,
+  type AssistantTx,
 } from "../repository";
 
 export type RouterToolsContext = OriginTurnContext & {
@@ -139,6 +141,37 @@ async function loadOwnTicket(
   return ticket;
 }
 
+/**
+ * Thrown inside a tool's `db.transaction` (never past it) when
+ * `markTriggersDecidedRows` updates fewer rows than were asked for — a
+ * trigger a concurrent call already decided under this exact batch key, a
+ * narrower race than `loadBatchTriggers`'s own `status === 'in_eval'`
+ * check already closes most of. Rolls the transaction back; the catching
+ * tool returns a tool error, never a partial write.
+ */
+class DecisionCountMismatchError extends Error {}
+
+/** `markTriggersDecidedRows`, rolled back (via throw) if it did not update
+ * every trigger asked for. */
+async function markDecidedOrMismatch(
+  tx: AssistantTx,
+  ctx: RouterToolsContext,
+  triggers: readonly AssistantTriggerRow[],
+  routedTicketId: string | null,
+): Promise<void> {
+  const updated = await markTriggersDecidedRows(tx, {
+    ids: triggers.map((trigger) => trigger.id),
+    teamId: ctx.teamId,
+    workspaceId: ctx.workspaceId,
+    assistantId: ctx.assistantId,
+    routerBatchKey: ctx.batchKey,
+    routedTicketId,
+  });
+  if (updated.length !== triggers.length) {
+    throw new DecisionCountMismatchError();
+  }
+}
+
 const createTicketSchema = z.object({
   title: z.string().trim().min(1).max(120),
   goal: z.string().trim().min(1).max(2000),
@@ -166,40 +199,40 @@ const recallSchema = z.object({
 });
 
 /**
- * Resolves a plain `OriginTurnContext` into what `createRouterTools` needs,
- * reading `assistantId`/`batchKey`/`batchTriggerIds` out of `hostContext`
- * (set by whoever starts this host turn — Task 7's scheduler tick, via
- * `startHostTurn`'s own `hostContext`) and loading the assistant row.
+ * Resolves a plain `OriginTurnContext` into what `createRouterTools` needs.
  *
- * Throws when any of that is missing, malformed, or the assistant does not
- * exist — but this runs once, at turn *setup*, before the model ever sees a
- * tool: throwing here means the turn never starts, which is the right
- * failure mode (contrast with the tools themselves in this file, which must
- * never throw once the turn is running).
+ * `hostContext` carries only `assistantId` and `batchKey` (per the binding
+ * controller contract: `hostContext` is capped at 1 KB, and a batch of 20
+ * trigger ids alone would already be ~780 bytes of it). `batchTriggerIds`
+ * is *not* read from `hostContext` — it is loaded from the database: every
+ * trigger this assistant still has `in_eval` under `batchKey`, scoped to
+ * tenant and assistant (`listInEvalTriggerRows`). Finding none is treated
+ * as a setup failure, not an empty batch: a batch key with nothing left
+ * `in_eval` under it means the key is stale, foreign, or the batch was
+ * already fully reconciled, and starting a Router turn with an empty tool
+ * roster context would be silently useless rather than explicitly wrong.
+ *
+ * Throws when `hostContext` is missing either field, the assistant does not
+ * exist, or no `in_eval` triggers are found — but this runs once, at turn
+ * *setup*, before the model ever sees a tool: throwing here means the turn
+ * never starts, which is the right failure mode (contrast with the tools
+ * themselves in this file, which must never throw once the turn is
+ * running).
+ *
+ * Deliberately not checked here: whether `assistant.current_router_batch_key`
+ * still equals `batchKey`. Task 7 is what decides exactly when that column
+ * gets written relative to starting this turn, and adding the check now
+ * risks assuming an ordering Task 7 may not guarantee; left for Task 7 (or
+ * a later pass) to add once that ordering is settled.
  */
 export async function resolveRouterToolsContext(
   ctx: OriginTurnContext,
 ): Promise<RouterToolsContext> {
   const assistantId = ctx.hostContext.assistantId;
   const batchKey = ctx.hostContext.batchKey;
-  const batchTriggerIdsRaw = ctx.hostContext.batchTriggerIds;
-  if (!assistantId || !batchKey || !batchTriggerIdsRaw) {
+  if (!assistantId || !batchKey) {
     throw new Error(
-      "The Router turn's hostContext is missing assistantId, batchKey, or batchTriggerIds.",
-    );
-  }
-  let batchTriggerIds: unknown;
-  try {
-    batchTriggerIds = JSON.parse(batchTriggerIdsRaw);
-  } catch {
-    batchTriggerIds = undefined;
-  }
-  if (
-    !Array.isArray(batchTriggerIds) ||
-    batchTriggerIds.some((id) => typeof id !== "string")
-  ) {
-    throw new Error(
-      "The Router turn's hostContext.batchTriggerIds is not a JSON array of strings.",
+      "The Router turn's hostContext is missing assistantId or batchKey.",
     );
   }
   const assistant = await findAssistantRow({
@@ -209,7 +242,23 @@ export async function resolveRouterToolsContext(
   if (!assistant || assistant.id !== assistantId) {
     throw new Error(`No assistant '${assistantId}' in this workspace.`);
   }
-  return { ...ctx, assistantId, batchKey, batchTriggerIds };
+  const inEvalRows = await listInEvalTriggerRows({
+    assistantId,
+    teamId: ctx.teamId,
+    workspaceId: ctx.workspaceId,
+    routerBatchKey: batchKey,
+  });
+  if (inEvalRows.length === 0) {
+    throw new Error(
+      `No in_eval triggers found for batch '${batchKey}' (assistant '${assistantId}').`,
+    );
+  }
+  return {
+    ...ctx,
+    assistantId,
+    batchKey,
+    batchTriggerIds: inEvalRows.map((row) => row.id),
+  };
 }
 
 /**
@@ -242,50 +291,56 @@ export function createRouterTools(
           "assistant-ticket-thread",
           ticketId,
         );
-        await db.transaction(async (tx) => {
-          await insertTicketRow(tx, {
-            id: ticketId,
-            teamId: ctx.teamId,
-            workspaceId: ctx.workspaceId,
-            assistantId: ctx.assistantId,
-            workerThreadId,
-            title: args.title,
-            goal: args.goal,
-            payerUserId,
-            creditCap: ASSISTANT_LIMITS.ticketCreditCapDefault,
-            now,
-          });
-          for (const trigger of triggers) {
-            await insertDecisionRow(tx, {
-              id: deterministicId(
-                "assistant-decision",
-                trigger.id,
-                ctx.batchKey,
-              ),
+        try {
+          await db.transaction(async (tx) => {
+            await insertTicketRow(tx, {
+              id: ticketId,
               teamId: ctx.teamId,
               workspaceId: ctx.workspaceId,
               assistantId: ctx.assistantId,
-              triggerId: trigger.id,
-              routerBatchKey: ctx.batchKey,
-              action: "create_ticket",
+              workerThreadId,
+              title: args.title,
+              goal: args.goal,
+              payerUserId,
+              creditCap: ASSISTANT_LIMITS.ticketCreditCapDefault,
+              now,
+            });
+            for (const trigger of triggers) {
+              await insertDecisionRow(tx, {
+                id: deterministicId(
+                  "assistant-decision",
+                  trigger.id,
+                  ctx.batchKey,
+                ),
+                teamId: ctx.teamId,
+                workspaceId: ctx.workspaceId,
+                assistantId: ctx.assistantId,
+                triggerId: trigger.id,
+                routerBatchKey: ctx.batchKey,
+                action: "create_ticket",
+                ticketId,
+              });
+            }
+            await markDecidedOrMismatch(tx, ctx, triggers, ticketId);
+            await insertFeedItemRow(tx, {
+              id: deterministicId("assistant-feed-ticket-created", ticketId),
+              teamId: ctx.teamId,
+              workspaceId: ctx.workspaceId,
+              assistantId: ctx.assistantId,
+              kind: "ticket_update",
+              text: `New ticket: ${args.title}`,
               ticketId,
             });
+          });
+        } catch (error) {
+          if (error instanceof DecisionCountMismatchError) {
+            return toolError(
+              "TRIGGER_ALREADY_DECIDED",
+              "One or more triggers were already decided under this batch; nothing was written.",
+            );
           }
-          await markTriggersDecidedRows(tx, {
-            ids: triggers.map((t) => t.id),
-            assistantId: ctx.assistantId,
-            routedTicketId: ticketId,
-          });
-          await insertFeedItemRow(tx, {
-            id: deterministicId("assistant-feed-ticket-created", ticketId),
-            teamId: ctx.teamId,
-            workspaceId: ctx.workspaceId,
-            assistantId: ctx.assistantId,
-            kind: "ticket_update",
-            text: `New ticket: ${args.title}`,
-            ticketId,
-          });
-        });
+          throw error;
+        }
         return { ticketId };
       }),
     {
@@ -304,30 +359,36 @@ export function createRouterTools(
         const triggers = await loadBatchTriggers(ctx, args.triggerIds);
         if (isRouterToolError(triggers)) return triggers;
 
-        await db.transaction(async (tx) => {
-          for (const trigger of triggers) {
-            await insertDecisionRow(tx, {
-              id: deterministicId(
-                "assistant-decision",
-                trigger.id,
-                ctx.batchKey,
-              ),
-              teamId: ctx.teamId,
-              workspaceId: ctx.workspaceId,
-              assistantId: ctx.assistantId,
-              triggerId: trigger.id,
-              routerBatchKey: ctx.batchKey,
-              action: "route_to_ticket",
-              ticketId: ticket.id,
-              reason: args.note ?? null,
-            });
-          }
-          await markTriggersDecidedRows(tx, {
-            ids: triggers.map((t) => t.id),
-            assistantId: ctx.assistantId,
-            routedTicketId: ticket.id,
+        try {
+          await db.transaction(async (tx) => {
+            for (const trigger of triggers) {
+              await insertDecisionRow(tx, {
+                id: deterministicId(
+                  "assistant-decision",
+                  trigger.id,
+                  ctx.batchKey,
+                ),
+                teamId: ctx.teamId,
+                workspaceId: ctx.workspaceId,
+                assistantId: ctx.assistantId,
+                triggerId: trigger.id,
+                routerBatchKey: ctx.batchKey,
+                action: "route_to_ticket",
+                ticketId: ticket.id,
+                reason: args.note ?? null,
+              });
+            }
+            await markDecidedOrMismatch(tx, ctx, triggers, ticket.id);
           });
-        });
+        } catch (error) {
+          if (error instanceof DecisionCountMismatchError) {
+            return toolError(
+              "TRIGGER_ALREADY_DECIDED",
+              "One or more triggers were already decided under this batch; nothing was written.",
+            );
+          }
+          throw error;
+        }
         return { ticketId: ticket.id };
       }),
     {
@@ -344,29 +405,35 @@ export function createRouterTools(
         const triggers = await loadBatchTriggers(ctx, args.triggerIds);
         if (isRouterToolError(triggers)) return triggers;
 
-        await db.transaction(async (tx) => {
-          for (const trigger of triggers) {
-            await insertDecisionRow(tx, {
-              id: deterministicId(
-                "assistant-decision",
-                trigger.id,
-                ctx.batchKey,
-              ),
-              teamId: ctx.teamId,
-              workspaceId: ctx.workspaceId,
-              assistantId: ctx.assistantId,
-              triggerId: trigger.id,
-              routerBatchKey: ctx.batchKey,
-              action: "ignore",
-              reason: args.reason,
-            });
-          }
-          await markTriggersDecidedRows(tx, {
-            ids: triggers.map((t) => t.id),
-            assistantId: ctx.assistantId,
-            routedTicketId: null,
+        try {
+          await db.transaction(async (tx) => {
+            for (const trigger of triggers) {
+              await insertDecisionRow(tx, {
+                id: deterministicId(
+                  "assistant-decision",
+                  trigger.id,
+                  ctx.batchKey,
+                ),
+                teamId: ctx.teamId,
+                workspaceId: ctx.workspaceId,
+                assistantId: ctx.assistantId,
+                triggerId: trigger.id,
+                routerBatchKey: ctx.batchKey,
+                action: "ignore",
+                reason: args.reason,
+              });
+            }
+            await markDecidedOrMismatch(tx, ctx, triggers, null);
           });
-        });
+        } catch (error) {
+          if (error instanceof DecisionCountMismatchError) {
+            return toolError(
+              "TRIGGER_ALREADY_DECIDED",
+              "One or more triggers were already decided under this batch; nothing was written.",
+            );
+          }
+          throw error;
+        }
         return { ignored: triggers.length };
       }),
     {
@@ -467,6 +534,8 @@ async function recallById(
   const [tickets, triggers, feedItems] = await Promise.all([
     findTicketRowsByIdPrefix({
       assistantId: ctx.assistantId,
+      teamId: ctx.teamId,
+      workspaceId: ctx.workspaceId,
       prefix: idPrefix,
       limit: RECALL_CANDIDATE_LIMIT,
     }),
@@ -501,6 +570,8 @@ async function recallById(
     const ticket = tickets[0]!;
     const routedTriggers = await findTriggerRowsRoutedToTicket({
       assistantId: ctx.assistantId,
+      teamId: ctx.teamId,
+      workspaceId: ctx.workspaceId,
       ticketId: ticket.id,
       limit: RECALL_CANDIDATE_LIMIT,
     });

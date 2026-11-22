@@ -101,15 +101,24 @@ export function routerBatchKey(triggerIds: readonly string[]): string {
  * the ids that were actually claimed — fewer than `batch.triggerIds` means
  * a concurrent cycle got to some of them first, which the caller (Task 7)
  * decides how to handle (most simply: proceed with whatever was claimed).
+ *
+ * `tenant` is the assistant's own team/workspace (every query carries both,
+ * per the global tenant-isolation constraint) — not part of the brief's
+ * `claimBatch(assistantId, batch, batchKey)` signature verbatim, added here
+ * because `assistantId` alone is not enough to satisfy that constraint at
+ * the query layer.
  */
 export async function claimBatch(
   assistantId: string,
   batch: RouterBatch,
   batchKey: string,
+  tenant: { teamId: string; workspaceId: string },
   executor: Executor = db,
 ): Promise<{ claimedTriggerIds: string[] }> {
   const claimed = await claimTriggerRows(executor, {
     assistantId,
+    teamId: tenant.teamId,
+    workspaceId: tenant.workspaceId,
     triggerIds: batch.triggerIds,
     batchKey,
   });

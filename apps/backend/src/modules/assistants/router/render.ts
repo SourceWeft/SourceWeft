@@ -76,9 +76,13 @@ function renderTriggerLine(trigger: RenderTrigger): string {
 
 function renderRelatedTicketLine(ticket: RenderRelatedTicket): string {
   const summary = ticket.lastReportSummary
-    ? oneLine(truncate(ticket.lastReportSummary, SUMMARY_LINE_MAX))
+    ? escapeTagText(oneLine(truncate(ticket.lastReportSummary, SUMMARY_LINE_MAX)))
     : "";
-  return `${ticket.id} | ${ticket.title} | ${ticket.stage} | ${summary}`;
+  // `id` and `stage` are system-controlled (a uuid, an enum value); `title`
+  // and the report summary are free text a member or a worker wrote, so —
+  // like a trigger's own body — they are escaped before going anywhere
+  // near the `<assistant-trigger>` framing above them.
+  return `${ticket.id} | ${escapeTagText(ticket.title)} | ${ticket.stage} | ${summary}`;
 }
 
 /**
@@ -98,7 +102,7 @@ export function renderBatch(input: RenderBatchInput): string {
     lines.push("", "Recent feed / 最近动态:");
     for (const item of input.feedItems) {
       lines.push(
-        `- [${item.kind}] ${oneLine(truncate(item.text, SUMMARY_LINE_MAX))}`,
+        `- [${item.kind}] ${escapeTagText(oneLine(truncate(item.text, SUMMARY_LINE_MAX)))}`,
       );
     }
   }
@@ -141,6 +145,8 @@ export async function fetchRouterBatchContext(input: {
     }),
     listRelatedTicketCandidateRows({
       assistantId: input.assistantId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
       payerUserId: input.payerUserId,
       limit: ASSISTANT_LIMITS.relatedTicketsMax,
     }),
