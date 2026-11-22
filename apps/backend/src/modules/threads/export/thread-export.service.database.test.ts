@@ -16,6 +16,12 @@ vi.mock("../../sources/storage", async (importOriginal) => {
       }
       throw new Error("storage unavailable");
     }),
+    downloadArtifactObject: vi.fn(async (input: { key: string }) => {
+      if (input.key.startsWith("art-ok")) {
+        return Buffer.from("GEN");
+      }
+      throw new Error("storage unavailable");
+    }),
   };
 });
 
@@ -236,6 +242,120 @@ test("a chat with an image exports a zip with the image file", async () => {
     strFromU8(files["Charts.md"]!),
     /!\[my chart\.png\]\(images\/01-my-chart\.png\)/,
   );
+});
+
+test("image file names keep only link-safe characters so the link opens", async () => {
+  const thread = await chat("Odd names");
+  await message(thread.id, {
+    content: "See",
+    images: [{ name: "report#2 (final).png", key: "ok-odd" }],
+  });
+
+  const result = await run(thread.id);
+  if (result.kind !== "zip") return assert.fail("expected a zip");
+  const files = await unzip(result.stream);
+  assert.deepEqual(Object.keys(files).sort(), [
+    "Odd names.md",
+    "images/01-report-2-final.png",
+  ]);
+  assert.match(
+    strFromU8(files["Odd names.md"]!),
+    /!\[report#2 \(final\)\.png\]\(images\/01-report-2-final\.png\)/,
+  );
+});
+
+async function artifact(input: {
+  workspace?: string;
+  type: "image" | "report";
+  title: string;
+  status?: "ready" | "pending";
+  visibility?: "workspace" | "private";
+  createdBy?: string;
+  storageKey?: string;
+}) {
+  const id = randomUUID();
+  await schema.db.insert(schema.artifacts).values({
+    id,
+    teamId,
+    workspaceId: input.workspace ?? workspaceId,
+    artifactType: input.type,
+    status: input.status ?? "ready",
+    title: input.title,
+    visibility: input.visibility ?? "workspace",
+    createdBy: input.createdBy ?? owner,
+    storageKey: input.storageKey ?? null,
+  });
+  return id;
+}
+
+test("a reply's artifacts export as images and links, only those the member can see", async () => {
+  const otherWorkspace = randomUUID();
+  await schema.db.insert(schema.workspaces).values({
+    id: otherWorkspace,
+    organizationId: teamId,
+    name: "Elsewhere",
+    slug: otherWorkspace,
+  });
+  try {
+    const image = await artifact({
+      type: "image",
+      title: "A sleeping cat",
+      storageKey: "art-ok-cat.png",
+    });
+    const report = await artifact({ type: "report", title: "Q3 summary" });
+    const hidden = await artifact({
+      type: "report",
+      title: "Secret plan",
+      visibility: "private",
+      createdBy: member,
+    });
+    const unfinished = await artifact({
+      type: "report",
+      title: "Draft in progress",
+      status: "pending",
+    });
+    const elsewhere = await artifact({
+      workspace: otherWorkspace,
+      type: "report",
+      title: "Other workspace report",
+    });
+
+    const thread = await chat("Artifacts");
+    await message(thread.id, { content: "Make things" });
+    await message(thread.id, {
+      role: "assistant",
+      content: "Done.",
+      metadata: {
+        renderBlocks: [image, report, hidden, unfinished, elsewhere].map(
+          (artifactId) => ({ type: "artifact_output", artifactId }),
+        ),
+      },
+    });
+
+    const result = await run(thread.id);
+    if (result.kind !== "zip") return assert.fail(`expected a zip: ${result.text}`);
+    const files = await unzip(result.stream);
+    assert.deepEqual(Object.keys(files).sort(), [
+      "Artifacts.md",
+      "images/01-A-sleeping-cat.png",
+    ]);
+    assert.equal(strFromU8(files["images/01-A-sleeping-cat.png"]!), "GEN");
+
+    const markdown = strFromU8(files["Artifacts.md"]!);
+    assert.match(
+      markdown,
+      /!\[A sleeping cat\]\(images\/01-A-sleeping-cat\.png\)/,
+    );
+    assert.match(
+      markdown,
+      new RegExp(`\\[Report: Q3 summary\\]\\(http[^)]*artifactId=${report}`),
+    );
+    assert.doesNotMatch(markdown, /Secret plan|Draft in progress|Other workspace/);
+  } finally {
+    await schema.db
+      .delete(schema.workspaces)
+      .where(eq(schema.workspaces.id, otherWorkspace));
+  }
 });
 
 test("an image that fails to load becomes a placeholder", async () => {

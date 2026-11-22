@@ -91,13 +91,16 @@ test("missing authors fall back to localized labels", () => {
   assert.match(markdown, /^## 助手 · 2026-11-20 10:31$/m);
 });
 
-test("a title that starts with markup is escaped and kept on one line", () => {
-  const markdown = renderChatMarkdown({
-    ...base,
-    title: "# Plan\nnext",
-    messages: [],
-  });
-  assert.equal(markdown.split("\n")[0], "# \\# Plan next");
+test("the title heading shows the title as written, on one line", () => {
+  const heading = (title: string) =>
+    renderChatMarkdown({ ...base, title, messages: [] }).split("\n")[0];
+  // Inside a heading a leading `#`, `>` or `1.` starts nothing, so no
+  // backslash is needed (a stray `\1` would show up in the heading).
+  assert.equal(heading("1. Intro"), "# 1. Intro");
+  assert.equal(heading("# Plan\nnext"), "# # Plan next");
+  assert.equal(heading("> Notes"), "# > Notes");
+  // A trailing ` #` would be read as the heading's closing sequence.
+  assert.equal(heading("Plan #"), "# Plan \\#");
 });
 
 test("an unavailable attachment becomes a placeholder", () => {

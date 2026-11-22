@@ -55,7 +55,13 @@ function imageFileName(name: string, mimeType: string, n: number) {
   const extension =
     IMAGE_EXTENSIONS[mimeType.toLowerCase()] ||
     (/^[a-z0-9]{1,5}$/.test(fromName) ? fromName : "bin");
-  const safeStem = exportFileBaseName(stem).replace(/\s+/g, "-");
+  // Only characters that need no escaping in a Markdown link destination:
+  // `#`, parentheses or spaces would cut the link short in most viewers.
+  const safeStem =
+    exportFileBaseName(stem)
+      .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "") || "image";
   return `images/${String(n).padStart(2, "0")}-${safeStem}.${extension}`;
 }
 

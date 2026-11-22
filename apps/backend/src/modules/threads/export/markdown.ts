@@ -32,9 +32,12 @@ function escapeLinkText(value: string) {
   return oneLine(value).replace(/([[\]\\])/g, "\\$1");
 }
 
+/**
+ * The title as an ATX heading's text. Nothing at its start begins a block
+ * there; only a trailing ` #…` would be read as the closing sequence.
+ */
 function escapeTitle(value: string) {
-  const line = oneLine(value);
-  return /^(#|>|[-+*]\s|\d+[.)]\s)/.test(line) ? `\\${line}` : line;
+  return oneLine(value).replace(/(\s)(#+)$/, "$1\\$2");
 }
 
 function formatTime(date: Date, timeZone: string) {
