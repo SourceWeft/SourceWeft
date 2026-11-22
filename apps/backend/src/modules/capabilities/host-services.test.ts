@@ -95,6 +95,32 @@ test("connector adapters are collected from capabilities that declare connectors
   );
 });
 
+test("a connector factory receives a public fetch that opens independent scopes", async () => {
+  let received: unknown;
+  await collectCapabilityConnectorContributions({
+    recordsProvider: async () => [connectorRecord()],
+    loadModule: async () => ({
+      createConnectorAdapters: (input: { publicFetch?: unknown }) => {
+        received = input.publicFetch;
+        return { adapters: [], agentToolDefs: [] };
+      },
+    }),
+  });
+
+  assert.equal(typeof received, "function");
+  const open = received as () => {
+    fetch: unknown;
+    close: () => Promise<void>;
+  };
+  const first = open();
+  const second = open();
+  assert.equal(typeof first.fetch, "function");
+  assert.equal(typeof first.close, "function");
+  assert.notEqual(first, second);
+  await first.close();
+  await second.close();
+});
+
 test("a connector factory receives the host logger and its errors propagate", async () => {
   let receivedLogger: unknown;
   await collectCapabilityConnectorContributions({
