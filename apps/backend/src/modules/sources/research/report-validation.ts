@@ -6,7 +6,7 @@ const MARKER = /\[\[([^\]|]+)\|([^\]]*?)\]\]/g;
 
 /** Lowercases, unifies full-width spaces and collapses whitespace; words are untouched. */
 export function normalizeForQuote(text: string): string {
-  return text.replace(/　/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  return text.replace(/\u3000/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 export type VerifyReportResult =
