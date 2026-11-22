@@ -12,7 +12,7 @@ const MAX_QUOTE_CHARS = 200;
 
 /** Same marker grammar the chat renders (web `message-response.tsx`). */
 const CITATION_PATTERN =
-  /[[【]​?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*​?[\]】]/g;
+  /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
 
 /** Fenced blocks (closed or running to the end) and inline code spans. */
 const CODE_PATTERN = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g;

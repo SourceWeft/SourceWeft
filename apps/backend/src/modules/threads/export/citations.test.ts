@@ -36,7 +36,7 @@ test("markers become footnotes numbered across calls", () => {
 test("full-width brackets, comma lists and zero-width spaces are accepted", () => {
   const footnotes = createFootnotes();
   assert.equal(
-    footnotes.replace("x【​citation: c1 , c2​】", records).text,
+    footnotes.replace("x【\u200Bcitation: c1 , c2\u200B】", records).text,
     "x[^1][^2]",
   );
 });
