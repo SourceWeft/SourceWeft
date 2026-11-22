@@ -42,7 +42,10 @@ import {
   updateSourceRecord,
   updateSourceStatusForLatestRevision,
 } from "./repository";
-import type { SourceIndexingService } from "./indexing-service";
+import {
+  admitIngestionPages,
+  type SourceIndexingService,
+} from "./indexing-service";
 import { requireContentSource } from "./guards";
 import { normalizeContentTitle } from "../../shared/strings";
 import { DEFAULT_PARSER_VERSION, defaultParsingConfig } from "./parsing-config";
@@ -54,6 +57,9 @@ import {
 import { computeContentHash } from "./content-hash";
 import { createBilledVideoModelPort } from "./youtube/model-port";
 import { createYouTubeSourceParser } from "./youtube/providers";
+
+/** The transcript's page count is unknown until it exists; at least one is required. */
+const YOUTUBE_MIN_ADMITTED_PAGES = 1;
 
 /**
  * Source types whose content comes from their `externalUri` rather than a
@@ -539,6 +545,16 @@ export class SourceParsingService {
     if (!processingSource) {
       return;
     }
+
+    // The transcription is paid for before indexing checks pages: refuse
+    // now, with the same code, if the payer has no ingestion page left, so a
+    // source that could never be indexed is never transcribed.
+    await admitIngestionPages(
+      this.billing,
+      job.teamId,
+      job.userId,
+      YOUTUBE_MIN_ADMITTED_PAGES,
+    );
 
     const idempotencyKey =
       job.idempotencyKey?.trim() ||

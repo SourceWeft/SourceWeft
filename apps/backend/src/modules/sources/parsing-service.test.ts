@@ -20,6 +20,7 @@ const fixtures = vi.hoisted(() => ({
   createVideoPort: vi.fn(),
   createYouTubeParser: vi.fn(),
   youtubeParse: vi.fn(),
+  getExecutionState: vi.fn(),
   rejectRevisionWrite: false,
 }));
 vi.mock("./repository", () => ({
@@ -110,11 +111,14 @@ beforeEach(() => {
   fixtures.createYouTubeParser
     .mockReset()
     .mockReturnValue({ parse: fixtures.youtubeParse });
+  fixtures.getExecutionState
+    .mockReset()
+    .mockResolvedValue({ kind: "unmetered", reason: "billing_not_installed" });
 });
 function service() {
   return new SourceParsingService(
     { indexSourceRevision: fixtures.index } as never,
-    {} as never,
+    { getExecutionState: fixtures.getExecutionState } as never,
   );
 }
 const job = {
@@ -386,7 +390,10 @@ function youtubeSource() {
 test("youtube branch passes billing and completes with transcript content", async () => {
   youtubeSource();
   fixtures.parsed.content = "# Talk\n\n[0:00](link) hello";
-  const billing = { name: "billing-port" };
+  const billing = {
+    name: "billing-port",
+    getExecutionState: fixtures.getExecutionState,
+  };
   await new SourceParsingService(
     { indexSourceRevision: fixtures.index } as never,
     billing as never,
@@ -439,6 +446,42 @@ test("a failed youtube transcription fails the source with its code", async () =
   fixtures.youtubeParse.mockRejectedValue(failure);
   await assert.rejects(service().processSourceParseJob(job), /private video/);
   assert.equal(fixtures.index.mock.calls.length, 0);
+});
+
+test("a youtube parse with no ingestion pages left fails before any model call", async () => {
+  youtubeSource();
+  fixtures.getExecutionState.mockResolvedValue({
+    kind: "metered",
+    mode: "enforced",
+    availableCredits: 100,
+    consumedThisCycle: 0,
+    ingestionPages: { enforced: true, available: 0, cycleCapacity: 10 },
+  });
+
+  await assert.rejects(service().processSourceParseJob(job), (error: unknown) => {
+    assert.equal((error as { code?: unknown }).code, "PAGES_LIMIT_EXCEEDED");
+    assert.equal((error as { statusCode?: unknown }).statusCode, 402);
+    return true;
+  });
+  assert.deepEqual(fixtures.getExecutionState.mock.calls[0], ["team", "user"]);
+  assert.equal(fixtures.createVideoPort.mock.calls.length, 0);
+  assert.equal(fixtures.youtubeParse.mock.calls.length, 0);
+  assert.equal(fixtures.index.mock.calls.length, 0);
+});
+
+test("a youtube parse with one ingestion page left goes ahead", async () => {
+  youtubeSource();
+  fixtures.getExecutionState.mockResolvedValue({
+    kind: "metered",
+    mode: "enforced",
+    availableCredits: 100,
+    consumedThisCycle: 0,
+    ingestionPages: { enforced: true, available: 1, cycleCapacity: 10 },
+  });
+
+  await service().processSourceParseJob(job);
+  assert.equal(fixtures.createVideoPort.mock.calls.length, 1);
+  assert.equal(fixtures.youtubeParse.mock.calls.length, 1);
 });
 
 test("a youtube source can be reparsed without stored bytes", async () => {

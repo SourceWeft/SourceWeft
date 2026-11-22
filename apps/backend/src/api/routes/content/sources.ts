@@ -38,7 +38,19 @@ import {
   requireSession,
 } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
+import { ContentError } from "../../../modules/content/errors";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
+
+/** Seconds until a 429 rate-limit refusal clears, or null for any other error. */
+function rateLimitRetryAfterSeconds(error: unknown): number | null {
+  if (!(error instanceof ContentError) || error.statusCode !== 429) {
+    return null;
+  }
+  const details = error.details as { retryAfterSeconds?: unknown } | undefined;
+  return typeof details?.retryAfterSeconds === "number"
+    ? details.retryAfterSeconds
+    : null;
+}
 
 function parseOptionalBooleanQuery(value: string | undefined) {
   if (value === undefined) {
@@ -381,12 +393,22 @@ export function registerSourceRoutes(app: Hono) {
       userId: getSessionUserId(session),
     });
 
-    const result = await listYouTubeCollection({
-      teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      userId: getSessionUserId(session),
-      url: parsed.data.url,
-    });
+    let result;
+    try {
+      result = await listYouTubeCollection({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: getSessionUserId(session),
+        url: parsed.data.url,
+      });
+    } catch (error) {
+      // Same as /source-discovery: a refusal says when to come back.
+      const retryAfterSeconds = rateLimitRetryAfterSeconds(error);
+      if (retryAfterSeconds !== null) {
+        c.header("Retry-After", String(retryAfterSeconds));
+      }
+      throw error;
+    }
 
     return ApiResponse.success(c, result);
   });

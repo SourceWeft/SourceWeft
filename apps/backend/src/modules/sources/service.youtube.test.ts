@@ -163,6 +163,35 @@ test("forceRefresh on an existing video queues a new parse of the same source", 
   );
 });
 
+for (const [label, url] of [
+  ["youtube", CANONICAL],
+  ["web", "https://example.com/article"],
+] as const) {
+  test(`a forceRefresh re-paste without a title keeps a user-set title (${label})`, async () => {
+    const first = await create(url, { title: "My own title" });
+    assert.equal(first.source.metadata.userTitleProvided, true);
+
+    const refreshed = await create(url, { forceRefresh: true });
+
+    assert.equal(refreshed.source.id, first.source.id);
+    // The next parse reads this flag to keep the title instead of the
+    // video's/page's own.
+    assert.equal(refreshed.source.metadata.userTitleProvided, true);
+  });
+
+  test(`a forceRefresh re-paste with a new title marks it as provided (${label})`, async () => {
+    const first = await create(url);
+    assert.equal(first.source.metadata.userTitleProvided, false);
+
+    const refreshed = await create(url, {
+      forceRefresh: true,
+      title: "Renamed",
+    });
+
+    assert.equal(refreshed.source.metadata.userTitleProvided, true);
+  });
+}
+
 for (const [url, kind] of [
   ["https://www.youtube.com/playlist?list=PLxyz12345", "playlist"],
   ["https://www.youtube.com/@GoogleDevelopers", "channel"],

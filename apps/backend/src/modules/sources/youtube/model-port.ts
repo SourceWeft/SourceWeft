@@ -18,6 +18,17 @@ const AUDIT_FEATURE = "ingestion";
 const BILLING_FEATURE = "ingestion.youtube";
 const OPERATION = "source.youtube_transcribe";
 
+/**
+ * One transcription can run for many minutes on a long video, far past the
+ * gateway's default per-attempt timeout. The call is bounded on its own.
+ */
+export const YOUTUBE_TRANSCRIPT_TIMEOUT_MS = 900_000;
+/**
+ * No SDK retries: a retry re-sends the whole video, doubling the wait and
+ * the provider cost of a call that already ran to its timeout.
+ */
+export const YOUTUBE_TRANSCRIPT_MAX_RETRIES = 0;
+
 async function resolveYouTubeTranscriptProfile() {
   const profile = await resolveModelGatewayProfile({
     kind: "vision",
@@ -71,7 +82,9 @@ function isBillingRefusal(error: unknown) {
   return error instanceof BillingAdmissionError || isBillingError(error);
 }
 
-const VIDEO_SUBJECT_RE = /\b(video|youtube|url|media|file)\b/i;
+// The error must be about the video itself: "url … not found" or "file not
+// found" from a gateway or route is not a video that is unavailable.
+const VIDEO_SUBJECT_RE = /\b(video|youtube)\b/i;
 const UNAVAILABLE_RE =
   /\b(private|unavailable|not available|not found|removed|deleted|does not exist|no longer exists|inaccessible|cannot be accessed)\b/i;
 
@@ -230,6 +243,8 @@ export async function createBilledVideoModelPort(input: {
                 modelAlias: profile.modelAlias,
                 referenceId: `source:${sourceId}:youtube-transcript`,
                 idempotencyKey: `${idempotencyKey}:youtube-transcript`,
+                timeoutMs: YOUTUBE_TRANSCRIPT_TIMEOUT_MS,
+                maxRetries: YOUTUBE_TRANSCRIPT_MAX_RETRIES,
               },
             ),
         );

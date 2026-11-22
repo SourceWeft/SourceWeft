@@ -145,6 +145,18 @@ export function assertWebSourceUrlSupported(externalUri: string) {
   }
 }
 
+/**
+ * A re-paste that names no title keeps whatever the source already had: a
+ * title the user set earlier must survive the refresh's parse.
+ */
+function resolveUserTitleProvided(
+  title: string | undefined,
+  existing: SourceRecord | null | undefined,
+) {
+  if (title?.trim()) return true;
+  return existing?.metadata?.userTitleProvided === true;
+}
+
 function youTubeUrlUnsupportedError() {
   return new ContentError(
     422,
@@ -1055,7 +1067,7 @@ export class ContentSourceService {
       requestedUrl: externalUri,
       sourceUrl: externalUri,
       forceRefresh: input.forceRefresh === true,
-      userTitleProvided: Boolean(input.title?.trim()),
+      userTitleProvided: resolveUserTitleProvided(input.title, existing),
       progress: 0,
       currentStep: "created",
     };
@@ -1172,7 +1184,7 @@ export class ContentSourceService {
       catalogProvider: DEFAULT_YOUTUBE_CATALOG_PROVIDER_ID,
       transcriptProvider: DEFAULT_YOUTUBE_TRANSCRIPT_PROVIDER_ID,
       forceRefresh: input.forceRefresh === true,
-      userTitleProvided: Boolean(userTitle),
+      userTitleProvided: resolveUserTitleProvided(userTitle, existing),
       progress: 5,
       currentStep: "queued",
       queuedAt: now.toISOString(),

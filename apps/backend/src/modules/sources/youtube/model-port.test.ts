@@ -110,6 +110,15 @@ test("bills ingestion.youtube with the youtube-transcript idempotency key", asyn
   assert.equal(requestOptions.modelAlias, "gemini-flash");
 });
 
+test("gives the transcription call a 15-minute timeout and no SDK retries", async () => {
+  const port = await createBilledVideoModelPort(portInput);
+  await port.complete(call);
+
+  const [, requestOptions] = mocks.complete.mock.calls[0]!;
+  assert.equal(requestOptions.timeoutMs, 900_000);
+  assert.equal(requestOptions.maxRetries, 0);
+});
+
 test("sends a video_url part with thinking off and the output token budget", async () => {
   const port = await createBilledVideoModelPort(portInput);
   const result = await port.complete(call);
@@ -209,6 +218,40 @@ test("a provider 4xx saying the video is private is YOUTUBE_VIDEO_UNAVAILABLE", 
   const failure = mocks.audit.mock.calls[0]![0];
   assert.equal(failure.success, false);
   assert.equal(failure.errorCode, "MODEL_REQUEST_INVALID");
+});
+
+for (const message of [
+  "Requested URL not found",
+  "File not found on upstream",
+  "Media resource is unavailable",
+]) {
+  test(`a 4xx that names no video is YOUTUBE_TRANSCRIPT_FAILED (${message})`, async () => {
+    mocks.complete.mockRejectedValue(
+      new ModelGatewayError({
+        code: "BAD_REQUEST",
+        message,
+        statusCode: 404,
+      }),
+    );
+    const port = await createBilledVideoModelPort(portInput);
+    await assert.rejects(port.complete(call), {
+      code: "YOUTUBE_TRANSCRIPT_FAILED",
+    });
+  });
+}
+
+test("a 4xx saying the YouTube video was not found is YOUTUBE_VIDEO_UNAVAILABLE", async () => {
+  mocks.complete.mockRejectedValue(
+    new ModelGatewayError({
+      code: "BAD_REQUEST",
+      message: "YouTube video not found",
+      statusCode: 404,
+    }),
+  );
+  const port = await createBilledVideoModelPort(portInput);
+  await assert.rejects(port.complete(call), {
+    code: "YOUTUBE_VIDEO_UNAVAILABLE",
+  });
 });
 
 test("any other provider failure is YOUTUBE_TRANSCRIPT_FAILED", async () => {
