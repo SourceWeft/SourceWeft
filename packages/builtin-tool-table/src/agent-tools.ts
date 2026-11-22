@@ -47,8 +47,22 @@ type GenerateTableArgs = z.infer<typeof generateTableSchema>;
 const NO_SOURCES_MESSAGE =
   "No sources are selected for this conversation. Ask the user to select or @mention the sources to compare (in the Hub or the message), then run /table again.";
 
+function tooManySourcesMessage(counts: { sources: number; maxSources: number }) {
+  return `This conversation has ${counts.sources} sources, more than the ${counts.maxSources} one table can compare. Ask the user to narrow the selection (or @mention the sources to compare) to ${counts.maxSources} or fewer, then run /table again.`;
+}
+
 const NEXT_STEP =
   "The table is being generated in the background, one source at a time. Tell the user it will appear in the Hub's Artifacts tab when it is ready. Do not state, guess or summarize any cell values: none exist yet.";
+
+const READY_STEP =
+  "The same table was requested a moment ago and is already ready. Tell the user it is in the Hub's Artifacts tab. Do not state, guess or summarize any cell values yourself.";
+
+function nextStep(receipt: { reused: boolean; status: string }) {
+  if (receipt.reused && receipt.status === "ready") return READY_STEP;
+  return receipt.reused
+    ? `The same table was requested a moment ago and is reused. ${NEXT_STEP}`
+    : NEXT_STEP;
+}
 
 export function createCapabilityAgentTools(input: GroundedArtifactToolFactoryInput) {
   const binding = bindGroundedArtifactTool(input, GENERATE_TABLE_TOOL_NAME);
@@ -73,6 +87,8 @@ export function createCapabilityAgentTools(input: GroundedArtifactToolFactoryInp
           }),
         uiLocale: args.userLanguage,
         noSourcesMessage: NO_SOURCES_MESSAGE,
+        maxSources: TABLE_LIMITS.maxSources,
+        tooManySourcesMessage,
       });
       if (!outcome.ok) return outcome;
       const { request, receipt } = outcome;
@@ -85,9 +101,7 @@ export function createCapabilityAgentTools(input: GroundedArtifactToolFactoryInp
         reused: receipt.reused,
         sources: request.sourceIds.length,
         columns: request.columns.length,
-        nextStep: receipt.reused
-          ? `The same table was requested a moment ago and is reused. ${NEXT_STEP}`
-          : NEXT_STEP,
+        nextStep: nextStep(receipt),
       };
     },
     {

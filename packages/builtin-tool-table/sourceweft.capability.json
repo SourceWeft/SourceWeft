@@ -44,7 +44,8 @@
             "When the request leaves the columns open, use search_sources to see what the sources cover before proposing them.",
             "If the request does not make clear what to compare, ask one short question and suggest a set of columns instead of calling generate_table.",
             "If generate_table reports that there are no sources, ask the user to select or @mention the sources to compare.",
-            "After generate_table returns, tell the user the table is being generated and will appear in the Hub's Artifacts tab when ready. Do not state or guess any cell values."
+            "If generate_table reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to compare.",
+            "After generate_table returns, follow its nextStep: the table is being generated and will appear in the Hub's Artifacts tab, or it is already there. Do not state or guess any cell values."
           ]
         }
       }

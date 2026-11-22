@@ -85,6 +85,15 @@ export type GroundedToolRequest<T> = Omit<T, "threadId" | "visibility">;
 export type GroundedArtifactToolOutcome<T> =
   | { readonly ok: false; readonly code: "NO_SOURCES"; readonly message: string }
   | {
+      readonly ok: false;
+      readonly code: "TOO_MANY_SOURCES";
+      readonly message: string;
+      /** How many sources the turn has. */
+      readonly sources: number;
+      /** The most one request may take. */
+      readonly maxSources: number;
+    }
+  | {
       readonly ok: true;
       readonly request: GroundedToolRequest<T>;
       readonly receipt: AgentToolGroundedArtifactReceipt;
@@ -92,10 +101,14 @@ export type GroundedArtifactToolOutcome<T> =
 
 /**
  * Takes the turn's sources from the host, validates the capability's request
- * against its own contract with the turn's thread, and queues it. With no
- * sources it requests nothing and says so, so the agent can ask the user to
- * pick some instead of failing silently. An invalid request throws, so the
- * model sees why and can correct its arguments.
+ * against its own contract with the turn's thread, and queues it.
+ *
+ * The tools take no source argument, so a problem with the turn's sources is
+ * one the model cannot fix by changing its arguments: with none, or with more
+ * than the contract allows, it requests nothing and returns a result naming
+ * the problem, so the agent asks the user to pick or narrow the sources. Any
+ * other invalid request throws, so the model sees why and can correct its
+ * arguments.
  */
 export async function requestGroundedArtifactFromTurn<
   T extends { readonly threadId: string },
@@ -112,11 +125,27 @@ export async function requestGroundedArtifactFromTurn<
   /** BCP 47; the language a mixed or untagged corpus falls back to. */
   readonly uiLocale: string;
   readonly noSourcesMessage: string;
+  /** The contract's source limit for one request. */
+  readonly maxSources: number;
+  /** What the agent is told when the turn has more sources than that. */
+  readonly tooManySourcesMessage: (input: {
+    readonly sources: number;
+    readonly maxSources: number;
+  }) => string;
 }): Promise<GroundedArtifactToolOutcome<T>> {
   const { grounded, threadId } = input.binding;
   const sourceIds = await grounded.listTurnSourceIds();
   if (sourceIds.length === 0) {
     return { ok: false, code: "NO_SOURCES", message: input.noSourcesMessage };
+  }
+  if (sourceIds.length > input.maxSources) {
+    const counts = { sources: sourceIds.length, maxSources: input.maxSources };
+    return {
+      ok: false,
+      code: "TOO_MANY_SOURCES",
+      message: input.tooManySourcesMessage(counts),
+      ...counts,
+    };
   }
   const parsed = input.parse({ threadId, sourceIds: [...sourceIds] });
   if (!parsed.success) {

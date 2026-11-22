@@ -16,7 +16,7 @@ type Call = Parameters<AgentToolGroundedArtifactServices["requestGeneration"]>[0
 
 function groundedArtifacts(
   sourceIds: readonly string[] = ["s1", "s2"],
-  receipt: { reused: boolean } = { reused: false },
+  receipt: { reused: boolean; status?: "pending" | "running" | "ready" } = { reused: false },
 ) {
   const calls: Call[] = [];
   let listed = 0;
@@ -27,7 +27,12 @@ function groundedArtifacts(
     },
     requestGeneration: async (input) => {
       calls.push(input);
-      return { artifactId: "artifact-1", versionNo: 1, status: "pending", reused: receipt.reused };
+      return {
+        artifactId: "artifact-1",
+        versionNo: 1,
+        status: receipt.status ?? "pending",
+        reused: receipt.reused,
+      };
     },
   };
   return { service, calls, listed: () => listed };
@@ -136,6 +141,8 @@ test("the manifest declares the three tools as write-risk commands with workflow
     assert.deepEqual(entry.command.workflow.successCriteria, { kind: "none" });
     const prompt = entry.command.workflow.additionalPromptLines.join("\n");
     assert.match(prompt, /no sources/);
+    assert.match(prompt, /too many sources/);
+    assert.match(prompt, /narrow the selection/);
     assert.match(prompt, /select or @mention/);
     assert.match(prompt, /Artifacts tab/);
   }
@@ -207,6 +214,19 @@ test("a repeated request reports the reused artifact", async () => {
   assert.match(String(result.nextStep), /requested a moment ago and are reused/);
 });
 
+test("a repeat of a request that is already ready says so instead of promising it", async () => {
+  for (const [kind, name] of Object.entries(STUDY_TOOL_NAMES)) {
+    const grounded = groundedArtifacts(["s1"], { reused: true, status: "ready" });
+    const tool = toolNamed(grounded.service, name);
+    const result = (await tool.invoke({ userLanguage: "en" })) as Record<string, unknown>;
+    assert.equal(result.status, "ready", kind);
+    assert.equal(result.reused, true);
+    assert.match(String(result.nextStep), /already ready/);
+    assert.match(String(result.nextStep), /Artifacts tab/);
+    assert.doesNotMatch(String(result.nextStep), /when it is ready|being generated/);
+  }
+});
+
 test("a study tool never writes items: the receipt carries none, and the tool reaches no engine or model", async () => {
   const grounded = groundedArtifacts();
   const tool = toolNamed(grounded.service, "generate_flashcards");
@@ -267,9 +287,30 @@ test("a count above the type's ceiling, a long focus or no user language are rej
   await rejected("generate_quiz", { size: "huge", userLanguage: "en" });
 });
 
-test("more sources than the study contract allows are rejected before anything is requested", async () => {
+test("more sources than the study contract allows: the tool says so with the limit and requests nothing", async () => {
   const sourceIds = Array.from({ length: STUDY_LIMITS.maxSources + 1 }, (_, index) => `s${index}`);
-  await rejected("generate_flashcards", { userLanguage: "en" }, sourceIds);
+  for (const [kind, name] of Object.entries(STUDY_TOOL_NAMES)) {
+    const grounded = groundedArtifacts(sourceIds);
+    const tool = toolNamed(grounded.service, name);
+    const result = (await tool.invoke({ userLanguage: "en" })) as Record<string, unknown>;
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "TOO_MANY_SOURCES");
+    assert.equal(result.sources, STUDY_LIMITS.maxSources + 1);
+    assert.equal(result.maxSources, STUDY_LIMITS.maxSources);
+    assert.match(String(result.message), new RegExp(`${STUDY_LIMITS.maxSources} or fewer`));
+    assert.match(String(result.message), /narrow the selection/);
+    assert.match(String(result.message), new RegExp(`/${kind}`));
+    assert.deepEqual(grounded.calls, []);
+  }
+});
+
+test("exactly the study source limit is still requested", async () => {
+  const sourceIds = Array.from({ length: STUDY_LIMITS.maxSources }, (_, index) => `s${index}`);
+  const grounded = groundedArtifacts(sourceIds);
+  const tool = toolNamed(grounded.service, "generate_quiz");
+  const result = (await tool.invoke({ userLanguage: "en" })) as Record<string, unknown>;
+  assert.equal(result.ok, true);
+  assert.equal(grounded.calls.length, 1);
 });
 
 test("with no sources in the turn the tool asks for them and requests nothing", async () => {

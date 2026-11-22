@@ -281,13 +281,17 @@ export type AgentToolCurrentRunArtifactPublicationServices = {
 
 /**
  * What the host answers when it accepted a grounded generation: the artifact
- * row it opened (or the one an identical recent request opened) and that the
- * work is queued, never done.
+ * row it opened (or the one an identical recent request opened). A new request
+ * is only queued, never done; a reused one may already be done.
  */
 export type AgentToolGroundedArtifactReceipt = {
   readonly artifactId: string;
   readonly versionNo: number;
-  readonly status: "pending";
+  /**
+   * `pending` for a newly opened artifact. A reused one reports where it is:
+   * still `pending` or `running`, or already `ready`.
+   */
+  readonly status: "pending" | "running" | "ready";
   /** True when an identical request within the dedupe window already opened it. */
   readonly reused: boolean;
 };

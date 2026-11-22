@@ -29,7 +29,9 @@ import { checkGroundedSources } from "../grounded-generation/corpus-loader";
 import { loadInputFreshness } from "../grounded-generation/freshness";
 import {
   GROUNDED_REQUEST_DEDUPE_WINDOW_MS,
+  groundedRequestArtifactStatus,
   groundedRequestKey,
+  type GroundedRequestArtifactStatus,
 } from "../grounded-generation/request-key";
 import { requireContentWorkspace } from "../workspace/guards";
 import { loadTableGeneration } from "./capability";
@@ -100,6 +102,12 @@ export type TableRequestResult = {
   artifactId: string;
   versionNo: number;
   status: "pending";
+  /**
+   * Where the artifact stands now. Always `pending` for a new request; a
+   * reused one may already be running or ready. `status` stays the accepted
+   * request's status, as the API has always answered.
+   */
+  artifactStatus: GroundedRequestArtifactStatus;
   visibility: "private" | "workspace";
   reused: boolean;
 };
@@ -201,6 +209,7 @@ export async function requestTableArtifact(input: {
       artifactId: opened.artifactId,
       versionNo: Math.max(1, record?.currentVersionNo ?? 1),
       status: "pending",
+      artifactStatus: groundedRequestArtifactStatus(opened.reused, record?.status),
       visibility: record?.visibility ?? "workspace",
       reused: opened.reused,
     };

@@ -3,11 +3,12 @@ import { test, vi } from "vitest";
 import type { StudyCorpusChunk } from "@sourceweft/contracts/study-capability";
 
 /**
- * The other half of "no double billing" for the chat entry (the turn half is
- * `threads/agent/capability-tools/study-command-binding.test.ts`): the study
- * job started from a chat tool runs the production model port, and every
- * model call it makes is billed to the person who asked, on the queue job's
- * own `worker-job` scope — never on the chat turn's `thread-turn` scope.
+ * `runStudyGeneration`, called directly with the production model port (only
+ * the gateway call itself is stubbed): every model call it makes is billed to
+ * the requester's billing organization as the requester, on the `worker-job`
+ * scope with the scope id it was given (the worker passes the queue job id).
+ * No chat turn is involved here; the chat side is
+ * `threads/agent/capability-tools/study-command-binding.test.ts`.
  */
 
 const gateway = vi.hoisted(() => ({
@@ -33,7 +34,7 @@ const chunks: StudyCorpusChunk[] = Array.from({ length: 4 }, (_, index) => ({
 
 const WORDS = ["amber", "basin", "cedar", "delta", "ember", "fjord", "grove", "harbor"];
 
-test("the job a chat tool queued bills its asker on the job's worker-job scope", async () => {
+test("study generation bills every model call to the requester on the worker-job scope it is given", async () => {
   gateway.complete.mockReset().mockImplementation(async (call: { operation: string; user: string }) => {
     if (call.operation.endsWith(".verify")) return { supported: true };
     const handles = [...call.user.matchAll(/<<<CHUNK (c\d+)/g)].map((m) => m[1]!);

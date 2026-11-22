@@ -25,7 +25,9 @@ import {
 } from "../grounded-generation/access";
 import {
   GROUNDED_REQUEST_DEDUPE_WINDOW_MS,
+  groundedRequestArtifactStatus,
   groundedRequestKey,
+  type GroundedRequestArtifactStatus,
 } from "../grounded-generation/request-key";
 import { checkStudySources, loadStudyCorpus } from "./corpus-loader";
 import { loadStudyGeneration } from "./capability";
@@ -104,6 +106,12 @@ export type StudyRequestResult = {
   artifactId: string;
   versionNo: number;
   status: "pending";
+  /**
+   * Where the artifact stands now. Always `pending` for a new request; a
+   * reused one may already be running or ready. `status` stays the accepted
+   * request's status, as the API has always answered.
+   */
+  artifactStatus: GroundedRequestArtifactStatus;
   visibility: "private" | "workspace";
   reused: boolean;
 };
@@ -187,6 +195,7 @@ export async function requestStudyArtifact(input: {
       artifactId: opened.artifactId,
       versionNo: Math.max(1, record?.currentVersionNo ?? 1),
       status: "pending",
+      artifactStatus: groundedRequestArtifactStatus(opened.reused, record?.status),
       visibility: record?.visibility ?? "workspace",
       reused: opened.reused,
     };

@@ -37,6 +37,7 @@ beforeEach(() => {
     artifactId: "artifact-1",
     versionNo: 1,
     status: "pending",
+    artifactStatus: "pending",
     visibility: "workspace",
     reused: false,
   });
@@ -44,6 +45,7 @@ beforeEach(() => {
     artifactId: "study-1",
     versionNo: 1,
     status: "pending",
+    artifactStatus: "ready",
     visibility: "private",
     reused: true,
   });
@@ -194,11 +196,12 @@ for (const artifactType of ["flashcards", "quiz", "mindmap"] as const) {
         options: { size: "fewer", focus: "chapter 1" },
       },
     });
-    // A repeat within the API's dedupe window is reported, not hidden.
+    // A repeat within the API's dedupe window is reported, not hidden, with
+    // where the reused artifact stands (here already ready).
     assert.deepEqual(receipt, {
       artifactId: "study-1",
       versionNo: 1,
-      status: "pending",
+      status: "ready",
       reused: true,
     });
   });
@@ -227,4 +230,23 @@ test("a request that breaks the study contract is refused before anything is ope
     );
   }
   assert.equal(mocks.requestStudyArtifact.mock.calls.length, 0);
+});
+
+test("a reused table that is still running is reported as running", async () => {
+  mocks.requestTableArtifact.mockResolvedValue({
+    artifactId: "artifact-1",
+    versionNo: 1,
+    status: "pending",
+    artifactStatus: "running",
+    visibility: "workspace",
+    reused: true,
+  });
+  const services = createGroundedArtifactServices({ prepared: prepared() });
+  const receipt = await services.requestGeneration({
+    artifactType: "table",
+    request: { sourceIds: ["s-selected-1"], columns: COLUMNS },
+    uiLocale: "en",
+  });
+  assert.equal(receipt.status, "running");
+  assert.equal(receipt.reused, true);
 });

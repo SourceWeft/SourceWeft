@@ -37,6 +37,8 @@ type StudyToolText = {
   readonly countMeaning: string;
   /** Leads the next step when an identical request a moment ago is reused. */
   readonly reused: string;
+  /** The next step when that reused artifact is already ready. */
+  readonly ready: string;
 };
 
 const TEXT: Record<StudyKind, StudyToolText> = {
@@ -48,6 +50,7 @@ const TEXT: Record<StudyKind, StudyToolText> = {
     what: "a deck of flashcards (front, back, hint) for spaced-repetition review",
     countMeaning: "number of cards",
     reused: "The same flashcards were requested a moment ago and are reused.",
+    ready: "The same flashcards were requested a moment ago and are already ready.",
   },
   quiz: {
     noun: "a quiz",
@@ -57,6 +60,7 @@ const TEXT: Record<StudyKind, StudyToolText> = {
     what: "a quiz (single choice, multiple choice, true/false and short answer) the user can take and get scored on",
     countMeaning: "number of questions",
     reused: "The same quiz was requested a moment ago and is reused.",
+    ready: "The same quiz was requested a moment ago and is already ready.",
   },
   mindmap: {
     noun: "a mind map",
@@ -66,6 +70,7 @@ const TEXT: Record<StudyKind, StudyToolText> = {
     what: "a mind map: a tree of the sources' main topics and their sub-points",
     countMeaning: "number of nodes",
     reused: "The same mind map was requested a moment ago and is reused.",
+    ready: "The same mind map was requested a moment ago and is already ready.",
   },
 };
 
@@ -136,10 +141,21 @@ function noSourcesMessage(kind: StudyKind) {
   return `No sources are selected for this conversation. Ask the user to select or @mention the sources to make ${text.noun} from (in the Hub or the message), then run ${text.command} again.`;
 }
 
-function nextStep(kind: StudyKind, reused: boolean) {
+function tooManySourcesMessage(
+  kind: StudyKind,
+  counts: { sources: number; maxSources: number },
+) {
   const text = TEXT[kind];
+  return `This conversation has ${counts.sources} sources, more than the ${counts.maxSources} that ${text.noun} can be made from. Ask the user to narrow the selection (or @mention the sources to use) to ${counts.maxSources} or fewer, then run ${text.command} again.`;
+}
+
+function nextStep(kind: StudyKind, receipt: { reused: boolean; status: string }) {
+  const text = TEXT[kind];
+  if (receipt.reused && receipt.status === "ready") {
+    return `${text.ready} Tell the user it is in the Hub's Artifacts tab. Do not write, guess or summarize any ${text.items} yourself.`;
+  }
   const step = `${text.subject} being generated in the background. Tell the user it will appear in the Hub's Artifacts tab when it is ready. Do not write, guess or summarize any ${text.items}: none exist yet.`;
-  return reused ? `${text.reused} ${step}` : step;
+  return receipt.reused ? `${text.reused} ${step}` : step;
 }
 
 /** Only the options the model set; an empty set is no options at all. */
@@ -176,6 +192,8 @@ function createStudyTool(kind: StudyKind, binding: GroundedArtifactToolBinding) 
           }),
         uiLocale: args.userLanguage,
         noSourcesMessage: noSourcesMessage(kind),
+        maxSources: STUDY_LIMITS.maxSources,
+        tooManySourcesMessage: (counts) => tooManySourcesMessage(kind, counts),
       });
       if (!outcome.ok) return outcome;
       const { request, receipt } = outcome;
@@ -187,7 +205,7 @@ function createStudyTool(kind: StudyKind, binding: GroundedArtifactToolBinding) 
         versionNo: receipt.versionNo,
         reused: receipt.reused,
         sources: request.sourceIds.length,
-        nextStep: nextStep(kind, receipt.reused),
+        nextStep: nextStep(kind, receipt),
       };
     },
     {

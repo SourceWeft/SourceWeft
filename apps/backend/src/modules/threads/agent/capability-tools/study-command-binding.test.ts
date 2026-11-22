@@ -20,9 +20,11 @@ import { AgentCitationRegistry } from "../citation-registry";
  * process is stubbed: the study request's database work, the source lookup,
  * the web provider and model calls.
  *
- * Billing: a study tool starts a background job and never calls a model, so
- * the chat turn has nothing of it to settle. The job bills the person who
- * asked, on its own `worker-job` scope.
+ * Billing: what this file proves is the turn's side only. With the study
+ * request function mocked, calling a bound study tool reads nothing of the
+ * turn's billing port, makes no model call through the turn, and hands the
+ * request to the study request function as the turn's actor. That the queued
+ * job then bills that actor on its own scope is `study/job-billing.test.ts`.
  */
 
 const hostMocks = vi.hoisted(() => ({
@@ -144,6 +146,7 @@ beforeEach(() => {
     artifactId: "artifact-1",
     versionNo: 1,
     status: "pending",
+    artifactStatus: "pending",
     visibility: "private",
     reused: false,
   });
@@ -210,7 +213,7 @@ test("a /quiz tool call queues the request as the turn's actor, in the turn's th
   });
 });
 
-test("no double billing: a study tool call reads nothing of the turn's billing and calls no model", async () => {
+test("a study tool call reads nothing of the turn's billing port, calls no model, and requests as the turn's actor", async () => {
   for (const study of STUDY_COMMANDS) {
     const billing = recordingBilling();
     const prepared = await prepareCommandTurn(study.command, "");
@@ -223,7 +226,7 @@ test("no double billing: a study tool call reads nothing of the turn's billing a
     assert.equal(result.ok, true);
     assert.deepEqual(billing.reads, [], `${study.tool} charged nothing to the chat turn`);
     assert.equal(hostMocks.getClient.mock.calls.length, 0, "no model call in the turn");
-    // The job is queued for the person who asked; it is what pays.
+    // The request (mocked here) is made as the person who asked.
     const call = hostMocks.requestStudyArtifact.mock.calls.at(-1)![0];
     assert.equal(call.userId, "user-1");
     assert.equal(call.request.artifactType, study.artifactType);

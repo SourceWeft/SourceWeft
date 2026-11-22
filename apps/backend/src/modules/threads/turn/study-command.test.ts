@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { buildCapabilityCommandList } from "@sourceweft/capability-runtime";
+import type { EnabledSkillDescriptor } from "../../skills/types";
 import { listCapabilityRecords } from "./capability-command-workflows";
 import { parseRequestedCommand, resolveThreadCommand } from "./thread-command";
 
@@ -86,6 +87,48 @@ for (const study of STUDY_COMMANDS) {
     assert.deepEqual(resolved?.workflow?.defaultTools, [study.tool]);
   });
 }
+
+function workspaceSkill(name: string) {
+  return {
+    workspaceSkillId: `ws-skill-${name}`,
+    sourceType: "workspace",
+    name,
+    version: "1.0.0",
+    description: `A workspace skill called ${name}`,
+  } as unknown as EnabledSkillDescriptor;
+}
+
+for (const name of ["mindmap", "quiz", "flashcards", "table"]) {
+  test(`a skill named ${name} sent as a skill command runs the skill, not the tool`, async () => {
+    const resolved = await resolveThreadCommand({
+      command: { name: `/${name}`, arguments: "go", kind: "skill" },
+      enabledSkills: [workspaceSkill(name)],
+    });
+    assert.equal(resolved?.kind, "skill");
+    assert.equal(resolved?.skillSlug, name);
+    assert.equal(resolved?.canonicalName, `/${name}`);
+    assert.equal(resolved?.toolName, undefined);
+  });
+}
+
+test("with a skill named mindmap enabled, /mindmap as a tool command still runs the tool", async () => {
+  const resolved = await resolveThreadCommand({
+    command: { name: "/mindmap", arguments: "", kind: "tool" },
+    enabledSkills: [workspaceSkill("mindmap")],
+  });
+  assert.equal(resolved?.kind, "tool");
+  assert.equal(resolved?.toolName, "generate_mindmap");
+});
+
+test("a skill command naming a tool alias with no such skill enabled is not found", async () => {
+  await assert.rejects(
+    resolveThreadCommand({
+      command: { name: "/quiz", arguments: "", kind: "skill" },
+      enabledSkills: [],
+    }),
+    (error: unknown) => (error as { code?: string }).code === "COMMAND_NOT_FOUND",
+  );
+});
 
 test("the study commands are also found by tool name and without the kind hint", async () => {
   const byTool = await resolveThreadCommand({

@@ -45,6 +45,21 @@ function invalidRequest(artifactType: string, details: unknown): never {
   });
 }
 
+/** The narrow receipt: where the artifact stands, never its visibility. */
+function receiptOf(result: {
+  artifactId: string;
+  versionNo: number;
+  artifactStatus: AgentToolGroundedArtifactReceipt["status"];
+  reused: boolean;
+}): AgentToolGroundedArtifactReceipt {
+  return {
+    artifactId: result.artifactId,
+    versionNo: result.versionNo,
+    status: result.artifactStatus,
+    reused: result.reused,
+  };
+}
+
 /**
  * One requester per study type. The type is the one the host was asked for:
  * a request naming another type cannot open it under this one.
@@ -63,12 +78,7 @@ function studyTurnRequester(artifactType: StudyKind): GroundedTurnRequester {
       uiLocale: input.uiLocale,
       request: parsed.data,
     });
-    return {
-      artifactId: result.artifactId,
-      versionNo: result.versionNo,
-      status: result.status,
-      reused: result.reused,
-    };
+    return receiptOf(result);
   };
 }
 
@@ -85,12 +95,7 @@ const GROUNDED_TURN_REQUESTERS: Readonly<Record<string, GroundedTurnRequester>> 
       uiLocale: input.uiLocale,
       request: parsed.data,
     });
-    return {
-      artifactId: result.artifactId,
-      versionNo: result.versionNo,
-      status: result.status,
-      reused: result.reused,
-    };
+    return receiptOf(result);
   },
   ...Object.fromEntries(
     STUDY_ARTIFACT_TYPES.map((artifactType) => [artifactType, studyTurnRequester(artifactType)]),

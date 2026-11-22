@@ -40,7 +40,8 @@
             "The flashcards cover the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_flashcards reads them itself: pass no source names, paths or ids.",
             "Call generate_flashcards without asking first. Pass only what the user asked for: a size (fewer, standard or more) or an exact number of cards, a difficulty (easy, mixed or hard), a focus in the user's own words, and an output language if they named one. Leave everything else out.",
             "If generate_flashcards reports that there are no sources, do not call it again: ask the user to select or @mention the sources to make flashcards from, then run /flashcards again.",
-            "After generate_flashcards returns, tell the user the flashcards are being generated and will appear in the Hub's Artifacts tab when ready. Do not write any cards yourself."
+            "If generate_flashcards reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to make flashcards from, then run /flashcards again.",
+            "After generate_flashcards returns, follow its nextStep: the flashcards are being generated and will appear in the Hub's Artifacts tab, or they are already there. Do not write any cards yourself."
           ]
         }
       }
@@ -79,7 +80,8 @@
             "The quiz covers the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_quiz reads them itself: pass no source names, paths or ids.",
             "Call generate_quiz without asking first. Pass only what the user asked for: a size (fewer, standard or more) or an exact number of questions, a difficulty (easy, mixed or hard), a focus in the user's own words, and an output language if they named one. Leave everything else out.",
             "If generate_quiz reports that there are no sources, do not call it again: ask the user to select or @mention the sources to make a quiz from, then run /quiz again.",
-            "After generate_quiz returns, tell the user the quiz is being generated and will appear in the Hub's Artifacts tab when ready. Do not write any questions or answers yourself."
+            "If generate_quiz reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to make a quiz from, then run /quiz again.",
+            "After generate_quiz returns, follow its nextStep: the quiz is being generated and will appear in the Hub's Artifacts tab, or it is already there. Do not write any questions or answers yourself."
           ]
         }
       }
@@ -118,7 +120,8 @@
             "The mind map covers the sources the user @mentioned, otherwise the sources selected for this conversation; folders count as the documents in them. generate_mindmap reads them itself: pass no source names, paths or ids.",
             "Call generate_mindmap without asking first. Pass only what the user asked for: a size (fewer, standard or more) or an exact number of nodes, a focus in the user's own words, and an output language if they named one. Leave everything else out.",
             "If generate_mindmap reports that there are no sources, do not call it again: ask the user to select or @mention the sources to make a mind map from, then run /mindmap again.",
-            "After generate_mindmap returns, tell the user the mind map is being generated and will appear in the Hub's Artifacts tab when ready. Do not write any nodes or branches yourself."
+            "If generate_mindmap reports too many sources, do not call it again: tell the user the limit it gives and ask them to narrow the selection or @mention the sources to make a mind map from, then run /mindmap again.",
+            "After generate_mindmap returns, follow its nextStep: the mind map is being generated and will appear in the Hub's Artifacts tab, or it is already there. Do not write any nodes or branches yourself."
           ]
         }
       }
