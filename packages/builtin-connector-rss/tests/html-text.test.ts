@@ -58,23 +58,61 @@ test("non-HTML input passes through trimmed", () => {
   assert.equal(htmlToText("   "), "");
 });
 
-test("1 MB of nested divs neither throws nor stalls", () => {
-  const html = `${"<div>".repeat(200_000)}deep`;
-  assert.ok(html.length >= 1_000_000);
+// Hostile shapes that keep parse5's open-element stack growing (it rescans the
+// stack per tag, so they are quadratic without a cap). Each must finish fast.
+const HOSTILE_SHAPES: Record<string, string> = {
+  "nested divs": "<div>",
+  "self-closing divs": "<div/>",
+  "divs with stray end tags": "<div></span>",
+  "unterminated tags": "<a",
+  "foster-parented table content": "<div><table></div>",
+  "nested templates": "<template>",
+  "misnested formatting": "<b><i></b></i>",
+  "unclosed table cells": "<div><td></div>",
+};
+
+for (const [name, unit] of Object.entries(HOSTILE_SHAPES)) {
+  test(`hostile input (${name}, 200k repeats) neither throws nor stalls`, () => {
+    const html = `${unit.repeat(200_000)}tail`;
+    assert.ok(html.length >= 400_000);
+    const started = Date.now();
+    const text = htmlToText(html);
+    assert.equal(typeof text, "string");
+    assert.ok(!text.includes("<div"));
+    assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  });
+}
+
+test("a ~5 MiB mix of hostile shapes neither throws nor stalls", () => {
+  const html = Object.values(HOSTILE_SHAPES)
+    .map((unit) => unit.repeat(200_000))
+    .join("")
+    .slice(0, 5 * 1024 * 1024);
   const started = Date.now();
-  const text = htmlToText(html);
-  assert.equal(typeof text, "string");
-  assert.ok(!text.includes("<"));
-  assert.ok(Date.now() - started < 5_000, "nesting cap keeps parsing linear");
+  htmlToText(html);
+  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
 });
 
-test("realistic nesting depth and unclosed p/li elements keep their text", () => {
+test("realistic nesting depth and unclosed p/li/td elements keep their text", () => {
   assert.equal(
     htmlToText(`${"<div>".repeat(100)}deep${"</div>".repeat(100)}`),
     "deep",
   );
   const items = Array.from({ length: 800 }, (_, i) => `<li>item ${i}`).join("");
-  const text = htmlToText(`<ul>${items}</ul>`);
-  assert.ok(text.includes("item 0"));
-  assert.ok(text.includes("item 799"));
+  const list = htmlToText(`<ul>${items}</ul>`);
+  assert.ok(list.includes("item 0"));
+  assert.ok(list.includes("item 799"));
+  const paragraphs = Array.from({ length: 800 }, (_, i) => `<p>para ${i}`).join(
+    "",
+  );
+  assert.ok(htmlToText(paragraphs).includes("para 799"));
+  const cells = Array.from({ length: 800 }, (_, i) => `<td>cell ${i}`).join("");
+  assert.ok(htmlToText(`<table><tr>${cells}</table>`).includes("cell 799"));
+});
+
+test("pretty-printed markup does not add blank lines between blocks", () => {
+  assert.equal(htmlToText("<ul>\n  <li>a</li>\n  <li>b</li>\n</ul>"), "a\nb");
+  assert.equal(htmlToText("<div>a</div>\n<div>b</div>"), "a\nb");
+  assert.equal(htmlToText("<p>a</p>\n\n<p>b</p>\n"), "a\n\nb");
+  assert.equal(htmlToText("<p>one <b>two</b> three</p>"), "one two three");
 });

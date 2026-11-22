@@ -1,4 +1,9 @@
-import { parse, type DefaultTreeAdapterMap } from "parse5";
+import {
+  defaultTreeAdapter,
+  parse,
+  type DefaultTreeAdapterMap,
+  type TreeAdapter,
+} from "parse5";
 
 type Node = DefaultTreeAdapterMap["node"];
 
@@ -67,59 +72,44 @@ const BLOCK = new Set([
 const LOOKS_LIKE_HTML =
   /<[a-zA-Z!/]|&(?:#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/;
 
-/** Elements with no content, or whose end tag HTML lets authors omit; they do
- * not deepen the tree on their own, so they are not counted as nesting. */
-const NOT_NESTING = new Set([
-  "area",
-  "base",
-  "br",
-  "col",
-  "embed",
-  "hr",
-  "img",
-  "input",
-  "link",
-  "meta",
-  "param",
-  "source",
-  "track",
-  "wbr",
-  "p",
-  "li",
-  "dt",
-  "dd",
-  "tr",
-  "td",
-  "th",
-  "tbody",
-  "thead",
-  "tfoot",
-  "option",
-  "optgroup",
-  "colgroup",
-  "caption",
-]);
+/** Most elements one document may create. parse5 rescans its open-element
+ * stack for many tags, so the cost of hostile input is quadratic in how many
+ * elements it opens: 20k nested divs take seconds, and `<div/>`, stray end
+ * tags, foster-parented table content and nested templates all keep the stack
+ * growing while the visible tree stays shallow. The element count bounds all
+ * of them regardless of shape, because the stack can never exceed it. Real
+ * feed items have a few hundred elements. */
+const MAX_ELEMENTS = 3_000;
 
-/** Deeper nesting than any real feed content. parse5's tree construction
- * rescans its open-element stack per tag, so unbounded nesting is quadratic
- * (200k nested divs take minutes) and one hostile feed item would stall a sync. */
-const MAX_NESTING_DEPTH = 512;
+class TooManyElements extends Error {}
 
-/** Cuts the markup where element nesting first exceeds the cap. Linear time. */
-function truncateExcessiveNesting(html: string): string {
-  const tag = /<(\/?)([a-zA-Z][a-zA-Z0-9:-]*)[^>]*>/g;
-  let depth = 0;
-  for (let m = tag.exec(html); m !== null; m = tag.exec(html)) {
-    const name = m[2]!.toLowerCase();
-    if (NOT_NESTING.has(name)) continue;
-    if (m[1] === "/") {
-      depth = Math.max(0, depth - 1);
-    } else if (!m[0].endsWith("/>")) {
-      depth += 1;
-      if (depth > MAX_NESTING_DEPTH) return html.slice(0, m.index);
-    }
+/**
+ * Parses with a tree adapter that counts the elements the parser creates and
+ * aborts once the cap is exceeded, keeping what was built so far. Counting in
+ * the parser's own adapter (not guessing from the markup) means no syntax can
+ * hide an element from the count.
+ */
+function parseCapped(html: string): DefaultTreeAdapterMap["document"] {
+  let root: DefaultTreeAdapterMap["document"] | undefined;
+  let elements = 0;
+  const treeAdapter: TreeAdapter<DefaultTreeAdapterMap> = {
+    ...defaultTreeAdapter,
+    createDocument() {
+      root = defaultTreeAdapter.createDocument();
+      return root;
+    },
+    createElement(tagName, namespaceURI, attrs) {
+      elements += 1;
+      if (elements > MAX_ELEMENTS) throw new TooManyElements();
+      return defaultTreeAdapter.createElement(tagName, namespaceURI, attrs);
+    },
+  };
+  try {
+    return parse(html, { treeAdapter });
+  } catch (error) {
+    if (error instanceof TooManyElements && root !== undefined) return root;
+    throw error;
   }
-  return html;
 }
 
 /**
@@ -130,7 +120,7 @@ function truncateExcessiveNesting(html: string): string {
 export function htmlToText(html: string): string {
   if (!LOOKS_LIKE_HTML.test(html)) return html.trim();
 
-  const document = parse(truncateExcessiveNesting(html));
+  const document = parseCapped(html);
   const out: string[] = [];
   // Newlines currently at the end of `out`; Infinity at the very start so no
   // leading blank lines are produced.
@@ -157,6 +147,8 @@ export function htmlToText(html: string): string {
     const { node, exit } = stack.pop()!;
     if (node.nodeName === "#text") {
       const value = (node as { value: string }).value.replace(/\s+/g, " ");
+      // Whitespace between tags (pretty-printed markup) is not content.
+      if (value === " " && trailingNewlines > 0) continue;
       emit(value);
       continue;
     }
