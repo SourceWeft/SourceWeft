@@ -148,7 +148,11 @@ test("no member identity, tool output, reasoning, or model name crosses into the
     "reasoning",
     "gpt-mystery",
   ]) {
-    assert.equal(json.includes(forbidden), false, `must not include ${forbidden}`);
+    assert.equal(
+      json.includes(forbidden),
+      false,
+      `must not include ${forbidden}`,
+    );
   }
 });
 
@@ -266,4 +270,57 @@ test("stopped follows metadata.isCancelled, and a marker inside a code block sta
   ]);
   assert.equal(result.messages[0]?.stopped, true);
   assert.equal(result.messages[0]?.content, "Partial `[citation:c1]` text");
+});
+
+test("an internal artifact image that was not placed never leaks the workspace or artifact id", () => {
+  // "ws-secret-7" is not ready/viewable here (absent from the map), and
+  // "art-query-9" is referenced through an artifactId= query URL.
+  const result = snapshot([
+    message("a", {
+      role: "assistant",
+      content: [
+        "Before",
+        "![chart](/v1/workspaces/ws-secret-7/artifacts/art-missing-3/file)",
+        "middle",
+        "![other](https://api.test/v1/files?workspaceId=ws-secret-7&artifactId=art-query-9)",
+        "After",
+      ].join("\n\n"),
+      metadata: {
+        renderBlocks: [
+          { type: "artifact_output", artifactId: "art-missing-3" },
+        ],
+      },
+    }),
+  ]);
+
+  const serialized = JSON.stringify(result);
+  assert.ok(!serialized.includes("ws-secret-7"), serialized);
+  assert.ok(!serialized.includes("art-missing-3"), serialized);
+  assert.ok(!serialized.includes("art-query-9"), serialized);
+  assert.equal(
+    result.messages[0]?.content,
+    "Before\n\nchart\n\nmiddle\n\nother\n\nAfter",
+  );
+});
+
+test("an internal artifact link is reduced to its text, while code and external images stay", () => {
+  const result = snapshot([
+    message("a", {
+      role: "assistant",
+      content: [
+        "[the report](/v1/workspaces/ws-secret-7/artifacts/art-1/download)",
+        "![web](https://example.com/pic.png)",
+        "`![x](/v1/workspaces/ws-code/artifacts/a/file)`",
+      ].join("\n\n"),
+    }),
+  ]);
+
+  const content = result.messages[0]?.content ?? "";
+  assert.ok(!content.includes("ws-secret-7"), content);
+  assert.ok(content.startsWith("the report\n\n"), content);
+  assert.ok(content.includes("![web](https://example.com/pic.png)"), content);
+  assert.ok(
+    content.includes("`![x](/v1/workspaces/ws-code/artifacts/a/file)`"),
+    content,
+  );
 });

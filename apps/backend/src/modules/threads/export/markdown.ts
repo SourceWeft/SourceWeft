@@ -1,5 +1,9 @@
 import type { ExportThreadLocale } from "@sourceweft/contracts";
-import { createFootnotes, formatFootnote, type ExportCitation } from "./citations";
+import {
+  createFootnotes,
+  formatFootnote,
+  type ExportCitation,
+} from "./citations";
 import { exportLabels, type ArtifactType, type ExportLabels } from "./labels";
 
 /** An image in the export; a null path means it could not be included. */
@@ -63,7 +67,7 @@ function imageMarkdown(image: ExportImage, labels: ExportLabels) {
     : `[${labels.imageUnavailable}: ${escapeLinkText(image.name)}]`;
 }
 
-function referencedArtifactId(url: string) {
+export function referencedArtifactId(url: string) {
   return (
     /\/artifacts\/([^/?#]+)/.exec(url)?.[1] ??
     /[?&]artifactId=([^&#]+)/.exec(url)?.[1] ??

@@ -1,12 +1,16 @@
 import type { MessageRecord } from "../../content/types";
 import {
+  CODE_PATTERN,
   createFootnotes,
   readCitationRecords,
   type ExportCitation,
 } from "../export/citations";
 import { exportLabels, type ArtifactType } from "../export/labels";
-import { placeGeneratedImages } from "../export/markdown";
-import { collectMessageArtifactIds, selectExportMessages } from "../export/messages";
+import { placeGeneratedImages, referencedArtifactId } from "../export/markdown";
+import {
+  collectMessageArtifactIds,
+  selectExportMessages,
+} from "../export/messages";
 import { extractImagePartsFromContentJson } from "../turn/message-image-parts";
 
 /** Ready, viewable artifacts a reply produced, keyed by artifact id. */
@@ -34,7 +38,12 @@ export type ChatSnapshotImage =
       key: string;
       mimeType: string;
     }
-  | { n: number; source: "artifact"; artifactId: string; mimeType: string | null };
+  | {
+      n: number;
+      source: "artifact";
+      artifactId: string;
+      mimeType: string | null;
+    };
 
 export type ChatSnapshot = {
   title: string;
@@ -55,6 +64,42 @@ function escapeAltText(value: string) {
 }
 
 type PlacedImage = { artifactId: string; n: number; name: string };
+
+const MARKDOWN_IMAGE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+const MARKDOWN_LINK = /(?<!!)\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+
+function isWorkspaceApiUrl(url: string) {
+  return url.includes("/v1/workspaces/");
+}
+
+/**
+ * A public snapshot must not carry workspace or artifact ids. Any Markdown
+ * image still pointing at an internal artifact after placement (its artifact
+ * missing, not ready, not viewable or not an image) is reduced to its alt
+ * text, and a link into the workspace API to its link text. Code is left
+ * alone, like the citation rewrite.
+ */
+function stripInternalArtifactReferences(content: string) {
+  return content
+    .split(CODE_PATTERN)
+    .map((segment, index) =>
+      index % 2 === 1
+        ? segment
+        : segment
+            .replace(MARKDOWN_IMAGE, (markdown, alt: string, url: string) =>
+              referencedArtifactId(url) || isWorkspaceApiUrl(url)
+                ? alt
+                : markdown,
+            )
+            .replace(MARKDOWN_LINK, (markdown, text: string, url: string) =>
+              isWorkspaceApiUrl(url) ||
+              (url.startsWith("/") && referencedArtifactId(url))
+                ? text
+                : markdown,
+            ),
+    )
+    .join("");
+}
 
 /**
  * Builds the frozen snapshot of a chat: the same message selection and
@@ -142,7 +187,10 @@ export function buildChatSnapshot(input: {
             quote: null,
           }))
         : [];
-    const cited = footnotes.replace(placed.text, records);
+    const cited = footnotes.replace(
+      stripInternalArtifactReferences(placed.text),
+      records,
+    );
     const citations = cited.added.map(({ n, record }) => ({
       n,
       title: record.sourceTitle ?? SOURCE_LABEL,
