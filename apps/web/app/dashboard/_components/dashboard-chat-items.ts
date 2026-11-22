@@ -183,3 +183,18 @@ export function insertChatByActivity(
     ? [...others, chat]
     : [...others.slice(0, index), chat, ...others.slice(index)];
 }
+
+/**
+ * Adds the viewer's pinned chats to a page of the main list (which leaves
+ * them out), each in activity order. A pinned chat already on the page keeps
+ * one row.
+ */
+export function mergePinnedChats(
+  items: ChatItem[],
+  pinned: readonly ChatItem[],
+): ChatItem[] {
+  return pinned.reduce(
+    (merged, chat) => insertChatByActivity(merged, chat),
+    items,
+  );
+}

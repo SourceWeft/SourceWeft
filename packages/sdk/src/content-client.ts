@@ -80,6 +80,11 @@ import type {
   DeleteThreadResponse,
   ArchiveThreadRequest,
   ArchiveThreadResponse,
+  PinThreadResponse,
+  RenameThreadRequest,
+  RenameThreadResponse,
+  SearchThreadsRequest,
+  SearchThreadsResponse,
   DeleteWorkingFileResponse,
   DeleteWorkspaceSkillResponse,
   EnableWorkspaceSkillRequest,
@@ -909,6 +914,9 @@ export class ContentClient {
     if (input.archived) {
       params.set("archived", "true");
     }
+    if (input.pinned) {
+      params.set("pinned", "true");
+    }
 
     const query = params.toString();
     return this.http.get<ListThreadsResponse>(
@@ -1136,6 +1144,40 @@ export class ContentClient {
     return this.http.patch<ArchiveThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/archive`,
       input,
+    );
+  }
+
+  renameThread(
+    workspaceId: string,
+    threadId: string,
+    input: RenameThreadRequest,
+  ) {
+    return this.http.patch<RenameThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/title`,
+      input,
+    );
+  }
+
+  pinThread(workspaceId: string, threadId: string) {
+    return this.http.put<PinThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/pin`,
+      {},
+    );
+  }
+
+  unpinThread(workspaceId: string, threadId: string) {
+    return this.http.delete<PinThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/pin`,
+    );
+  }
+
+  searchThreads(workspaceId: string, input: SearchThreadsRequest) {
+    const params = new URLSearchParams({ q: input.q });
+    if (typeof input.limit === "number") {
+      params.set("limit", String(input.limit));
+    }
+    return this.http.get<SearchThreadsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/search?${params.toString()}`,
     );
   }
 

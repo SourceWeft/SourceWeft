@@ -46,6 +46,7 @@ function render(
   catalog = intlMessages,
   includeChild = false,
   showCreateChat = true,
+  pinnedChatIds: string[] = [],
 ) {
   const noop = () => {};
   const asyncNoop = async () => {};
@@ -89,6 +90,9 @@ function render(
           isLoadingPrivateChats: false,
           onArchiveChat: asyncNoop,
           onUnarchiveChat: asyncNoop,
+          onRenameChat: asyncNoop,
+          onTogglePinChat: asyncNoop,
+          pinnedChatIds,
           onLoadArchivedChats: asyncNoop,
           onLoadMoreArchivedChats: asyncNoop,
           onClearArchivedChats: asyncNoop,
@@ -118,11 +122,29 @@ test("cloud, local, other computers and legacy conversations stay visible regard
     assert.ok(!html.includes("筛选对话列表"));
   }
 });
-test("sidebar text search spans all execution targets", () => {
+test("a search query replaces the loaded list with server results", () => {
   const html = render("mac", "cloud");
-  assert.ok(html.includes("Cloud research"));
+  assert.ok(!html.includes("Cloud research"));
   assert.ok(!html.includes("Mac research"));
+  assert.ok(html.includes("Searching…"));
   assert.ok(!html.includes("Clear all private chats"));
+});
+
+test("pinned chats get their own section above the rest, in pin order", () => {
+  const html = render("mac", "", false, "en", intlMessages, false, true, [
+    "legacy",
+    "other",
+  ]);
+  const pinned = html.indexOf(">Pinned<");
+  assert.ok(pinned >= 0);
+  const order = ["Legacy research", "Other computer research", "Cloud research"]
+    .map((title) => html.indexOf(title));
+  assert.ok(order.every((index) => index > pinned));
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+});
+
+test("there is no pinned section without pins", () => {
+  assert.ok(!render("mac").includes(">Pinned<"));
 });
 
 test("the PC client's first row holds the list actions beside the traffic lights", () => {

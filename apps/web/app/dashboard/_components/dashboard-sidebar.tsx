@@ -169,6 +169,10 @@ export function DashboardSidebar() {
     archivedChats,
     archiveChat,
     unarchiveChat,
+    renameChat,
+    pinChat,
+    unpinChat,
+    pinnedChatIds,
     hasMoreArchivedChats,
     isLoadingArchivedChats,
     loadArchivedChats,
@@ -354,6 +358,11 @@ export function DashboardSidebar() {
     });
   };
 
+  const handleTogglePinChat = React.useCallback(
+    (id: string, pinned: boolean) => (pinned ? pinChat(id) : unpinChat(id)),
+    [pinChat, unpinChat],
+  );
+
   // Everything the conversation list needs, shared by the docked column, the
   // overlay and the phone drawer.
   const panelProps = {
@@ -365,6 +374,9 @@ export function DashboardSidebar() {
     activeChatId: activeThreadId,
     onArchiveChat: archiveChat,
     onUnarchiveChat: unarchiveChat,
+    onRenameChat: renameChat,
+    onTogglePinChat: handleTogglePinChat,
+    pinnedChatIds,
     onLoadArchivedChats: loadArchivedChats,
     onLoadMoreArchivedChats: loadMoreArchivedChats,
     onClearArchivedChats: handleClearArchivedChats,

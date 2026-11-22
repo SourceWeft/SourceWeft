@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslations } from "next-intl";
+import { MAX_PINNED_THREADS } from "@sourceweft/contracts";
 import type {
   DashboardChatBootstrapCacheHints,
   ListThreadModelCatalogResponse,
@@ -38,6 +39,7 @@ import {
   insertChildChatItem,
   mapChatItems,
   mapThreadToChatItem,
+  mergePinnedChats,
   removeChatItem,
 } from "./dashboard-chat-items";
 import { subscribeDashboardChatChildRefresh } from "./dashboard-chat-children-refresh";
@@ -51,6 +53,7 @@ type ThreadModelSettingsInput = {
 
 type ViewMode = "thread" | "new";
 const THREADS_PAGE_SIZE = 20;
+const EMPTY_IDS: string[] = [];
 const DEFAULT_THREAD_CHAT_PREFERENCES: ThreadChatPreferences = {
   thinking: { mode: "auto", effort: "medium" },
   webAccess: true,
@@ -74,6 +77,11 @@ export type DashboardChatState = {
   sharedChats: ChatItem[];
   privateChats: ChatItem[];
   archivedChats: ChatItem[];
+  /**
+   * The viewer's pinned chats, newest pin first. Pinned chats stay in their
+   * private/shared list; the sidebar shows them in its Pinned section.
+   */
+  pinnedChatIds: string[];
   hasMoreArchivedChats: boolean;
   isLoadingArchivedChats: boolean;
   hasMorePrivateChats: boolean;
@@ -133,6 +141,9 @@ export type DashboardChatState = {
   openChat: (id: string, title: string) => void;
   archiveChat: (id: string) => Promise<void>;
   unarchiveChat: (id: string) => Promise<void>;
+  renameChat: (id: string, title: string) => Promise<void>;
+  pinChat: (id: string) => Promise<void>;
+  unpinChat: (id: string) => Promise<void>;
   deleteChat: (id: string) => Promise<void>;
   setChatVisibility: (
     id: string,
@@ -234,6 +245,11 @@ export function DashboardChatStateProvider({
   >(null);
   const [sharedChats, setSharedChats] = useState<ChatItem[]>([]);
   const [privateChats, setPrivateChats] = useState<ChatItem[]>([]);
+  // Keyed by workspace so a pin list is never shown for another workspace.
+  const [pinnedState, setPinnedState] = useState<{
+    workspaceId: string | null;
+    ids: string[];
+  }>({ workspaceId: null, ids: [] });
   const [archivedChats, setArchivedChats] = useState<ChatItem[]>([]);
   // The workspace whose archived chats are loaded. They are fetched the first
   // time the archived list is opened, and again after a workspace change.
@@ -301,14 +317,35 @@ export function DashboardChatStateProvider({
   // stream and appends to whichever bucket each thread belongs to.
   const fetchChatsPage = useCallback(
     async (targetWorkspaceId: string, cursor?: string | null) => {
-      const threads = await retryOnceOnServiceUnavailable(() =>
-        contentClient.listThreads(targetWorkspaceId, {
-          cursor: cursor ?? undefined,
-          limit: THREADS_PAGE_SIZE,
-        }),
-      );
+      // The main list leaves pinned chats out, so the first page also loads
+      // them. Pins are a convenience: failing to load them keeps the list.
+      const [threads, pinned] = await Promise.all([
+        retryOnceOnServiceUnavailable(() =>
+          contentClient.listThreads(targetWorkspaceId, {
+            cursor: cursor ?? undefined,
+            limit: THREADS_PAGE_SIZE,
+          }),
+        ),
+        cursor
+          ? Promise.resolve(null)
+          : contentClient
+              .listThreads(targetWorkspaceId, {
+                pinned: true,
+                limit: MAX_PINNED_THREADS,
+              })
+              .catch(() => null),
+      ]);
 
-      const items = threads.items.map(mapThreadToChatItem);
+      if (pinned) {
+        setPinnedState({
+          workspaceId: targetWorkspaceId,
+          ids: pinned.items.map((item) => item.id),
+        });
+      }
+      const items = mergePinnedChats(
+        threads.items.map(mapThreadToChatItem),
+        pinned?.items.map(mapThreadToChatItem) ?? [],
+      );
       return {
         ...partitionChatsByVisibility(items),
         nextCursor: threads.nextCursor,
@@ -436,8 +473,16 @@ export function DashboardChatStateProvider({
           result.activeOrganizationId,
           result.activeWorkspace.id,
         );
+        const pinnedChats = result.pinnedChats?.items ?? [];
+        setPinnedState({
+          workspaceId: result.activeWorkspace.id,
+          ids: pinnedChats.map((item) => item.id),
+        });
         const bootstrapChats = partitionChatsByVisibility(
-          result.privateChats.items.map(mapThreadToChatItem),
+          mergePinnedChats(
+            result.privateChats.items.map(mapThreadToChatItem),
+            pinnedChats.map(mapThreadToChatItem),
+          ),
         );
         setPrivateChats(bootstrapChats.private);
         setSharedChats(bootstrapChats.shared);
@@ -1074,6 +1119,58 @@ export function DashboardChatStateProvider({
     [workspaceId, archivedChats],
   );
 
+  const renameChat = useCallback(
+    async (id: string, title: string) => {
+      if (!workspaceId) return;
+      const result = await contentClient.renameThread(workspaceId, id, {
+        title,
+      });
+      updateChatTitle(id, result.title);
+    },
+    [workspaceId, updateChatTitle],
+  );
+
+  const pinChat = useCallback(
+    async (id: string) => {
+      if (!workspaceId) return;
+      await contentClient.pinThread(workspaceId, id);
+      setPinnedState((value) => ({
+        workspaceId,
+        ids: [
+          id,
+          ...(value.workspaceId === workspaceId ? value.ids : []).filter(
+            (pinnedId) => pinnedId !== id,
+          ),
+        ],
+      }));
+    },
+    [workspaceId],
+  );
+
+  const unpinChat = useCallback(
+    async (id: string) => {
+      if (!workspaceId) return;
+      await contentClient.unpinThread(workspaceId, id);
+      setPinnedState((value) =>
+        value.workspaceId === workspaceId
+          ? {
+              workspaceId,
+              ids: value.ids.filter((pinnedId) => pinnedId !== id),
+            }
+          : value,
+      );
+    },
+    [workspaceId],
+  );
+
+  const pinnedChatIds = useMemo(
+    () =>
+      workspaceId !== null && pinnedState.workspaceId === workspaceId
+        ? pinnedState.ids
+        : EMPTY_IDS,
+    [pinnedState, workspaceId],
+  );
+
   const removeChatFromState = useCallback((id: string) => {
     setSharedChats((value) => removeChatItem(value, id));
     setPrivateChats((value) => removeChatItem(value, id));
@@ -1260,6 +1357,7 @@ export function DashboardChatStateProvider({
       sharedChats,
       privateChats,
       archivedChats: visibleArchivedChats,
+      pinnedChatIds,
       hasMoreArchivedChats,
       isLoadingArchivedChats,
       hasMorePrivateChats,
@@ -1291,6 +1389,9 @@ export function DashboardChatStateProvider({
       openChat,
       archiveChat,
       unarchiveChat,
+      renameChat,
+      pinChat,
+      unpinChat,
       deleteChat,
       setChatVisibility,
       clearPrivateChats,
@@ -1310,6 +1411,7 @@ export function DashboardChatStateProvider({
       sharedChats,
       privateChats,
       visibleArchivedChats,
+      pinnedChatIds,
       hasMoreArchivedChats,
       isLoadingArchivedChats,
       hasMorePrivateChats,
@@ -1336,6 +1438,9 @@ export function DashboardChatStateProvider({
       refreshChatThread,
       archiveChat,
       unarchiveChat,
+      renameChat,
+      pinChat,
+      unpinChat,
       deleteChat,
       setChatVisibility,
       clearPrivateChats,

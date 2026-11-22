@@ -8,6 +8,7 @@ import {
   insertChildChatItem,
   mapChatItems,
   mapThreadToChatItem,
+  mergePinnedChats,
   removeChatItem,
 } from "./dashboard-chat-items";
 import type { ChatItem } from "./dashboard-chat-types";
@@ -168,5 +169,22 @@ test("flattenChatItems lists parents followed by their children", () => {
   assert.deepEqual(
     flattenChatItems(items).map((item) => item.id),
     ["a", "a1", "b"],
+  );
+});
+
+test("mergePinnedChats adds pinned chats in activity order without duplicating one already listed", () => {
+  const page = [
+    chat("new", { updatedAt: "2026-09-03T00:00:00.000Z" }),
+    chat("old", { updatedAt: "2026-09-01T00:00:00.000Z" }),
+  ];
+  const merged = mergePinnedChats(page, [
+    chat("pinned-mid", { updatedAt: "2026-09-02T00:00:00.000Z" }),
+    chat("pinned-oldest", { updatedAt: "2026-08-01T00:00:00.000Z" }),
+    chat("new", { updatedAt: "2026-09-03T00:00:00.000Z" }),
+  ]);
+
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ["new", "pinned-mid", "old", "pinned-oldest"],
   );
 });
