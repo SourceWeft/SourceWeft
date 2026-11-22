@@ -17,6 +17,7 @@ import {
   type ThreadChatPreferencesPatch,
 } from "../chat-preferences";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
+import { MAX_PINNED_THREADS } from "@sourceweft/contracts";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 
 type RawThreadRow = {
@@ -65,6 +66,10 @@ const THREAD_RETURNING_SQL = `
  * so brand-new threads fall back to `created_at`.
  */
 const THREAD_ACTIVITY_SQL = "coalesce(last_message_at, created_at)";
+
+/** The viewer's (`$3`) pin row on the `threads` row in scope. */
+const VIEWER_PIN_SQL =
+  "select 1 from thread_pins p where p.thread_id = threads.id and p.user_id = $3";
 
 /**
  * Raw-SQL predicate hiding other members' private threads. `public_link` is an
@@ -230,7 +235,11 @@ export async function listThreadRecordsByWorkspace(input: {
   };
   /** The archived chats instead of the main list. */
   archived?: boolean;
+  /** The viewer's own pinned, non-archived chats, newest pin first. */
+  pinned?: boolean;
 }) {
+  if (input.pinned) return listPinnedThreadRecords(input);
+
   const cursorDate = input.cursor ? new Date(input.cursor.activityAt) : null;
   const hasValidCursor =
     Boolean(input.cursor) &&
@@ -264,6 +273,7 @@ export async function listThreadRecordsByWorkspace(input: {
         and archived = ${input.archived ? "true" : "false"}
         and parent_thread_id is null
         and ${visibility}
+        ${input.archived ? "" : `and not exists (${VIEWER_PIN_SQL})`}
         ${cursorSql}
       order by ${THREAD_ACTIVITY_SQL} desc, id desc
       limit $${limitParam}
@@ -393,6 +403,193 @@ export async function deleteThreadRecord(input: {
  * thread or one out of scope matches no row and returns false. Its sub-agent
  * threads keep their own flag and stay nested under it.
  */
+async function listPinnedThreadRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  limit: number;
+}) {
+  const result = await database.query<RawThreadRow>(
+    `
+      select ${THREAD_RETURNING_SQL}
+      from threads
+      join lateral (
+        select p.pinned_at from thread_pins p
+        where p.thread_id = threads.id and p.user_id = $3
+      ) pin on true
+      where team_id = $1
+        and workspace_id = $2
+        and archived = false
+        and parent_thread_id is null
+        and ${threadVisibilityClause(3)}
+      order by pin.pinned_at desc, id desc
+      limit $4
+    `,
+    [
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      Math.min(input.limit, MAX_PINNED_THREADS),
+    ],
+  );
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: result.rows.map((row) => row.id),
+  });
+
+  return result.rows.map((row) =>
+    mapRawThread(row, sourceCounts.get(row.id) ?? 0),
+  );
+}
+
+/**
+ * Renames a top-level chat under the same rule as archive and delete. Returns
+ * false when the chat is missing, a sub-agent chat, or not the viewer's to
+ * rename.
+ */
+export async function renameThreadRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  isContentAdmin: boolean;
+  title: string;
+}) {
+  const renamableClause = input.isContentAdmin
+    ? threadVisibilityClause(4)
+    : `(created_by = $4 or created_by is null)`;
+  const result = await database.query<{ id: string }>(
+    `
+      update threads
+      set title = $5,
+          updated_at = now()
+      where id = $1
+        and team_id = $2
+        and workspace_id = $3
+        and parent_thread_id is null
+        and ${renamableClause}
+      returning id
+    `,
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      input.title,
+    ],
+  );
+
+  return result.rows.length > 0;
+}
+
+/**
+ * Pins or unpins a top-level chat for the viewer only. Returns whether the
+ * viewer can see the chat; unpinning removes the viewer's pin row either way.
+ */
+export async function setThreadPinnedRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  pinned: boolean;
+}) {
+  const write = input.pinned
+    ? `insert into thread_pins (thread_id, user_id, team_id, workspace_id)
+       select id, $4, team_id, workspace_id from target
+       on conflict (thread_id, user_id) do nothing`
+    : `delete from thread_pins where thread_id = $1 and user_id = $4`;
+  const result = await database.query<{ visible: number }>(
+    `
+      with target as (
+        select id, team_id, workspace_id
+        from threads
+        where id = $1
+          and team_id = $2
+          and workspace_id = $3
+          and parent_thread_id is null
+          and ${threadVisibilityClause(4)}
+      ),
+      pin_write as (${write})
+      select count(*)::int as visible from target
+    `,
+    [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
+  );
+
+  return (result.rows[0]?.visible ?? 0) > 0;
+}
+
+/** Escapes `\`, `%` and `_` so a search query matches them literally. */
+function escapeLikePattern(query: string) {
+  return query.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * Top-level chats visible to the viewer whose title or user/assistant message
+ * text contains `query` (case-insensitive), archived ones included, newest
+ * activity first. `hitContent` is the newest matching message, if any.
+ */
+export async function searchThreadRecords(input: {
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  query: string;
+  limit: number;
+}) {
+  const result = await database.query<
+    RawThreadRow & {
+      archived: boolean;
+      title_match: boolean;
+      hit_content: string | null;
+    }
+  >(
+    `
+      select ${THREAD_RETURNING_SQL},
+        archived,
+        (title ilike $4 escape '\\') as title_match,
+        hit.content as hit_content
+      from threads
+      left join lateral (
+        select m.content
+        from messages m
+        where m.thread_id = threads.id
+          and m.role in ('user', 'assistant')
+          and m.content ilike $4 escape '\\'
+        order by m.created_at desc
+        limit 1
+      ) hit on true
+      where team_id = $1
+        and workspace_id = $2
+        and parent_thread_id is null
+        and ${threadVisibilityClause(3)}
+        and (title ilike $4 escape '\\' or hit.content is not null)
+      order by ${THREAD_ACTIVITY_SQL} desc, id desc
+      limit $5
+    `,
+    [
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      `%${escapeLikePattern(input.query)}%`,
+      input.limit,
+    ],
+  );
+
+  const sourceCounts = await countUsedSourceIdsByThread({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    threadIds: result.rows.map((row) => row.id),
+  });
+
+  return result.rows.map((row) => ({
+    thread: mapRawThread(row, sourceCounts.get(row.id) ?? 0),
+    archived: row.archived,
+    titleMatch: row.title_match,
+    hitContent: row.hit_content,
+  }));
+}
+
 export async function setThreadArchivedRecord(input: {
   threadId: string;
   teamId: string;

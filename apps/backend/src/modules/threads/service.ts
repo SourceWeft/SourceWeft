@@ -21,10 +21,14 @@ import {
   listChildThreadRecords,
   listThreadRecordsByWorkspace,
   setThreadArchivedRecord,
+  renameThreadRecord,
+  setThreadPinnedRecord,
+  searchThreadRecords,
   updateThreadChatPreferencesRecord,
   updateThreadModelSettingsRecord,
   updateThreadVisibilityRecord,
 } from "./thread/repository";
+import { buildSearchSnippet } from "./thread/search-snippet";
 import {
   listMessageRecordPageByThread,
   findMessageRecord,
@@ -204,6 +208,9 @@ export type StartScheduledTurnInput = {
  */
 const SCHEDULED_TURN_JOB_PRIORITY = 10;
 
+/** Search results returned when the caller does not ask for a limit. */
+const DEFAULT_THREAD_SEARCH_LIMIT = 30;
+
 /**
  * A run that failed before it reached the queue did nothing: no message, no
  * model call. Starting the same scheduled turn again gets a fresh run under
@@ -219,6 +226,8 @@ class ContentThreadService {
     limit?: number;
     cursor?: string;
     archived?: boolean;
+    /** The viewer's pinned chats (one page, no cursor). */
+    pinned?: boolean;
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
@@ -237,10 +246,11 @@ class ContentThreadService {
       limit: limit + 1,
       cursor: decodedCursor,
       archived: input.archived ?? false,
+      pinned: input.pinned ?? false,
     });
 
     const pageItems = items.slice(0, limit);
-    const hasMore = items.length > limit;
+    const hasMore = !input.pinned && items.length > limit;
     const lastVisible = pageItems[pageItems.length - 1] ?? null;
     const nextCursor =
       hasMore && lastVisible
@@ -503,6 +513,106 @@ class ContentThreadService {
     }
 
     return { threadId: input.threadId, archived: input.archived };
+  }
+
+  /** Renames a top-level chat under the same rule as archive and delete. */
+  async renameThread(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    title: string;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const access = await workspaceService.resolveAccess({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const isContentAdmin = access
+      ? workspaceService.canAdministerContent(access)
+      : false;
+    const title = input.title.trim();
+
+    const updated = await renameThreadRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      isContentAdmin,
+      title,
+    });
+    if (!updated) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    return { threadId: input.threadId, title };
+  }
+
+  /** Pins or unpins a chat for this member only. */
+  async setThreadPinned(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    pinned: boolean;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    const visible = await setThreadPinnedRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      pinned: input.pinned,
+    });
+    if (!visible) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    return { threadId: input.threadId, pinned: input.pinned };
+  }
+
+  /**
+   * Chats the member can see whose title or user/assistant message text
+   * contains `q`, archived ones included and flagged.
+   */
+  async searchThreads(input: {
+    workspaceId: string;
+    userId: string;
+    q: string;
+    limit?: number;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const query = input.q.trim();
+
+    const rows = await searchThreadRecords({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      query,
+      limit: input.limit ?? DEFAULT_THREAD_SEARCH_LIMIT,
+    });
+
+    return {
+      items: rows.map((row) => ({
+        thread: row.thread,
+        archived: row.archived,
+        match:
+          row.titleMatch || row.hitContent === null
+            ? { kind: "title" as const, snippet: row.thread.title }
+            : {
+                kind: "message" as const,
+                snippet: buildSearchSnippet(row.hitContent, query),
+              },
+      })),
+    };
   }
 
   async updateThreadModelSettings(input: {

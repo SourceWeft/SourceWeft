@@ -17,6 +17,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -167,6 +168,40 @@ export const threads = pgTable(
     index("threads_workspace_last_message_idx").on(
       table.workspaceId,
       desc(table.lastMessageAt),
+    ),
+  ],
+);
+
+/**
+ * A member's own pinned chats. Pins are personal: one row per (chat, member),
+ * removed with the chat. Reads always re-apply chat visibility, so a pin on a
+ * chat the member can no longer see is simply not listed.
+ */
+export const threadPins = pgTable(
+  "thread_pins",
+  {
+    threadId: text("thread_id").notNull(),
+    userId: text("user_id").notNull(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "thread_pins_pk",
+      columns: [table.threadId, table.userId],
+    }),
+    foreignKey({
+      name: "thread_pins_thread_fk",
+      columns: [table.threadId, table.workspaceId, table.teamId],
+      foreignColumns: [threads.id, threads.workspaceId, threads.teamId],
+    }).onDelete("cascade"),
+    index("thread_pins_user_workspace_idx").on(
+      table.userId,
+      table.workspaceId,
+      desc(table.pinnedAt),
     ),
   ],
 );

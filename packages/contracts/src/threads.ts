@@ -192,6 +192,8 @@ export const listThreadsRequestSchema = z.object({
   cursor: z.string().trim().min(1).max(1024).optional(),
   /** List archived chats instead of the main list. */
   archived: z.boolean().optional(),
+  /** List the viewer's own pinned chats (at most 50, newest pin first). */
+  pinned: z.boolean().optional(),
 });
 
 /**
@@ -205,6 +207,43 @@ export const archiveThreadRequestSchema = z.object({
 export const archiveThreadResponseSchema = z.object({
   threadId: z.string(),
   archived: z.boolean(),
+});
+
+/** Renames a top-level chat. Automatic titling never overwrites it. */
+export const renameThreadRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+});
+
+export const renameThreadResponseSchema = z.object({
+  threadId: z.string(),
+  title: z.string(),
+});
+
+/** At most this many pinned chats are listed. */
+export const MAX_PINNED_THREADS = 50;
+
+/** Pins are personal: they never change another member's list. */
+export const pinThreadResponseSchema = z.object({
+  threadId: z.string(),
+  pinned: z.boolean(),
+});
+
+export const searchThreadsRequestSchema = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+export const threadSearchResultSchema = z.object({
+  thread: threadWithChatPreferencesSchema,
+  archived: z.boolean(),
+  match: z.object({
+    kind: z.enum(["title", "message"]),
+    snippet: z.string(),
+  }),
+});
+
+export const searchThreadsResponseSchema = z.object({
+  items: z.array(threadSearchResultSchema),
 });
 
 export const threadListItemSchema = threadWithChatPreferencesSchema.extend({
@@ -287,6 +326,12 @@ export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;
 export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;
 export type ArchiveThreadRequest = z.infer<typeof archiveThreadRequestSchema>;
 export type ArchiveThreadResponse = z.infer<typeof archiveThreadResponseSchema>;
+export type RenameThreadRequest = z.infer<typeof renameThreadRequestSchema>;
+export type RenameThreadResponse = z.infer<typeof renameThreadResponseSchema>;
+export type PinThreadResponse = z.infer<typeof pinThreadResponseSchema>;
+export type SearchThreadsRequest = z.infer<typeof searchThreadsRequestSchema>;
+export type ThreadSearchResult = z.infer<typeof threadSearchResultSchema>;
+export type SearchThreadsResponse = z.infer<typeof searchThreadsResponseSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;
 export type ThreadCommandRequest = z.infer<typeof threadCommandRequestSchema>;
 export type UpdateThreadModelSettingsRequest = z.infer<
