@@ -423,6 +423,80 @@ test("too little surviving validation fails the whole generation", async () => {
   );
 });
 
+const TERMS = ["光合作用", "叶绿素", "气孔", "蒸腾作用", "细胞呼吸", "根系", "种子萌发", "花粉传播"];
+
+/** Chinese cards about English chunks, each with the quote `quoteOf(n)` gives. */
+function chineseCards(user: string, quoteOf: (n: number) => string | null) {
+  return {
+    cards: promptHandles(user).map((handle) => {
+      const n = Number(handle.slice(1));
+      return {
+        front: `${TERMS[n - 1]}指的是什么？`,
+        back: `${TERMS[n - 1]}是资料中第 ${n} 个主题所讲的内容。`,
+        hint: null,
+        tags: [],
+        difficulty: 1 as const,
+        refs: [handle],
+        quote: quoteOf(n),
+      };
+    }),
+  };
+}
+
+function chineseInput(chunks = factChunks(8)) {
+  return baseInput("flashcards", chunks, {
+    options: { count: 5, difficulty: "mixed", language: "zh-CN" },
+  });
+}
+
+test("a card in another language than its source is kept on its word-for-word quote", async () => {
+  const anchor = factAnchor();
+  const { model } = stubModel((call) =>
+    isVerify(call)
+      ? { supported: true }
+      : chineseCards(call.user, (n) => `FACT-${n} is a statement   about topic ${n}.`),
+  );
+  const result = await generateStudyContent({ model, anchor }, chineseInput());
+  if (result.content.kind !== "flashcards") throw new Error("kind");
+  assert.equal(result.stats.kept, 5);
+  assert.equal(anchor.requests, 0, "quoted cards never reach the anchor port");
+  const [first] = result.content.items;
+  const n = TERMS.indexOf(first!.front.replace("指的是什么？", "")) + 1;
+  // The evidence is the source's own text at that span, whitespace included.
+  assert.equal(first!.evidence[0]!.quote, `FACT-${n} is a statement about topic ${n}.`);
+  assert.equal(first!.evidence[0]!.startChar, 0);
+});
+
+test("a reworded quote is not evidence: the card goes to the anchor port", async () => {
+  const anchor = factAnchor();
+  const { model } = stubModel((call) =>
+    isVerify(call)
+      ? { supported: true }
+      : chineseCards(call.user, (n) => `Topic ${n} is described by FACT-${n}.`),
+  );
+  await assert.rejects(
+    generateStudyContent({ model, anchor }, chineseInput()),
+    (error: unknown) =>
+      error instanceof StudyGenerationError &&
+      error.code === "GENERATION_QUALITY_TOO_LOW",
+  );
+  assert.ok(anchor.requests > 0);
+});
+
+test("a quote too short to prove anything is not evidence", async () => {
+  const anchor = factAnchor();
+  const { model } = stubModel((call) =>
+    isVerify(call) ? { supported: true } : chineseCards(call.user, (n) => `FACT-${n}`),
+  );
+  await assert.rejects(
+    generateStudyContent({ model, anchor }, chineseInput()),
+    (error: unknown) =>
+      error instanceof StudyGenerationError &&
+      error.code === "GENERATION_QUALITY_TOO_LOW",
+  );
+  assert.ok(anchor.requests > 0);
+});
+
 test("a single pass asks the model for the whole over-generated request", async () => {
   for (const [kind, count] of [
     ["flashcards", 20],
@@ -467,6 +541,7 @@ test("a single pass asks the model for the whole over-generated request", async 
   }
 });
 
+
 test("a failed generation says how many items were written and why the rest were dropped", async () => {
   // Twenty requested: thirteen cards written, every second one unanchored.
   const model = stubModel((call) => {
@@ -499,6 +574,7 @@ test("a failed generation says how many items were written and why the rest were
   );
 });
 
+
 test("a mind map whose every group answer is unreadable fails instead of publishing an empty map", async () => {
   const { model } = stubModel(() => ({ rootLabel: "Cut off", nodes: "not a list" }));
   await assert.rejects(
@@ -519,6 +595,7 @@ test("a mind map whose every group answer is unreadable fails instead of publish
     },
   );
 });
+
 
 test("a skewed difficulty is recorded but does not fail", async () => {
   const model = stubModel((call) => {

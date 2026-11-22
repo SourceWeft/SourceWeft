@@ -7,6 +7,7 @@ import { logger } from "../../shared/logger";
 import { CITATION_ANCHORING_FEATURE } from "../citations/anchoring-diagnostics";
 import type { ContentBillingPort } from "../content/billing-port";
 import type { GuidePayer, GuidePayerPorts } from "../sources/guide-payer";
+import { embeddingBatchKey } from "../grounded-generation/anchor-port";
 import { createStudyAnchorPort } from "./anchor-port";
 import {
   loadStudyCorpus,
@@ -137,7 +138,10 @@ export async function runStudyGeneration(
             threadId: request.threadId,
             scopeId: request.scopeId,
             feature: CITATION_ANCHORING_FEATURE,
-            idempotencyKey: `study:${request.artifactId}:v${request.versionNo}:anchor`,
+            idempotencyKey: embeddingBatchKey(
+              `study:${request.artifactId}:v${request.versionNo}:anchor`,
+              texts,
+            ),
             texts,
           }),
         onSemanticError: (error) =>

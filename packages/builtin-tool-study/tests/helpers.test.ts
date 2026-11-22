@@ -98,8 +98,8 @@ test("a small request still leaves room for a whole answer", () => {
   // A map-reduce group asked for four mind map nodes: models write more, and
   // an answer cut off at the ceiling is unreadable.
   assert.equal(generationMaxTokens("mindmap", 4), GENERATION_MIN_MAX_TOKENS);
-  assert.equal(generationMaxTokens("mindmap", 40), 5_200);
-  assert.equal(generationMaxTokens("flashcards", 26), 6_380);
+  assert.equal(generationMaxTokens("mindmap", 40), 6_800);
+  assert.equal(generationMaxTokens("flashcards", 26), 8_000);
   assert.equal(generationMaxTokens("quiz", 40), 8_000);
 });
 

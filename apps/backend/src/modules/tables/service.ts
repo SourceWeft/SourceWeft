@@ -25,7 +25,10 @@ import { logger } from "../../shared/logger";
 import { CITATION_ANCHORING_FEATURE } from "../citations/anchoring-diagnostics";
 import { figuresCovered } from "../citations/figures";
 import type { ContentBillingPort } from "../content/billing-port";
-import { createGroundedAnchorPort } from "../grounded-generation/anchor-port";
+import {
+  createGroundedAnchorPort,
+  embeddingBatchKey,
+} from "../grounded-generation/anchor-port";
 import type { GroundedSourceSnapshot } from "../grounded-generation/corpus-loader";
 import {
   createGroundedModelPort,
@@ -282,7 +285,10 @@ export async function runTableGeneration(
             threadId: request.threadId,
             scopeId: request.scopeId,
             feature: CITATION_ANCHORING_FEATURE,
-            idempotencyKey: `table:${request.artifactId}:v${request.versionNo}:anchor`,
+            idempotencyKey: embeddingBatchKey(
+              `table:${request.artifactId}:v${request.versionNo}:anchor`,
+              texts,
+            ),
             texts,
           }),
         onSemanticError: (error) =>
