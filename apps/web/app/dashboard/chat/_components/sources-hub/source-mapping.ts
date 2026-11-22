@@ -54,6 +54,10 @@ export function mapSourcesToUi(
     connectorId: item.connectorId,
     externalUri: item.externalUri,
     metadata: item.metadata,
+    errorCode:
+      item.status === "failed" && typeof item.error?.code === "string"
+        ? item.error.code
+        : null,
     storageKey: item.storageKey,
     updatedAt: item.updatedAt,
   }));

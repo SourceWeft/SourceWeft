@@ -3658,6 +3658,36 @@
       },
       "add": "发现"
     },
+    "youtube": {
+      "dialogTitle": "添加 YouTube 视频",
+      "playlist": "播放列表",
+      "channel": "频道",
+      "byChannel": "来自 {channel}",
+      "videoCount": "{count} 个视频",
+      "loading": "正在加载视频…",
+      "empty": "这个链接中没有可添加的视频。",
+      "transcriptNote": "视频由 AI 根据音频转写，转写文本可能有误。",
+      "import": "导入 {count} 个视频",
+      "imported": "已添加 {count} 个视频",
+      "retry": "重试",
+      "errorBusy": "暂时无法列出视频，请稍后再试。",
+      "rateLimited": "已达到列出视频的上限（与查找来源共用），将在 {time} 恢复（还需 {wait}）。",
+      "chooseVideos": "选择视频",
+      "collectionHint": "这是 YouTube {kind, select, playlist {播放列表} other {频道}}链接，下一步选择要添加的视频。",
+      "videoHint": "SourceWeft 将用 AI 转写这个视频，并为转写文本建立搜索索引。",
+      "aiTranscription": "AI 转写",
+      "aiTranscriptionHint": "由 AI 根据视频音频转写，可能有误。",
+      "error": {
+        "YOUTUBE_URL_UNSUPPORTED": "不支持这个 YouTube 链接，请使用视频、播放列表或频道链接。",
+        "YOUTUBE_COLLECTION_URL": "这是播放列表或频道链接，请从中选择要添加的视频。",
+        "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED": "此服务器未启用 YouTube 转写。",
+        "YOUTUBE_VIDEO_UNAVAILABLE": "这个视频无法观看，可能是私密视频或已被删除。",
+        "YOUTUBE_NO_SPEECH": "这个视频中没有检测到语音，因此没有转写文本。",
+        "YOUTUBE_TRANSCRIPT_FAILED": "无法转写这个视频，请稍后再试。",
+        "YOUTUBE_LISTING_FAILED": "无法列出视频，请稍后再试。",
+        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到这个频道。"
+      }
+    },
     "noteOrigin": {
       "title": "已保存的笔记",
       "edit": "编辑",

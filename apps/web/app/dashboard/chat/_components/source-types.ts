@@ -30,6 +30,8 @@ export type SourceItem = {
   connectorId?: string | null;
   externalUri?: string | null;
   metadata?: Record<string, unknown>;
+  /** Why processing failed, as the server's error code, when it gave one. */
+  errorCode?: string | null;
   storageKey?: string | null;
   updatedAt?: string;
 };
