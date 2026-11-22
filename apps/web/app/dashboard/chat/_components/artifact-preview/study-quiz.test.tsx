@@ -210,6 +210,18 @@ describe("QuizViewer", () => {
     expect(oxygen?.getAttribute("aria-checked")).toBe("true");
   });
 
+  it("says the answers are not saved when the attempt cannot be opened", async () => {
+    const host = createRecordingStudyHost({
+      startQuizAttempt: () => Promise.reject(new Error("no version to record against")),
+    });
+    await renderQuiz(host);
+    await press("study.quiz.start");
+    await flush(3);
+    // The quiz still runs, and the person is told nothing is being kept.
+    expect(text()).toContain("study.quiz.questionOf current=1 total=4");
+    expect(text()).toContain("study.quiz.saveFailed");
+  });
+
   it("answers locally and records nothing when not interactive", async () => {
     const host = createRecordingStudyHost({ interactive: false });
     await renderQuiz(host);

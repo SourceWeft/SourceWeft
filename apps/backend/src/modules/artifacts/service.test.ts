@@ -1308,3 +1308,85 @@ test("member source-file reads reject tampered bytes with 409 and oversized mani
   );
   assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
 });
+
+test("a type without version media names the current version it shows", async () => {
+  vi.clearAllMocks();
+  mocks.requireContentWorkspace.mockResolvedValue({
+    id: "workspace-1",
+    organizationId: "team-1",
+  });
+  mocks.findPubliclySharedArtifactIds.mockResolvedValue(new Set());
+  mocks.loadArtifactViewHandlerRegistry.mockResolvedValue(
+    createArtifactViewHandlerRegistry([]),
+  );
+  const artifact = {
+    id: "artifact-1",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    artifactType: "quiz",
+    status: "ready",
+    title: "Quiz",
+    promptText: null,
+    payloadJson: { kind: "quiz", items: [] },
+    storageBucket: null,
+    storageKey: null,
+    previewStorageKey: null,
+    previewMetadataJson: {},
+    errorCode: null,
+    errorMessage: null,
+    visibility: "workspace",
+    createdBy: "user-1",
+    completedAt: "2026-11-22T00:00:00.000Z",
+    createdAt: "2026-11-22T00:00:00.000Z",
+    updatedAt: "2026-11-22T00:00:00.000Z",
+  };
+  mocks.findArtifactRecord.mockResolvedValue(artifact);
+  const currentVersion = {
+    artifactId: "artifact-1",
+    artifactType: "quiz",
+    currentVersionNo: 1,
+    visibility: "workspace",
+    createdBy: "user-1",
+    storageBucket: null,
+    previewStorageKey: null,
+    versionId: "version-1",
+    versionNo: 1,
+    contentJson: { kind: "quiz", items: [] },
+    filesJson: null,
+  };
+  mocks.findCurrentReadyArtifactVersionRecord.mockResolvedValue(currentVersion);
+
+  const detail = await contentArtifactsService.getArtifact({
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    userId: "user-1",
+  });
+  assert.equal(detail.artifact.artifactVersionId, "version-1");
+  assert.deepEqual(detail.artifact.payloadJson, {
+    kind: "quiz",
+    items: [],
+    versionFiles: null,
+  });
+
+  mocks.listArtifactRecords.mockResolvedValue({
+    items: [artifact],
+    nextCursor: null,
+  });
+  mocks.listCurrentReadyArtifactVersionRecords.mockResolvedValue([currentVersion]);
+  const list = await contentArtifactsService.listArtifacts({
+    workspaceId: "workspace-1",
+    userId: "user-1",
+  });
+  assert.equal(list.items[0]?.artifactVersionId, "version-1");
+
+  // Still generating: no ready version yet, so none is named.
+  mocks.findArtifactRecord.mockResolvedValue({ ...artifact, status: "running" });
+  mocks.findCurrentReadyArtifactVersionRecord.mockResolvedValue(null);
+  const pending = await contentArtifactsService.getArtifact({
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    userId: "user-1",
+  });
+  assert.equal(pending.artifact.artifactVersionId, null);
+});
