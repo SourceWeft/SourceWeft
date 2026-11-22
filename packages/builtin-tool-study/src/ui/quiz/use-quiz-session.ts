@@ -142,6 +142,9 @@ export function useQuizSession({
     async (itemIds: readonly string[] = allIds) => {
       let attemptId: string | null = null;
       let ids = [...itemIds];
+      // The quiz still runs when the attempt cannot be opened on the server,
+      // but the person is told its answers are not being saved.
+      let saveFailed = false;
       finishing.current = false;
       if (interactive) {
         try {
@@ -154,7 +157,7 @@ export function useQuizSession({
           attemptId = attempt.id;
           if (attempt.itemIds.length > 0) ids = attempt.itemIds;
         } catch {
-          setSession((current) => ({ ...current, saveFailed: true }));
+          saveFailed = true;
         }
       }
       setSession({
@@ -163,7 +166,7 @@ export function useQuizSession({
         itemIds: ids,
         index: 0,
         answers: {},
-        saveFailed: false,
+        saveFailed,
       });
     },
     [artifactId, artifactVersionId, host, interactive, workspaceId, items],
