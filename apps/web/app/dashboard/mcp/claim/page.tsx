@@ -17,6 +17,7 @@ import {
   claimPageView,
   normalizeClaimIdentifier,
 } from "./_components/mcp-claim-view";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 type LoadFailure = "signedOut" | "notFound" | "loadFailed";
 
@@ -76,6 +77,7 @@ function ClaimPage() {
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <Button
             asChild
+            {...swipeBackProps}
             aria-label={t("back")}
             className="h-8 w-8 rounded-full p-0"
             size="icon-sm"

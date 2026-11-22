@@ -59,6 +59,7 @@ import {
 } from "../../../../lib/mcp-return-to";
 import { mcpDetailTools } from "../_components/mcp-detail-tools";
 import { McpOverviewAdmin } from "../_components/mcp-overview-admin";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 type MarketMcpDetail = Awaited<
   ReturnType<typeof contentClient.getWorkspaceMarketMcp>
@@ -365,6 +366,7 @@ export default function McpDetailPage() {
             <div className="flex min-w-0 items-center gap-3">
               <Button
                 asChild
+                {...swipeBackProps}
                 aria-label={t("detail.backAria")}
                 className="h-8 w-8 rounded-full p-0"
                 size="icon-sm"

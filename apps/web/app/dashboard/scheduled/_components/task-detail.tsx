@@ -20,6 +20,7 @@ import {
 } from "./task-status";
 import { ScheduledTaskDetailSkeleton } from "./scheduled-tasks-skeleton";
 import { useScheduleText } from "./use-schedule-text";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 export function TaskDetail({ taskId }: { taskId: string }) {
   const t = useTranslations("dashboardScheduled");
@@ -31,7 +32,13 @@ export function TaskDetail({ taskId }: { taskId: string }) {
   const actions = useTaskActions(workspaceId);
 
   const back = (
-    <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
+    <Button
+      {...swipeBackProps}
+      asChild
+      variant="ghost"
+      size="sm"
+      className="-ml-2 w-fit"
+    >
       <Link href="/dashboard/scheduled">
         <ArrowLeft className="size-4" />
         {t("detail.back")}

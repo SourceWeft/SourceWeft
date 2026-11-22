@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { afterEach, test, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -21,8 +21,13 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
 }));
 
+// next-themes 0.4 hands out a new `setTheme` every time the theme changes, so
+// the mock does too.
 vi.mock("next-themes", () => ({
-  useTheme: () => ({ theme: "system", setTheme: state.setTheme }),
+  useTheme: () => ({
+    theme: "system",
+    setTheme: (value: string) => state.setTheme(value),
+  }),
 }));
 
 vi.mock("../lib/auth-client", () => ({
@@ -47,12 +52,20 @@ vi.mock("../lib/sdk", () => ({
 import { UserSettingsSync } from "./providers";
 import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
+let rerender: () => void = () => {};
+
+function Rerenderable() {
+  const [, setCount] = useState(0);
+  rerender = () => setCount((count) => count + 1);
+  return createElement(UserSettingsSync);
+}
+
 async function render(locale: "en" | "zh-CN" | "zh-TW") {
   const { container } = await mountWithIntl(
     createElement(
       QueryClientProvider,
       { client: new QueryClient() },
-      createElement(UserSettingsSync),
+      createElement(Rerenderable),
     ),
     {
       locale,
@@ -143,4 +156,25 @@ test("signed-out visitors are left alone entirely", async () => {
   await flush();
   assert.equal(state.refresh.mock.calls.length, 0);
   assert.equal(state.setTheme.mock.calls.length, 0);
+});
+
+// Regression for the theme flash on the Me page (2026-11-22): picking a theme
+// calls `setTheme` right away and saves in the background. The new `setTheme`
+// re-ran the sync, which put the old saved theme back until the save finished.
+test("a re-render does not re-apply the saved theme over a newer pick", async () => {
+  clearCookieJar();
+  state.settings = {
+    preview: { gmail: false },
+    appearance: { theme: "light", language: "system" },
+  };
+  await render("en");
+  await flush();
+  assert.deepEqual(state.setTheme.mock.calls, [["light"]]);
+
+  // The person picks dark: next-themes re-renders with a new `setTheme`
+  // while the saved settings still say light.
+  await act(async () => rerender());
+  await flush();
+  assert.deepEqual(state.setTheme.mock.calls, [["light"]]);
+  assert.equal(state.refresh.mock.calls.length, 0);
 });

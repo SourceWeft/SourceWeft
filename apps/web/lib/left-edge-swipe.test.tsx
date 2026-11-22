@@ -4,7 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   completesEdgeSwipe,
+  findSwipeBack,
   startsEdgeSwipe,
+  SWIPE_BACK_ATTRIBUTE,
   useLeftEdgeSwipe,
 } from "./left-edge-swipe";
 
@@ -75,4 +77,26 @@ test("nothing happens while it is turned off", async () => {
   area.dispatchEvent(touch("touchstart", 5, 300));
   area.dispatchEvent(touch("touchmove", 90, 300));
   expect(onSwipe).not.toHaveBeenCalled();
+});
+
+function backButton(name: string, shown: boolean) {
+  const button = document.createElement("button");
+  button.setAttribute(SWIPE_BACK_ATTRIBUTE, "");
+  button.textContent = name;
+  // jsdom lays nothing out; a shown element has a box, a hidden one has none.
+  button.getClientRects = () => (shown ? [{}] : []) as unknown as DOMRectList;
+  return button;
+}
+
+test("the swipe presses the page's back button that is on screen", () => {
+  const page = document.createElement("div");
+  expect(findSwipeBack(page)).toBeNull();
+
+  // The desktop copy of the page is hidden on a phone; only the shown one counts.
+  page.append(backButton("phone", true), backButton("desktop", false));
+  expect(findSwipeBack(page)?.textContent).toBe("phone");
+
+  // A panel opened on top of the page brings its own back button, which wins.
+  page.append(backButton("panel", true));
+  expect(findSwipeBack(page)?.textContent).toBe("panel");
 });
