@@ -17,6 +17,7 @@ vi.mock("../web-provider", () => ({ createDefaultWebProvider: vi.fn() }));
 import { BillingAdmissionError } from "../../../shared/model-gateway/index";
 import type { RateLimitVerdict } from "../../../shared/rate-limit";
 import type { CacheEntry, JsonCache } from "../../../shared/redis-cache";
+import { findSourceRecordByExternalUri } from "../repository";
 import { discoverSources, isSourceDiscoveryAvailable } from "./service";
 
 const search = vi.fn();
@@ -121,6 +122,30 @@ test("a page already in the workspace is marked, not hidden", async () => {
   );
 
   assert.equal(result.candidates[0]?.existingSourceId, "source-9");
+});
+
+test("discovery marks an added youtube video as existing", async () => {
+  const mockedFind = findSourceRecordByExternalUri as ReturnType<typeof vi.fn>;
+  mockedFind.mockReset().mockResolvedValue({ id: "yt-source-1" });
+  searchReturns({
+    q1: [hit("https://www.youtube.com/watch?v=aaaaaaaaaaa")],
+    q2: [],
+  });
+
+  // No `findExistingSourceId` override: exercises the real default, which
+  // must route a youtube video candidate to sourceType "youtube".
+  const { findExistingSourceId: _unused, ...withoutOverride } = deps();
+
+  const result = ok(await discoverSources(input, withoutOverride));
+
+  assert.equal(
+    result.candidates[0]?.url,
+    "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+  );
+  assert.equal(result.candidates[0]?.existingSourceId, "yt-source-1");
+  const call = mockedFind.mock.calls.at(-1)?.[0];
+  assert.equal(call.sourceType, "youtube");
+  assert.equal(call.externalUri, "https://www.youtube.com/watch?v=aaaaaaaaaaa");
 });
 
 test("one failing search does not lose the others", async () => {

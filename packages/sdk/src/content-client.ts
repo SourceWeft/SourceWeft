@@ -20,6 +20,8 @@ import type {
   SourceDiscoveryAvailabilityResponse,
   SourceDiscoveryResponse,
   SourceGuideResponse,
+  YouTubeListingRequest,
+  YouTubeListingResponse,
 } from "@sourceweft/contracts/sources";
 import type { ResearchRun } from "@sourceweft/contracts/source-research";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
@@ -737,6 +739,14 @@ export class ContentClient {
     return this.http.post<SourceDiscoveryResponse>(
       `/v1/workspaces/${encode(workspaceId)}/source-discovery`,
       { topic },
+    );
+  }
+
+  /** Lists the videos of a YouTube playlist or channel link, for import. */
+  listYouTubeCollection(workspaceId: string, input: YouTubeListingRequest) {
+    return this.http.post<YouTubeListingResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/sources/youtube/listing`,
+      input,
     );
   }
 

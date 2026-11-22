@@ -13,6 +13,7 @@ import {
   updateNoteContentRequestSchema,
   retrySourceRequestSchema,
   updateSourceRequestSchema,
+  youTubeListingRequestSchema,
 } from "@sourceweft/contracts";
 import {
   getSourceGuide,
@@ -23,6 +24,8 @@ import {
   isSourceDiscoveryAvailable,
 } from "../../../modules/sources/discovery/service";
 import { discoveryRateLimitedError } from "./source-discovery-errors";
+import { listYouTubeCollection } from "../../../modules/sources/youtube/listing-service";
+import { requireContentWorkspace } from "../../../modules/workspace/guards";
 import { getNoteOrigin, updateNoteContent } from "../../../modules/notes";
 import { billingRuntime as billingService } from "../../../billing-host/bindings";
 import {
@@ -357,6 +360,35 @@ export function registerSourceRoutes(app: Hono) {
     }
     const { kind: _kind, ...response } = result;
     return ApiResponse.success(c, response);
+  });
+
+  app.post("/sources/youtube/listing", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = youTubeListingRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const workspace = await requireContentWorkspace({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    const result = await listYouTubeCollection({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: getSessionUserId(session),
+      url: parsed.data.url,
+    });
+
+    return ApiResponse.success(c, result);
   });
 
   app.get("/sources/:id/note", async (c) => {

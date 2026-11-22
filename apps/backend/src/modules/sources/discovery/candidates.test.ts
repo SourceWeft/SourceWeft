@@ -53,11 +53,9 @@ test("candidates are de-duplicated by normalized URL, keeping the first title", 
   );
 });
 
-test("YouTube and private hosts are left out", () => {
+test("private hosts are left out", () => {
   const candidates = buildCandidates({
     hits: [
-      { url: "https://www.youtube.com/watch?v=1" },
-      { url: "https://youtu.be/1" },
       { url: "http://127.0.0.1/x" },
       { url: "https://example.com/ok" },
     ],
@@ -66,6 +64,28 @@ test("YouTube and private hosts are left out", () => {
     candidates.map((item) => item.url),
     ["https://example.com/ok"],
   );
+});
+
+test("discovery keeps youtube video candidates and drops playlists", () => {
+  const candidates = buildCandidates({
+    hits: [
+      {
+        title: "A talk",
+        url: "https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLabc1234567890&index=2",
+      },
+      // Same video via the short host: de-duplicated against the first.
+      { url: "https://youtu.be/aaaaaaaaaaa" },
+      { url: "https://www.youtube.com/playlist?list=PLabc1234567890xyz" },
+      { url: "https://www.youtube.com/@somechannel" },
+      { url: "https://example.com/ok" },
+    ],
+  });
+  assert.deepEqual(
+    candidates.map((item) => item.url),
+    ["https://www.youtube.com/watch?v=aaaaaaaaaaa", "https://example.com/ok"],
+  );
+  assert.equal(candidates[0]?.title, "A talk");
+  assert.equal(candidates[0]?.domain, "youtube.com");
 });
 
 test("a missing title falls back to the domain and long text is cut", () => {

@@ -1,5 +1,9 @@
 import type { SourceDiscoveryCandidate } from "@sourceweft/contracts/sources";
 import { validatePublicHttpUrl } from "@sourceweft/builtin-document-parsers";
+import {
+  canonicalVideoUrl,
+  parseYouTubeUrl,
+} from "@sourceweft/builtin-document-parsers/youtube";
 
 /** Results asked of each search query, and the most candidates one discovery returns. */
 export const DISCOVERY_RESULTS_PER_QUERY = 5;
@@ -62,9 +66,12 @@ function cleanText(value: string | undefined, max: number) {
 }
 
 /**
- * Turns raw search hits into candidates: public pages only, YouTube left out
- * (it cannot be added as a web source), one entry per page, in the order the
- * searches returned them, capped.
+ * Turns raw search hits into candidates: public pages only, one entry per
+ * page, in the order the searches returned them, capped. A YouTube video
+ * link is kept with its canonical `watch?v=` URL (so it de-duplicates with
+ * every other link to the same video, and so importing it dedupes against an
+ * already-added source); a YouTube playlist, channel, or unrecognised
+ * YouTube link cannot become a source here and is left out.
  */
 export function buildCandidates(input: {
   hits: readonly RawSearchHit[];
@@ -75,10 +82,16 @@ export function buildCandidates(input: {
   const candidates: Array<Omit<SourceDiscoveryCandidate, "existingSourceId">> =
     [];
   for (const hit of input.hits) {
-    const url = normalizeCandidateUrl(hit.url);
-    if (!url || seen.has(url)) continue;
-    const { hostname } = new URL(url);
-    if (isYouTube(hostname)) continue;
+    const normalized = normalizeCandidateUrl(hit.url);
+    if (!normalized) continue;
+    const { hostname } = new URL(normalized);
+    let url = normalized;
+    if (isYouTube(hostname)) {
+      const target = parseYouTubeUrl(normalized);
+      if (!target || target.kind !== "video") continue;
+      url = canonicalVideoUrl(target.videoId);
+    }
+    if (seen.has(url)) continue;
     seen.add(url);
     candidates.push({
       url,

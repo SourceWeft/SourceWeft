@@ -491,6 +491,32 @@ export const YOUTUBE_SOURCE_ERROR_CODES = [
 export type YouTubeSourceErrorCode =
   (typeof YOUTUBE_SOURCE_ERROR_CODES)[number];
 
+/** A playlist or channel link to list the videos of, for import. */
+export const youTubeListingRequestSchema = z.object({
+  url: z.string().trim().min(1).max(4096),
+});
+
+export const youTubeListingVideoSchema = z.object({
+  videoId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  publishedAt: z.string().optional(),
+  thumbnailUrl: z.string().optional(),
+  /** The workspace already has this video as a `youtube` source. */
+  existingSourceId: z.string().nullable(),
+});
+
+export const youTubeListingResponseSchema = z.object({
+  kind: z.enum(["playlist", "channel"]),
+  title: z.string(),
+  channelTitle: z.string().optional(),
+  videos: z.array(youTubeListingVideoSchema),
+});
+
+export type YouTubeListingRequest = z.infer<typeof youTubeListingRequestSchema>;
+export type YouTubeListingVideo = z.infer<typeof youTubeListingVideoSchema>;
+export type YouTubeListingResponse = z.infer<typeof youTubeListingResponseSchema>;
+
 export const createUrlSourceRequestSchema = z.object({
   url: z.string().trim().min(1).max(4096),
   title: z.string().trim().min(1).max(200).optional(),
