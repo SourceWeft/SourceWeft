@@ -158,6 +158,11 @@ export async function runArtifactGenerationJob(input: {
       versionNo: job.versionNo,
       kind: job.artifactType,
       errorCode,
+      // What was written and dropped: tells a model shortfall from a
+      // validation loss without rerunning the job.
+      ...(isGroundedGenerationError(error) && Object.keys(error.details).length > 0
+        ? { details: error.details }
+        : {}),
       err: error,
     });
     if (isFirst) {

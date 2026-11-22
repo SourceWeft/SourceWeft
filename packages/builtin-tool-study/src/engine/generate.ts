@@ -319,8 +319,13 @@ export async function generateStudyContent(
     const kept = enforceMindmapLimits(root, requested, dropped);
     await progress({ stage: "verify", done: 1, total: 1 });
     // Node count is a ceiling, not a target: judge retention against what the
-    // model could have produced.
-    assertRetention({ kept, requested: Math.min(requested, generated) });
+    // model could have produced. A map with nothing readable has failed.
+    assertRetention({
+      kept,
+      requested: Math.max(1, Math.min(requested, generated)),
+      generated,
+      dropped,
+    });
     await progress({ stage: "finalize", done: 1, total: 1 });
     return finish({ kind, root: toMindmapNode(root) }, kept, []);
   }
@@ -330,6 +335,7 @@ export async function generateStudyContent(
     result.kind === "mindmap" ? [] : (result.items as Candidate[]),
   );
 
+  const generated = candidates.length;
   await progress({ stage: "verify", done: 0, total: candidates.length });
   const evidence = await anchorCandidates(candidates, deps.anchor, chunkByHandle);
   candidates = candidates.filter((item) => {
@@ -393,7 +399,7 @@ export async function generateStudyContent(
     await progress({ stage: "verify", done: kept.length, total: requested });
   }
 
-  assertRetention({ kept: kept.length, requested });
+  assertRetention({ kept: kept.length, requested, generated, dropped });
   await progress({ stage: "finalize", done: 1, total: 1 });
 
   const difficulties = kept.map((item) => item.difficulty);
