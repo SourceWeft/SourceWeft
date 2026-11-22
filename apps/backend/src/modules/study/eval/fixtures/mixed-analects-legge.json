@@ -1,0 +1,84 @@
+{
+  "id": "mixed-analects-legge",
+  "title": "論語 學而・為政 with Legge's translation (1861)",
+  "language": "mixed",
+  "category": "mixed",
+  "uiLocale": "zh-CN",
+  "licenses": [
+    "legge-analects"
+  ],
+  "chunks": [
+    {
+      "chunkNo": 0,
+      "headingPath": "學而第一 / Book I",
+      "text": "【第一章】【一節】子曰、 學而時習之、不亦說乎。【二節】有朋自遠方來、不亦樂乎。【三節】人不知而不慍、不亦君子乎。\n\n【第二章】【一節】有子曰、其爲人也孝弟、而好犯上者鮮矣、不好犯上、而好作亂者、未之有也。【二節】君子務本、本立、而道生、孝弟也者、其爲仁之本與。\n\n【第三章】子曰、巧言令色、鮮矣仁。\n\n【第四章】曾子曰、吾日三省吾身、爲人謀、而不忠乎、與朋友交、而不信乎、傳不習乎。\n\n【第五章】子曰、道千乘之國、敬事而信、節用而愛人、使民以時。\n\n【第六章】子曰、弟子、入則孝、出則弟、謹而信、凡愛眾、而親仁、行有餘力、則以學文。\n\n【第七章】子夏曰、賢賢易色、事父母、能竭其力、事君、能致其身、與朋友交、言而有信、雖曰未學、吾必謂之學矣。\n\n【第八章】【一節】子曰、君子不重、則不威、學則不固。【二節】主忠信。【三節】無友不如己者。【四節】過則勿憚改。\n\n【第九章】曾子曰、愼終追遠、民德歸厚矣。\n\n【第十章】【一節】子禽問於子貢曰、夫子至於是邦也、必聞其政、求之與、抑與之與。【二節】子貢曰、夫子溫、良、恭、儉、讓、以得之、夫子之求之也、其諸異乎人之求之與。\n\n【十一章】子曰、父在、觀其志、父沒、觀其行、三年無改於父之道、可謂孝矣。\n\n【十二章】【一節】有子曰、禮之用、和爲貴、先王之道、斯爲美、小大由之。【二節】有所不行、知和而和、不以禮節之、亦不可行也。\n\n【十三章】有子曰、信近於義、言可復也、恭近於禮、遠恥辱也、因不失其親、亦可宗也。\n\n【十四章】子曰、君子食無求飽、居無求安、敏於事、而愼於言、就有道、而正焉、可謂好學也已。",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 1,
+      "headingPath": "學而第一 / Book I",
+      "text": "【十五章】【一節】子貢曰貧、而無諂、富而無驕、何如。子曰、可也、未若貧而樂、富而好禮者也。【二節】子貢曰、詩云、如切如磋、如琢如磨、其斯之謂與。【三節】子曰、賜也、始可與言詩已矣、吿諸往而知來者。\n\n【十六章】子曰、不患人之不己知、患不知人也。",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 2,
+      "headingPath": "為政第二 / Book II",
+      "text": "【第一章】子曰、爲政以德、譬如北辰、居其所、而眾星共之。\n\n【第二章】子曰、詩三百、一言以蔽之、曰、思無邪。\n\n【第三章】【一節】子曰、道之以政、齊之以刑、民免而無恥。【二節】道之以德、齊之以禮、有恥且格。\n\n【第四章】【一節】子曰、吾十有五而志于學。【二節】三十而立。【三節】四十而不惑。【四節】五十而知天命。【五節】六十而耳順。【六節】七十而從心所欲、不踰矩。\n\n【第五章】【一節】孟懿子問孝、子曰、無違。【二節】樊遲御、子吿之曰、孟孫問孝於我、我對曰、無違。【三節】樊遲曰、何謂也、子曰、生事之以禮、死葬之以禮、祭之以禮。\n\n【第六章】孟武伯問孝、子曰、父母唯其疾之憂。\n\n【第七章】子游問孝、子曰、今之孝者、是謂能養、至於犬馬、皆能有養、不敬、何以別乎。\n\n【第八章】子夏問孝、子曰、色難、有事、弟子服其勞、有酒食、先生饌、曾是以爲孝乎。\n\n【第九章】子曰、吾與回言終日、不違、如愚。退而省其私、亦足以發、回也不愚。\n\n【第十章】【一節】子曰、視其所以。【二節】觀其所由。【三節】察其所安。【四節】人焉廋哉、人焉廋哉。\n\n【十一章】子曰、溫故而知新、可以爲師矣。\n\n【十二章】子曰、君子不器。\n\n【十三章】子貢問君子、子曰、先行其言、而後從之。\n\n【十四章】子曰、君子周而不比、小人比而不周。\n\n【十五章】子曰、學而不思則罔、思而不學則殆。\n\n【十六章】子曰、攻乎異端、斯害也已。\n\n【十七章】子曰、由、誨女知之乎、知之爲知之、不知爲不知、是知也。\n\n【十八章】【一節】子張學干祿。【一節】子曰、多聞闕疑、愼言其餘、則寡尤、多見闕殆、愼行其餘、則寡悔、言寡尤、行寡悔、祿在其中矣。",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 3,
+      "headingPath": "為政第二 / Book II",
+      "text": "【十九章】哀公問曰、何爲則民服。孔子對曰、擧直錯諸枉、則民服、擧枉錯諸直、則民不服。\n\n【二十章】季康子問使民敬忠以勸、如之何。子曰、臨之以莊、則敬、孝慈、則忠、擧善而教不能、則勸。\n\n【廿一章】【一節】或謂孔子曰、子奚不爲政。【二節】子曰、書云孝乎、惟孝友于兄弟、施於有政、是亦爲政、奚其爲爲政。\n\n【廿二章】子曰、人而無信、不知其可也、大車無輗、小車無軏、其何以行之哉。\n\n【廿三章】【一節】子張問十世、可知也。【二節】子曰、殷因於夏禮、所損益、可知也、周因於殷禮、所損益、可知也、其或繼周者、雖百世、可知也。\n\n【廿四章】【一節】子曰、非其鬼而祭之、諂也。【二節】見義不爲、無勇也。",
+      "language": "zh"
+    },
+    {
+      "chunkNo": 4,
+      "headingPath": "學而第一 / Book I",
+      "text": "Chapter I. 1. The Master said, \"Is it not pleasant to learn with a constant perseverance and application?\n\n2. \"Is it not delightful to have friends coming from distant quarters?\n\n3. \"Is he not a man of complete virtue, who feels no discomposure though men may take no note of him?\"\n\nChapter II. 1. The philosopher Yu said, \"They are few who, being filial and fraternal, are fond of offending against their superiors. There have been none, who, not liking to offend against their superiors, have been fond of stirring up confusion.\n\n2. \"The superior man bends his attention to what is radical.That being established, all practical courses naturally grow up. Filial piety and fraternal submission!—are they not the root of all benevolent actions?\"\n\nChapter III. The Master said, \"Fine words and an insinuating appearance are seldom associated with true virtue.\"\n\nChapter IV. The philosopher Tsang said, \"I daily examine myself on three points:—whether, in transacting business for others, I may have been not faithful;—whether, in intercourse with friends, I may have been not sincere;—whether I may have not mastered and practised the instructions of my teacher.\"\n\nChapter V. The Master said, To rule a country of a thousand chariots, there must be reverent attention to business, and sincerity; economy in expenditure, and love for men; and the employment of the people at the proper seasons.\"\n\nChapter VI. The Master said, \"A youth, when at home, should be filial, and, abroad, respectful to his elders. He should be earnest and truthful. He should overflow in love to all, and cultivate the friendship of the good. When he has time and opportunity, after the performance of these things, he should employ them in polite studies.\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 5,
+      "headingPath": "學而第一 / Book I",
+      "text": "Chapter VII. Tsze-hsia said, \"If a man withdraws his mind from the love of beauty, and applies it as sincerely to the love of the virtuous; if, in serving his parents, he can exert his utmost strength; if, in serving his prince, he can devote his life; if, in his intercourse with his friends, his words are sincere:—although men say that he has not learned, I will certainly say that he has.\"\n\nChapter VIII. 1. The Master said, \"If the scholar be not grave, he will not call forth any veneration, and his learning will not be solid.\n\n2. \"Hold faithfulness and sincerity as first principles.\n\n3. \"Have no friends not equal to yourself.\n\n4. \"When you have faults, do not fear to abandon them.\"\n\nChapter IX. The philosopher Tsang said, \"Let there be a careful attention to perform the funeral rites to parents, and let them be followed when long gone with the ceremonies of sacrifice;—then the virtue of the people will resume its proper excellence.\"\n\nChapter X. 1. Tsze-ch'in asked Tsze-kung, saying, \"When our master comes to any country, he does not fail to learn all about its government. Does he ask his information? or is it given to him?\"\n\n2. Tsze-kung said, \"Our master is benign, upright, courteous, temperate, and complaisant, and thus he gets his information. The master's mode of asking information!—is it not different from that of other men?\"\n\nChapter XI. The Master said, \"While a man's father is alive, look at the bent of his will; when his father is dead, look at his conduct. If for three years he does not alter from the way of his father, he may be called filial.\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 6,
+      "headingPath": "學而第一 / Book I",
+      "text": "Chapter XII. 1. The philosopher Yu said, \"In practising the rules of propriety, a natural ease is to be prized. In the ways prescribed by the ancient kings, this is the excellent quality, and in things small and great we follow them.\n\n2. \"Yet it is not to be observed in all cases. If one, knowing how such ease should be prized, manifests it, without regulating it by the rules of propriety, this likewise is not to be done.\"\n\nChapter XIII. The philosopher Yu said, \"When agreements are made according to what is right, what is spoken can be made good. When respect is shown according to what is proper, one keeps far from shame and disgrace. When the parties upon whom a man leans are proper persons to be intimate with, he can make them his guides and masters.\"\n\nChapter XIV. The Master said, \"He who aims to be a man of complete virtue in his food does not seek to gratify his appetite, nor in his dwelling place does he seek the appliances of ease; he is earnest in what he is doing, and careful in his speech; he frequents the company of men of principle that he may be rectified:—such a person may be said indeed to love to learn.\"\n\nChapter XV. 1. Tsze-kung said, \"What do you pronounce concerning the poor man who yet does not flatter, and the rich man who is not proud?\" The Master replied, \"They will do; but they are not equal to him, who, though poor, is yet cheerful, and to him, who, though rich, loves the rules of propriety.\"\n\n2. Tsze-kung replied, \"It is said in the Book of Poetry, 'As you cut and then file, as you carve and then polish.'—The meaning is the same, I apprehend, as that which you have just expressed.\"\n\n3. The Master said, \"With one like Ts'ze, I can begin to talk about the odes. I told him one point, and he knew its proper sequence.\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 7,
+      "headingPath": "學而第一 / Book I",
+      "text": "Chapter XVI. The Master said, \"I will not be afflicted at men's not knowing me; I will be afflicted that I do not know men.\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 8,
+      "headingPath": "為政第二 / Book II",
+      "text": "Chapter I. The Master said, \"He who exercises government by means of his virtue may be compared to the north polar star, which keeps its place and all the stars turn towards it.\"\n\nChapter II. The Master said, \"In the Book of Poetry are three hundred pieces, but the design of them all may be embraced in one sentence—'Having no depraved thoughts.'\"\n\nChapter III. 1. The Master said, \"If the people be led by laws, and uniformity sought to be given them by punishments, they will try to avoid the punishment, but have no sense of shame.\n\n2. \"If they be led by virtue, and uniformity sought to be given them by the rules of propriety, they will have the sense of shame, and moreover will become good.\"\n\nChapter IV. 1. The Master said, \"At fifteen, I had my mind bent on learning.\n\n2. \"At thirty, I stood firm.\n\n3. \"At forty, I had no doubts.\n\n4. \"At fifty, I knew the decrees of Heaven.\n\n5. \"At sixty, my ear was an obedient organ for the reception of truth.\n\n6. \"At seventy, I could follow what my heart desired, without transgressing what was right.\"\n\nChapter V. 1. Mang I asked what filial piety was. The Master said, \"It is not being disobedient.\"\n\n2. Soon after, as Fan Ch'ih was driving him, the Master told him, saying, \"Mang-sun asked me what filial piety was, and I answered him,—'not being disobedient.'\"\n\n3. Fan Ch'ih said, \"What did you mean?\" The Master replied, \"That parents, when alive, be served according to propriety; that, when dead, they should be buried according to propriety; and that they should be sacrificed to according to propriety.\"\n\nChapter VI. Mang Wu asked what filial piety was. The Master said, \"Parents are anxious lest their children should be sick.\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 9,
+      "headingPath": "為政第二 / Book II",
+      "text": "Chapter VII. Tsze-yu asked what filial piety was. The Master said, \"The filial piety of now-a-days means the support of one's parents. But dogs and horses likewise are able to do something in the way of support;—without reverence, what is there to distinguish the one support given from the other?\"\n\nChapter VIII. Tsze-hsia asked what filial piety was. The Master said, \"The difficulty is with the countenance. If, when their elders have any troublesome affairs, the young take the toil of them, and if, when the young have wine and food, they set them before their elders, is this to be considered filial piety?\"\n\nChapter IX. The Master said, \"I have talked with Hui for a whole day, and he has not made any objection to anything I said;—as if he were stupid. He has retired, and I have examined his conduct when away from me, and found him able to illustrate my teachings. Hui!—He is not stupid.\"\n\nChapter X. 1. The Master said, \"See what a man does.\n\n2. \"Mark his motives.\n\n3. \"Examine in what things he rests.\n\n4. \"How can a man conceal his character?\n\n5. How can a man conceal his character?\"\n\nChapter XI. The Master said, \"If a man keeps cherishing his old knowledge, so as continually to be acquiring new, he may be a teacher of others.\"\n\nChapter XII. The Master said, \"The accomplished scholar is not a utensil.\"\n\nChapter XIII. Tsze-kung asked what constituted the superior man. The Master said, \"He acts before he speaks, and afterwards speaks according to his actions.\"\n\nChapter XIV. The Master said, \"The superior man is catholic and no partisan. The mean man is partisan and not catholic.\"\n\nChapter XV. The Master said, \"Learning without thought is labour lost; thought without learning is perilous.\"\n\nChapter XVI. The Master said, \"The study of strange doctrines is injurious indeed!\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 10,
+      "headingPath": "為政第二 / Book II",
+      "text": "Chapter XVII. The Master said, \"Yu, shall I teach you what knowledge is? When you know a thing, to hold that you know it; and when you do not know a thing, to allow that you do not know it;—this is knowledge.\"\n\nChapter XVII. 1. Tsze-chang was learning with a view to official emolument.\n\n2. The Master said, \"Hear much and put aside the points of which you stand in doubt, while you speak cautiously at the same time of the others:—then you will afford few occasions for blame. See much and put aside the things which seem perilous, while you are cautious at the same time in carrying the others into practice:—then you will have few occasions for repentance. When one gives few occasions for blame in his words, and few occasions for repentance in his conduct, he is in the way to get emolument.\"\n\nChapter XIX. The Duke Ai asked, saying, \"What should be done in order to secure the submission of the people?\" Confucius replied, \"Advance the upright and set aside the crooked, then the people will submit. Advance the crooked and set aside the upright, then the people will not submit.\"\n\nChapter XX. Chi K'ang asked how to cause the people to reverence their ruler, to be faithful to him, and to go on to nerve themselves to virtue. The Master said, \"Let him preside over them with gravity;—then they will reverence him. Let him be filial and kind to all;—then they will be faithful to him. Let him advance the good and teach the incompetent;—then they will eagerly seek to be virtuous.\"\n\nChapter XXI. 1. Some one addressed Confucius, saying, \"Sir, why are you not engaged in the government?\"",
+      "language": "en"
+    },
+    {
+      "chunkNo": 11,
+      "headingPath": "為政第二 / Book II",
+      "text": "2. The Master said, \"What does the Shu-ching say of filial piety?—'You are filial, you discharge your brotherly duties. These qualities are displayed in government.' This then also constitutes the exercise of government. Why must there be that—making one be in the government?\"\n\nChapter XXII. The Master said, \"I do not know how a man without truthfulness is to get on. How can a large carriage be made to go without the cross-bar for yoking the oxen to, or a small carriage without the arrangement for yoking the horses?\"\n\nChapter XXIII. 1. Tsze-chang asked whether the affairs of ten ages after could be known.\n\n2. Confucius said, \"The Yin dynasty followed the regulations of the Hsia: wherein it took from or added to them may be known. The Chau dynasty has followed the regulations of Yin: wherein it took from or added to them may be known. Some other may follow the Chau, but though it should be at the distance of a hundred ages, its affairs may be known.\"\n\nChapter XXIV. 1. The Master said, \"For a man to sacrifice to a spirit which does not belong to him is flattery.\n\n2. \"To see what is right and not to do it is want of courage.\"",
+      "language": "en"
+    }
+  ]
+}

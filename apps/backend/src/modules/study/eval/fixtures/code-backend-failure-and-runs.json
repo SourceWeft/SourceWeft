@@ -1,0 +1,66 @@
+{
+  "id": "code-backend-failure-and-runs",
+  "title": "SourceWeft model failure semantics and stream run lifecycle",
+  "language": "en",
+  "category": "code",
+  "licenses": [
+    "sourceweft-repo-docs"
+  ],
+  "chunks": [
+    {
+      "chunkNo": 0,
+      "headingPath": "Model catalog, retrieval and request failures > Model readiness errors",
+      "text": "A GLOBAL request with no eligible ready route target fails with gateway code\n`CONFIGURATION`, not `AUTH`. The API, stream and durable preparation paths map\nit to `MODEL_CONFIGURATION_ERROR` (503) with a safe message asking the operator\nto check Provider and route configuration. This error is not retryable and does\nnot activate or select another undeclared Provider. Existing authentication\nerrors, including upstream 401/403 and missing BYOK credentials, retain their\nauthentication classification."
+    },
+    {
+      "chunkNo": 1,
+      "headingPath": "Model catalog, retrieval and request failures > Catalog publication",
+      "text": "When the normalized registry is needed, LiteLLM and models.dev are both required\nsources. Their existing precedence is retained: LiteLLM, then models.dev, then\nrepository/operator overrides. HTTP errors, JSON failures and invalid entry\nobjects reject the refresh. A valid empty object remains a successful empty\nsource. Overrides are prepared before publication too; an invalid configured\noverride file cannot replace a prior snapshot with an empty override map.\n\nAll registry indexes are replaced together after preparation succeeds. A failed\nrefresh keeps the last complete in-memory snapshot; an initial failure leaves\nthe registry unready. Periodic refresh starts doing network work only after a\ncaller has needed and successfully loaded the registry.\n\nConfiguration sync loads only the catalogs it needs. Disabled or credential-\nincomplete global Providers do not trigger discovery. Static configurations with\nexplicit manual prices and disabled discovery need no remote registry. A\nself-describing OpenRouter catalog with inline prices can use its own data;\ndynamic models needing automatic pricing require the registry to load before\ndatabase activation, just as static automatic prices do.\n\nFailure of a required registry or Provider catalog aborts configuration sync\nbefore database changes, preserving the previous active version and its routes.\nA valid empty Provider catalog retires its old dynamic entries, subject to\nembedding identity protection for existing vectors."
+    },
+    {
+      "chunkNo": 2,
+      "headingPath": "Model catalog, retrieval and request failures > Catalog publication",
+      "text": "Background price updates use the same configuration lock order as config sync.\nThey verify the active version and reread the profile under a row lock before\nmerging their owned fields. An old task cannot overwrite a new embedding\ndefinition or a newly pinned manual price. Catalog network calls stay outside\nthese short database transactions."
+    },
+    {
+      "chunkNo": 3,
+      "headingPath": "Model catalog, retrieval and request failures > Retrieval failures",
+      "text": "The backend BM25 repository propagates SQL errors. A successful search with no\nmatches still returns an empty result. The standard application flow fails when\nBM25 fails, including the anchor-source branch.\n\nAn internal caller can explicitly allow a hybrid search to continue using its\nvector channel:\n\n```ts\nrunRetrieval(\n  {\n    ...input,\n    tuning: { ...input.tuning, bm25FailurePolicy: \"allow_vector\" },\n  },\n  dependencies,\n);\n```\n\nThe default policy is `\"fail\"`. A `bm25_only` strategy always fails if BM25 fails,\nbecause it has no other search channel. An allowed hybrid degradation is returned\nin `result.degradations` and recorded in the existing retrieval audit metadata,\nwith distinct main/anchor stages. This change adds no deployment environment\nvariable or automatic Provider/data-source selection."
+    },
+    {
+      "chunkNo": 4,
+      "headingPath": "Model catalog, retrieval and request failures > Model request limits",
+      "text": "Effective options use request values first, then the selected Provider's values,\nthen gateway defaults. `maxRetries: 0` is preserved. Each target attempt gets a\nfresh timeout budget, combined with caller cancellation. All retries for that\nattempt share its timeout; moving to a declared next target starts that target's\nbudget. Cancellation stops retries and Provider failover.\n\nChat, embedding, rerank, image, ASR and TTS requests now honor their declared\noptions. Raw transports previously ignored `maxRetries`; they now execute the\nconfigured retry budget using the SDK's existing status/quota error rules.\nInjected rerank implementations are guarded for timeout/cancellation without\nadding a second retry layer. Network policy refusals are never retryable.\nA `json_schema` answer the SDK received but could not parse (invalid JSON, or\ncut off at the token limit or by a content filter) is not requested again by\nthe transport retry: it surfaces once as a retryable `STRUCTURED_OUTPUT` error\nwith its finish reason, and the caller's own retry decides.\n\nLangChain calls obtain fresh execution options per invocation, including\n`invoke`, `stream`, SDK `batch`, and the supported `withConfig`, `bindTools` and\n`withStructuredOutput` combinations. SDK configuration/callback merging is\npreserved; configuring a model no longer bypasses the gateway's timeout guard.\nThe existing invoke streaming behavior is retained."
+    },
+    {
+      "chunkNo": 5,
+      "headingPath": "Model catalog, retrieval and request failures > Model request limits",
+      "text": "Stream closure, partial-usage settlement, tool-message grouping and durable\nterminal events now follow [stream and run lifecycle](stream-run-lifecycle.md).\nUnauthenticated System OpenAI-compatible transport is supported through the\nexplicit configuration described in [local LLM networking](llm-network.md).\nAnyDoc is the sole parser for its supported document formats. Retired\n`DOCUMENT_PARSE_PROVIDER` selections (including `langchain` and `pdf2markdown`)\nand non-explicit `DOCUMENT_PARSE_STRATEGY` values fail startup with migration\ninstructions. Remove these environment variables; an existing `anydoc`/`explicit`\ndeclaration is accepted without exposing a runtime selector. PDF2Markdown remains\navailable only for explicitly enabled OCR and existing pending-task resumes.\nOnly native `needsOcr` enters that OCR branch. Other failures propagate without\nswitching parsers or providers."
+    },
+    {
+      "chunkNo": 6,
+      "headingPath": "Model catalog, retrieval and request failures > Optional default skills",
+      "text": "Enabling a skill by default expands the tools available to ordinary chat. It\ndoes not require every optional model or sandbox service to be configured. A\nmissing optional image model is recorded as `image_model_unavailable` and the\nturn's effective image-tool selection is disabled before binding. A tool that\ndeclares `requirements.sandbox:true` is unavailable when that turn has no\nsandbox; the host records the reason and consistently disables its selection,\npermission and binding. Required-tool validation remains strict for available\ntools.\n\nAn explicitly invoked skill, including an `invokedSkillIds` chip for a default\nskill, keeps its declared output requirement. `/image` requires an image model;\n`/ppt` requires its sandbox tools and fails with `SANDBOX_RUNTIME_UNAVAILABLE`\nwhen they are unavailable. Image generation used as a PPT helper stays optional.\nDatabase or configuration-read errors still propagate; no model is substituted."
+    },
+    {
+      "chunkNo": 7,
+      "headingPath": "Stream and run lifecycle > Model streams",
+      "text": "Every opened model iterator has one owner. Reads, cancellation and close run in\nthe same response-capture context. Early closure aborts pending SDK reads before\nawaiting `return`, including LangChain's prefetch, and closes at most once.\nAn already-opened billed stream also closes when its consumer returns before the\nfirst read. A lazy stream that never opened a resource does not start a model\nrequest merely to close it.\n\nEach model attempt emits one terminal observation. Errors and cancellation can\ncarry the usage and Provider identity received before termination, including\nmetadata arriving during close. The backend records these on an `error`\ngeneration and settles the observed usage once after closing the iterator.\nUnknown usage/cost stays unknown; explicit zero remains distinct. Existing\ncovered/billed policies and response-header/Provider-field redaction are retained.\n\nClose errors do not prevent settlement attempts. When an upstream or consumer\nerror already exists, a later close/settlement error does not replace it. After\nany content reaches the consumer, another Provider does not replay the response."
+    },
+    {
+      "chunkNo": 8,
+      "headingPath": "Stream and run lifecycle > Context compression",
+      "text": "Window truncation keeps complete assistant tool calls with their matching\nresults, including multiple tools in one assistant message. Old orphaned,\nduplicated or incomplete tool groups are removed together. The current user turn\nand system messages are retained; invalid tool history in the current turn fails\nexplicitly rather than sending an invalid sequence to the model.\n\nThe existing Deep Agents summarizer is retained. Its public keep window is\nexpanded to protect the current turn/system content, and a second full-history\nsummary request after context overflow is refused with the original error.\nIf protected content alone is too large, it remains intact and the overflow is\nreported. Checkpoint replay does not repeatedly summarize the prior summary.\nThe dependency can append a history offload before attempting its refused second\nsummary; no second model call or new summary checkpoint is produced by that path."
+    },
+    {
+      "chunkNo": 9,
+      "headingPath": "Stream and run lifecycle > Durable runs",
+      "text": "Stale recovery rechecks status and heartbeat while holding the existing run row\nlock. A new heartbeat or terminal winner prevents stale recovery from finishing\nthe run, sending terminal SSE, or releasing an active lease.\n\nFailed, cancelled and completed outcomes are committed before terminal SSE is\nsent. CAS losers use the persisted outcome instead of constructing a successful\nterminal result. If Redis notification fails after commit, attach reconstructs\nthe terminal events from the database, including an explicit `CHAT_RUN_STALE`\nerror and finish for an expired worker. The scheduler runs the same recovery\nover silent active runs each tick, so an expired worker's run is failed even\nwhen no client reads the thread. A worker stopped with SIGTERM/SIGINT lets its\nin-flight turns end on their own for 5s, then fails the rest itself with\n`CHAT_RUN_WORKER_SHUTDOWN`, keeping the output they had streamed.\n\nPreparation can fail before any message is inserted. Terminal updates only bind\nmessage IDs that already exist in the same thread and scope; a deterministic ID\nis not evidence that its message was persisted. The processor boundary uses the\nsame commit-before-notification path and preserves the original business error\nif terminal persistence or notification also fails.\n\nThe existing active-run endpoint includes a `latestFailure` summary when the\nlatest run failed without a persisted assistant message. It rechecks workspace\nmembership and thread visibility, sanitizes the message for clients, and never\nloads the run's request or snapshot for this summary. A newer active or terminal\nrun suppresses an older failure. The chat page displays this summary after live\nupdates and reloads without manufacturing message records."
+    },
+    {
+      "chunkNo": 10,
+      "headingPath": "Stream and run lifecycle > Durable runs",
+      "text": "A worker stops when its run is failed, completed, cancelled or no longer owned.\nProgress/heartbeat returning no row is not treated as permission to continue.\nThe original durable error is carried through the abort signal; genuine user\ncancellation retains its existing 499 behavior. No new run-state table, schema\nmigration or state-machine framework was added."
+    }
+  ]
+}
