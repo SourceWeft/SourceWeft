@@ -20,10 +20,21 @@ export { STUDY_SIZE_COUNTS } from "@sourceweft/contracts/study";
 /** Items are asked for at this multiple of the request, then cut back. */
 export const OVERGENERATE_FACTOR = 1.3;
 
-/** Output token ceiling of one generation call for `items` requested items. */
+/** The smallest output ceiling of a generation call. */
+export const GENERATION_MIN_MAX_TOKENS = 2_000;
+
+/**
+ * Output token ceiling of one generation call for `items` requested items.
+ * Models write past "at most N" mind map nodes, and a cut-off answer is
+ * unreadable JSON, so small requests still get room for a whole answer. Only
+ * the tokens written are paid for.
+ */
 export function generationMaxTokens(kind: StudyKind, items: number): number {
-  const perItem = kind === "flashcards" ? 230 : kind === "quiz" ? 320 : 80;
-  return Math.min(8_000, 400 + perItem * items);
+  const perItem = kind === "flashcards" ? 230 : kind === "quiz" ? 320 : 120;
+  return Math.min(
+    8_000,
+    Math.max(GENERATION_MIN_MAX_TOKENS, 400 + perItem * items),
+  );
 }
 
 /** A generation keeps at least this share of the requested items... */

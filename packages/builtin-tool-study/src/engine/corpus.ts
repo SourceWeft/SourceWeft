@@ -15,8 +15,9 @@ export {
 
 /**
  * Splits `total` items over groups in proportion to their tokens (largest
- * remainder), with at least one and at most half of the total per group so no
- * group takes over. With more groups than items every group gets one.
+ * remainder), with at least one per group and, when there are several, at most
+ * half of the total per group so no group takes over. A single group gets the
+ * whole total. With more groups than items every group gets one.
  */
 export function allocateGroupQuotas(
   total: number,
@@ -26,7 +27,7 @@ export function allocateGroupQuotas(
   if (count === 0) return [];
   if (count >= total) return groupTokens.map(() => 1);
 
-  const ceiling = Math.max(1, Math.ceil(total / 2));
+  const ceiling = count === 1 ? total : Math.max(1, Math.ceil(total / 2));
   const sum = groupTokens.reduce((a, b) => a + b, 0);
   const exact = groupTokens.map((tokens) =>
     sum === 0 ? total / count : (total * tokens) / sum,

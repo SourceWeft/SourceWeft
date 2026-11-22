@@ -15,6 +15,7 @@ import {
   factAnchor,
   factChunks,
   memoryCheckpoint,
+  phrase,
   promptCount,
   promptHandles,
   questionsFor,
@@ -419,6 +420,103 @@ test("too little surviving validation fails the whole generation", async () => {
     (error: unknown) =>
       error instanceof StudyGenerationError &&
       error.code === "GENERATION_QUALITY_TOO_LOW",
+  );
+});
+
+test("a single pass asks the model for the whole over-generated request", async () => {
+  for (const [kind, count] of [
+    ["flashcards", 20],
+    ["quiz", 10],
+    ["mindmap", 40],
+  ] as const) {
+    const { model, calls } = stubModel((call) =>
+      isVerify(call)
+        ? kind === "quiz"
+          ? AGREE_FIRST_OPTION
+          : { supported: true }
+        : kind === "flashcards"
+          ? cardsFor(call.user)
+          : kind === "quiz"
+            ? questionsFor(call.user)
+            : {
+                rootLabel: "Topics",
+                rootSummary: null,
+                // Five branches of five leaves, distinct labels.
+                nodes: promptHandles(call.user).map((handle, index, all) => ({
+                  key: handle,
+                  parentKey: index % 6 === 0 ? null : all[index - (index % 6)]!,
+                  label: phrase(index + 1),
+                  summary: `FACT-${handle.slice(1)} detail`,
+                  refs: [handle],
+                })),
+              },
+    );
+    await generateStudyContent(
+      { model, anchor: factAnchor() },
+      baseInput(kind, factChunks(30), {
+        options: { count, difficulty: "mixed", language: "en" },
+      }),
+    );
+    const generations = calls.filter(isGenerate);
+    assert.equal(generations.length, 1, kind);
+    assert.equal(
+      promptCount(generations[0]!.user),
+      kind === "mindmap" ? count : Math.ceil(count * OVERGENERATE_FACTOR),
+      kind,
+    );
+  }
+});
+
+test("a failed generation says how many items were written and why the rest were dropped", async () => {
+  // Twenty requested: thirteen cards written, every second one unanchored.
+  const model = stubModel((call) => {
+    if (isVerify(call)) return { supported: true };
+    const output = cardsFor(call.user);
+    output.cards = output.cards.map((card, index) =>
+      index % 2 === 0 ? card : { ...card, back: "Unsupported claim." },
+    );
+    return output;
+  });
+  await assert.rejects(
+    generateStudyContent(
+      { model: model.model, anchor: factAnchor() },
+      baseInput("flashcards", factChunks(13), {
+        options: { count: 20, difficulty: "mixed", language: "en" },
+      }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof StudyGenerationError);
+      assert.equal(error.code, "GENERATION_QUALITY_TOO_LOW");
+      assert.deepEqual(error.details, {
+        kept: 7,
+        requested: 20,
+        minimum: 12,
+        generated: 13,
+        dropped: { unanchored: 6 },
+      });
+      return true;
+    },
+  );
+});
+
+test("a mind map whose every group answer is unreadable fails instead of publishing an empty map", async () => {
+  const { model } = stubModel(() => ({ rootLabel: "Cut off", nodes: "not a list" }));
+  await assert.rejects(
+    generateStudyContent(
+      { model, anchor: factAnchor() },
+      baseInput("mindmap", factChunks(12, { tokens: 5_000 }), {
+        options: { count: 40, difficulty: "mixed", language: "en" },
+      }),
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof StudyGenerationError);
+      assert.equal(error.code, "GENERATION_QUALITY_TOO_LOW");
+      assert.equal(error.details.kept, 0);
+      assert.equal(error.details.generated, 0);
+      const dropped = error.details.dropped as Record<string, number>;
+      assert.ok((dropped.malformedOutput ?? 0) > 1);
+      return true;
+    },
   );
 });
 
