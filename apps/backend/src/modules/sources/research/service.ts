@@ -41,9 +41,7 @@ export type CreateResearchInput = {
 export type CreateResearchDeps = {
   billing: ContentBillingPort;
   /** Overridable for tests; production enqueues the real worker job. */
-  enqueue?: (
-    payload: ResearchJobPayload,
-  ) => Promise<{ created: boolean }>;
+  enqueue?: (payload: ResearchJobPayload) => Promise<{ created: boolean }>;
   /** The payer's credit gate; defaults to the deployment billing admission. */
   hasCredits?: () => Promise<boolean>;
   /** The deployment web provider; defaults to the capability-supplied one. */
@@ -108,6 +106,17 @@ export async function createResearch(
     });
   const countRuns = deps.countRuns ?? countResearchRuns;
 
+  // Credits are checked before the transaction so the billing lookup never
+  // takes a second pooled connection while the advisory lock is held. It is
+  // still the first check, so the 402 keeps precedence over the limits.
+  if (!(await hasCredits())) {
+    throw new ContentError(
+      402,
+      "INSUFFICIENT_CREDITS",
+      "There are not enough credits to run deep research.",
+    );
+  }
+
   const outcome = await db.transaction(
     async (tx): Promise<CreateResearchResult> => {
       await tx.execute(
@@ -123,7 +132,10 @@ export async function createResearch(
         },
         // Count on the lock-holding connection so the limit sees everything
         // committed before this lock was granted.
-        { countRuns: (filter) => countRuns(filter, tx), hasCredits },
+        {
+          countRuns: (filter) => countRuns(filter, tx),
+          hasCredits: async () => true,
+        },
       );
       if (!admission.ok) {
         if (admission.code === "INSUFFICIENT_CREDITS") {
@@ -210,7 +222,9 @@ export type GetResearchInput = {
  * the run is looked up scoped to that workspace, so a run in another workspace
  * is indistinguishable from one that does not exist: both are 404.
  */
-export async function getResearch(input: GetResearchInput): Promise<ResearchRun> {
+export async function getResearch(
+  input: GetResearchInput,
+): Promise<ResearchRun> {
   const workspace = await requireContentWorkspace(input);
   const row = await findRun({
     teamId: workspace.organizationId,
@@ -218,11 +232,7 @@ export async function getResearch(input: GetResearchInput): Promise<ResearchRun>
     id: input.id,
   });
   if (!row) {
-    throw new ContentError(
-      404,
-      "RESEARCH_NOT_FOUND",
-      "Research run not found",
-    );
+    throw new ContentError(404, "RESEARCH_NOT_FOUND", "Research run not found");
   }
   return toResearchRun(row);
 }

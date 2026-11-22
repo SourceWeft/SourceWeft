@@ -2,7 +2,7 @@ import type { GroundedAnchorPort } from "@sourceweft/contracts/grounded-generati
 import type { ResearchCitation } from "@sourceweft/contracts/source-research";
 import type { LedgerEntry } from "./ledger";
 
-const MARKER = /\[\[([^\]|]+)\|([^\]]*?)\]\]/g;
+const MARKER = /\[\[([^\]|]+)\|([\s\S]*?)\]\]/g;
 
 /** Lowercases, unifies full-width spaces and collapses whitespace; words are untouched. */
 export function normalizeForQuote(text: string): string {

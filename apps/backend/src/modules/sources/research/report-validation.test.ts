@@ -159,3 +159,36 @@ describe("verifyReport", () => {
     if (result.ok) expect(result.citations).toHaveLength(2);
   });
 });
+
+describe("verifyReport markers with a closing bracket in the quote", () => {
+  const ledger: LedgerEntry[] = addLedgerEntry(
+    [],
+    { url: "https://a.example/x", title: "T", points: ["p"], quotes: [] },
+    { maxPages: 30 },
+  );
+
+  test("an unknown id is still rejected when its quote contains ]", async () => {
+    const result = await verifyReport({
+      report: "Sales rose [[e99|sales rose 12% in Q3 [2024] overall]].",
+      ledger,
+      pageTexts: new Map(),
+      anchor: noEvidence,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.unknownEntryIds).toContain("e99");
+  });
+
+  test("a known id with ] in its quote is parsed, not left raw", async () => {
+    const result = await verifyReport({
+      report: "Seen [[e1|see note [3] here]] today.",
+      ledger,
+      pageTexts: new Map([["e1", "We say: see note [3] here, always."]]),
+      anchor: noEvidence,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.report).not.toContain("[[");
+      expect(result.citations).toHaveLength(1);
+    }
+  });
+});
