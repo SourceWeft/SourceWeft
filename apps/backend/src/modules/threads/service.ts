@@ -66,6 +66,8 @@ import { downloadChatImageObject } from "../sources/storage";
 import { durableChatRunService } from "./durable/service";
 import { seedThreadSourceSelection } from "./source-selection-service";
 import { findChatThreadRunByIdempotencyKey } from "./durable/repository";
+import { RUN_IDEMPOTENCY_CONSTRAINT } from "./durable/run-constants";
+import { isUniqueConstraintError } from "./durable/run-state";
 import { streamThreadRoom } from "./durable/room-service";
 import { readPresence } from "./durable/presence-store";
 import { typingRateLimiter } from "./durable/typing-rate-limit";
@@ -220,6 +222,10 @@ const DEFAULT_THREAD_SEARCH_LIMIT = 30;
 const SCHEDULED_TURN_START_KEYS = 5;
 const CHAT_RUN_START_FAILED_CODE = "CHAT_RUN_START_FAILED";
 
+/** What `getOrCreateRun` refuses with when the conversation already has an
+ * active run, including one inserted between its lookup and its insert. */
+const CHAT_RUN_ALREADY_ACTIVE_CODE = "CHAT_RUN_ALREADY_ACTIVE";
+
 /** Largest serialized `hostContext` a host may attach to a run, in bytes. */
 const HOST_CONTEXT_MAX_BYTES = 1024;
 
@@ -279,15 +285,49 @@ function assertHostContext(hostContext: StartHostTurnInput["hostContext"]) {
 }
 
 /**
+ * A run already recorded under a host turn's key, as that start's replay. It
+ * must be the same person's run in the same conversation, or the start is
+ * refused with 404. Null when the run never reached the queue: the caller
+ * starts the turn again under its next key.
+ */
+async function hostTurnReplay(
+  scope: { teamId: string; workspaceId: string },
+  input: StartHostTurnInput,
+  existingRun: ChatThreadRunRecord,
+): Promise<{ thread: ThreadRecord; run: ChatThreadRunRecord; created: false } | null> {
+  const existingThread = await findThreadRecord({
+    ...scope,
+    threadId: existingRun.threadId,
+  });
+  if (
+    existingRun.userId !== input.userId ||
+    existingRun.threadId !== input.threadId ||
+    !existingThread
+  ) {
+    throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
+  }
+  const neverStarted =
+    existingRun.status === "failed" &&
+    existingRun.errorCode === CHAT_RUN_START_FAILED_CODE;
+  return neverStarted
+    ? null
+    : { thread: existingThread, run: existingRun, created: false };
+}
+
+/**
  * Starts a host-owned turn: an ordinary durable chat run, as `userId`, in a
  * conversation of the host's origin. The run goes through the same queue,
  * worker and turn pipeline as a turn a person sends; it is marked
  * `unattended`, so it binds read-class tools only, plus whatever the origin's
  * provider adds (see `agent/origin-providers.ts`).
  *
- * Safe to call again with the same ids. Thread creation and run creation
- * are not one transaction: a crash in between leaves an empty conversation
- * that the next call picks up.
+ * Safe to call again with the same ids, also at the same time (a kick and
+ * the scheduler's tick starting one Router batch): a start whose run insert
+ * loses to another start of the same key returns that run, `created: false`.
+ * Thread creation and run creation are not one transaction: a crash in
+ * between leaves an empty conversation that the next call picks up, and two
+ * starts creating the same conversation share its one row (its id is the
+ * caller's, inserted with `on conflict do nothing`).
  */
 export async function startHostTurn(input: StartHostTurnInput): Promise<{
   thread: ThreadRecord;
@@ -335,23 +375,8 @@ export async function startHostTurn(input: StartHostTurnInput): Promise<{
       idempotencyKey = key;
       break;
     }
-    const existingThread = await findThreadRecord({
-      ...scope,
-      threadId: existingRun.threadId,
-    });
-    if (
-      existingRun.userId !== input.userId ||
-      existingRun.threadId !== input.threadId ||
-      !existingThread
-    ) {
-      throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
-    }
-    const neverStarted =
-      existingRun.status === "failed" &&
-      existingRun.errorCode === CHAT_RUN_START_FAILED_CODE;
-    if (!neverStarted) {
-      return { thread: existingThread, run: existingRun, created: false };
-    }
+    const replay = await hostTurnReplay(scope, input, existingRun);
+    if (replay) return replay;
   }
   if (!idempotencyKey) {
     throw new ContentError(
@@ -416,16 +441,36 @@ export async function startHostTurn(input: StartHostTurnInput): Promise<{
       ? { hostContext: { ...input.hostContext } }
       : {}),
   };
-  const { run, created } = await durableChatRunService.getOrCreateRun({
-    workspaceId: input.workspaceId,
-    threadId: thread.id,
-    userId: input.userId,
-    idempotencyKey,
-    mode: "send",
-    request,
-    jobPriority: input.jobPriority ?? SCHEDULED_TURN_JOB_PRIORITY,
-  });
-  return { thread, run, created };
+  try {
+    const { run, created } = await durableChatRunService.getOrCreateRun({
+      workspaceId: input.workspaceId,
+      threadId: thread.id,
+      userId: input.userId,
+      idempotencyKey,
+      mode: "send",
+      request,
+      jobPriority: input.jobPriority ?? SCHEDULED_TURN_JOB_PRIORITY,
+    });
+    return { thread, run, created };
+  } catch (error) {
+    // Another start of this same turn inserted its run after this one looked
+    // for it. Its insert surfaces here as the conversation's one-active-run
+    // conflict (a 409) or, in principle, the key's own unique index. Only a
+    // run actually recorded under this key makes it a replay; anything else
+    // (another key's run, any other failure) is thrown as it was.
+    const raced =
+      isUniqueConstraintError(error, RUN_IDEMPOTENCY_CONSTRAINT) ||
+      (error instanceof ContentError &&
+        error.code === CHAT_RUN_ALREADY_ACTIVE_CODE);
+    if (!raced) throw error;
+    const winner = await findChatThreadRunByIdempotencyKey({
+      ...scope,
+      idempotencyKey,
+    });
+    const replay = winner ? await hostTurnReplay(scope, input, winner) : null;
+    if (!replay) throw error;
+    return replay;
+  }
 }
 
 class ContentThreadService {

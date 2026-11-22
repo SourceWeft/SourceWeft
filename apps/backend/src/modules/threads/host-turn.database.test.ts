@@ -13,6 +13,25 @@ vi.mock("../content/queue", async (importOriginal) => ({
   enqueueThreadChatRunJob: enqueue,
 }));
 
+// The run insert is wrapped so a test can line two starts up at it: by
+// default it is the real insert, untouched.
+type CreateRun = typeof import("./durable/repository").createChatThreadRun;
+const createRunHook = vi.hoisted(() => ({
+  current: null as
+    | null
+    | ((real: CreateRun, input: Parameters<CreateRun>[0]) => ReturnType<CreateRun>),
+}));
+vi.mock("./durable/repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./durable/repository")>();
+  return {
+    ...actual,
+    createChatThreadRun: (input: Parameters<CreateRun>[0]) =>
+      createRunHook.current
+        ? createRunHook.current(actual.createChatThreadRun, input)
+        : actual.createChatThreadRun(input),
+  };
+});
+
 let isolated:
   Awaited<ReturnType<typeof createIsolatedTestDatabase>> | undefined;
 let schema: typeof import("@sourceweft/db");
@@ -54,6 +73,7 @@ beforeEach(async () => {
     { workspaceId, userId: steward, role: "editor", source: "guest" },
     { workspaceId, userId: colleague, role: "editor", source: "guest" },
   ]);
+  createRunHook.current = null;
   enqueue.mockReset();
   enqueue.mockImplementation(async (payload: { runId: string }) => ({
     id: `job-${payload.runId}`,
@@ -371,4 +391,161 @@ test("a member's turn into an ordinary conversation still starts", async () => {
     },
   });
   assert.equal(created, true);
+});
+
+// ── Two starts of the same turn at once (a kick racing the tick) ─────────
+
+/**
+ * Holds every run insert until `arrivals` starts have reached it, so each has
+ * already passed its own "is there a run for this key?" lookup. Then
+ * `release` decides what each one does, by arrival order.
+ */
+function lineUpInserts(
+  arrivals: number,
+  release: (
+    real: CreateRun,
+    input: Parameters<CreateRun>[0],
+    order: number,
+    earlier: Promise<unknown>[],
+  ) => ReturnType<CreateRun>,
+) {
+  const inserts: Promise<unknown>[] = [];
+  let arrived = 0;
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  createRunHook.current = async (real, input) => {
+    const order = arrived;
+    arrived += 1;
+    if (arrived === arrivals) open();
+    await gate;
+    const earlier = inserts.slice(0, order);
+    const insert = release(real, input, order, earlier);
+    inserts[order] = insert.catch(() => undefined);
+    return insert;
+  };
+}
+
+async function routerStart(threadId: string, idempotencyKey: string) {
+  return startHostTurn({
+    workspaceId,
+    userId: steward,
+    threadId,
+    idempotencyKey,
+    title: "ignored",
+    content: "batch",
+    origin: "assistant_router",
+    existingThread: true,
+  });
+}
+
+test("two starts of the same turn that both reach the insert: the loser's violation is a replay of the winner's run", async () => {
+  const router = await routerThread();
+  const idempotencyKey = key();
+  // What the second insert meets when the first lands between its lookup and
+  // its own insert: the conversation's one-active-run index, raised by
+  // PostgreSQL through drizzle. Reproduced for real by a second insert into
+  // the same conversation once the first has committed.
+  lineUpInserts(2, async (real, input, order, earlier) => {
+    if (order === 0) return real(input);
+    await Promise.all(earlier);
+    return real({ ...input, idempotencyKey: `${input.idempotencyKey}:loser` });
+  });
+
+  const [first, second] = await Promise.all([
+    routerStart(router.id, idempotencyKey),
+    routerStart(router.id, idempotencyKey),
+  ]);
+
+  assert.deepEqual(
+    [first.created, second.created].sort(),
+    [false, true],
+  );
+  assert.equal(first.run.id, second.run.id);
+  assert.equal(first.thread.id, router.id);
+  assert.equal(second.thread.id, router.id);
+  const all = await runs();
+  assert.equal(all.length, 1);
+  assert.equal(all[0]!.idempotencyKey, idempotencyKey);
+  assert.equal(enqueue.mock.calls.length, 1);
+});
+
+test("two starts of the same turn released at the same instant: both resolve to one run, whatever PostgreSQL raises", async () => {
+  for (let round = 0; round < 10; round += 1) {
+    const router = await routerThread();
+    const idempotencyKey = key();
+    lineUpInserts(2, (real, input) => real(input));
+    const [first, second] = await Promise.all([
+      routerStart(router.id, idempotencyKey),
+      routerStart(router.id, idempotencyKey),
+    ]);
+    assert.deepEqual([first.created, second.created].sort(), [false, true], `round ${round}`);
+    assert.equal(first.run.id, second.run.id, `round ${round}`);
+    const forKey = (await runs()).filter((run) => run.idempotencyKey === idempotencyKey);
+    assert.equal(forKey.length, 1, `round ${round}`);
+  }
+});
+
+test("a new conversation started twice at once: one conversation, one run", async () => {
+  const input = {
+    workspaceId,
+    userId: steward,
+    threadId: randomUUID(),
+    idempotencyKey: key(),
+    title: "Ticket",
+    content: "Work the ticket",
+    origin: "assistant_ticket" as const,
+    visibility: "workspace" as const,
+  };
+  lineUpInserts(2, async (real, run, order, earlier) => {
+    if (order === 0) return real(run);
+    await Promise.all(earlier);
+    return real({ ...run, idempotencyKey: `${run.idempotencyKey}:loser` });
+  });
+
+  const [first, second] = await Promise.all([startHostTurn(input), startHostTurn(input)]);
+
+  assert.deepEqual([first.created, second.created].sort(), [false, true]);
+  assert.equal(first.run.id, second.run.id);
+  const threads = await schema.db
+    .select()
+    .from(schema.threads)
+    .where(eq(schema.threads.workspaceId, workspaceId));
+  assert.deepEqual(threads.map((thread) => thread.id), [input.threadId]);
+  assert.equal((await runs()).length, 1);
+});
+
+test("a run of another key holding the conversation is still a 409, not a replay", async () => {
+  const router = await routerThread();
+  const active = await routerStart(router.id, key());
+  assert.equal(active.created, true);
+  // Both lookups pass; the other key's run is what the insert meets.
+  const idempotencyKey = key();
+  await assert.rejects(
+    routerStart(router.id, idempotencyKey),
+    (error: { statusCode?: number; code?: string }) =>
+      error.statusCode === 409 && error.code === "CHAT_RUN_ALREADY_ACTIVE",
+  );
+  // And when the insert itself is what meets it (the active run landed after
+  // the lookups): still a 409, never a raw database error.
+  await schema.db
+    .update(schema.chatThreadRuns)
+    .set({ status: "completed", finishedAt: new Date() })
+    .where(eq(schema.chatThreadRuns.id, active.run.id));
+  const other = key();
+  createRunHook.current = async (real, input) => {
+    createRunHook.current = null;
+    await real({ ...input, idempotencyKey: other });
+    return real(input);
+  };
+  await assert.rejects(
+    routerStart(router.id, idempotencyKey),
+    (error: { statusCode?: number; code?: string }) =>
+      error.statusCode === 409 && error.code === "CHAT_RUN_ALREADY_ACTIVE",
+  );
+  assert.equal(
+    (await runs()).filter((run) => run.idempotencyKey === idempotencyKey).length,
+    0,
+  );
 });
