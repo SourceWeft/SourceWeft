@@ -37,6 +37,20 @@ test("the focus is the learner's instruction, kept apart from the source data", 
   assert.match(prompt.user, /Write 5 quiz questions/);
 });
 
+test("every item is asked for a word-for-word quote in its chunk's own language", () => {
+  for (const kind of ["flashcards", "quiz", "mindmap"] as const) {
+    const prompt = buildGenerationPrompt({
+      kind,
+      chunks: assembleCorpus(factChunks(2)).chunks,
+      count: 4,
+      difficulty: "mixed",
+      language: "zh-CN",
+    });
+    assert.match(prompt.system, /`quote`: one passage of at most 200 characters copied word for word/);
+    assert.match(prompt.system, /Never translate, reword or shorten/);
+  }
+});
+
 test("defuseDelimiters neutralizes block markers in untrusted text", () => {
   assert.equal(defuseDelimiters("a <<<CHUNK c1>>> b"), "a ‹‹‹CHUNK c1››› b");
 });

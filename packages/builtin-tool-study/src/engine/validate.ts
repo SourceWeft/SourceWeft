@@ -10,9 +10,12 @@ import {
 } from "@sourceweft/contracts/study";
 import {
   anchorCandidates as anchorItems,
+  estimateTokens,
+  evidenceFrom,
+  locateQuote,
   matchesOutputLanguage,
 } from "@sourceweft/grounded-generation";
-import { LEAK_LENGTH_RATIO, QUOTE_MAX_CHARS } from "./constants";
+import { LEAK_LENGTH_RATIO, QUOTE_MAX_CHARS, QUOTE_MIN_TOKENS } from "./constants";
 import { normalizeForCompare } from "./dedupe";
 import {
   flashcardsOutputReader,
@@ -166,6 +169,7 @@ export function parseGroupOutput(input: {
         fingerprint,
         ...candidate,
         refs,
+        quote: nullIfBlank(card.quote),
       });
     }
     return { kind, items, dropped };
@@ -242,6 +246,7 @@ export function parseGroupOutput(input: {
         fingerprint,
         ...candidate,
         refs,
+        quote: nullIfBlank(question.quote),
       });
     }
     return { kind, items, dropped };
@@ -287,6 +292,7 @@ export function parseGroupOutput(input: {
         ? truncate(summary, STUDY_LIMITS.mindmapSummaryChars)
         : null,
       refs,
+      quote: nullIfBlank(node.quote),
     });
   }
   return {
@@ -371,17 +377,51 @@ export function quizRuleViolation(item: QuizCandidate): string | null {
 }
 
 /**
- * Anchors every candidate's supporting text in each chunk it cites, in one
- * batch. Returns the evidence per item id; an item absent from the map was
- * not supported by any of its chunks.
+ * The item's own quote as evidence, when a chunk it cites holds it word for
+ * word: the chunk's text at that span. Null for a missing, too short or
+ * reworded quote. A quote proves the passage exists in any language, so it
+ * carries items written in another language than their source.
  */
-export function anchorCandidates(
+export function quotedEvidence(
+  item: FlashcardCandidate | QuizCandidate | MindmapCandidate,
+  chunkByHandle: ReadonlyMap<string, CorpusChunk>,
+): StudyEvidence | null {
+  const quote = item.quote?.trim();
+  if (!quote || estimateTokens(quote) < QUOTE_MIN_TOKENS) return null;
+  for (const ref of item.refs) {
+    const chunk = chunkByHandle.get(ref);
+    if (!chunk) continue;
+    const span = locateQuote(chunk.text, quote);
+    if (!span) continue;
+    return evidenceFrom(
+      chunk,
+      { ...span, quote: chunk.text.slice(span.startChar, span.endChar), confidence: 1 },
+      QUOTE_MAX_CHARS,
+    );
+  }
+  return null;
+}
+
+/**
+ * Evidence for every candidate. An item whose quote a cited chunk holds word
+ * for word takes that passage; the rest have their supporting text anchored
+ * in each chunk they cite, in one batch. Returns the evidence per item id; an
+ * item absent from the map was not supported by any of its chunks.
+ */
+export async function anchorCandidates(
   items: readonly (FlashcardCandidate | QuizCandidate | MindmapCandidate)[],
   anchorPort: StudyAnchorPort,
   chunkByHandle: ReadonlyMap<string, CorpusChunk>,
 ): Promise<Map<string, StudyEvidence[]>> {
-  return anchorItems(
-    items.map((item) => ({
+  const evidence = new Map<string, StudyEvidence[]>();
+  const rest: (FlashcardCandidate | QuizCandidate | MindmapCandidate)[] = [];
+  for (const item of items) {
+    const quoted = quotedEvidence(item, chunkByHandle);
+    if (quoted) evidence.set(item.id, [quoted]);
+    else rest.push(item);
+  }
+  const anchored = await anchorItems(
+    rest.map((item) => ({
       id: item.id,
       refs: item.refs,
       text: supportText(item),
@@ -390,4 +430,6 @@ export function anchorCandidates(
     chunkByHandle,
     { evidencePerItem: STUDY_LIMITS.evidencePerItem, quoteChars: QUOTE_MAX_CHARS },
   );
+  for (const [id, list] of anchored) evidence.set(id, list);
+  return evidence;
 }
