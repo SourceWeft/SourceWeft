@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./providers": "./src/providers/index.ts",
     "./formats": "./src/anydoc-formats.ts",
-    "./file-types": "./src/source-file-types.ts"
+    "./file-types": "./src/source-file-types.ts",
+    "./youtube-url": "./src/youtube/url.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
