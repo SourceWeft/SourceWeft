@@ -171,6 +171,8 @@ export function fakeAdapter(
       actions: [],
       configSchema: { type: "object" },
     }),
+    exchangeOAuthCode: async () => ({ accessToken: "unused" }),
+    refreshOAuthToken: async () => ({ accessToken: "unused" }),
     async *discover() {},
     discoverPages,
     extract,

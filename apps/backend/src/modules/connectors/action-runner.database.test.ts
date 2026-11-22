@@ -95,6 +95,8 @@ function actionAdapter(connectorType: string, action: ConnectorActionSpec) {
       actions: [action],
       configSchema: { type: "object" },
     }),
+    exchangeOAuthCode: async () => ({ accessToken: "unused" }),
+    refreshOAuthToken: async () => ({ accessToken: "unused" }),
     async *discover() {},
     executeAction,
   } as unknown as ConnectorAdapter;
