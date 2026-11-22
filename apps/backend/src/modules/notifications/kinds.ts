@@ -42,6 +42,14 @@ function conversationPath({ payload }: PathInput) {
 }
 
 /**
+ * There is no deep link to the research card yet, so a research notification
+ * leads to the chat landing page, where the sources panel lives.
+ */
+function researchPath() {
+  return "/dashboard/chat";
+}
+
+/**
  * The notification kinds. Adding a kind is one entry here (plus a template
  * when it can be emailed); the table and the service stay unchanged.
  */
@@ -96,6 +104,18 @@ export const NOTIFICATION_KINDS = {
     defaultEmail: true,
     template: "notification.task-paused-repeated-failure",
     path: taskPath,
+  },
+  // A deep-research run in the sources panel finished or failed (a cancelled
+  // one sends nothing). In-app only; the payload is the topic, never the report.
+  research_ready: {
+    defaultEmail: false,
+    template: null,
+    path: researchPath,
+  },
+  research_failed: {
+    defaultEmail: false,
+    template: null,
+    path: researchPath,
   },
   // A table or study set generated in the background after the conversation
   // moved on could not be made (or remade): in-app only, leading to the

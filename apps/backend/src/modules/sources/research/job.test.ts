@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
+import { logger } from "../../../shared/logger";
 import type { AgentToolWebProvider } from "@sourceweft/contracts/agent-tools";
 import type {
   ResearchErrorCode,
@@ -7,7 +8,11 @@ import type {
 } from "@sourceweft/contracts/source-research";
 import type { ContentBillingPort } from "../../content/billing-port";
 import type { GuidePayer } from "../guide-payer";
-import { processResearchJob, type ResearchJobRepo } from "./job";
+import {
+  processResearchJob,
+  type ResearchJobDeps,
+  type ResearchJobRepo,
+} from "./job";
 import type { runResearch } from "./loop";
 import type { ResearchRunRow } from "./repository";
 
@@ -122,6 +127,17 @@ function makeLoop(impl: RunLoop) {
   return { fn, inputs };
 }
 
+/** Every run gets a stub notifier by default so no test reaches the real service. */
+function runJob(
+  input: Parameters<typeof processResearchJob>[0],
+  deps: ResearchJobDeps,
+) {
+  return processResearchJob(input, {
+    notify: async () => ({ id: "n", merged: false, emailed: false }),
+    ...deps,
+  });
+}
+
 const payload = {
   runId: "run-1",
   teamId: "team-1",
@@ -137,7 +153,7 @@ test("a ready result is written as a ready run", async () => {
     report: "# Report",
     citations: [],
   }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -151,7 +167,7 @@ test("a ready result is written as a ready run", async () => {
 test("a cancelled result is written as a cancelled run", async () => {
   const store = makeRepo(baseRow());
   const loop = makeLoop(async () => ({ status: "cancelled" }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -163,7 +179,7 @@ test("a cancelled result is written as a cancelled run", async () => {
 test("a failed result records its error code", async () => {
   const store = makeRepo(baseRow());
   const loop = makeLoop(async () => ({ status: "failed", errorCode: "NO_RESULTS" }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -176,7 +192,7 @@ test("a lost initiator fails ACCESS_LOST without entering the loop", async () =>
   const loop = makeLoop(async () => {
     throw new Error("the loop must not run");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => null, runLoop: loop.fn },
   );
@@ -191,7 +207,7 @@ test("a transient failure before the final attempt rethrows for retry", async ()
     throw new Error("model timed out");
   });
   await assert.rejects(
-    processResearchJob(
+    runJob(
       { ...payload, isFinalAttempt: false },
       { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
     ),
@@ -206,7 +222,7 @@ test("a transient failure on the final attempt settles MODEL_UNAVAILABLE", async
   const loop = makeLoop(async () => {
     throw new Error("model timed out");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: true },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -221,7 +237,7 @@ test("an already-terminal run is a no-op", async () => {
   const loop = makeLoop(async () => {
     throw new Error("the loop must not run");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -250,7 +266,7 @@ test("a run found still running is resumed from its row with the original clock"
     report: "# Resumed",
     citations: [],
   }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -261,4 +277,138 @@ test("a run found still running is resumed from its row with the original clock"
   assert.equal(seen?.resume?.progress.modelCalls, 6);
   assert.equal(seen?.startedAtMs, startedAt.getTime());
   assert.equal(store.get().status, "ready");
+});
+
+type Notified = Parameters<NonNullable<ResearchJobDeps["notify"]>>[0];
+
+function makeNotify(impl?: () => Promise<void>) {
+  const sent: Notified[] = [];
+  const fn: NonNullable<ResearchJobDeps["notify"]> = async (input) => {
+    sent.push(input);
+    await impl?.();
+    return { id: "n1", merged: false, emailed: false };
+  };
+  return { fn, sent };
+}
+
+test("a ready run notifies its owner with only the topic", async () => {
+  const store = makeRepo(baseRow());
+  const sink = makeNotify();
+  await runJob(
+    { ...payload, isFinalAttempt: false },
+    {
+      billing,
+      web,
+      repo: store.repo,
+      resolvePayer: async () => payer,
+      runLoop: makeLoop(async () => ({
+        status: "ready",
+        report: "# Secret report",
+        citations: [],
+      })).fn,
+      notify: sink.fn,
+    },
+  );
+  assert.equal(sink.sent.length, 1);
+  assert.equal(sink.sent[0]?.kind, "research_ready");
+  assert.equal(sink.sent[0]?.userId, "user-1");
+  assert.equal(sink.sent[0]?.teamId, "team-1");
+  assert.deepEqual(sink.sent[0]?.payload, { topic: "Solid-state batteries" });
+  assert.equal(sink.sent[0]?.email, false);
+});
+
+test("a failed run notifies research_failed", async () => {
+  const store = makeRepo(baseRow());
+  const sink = makeNotify();
+  await runJob(
+    { ...payload, isFinalAttempt: false },
+    {
+      billing,
+      web,
+      repo: store.repo,
+      resolvePayer: async () => payer,
+      runLoop: makeLoop(async () => ({
+        status: "failed",
+        errorCode: "NO_RESULTS",
+      })).fn,
+      notify: sink.fn,
+    },
+  );
+  assert.deepEqual(
+    sink.sent.map((n) => n.kind),
+    ["research_failed"],
+  );
+});
+
+test("a lost initiator also notifies research_failed", async () => {
+  const store = makeRepo(baseRow());
+  const sink = makeNotify();
+  await runJob(
+    { ...payload, isFinalAttempt: false },
+    {
+      billing,
+      web,
+      repo: store.repo,
+      resolvePayer: async () => null,
+      notify: sink.fn,
+    },
+  );
+  assert.deepEqual(
+    sink.sent.map((n) => n.kind),
+    ["research_failed"],
+  );
+});
+
+test("a cancelled run sends no notification", async () => {
+  const store = makeRepo(baseRow());
+  const sink = makeNotify();
+  await runJob(
+    { ...payload, isFinalAttempt: false },
+    {
+      billing,
+      web,
+      repo: store.repo,
+      resolvePayer: async () => payer,
+      runLoop: makeLoop(async () => ({ status: "cancelled" })).fn,
+      notify: sink.fn,
+    },
+  );
+  assert.equal(sink.sent.length, 0);
+});
+
+test("a repeat of a terminal run sends nothing", async () => {
+  const store = makeRepo(baseRow({ status: "ready", finishedAt: new Date() }));
+  const sink = makeNotify();
+  await runJob(
+    { ...payload, isFinalAttempt: false },
+    { billing, web, repo: store.repo, resolvePayer: async () => payer, notify: sink.fn },
+  );
+  assert.equal(sink.sent.length, 0);
+});
+
+test("a throwing notification service does not change the run's final status", async () => {
+  const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
+  const store = makeRepo(baseRow());
+  const sink = makeNotify(async () => {
+    throw new Error("notifications are down");
+  });
+  await runJob(
+    { ...payload, isFinalAttempt: false },
+    {
+      billing,
+      web,
+      repo: store.repo,
+      resolvePayer: async () => payer,
+      runLoop: makeLoop(async () => ({
+        status: "ready",
+        report: "# R",
+        citations: [],
+      })).fn,
+      notify: sink.fn,
+    },
+  );
+  assert.equal(store.get().status, "ready");
+  assert.equal(sink.sent.length, 1);
+  assert.equal(errorSpy.mock.calls.length, 1);
+  errorSpy.mockRestore();
 });

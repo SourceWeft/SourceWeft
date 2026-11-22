@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, test } from "vitest";
 import type { AgentToolWebProvider } from "@sourceweft/contracts/agent-tools";
 import type { ContentBillingPort } from "../../content/billing-port";
@@ -144,6 +145,43 @@ test("an initiator who is no longer a member fails ACCESS_LOST and never runs th
   assert.equal(found?.status, "failed");
   assert.equal(found?.errorCode, "ACCESS_LOST");
   assert.equal(loop.count(), 0);
+});
+
+test("a ready run writes one research_ready notification with only the topic; cancelled writes none", async () => {
+  const ready = await repo.createRun({
+    teamId,
+    workspaceId,
+    userId,
+    topic: "Grid topic",
+  });
+  await job.processResearchJob(jobInput(ready.id), {
+    billing,
+    web,
+    runLoop: makeLoop(async () => ({
+      status: "ready",
+      report: "# Hidden",
+      citations: [],
+    })).fn,
+  });
+  const cancelled = await repo.createRun({
+    teamId,
+    workspaceId,
+    userId,
+    topic: "Stopped topic",
+  });
+  await job.processResearchJob(jobInput(cancelled.id), {
+    billing,
+    web,
+    runLoop: makeLoop(async () => ({ status: "cancelled" })).fn,
+  });
+  const rows = await schema.db
+    .select()
+    .from(schema.notifications)
+    .where(eq(schema.notifications.userId, userId));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.kind, "research_ready");
+  assert.equal(rows[0]?.refId, ready.id);
+  assert.deepEqual(rows[0]?.payloadJson, { topic: "Grid topic" });
 });
 
 test("the same run executed twice does not change the first result", async () => {

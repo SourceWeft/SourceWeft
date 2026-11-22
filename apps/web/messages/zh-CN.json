@@ -7063,6 +7063,8 @@
       "task_tools_unavailable": "“{taskName}”无法运行：它使用的资料或 MCP 服务不可用。",
       "task_blocked_auth": "“{taskName}”无法运行：需要重新登录它使用的已连接账号。",
       "task_paused_repeated_failure": "“{taskName}”连续失败后已暂停。",
+      "research_ready": "你关于“{topic}”的研究已完成。",
+      "research_failed": "你关于“{topic}”的研究未能完成。",
       "artifact_generation_failed": "“{title}”生成失败。在资料中心的“制品”中打开它，可查看原因。",
       "artifact_regeneration_failed": "“{title}”重新生成失败，上一个版本仍保留。打开它可查看原因。",
       "unknown": "关于“{taskName}”的更新。"
