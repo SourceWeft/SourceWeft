@@ -5665,7 +5665,7 @@
         "unsupported_response_type": "不支援此登入方式。",
         "invalid_scope": "請求的存取權限無效。",
         "server_error": "登入伺服器發生錯誤。",
-        "temporarily_unavailable": "登入服務暫時不可用，請稍後重試。",
+        "temporarily_unavailable": "登入服務暫時無法使用，請稍後重試。",
         "invalid_token": "你的登入連結無效或已過期。",
         "account_not_linked": "此帳號尚未連結，請嘗試其他登入方式。",
         "email_not_verified": "登入前請先驗證你的電子郵件。",
@@ -5978,7 +5978,7 @@
         "INSUFFICIENT_CREDITS": "點數不足，無法產生這張表。",
         "INPUT_TOO_LARGE": "所選來源太大，一張表容納不下。請減少來源，或選擇較短的來源。",
         "NO_INDEXED_SOURCES": "所選來源都還沒有建立索引。",
-        "MODEL_UNAVAILABLE": "模型暫時不可用，請稍後再試。",
+        "MODEL_UNAVAILABLE": "模型暫時無法使用，請稍後再試。",
         "GENERATION_QUALITY_TOO_LOW": "太多答案無法在原文中核實，所以沒有產生這張表。",
         "SOURCE_NOT_READABLE": "有來源無法讀取。",
         "UNKNOWN": "無法產生這張表。"
@@ -6050,7 +6050,7 @@
       "reused": "這張表已經在產生中。",
       "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
       "errors": {
-        "TABLE_TOO_MANY_RUNNING": "同時產生的資料表和學習產物太多，請等其中一個完成。",
+        "TABLE_TOO_MANY_RUNNING": "同時產生的資料表和學習製品太多，請等其中一個完成。",
         "TABLE_NOT_READY": "只有已完成的資料表才能重新產生。",
         "TABLE_CONTENT_UNREADABLE": "無法讀取這張表，因此不能重新產生。",
         "TABLE_REGENERATION_IN_PROGRESS": "這張表已經在重新產生中。",
@@ -6070,14 +6070,14 @@
       "generating": "正在產生… 已完成 {completed} / {total} 步"
     },
     "error": {
-      "retry": "重試",
+      "generateAgain": "如需重試，請在來源中心選擇來源後重新產生。",
       "cannotDisplay": "無法顯示這份學習內容。",
       "code": {
         "INSUFFICIENT_CREDITS": "點數不足，無法產生。",
         "INPUT_TOO_LARGE": "所選來源太大，一次產生容納不下。請減少來源，或選擇較短的來源。",
         "NO_INDEXED_SOURCES": "所選來源都還沒有建立索引。",
-        "MODEL_UNAVAILABLE": "模型暫時不可用，請稍後再試。",
-        "GENERATION_QUALITY_TOO_LOW": "能在原文中核實的條目太少，所以沒有產生。",
+        "MODEL_UNAVAILABLE": "模型暫時無法使用，請稍後再試。",
+        "GENERATION_QUALITY_TOO_LOW": "能在原文中核實的項目太少，所以沒有產生。",
         "SOURCE_NOT_READABLE": "有來源無法讀取。",
         "UNKNOWN": "無法產生。"
       }
@@ -6123,7 +6123,7 @@
     },
     "quiz": {
       "loading": "正在載入測驗…",
-      "intro": "共 {total} 道題，提交後批改。",
+      "intro": "共 {total} 題，提交後批改。",
       "start": "開始",
       "saveFailed": "答案沒有儲存成功，已保留在本頁。",
       "questionOf": "第 {current} 題，共 {total} 題",
@@ -6166,7 +6166,7 @@
       "exportMarkdown": "匯出 Markdown",
       "exportJson": "匯出 JSON",
       "detailLabel": "所選要點",
-      "askPrompt": "根據我的來源，進一步講講「{label}」。",
+      "askPrompt": "根據我的來源，進一步說明「{label}」。",
       "askInChat": "在聊天中追問",
       "expand": "展開",
       "collapse": "收起",
@@ -6180,7 +6180,7 @@
       },
       "description": {
         "flashcards": "用於間隔複習的卡片，每張卡片都註明出自哪段原文。",
-        "quiz": "附解析的題目，每道題都註明出自哪段原文。",
+        "quiz": "附解析的題目，每題都註明出自哪段原文。",
         "mindmap": "主要觀點及其關係，每個要點都註明出自哪段原文。"
       },
       "regenerateTitle": "調整並重新產生",
@@ -6226,7 +6226,7 @@
         "loading": "正在估算規模…",
         "summary": {
           "flashcards": "最多 {count} 張閃卡，來自 {sources} 個來源",
-          "quiz": "最多 {count} 道題，來自 {sources} 個來源",
+          "quiz": "最多 {count} 題，來自 {sources} 個來源",
           "mindmap": "最多 {count} 個要點，來自 {sources} 個來源"
         },
         "parts": "來源較長，會分 {groups} 部分閱讀，所需時間稍長。",
@@ -6241,7 +6241,7 @@
       "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
       "manageBilling": "管理計費",
       "errors": {
-        "STUDY_TOO_MANY_RUNNING": "同時產生的資料表和學習產物太多，請等其中一個完成。",
+        "STUDY_TOO_MANY_RUNNING": "同時產生的資料表和學習製品太多，請等其中一個完成。",
         "STUDY_NOT_READY": "只有已完成的學習內容才能重新產生。",
         "STUDY_CONTENT_UNREADABLE": "無法讀取這份學習內容，因此不能重新產生。",
         "STUDY_REGENERATION_IN_PROGRESS": "這份學習內容已經在重新產生中。",

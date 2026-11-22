@@ -6070,7 +6070,7 @@
       "generating": "Working… {completed} of {total} steps done"
     },
     "error": {
-      "retry": "Try again",
+      "generateAgain": "To try again, select the sources in the source hub and generate it again.",
       "cannotDisplay": "This study set can't be displayed.",
       "code": {
         "INSUFFICIENT_CREDITS": "Not enough credits to generate this.",

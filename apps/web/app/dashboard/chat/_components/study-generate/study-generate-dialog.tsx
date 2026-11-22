@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,8 +27,6 @@ import {
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Label } from "@sourceweft/ui-web/components/ui/label";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
-import { useBillingAvailable } from "@/lib/billing-edition/capabilities";
-import { usePurchasesAllowed } from "@/lib/native-host";
 import { contentClient } from "../../../../../lib/sdk";
 import { WorkspaceSourcePicker } from "../../../_components/resource-picker";
 
@@ -88,17 +85,13 @@ const STUDY_REQUEST_CODES = new Set([
 
 type StudyT = ReturnType<typeof useTranslations<"study">>;
 
-function errorCode(error: unknown) {
-  return error instanceof HttpClientError ? error.code : null;
-}
-
 /** The message for a failed study request, chosen by its API error code. */
 function requestErrorMessage(
   t: StudyT,
   error: unknown,
   fallback: "generate.errors.generic" | "generate.estimate.failed",
 ) {
-  const code = errorCode(error);
+  const code = error instanceof HttpClientError ? error.code : null;
   if (code && groundedErrorCodeSchema.safeParse(code).success) {
     return t(`error.code.${code}` as Parameters<StudyT>[0]);
   }
@@ -226,13 +219,10 @@ export function StudyGenerateDialog({
   onQueued,
 }: Props) {
   const t = useTranslations("study");
-  const billingAvailable = useBillingAvailable();
-  const purchasesAllowed = usePurchasesAllowed();
   const [form, setForm] = useState<Form>(() => initialForm(artifactType, initialOptions));
   const [sourceIds, setSourceIds] = useState<string[]>(() => sources.map((source) => source.id));
   const [submitting, setSubmitting] = useState(false);
   const [estimate, setEstimate] = useState<EstimateState | null>(null);
-  const [outOfCredits, setOutOfCredits] = useState(false);
   const knownTitles = useMemo(
     () => new Map(sources.map((source) => [source.id, source.title])),
     [sources],
@@ -250,7 +240,6 @@ export function StudyGenerateDialog({
     setForm(initialForm(artifactType, initialOptions));
     setSourceIds(sources.map((source) => source.id));
     setEstimate(null);
-    setOutOfCredits(false);
   }, [open, artifactType, initialOptions, sources]);
 
   const focusTooLong = form.focus.trim().length > STUDY_LIMITS.focusChars;
@@ -310,7 +299,6 @@ export function StudyGenerateDialog({
   async function submit() {
     if (!canSubmit) return;
     setSubmitting(true);
-    setOutOfCredits(false);
     try {
       const queued =
         target.kind === "generate"
@@ -330,11 +318,7 @@ export function StudyGenerateDialog({
       onOpenChange(false);
       onQueued?.({ artifactId: queued.artifactId, versionNo: queued.versionNo });
     } catch (error) {
-      if (errorCode(error) === "INSUFFICIENT_CREDITS") {
-        setOutOfCredits(true);
-      } else {
-        toast.error(requestErrorMessage(t, error, "generate.errors.generic"));
-      }
+      toast.error(requestErrorMessage(t, error, "generate.errors.generic"));
     } finally {
       setSubmitting(false);
     }
@@ -393,7 +377,12 @@ export function StudyGenerateDialog({
               value: size,
               label: t(`generate.size.${artifactType}`, {
                 size: t(`generate.size.${size}`),
-                count: STUDY_SIZE_COUNTS[artifactType][size],
+                // The chosen step names what is sent: a recipe's exact count
+                // until another size is picked.
+                count:
+                  size === form.size && !form.sizeTouched && options.count !== undefined
+                    ? options.count
+                    : STUDY_SIZE_COUNTS[artifactType][size],
               }),
             }))}
             value={form.size}
@@ -475,19 +464,6 @@ export function StudyGenerateDialog({
                 ) : null}
               </>
             )}
-            {outOfCredits ? (
-              <p className="text-destructive" role="alert">
-                {t("error.code.INSUFFICIENT_CREDITS")}{" "}
-                {billingAvailable && purchasesAllowed ? (
-                  <Link
-                    className="font-medium underline underline-offset-2"
-                    href="/dashboard/billing"
-                  >
-                    {t("generate.manageBilling")}
-                  </Link>
-                ) : null}
-              </p>
-            ) : null}
           </div>
         </div>
 

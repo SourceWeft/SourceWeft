@@ -503,6 +503,15 @@ export const reviewProgressQuerySchema = z
     path: ["artifactVersionId"],
   });
 
+/**
+ * Attempts query: every version's attempts by default, or only those of the
+ * version a client holds (what a viewer resumes from).
+ */
+export const quizAttemptListQuerySchema = z.object({
+  artifactVersionId: z.string().min(1).optional(),
+});
+export type QuizAttemptListQuery = z.infer<typeof quizAttemptListQuerySchema>;
+
 export const reviewQueueQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
   artifactId: z.string().min(1).optional(),

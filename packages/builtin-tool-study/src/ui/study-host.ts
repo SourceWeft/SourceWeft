@@ -91,8 +91,16 @@ export type StudyHost = {
   askInChat(input: { text: string; evidence?: readonly StudyEvidence[] }): void;
   downloadText(fileName: string, mimeType: string, body: string): void;
   getFreshness(ref: StudyVersionRef): Promise<StudyFreshness>;
-  /** Present when the app can regenerate (retry a failure, refresh a stale artifact). */
+  /**
+   * Present when the app can regenerate a ready artifact (refresh a stale
+   * one). A failed first generation has nothing to regenerate from.
+   */
   readonly requestRegenerate?: (ref: StudyVersionRef) => void | Promise<void>;
+  /**
+   * Where the person can buy credits, or null where this surface may not sell
+   * them. A React hook, like `useTranslate`. Absent means no link.
+   */
+  readonly useBillingLink?: () => { readonly href: string; readonly label: string } | null;
 };
 
 /**
@@ -103,7 +111,7 @@ export type StudyHost = {
 export const STUDY_TRANSLATION_KEYS = [
   "study.status.queued",
   "study.status.generating",
-  "study.error.retry",
+  "study.error.generateAgain",
   "study.error.cannotDisplay",
   "study.error.code.INSUFFICIENT_CREDITS",
   "study.error.code.INPUT_TOO_LARGE",

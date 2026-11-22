@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import type { z } from "zod";
 import {
+  quizAttemptListQuerySchema,
   reviewProgressQuerySchema,
   reviewQueueQuerySchema,
   reviewRequestSchema,
@@ -110,7 +111,11 @@ export function registerStudyStateRoutes(app: Hono) {
     const user = await requireUser(c);
     return ApiResponse.success(
       c,
-      await listQuizAttempts({ ...user, artifactId: requireRouteParam(c, "id") }),
+      await listQuizAttempts({
+        ...user,
+        artifactId: requireRouteParam(c, "id"),
+        ...parse(quizAttemptListQuerySchema, c.req.query()),
+      }),
     );
   });
 

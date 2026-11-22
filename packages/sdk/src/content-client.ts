@@ -1852,9 +1852,19 @@ export class ContentClient {
     );
   }
 
-  listStudyQuizAttempts(workspaceId: string, artifactId: string) {
+  /** Newest first; with `artifactVersionId`, only the attempts at that version. */
+  listStudyQuizAttempts(
+    workspaceId: string,
+    artifactId: string,
+    version: { artifactVersionId?: string } = {},
+  ) {
+    const query = new URLSearchParams();
+    if (version.artifactVersionId) {
+      query.set("artifactVersionId", version.artifactVersionId);
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.http.get<QuizAttemptListResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/quiz/attempts`,
+      `/v1/workspaces/${encode(workspaceId)}/study/artifacts/${encode(artifactId)}/quiz/attempts${suffix}`,
     );
   }
 

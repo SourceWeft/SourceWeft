@@ -6050,7 +6050,7 @@
       "reused": "这张表已经在生成中。",
       "regenerating": "正在重新生成。新版本完成前仍显示当前版本。",
       "errors": {
-        "TABLE_TOO_MANY_RUNNING": "同时生成的数据表和学习产物太多，请等其中一个完成。",
+        "TABLE_TOO_MANY_RUNNING": "同时生成的数据表和学习制品太多，请等其中一个完成。",
         "TABLE_NOT_READY": "只有已完成的数据表才能重新生成。",
         "TABLE_CONTENT_UNREADABLE": "无法读取这张表，因此不能重新生成。",
         "TABLE_REGENERATION_IN_PROGRESS": "这张表已经在重新生成中。",
@@ -6070,14 +6070,14 @@
       "generating": "正在生成… 已完成 {completed} / {total} 步"
     },
     "error": {
-      "retry": "重试",
+      "generateAgain": "如需重试，请在来源中心选择来源后重新生成。",
       "cannotDisplay": "无法显示这份学习内容。",
       "code": {
         "INSUFFICIENT_CREDITS": "积分不足，无法生成。",
         "INPUT_TOO_LARGE": "所选来源太大，一次生成容纳不下。请减少来源，或选择较短的来源。",
         "NO_INDEXED_SOURCES": "所选来源都还没有建立索引。",
         "MODEL_UNAVAILABLE": "模型暂时不可用，请稍后再试。",
-        "GENERATION_QUALITY_TOO_LOW": "能在原文中核实的条目太少，所以没有生成。",
+        "GENERATION_QUALITY_TOO_LOW": "能在原文中核实的项目太少，所以没有生成。",
         "SOURCE_NOT_READABLE": "有来源无法读取。",
         "UNKNOWN": "无法生成。"
       }
@@ -6123,7 +6123,7 @@
     },
     "quiz": {
       "loading": "正在加载测验…",
-      "intro": "共 {total} 道题，提交后批改。",
+      "intro": "共 {total} 题，提交后批改。",
       "start": "开始",
       "saveFailed": "答案没有保存成功，已保留在本页。",
       "questionOf": "第 {current} 题，共 {total} 题",
@@ -6166,7 +6166,7 @@
       "exportMarkdown": "导出 Markdown",
       "exportJson": "导出 JSON",
       "detailLabel": "所选要点",
-      "askPrompt": "根据我的来源，进一步讲讲“{label}”。",
+      "askPrompt": "根据我的来源，进一步说明“{label}”。",
       "askInChat": "在聊天中追问",
       "expand": "展开",
       "collapse": "收起",
@@ -6180,7 +6180,7 @@
       },
       "description": {
         "flashcards": "用于间隔复习的卡片，每张卡片都注明出自哪段原文。",
-        "quiz": "附解析的题目，每道题都注明出自哪段原文。",
+        "quiz": "附解析的题目，每题都注明出自哪段原文。",
         "mindmap": "主要观点及其关系，每个要点都注明出自哪段原文。"
       },
       "regenerateTitle": "调整并重新生成",
@@ -6226,7 +6226,7 @@
         "loading": "正在估算规模…",
         "summary": {
           "flashcards": "最多 {count} 张闪卡，来自 {sources} 个来源",
-          "quiz": "最多 {count} 道题，来自 {sources} 个来源",
+          "quiz": "最多 {count} 题，来自 {sources} 个来源",
           "mindmap": "最多 {count} 个要点，来自 {sources} 个来源"
         },
         "parts": "来源较长，会分 {groups} 部分阅读，所需时间稍长。",
@@ -6241,7 +6241,7 @@
       "regenerating": "正在重新生成。新版本完成前仍显示当前版本。",
       "manageBilling": "管理计费",
       "errors": {
-        "STUDY_TOO_MANY_RUNNING": "同时生成的数据表和学习产物太多，请等其中一个完成。",
+        "STUDY_TOO_MANY_RUNNING": "同时生成的数据表和学习制品太多，请等其中一个完成。",
         "STUDY_NOT_READY": "只有已完成的学习内容才能重新生成。",
         "STUDY_CONTENT_UNREADABLE": "无法读取这份学习内容，因此不能重新生成。",
         "STUDY_REGENERATION_IN_PROGRESS": "这份学习内容已经在重新生成中。",

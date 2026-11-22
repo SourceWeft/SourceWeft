@@ -1,20 +1,19 @@
 "use client";
 
-import { LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { LoaderCircle, TriangleAlert } from "lucide-react";
 import {
   parseStudyContentForArtifact,
   studyErrorCodeSchema,
   type StudyContent,
 } from "@sourceweft/contracts/study";
 import type { ArtifactPreviewArtifactView } from "@sourceweft/contracts/artifact-ui";
-import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { FlashcardsViewer } from "./flashcards/flashcards-viewer";
 import { MindmapViewer } from "./mindmap/mindmap-viewer";
 import { QuizViewer } from "./quiz/quiz-viewer";
 import { StudyCannotDisplay, StudyErrorBoundary } from "./shared/error-boundary";
 import { parsePublicStudyContent } from "./shared/public-content";
 import { StaleBanner } from "@sourceweft/grounded-generation/ui";
-import { useStudyHost, type StudyVersionRef } from "./study-host";
+import { useStudyHost, type StudyHost, type StudyVersionRef } from "./study-host";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -43,11 +42,58 @@ function parseContent(artifactType: string, payload: unknown): StudyContent | nu
   }
 }
 
+function useNoBillingLink() {
+  return null;
+}
+
+/**
+ * A failed artifact. Only a first generation fails this way (a failed
+ * regeneration leaves the ready version in place), so there is no recipe to
+ * retry from: the message says to generate again from the sources. Running
+ * out of credits links to billing where the app may sell them.
+ */
+function StudyFailed({
+  host,
+  errorCode,
+  interactive,
+}: {
+  host: StudyHost;
+  errorCode: unknown;
+  interactive: boolean;
+}) {
+  const t = host.useTranslate();
+  const useBillingLink = host.useBillingLink ?? useNoBillingLink;
+  const billingLink = useBillingLink();
+  const code = studyErrorCodeSchema.safeParse(errorCode);
+  const outOfCredits = code.success && code.data === "INSUFFICIENT_CREDITS";
+  return (
+    <div
+      className="flex h-full min-h-40 flex-col items-center justify-center gap-3 p-6 text-center text-sm"
+      role="alert"
+    >
+      <TriangleAlert aria-hidden className="size-5 text-destructive" />
+      <p>{t(`study.error.code.${code.success ? code.data : "UNKNOWN"}`)}</p>
+      {interactive ? (
+        <p className="text-muted-foreground">{t("study.error.generateAgain")}</p>
+      ) : null}
+      {interactive && outOfCredits && billingLink ? (
+        <a
+          className="font-medium underline underline-offset-2"
+          data-study-billing
+          href={billingLink.href}
+        >
+          {billingLink.label}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Everything a study artifact shows in the preview panel or share page:
- * generation progress, a worded failure with retry, or the viewer for its
- * type behind an error boundary. An invalid payload shows "cannot display"
- * rather than blanking the panel.
+ * generation progress, a worded failure, or the viewer for its type behind
+ * an error boundary. An invalid payload shows "cannot display" rather than
+ * blanking the panel.
  */
 export function StudyArtifactView({
   artifact,
@@ -87,22 +133,12 @@ export function StudyArtifactView({
   }
 
   if (artifact.status === "failed") {
-    const code = studyErrorCodeSchema.safeParse(artifact.errorCode);
-    const regenerate = host.requestRegenerate;
     return (
-      <div
-        className="flex h-full min-h-40 flex-col items-center justify-center gap-3 p-6 text-center text-sm"
-        role="alert"
-      >
-        <TriangleAlert aria-hidden className="size-5 text-destructive" />
-        <p>{t(`study.error.code.${code.success ? code.data : "UNKNOWN"}`)}</p>
-        {regenerate && interactive !== false && host.interactive ? (
-          <Button onClick={() => regenerate(version)} size="sm" type="button" variant="outline">
-            <RefreshCw aria-hidden />
-            {t("study.error.retry")}
-          </Button>
-        ) : null}
-      </div>
+      <StudyFailed
+        errorCode={artifact.errorCode}
+        host={host}
+        interactive={interactive !== false && host.interactive}
+      />
     );
   }
 

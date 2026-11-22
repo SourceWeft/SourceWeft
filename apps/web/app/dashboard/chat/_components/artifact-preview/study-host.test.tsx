@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement, useEffect } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { HttpClientError } from "@sourceweft/sdk";
 import {
   STUDY_TRANSLATION_KEYS,
   StudyArtifactView,
@@ -173,18 +174,65 @@ describe("webStudyHost", () => {
     );
   });
 
-  it("resumes the newest attempt of the version shown, not of another version", async () => {
+  it("asks for the attempts of the version shown, without the flashcards-only progress route", async () => {
     sdk.contentClient.listStudyQuizAttempts.mockResolvedValue({
-      items: [attempt("attempt-newer-version", 3), attempt("attempt-this-version", 2)],
+      items: [attempt("attempt-this-version", 2)],
     });
     await expect(webStudyHost.latestQuizAttempt(version)).resolves.toMatchObject({
       id: "attempt-this-version",
     });
+    expect(sdk.contentClient.listStudyQuizAttempts).toHaveBeenCalledWith(
+      "workspace-1",
+      "artifact-1",
+      { artifactVersionId: "version-1" },
+    );
+    expect(sdk.contentClient.getStudyReviewProgress).not.toHaveBeenCalled();
 
-    sdk.contentClient.listStudyQuizAttempts.mockResolvedValue({
-      items: [attempt("attempt-other", 1)],
-    });
+    sdk.contentClient.listStudyQuizAttempts.mockResolvedValue({ items: [] });
     await expect(webStudyHost.latestQuizAttempt(version)).resolves.toBeNull();
+  });
+
+  it("a reloaded quiz resumes its unfinished attempt instead of starting another", async () => {
+    // As the API answers: review progress is for flashcards only.
+    sdk.contentClient.getStudyReviewProgress.mockRejectedValue(
+      new HttpClientError({
+        message: "Artifact not found",
+        status: 404,
+        statusText: "Not Found",
+        code: "STUDY_ARTIFACT_NOT_FOUND",
+      }),
+    );
+    sdk.contentClient.listStudyQuizAttempts.mockResolvedValue({
+      items: [
+        {
+          ...attempt("attempt-open", 1),
+          itemIds: ["q_single", "q_multi"],
+          answers: { q_single: { selected: [1] } },
+        },
+      ],
+    });
+    await mountWithIntl(
+      createElement(
+        StudyHostProvider,
+        { host: webStudyHost },
+        createElement(StudyArtifactView, {
+          artifact: {
+            id: "artifact-1",
+            workspaceId: "workspace-1",
+            artifactType: "quiz",
+            status: "ready",
+            errorMessage: null,
+            artifactVersionId: "version-1",
+          },
+          payload: quizFixtureEn as never,
+        }),
+      ),
+    );
+    await flush(8);
+    // Back at the first unanswered question of the open attempt.
+    expect(text()).toContain("Question 2 of 2");
+    expect(text()).toContain("Which inputs does photosynthesis need?");
+    expect(sdk.contentClient.startStudyQuizAttempt).not.toHaveBeenCalled();
   });
 
   it("refuses to record against an unknown version", async () => {

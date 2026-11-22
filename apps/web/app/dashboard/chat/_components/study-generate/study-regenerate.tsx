@@ -10,6 +10,7 @@ import {
   type StudyOptions,
 } from "@sourceweft/contracts/study";
 import { contentClient } from "../../../../../lib/sdk";
+import { refreshLiveArtifact } from "../artifact-preview/artifact-live-refresh";
 import { EMPTY_REGENERATE_REQUEST_STATE } from "../artifact-preview/regenerate-request-store";
 import { invalidateArtifactDetail } from "../sources-hub/artifacts/artifact-detail-loader";
 import type { ArtifactListItem } from "../sources-hub/types";
@@ -102,7 +103,11 @@ export function StudyRegenerateDialogHost() {
       onOpenChange={(open) => {
         if (!open) studyRegenerateStore.clear(recipe.token);
       }}
-      onQueued={() => invalidateArtifactDetail(recipe.workspaceId, recipe.artifactId)}
+      onQueued={() => {
+        invalidateArtifactDetail(recipe.workspaceId, recipe.artifactId);
+        // The open preview follows the new version until it publishes.
+        refreshLiveArtifact(recipe.artifactId);
+      }}
       open
       sources={recipe.sources}
       target={{

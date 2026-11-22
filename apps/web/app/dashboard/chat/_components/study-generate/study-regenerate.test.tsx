@@ -158,8 +158,8 @@ describe("StudyRegenerateDialogHost", () => {
     );
     await mountHost();
     await requestRegenerate();
-    // The nearest size step is shown.
-    expect(pressed("Amount")).toBe("More · 20 questions");
+    // The nearest size step is chosen, labelled with the count that is sent.
+    expect(pressed("Amount")).toBe("More · 18 questions");
     await settleEstimate();
     expect(sdk.contentClient.estimateStudy).toHaveBeenLastCalledWith(
       "workspace-1",
@@ -172,6 +172,9 @@ describe("StudyRegenerateDialogHost", () => {
       "workspace-1",
       expect.objectContaining({ options: { size: "fewer", count: 5, difficulty: "mixed" } }),
     );
+    expect(pressed("Amount")).toBe("Fewer · 5 questions");
+    // Once a size is picked, every step shows its own count again.
+    expect(text()).toContain("More · 20 questions");
   });
 
   test("a set without a readable recipe says so and opens nothing", async () => {

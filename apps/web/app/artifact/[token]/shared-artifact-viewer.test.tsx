@@ -237,6 +237,39 @@ function sharedStudy(
   };
 }
 
+const OWNER_FOCUS = "Only the parts about my own medical history";
+
+/** The fixture with the owner's focus in its recipe, as a real one may carry. */
+function withOwnerFocus<T extends { generation: { recipe: Record<string, unknown> } }>(
+  content: T,
+): T {
+  return {
+    ...content,
+    generation: {
+      ...content.generation,
+      recipe: { ...content.generation.recipe, focus: OWNER_FOCUS },
+    },
+  };
+}
+
+/** Nothing but what the viewer renders reaches an anonymous browser. */
+function assertNothingPrivate(payload: unknown) {
+  const serialized = JSON.stringify(payload);
+  for (const field of [
+    "quote",
+    "chunkId",
+    "documentId",
+    "contentHash",
+    "recipe",
+    "focus",
+    "generation",
+    "inputs",
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${field}"`), field);
+  }
+  assert.ok(!serialized.includes(OWNER_FOCUS), "the owner's focus is in the public payload");
+}
+
 function publicStudyPayload(artifactType: "flashcards" | "quiz", payloadJson: unknown) {
   const handler = studyArtifactViewHandlers.find(
     (candidate) => candidate.artifactType === artifactType,
@@ -257,10 +290,8 @@ function publicStudyPayload(artifactType: "flashcards" | "quiz", payloadJson: un
 }
 
 test("shared flashcards render the stripped public payload with catalog wording and no source quote", async () => {
-  const payload = publicStudyPayload("flashcards", flashcardsFixtureEn);
-  const serialized = JSON.stringify(payload);
-  assert.doesNotMatch(serialized, /"quote"/);
-  assert.doesNotMatch(serialized, /"chunkId"/);
+  const payload = publicStudyPayload("flashcards", withOwnerFocus(flashcardsFixtureEn));
+  assertNothingPrivate(payload);
 
   const { container } = await mountWithIntl(
     <SharedArtifactViewer artifact={sharedStudy("flashcards", payload)} />,
@@ -280,8 +311,8 @@ test("shared flashcards render the stripped public payload with catalog wording 
 });
 
 test("a shared quiz is answered in the page with catalog wording", async () => {
-  const payload = publicStudyPayload("quiz", quizFixtureEn);
-  assert.doesNotMatch(JSON.stringify(payload), /"quote"|"chunkId"/);
+  const payload = publicStudyPayload("quiz", withOwnerFocus(quizFixtureEn));
+  assertNothingPrivate(payload);
 
   const { container } = await mountWithIntl(
     <SharedArtifactViewer artifact={sharedStudy("quiz", payload)} />,

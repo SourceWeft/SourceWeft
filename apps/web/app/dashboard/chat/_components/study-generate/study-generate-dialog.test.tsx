@@ -213,27 +213,6 @@ describe("StudyGenerateDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  test("running out of credits is explained in the dialog, which stays open", async () => {
-    sdk.contentClient.generateStudyArtifact.mockRejectedValue(
-      new HttpClientError({
-        message: "Payment required",
-        status: 402,
-        statusText: "Payment Required",
-        code: "INSUFFICIENT_CREDITS",
-      }),
-    );
-    await renderDialog();
-    await settleEstimate();
-    await act(async () => submitButton().click());
-    await flush(3);
-
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
-      "Not enough credits to generate this.",
-    );
-    expect(toasts.error).not.toHaveBeenCalled();
-    expect(onOpenChange).not.toHaveBeenCalledWith(false);
-  });
-
   test("other failures are worded by their API code", async () => {
     sdk.contentClient.generateStudyArtifact.mockRejectedValue(
       new HttpClientError({

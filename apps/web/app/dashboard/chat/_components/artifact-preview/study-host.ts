@@ -8,6 +8,8 @@ import {
   type StudyTranslate,
   type StudyVersionRef,
 } from "@sourceweft/builtin-tool-study/ui";
+import { useBillingAvailable } from "@/lib/billing-edition/capabilities";
+import { usePurchasesAllowed } from "@/lib/native-host";
 import { contentClient } from "../../../../../lib/sdk";
 import { insertIntoComposer } from "../chat-canvas/composer-insert";
 import { requestStudyRegenerate } from "../study-generate/study-regenerate-store";
@@ -34,6 +36,16 @@ export function useStudyTranslate(): StudyTranslate {
   );
 }
 
+/** Billing, where this deployment and the host the page runs in may sell credits. */
+function useStudyBillingLink() {
+  const t = useTranslations("study");
+  const billingAvailable = useBillingAvailable();
+  const purchasesAllowed = usePurchasesAllowed();
+  return billingAvailable && purchasesAllowed
+    ? { href: "/dashboard/billing", label: t("generate.manageBilling") }
+    : null;
+}
+
 /** The learning-state API names a version by its id; a viewer may not know it yet. */
 function versionQuery(ref: StudyVersionRef) {
   return ref.artifactVersionId ? { artifactVersionId: ref.artifactVersionId } : {};
@@ -44,21 +56,6 @@ function requireVersionId(ref: StudyVersionRef): string {
     throw new Error("This study artifact has no version to record against");
   }
   return ref.artifactVersionId;
-}
-
-/** Version numbers by version id: attempts are listed by number, viewers know the id. */
-const versionNos = new Map<string, number>();
-
-async function resolveVersionNo(ref: StudyVersionRef): Promise<number> {
-  const known = ref.artifactVersionId ? versionNos.get(ref.artifactVersionId) : undefined;
-  if (known !== undefined) return known;
-  const progress = await contentClient.getStudyReviewProgress(
-    ref.workspaceId,
-    ref.artifactId,
-    versionQuery(ref),
-  );
-  versionNos.set(progress.artifactVersionId, progress.versionNo);
-  return progress.versionNo;
 }
 
 /**
@@ -73,13 +70,13 @@ async function resolveVersionNo(ref: StudyVersionRef): Promise<number> {
 export const webStudyHost: StudyHost = {
   interactive: true,
   useTranslate: useStudyTranslate,
+  useBillingLink: useStudyBillingLink,
   async listReviewProgress(ref) {
     const progress = await contentClient.getStudyReviewProgress(
       ref.workspaceId,
       ref.artifactId,
       versionQuery(ref),
     );
-    versionNos.set(progress.artifactVersionId, progress.versionNo);
     return progress.items;
   },
   gradeCard: async ({ workspaceId, artifactId, itemId, grade, ...ref }) =>
@@ -89,12 +86,12 @@ export const webStudyHost: StudyHost = {
       grade,
     }),
   async latestQuizAttempt(ref) {
-    const [versionNo, attempts] = await Promise.all([
-      resolveVersionNo(ref),
-      contentClient.listStudyQuizAttempts(ref.workspaceId, ref.artifactId),
-    ]);
-    // Newest first.
-    return attempts.items.find((attempt) => attempt.versionNo === versionNo) ?? null;
+    // Only the version shown: an attempt at another version names questions
+    // this one may not have. Newest first.
+    const attempts = await contentClient.listStudyQuizAttempts(ref.workspaceId, ref.artifactId, {
+      artifactVersionId: requireVersionId(ref),
+    });
+    return attempts.items[0] ?? null;
   },
   startQuizAttempt: async ({ workspaceId, artifactId, itemIds, ...ref }) =>
     contentClient.startStudyQuizAttempt(workspaceId, artifactId, {
