@@ -611,16 +611,24 @@ export async function insertTicketRow(
  * Candidate tickets for one batch's "related tickets" render context, in
  * the spec's order: the batch's own payer first, then a ticket that has
  * ever been a `route_to_ticket` target, then most recently updated — each
- * tier newest-first. Callers slice to `ASSISTANT_LIMITS.relatedTicketsMax`
- * (render.ts's `renderBatch` also defends this bound on its own input).
+ * tier newest-first. Ahead of all of them come `reportingTicketIds`, the
+ * tickets whose `worker_report` is in the batch, so the cap never drops
+ * the ticket a report is about. Callers slice to
+ * `ASSISTANT_LIMITS.relatedTicketsMax` (render.ts's `renderBatch` also
+ * defends this bound on its own input).
  */
 export async function listRelatedTicketCandidateRows(input: {
   assistantId: string;
   teamId: string;
   workspaceId: string;
   payerUserId: string;
+  reportingTicketIds: readonly string[];
   limit: number;
 }): Promise<AssistantTicketRow[]> {
+  const reporting =
+    input.reportingTicketIds.length > 0
+      ? sql`(${inArray(assistantTickets.id, [...input.reportingTicketIds])})`
+      : sql`false`;
   const samePayer = sql`(${assistantTickets.payerUserId} = ${input.payerUserId})`;
   const wasRouted = sql`exists (
     select 1 from ${assistantDecisions}
@@ -639,7 +647,12 @@ export async function listRelatedTicketCandidateRows(input: {
         eq(assistantTickets.workspaceId, input.workspaceId),
       ),
     )
-    .orderBy(desc(samePayer), desc(wasRouted), desc(assistantTickets.updatedAt))
+    .orderBy(
+      desc(reporting),
+      desc(samePayer),
+      desc(wasRouted),
+      desc(assistantTickets.updatedAt),
+    )
     .limit(input.limit);
 }
 

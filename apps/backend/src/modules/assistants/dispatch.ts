@@ -450,6 +450,7 @@ function toRenderTrigger(row: AssistantTriggerRow): RenderTrigger {
     source: row.sourceKind,
     author: row.authorUserId ?? null,
     text: row.text,
+    ticketId: row.ticketId ?? null,
   };
 }
 
@@ -752,7 +753,13 @@ async function startRouterTurn(
   const ordered = [...rows].sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
   );
-  const context = await fetchRouterBatchContext({ ...scope, payerUserId });
+  const context = await fetchRouterBatchContext({
+    ...scope,
+    payerUserId,
+    reportingTicketIds: [
+      ...new Set(ordered.flatMap((row) => (row.ticketId ? [row.ticketId] : []))),
+    ],
+  });
   const content = renderBatch({
     triggers: ordered.map(toRenderTrigger),
     feedItems: context.feedItems,

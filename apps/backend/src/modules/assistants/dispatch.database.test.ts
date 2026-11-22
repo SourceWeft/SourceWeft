@@ -506,6 +506,58 @@ test("A without credits: A's batch stays pending with no attempt counted, and B'
   assert.ok(assistant.currentRouterRunId);
 });
 
+test("a worker_report in a batch reaches the Router with its ticket id, and its ticket is listed even past the related-tickets cap", async () => {
+  const s = await setup();
+  const now = new Date();
+  // The reporting ticket is the payer's oldest: by recency alone, the eight
+  // newer ones would fill the related-tickets list without it.
+  const reporting = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    stage: "idle",
+    title: "Weekly digest",
+    createdAt: minutesAgo(now, 120),
+  });
+  for (let i = 0; i < 9; i += 1) {
+    await f.insertTicket({
+      teamId: s.teamId,
+      workspaceId: s.workspaceId,
+      assistantId: s.assistant.id,
+      payerUserId: s.a,
+      stage: "idle",
+      title: `Newer ${i}`,
+      createdAt: minutesAgo(now, 10 - i),
+    });
+  }
+  const report = await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    sourceKind: "worker_report",
+    authorUserId: null,
+    ticketId: reporting.id,
+    text: "ready: the digest is in /files/digest.md",
+  });
+
+  await tick(now, f.ports);
+
+  const [start] = startsOf("assistant_router", s.workspaceId);
+  assert.ok(start);
+  const line = start.content
+    .split("\n")
+    .find((l) => l.startsWith(`<assistant-trigger id=${report.id} `));
+  assert.ok(line);
+  assert.match(line, / source=worker_report /);
+  assert.ok(line.includes(` member=false ticket=${reporting.id}>`));
+  const related = start.content.split("Related tickets / 相关工单:")[1] ?? "";
+  const lines = related.split("\n").filter((line) => line.includes(" | "));
+  assert.equal(lines.length, 8);
+  assert.ok(lines[0]!.startsWith(`${reporting.id} | Weekly digest | idle | `));
+});
+
 // ── Router busy / 409 (Review Focus 1) ──────────────────────────────────
 
 test("A and B write while the Router is busy: nothing starts; then A's batch, then B's, and neither is lost", async () => {

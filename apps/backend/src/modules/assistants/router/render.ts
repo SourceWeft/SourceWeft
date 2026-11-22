@@ -29,6 +29,9 @@ export type RenderTrigger = {
   source: AssistantTriggerSource;
   author: string | null;
   text: string;
+  /** The ticket that reported (`assistant_triggers.ticket_id`): set on a
+   * `worker_report`, null on a member's message. */
+  ticketId: string | null;
 };
 
 export type RenderFeedItem = {
@@ -73,7 +76,10 @@ export function renderTriggerLine(trigger: RenderTrigger): string {
     truncate(trigger.text, ASSISTANT_LIMITS.triggerTextMax),
   );
   const member = trigger.source === "member_message";
-  return `<assistant-trigger id=${trigger.id} source=${trigger.source} author=${trigger.author ?? ""} member=${member}>${body}</assistant-trigger>`;
+  const ticket = trigger.ticketId
+    ? ` ticket=${escapeTagText(trigger.ticketId)}`
+    : "";
+  return `<assistant-trigger id=${trigger.id} source=${trigger.source} author=${trigger.author ?? ""} member=${member}${ticket}>${body}</assistant-trigger>`;
 }
 
 function renderRelatedTicketLine(ticket: RenderRelatedTicket): string {
@@ -134,6 +140,8 @@ export async function fetchRouterBatchContext(input: {
   teamId: string;
   workspaceId: string;
   payerUserId: string;
+  /** Tickets whose `worker_report` is in the batch: always listed first. */
+  reportingTicketIds: readonly string[];
 }): Promise<{
   feedItems: RenderFeedItem[];
   relatedTickets: RenderRelatedTicket[];
@@ -150,6 +158,7 @@ export async function fetchRouterBatchContext(input: {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       payerUserId: input.payerUserId,
+      reportingTicketIds: input.reportingTicketIds,
       limit: ASSISTANT_LIMITS.relatedTicketsMax,
     }),
   ]);
