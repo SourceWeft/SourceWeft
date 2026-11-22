@@ -37,6 +37,7 @@ function createRun(
     startedAt: iso(),
     heartbeatAt: iso(),
     finishedAt: null,
+    consumedCredits: null,
     createdAt: iso(),
     updatedAt: iso(),
     ...input,

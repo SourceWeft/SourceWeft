@@ -174,6 +174,8 @@ type FinishRunInput = {
   snapshot?: ChatRunSnapshot;
   errorCode?: string | null;
   errorMessage?: string | null;
+  /** How many credits this run cost; omitted settles to 0. */
+  consumedCredits?: number;
 };
 
 /**
@@ -214,6 +216,7 @@ async function finishRunWithDependencies(
     snapshotJson: input.snapshot,
     errorCode: input.errorCode,
     errorMessage: input.errorMessage,
+    consumedCredits: input.consumedCredits,
   });
   if (
     finished &&

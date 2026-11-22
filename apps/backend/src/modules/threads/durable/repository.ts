@@ -230,6 +230,8 @@ function mapRun(row: ChatThreadRunRow): ChatThreadRunRecord {
     startedAt: row.startedAt?.toISOString() ?? null,
     heartbeatAt: row.heartbeatAt?.toISOString() ?? null,
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    consumedCredits:
+      row.consumedCredits === null ? null : Number(row.consumedCredits),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -1179,9 +1181,16 @@ export async function finishChatThreadRun(input: {
   protectedOperationTerminalReason?: string;
   errorCode?: string | null;
   errorMessage?: string | null;
+  /**
+   * How many credits this run cost. Omitted or undefined settles to 0: every
+   * run finishes with a number, never null, so a ticket's cap rollup never
+   * has to treat "unknown" as "free".
+   */
+  consumedCredits?: number;
   /** Recovery must recheck liveness after acquiring the run row lock. */
   staleAt?: Date;
 }) {
+  const consumedCredits = input.consumedCredits ?? 0;
   const allowedSourceStatuses: ChatThreadRunStatus[] =
     input.status === "completed"
       ? ["running", "waiting_for_approval"]
@@ -1213,6 +1222,7 @@ export async function finishChatThreadRun(input: {
       errorMessage: input.errorMessage ?? null,
       finishedAt: now.toISOString(),
       updatedAt: now.toISOString(),
+      consumedCredits,
     };
     const mergedSnapshot =
       input.snapshotMode === "terminal_patch"
@@ -1256,6 +1266,7 @@ export async function finishChatThreadRun(input: {
         errorMessage: input.errorMessage ?? null,
         finishedAt: now,
         updatedAt: now,
+        consumedCredits: String(consumedCredits),
       })
       .where(
         and(

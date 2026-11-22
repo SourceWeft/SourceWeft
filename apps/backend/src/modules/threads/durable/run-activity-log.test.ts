@@ -49,6 +49,7 @@ function createRun(input: Partial<ChatThreadRunRecord> = {}): ChatThreadRunRecor
     startedAt: "2026-10-14T10:00:00.000Z",
     heartbeatAt: null,
     finishedAt: null,
+    consumedCredits: null,
     createdAt: "2026-10-14T09:59:50.000Z",
     updatedAt: "2026-10-14T10:00:00.000Z",
     ...input,

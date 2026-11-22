@@ -36,6 +36,8 @@ import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-cou
 import { createSourceWeftStepBudgetMiddleware } from "./step-budget";
 import { createSourceWeftModelRetryMiddleware } from "./model-call-observability";
 import { createSourceWeftClosingToolGovernanceMiddleware } from "./closing-tool-governance";
+import { createRunCreditCapMiddleware } from "./run-credit-cap";
+import type { BillingScope } from "../../../../shared/model-gateway/billing/scope";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -87,6 +89,14 @@ export type SourceWeftAgentMiddlewareStackInput = {
   runId?: string | null;
   /** Run start origin for the step-budget wall clock (epoch ms). */
   turnStartedAtMs?: number | null;
+  /**
+   * Host-set credit ceiling for this run (e.g. a ticket's worker-run budget).
+   * Undefined leaves the run uncapped. The threads module has no notion of
+   * what set it; see `StreamThreadEventInput.creditCap`.
+   */
+  creditCap?: number;
+  /** Reads the turn's billing scope; see run-credit-cap.ts. */
+  getBillingScope?: () => BillingScope | undefined;
 };
 
 export type SourceWeftSubagentMiddlewareStackInput = {
@@ -211,6 +221,14 @@ export async function createSourceWeftAgentMiddlewareStack(
           ),
         ]
       : []),
+    ...(input.creditCap != null
+      ? [
+          createRunCreditCapMiddleware({
+            capCredits: input.creditCap,
+            getScope: input.getBillingScope ?? (() => undefined),
+          }),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
@@ -286,6 +304,10 @@ export {
   createSourceWeftContextCompressionMiddleware,
   createSourceWeftSummarizationMiddleware,
 } from "./context-compression";
+export {
+  RUN_CREDIT_CAP_EXCEEDED,
+  createRunCreditCapMiddleware,
+} from "./run-credit-cap";
 export { createKnowledgeFilesystemToolDescriptionMiddleware } from "./filesystem-descriptions";
 export {
   createSourceWeftImageHistorySanitizerMiddleware,

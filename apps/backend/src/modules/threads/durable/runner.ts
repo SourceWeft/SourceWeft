@@ -301,6 +301,21 @@ function isClientCancelledRun(run: ChatThreadRunRecord | null) {
   return run?.status === "cancel_requested" || run?.status === "cancelled";
 }
 
+/**
+ * Reads the turn's own metered-call credit figure off an already-persisted
+ * assistant message: `meteredLlmCreditsConsumed` from `finalizer.ts` on
+ * success, or from `error-turn-billing.ts` (spread into the same metadata
+ * key) on failure. Deliberately not the message's total `creditsConsumed`,
+ * which also folds in preflight billing that the run-level credit cap never
+ * counted against.
+ */
+function readMeteredLlmCreditsConsumed(
+  metadata: Record<string, unknown> | null | undefined,
+): number | null {
+  const value = metadata?.meteredLlmCreditsConsumed;
+  return typeof value === "number" ? value : null;
+}
+
 function mergeToolCall(existing: unknown[], next: unknown) {
   const record =
     next && typeof next === "object" && !Array.isArray(next)
@@ -1935,6 +1950,8 @@ export async function persistTerminalFailure(input: {
   finishRun: DurableChatRunServiceFinishRun;
   findRunById?: typeof findChatThreadRunById;
   findMessage?: typeof findMessageRecord;
+  /** How many credits this run cost; omitted settles to 0. */
+  consumedCredits?: number;
 }) {
   const findRun = input.findRunById ?? findChatThreadRunById;
   const readCurrent = () =>
@@ -2007,6 +2024,7 @@ export async function persistTerminalFailure(input: {
       snapshot,
       errorCode: input.contentError.code,
       errorMessage: input.contentError.message,
+      consumedCredits: input.consumedCredits,
     });
     if (!finished) {
       return (await readCurrent()) ?? run;
@@ -2139,6 +2157,11 @@ export async function processThreadChatRunJob(
   let terminalErrorCode: string | null = null;
   let terminalErrorMessage: string | null = null;
   let assistantMessagePersisted = false;
+  // The run's own metered-call credits (never preflight), read off whichever
+  // assistant message the turn actually persisted — success or error, both
+  // of which already compute and store this figure (finalizer.ts,
+  // error-turn-billing.ts). Feeds `chat_thread_runs.consumed_credits`.
+  let runConsumedCredits: number | null = null;
   const flushAssistantSnapshot = createAssistantSnapshotFlushWindow();
 
   const maybeFlushAssistantSnapshot = async (force = false) => {
@@ -2386,11 +2409,17 @@ export async function processThreadChatRunJob(
               ...snapshot,
               assistantMessage: errorMessage,
             };
+            runConsumedCredits =
+              readMeteredLlmCreditsConsumed(errorMessage.metadata) ??
+              runConsumedCredits;
           }
           return errorMessage;
         },
         onFinalized: async (result) => {
           runBilling = result.billing ?? null;
+          runConsumedCredits =
+            readMeteredLlmCreditsConsumed(result.assistantMessage.metadata) ??
+            runConsumedCredits;
           snapshot = snapshotWithFinalizedResult(snapshot, result);
         },
       },
@@ -2479,6 +2508,7 @@ export async function processThreadChatRunJob(
           snapshot: finalSnapshot,
           errorCode: terminalErrorCode,
           errorMessage: terminalErrorMessage,
+          consumedCredits: runConsumedCredits ?? 0,
         });
     if (isWaitingForApproval && finished) {
       terminalStatus = "waiting_for_approval";
@@ -2514,6 +2544,7 @@ export async function processThreadChatRunJob(
           finishRun: durableChatRunService.finishRun.bind(
             durableChatRunService,
           ),
+          consumedCredits: runConsumedCredits ?? 0,
         });
         terminalStatus = "cancelled";
         terminalErrorCode = contentError.code;
@@ -2701,6 +2732,7 @@ export async function processThreadChatRunJob(
         durableChatRunService,
       ),
       finishRun: durableChatRunService.finishRun.bind(durableChatRunService),
+      consumedCredits: runConsumedCredits ?? 0,
     });
     return {
       status: isTerminalRunStatus(finalRun.status)

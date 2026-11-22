@@ -194,6 +194,13 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
    * `agent/unattended-policy.ts`.
    */
   unattended?: true;
+  /**
+   * Host-set credit ceiling for this run (e.g. a ticket's worker-run
+   * budget). Set by the host when it starts the run, never exposed in an
+   * HTTP request schema. Undefined leaves the run uncapped; see
+   * `agent/middleware/run-credit-cap.ts`.
+   */
+  creditCap?: number;
 };
 
 export type AgentCheckpointRef = {
@@ -306,6 +313,8 @@ export type PreparedThreadTurn = {
   failurePersistence: "persist-error-turn" | "transient";
   /** Nobody is present: the unattended tool policy applies to this turn. */
   unattended?: true;
+  /** Host-set credit ceiling for this run; see `StreamThreadEventInput.creditCap`. */
+  creditCap?: number;
   mcpInstallIds: string[];
   enabledSkills: EnabledSkillDescriptor[];
   invokedSkillIds: string[];

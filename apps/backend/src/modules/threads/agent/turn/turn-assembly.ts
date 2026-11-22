@@ -29,6 +29,7 @@ import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { TraceContext } from "../../../llm-observability";
 import { logger } from "../../../../shared/logger";
+import type { BillingScope } from "../../../../shared/model-gateway/billing/scope";
 import { DatabaseKnowledgeBackend } from "../database-fs-backend";
 import {
   listVirtualFsSources,
@@ -605,6 +606,8 @@ export interface ThreadAgentAssemblyInput {
   model: BaseLanguageModel;
   /** Aborts `agent.stream` (LLM + signal-aware tools) when the run is cancelled. */
   abortSignal?: AbortSignal;
+  /** Reads the turn's billing scope so the credit-cap middleware can check it. */
+  getBillingScope?: () => BillingScope | undefined;
 }
 
 export interface ThreadAgentAssembly {
@@ -943,6 +946,7 @@ export async function buildThreadAgentAssembly(
     runtimePrompt,
     model,
     abortSignal,
+    getBillingScope,
   } = input;
   const {
     capabilityTools,
@@ -1246,6 +1250,8 @@ export async function buildThreadAgentAssembly(
       fileImages.middleware(),
     ],
     unattended: Boolean(prepared.unattended),
+    creditCap: prepared.creditCap,
+    getBillingScope,
     contextCompressionReportKey: prepared.userMessage.id,
     traceContext,
     runId: wallClockRunId,
