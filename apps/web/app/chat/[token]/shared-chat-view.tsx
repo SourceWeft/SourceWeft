@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getFormatter, getTranslations } from "next-intl/server";
 import type { PublicSharedChat } from "@sourceweft/contracts";
-import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
+import { SharedChatMarkdown } from "./shared-chat-markdown";
 
 /**
  * Same shape as the share dialog's `SNAPSHOT_DATE_OPTIONS`
@@ -175,11 +175,13 @@ function SharedChatMessageImages({
 }
 
 function SharedChatMessage({
+  allowedImageUrls,
   assistantLabel,
   kindLabel,
   labels,
   message,
 }: {
+  allowedImageUrls: string[];
   assistantLabel: string;
   kindLabel: (kind: string) => string;
   labels: { stopped: string; sources: string; user: string };
@@ -192,11 +194,12 @@ function SharedChatMessage({
       <span className="text-xs font-medium text-muted-foreground">
         {roleLabel}
       </span>
-      <MessageResponse>{message.content}</MessageResponse>
+      <SharedChatMarkdown
+        allowedImageUrls={allowedImageUrls}
+        content={message.content}
+      />
       {message.stopped ? (
-        <p className="text-xs italic text-muted-foreground">
-          {labels.stopped}
-        </p>
+        <p className="text-xs italic text-muted-foreground">{labels.stopped}</p>
       ) : null}
       <SharedChatMessageImages
         content={message.content}
@@ -218,7 +221,7 @@ function SharedChatMessage({
  * Server component: no client-side re-formatting of `takenAt` means the
  * server's rendered text is the only text, so there is nothing for React to
  * hydration-mismatch against a visitor's browser timezone. `MessageResponse`
- * is its own `"use client"` component further down the tree, which is fine —
+ * (via `SharedChatMarkdown`) is its own `"use client"` component further down the tree, which is fine —
  * a server component can render a client one.
  */
 export async function SharedChatView({ chat }: { chat: PublicSharedChat }) {
@@ -231,6 +234,15 @@ export async function SharedChatView({ chat }: { chat: PublicSharedChat }) {
     user: t("user"),
   };
   const kindLabel = (kind: string) => artifactKindLabel(kind, t);
+  // The only images message Markdown may show: this share's own
+  // token-scoped image URLs, never another host.
+  const allowedImageUrls = [
+    ...new Set(
+      chat.messages.flatMap((message) =>
+        message.images.map((image) => image.url),
+      ),
+    ),
+  ];
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-6 px-4 py-8">
@@ -246,6 +258,7 @@ export async function SharedChatView({ chat }: { chat: PublicSharedChat }) {
       <div className="flex flex-1 flex-col gap-6">
         {chat.messages.map((message, index) => (
           <SharedChatMessage
+            allowedImageUrls={allowedImageUrls}
             assistantLabel={assistantLabel}
             kindLabel={kindLabel}
             key={index}

@@ -33,6 +33,7 @@ vi.mock("next-intl/server", async () => {
 });
 
 import { createFormatter } from "next-intl";
+import { renderFootnoteReferences } from "./shared-chat-markdown";
 import {
   AS_OF_DATE_OPTIONS,
   SharedChatUnavailable,
@@ -246,8 +247,74 @@ test("hostile message content never produces a script tag, an onerror handler or
   );
 
   assert.ok(!/<script/i.test(html));
-  assert.ok(!/onerror/i.test(html));
+  // Raw HTML is not parsed: the markup survives only as inert, escaped
+  // text, so no element carries an onerror handler.
+  assert.ok(!/<[a-z][^>]*\sonerror/i.test(html));
+  assert.ok(html.includes("&lt;img src=x onerror="));
   assert.ok(!/href="javascript:/i.test(html));
+});
+
+test("footnote references inside inline code and fenced blocks stay literal", () => {
+  assert.equal(
+    renderFootnoteReferences(
+      "A[^1] `x[^1]y`\n\n```\nliteral [^2]\n```\n\n~~~\n[^3]\n~~~ B[^3]",
+    ),
+    "A\\[1\\] `x[^1]y`\n\n```\nliteral [^2]\n```\n\n~~~\n[^3]\n~~~ B\\[3\\]",
+  );
+});
+
+const OWN_IMAGE = "https://api.test/v1/public/shares/tok-1/chat/images/1";
+
+test("footnote references render as bracketed numbers outside code", async () => {
+  const html = await render(
+    chat({
+      messages: [
+        message({
+          role: "assistant",
+          content:
+            "See the report.[^1][^2] Inline `a[^1]b` stays.\n\n```\nliteral [^2]\n```",
+          citations: [
+            { n: 1, title: "Report", url: "https://example.com/r" },
+            { n: 2, title: "Notes", url: null },
+          ],
+        }),
+      ],
+    }),
+  );
+
+  const withoutCode = html.replace(/<(code|pre)\b[\s\S]*?<\/\1>/g, "");
+  assert.ok(!withoutCode.includes("[^"), withoutCode);
+  assert.ok(withoutCode.includes("[1][2]"), withoutCode);
+});
+
+test("raw HTML is not parsed and images are limited to the share's own image URLs", async () => {
+  const html = await render(
+    chat({
+      messages: [
+        message({
+          role: "assistant",
+          content: [
+            '<img src="https://evil.example/p.png">',
+            "![tracker](https://evil.example/q.png)",
+            `![own](${OWN_IMAGE})`,
+          ].join("\n\n"),
+          images: [{ name: "own.png", url: OWN_IMAGE }],
+        }),
+      ],
+    }),
+  );
+
+  const imgTags = html.match(/<img[^>]*>/g) ?? [];
+  assert.ok(
+    imgTags.every((tag) => !tag.includes("evil.example")),
+    imgTags.join("\n"),
+  );
+  assert.ok(!/<img[^>]*evil\.example/.test(html));
+  assert.equal(
+    imgTags.filter((tag) => tag.includes(OWN_IMAGE)).length,
+    1,
+    imgTags.join("\n"),
+  );
 });
 
 test("the unavailable view shows its message", async () => {
