@@ -643,6 +643,39 @@ test("a 409 from starting the Router puts the batch back to pending_eval without
   assert.equal((await f.triggerRow(message.item.id))!.status, "in_eval");
 });
 
+test("a kick's 409 while a run is already recorded under its own batch key leaves the events in_eval", async () => {
+  const s = await setup();
+  const message = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
+  const batchKey = batchKeyOf([message.item.id]);
+  // The tick's recovery already started this very batch (same key) before
+  // the kick's start came back with a 409.
+  await f.ports.startTurn({
+    origin: "assistant_router",
+    existingThread: true,
+    workspaceId: s.workspaceId,
+    userId: s.a,
+    threadId: s.assistant.routerThreadId,
+    idempotencyKey: batchKey,
+    title: "Workspace assistant",
+    content: "batch",
+  });
+  f.reset();
+  f.state.startErrors.push(
+    new ContentError(409, "CHAT_RUN_ALREADY_ACTIVE", "A chat run is already active for this thread"),
+  );
+
+  await kick(kickInput(s), f.ports);
+
+  assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
+  const trigger = (await f.triggerRow(message.item.id))!;
+  assert.equal(trigger.status, "in_eval");
+  assert.equal(trigger.routerBatchKey, batchKey);
+  assert.equal(trigger.evalAttempts, 0);
+});
+
 test("any other failure to start the Router counts as an evaluation attempt", async () => {
   const s = await setup();
   const message = await f.service.postMessage(

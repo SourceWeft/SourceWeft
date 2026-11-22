@@ -16,6 +16,7 @@ import { db } from "@sourceweft/db";
 import type { OriginTurnContext } from "../../threads/agent/origin-providers";
 import { deterministicId } from "../../agent-tasks/runs";
 import { logger } from "../../../shared/logger";
+import { turnSetupError } from "../errors";
 import { ASSISTANT_LIMITS } from "../limits";
 import { assistantPorts, type AssistantPorts } from "../ports";
 import {
@@ -68,7 +69,7 @@ export async function resolveWorkerToolsContext(
   const assistantId = ctx.hostContext.assistantId;
   const ticketId = ctx.hostContext.ticketId;
   if (!assistantId || !ticketId) {
-    throw new Error(
+    throw turnSetupError(
       "The Worker turn's hostContext is missing assistantId or ticketId.",
     );
   }
@@ -77,7 +78,7 @@ export async function resolveWorkerToolsContext(
     teamId: ctx.teamId,
   });
   if (!assistant || assistant.id !== assistantId) {
-    throw new Error(`No assistant '${assistantId}' in this workspace.`);
+    throw turnSetupError(`No assistant '${assistantId}' in this workspace.`);
   }
   const ticket = await findScopedTicketRow({
     assistantId,
@@ -86,7 +87,7 @@ export async function resolveWorkerToolsContext(
     ticketId,
   });
   if (!ticket) {
-    throw new Error(`No ticket '${ticketId}' for assistant '${assistantId}'.`);
+    throw turnSetupError(`No ticket '${ticketId}' for assistant '${assistantId}'.`);
   }
   return { ...ctx, assistantId, ticketId, ticket };
 }

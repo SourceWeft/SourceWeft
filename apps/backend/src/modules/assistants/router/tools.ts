@@ -18,6 +18,7 @@ import { db } from "@sourceweft/db";
 import type { OriginTurnContext } from "../../threads/agent/origin-providers";
 import { deterministicId } from "../../agent-tasks/runs";
 import { logger } from "../../../shared/logger";
+import { turnSetupError } from "../errors";
 import { ASSISTANT_LIMITS } from "../limits";
 import { assistantPorts, type AssistantPorts } from "../ports";
 import {
@@ -231,7 +232,7 @@ export async function resolveRouterToolsContext(
   const assistantId = ctx.hostContext.assistantId;
   const batchKey = ctx.hostContext.batchKey;
   if (!assistantId || !batchKey) {
-    throw new Error(
+    throw turnSetupError(
       "The Router turn's hostContext is missing assistantId or batchKey.",
     );
   }
@@ -240,7 +241,7 @@ export async function resolveRouterToolsContext(
     teamId: ctx.teamId,
   });
   if (!assistant || assistant.id !== assistantId) {
-    throw new Error(`No assistant '${assistantId}' in this workspace.`);
+    throw turnSetupError(`No assistant '${assistantId}' in this workspace.`);
   }
   const inEvalRows = await listInEvalTriggerRows({
     assistantId,
@@ -249,7 +250,7 @@ export async function resolveRouterToolsContext(
     routerBatchKey: batchKey,
   });
   if (inEvalRows.length === 0) {
-    throw new Error(
+    throw turnSetupError(
       `No in_eval triggers found for batch '${batchKey}' (assistant '${assistantId}').`,
     );
   }

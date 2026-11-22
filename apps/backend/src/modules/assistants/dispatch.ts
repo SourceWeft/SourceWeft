@@ -36,6 +36,7 @@ import { logger } from "../../shared/logger";
 import { ASSISTANT_LIMITS } from "./limits";
 import { assistantPorts, type AssistantPorts } from "./ports";
 import {
+  chatRunExistsForKey,
   countWorkingTicketRows,
   findAssistantRowById,
   findChatRunRow,
@@ -733,10 +734,12 @@ type RouterStartOutcome = "started" | "busy" | "failed" | "claim_short";
  * Starts the Router's turn on an already-claimed batch and records it on the
  * assistant. A 409 (the Router conversation already has a run) gives this
  * caller's own freshly claimed events back to `pending_eval` with no attempt
- * counted (Review Focus 1). Restarting a batch whose run was never recorded
- * (`recovering`), a 409 leaves the events `in_eval`: the run holding the
- * conversation may be this very batch's, started by a concurrent kick, and
- * the next tick tries again. Any other failure counts as one evaluation
+ * counted (Review Focus 1) — unless a run is already recorded under this
+ * batch's key: then that run (started by the tick's recovery) holds them,
+ * and they stay `in_eval` for it. Restarting a batch whose run was never
+ * recorded (`recovering`), a 409 leaves the events `in_eval`: the run
+ * holding the conversation may be this very batch's, started by a
+ * concurrent kick, and the next tick tries again. Any other failure counts as one evaluation
  * attempt, the same as a Router run that ended without deciding them, so a
  * start that keeps failing ends in `unavailable` and the steward is told
  * rather than retrying forever.
@@ -782,7 +785,10 @@ async function startRouterTurn(
     runId = started.run.id;
   } catch (error) {
     if (isContentError(error) && error.code === CHAT_RUN_ALREADY_ACTIVE) {
-      if (!options.recovering) {
+      const release =
+        !options.recovering &&
+        !(await chatRunExistsForKey({ ...scope, idempotencyKey: batchKey }));
+      if (release) {
         await releaseInEvalTriggerRows(db, {
           ...scope,
           routerBatchKey: batchKey,
@@ -792,7 +798,7 @@ async function startRouterTurn(
       logger.info("Assistant Router conversation is busy; retrying the batch later", {
         assistantId: assistant.id,
         batchKey,
-        released: !options.recovering,
+        released: release,
       });
       return "busy";
     }

@@ -828,6 +828,27 @@ export async function findChatRunRow(input: {
   return row ?? null;
 }
 
+/** Whether a chat run was ever recorded under `idempotencyKey` in this
+ * tenant, in any status (a Router batch's key is its run's key). */
+export async function chatRunExistsForKey(input: {
+  idempotencyKey: string;
+  teamId: string;
+  workspaceId: string;
+}): Promise<boolean> {
+  const [row] = await db
+    .select({ id: chatThreadRuns.id })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.idempotencyKey, input.idempotencyKey),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
 /** The visibility of a conversation, scoped to its tenant; null when gone. */
 export async function findThreadVisibility(input: {
   threadId: string;

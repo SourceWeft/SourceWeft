@@ -649,20 +649,28 @@ test("resolveRouterToolsContext throws when the assistant does not exist in this
   );
 });
 
-test("resolveRouterToolsContext throws when no in_eval triggers exist for the given batchKey", async () => {
+test("resolveRouterToolsContext throws when no in_eval triggers exist for the given batchKey — a turn-setup failure, not an upstream model error", async () => {
   const { teamId, workspaceId, assistant } = await setupAssistant();
-  await assert.rejects(() =>
-    resolveRouterToolsContextFn({
-      workspaceId,
-      teamId,
-      threadId: randomUUID(),
-      runId: randomUUID(),
-      userId: randomUUID(),
-      hostContext: {
-        assistantId: assistant.id,
-        batchKey: "a-batch-key-nothing-is-claimed-under",
-      },
-    }),
+  const { toObservationError } = await import("../../threads/stream/observability");
+  await assert.rejects(
+    () =>
+      resolveRouterToolsContextFn({
+        workspaceId,
+        teamId,
+        threadId: randomUUID(),
+        runId: randomUUID(),
+        userId: randomUUID(),
+        hostContext: {
+          assistantId: assistant.id,
+          batchKey: "a-batch-key-nothing-is-claimed-under",
+        },
+      }),
+    (error: unknown) => {
+      assert.match(String((error as Error).message), /No in_eval triggers found for batch/);
+      // What the failed run is labelled with (the stream's error event).
+      assert.equal(toObservationError(error).code, "CHAT_RUN_FAILED");
+      return true;
+    },
   );
 });
 
