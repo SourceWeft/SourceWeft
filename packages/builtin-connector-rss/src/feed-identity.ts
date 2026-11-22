@@ -53,7 +53,8 @@ export function itemIdentity(input: {
 
 /**
  * sha256 hex of the fields that make up an item's indexed content: title,
- * link, author, date (published, else updated) and text. Dates enter as ISO
+ * link (canonicalized, so rotating `utm_*` params or fragments do not
+ * change it), author, date (published, else updated) and text. Dates enter as ISO
  * instants, so re-formatting a date does not change the hash. Fields are
  * JSON-encoded, so shifting text between two fields does.
  */
@@ -64,7 +65,7 @@ export function contentHashOf(
   return sha256Hex(
     JSON.stringify([
       item.title,
-      item.link,
+      item.link === null ? null : (canonicalLink(item.link) ?? item.link),
       item.author,
       date === null ? null : date.toISOString(),
       item.text,

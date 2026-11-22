@@ -115,3 +115,44 @@ test("contentHashOf does not confuse field boundaries", () => {
     contentHashOf({ ...base, title: "a", author: "bc" }),
   );
 });
+
+test("contentHashOf ignores utm_* params and the fragment on the link", () => {
+  const hash = contentHashOf({
+    ...base,
+    link: "https://a.example/p?id=1&utm_source=mon#top",
+  });
+  assert.equal(
+    hash,
+    contentHashOf({
+      ...base,
+      link: "https://a.example/p?id=1&utm_source=tue&utm_medium=x#other",
+    }),
+  );
+  assert.equal(
+    hash,
+    contentHashOf({ ...base, link: "https://a.example/p?id=1" }),
+  );
+});
+
+test("contentHashOf changes when a meaningful query param or the path changes", () => {
+  const hash = contentHashOf({ ...base, link: "https://a.example/p?id=1" });
+  assert.notEqual(
+    hash,
+    contentHashOf({ ...base, link: "https://a.example/p?id=2" }),
+  );
+  assert.notEqual(
+    hash,
+    contentHashOf({ ...base, link: "https://a.example/q?id=1" }),
+  );
+});
+
+test("a link canonicalLink rejects still hashes deterministically by its raw value", () => {
+  const raw = { ...base, link: "javascript:alert(1)" };
+  assert.equal(canonicalLink(raw.link), null);
+  assert.equal(contentHashOf(raw), contentHashOf({ ...raw }));
+  assert.notEqual(
+    contentHashOf(raw),
+    contentHashOf({ ...base, link: "javascript:alert(2)" }),
+  );
+  assert.notEqual(contentHashOf(raw), contentHashOf({ ...base, link: null }));
+});
