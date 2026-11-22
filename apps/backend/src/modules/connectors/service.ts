@@ -1,6 +1,6 @@
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
-import { stableJsonStringify } from "./json-compare";
+import { comparableConfig } from "./json-compare";
 import { ConnectorOAuthService } from "./oauth-service";
 import { requireConnectorWorkspace } from "./permissions";
 import {
@@ -23,25 +23,6 @@ import {
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import type { ConnectorStatus, ConnectorSyncReadinessResult } from "./types";
-
-/** Recursively trims every string value so equivalent configs compare equal. */
-function trimStrings(value: unknown): unknown {
-  if (typeof value === "string") return value.trim();
-  if (Array.isArray(value)) return value.map(trimStrings);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        trimStrings(item),
-      ]),
-    );
-  }
-  return value;
-}
-
-function comparableConfig(configJson: Record<string, unknown>) {
-  return stableJsonStringify(trimStrings(configJson));
-}
 
 export class ConnectorService {
   constructor(
