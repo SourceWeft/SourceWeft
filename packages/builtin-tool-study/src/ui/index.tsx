@@ -38,6 +38,7 @@ export { StudyCannotDisplay, StudyErrorBoundary } from "./shared/error-boundary"
 export {
   configureStudyHost,
   readOnlyStudyHost,
+  STUDY_TRANSLATION_KEYS,
   StudyHostProvider,
   useStudyHost,
   type QuizAttemptView,

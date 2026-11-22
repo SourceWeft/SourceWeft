@@ -3082,7 +3082,7 @@
         "table": "資料表",
         "flashcards": "閃卡",
         "quiz": "測驗",
-        "mindmap": "思維導圖"
+        "mindmap": "心智圖"
       }
     },
     "skills": {
@@ -3809,8 +3809,11 @@
       "menu": "用所選來源產生",
       "needsSelection": "先選擇要使用的來源",
       "needsThread": "開始對話後才能用來源產生",
-      "openFailed": "資料表已加入佇列，但無法開啟。請在製品中檢視。",
-      "table": "資料表"
+      "openFailed": "已開始產生，但無法開啟結果。請在製品中檢視。",
+      "table": "資料表",
+      "flashcards": "閃卡",
+      "quiz": "測驗",
+      "mindmap": "心智圖"
     }
   },
   "dashboardBlogAdmin": {
@@ -5665,7 +5668,7 @@
         "unsupported_response_type": "不支援此登入方式。",
         "invalid_scope": "請求的存取權限無效。",
         "server_error": "登入伺服器發生錯誤。",
-        "temporarily_unavailable": "登入服務暫時不可用，請稍後重試。",
+        "temporarily_unavailable": "登入服務暫時無法使用，請稍後重試。",
         "invalid_token": "你的登入連結無效或已過期。",
         "account_not_linked": "此帳號尚未連結，請嘗試其他登入方式。",
         "email_not_verified": "登入前請先驗證你的電子郵件。",
@@ -5978,7 +5981,7 @@
         "INSUFFICIENT_CREDITS": "點數不足，無法產生這張表。",
         "INPUT_TOO_LARGE": "所選來源太大，一張表容納不下。請減少來源，或選擇較短的來源。",
         "NO_INDEXED_SOURCES": "所選來源都還沒有建立索引。",
-        "MODEL_UNAVAILABLE": "模型暫時不可用，請稍後再試。",
+        "MODEL_UNAVAILABLE": "模型暫時無法使用，請稍後再試。",
         "GENERATION_QUALITY_TOO_LOW": "太多答案無法在原文中核實，所以沒有產生這張表。",
         "SOURCE_NOT_READABLE": "有來源無法讀取。",
         "UNKNOWN": "無法產生這張表。"
@@ -6050,7 +6053,7 @@
       "reused": "這張表已經在產生中。",
       "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
       "errors": {
-        "TABLE_TOO_MANY_RUNNING": "同時產生的資料表和學習產物太多，請等其中一個完成。",
+        "TABLE_TOO_MANY_RUNNING": "同時產生的資料表和學習製品太多，請等其中一個完成。",
         "TABLE_NOT_READY": "只有已完成的資料表才能重新產生。",
         "TABLE_CONTENT_UNREADABLE": "無法讀取這張表，因此不能重新產生。",
         "TABLE_REGENERATION_IN_PROGRESS": "這張表已經在重新產生中。",
@@ -6061,6 +6064,196 @@
         "loadFailed": "無法開啟這張表以重新產生。",
         "suggestFailed": "無法建議欄，請重試。",
         "generic": "無法產生資料表，請重試。"
+      }
+    }
+  },
+  "study": {
+    "status": {
+      "queued": "等待開始…",
+      "generating": "正在產生… 已完成 {completed} / {total} 步"
+    },
+    "error": {
+      "generateAgain": "如需重試，請在來源中心選擇來源後重新產生。",
+      "cannotDisplay": "無法顯示這份學習內容。",
+      "code": {
+        "INSUFFICIENT_CREDITS": "點數不足，無法產生。",
+        "INPUT_TOO_LARGE": "所選來源太大，一次產生容納不下。請減少來源，或選擇較短的來源。",
+        "NO_INDEXED_SOURCES": "所選來源都還沒有建立索引。",
+        "MODEL_UNAVAILABLE": "模型暫時無法使用，請稍後再試。",
+        "GENERATION_QUALITY_TOO_LOW": "能在原文中核實的項目太少，所以沒有產生。",
+        "SOURCE_NOT_READABLE": "有來源無法讀取。",
+        "UNKNOWN": "無法產生。"
+      }
+    },
+    "evidence": {
+      "show": "檢視原文片段",
+      "hide": "隱藏原文片段",
+      "sourceChanged": "來源原文在產生之後發生了變化，下方顯示的是當時的片段。",
+      "openSource": "在來源中開啟"
+    },
+    "stale": {
+      "message": "有來源在產生之後發生了變化，重新產生即可更新。",
+      "sourceDeleted": "有來源已被刪除，這份內容仍可使用。",
+      "regenerate": "重新產生"
+    },
+    "flashcards": {
+      "label": "閃卡",
+      "mode": {
+        "browse": "瀏覽",
+        "review": "複習"
+      },
+      "progress": "{current} / {total}",
+      "exportAnki": "匯出到 Anki（CSV）",
+      "showFront": "顯示正面",
+      "showBack": "顯示答案",
+      "showingFront": "正在顯示正面",
+      "showingBack": "正在顯示答案",
+      "gradeFailed": "評分沒有儲存成功，請重試。",
+      "nothingDue": "現在沒有需要複習的卡片。",
+      "done": "本輪完成：共 {total} 張，已複習 {graded} 張。",
+      "restart": "重新開始",
+      "previous": "上一張",
+      "next": "下一張",
+      "hintFlip": "按 Space 或 Enter 鍵翻面",
+      "hintGrade": "按 1–4 評價掌握程度",
+      "gradeLabel": "掌握得怎麼樣？",
+      "grade": {
+        "again": "重來",
+        "hard": "困難",
+        "good": "良好",
+        "easy": "簡單"
+      }
+    },
+    "quiz": {
+      "loading": "正在載入測驗…",
+      "intro": "共 {total} 題，提交後批改。",
+      "start": "開始",
+      "saveFailed": "答案沒有儲存成功，已保留在本頁。",
+      "questionOf": "第 {current} 題，共 {total} 題",
+      "previous": "上一題",
+      "submit": "提交",
+      "next": "下一題",
+      "true": "對",
+      "false": "錯",
+      "chooseOne": "選擇一個答案",
+      "chooseAll": "選擇所有正確答案",
+      "yourAnswer": "你的答案",
+      "referenceAnswer": "參考答案",
+      "showReference": "顯示參考答案",
+      "selfGrade": {
+        "knew": "我答對了",
+        "missed": "我沒答對"
+      },
+      "result": {
+        "score": "答對 {correct} / {total} 題",
+        "selfGraded": "問答題：自評答對 {knew} / {total} 題"
+      },
+      "practiceMistakes": "重練錯題",
+      "restart": "重新開始",
+      "verdict": {
+        "correct": "正確",
+        "wrong": "錯誤",
+        "self": {
+          "knew": "自評：答對了",
+          "missed": "自評：沒答對",
+          "none": "未自評"
+        }
+      },
+      "correctAnswer": "答案："
+    },
+    "mindmap": {
+      "view": {
+        "map": "圖",
+        "outline": "大綱"
+      },
+      "exportMarkdown": "匯出 Markdown",
+      "exportJson": "匯出 JSON",
+      "detailLabel": "所選要點",
+      "askPrompt": "根據我的來源，進一步說明「{label}」。",
+      "askInChat": "在聊天中追問",
+      "expand": "展開",
+      "collapse": "收起",
+      "outlineLabel": "心智圖大綱"
+    },
+    "generate": {
+      "title": {
+        "flashcards": "產生閃卡",
+        "quiz": "產生測驗",
+        "mindmap": "產生心智圖"
+      },
+      "description": {
+        "flashcards": "用於間隔複習的卡片，每張卡片都註明出自哪段原文。",
+        "quiz": "附解析的題目，每題都註明出自哪段原文。",
+        "mindmap": "主要觀點及其關係，每個要點都註明出自哪段原文。"
+      },
+      "regenerateTitle": "調整並重新產生",
+      "regenerateSources": "使用與目前版本相同的 {count} 個來源。",
+      "sources": "{count} 個來源",
+      "addSource": "新增來源",
+      "searchSources": "搜尋來源",
+      "noSources": "沒有符合的來源。",
+      "moreResults": "顯示更多",
+      "sourcesLimit": "最多使用 {max} 個來源。",
+      "untitledSource": "未命名來源",
+      "unavailableSource": "來源已無法使用",
+      "size": {
+        "label": "數量",
+        "fewer": "較少",
+        "standard": "標準",
+        "more": "較多",
+        "flashcards": "{size} · {count} 張",
+        "quiz": "{size} · {count} 題",
+        "mindmap": "{size} · 最多 {count} 個要點"
+      },
+      "difficulty": {
+        "label": "難度",
+        "easy": "簡單",
+        "mixed": "混合",
+        "hard": "困難"
+      },
+      "focus": {
+        "label": "側重點（選填）",
+        "placeholder": "例如：定義和關鍵日期",
+        "counter": "{used} / {max}",
+        "tooLong": "側重點最多 {max} 個字元。"
+      },
+      "language": {
+        "label": "語言",
+        "follow": "與來源相同"
+      },
+      "problems": {
+        "noSources": "至少新增一個來源。",
+        "tooManySources": "最多使用 {max} 個來源，請減少所選來源。"
+      },
+      "estimate": {
+        "loading": "正在估算規模…",
+        "summary": {
+          "flashcards": "最多 {count} 張閃卡，來自 {sources} 個來源",
+          "quiz": "最多 {count} 題，來自 {sources} 個來源",
+          "mindmap": "最多 {count} 個要點，來自 {sources} 個來源"
+        },
+        "parts": "來源較長，會分 {groups} 部分閱讀，所需時間稍長。",
+        "exceedsLimit": "所選來源太大，一次產生容納不下。請減少來源，或選擇較短的來源。",
+        "failed": "無法估算規模。"
+      },
+      "submit": "產生",
+      "regenerateSubmit": "重新產生",
+      "cancel": "取消",
+      "started": "正在產生，也會出現在製品中。",
+      "reused": "已經在產生中。",
+      "regenerating": "正在重新產生。新版本完成前仍顯示目前版本。",
+      "manageBilling": "管理計費",
+      "errors": {
+        "STUDY_TOO_MANY_RUNNING": "同時產生的資料表和學習製品太多，請等其中一個完成。",
+        "STUDY_NOT_READY": "只有已完成的學習內容才能重新產生。",
+        "STUDY_CONTENT_UNREADABLE": "無法讀取這份學習內容，因此不能重新產生。",
+        "STUDY_REGENERATION_IN_PROGRESS": "這份學習內容已經在重新產生中。",
+        "VALIDATION_ERROR": "請檢查選項和來源後重試。",
+        "THREAD_NOT_FOUND": "這個對話已無法使用。",
+        "ARTIFACT_NOT_FOUND": "這份學習內容已不存在。",
+        "recipeUnavailable": "這份學習內容無法調整。請從來源中心重新產生。",
+        "loadFailed": "無法開啟這份學習內容以重新產生。",
+        "generic": "無法產生，請重試。"
       }
     }
   },

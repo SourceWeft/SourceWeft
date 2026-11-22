@@ -692,6 +692,69 @@ test("quiz answers are scored on the server; finishing locks the attempt", async
   );
 });
 
+test("a viewer finds the attempts of the version it holds by its version id", async () => {
+  const quizId = await createArtifact({ artifactType: "quiz", payload: quiz });
+  const versionIds = async () =>
+    (
+      await rows(
+        "select id from artifact_versions where artifact_id = $1 order by version_no",
+        [quizId],
+      )
+    ).map((row) => row.id as string);
+  const [firstVersionId] = await versionIds();
+  const first = await data(
+    await call("POST", `/study/artifacts/${quizId}/quiz/attempts`, {
+      artifactVersionId: firstVersionId,
+    }),
+  );
+  await addVersion(quizId, quiz);
+  const [, secondVersionId] = await versionIds();
+  const second = await data(
+    await call("POST", `/study/artifacts/${quizId}/quiz/attempts`, {
+      artifactVersionId: secondVersionId,
+    }),
+  );
+
+  const attemptsAt = async (versionId: string) =>
+    (
+      await data(
+        await call(
+          "GET",
+          `/study/artifacts/${quizId}/quiz/attempts?artifactVersionId=${versionId}`,
+        ),
+      )
+    ).items.map((item: { id: string; versionNo: number }) => [item.id, item.versionNo]);
+  assert.deepEqual(await attemptsAt(firstVersionId!), [[first.id, 1]]);
+  assert.deepEqual(await attemptsAt(secondVersionId!), [[second.id, 2]]);
+  // Without a version, every version's attempts, newest first.
+  assert.deepEqual(
+    (await data(await call("GET", `/study/artifacts/${quizId}/quiz/attempts`))).items.map(
+      (item: { id: string }) => item.id,
+    ),
+    [second.id, first.id],
+  );
+  assert.equal(
+    (
+      await call(
+        "GET",
+        `/study/artifacts/${quizId}/quiz/attempts?artifactVersionId=${randomUUID()}`,
+      )
+    ).status,
+    404,
+  );
+  // Review progress is a flashcards route: a quiz is not found there, so a
+  // viewer cannot use it to learn a quiz version's number.
+  assert.equal(
+    (
+      await call(
+        "GET",
+        `/study/artifacts/${quizId}/progress?artifactVersionId=${firstVersionId}`,
+      )
+    ).status,
+    404,
+  );
+});
+
 test("multi scores only when every correct option is chosen; short self grades count", async () => {
   const quizId = await createArtifact({ artifactType: "quiz", payload: quiz });
   const attempt = await data(

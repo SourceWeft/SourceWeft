@@ -101,6 +101,7 @@ import {
 } from "../action-icons";
 import type { SourceItem } from "../source-types";
 import { ComposerDictationButton } from "./dictation/dictation-button";
+import { ComposerInsertSlot } from "./composer-insert";
 import { useDictation } from "./dictation/use-dictation";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
@@ -1494,6 +1495,8 @@ function ComposerBody({
         key={`${String(inputKey ?? "composer")}:${composerSessionKey}:${initialAttachments.map((a) => a.id).join(",")}`}
       >
         {draftKey && <DraftMirror draftKey={draftKey} paused={draftPaused} />}
+        {/* Where an artifact viewer's "ask in chat" puts its text. */}
+        <ComposerInsertSlot />
         <PromptInput
           accept="image/png,image/jpeg,image/webp,image/gif"
           maxFileSize={10 * 1024 * 1024}

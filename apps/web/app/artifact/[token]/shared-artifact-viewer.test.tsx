@@ -4,8 +4,13 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { tableArtifactViewHandlers } from "@sourceweft/builtin-tool-table";
 import { TABLE_FIXTURE_EN } from "@sourceweft/builtin-tool-table/testing";
+import { studyArtifactViewHandlers } from "@sourceweft/builtin-tool-study";
+import {
+  flashcardsFixtureEn,
+  quizFixtureEn,
+} from "@sourceweft/builtin-tool-study/testing";
 import { SharedArtifactViewer } from "./shared-artifact-viewer";
-import { mountWithIntl, unmountAll } from "@/test/react";
+import { buttons, click, flush, mountWithIntl, unmountAll } from "@/test/react";
 
 vi.mock("@sourceweft/preview/react", () => ({
   Preview: ({
@@ -209,5 +214,116 @@ test("a shared table renders its stripped public payload with values and no sour
   // No quote, and nothing that would open one.
   assert.doesNotMatch(text, /This was a randomised controlled trial/);
   assert.equal(container.querySelector("[data-study-evidence]"), null);
+  await unmountAll();
+});
+
+function sharedStudy(
+  artifactType: "flashcards" | "quiz" | "mindmap",
+  payload: Record<string, unknown>,
+) {
+  return {
+    token: "token",
+    artifactType,
+    title: "Photosynthesis",
+    fileUrl: null,
+    downloadUrl: null,
+    inlinePreviewable: false,
+    previewImageUrl: null,
+    payload,
+    description: null,
+    viewCount: 0,
+    noindex: false,
+    createdAt: "2026-11-22T00:00:00.000Z",
+  };
+}
+
+const OWNER_FOCUS = "Only the parts about my own medical history";
+
+/** The fixture with the owner's focus in its recipe, as a real one may carry. */
+function withOwnerFocus<T extends { generation: { recipe: Record<string, unknown> } }>(
+  content: T,
+): T {
+  return {
+    ...content,
+    generation: {
+      ...content.generation,
+      recipe: { ...content.generation.recipe, focus: OWNER_FOCUS },
+    },
+  };
+}
+
+/** Nothing but what the viewer renders reaches an anonymous browser. */
+function assertNothingPrivate(payload: unknown) {
+  const serialized = JSON.stringify(payload);
+  for (const field of [
+    "quote",
+    "chunkId",
+    "documentId",
+    "contentHash",
+    "recipe",
+    "focus",
+    "generation",
+    "inputs",
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${field}"`), field);
+  }
+  assert.ok(!serialized.includes(OWNER_FOCUS), "the owner's focus is in the public payload");
+}
+
+function publicStudyPayload(artifactType: "flashcards" | "quiz", payloadJson: unknown) {
+  const handler = studyArtifactViewHandlers.find(
+    (candidate) => candidate.artifactType === artifactType,
+  );
+  const payload = handler!.buildPublicPayload!({
+    artifact: {
+      artifactType,
+      status: "ready",
+      title: "Photosynthesis",
+      storageBucket: null,
+      storageKey: null,
+      payloadJson,
+    },
+    assetUrl: (fileName) => `/public/${fileName}`,
+  });
+  assert.ok(payload);
+  return payload;
+}
+
+test("shared flashcards render the stripped public payload with catalog wording and no source quote", async () => {
+  const payload = publicStudyPayload("flashcards", withOwnerFocus(flashcardsFixtureEn));
+  assertNothingPrivate(payload);
+
+  const { container } = await mountWithIntl(
+    <SharedArtifactViewer artifact={sharedStudy("flashcards", payload)} />,
+  );
+  await flush(3);
+  const text = container.textContent ?? "";
+  assert.ok(text.includes("What does photosynthesis produce?"));
+  // Wording comes from the catalog, not raw keys.
+  assert.ok(text.includes("Export for Anki (CSV)"));
+  assert.ok(text.includes("1 / 3"));
+  assert.doesNotMatch(text, /study\./);
+  // Read-only: no review mode, no grading, no evidence.
+  assert.equal(buttons("Review", container).length, 0);
+  assert.equal(container.querySelector("[data-study-evidence]"), null);
+  assert.doesNotMatch(text, /Photosynthesis turns carbon dioxide/);
+  await unmountAll();
+});
+
+test("a shared quiz is answered in the page with catalog wording", async () => {
+  const payload = publicStudyPayload("quiz", withOwnerFocus(quizFixtureEn));
+  assertNothingPrivate(payload);
+
+  const { container } = await mountWithIntl(
+    <SharedArtifactViewer artifact={sharedStudy("quiz", payload)} />,
+  );
+  await flush(3);
+  assert.ok((container.textContent ?? "").includes("4 questions."));
+  await click(buttons("Start", container)[0]!);
+  await flush(3);
+  const text = container.textContent ?? "";
+  assert.ok(text.includes("Question 1 of 4"));
+  assert.ok(text.includes("Which gas do plants release during photosynthesis?"));
+  assert.doesNotMatch(text, /study\./);
   await unmountAll();
 });

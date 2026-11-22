@@ -106,4 +106,28 @@ describe("GenerateMenu", () => {
       sourceIds: ["source-1", "source-2"],
     });
   });
+
+  test("offers flashcards, a quiz and a mind map, each with its own dialog", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await mountWithIntl(
+      <QueryClientProvider client={client}>
+        <GenerateMenu
+          onCreated={vi.fn()}
+          sources={selected}
+          threadId="thread-1"
+          workspaceId="workspace-1"
+        />
+      </QueryClientProvider>,
+    );
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map(
+      (item) => item.textContent,
+    );
+    expect(items).toEqual(["Data table", "Flashcards", "Quiz", "Mind map"]);
+
+    await act(async () => button("Quiz").click());
+    await flush(3);
+    expect(text()).toContain("Generate a quiz");
+    expect(text()).toContain("2 sources");
+    expect(text()).toContain("Alpha report");
+  });
 });

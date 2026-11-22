@@ -229,17 +229,23 @@ export async function saveQuizAnswers(
   return attemptView(saved, version.content);
 }
 
-/** The caller's own recent attempts at one quiz, newest first. */
+/**
+ * The caller's own recent attempts at one quiz, newest first. With
+ * `artifactVersionId`, only the attempts at that version (an unknown or
+ * foreign version id is a 404, like every other study route).
+ */
 export async function listQuizAttempts(input: {
   workspaceId: string;
   userId: string;
   artifactId: string;
+  artifactVersionId?: string;
 }): Promise<QuizAttemptListResponse> {
   const current = await requireStudyVersion({ ...input, artifactType: "quiz" });
   const rows = await listOwnQuizAttempts({
     userId: input.userId,
     artifactId: current.owner.artifactId,
     limit: ATTEMPT_HISTORY_MAX,
+    ...(input.artifactVersionId ? { versionNo: current.versionNo } : {}),
   });
   const contents = new Map<number, QuizContent>([
     [current.versionNo, current.content],
@@ -250,7 +256,9 @@ export async function listQuizAttempts(input: {
     if (!content && row.finishedAt) {
       content = (
         await requireStudyVersion({
-          ...input,
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          artifactId: input.artifactId,
           artifactType: "quiz",
           versionNo: row.versionNo,
         })

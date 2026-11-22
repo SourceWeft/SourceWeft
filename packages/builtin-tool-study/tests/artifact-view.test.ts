@@ -71,12 +71,29 @@ function sourceText(value: unknown): string[] {
   return found;
 }
 
+const PRIVATE_FOCUS = "Only the parts about my own medical history";
+
+/** A fixture whose recipe carries the owner's focus, as a real one may. */
+function withFocus<T extends { generation: { recipe: Record<string, unknown> } }>(content: T): T {
+  return {
+    ...content,
+    generation: {
+      ...content.generation,
+      recipe: {
+        ...content.generation.recipe,
+        focus: PRIVATE_FOCUS,
+        options: { size: "standard", focus: PRIVATE_FOCUS },
+      },
+    },
+  };
+}
+
 for (const [artifactType, fixture] of [
-  ["flashcards", flashcardsFixtureEn],
-  ["quiz", quizFixtureEn],
-  ["mindmap", mindmapFixtureEn],
+  ["flashcards", withFocus(flashcardsFixtureEn)],
+  ["quiz", withFocus(quizFixtureEn)],
+  ["mindmap", withFocus(mindmapFixtureEn)],
 ] as const) {
-  test(`the public payload of ${artifactType} has no evidence quote, start or end offsets`, async () => {
+  test(`the public payload of ${artifactType} has no evidence quote, offsets or chunk ids`, async () => {
     const handlers = await createArtifactViewHandlers();
     const handler = handlers.find((candidate) => candidate.artifactType === artifactType)!;
     assert.ok(handler.buildPublicPayload, `${artifactType} offers a public payload`);
@@ -88,9 +105,31 @@ for (const [artifactType, fixture] of [
     });
     assert.ok(payload);
     const serialized = JSON.stringify(payload);
-    for (const field of ["quote", "startChar", "endChar", "quoteHash", "headingPath"]) {
+    for (const field of [
+      "quote",
+      "startChar",
+      "endChar",
+      "quoteHash",
+      "headingPath",
+      "chunkId",
+      "chunkNo",
+      "documentId",
+      "contentHash",
+      "inputs",
+      "generation",
+      "recipe",
+      "focus",
+      "modelAlias",
+      "promptVersion",
+      "stats",
+    ]) {
       assert.doesNotMatch(serialized, new RegExp(`"${field}"`), field);
     }
+    assert.ok(!serialized.includes(PRIVATE_FOCUS), "the owner's focus left in the public payload");
+    assert.deepEqual(
+      Object.keys(payload).sort(),
+      ["kind", "language", artifactType === "mindmap" ? "root" : "items", "schemaVersion"].sort(),
+    );
     for (const quote of quotes) {
       assert.ok(!serialized.includes(quote), `"${quote}" left in the public payload`);
     }
