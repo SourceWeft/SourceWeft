@@ -1171,6 +1171,21 @@ export class ContentClient {
     );
   }
 
+  /** Downloads a chat as Markdown, or as a zip when it has images. */
+  exportThread(
+    workspaceId: string,
+    threadId: string,
+    input: { locale: string; timeZone: string },
+  ) {
+    const params = new URLSearchParams({
+      locale: input.locale,
+      timeZone: input.timeZone,
+    });
+    return this.http.getDownload(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/export?${params.toString()}`,
+    );
+  }
+
   searchThreads(workspaceId: string, input: SearchThreadsRequest) {
     const params = new URLSearchParams({ q: input.q });
     if (typeof input.limit === "number") {
