@@ -1,4 +1,6 @@
 import type {
+  CheckConnectorConfigRequest,
+  CheckConnectorConfigResponse,
   ConnectorSelectionBrowseResult,
   ConnectorSelectionDescribeResult,
   ConnectorSelectionSearchResult,
@@ -149,6 +151,14 @@ export class ConnectorsClient {
   create(workspaceId: string, input: CreateConnectorRequest) {
     return this.http.post<CreateConnectorResponse>(
       `/v1/workspaces/${encode(workspaceId)}/connectors`,
+      input,
+    );
+  }
+
+  /** Pre-create readiness check for a configuration; creates nothing. */
+  checkConfig(workspaceId: string, input: CheckConnectorConfigRequest) {
+    return this.http.post<CheckConnectorConfigResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/check`,
       input,
     );
   }

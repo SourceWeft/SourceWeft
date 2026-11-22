@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import {
+  checkConnectorConfigRequestSchema,
   connectorWebhookConfigResponseSchema,
   createConnectorActionRequestSchema,
   createConnectorRequestSchema,
@@ -91,6 +92,32 @@ export function registerConnectorRoutes(app: Hono) {
     }
 
     return ApiResponse.success(c, connectorService.listManifests());
+  });
+
+  // Literal two-segment path; the `/connectors/:connectorId/...` routes all have
+  // more segments, so this never collides with them.
+  app.post("/connectors/check", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => null));
+    const parsed = checkConnectorConfigRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await connectorService.checkConfigReadiness({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      connectorType: parsed.data.connectorType,
+      configJson: parsed.data.configJson,
+    });
+    c.header("Cache-Control", "no-store");
+    return ApiResponse.success(c, result);
   });
 
   app.get("/connectors/:connectorId/gmail/labels", async (c) => {

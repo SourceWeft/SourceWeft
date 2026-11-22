@@ -465,6 +465,18 @@ export const createConnectorRequestSchema = z.object({
   indexingFrequencyMinutes: z.number().int().positive().optional(),
 });
 
+export const checkConnectorConfigRequestSchema = z.object({
+  connectorType: z.string().trim().min(1),
+  configJson: jsonObjectSchema,
+});
+
+export const checkConnectorConfigResponseSchema = z.object({
+  ready: z.boolean(),
+  reason: z.string().optional(),
+  message: z.string().optional(),
+  metadata: jsonObjectSchema.optional(),
+});
+
 export const updateConnectorRequestSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   oauthAccountId: z.string().trim().min(1).optional(),
@@ -657,6 +669,12 @@ export type ListConnectorOAuthAccountsResponse = z.infer<
 >;
 export type CreateConnectorRequest = z.infer<
   typeof createConnectorRequestSchema
+>;
+export type CheckConnectorConfigRequest = z.infer<
+  typeof checkConnectorConfigRequestSchema
+>;
+export type CheckConnectorConfigResponse = z.infer<
+  typeof checkConnectorConfigResponseSchema
 >;
 export type CreateConnectorResponse = z.infer<
   typeof createConnectorResponseSchema
