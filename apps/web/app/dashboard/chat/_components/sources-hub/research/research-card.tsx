@@ -16,7 +16,7 @@ export function ResearchCard({
   const active = run.status === "queued" || run.status === "running";
   return (
     <div className="rounded-md border p-3 text-sm" data-testid="research-card">
-      <p className="font-medium">{run.topic}</p>
+      <p className="font-medium break-words">{run.topic}</p>
       {active ? (
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="text-muted-foreground flex items-center gap-2">

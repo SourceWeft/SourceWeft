@@ -123,6 +123,13 @@ test("dialog starts a run and polls it to a ready report", async () => {
     expect(
       document.body.querySelector('[data-streamdown="strong"]')?.textContent,
     ).toBe("report");
+    // A long URL in the report must not widen the dialog's grid column and
+    // clip the text on the right: children may shrink and long words wrap.
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog?.className).toContain("[&>*]:min-w-0");
+    expect(
+      document.body.querySelector('[class*="overflow-wrap:anywhere"]'),
+    ).not.toBeNull();
   } finally {
     vi.useRealTimers();
   }

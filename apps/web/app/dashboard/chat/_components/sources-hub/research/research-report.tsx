@@ -159,7 +159,7 @@ export function ResearchReport({
   return (
     <div className="space-y-3">
       <div
-        className="max-h-80 overflow-y-auto rounded-md border p-3"
+        className="max-h-80 overflow-y-auto rounded-md border p-3 [overflow-wrap:anywhere]"
         onClick={(event) => {
           const n = citeAt(event.target);
           if (n !== null) {

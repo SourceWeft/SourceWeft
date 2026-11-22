@@ -74,7 +74,7 @@ export function ResearchDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle>{t("research.title")}</DialogTitle>
           <DialogDescription>{t("research.description")}</DialogDescription>
