@@ -1,7 +1,8 @@
-import type {
-  AgentToolHostServices,
-  AgentToolTurnContext,
-} from "@sourceweft/contracts/agent-tools";
+import {
+  bindGroundedArtifactTool,
+  requestGroundedArtifactFromTurn,
+  type GroundedArtifactToolFactoryInput,
+} from "@sourceweft/grounded-generation";
 import {
   TABLE_LIMITS,
   tableColumnInputSchema,
@@ -16,15 +17,6 @@ import { GENERATE_TABLE_TOOL_NAME } from "./agent-tool-defs";
  * pending artifact. The cells are filled by the background job, exactly as for
  * a table started from the source hub — this tool never calls a model.
  */
-
-/** What this capability asks of the host, taken out of the shared contract. */
-type CapabilityAgentToolFactoryInput = {
-  readonly toolIds?: readonly string[];
-  readonly context?: Partial<
-    Pick<AgentToolTurnContext, "isToolDenied" | "shouldBindAgentTool" | "threadId">
-  >;
-  readonly services?: Partial<Pick<AgentToolHostServices, "groundedArtifacts">>;
-};
 
 const TABLE_ARTIFACT_TYPE = "table";
 const LANGUAGE_TAG = z.string().trim().min(2).max(35);
@@ -55,60 +47,51 @@ type GenerateTableArgs = z.infer<typeof generateTableSchema>;
 const NO_SOURCES_MESSAGE =
   "No sources are selected for this conversation. Ask the user to select or @mention the sources to compare (in the Hub or the message), then run /table again.";
 
+function tooManySourcesMessage(counts: { sources: number; maxSources: number }) {
+  return `This conversation has ${counts.sources} sources, more than the ${counts.maxSources} one table can compare. Ask the user to narrow the selection (or @mention the sources to compare) to ${counts.maxSources} or fewer, then run /table again.`;
+}
+
 const NEXT_STEP =
   "The table is being generated in the background, one source at a time. Tell the user it will appear in the Hub's Artifacts tab when it is ready. Do not state, guess or summarize any cell values: none exist yet.";
 
-function describeIssues(error: z.ZodError) {
-  return error.issues
-    .map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`)
-    .join("; ");
+const READY_STEP =
+  "The same table was requested a moment ago and is already ready. Tell the user it is in the Hub's Artifacts tab. Do not state, guess or summarize any cell values yourself.";
+
+function nextStep(receipt: { reused: boolean; status: string }) {
+  if (receipt.reused && receipt.status === "ready") return READY_STEP;
+  return receipt.reused
+    ? `The same table was requested a moment ago and is reused. ${NEXT_STEP}`
+    : NEXT_STEP;
 }
 
-function includesTool(input: CapabilityAgentToolFactoryInput) {
-  return !input.toolIds || input.toolIds.includes(GENERATE_TABLE_TOOL_NAME);
-}
-
-export function createCapabilityAgentTools(input: CapabilityAgentToolFactoryInput) {
-  const threadId = input.context?.threadId;
-  const grounded = input.services?.groundedArtifacts;
-  // The host hands every manifest tool id to the factory; whether this turn
-  // binds the tool (the /table command or a skill selected it) is the turn's
-  // call, and an unasked-for binding is a host error.
-  if (
-    !includesTool(input) ||
-    !threadId ||
-    !grounded ||
-    input.context?.shouldBindAgentTool?.(GENERATE_TABLE_TOOL_NAME) !== true ||
-    input.context.isToolDenied?.(GENERATE_TABLE_TOOL_NAME) === true
-  ) {
-    return { tools: [] };
-  }
+export function createCapabilityAgentTools(input: GroundedArtifactToolFactoryInput) {
+  const binding = bindGroundedArtifactTool(input, GENERATE_TABLE_TOOL_NAME);
+  if (!binding) return { tools: [] };
 
   const generateTable = tool(
     async (args: GenerateTableArgs) => {
-      const sourceIds = await grounded.listTurnSourceIds();
-      if (sourceIds.length === 0) {
-        return { ok: false, code: "NO_SOURCES", message: NO_SOURCES_MESSAGE };
-      }
       // The table contract decides, not this tool: source and cell limits,
       // duplicates and column rules all come from the same schema the app's
       // request route uses. The thread is the turn's.
-      const parsed = tableGenerateRequestSchema.safeParse({
-        threadId,
-        sourceIds: [...sourceIds],
-        columns: args.columns,
-        ...(args.instruction?.trim() ? { instruction: args.instruction.trim() } : {}),
-        ...(args.language ? { language: args.language } : {}),
-      });
-      if (!parsed.success) {
-        throw new Error(`The table request is not valid: ${describeIssues(parsed.error)}`);
-      }
-      const { threadId: _thread, visibility: _visibility, ...request } = parsed.data;
-      const receipt = await grounded.requestGeneration({
+      const outcome = await requestGroundedArtifactFromTurn({
+        binding,
         artifactType: TABLE_ARTIFACT_TYPE,
-        request,
+        subject: "table",
+        parse: ({ threadId, sourceIds }) =>
+          tableGenerateRequestSchema.safeParse({
+            threadId,
+            sourceIds,
+            columns: args.columns,
+            ...(args.instruction?.trim() ? { instruction: args.instruction.trim() } : {}),
+            ...(args.language ? { language: args.language } : {}),
+          }),
         uiLocale: args.userLanguage,
+        noSourcesMessage: NO_SOURCES_MESSAGE,
+        maxSources: TABLE_LIMITS.maxSources,
+        tooManySourcesMessage,
       });
+      if (!outcome.ok) return outcome;
+      const { request, receipt } = outcome;
       return {
         ok: true,
         status: receipt.status,
@@ -118,9 +101,7 @@ export function createCapabilityAgentTools(input: CapabilityAgentToolFactoryInpu
         reused: receipt.reused,
         sources: request.sourceIds.length,
         columns: request.columns.length,
-        nextStep: receipt.reused
-          ? `The same table was requested a moment ago and is reused. ${NEXT_STEP}`
-          : NEXT_STEP,
+        nextStep: nextStep(receipt),
       };
     },
     {

@@ -5,7 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 /**
- * The web bundles this package's `./ui`, `./export` and `./testing` subpaths.
+ * The web bundles this package's `./ui`, `./export`, `./testing` and
+ * `./agent-tool-defs` subpaths.
  * The generation engine (and the root entry that exposes it to the backend)
  * imports `node:crypto`, so no runtime import reachable from those subpaths
  * may lead to it. Type-only imports are erased and do not count.
@@ -13,7 +14,13 @@ import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(PACKAGE_ROOT, "src");
-const BROWSER_ENTRIES = ["ui/index.tsx", "export/index.ts", "testing/index.ts"];
+const BROWSER_ENTRIES = [
+  "ui/index.tsx",
+  "export/index.ts",
+  "testing/index.ts",
+  // The tool registry (and through it the web) imports the definitions.
+  "agent-tool-defs.ts",
+];
 const SERVER_ONLY = [
   join(SRC, "engine") + "/",
   join(SRC, "scheduling") + "/",

@@ -42,6 +42,27 @@ test("capability workflow discovery exposes manifest artifact tool commands from
     assert.deepEqual(artifactTools, [
       {
         actionKind: "tool",
+        aliases: ["flashcards"],
+        iconName: undefined,
+        targetId: "generate_flashcards",
+        visible: true,
+      },
+      {
+        actionKind: "tool",
+        aliases: ["mindmap"],
+        iconName: undefined,
+        targetId: "generate_mindmap",
+        visible: true,
+      },
+      {
+        actionKind: "tool",
+        aliases: ["quiz"],
+        iconName: undefined,
+        targetId: "generate_quiz",
+        visible: true,
+      },
+      {
+        actionKind: "tool",
         aliases: ["table"],
         iconName: "table",
         targetId: "generate_table",
@@ -80,7 +101,16 @@ test("capability workflow discovery exposes manifest artifact tool commands from
       artifactTools
         .filter((command) => command.visible)
         .map((command) => command.targetId),
-      ["generate_table", "image-generate", "ppt-deck", "report", "video-presentation"],
+      [
+        "generate_flashcards",
+        "generate_mindmap",
+        "generate_quiz",
+        "generate_table",
+        "image-generate",
+        "ppt-deck",
+        "report",
+        "video-presentation",
+      ],
     );
   } finally {
     if (previousRoot === undefined) {
