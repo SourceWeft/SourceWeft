@@ -1,11 +1,12 @@
 import { and, count, eq, gte, inArray } from "drizzle-orm";
 import { db, sourceResearchRuns } from "@sourceweft/db";
+import type { ResearchStatus } from "@sourceweft/contracts/source-research";
 import { RESEARCH_LIMITS } from "./limits";
 
 export interface ResearchRunCountFilter {
   teamId?: string;
   userId?: string;
-  statuses?: readonly string[];
+  statuses?: readonly ResearchStatus[];
   since?: Date;
 }
 
@@ -35,7 +36,7 @@ export async function countResearchRuns(
       ? eq(sourceResearchRuns.createdByUserId, filter.userId)
       : undefined,
     filter.statuses
-      ? inArray(sourceResearchRuns.status, [...filter.statuses] as never[])
+      ? inArray(sourceResearchRuns.status, [...filter.statuses])
       : undefined,
     filter.since ? gte(sourceResearchRuns.createdAt, filter.since) : undefined,
   ].filter((condition) => condition !== undefined);

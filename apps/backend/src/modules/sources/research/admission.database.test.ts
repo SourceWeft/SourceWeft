@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, test } from "vitest";
+import type { ResearchStatus } from "@sourceweft/contracts/source-research";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
 
 /** Issue #678: research admission against real research_runs rows. */
@@ -40,7 +41,7 @@ afterAll(async () => {
 
 async function insertRuns(
   count: number,
-  overrides: { userId?: string; status?: string; createdAt?: Date } = {},
+  overrides: { userId?: string; status?: ResearchStatus; createdAt?: Date } = {},
 ) {
   const rows = Array.from({ length: count }, () => ({
     id: randomUUID(),
@@ -48,7 +49,7 @@ async function insertRuns(
     workspaceId,
     createdByUserId: overrides.userId ?? "user-1",
     topic: "Solid-state batteries",
-    status: (overrides.status ?? "ready") as never,
+    status: overrides.status ?? "ready",
     ...(overrides.createdAt ? { createdAt: overrides.createdAt } : {}),
   }));
   await schema.db.insert(schema.sourceResearchRuns).values(rows);
