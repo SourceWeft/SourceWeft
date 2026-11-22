@@ -304,3 +304,35 @@ export const shareLinks = pgTable(
       .where(sql`${table.revokedAt} is null`),
   ],
 );
+
+/**
+ * The frozen snapshot behind a thread share link: the chat content as it
+ * existed when the share was created, never updated to track the live
+ * thread. One row per `share_links` row of `target_type = 'thread'`.
+ *
+ * `snapshot` holds the backend-owned `ChatSnapshot` shape; this package
+ * types it structurally and leaves the cast to the repository that reads it.
+ */
+export const threadShareSnapshots = pgTable(
+  "thread_share_snapshots",
+  {
+    shareLinkId: text("share_link_id")
+      .primaryKey()
+      .references(() => shareLinks.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    threadId: text("thread_id").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    takenAt: timestamp("taken_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "thread_share_snapshots_thread_fk",
+      columns: [table.threadId, table.workspaceId, table.teamId],
+      foreignColumns: [threads.id, threads.workspaceId, threads.teamId],
+    }).onDelete("cascade"),
+    index("thread_share_snapshots_thread_idx").on(table.threadId),
+  ],
+);
