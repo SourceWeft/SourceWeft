@@ -20,10 +20,22 @@ export { STUDY_SIZE_COUNTS } from "@sourceweft/contracts/study";
 /** Items are asked for at this multiple of the request, then cut back. */
 export const OVERGENERATE_FACTOR = 1.3;
 
-/** Output token ceiling of one generation call for `items` requested items. */
+/** The smallest output ceiling of a generation call. */
+export const GENERATION_MIN_MAX_TOKENS = 2_000;
+
+/**
+ * Output token ceiling of one generation call for `items` requested items.
+ * Models write past "at most N" mind map nodes, and a cut-off answer is
+ * unreadable JSON, so small requests still get room for a whole answer. Only
+ * the tokens written are paid for.
+ */
 export function generationMaxTokens(kind: StudyKind, items: number): number {
-  const perItem = kind === "flashcards" ? 230 : kind === "quiz" ? 320 : 80;
-  return Math.min(8_000, 400 + perItem * items);
+  // Each item also carries a word-for-word quote of up to 200 characters.
+  const perItem = kind === "flashcards" ? 300 : kind === "quiz" ? 400 : 160;
+  return Math.min(
+    8_000,
+    Math.max(GENERATION_MIN_MAX_TOKENS, 400 + perItem * items),
+  );
 }
 
 /** A generation keeps at least this share of the requested items... */
@@ -35,6 +47,8 @@ export const MIN_KEEP_ITEMS = 3;
 export const DEDUPE_JACCARD = 0.8;
 
 export const QUOTE_MAX_CHARS = 600;
+/** A model quote shorter than this (estimated tokens) proves too little to be evidence. */
+export const QUOTE_MIN_TOKENS = 6;
 
 /** Cited text handed to one verification call. */
 export const VERIFY_MAX_INPUT_TOKENS = 1_500;
@@ -61,7 +75,7 @@ export const STUDY_JOB_TIMEOUT_MS = {
 } as const;
 
 export const STUDY_PROMPT_VERSIONS: Record<StudyKind, string> = {
-  flashcards: "flashcards-v1",
-  quiz: "quiz-v1",
-  mindmap: "mindmap-v1",
+  flashcards: "flashcards-v2",
+  quiz: "quiz-v2",
+  mindmap: "mindmap-v2",
 };

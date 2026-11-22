@@ -1,4 +1,3 @@
-import { connectorAccessPolicy } from "./access-policy";
 import { requireConnectorWorkspace } from "./permissions";
 import { tool } from "langchain";
 import type { ToolRuntime } from "@langchain/core/tools";
@@ -500,9 +499,7 @@ export async function createConnectorActionTools(
     teamId: context.teamId,
     workspaceId: context.workspaceId,
   });
-  const connectorsByType = activeConnectorsByType(
-    await connectorAccessPolicy.filterAvailable(connectors, context.userId),
-  );
+  const connectorsByType = activeConnectorsByType(connectors);
   const tools = [];
 
   for (const manifest of connectorRegistry.listManifests()) {
@@ -588,10 +585,6 @@ export async function createConnectorActionTools(
                     userId: context.userId,
                     permission: "connector.read",
                   });
-                await connectorAccessPolicy.requireConnection(
-                  connector,
-                  context.userId,
-                );
                 if (
                   connector.connectorType === "gmail" &&
                   action.capabilities?.includes("connector_read") &&

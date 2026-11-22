@@ -1,4 +1,3 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { createHash, randomBytes } from "node:crypto";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
@@ -138,7 +137,6 @@ function assertAuthorizationParamsConfigured(input: {
 export class ConnectorOAuthService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
-    private readonly access = new ConnectorAccessPolicy(undefined, registry),
   ) {}
 
   /**
@@ -167,7 +165,6 @@ export class ConnectorOAuthService {
       userId: input.userId,
       permission: "connector.manage",
     });
-    await this.access.requireAvailable(input.connectorType, input.userId);
     const manifest = this.registry.getManifest(input.connectorType);
     const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS);
 
@@ -292,7 +289,6 @@ export class ConnectorOAuthService {
       userId: stateRow.userId,
       permission: "connector.manage",
     });
-    await this.access.requireAvailable(input.connectorType, stateRow.userId);
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
     assertOAuth2Manifest(manifest);
@@ -344,7 +340,6 @@ export class ConnectorOAuthService {
       userId: stateRow.userId,
       permission: "connector.manage",
     });
-    await this.access.requireAvailable(input.connectorType, stateRow.userId);
     const adapter = this.registry.getAdapter(input.connectorType);
     const manifest = adapter.getManifest();
 

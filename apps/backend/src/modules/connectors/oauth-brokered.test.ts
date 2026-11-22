@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   workspace: vi.fn(),
-  requireAvailable: vi.fn(),
   consume: vi.fn(),
   createState: vi.fn(),
   findAccount: vi.fn(),
@@ -19,9 +18,6 @@ const mocks = vi.hoisted(() => ({
   refreshOAuthToken: vi.fn(),
 }));
 
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 vi.mock("./permissions", () => ({
   requireConnectorWorkspace: mocks.workspace,
 }));
@@ -97,15 +93,13 @@ const registry = {
     connectorType === "composio_gmail" ? brokeredAdapter : notionAdapter,
 };
 
-const access = { requireAvailable: mocks.requireAvailable };
-const service = new ConnectorOAuthService(registry as never, access as never);
+const service = new ConnectorOAuthService(registry as never);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.workspace.mockResolvedValue({
     workspace: { id: "workspace", organizationId: "team" },
   });
-  mocks.requireAvailable.mockResolvedValue(undefined);
 });
 
 describe("start", () => {
@@ -127,10 +121,6 @@ describe("start", () => {
       userId: "user",
       permission: "connector.manage",
     });
-    expect(mocks.requireAvailable).toHaveBeenCalledWith(
-      "composio_gmail",
-      "user",
-    );
     expect(mocks.startAuthorization).toHaveBeenCalledTimes(1);
 
     const call = mocks.startAuthorization.mock.calls[0]?.[0];
@@ -167,27 +157,6 @@ describe("start", () => {
         connectorType: "composio_gmail",
       }),
     ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
-    expect(mocks.requireAvailable).not.toHaveBeenCalled();
-    expect(mocks.startAuthorization).not.toHaveBeenCalled();
-    expect(mocks.createState).not.toHaveBeenCalled();
-  });
-
-  it("checks the preview gate before contacting the broker", async () => {
-    mocks.requireAvailable.mockRejectedValue(
-      new ConnectorError(
-        403,
-        "CONNECTOR_PREVIEW_ACCESS_DENIED",
-        "preview required",
-      ),
-    );
-
-    await expect(
-      service.start({
-        workspaceId: "workspace",
-        userId: "user",
-        connectorType: "composio_gmail",
-      }),
-    ).rejects.toMatchObject({ code: "CONNECTOR_PREVIEW_ACCESS_DENIED" });
     expect(mocks.startAuthorization).not.toHaveBeenCalled();
     expect(mocks.createState).not.toHaveBeenCalled();
   });
@@ -624,7 +593,6 @@ describe("revokeStoredAuthorization", () => {
   it("resolves (so the local delete still proceeds) when the connector's adapter is switched off at deployment level", async () => {
     const switchedOffService = new ConnectorOAuthService(
       new ConnectorRegistry(),
-      access as never,
     );
 
     await expect(

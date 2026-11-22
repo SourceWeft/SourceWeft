@@ -27,3 +27,8 @@ test("allocateGroupQuotas sums to the total with at least one per group", () => 
 test("allocateGroupQuotas gives one per group when there are more groups than items", () => {
   assert.deepEqual(allocateGroupQuotas(2, [100, 100, 100]), [1, 1, 1]);
 });
+
+test("allocateGroupQuotas gives a single group the whole total", () => {
+  assert.deepEqual(allocateGroupQuotas(26, [7_000]), [26]);
+  assert.deepEqual(allocateGroupQuotas(1, [7_000]), [1]);
+});

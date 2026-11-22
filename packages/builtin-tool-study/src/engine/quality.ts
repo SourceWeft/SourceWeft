@@ -13,14 +13,29 @@ export function minimumKept(requested: number): number {
   );
 }
 
-/** A generation that kept too little is not published as a partial result. */
-export function assertRetention(input: { kept: number; requested: number }) {
+/**
+ * A generation that kept too little is not published as a partial result. The
+ * failure carries how many items the model wrote and why the rest were
+ * dropped, so a shortfall can be told apart from a validation loss.
+ */
+export function assertRetention(input: {
+  kept: number;
+  requested: number;
+  generated?: number;
+  dropped?: Readonly<Record<string, number>>;
+}) {
   const minimum = minimumKept(input.requested);
   if (input.kept < minimum) {
     throw new StudyGenerationError(
       "GENERATION_QUALITY_TOO_LOW",
       `Only ${input.kept} of ${input.requested} requested items passed validation (need ${minimum})`,
-      { kept: input.kept, requested: input.requested, minimum },
+      {
+        kept: input.kept,
+        requested: input.requested,
+        minimum,
+        ...(input.generated === undefined ? {} : { generated: input.generated }),
+        ...(input.dropped ? { dropped: { ...input.dropped } } : {}),
+      },
     );
   }
 }

@@ -1,4 +1,3 @@
-import { connectorAccessPolicy } from "../../../modules/connectors/access-policy";
 import type { Hono } from "hono";
 import {
   connectorWebhookConfigResponseSchema,
@@ -91,10 +90,7 @@ export function registerConnectorRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
-    return ApiResponse.success(
-      c,
-      await connectorService.listManifests(getSessionUserId(session)),
-    );
+    return ApiResponse.success(c, connectorService.listManifests());
   });
 
   app.get("/connectors/:connectorId/gmail/labels", async (c) => {
@@ -123,10 +119,6 @@ export function registerConnectorRoutes(app: Hono) {
         "Active Gmail connector not found",
       );
     }
-    await connectorAccessPolicy.requireConnection(
-      connector,
-      getSessionUserId(session),
-    );
     const accessToken = await connectorOAuthService.getRuntimeToken({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -176,10 +168,6 @@ export function registerConnectorRoutes(app: Hono) {
         workspaceId: workspace.id,
         connectorId,
       });
-      await connectorAccessPolicy.requireConnection(
-        { connectorType: "google_drive", createdBy: connector?.createdBy },
-        getSessionUserId(session),
-      );
       const result = await createGoogleDrivePickerSession({
         connector,
         teamId: workspace.organizationId,
@@ -219,12 +207,6 @@ export function registerConnectorRoutes(app: Hono) {
       workspaceId: workspace.id,
       connectorId,
     });
-    if (connector) {
-      await connectorAccessPolicy.requireConnection(
-        { connectorType: connector.connectorType, createdBy: connector.createdBy },
-        getSessionUserId(session),
-      );
-    }
     const body = await c.req.json().catch(() => null);
     const result = await runConnectorSelectionAction({
       connector,

@@ -1,4 +1,3 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { createHash } from "node:crypto";
 import { ConnectorError, toConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
@@ -146,7 +145,6 @@ export class ConnectorActionRunner {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
     private readonly oauthService = new ConnectorOAuthService(registry),
-    private readonly access = new ConnectorAccessPolicy(undefined, registry),
   ) {}
 
   async propose(input: {
@@ -176,7 +174,6 @@ export class ConnectorActionRunner {
         "Connector not found",
       );
     }
-    await this.access.requireConnection(connector, input.userId);
     const manifest = this.registry.getManifest(connector.connectorType);
     const actionSpec = manifest.actions.find(
       (candidate) => candidate.type === input.actionType,
@@ -323,7 +320,6 @@ export class ConnectorActionRunner {
         "Connector action not found",
       );
     }
-    await this.access.requireAvailable(action.connectorType, input.userId);
     if (action.status !== "proposed") {
       throw new ConnectorError(
         409,
@@ -455,7 +451,6 @@ export class ConnectorActionRunner {
         "Connector action not found",
       );
     }
-    await this.access.requireAvailable(action.connectorType, input.userId);
     if (
       input.expected?.actionType &&
       action.actionType !== input.expected.actionType
@@ -527,7 +522,6 @@ export class ConnectorActionRunner {
         "Connector is not active",
       );
     }
-    await this.access.requireConnection(connector, input.userId);
     const privateRequest =
       typeof action.requestJson[ENCRYPTED_REQUEST_KEY] === "string";
     if (privateRequest && action.approvedBy !== input.userId) {

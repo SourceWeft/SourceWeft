@@ -31,9 +31,6 @@ const mocks = vi.hoisted(() => ({
   getTeamSecretCipher: vi.fn(),
 }));
 
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 vi.mock("../../shared/logger", () => ({
   logger: { info: mocks.info, warn: mocks.warn, error: vi.fn(), debug: vi.fn() },
 }));

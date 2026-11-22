@@ -7,7 +7,6 @@ import { isAgentTaskError } from "../../modules/agent-tasks/errors";
 import { isContentError } from "../../modules/content/errors";
 import { isMcpClaimError } from "../../modules/market/claims/errors";
 import { isMcpError } from "../../modules/mcp/errors";
-import { PreviewAccessError } from "../../modules/preview/errors";
 
 export type ApiErrorBody = {
   code: string;
@@ -94,10 +93,6 @@ export function toApiError(error: unknown): ApiError {
     });
   if (error instanceof ApiError) {
     return error;
-  }
-
-  if (error instanceof PreviewAccessError) {
-    return new ApiError(error.statusCode, error.code, error.message);
   }
 
   if (isContentError(error)) {

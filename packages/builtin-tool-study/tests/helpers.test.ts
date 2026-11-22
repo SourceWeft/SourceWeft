@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  GENERATION_MIN_MAX_TOKENS,
+  generationMaxTokens,
+} from "../src/engine/constants";
 import { dedupeItems, ngramJaccard } from "../src/engine/dedupe";
 import { resolveOutputLanguage } from "../src/engine/language";
 import {
@@ -88,6 +92,15 @@ test("assertRetention fails below 60% and passes at it", () => {
       error.code === "GENERATION_QUALITY_TOO_LOW",
   );
   assert.doesNotThrow(() => assertRetention({ kept: 60, requested: 100 }));
+});
+
+test("a small request still leaves room for a whole answer", () => {
+  // A map-reduce group asked for four mind map nodes: models write more, and
+  // an answer cut off at the ceiling is unreadable.
+  assert.equal(generationMaxTokens("mindmap", 4), GENERATION_MIN_MAX_TOKENS);
+  assert.equal(generationMaxTokens("mindmap", 40), 6_800);
+  assert.equal(generationMaxTokens("flashcards", 26), 8_000);
+  assert.equal(generationMaxTokens("quiz", 40), 8_000);
 });
 
 test("difficultySkewed records a skew without failing", () => {

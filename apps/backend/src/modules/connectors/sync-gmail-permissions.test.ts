@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import { ConnectorError } from "./errors";
 const mocks = vi.hoisted(() => ({
-  enabled: vi.fn(),
   markChecked: vi.fn(),
   connector: vi.fn(),
   run: vi.fn(),
@@ -9,9 +9,6 @@ const mocks = vi.hoisted(() => ({
   workspace: vi.fn(),
   commit: vi.fn(),
   state: vi.fn(),
-}));
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: mocks.enabled },
 }));
 vi.mock("./permissions", () => ({
   requireConnectorWorkspace: mocks.workspace,
@@ -29,6 +26,9 @@ vi.mock("./repository", () => ({
   isConnectorScheduleEnabled: vi.fn().mockResolvedValue(true),
 }));
 import { ConnectorSyncOrchestrator } from "./sync-orchestrator";
+
+// A Gmail sync started by a person keeps rechecking that person's workspace
+// sync permission while it reads mail on their behalf.
 const input = {
   runId: "run",
   teamId: "team",
@@ -44,6 +44,8 @@ const connection = {
   configJson: {},
   oauthAccountId: "account",
 };
+const forbidden = () =>
+  new ConnectorError(403, "CONNECTOR_FORBIDDEN", "permission revoked");
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.connector.mockResolvedValue(connection);
@@ -84,38 +86,31 @@ function runtime(discoverPages = vi.fn()) {
     ),
   };
 }
-it("rejects a queued manual run after its actor loses preview", async () => {
-  mocks.enabled.mockResolvedValue(false);
+it("rejects a queued manual Gmail run after its actor loses workspace sync permission", async () => {
+  mocks.workspace.mockRejectedValue(forbidden());
   const { orchestrator, oauth } = runtime();
   await expect(orchestrator.run(input)).rejects.toMatchObject({
-    code: "CONNECTOR_PREVIEW_ACCESS_DENIED",
+    code: "CONNECTOR_FORBIDDEN",
   });
-  expect(mocks.enabled).toHaveBeenCalledWith("actor", "gmail");
+  expect(mocks.workspace).toHaveBeenCalledWith({
+    workspaceId: "workspace",
+    userId: "actor",
+    permission: "connector.sync",
+  });
   expect(oauth.getRuntimeToken).not.toHaveBeenCalled();
   expect(mocks.updateRun).toHaveBeenCalledWith(
     expect.objectContaining({
       status: "failed",
-      errorCode: "CONNECTOR_PREVIEW_ACCESS_DENIED",
+      errorCode: "CONNECTOR_FORBIDDEN",
     }),
   );
 });
-it("background execution requires owner preview and never trusts a queue user fallback", async () => {
-  mocks.run.mockResolvedValue({
-    id: "run",
-    triggerType: "scheduled",
-    status: "queued",
-    createdBy: null,
+it("rechecks the actor's permission before requesting the next Gmail page", async () => {
+  let allowed = true;
+  mocks.workspace.mockImplementation(async () => {
+    if (!allowed) throw forbidden();
+    return { workspace: { id: "workspace", organizationId: "team" } };
   });
-  mocks.connector.mockResolvedValue({ ...connection, createdBy: null });
-  const { orchestrator, oauth } = runtime();
-  await expect(orchestrator.run(input)).rejects.toMatchObject({
-    code: "CONNECTOR_PREVIEW_OWNER_REQUIRED",
-  });
-  expect(oauth.getRuntimeToken).not.toHaveBeenCalled();
-});
-it("rechecks before requesting the next provider page", async () => {
-  let enabled = true;
-  mocks.enabled.mockImplementation(async () => enabled);
   const next = vi
     .fn()
     .mockResolvedValueOnce({
@@ -125,7 +120,7 @@ it("rechecks before requesting the next provider page", async () => {
     .mockResolvedValueOnce({ done: true });
   const close = vi.fn().mockResolvedValue({ done: true });
   mocks.commit.mockImplementation(async () => {
-    enabled = false;
+    allowed = false;
     return { generation: 2 };
   });
   const discover = vi.fn(() => ({
@@ -133,48 +128,33 @@ it("rechecks before requesting the next provider page", async () => {
   }));
   const { orchestrator } = runtime(discover);
   await expect(orchestrator.run(input)).rejects.toMatchObject({
-    code: "CONNECTOR_PREVIEW_ACCESS_DENIED",
+    code: "CONNECTOR_FORBIDDEN",
   });
   expect(next).toHaveBeenCalledTimes(1);
   expect(close).toHaveBeenCalledOnce();
 });
-
-it.each(["denied", "ownerless"])(
-  "quota resume advances the check timestamp for %s Gmail eligibility without queueing",
-  async (state) => {
-    mocks.enabled.mockResolvedValue(false);
-    const { orchestrator, oauth } = runtime();
-    const enqueue = vi.fn();
-    const result = await orchestrator.enqueueQuotaResumeRun({
-      connector: {
-        ...connection,
-        createdBy: state === "ownerless" ? null : "owner",
-        syncBlock: { reason: "PAGES_LIMIT_EXCEEDED" },
-      } as never,
-      enqueue,
-    });
-    expect(result).toEqual({ queued: false, reason: "preview_denied" });
-    expect(mocks.markChecked).toHaveBeenCalledWith({
-      connectorId: "connector",
-      checkedAt: expect.any(Date),
-    });
-    expect(enqueue).not.toHaveBeenCalled();
-    expect(oauth.getRuntimeToken).not.toHaveBeenCalled();
-  },
-);
-it("quota resume propagates database failures instead of treating them as eligibility denial", async () => {
-  mocks.enabled.mockRejectedValueOnce(new Error("database unavailable"));
-  const { orchestrator } = runtime();
-  const enqueue = vi.fn();
-  await expect(
-    orchestrator.enqueueQuotaResumeRun({
-      connector: {
-        ...connection,
-        syncBlock: { reason: "PAGES_LIMIT_EXCEEDED" },
-      } as never,
-      enqueue,
+it("runs an actorless scheduled Gmail sync like any other connector", async () => {
+  mocks.run.mockResolvedValue({
+    id: "run",
+    triggerType: "scheduled",
+    status: "queued",
+    createdBy: null,
+  });
+  const discover = vi.fn(() => ({
+    [Symbol.asyncIterator]: () => ({
+      next: vi
+        .fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: { items: [], complete: true },
+        })
+        .mockResolvedValue({ done: true }),
+      return: vi.fn().mockResolvedValue({ done: true }),
     }),
-  ).rejects.toThrow("database unavailable");
-  expect(mocks.markChecked).not.toHaveBeenCalled();
-  expect(enqueue).not.toHaveBeenCalled();
+  }));
+  const { orchestrator, oauth } = runtime(discover);
+  await orchestrator.run(input);
+  expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(oauth.getRuntimeToken).toHaveBeenCalledOnce();
+  expect(discover).toHaveBeenCalledOnce();
 });

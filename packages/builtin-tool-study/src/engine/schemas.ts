@@ -18,6 +18,12 @@ const refsSchema = {
   items: { type: "string" },
 } as const;
 
+const quoteSchema = {
+  type: ["string", "null"],
+  description:
+    "A passage copied word for word from one of the cited chunks, in that chunk's own language (at most 200 characters), that states the supporting fact. Never translated or reworded; null only when no single passage states it.",
+} as const;
+
 const difficultySchema = {
   type: "integer",
   enum: [1, 2, 3],
@@ -37,7 +43,7 @@ export const FLASHCARDS_OUTPUT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["front", "back", "hint", "tags", "difficulty", "refs"],
+        required: ["front", "back", "hint", "tags", "difficulty", "refs", "quote"],
         properties: {
           front: {
             type: "string",
@@ -52,6 +58,7 @@ export const FLASHCARDS_OUTPUT_SCHEMA = {
           },
           difficulty: difficultySchema,
           refs: refsSchema,
+          quote: quoteSchema,
         },
       },
     },
@@ -77,6 +84,7 @@ export const QUIZ_OUTPUT_SCHEMA = {
           "explanation",
           "difficulty",
           "refs",
+          "quote",
         ],
         properties: {
           type: { type: "string", enum: ["single", "multi", "truefalse", "short"] },
@@ -99,6 +107,7 @@ export const QUIZ_OUTPUT_SCHEMA = {
           },
           difficulty: difficultySchema,
           refs: refsSchema,
+          quote: quoteSchema,
         },
       },
     },
@@ -118,13 +127,14 @@ export const MINDMAP_OUTPUT_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["key", "parentKey", "label", "summary", "refs"],
+        required: ["key", "parentKey", "label", "summary", "refs", "quote"],
         properties: {
           key: { type: "string", description: "A short unique key such as \"n1\"." },
           parentKey: nullableString("The parent's key; null for a child of the root."),
           label: { type: "string", description: "At most 40 characters." },
           summary: nullableString("One sentence of at most 200 characters, or null."),
           refs: refsSchema,
+          quote: quoteSchema,
         },
       },
     },
@@ -219,6 +229,7 @@ export const mindmapOutputReader = z.object({
 
 const text = z.string().transform((value) => value.trim());
 const refs = z.array(z.string()).default([]);
+const quote = z.string().nullable().optional();
 const difficulty = z.union([z.literal(1), z.literal(2), z.literal(3)]);
 
 export const rawFlashcardReader = z.object({
@@ -228,6 +239,7 @@ export const rawFlashcardReader = z.object({
   tags: z.array(z.string()).default([]),
   difficulty,
   refs,
+  quote,
 });
 export type RawFlashcard = z.infer<typeof rawFlashcardReader>;
 
@@ -240,6 +252,7 @@ export const rawQuizReader = z.object({
   explanation: text.pipe(z.string().min(1)),
   difficulty,
   refs,
+  quote,
 });
 export type RawQuiz = z.infer<typeof rawQuizReader>;
 
@@ -249,6 +262,7 @@ export const rawMindmapNodeReader = z.object({
   label: text.pipe(z.string().min(1)),
   summary: z.string().nullable().optional(),
   refs,
+  quote,
 });
 export type RawMindmapNode = z.infer<typeof rawMindmapNodeReader>;
 

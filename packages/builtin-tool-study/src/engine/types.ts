@@ -36,6 +36,8 @@ export type FlashcardCandidate = {
   tags: string[];
   difficulty: 1 | 2 | 3;
   refs: string[];
+  /** The model's word-for-word passage of a cited chunk; absent in older checkpoints. */
+  quote?: string | null;
 };
 
 export type QuizCandidate = {
@@ -50,6 +52,7 @@ export type QuizCandidate = {
   explanation: string;
   difficulty: 1 | 2 | 3;
   refs: string[];
+  quote?: string | null;
 };
 
 export type MindmapCandidate = {
@@ -63,6 +66,7 @@ export type MindmapCandidate = {
   label: string;
   summary: string | null;
   refs: string[];
+  quote?: string | null;
 };
 
 export type MindmapGroupCandidate = {
