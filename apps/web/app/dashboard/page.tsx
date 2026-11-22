@@ -22,6 +22,8 @@ import {
 } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { trackWorkspaceCreated } from "../../lib/analytics-events";
+import { MAX_PINNED_THREADS } from "@sourceweft/contracts";
+import type { ThreadListItem } from "@sourceweft/contracts";
 import { contentClient, workspaceClient } from "../../lib/sdk";
 import { ensureDashboardWorkspace } from "../../lib/dashboard-workspace-bootstrap";
 import {
@@ -82,6 +84,18 @@ type ActivityItem = {
   badgeTone: string;
   updatedAt: string;
 };
+
+const RECENT_CHATS_LIMIT = 5;
+
+/** The most recently active chats, newest first, each once. */
+function recentChats(items: ThreadListItem[]) {
+  const activity = (item: ThreadListItem) =>
+    Date.parse(item.lastMessageAt ?? item.createdAt);
+  const unique = new Map(items.map((item) => [item.id, item]));
+  return [...unique.values()]
+    .sort((a, b) => activity(b) - activity(a))
+    .slice(0, RECENT_CHATS_LIMIT);
+}
 
 function formatRelative(value: string, t: Translate) {
   const time = new Date(value).getTime();
@@ -547,14 +561,31 @@ export default function DashboardPage() {
 
         const withPreviews = await Promise.all(
           workspaceResponse.items.map(async (workspace: Workspace) => {
-            const [sourceResult, threadResult] = await Promise.allSettled([
-              contentClient.listSources(workspace.id, { view: "tree" }),
-              contentClient.listThreads(workspace.id, { limit: 5 }),
-            ]);
+            const [sourceResult, threadResult, pinnedResult] =
+              await Promise.allSettled([
+                contentClient.listSources(workspace.id, { view: "tree" }),
+                contentClient.listThreads(workspace.id, {
+                  limit: RECENT_CHATS_LIMIT,
+                }),
+                // The main list leaves pinned chats out; recent activity
+                // includes them.
+                contentClient.listThreads(workspace.id, {
+                  pinned: true,
+                  limit: MAX_PINNED_THREADS,
+                }),
+              ]);
             const sourceResponse =
               sourceResult.status === "fulfilled" ? sourceResult.value : null;
-            const threadResponse =
-              threadResult.status === "fulfilled" ? threadResult.value : null;
+            const threadResponse = {
+              items: recentChats([
+                ...(threadResult.status === "fulfilled"
+                  ? threadResult.value.items
+                  : []),
+                ...(pinnedResult.status === "fulfilled"
+                  ? pinnedResult.value.items
+                  : []),
+              ]),
+            };
             const sources: Source[] = (sourceResponse?.items ?? []).map(
               (source: {
                 id: string;

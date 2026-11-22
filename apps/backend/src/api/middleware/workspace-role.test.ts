@@ -95,6 +95,13 @@ test("a viewer cannot write", async () => {
   assert.equal((await response.json()).code, "WORKSPACE_ROLE_REQUIRED");
 });
 
+test("a viewer may pin and unpin a chat for themselves but not rename it", async () => {
+  withAccess({ role: "viewer" });
+  assert.equal((await call("PUT", "/threads/t-1/pin")).status, 200);
+  assert.equal((await call("DELETE", "/threads/t-1/pin")).status, 200);
+  assert.equal((await call("PATCH", "/threads/t-1/title")).status, 403);
+});
+
 test("an editor can write content", async () => {
   withAccess({ role: "editor" });
   assert.equal((await call("POST", "/threads")).status, 200);

@@ -1058,6 +1058,7 @@
       "pin": "Pin",
       "unpin": "Unpin",
       "pinError": "Could not update the pin.",
+      "pinLimit": "You can pin up to {count} chats. Unpin one first.",
       "pinned": "Pinned",
       "archivedBadge": "Archived",
       "searching": "Searching…",

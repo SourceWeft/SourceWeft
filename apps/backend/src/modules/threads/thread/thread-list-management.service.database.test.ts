@@ -326,15 +326,71 @@ test("a pin disappears when its chat becomes private to someone else", async () 
 
   assert.deepEqual(await listIds(member, { pinned: true }), []);
   assert.deepEqual(await search(member, "Shared"), []);
-  await assert.rejects(
-    service.setThreadPinned({
+  // Unpinning it still clears the member's own pin row.
+  assert.deepEqual(
+    await service.setThreadPinned({
       workspaceId,
       threadId: shared.id,
       userId: member,
       pinned: false,
     }),
-    notFound,
+    { threadId: shared.id, pinned: false },
   );
+  const pins = await schema.database.query<{ count: number }>(
+    "select count(*)::int as count from thread_pins where thread_id = $1",
+    [shared.id],
+  );
+  assert.equal(pins.rows[0]?.count, 0);
+});
+
+test("pinning stops at the pinned-list cap, counting only listable pins", async () => {
+  const threads = [];
+  for (let index = 0; index < 51; index += 1) {
+    threads.push(await chat(owner, `Chat ${index}`));
+  }
+  for (const thread of threads.slice(0, 50)) {
+    await service.setThreadPinned({
+      workspaceId,
+      threadId: thread.id,
+      userId: owner,
+      pinned: true,
+    });
+  }
+  const last = threads[50]!;
+
+  await assert.rejects(
+    service.setThreadPinned({
+      workspaceId,
+      threadId: last.id,
+      userId: owner,
+      pinned: true,
+    }),
+    (error: { code?: string }) => error.code === "PIN_LIMIT_REACHED",
+  );
+  // Pinning an already pinned chat again is still fine at the cap.
+  await service.setThreadPinned({
+    workspaceId,
+    threadId: threads[0]!.id,
+    userId: owner,
+    pinned: true,
+  });
+  // Every pin stays listed: none falls off the pinned list.
+  assert.equal((await listIds(owner, { pinned: true })).length, 50);
+
+  // An archived pin does not count against the cap.
+  await service.setThreadArchived({
+    workspaceId,
+    threadId: threads[1]!.id,
+    userId: owner,
+    archived: true,
+  });
+  await service.setThreadPinned({
+    workspaceId,
+    threadId: last.id,
+    userId: owner,
+    pinned: true,
+  });
+  assert.equal((await listIds(owner, { pinned: true }))[0], last.id);
 });
 
 test("a sub-agent chat cannot be pinned and deleting a chat removes its pins", async () => {

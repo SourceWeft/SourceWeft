@@ -336,12 +336,6 @@ export function DashboardChatStateProvider({
               .catch(() => null),
       ]);
 
-      if (pinned) {
-        setPinnedState({
-          workspaceId: targetWorkspaceId,
-          ids: pinned.items.map((item) => item.id),
-        });
-      }
       const items = mergePinnedChats(
         threads.items.map(mapThreadToChatItem),
         pinned?.items.map(mapThreadToChatItem) ?? [],
@@ -349,6 +343,9 @@ export function DashboardChatStateProvider({
       return {
         ...partitionChatsByVisibility(items),
         nextCursor: threads.nextCursor,
+        // Only the first page carries pins; callers apply them once they know
+        // the response is still for the workspace on screen.
+        pinnedIds: cursor ? null : (pinned?.items.map((item) => item.id) ?? []),
       };
     },
     [],
@@ -397,6 +394,7 @@ export function DashboardChatStateProvider({
         }
         setPrivateChats(threads.private);
         setSharedChats(threads.shared);
+        setPinnedState({ workspaceId: active.id, ids: threads.pinnedIds ?? [] });
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
       } finally {
@@ -723,6 +721,7 @@ export function DashboardChatStateProvider({
         setStoredDashboardWorkspaceId(organizationId, target.id);
         setPrivateChats(threads.private);
         setSharedChats(threads.shared);
+        setPinnedState({ workspaceId: target.id, ids: threads.pinnedIds ?? [] });
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
         setInitialChatPreferences(preferences.initialChatPreferences);
@@ -1134,15 +1133,15 @@ export function DashboardChatStateProvider({
     async (id: string) => {
       if (!workspaceId) return;
       await contentClient.pinThread(workspaceId, id);
-      setPinnedState((value) => ({
-        workspaceId,
-        ids: [
-          id,
-          ...(value.workspaceId === workspaceId ? value.ids : []).filter(
-            (pinnedId) => pinnedId !== id,
-          ),
-        ],
-      }));
+      // A reply that lands after a workspace switch leaves the new list alone.
+      setPinnedState((value) =>
+        value.workspaceId === workspaceId
+          ? {
+              workspaceId,
+              ids: [id, ...value.ids.filter((pinnedId) => pinnedId !== id)],
+            }
+          : value,
+      );
     },
     [workspaceId],
   );
@@ -1297,8 +1296,17 @@ export function DashboardChatStateProvider({
 
     try {
       const threads = await fetchChatsPage(workspaceId, privateChatsCursor);
-      setPrivateChats(threads.private);
-      setSharedChats(threads.shared);
+      // Pinned chats are not on later pages; keep the ones still standing.
+      const keepPinned = (items: ChatItem[]) =>
+        items.filter(
+          (item) => pinnedChatIds.includes(item.id) && !privateIds.has(item.id),
+        );
+      setPrivateChats((value) =>
+        mergePinnedChats(threads.private, keepPinned(value)),
+      );
+      setSharedChats((value) =>
+        mergePinnedChats(threads.shared, keepPinned(value)),
+      );
       setPrivateChatsCursor(threads.nextCursor);
       setHasMorePrivateChats(Boolean(threads.nextCursor));
     } finally {
@@ -1308,6 +1316,7 @@ export function DashboardChatStateProvider({
     workspaceId,
     privateChats,
     privateChatsCursor,
+    pinnedChatIds,
     fetchChatsPage,
     removeChatFromState,
     t,

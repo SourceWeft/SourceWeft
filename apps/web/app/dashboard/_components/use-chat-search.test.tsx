@@ -50,14 +50,16 @@ function deferred<T>() {
 
 let state: ChatSearchState;
 let setQuery: (query: string) => void;
+type SearchFn = (q: string) => Promise<{ items: ThreadSearchResult[] }>;
+let setSearch: (search: SearchFn) => void;
 
-async function mountSearch(
-  search: (q: string) => Promise<{ items: ThreadSearchResult[] }>,
-) {
+async function mountSearch(initial: SearchFn) {
   const React = await import("react");
   function Harness() {
     const [query, set] = React.useState("");
+    const [search, swap] = React.useState<SearchFn>(() => initial);
     setQuery = set;
+    setSearch = (next) => swap(() => next);
     state = useChatSearch(query, search, 0);
     return null;
   }
@@ -129,4 +131,26 @@ test("a failed search is reported and a deleted chat leaves the results", async 
   expect(state.failed).toBe(false);
   await act(async () => state.removeResult("a"));
   expect(state.results.map((item) => item.thread.id)).toEqual(["b"]);
+});
+
+test("switching workspace hides the old workspace's results until the new ones arrive", async () => {
+  const later = deferred<{ items: ThreadSearchResult[] }>();
+  await mountSearch(vi.fn().mockResolvedValue({ items: [result("in-a")] }));
+
+  await type("budget");
+  await act(async () => flush(2));
+  expect(state.results.map((item) => item.thread.id)).toEqual(["in-a"]);
+
+  await act(async () => {
+    setSearch(vi.fn().mockReturnValue(later.promise));
+  });
+  expect(state.loading).toBe(true);
+  expect(state.results).toEqual([]);
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    later.resolve({ items: [result("in-b")] });
+    await flush(2);
+  });
+  expect(state.results.map((item) => item.thread.id)).toEqual(["in-b"]);
 });

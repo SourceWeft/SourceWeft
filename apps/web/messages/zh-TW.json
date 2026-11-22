@@ -1058,6 +1058,7 @@
       "pin": "置頂",
       "unpin": "取消置頂",
       "pinError": "無法更新置頂。",
+      "pinLimit": "最多可置頂 {count} 個對話，請先取消一個置頂。",
       "pinned": "已置頂",
       "archivedBadge": "已封存",
       "searching": "正在搜尋…",

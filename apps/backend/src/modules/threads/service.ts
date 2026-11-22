@@ -1,4 +1,4 @@
-import { fileReferenceSchema } from "@sourceweft/contracts";
+import { fileReferenceSchema, MAX_PINNED_THREADS } from "@sourceweft/contracts";
 import { targetKey } from "../devices/access";
 import { validateThreadExecutionTarget } from "../devices/service";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
@@ -234,7 +234,9 @@ class ContentThreadService {
       userId: input.userId,
     });
 
-    const limit = input.limit ?? DEFAULT_THREAD_PAGE_LIMIT;
+    const limit =
+      input.limit ??
+      (input.pinned ? MAX_PINNED_THREADS : DEFAULT_THREAD_PAGE_LIMIT);
     const decodedCursor = input.cursor
       ? decodeThreadsCursor(input.cursor)
       : undefined;
@@ -562,15 +564,22 @@ class ContentThreadService {
       userId: input.userId,
     });
 
-    const visible = await setThreadPinnedRecord({
+    const outcome = await setThreadPinnedRecord({
       threadId: input.threadId,
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       viewerUserId: input.userId,
       pinned: input.pinned,
     });
-    if (!visible) {
+    if (outcome === "not_found") {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+    if (outcome === "limit") {
+      throw new ContentError(
+        409,
+        "PIN_LIMIT_REACHED",
+        `At most ${MAX_PINNED_THREADS} chats can be pinned`,
+      );
     }
 
     return { threadId: input.threadId, pinned: input.pinned };

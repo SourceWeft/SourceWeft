@@ -34,7 +34,7 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Persona } from "@sourceweft/contracts";
+import { MAX_PINNED_THREADS, type Persona } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Dialog,
@@ -558,8 +558,12 @@ function ChatListRow({
     if (!onTogglePin) return;
     try {
       await onTogglePin(item.id, !pinned);
-    } catch {
-      toast.error(t("chats.pinError"));
+    } catch (error) {
+      toast.error(
+        (error as { code?: unknown }).code === "PIN_LIMIT_REACHED"
+          ? t("chats.pinLimit", { count: MAX_PINNED_THREADS })
+          : t("chats.pinError"),
+      );
     }
   };
 

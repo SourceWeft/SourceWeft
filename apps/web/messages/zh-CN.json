@@ -1058,6 +1058,7 @@
       "pin": "置顶",
       "unpin": "取消置顶",
       "pinError": "无法更新置顶。",
+      "pinLimit": "最多可置顶 {count} 个对话，请先取消一个置顶。",
       "pinned": "已置顶",
       "archivedBadge": "已归档",
       "searching": "正在搜索…",

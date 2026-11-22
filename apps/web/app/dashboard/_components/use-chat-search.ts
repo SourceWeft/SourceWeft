@@ -16,13 +16,22 @@ export type ChatSearchState = {
   removeResult: (threadId: string) => void;
 };
 
+type SearchFn = (q: string) => Promise<{ items: ThreadSearchResult[] }>;
+
 type Answer = {
   query: string;
+  /** The search (one per workspace) that produced the answer. */
+  source: SearchFn | null;
   results: ThreadSearchResult[];
   failed: boolean;
 };
 
-const NO_ANSWER: Answer = { query: "", results: [], failed: false };
+const NO_ANSWER: Answer = {
+  query: "",
+  source: null,
+  results: [],
+  failed: false,
+};
 
 /**
  * Searches every chat the member can see on the server, `debounceMs` after the
@@ -31,7 +40,7 @@ const NO_ANSWER: Answer = { query: "", results: [], failed: false };
  */
 export function useChatSearch(
   query: string,
-  search: ((q: string) => Promise<{ items: ThreadSearchResult[] }>) | undefined,
+  search: SearchFn | undefined,
   debounceMs = CHAT_SEARCH_DEBOUNCE_MS,
 ): ChatSearchState {
   const trimmed = query.trim();
@@ -46,11 +55,16 @@ export function useChatSearch(
       search(trimmed).then(
         (response) => {
           if (requestRef.current !== request) return;
-          setAnswer({ query: trimmed, results: response.items, failed: false });
+          setAnswer({
+            query: trimmed,
+            source: search,
+            results: response.items,
+            failed: false,
+          });
         },
         () => {
           if (requestRef.current !== request) return;
-          setAnswer({ query: trimmed, results: [], failed: true });
+          setAnswer({ query: trimmed, source: search, results: [], failed: true });
         },
       );
     }, debounceMs);
@@ -58,7 +72,9 @@ export function useChatSearch(
   }, [trimmed, search, debounceMs]);
 
   const active = Boolean(trimmed) && Boolean(search);
-  const current = active && answer.query === trimmed;
+  // Results from another workspace's search never show here.
+  const current =
+    active && answer.query === trimmed && answer.source === search;
   return {
     active,
     loading: active && !current,

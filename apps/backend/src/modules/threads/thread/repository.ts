@@ -396,13 +396,6 @@ export async function deleteThreadRecord(input: {
   return result.rows.length > 0;
 }
 
-/**
- * Archives or restores a top-level thread. The right to do so is the right to
- * delete it: a plain editor only their own (or legacy creator-less) threads, a
- * content admin any thread visible to them. A sub-agent thread, an invisible
- * thread or one out of scope matches no row and returns false. Its sub-agent
- * threads keep their own flag and stay nested under it.
- */
 async function listPinnedThreadRecords(input: {
   teamId: string;
   workspaceId: string;
@@ -485,8 +478,13 @@ export async function renameThreadRecord(input: {
 }
 
 /**
- * Pins or unpins a top-level chat for the viewer only. Returns whether the
- * viewer can see the chat; unpinning removes the viewer's pin row either way.
+ * Pins or unpins a top-level chat for the viewer only.
+ *
+ * - Pin: "not_found" when the viewer cannot see the chat, "limit" when they
+ *   already have MAX_PINNED_THREADS other listable pins here (so no pin falls
+ *   off the pinned list), otherwise "ok".
+ * - Unpin: always removes the viewer's own pin row and returns "ok", even when
+ *   the chat is no longer visible to them.
  */
 export async function setThreadPinnedRecord(input: {
   threadId: string;
@@ -494,13 +492,17 @@ export async function setThreadPinnedRecord(input: {
   workspaceId: string;
   viewerUserId: string;
   pinned: boolean;
-}) {
-  const write = input.pinned
-    ? `insert into thread_pins (thread_id, user_id, team_id, workspace_id)
-       select id, $4, team_id, workspace_id from target
-       on conflict (thread_id, user_id) do nothing`
-    : `delete from thread_pins where thread_id = $1 and user_id = $4`;
-  const result = await database.query<{ visible: number }>(
+}): Promise<"ok" | "not_found" | "limit"> {
+  if (!input.pinned) {
+    await database.query(
+      `delete from thread_pins
+       where thread_id = $1 and user_id = $2 and workspace_id = $3`,
+      [input.threadId, input.viewerUserId, input.workspaceId],
+    );
+    return "ok";
+  }
+
+  const result = await database.query<{ visible: number; pinned: number }>(
     `
       with target as (
         select id, team_id, workspace_id
@@ -511,13 +513,41 @@ export async function setThreadPinnedRecord(input: {
           and parent_thread_id is null
           and ${threadVisibilityClause(4)}
       ),
-      pin_write as (${write})
-      select count(*)::int as visible from target
+      -- Pins the viewer can see in the pinned list, other than this chat.
+      listed_pins as (
+        select count(*)::int as n
+        from thread_pins p
+        join threads t on t.id = p.thread_id
+        where p.user_id = $4
+          and p.workspace_id = $3
+          and p.thread_id <> $1
+          and t.archived = false
+          and t.parent_thread_id is null
+          and (t.visibility <> 'private' or t.created_by = $4)
+      ),
+      pin_write as (
+        insert into thread_pins (thread_id, user_id, team_id, workspace_id)
+        select id, $4, team_id, workspace_id from target
+        where (select n from listed_pins) < $5
+        on conflict (thread_id, user_id) do nothing
+      )
+      select
+        (select count(*)::int from target) as visible,
+        (select n from listed_pins) as pinned
     `,
-    [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      MAX_PINNED_THREADS,
+    ],
   );
 
-  return (result.rows[0]?.visible ?? 0) > 0;
+  const row = result.rows[0];
+  if (!row || row.visible === 0) return "not_found";
+  if (row.pinned >= MAX_PINNED_THREADS) return "limit";
+  return "ok";
 }
 
 /** Escapes `\`, `%` and `_` so a search query matches them literally. */
@@ -590,6 +620,13 @@ export async function searchThreadRecords(input: {
   }));
 }
 
+/**
+ * Archives or restores a top-level thread. The right to do so is the right to
+ * delete it: a plain editor only their own (or legacy creator-less) threads, a
+ * content admin any thread visible to them. A sub-agent thread, an invisible
+ * thread or one out of scope matches no row and returns false. Its sub-agent
+ * threads keep their own flag and stay nested under it.
+ */
 export async function setThreadArchivedRecord(input: {
   threadId: string;
   teamId: string;
