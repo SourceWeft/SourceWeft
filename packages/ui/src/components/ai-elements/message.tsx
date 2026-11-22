@@ -9,10 +9,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
@@ -29,6 +25,7 @@ import {
   useState,
 } from "react";
 import { Streamdown, type Components } from "streamdown";
+import { useStreamdownPlugins } from "./streamdown-plugins";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -337,7 +334,6 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const streamdownPlugins = { cjk, code, math, mermaid };
 const streamdownComponents: Components = {
   img: ({ alt, className, node: _node, ...props }) => (
     <img
@@ -389,15 +385,17 @@ export const MessageResponse = memo(
       () => ({ ...streamdownComponents, ...components }),
       [components],
     );
+    const { plugins, key } = useStreamdownPlugins(props.children);
 
     return (
       <Streamdown
+        key={key}
         className={cn(
           "w-full min-w-0 max-w-full [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:[overflow-wrap:normal]",
           className,
         )}
         components={safeComponents}
-        plugins={streamdownPlugins}
+        plugins={plugins}
         {...props}
       />
     );
