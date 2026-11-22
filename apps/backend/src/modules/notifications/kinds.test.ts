@@ -51,3 +51,13 @@ test("assistant notifications lead to the assistant, on the ticket when there is
     assert.ok(NOTIFICATION_KINDS[kind].template);
   }
 });
+
+test("a blocked-assistant mail about no ticket names the payer's messages, in every locale", () => {
+  const fallback = (
+    NOTIFICATION_KINDS.assistant_ticket_blocked as {
+      fallbackName?: Record<string, string>;
+    }
+  ).fallbackName;
+  assert.ok(fallback);
+  for (const locale of ["en", "zh-CN", "zh-TW"]) assert.ok(fallback[locale]);
+});

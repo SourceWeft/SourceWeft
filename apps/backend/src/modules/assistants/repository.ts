@@ -725,7 +725,7 @@ export async function listActiveAssistantRows(): Promise<AssistantRow[]> {
 
 /** One assistant by id within its tenant, optionally locked. */
 export async function findAssistantRowById(
-  input: { id: string; teamId?: string; workspaceId?: string },
+  input: { id: string; teamId: string; workspaceId: string },
   executor: Executor = db,
   options: { forUpdate?: boolean } = {},
 ): Promise<AssistantRow | null> {
@@ -735,10 +735,8 @@ export async function findAssistantRowById(
     .where(
       and(
         eq(assistants.id, input.id),
-        input.teamId ? eq(assistants.teamId, input.teamId) : undefined,
-        input.workspaceId
-          ? eq(assistants.workspaceId, input.workspaceId)
-          : undefined,
+        eq(assistants.teamId, input.teamId),
+        eq(assistants.workspaceId, input.workspaceId),
       ),
     )
     .limit(1);
@@ -747,18 +745,35 @@ export async function findAssistantRowById(
 }
 
 /**
- * Takes a per-assistant advisory lock for the length of `tx`, without
- * waiting: false when another tick or kick is already working on this
- * assistant. Released by PostgreSQL when `tx` ends, also if the process dies.
+ * Records the Router run now working on `batchKey` — only when no run is
+ * recorded yet, or it is this same run (a repeated write). A different run
+ * already recorded is left alone: this call then returns false and the
+ * batch's events stay `in_eval`, picked up again once that run is settled.
  */
-export async function tryLockAssistant(
-  tx: AssistantTx,
-  assistantId: string,
+export async function recordRouterRunRow(
+  executor: Executor,
+  input: AssistantScope & { runId: string; batchKey: string; now: Date },
 ): Promise<boolean> {
-  const result = await tx.execute<{ acquired: boolean }>(
-    sql`select pg_try_advisory_xact_lock(hashtextextended(${`assistant-dispatch:${assistantId}`}, 0)) as acquired`,
-  );
-  return result.rows[0]?.acquired === true;
+  const rows = await executor
+    .update(assistants)
+    .set({
+      currentRouterRunId: input.runId,
+      currentRouterBatchKey: input.batchKey,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(assistants.id, input.assistantId),
+        eq(assistants.teamId, input.teamId),
+        eq(assistants.workspaceId, input.workspaceId),
+        or(
+          isNull(assistants.currentRouterRunId),
+          eq(assistants.currentRouterRunId, input.runId),
+        ),
+      ),
+    )
+    .returning({ id: assistants.id });
+  return rows.length > 0;
 }
 
 export type AssistantChatRun = Pick<
@@ -1017,12 +1032,15 @@ export async function listAllInEvalTriggerRows(
  * Gives a claimed batch back: its events still `in_eval` under `batchKey`
  * return to `pending_eval` with no batch key, and — unlike
  * `requeueOrExpireInEvalTriggerRows` — no evaluation attempt counted, since
- * the Router never looked at them.
+ * the Router never looked at them. `ids`, when given, limits this to the
+ * events this caller itself claimed: two callers racing over the same
+ * events compute the same key, and one must never give back the other's.
  */
 export async function releaseInEvalTriggerRows(
   executor: Executor,
-  input: AssistantScope & { routerBatchKey: string },
+  input: AssistantScope & { routerBatchKey: string; ids?: string[] },
 ): Promise<AssistantTriggerRow[]> {
+  if (input.ids && input.ids.length === 0) return [];
   return executor
     .update(assistantTriggers)
     .set({ status: "pending_eval", routerBatchKey: null })
@@ -1033,6 +1051,7 @@ export async function releaseInEvalTriggerRows(
         eq(assistantTriggers.workspaceId, input.workspaceId),
         eq(assistantTriggers.routerBatchKey, input.routerBatchKey),
         eq(assistantTriggers.status, "in_eval"),
+        input.ids ? inArray(assistantTriggers.id, input.ids) : undefined,
       ),
     )
     .returning();

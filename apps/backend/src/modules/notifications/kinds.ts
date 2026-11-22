@@ -17,6 +17,11 @@ export interface NotificationKindDefinition {
   template: string | null;
   /** Where the notification leads, relative to the web base URL. */
   path(input: PathInput): string;
+  /**
+   * What the mail calls the subject when the payload names none
+   * (`payload.taskName` missing), per locale. Defaults to "a scheduled task".
+   */
+  fallbackName?: Readonly<Record<string, string>>;
 }
 
 function taskPath({ refId }: PathInput) {
@@ -150,11 +155,19 @@ export const NOTIFICATION_KINDS = {
     path: assistantPath,
   },
   // A ticket stopped on its own: its credit cap, the payer's credits, or
-  // repeated failed runs (`payload.reason`).
+  // repeated failed runs (`payload.reason`). Also sent with no ticket
+  // (`ref` = the assistant) when the payer's own messages wait for credits
+  // before the assistant can even look at them.
   assistant_ticket_blocked: {
     defaultEmail: true,
     template: "notification.assistant-ticket-blocked",
     path: assistantPath,
+    fallbackName: {
+      en: "your messages to the assistant",
+      "zh-CN": "你发给助理的消息",
+      // Generated with toTaiwanTraditional from the zh-CN value.
+      "zh-TW": "你發給助理的訊息",
+    },
   },
   // Messages the Router could not decide after every retry; sent to the
   // steward.

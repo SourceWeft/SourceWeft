@@ -87,13 +87,16 @@ caller's idempotency key, so a repeated click adds no second event.
   `assistant_ticket` origin turn providers, registered when the worker
   process starts. Each reads only its own `hostContext` keys and fails the
   turn when they do not resolve.
-- `dispatch.ts`: `runAssistantTick` (the scheduler, every tick) and
-  `kickAssistant` (right after a member's message). Per active assistant,
-  under a per-assistant advisory lock: steward check (a steward who lost
-  access pauses it, `steward_left`, without stopping running work), settle
-  the Router's ended run, settle each ticket's ended worker run (no report,
-  credit cap, credits, repeated failure, time limit), start worker runs
-  within the slots (one reserved for a member's input; a payer without
-  credits is blocked without taking a slot), then start the Router on its
-  next batch (a payer without credits is passed over; a 409 gives the batch
-  back with no attempt counted).
+- `dispatch.ts`: `runAssistantTick` (the scheduler, every tick; ticks never
+  overlap, guarded in-process) and `kickAssistant` (right after a member's
+  message; only tries to start the Router). Per active assistant: steward
+  check (a steward who lost access pauses it, `steward_left`, without
+  stopping running work), settle the Router's ended run, settle each
+  ticket's ended worker run (no report, credit cap, out of credits, repeated
+  failure, time limit), start worker runs within the slots (one reserved for
+  a member's input; a payer without credits is blocked without taking a
+  slot), then start the Router on its next batch (a payer without credits is
+  passed over and told; a 409 gives the batch back with no attempt counted).
+  A kick racing a tick is safe: claiming is a compare-and-set, the Router's
+  run is recorded only over an empty slot, and its conversation takes one
+  run at a time.

@@ -122,8 +122,8 @@ export async function createAssistantFixture(label: string) {
     },
   };
 
-  async function kickAssistant(assistantId: string) {
-    kicked.push(assistantId);
+  async function kickAssistant(input: { assistantId: string }) {
+    kicked.push(input.assistantId);
   }
 
   const service = new assistants.AssistantService(ports, kickAssistant);

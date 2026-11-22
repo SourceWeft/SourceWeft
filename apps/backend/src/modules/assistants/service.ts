@@ -15,6 +15,7 @@ import type {
 // new hash function"); it is not re-exported from the module's index, so the
 // import reaches past it on purpose.
 import { deterministicId } from "../agent-tasks/runs";
+import { logger } from "../../shared/logger";
 import { AssistantError } from "./errors";
 import { assistantPorts, type AssistantPorts } from "./ports";
 import {
@@ -142,7 +143,11 @@ export class AssistantService {
      * `dispatch.ts#kickAssistant`, which never throws. Called after a
      * brand-new member message commits, never on a replay.
      */
-    private readonly kickAssistant: (assistantId: string) => Promise<void> = async () => {
+    private readonly kickAssistant: (assistant: {
+      assistantId: string;
+      teamId: string;
+      workspaceId: string;
+    }) => Promise<void> = async () => {
       /* no-op unless wired */
     },
   ) {}
@@ -489,7 +494,11 @@ export class AssistantService {
       throw error;
     }
 
-    await this.kickAssistant(assistant.id);
+    await this.kickAssistant({
+      assistantId: assistant.id,
+      teamId: assistant.teamId,
+      workspaceId: assistant.workspaceId,
+    });
     return { item: presentFeedItem(created), created: true };
   }
 
@@ -640,8 +649,18 @@ export const assistantService = new AssistantService(
   assistantPorts,
   // Loaded lazily: the dispatch module pulls in the Router's tools and
   // rendering, which a plain read of the assistant never needs.
-  async (assistantId) => {
-    const { kickAssistant } = await import("./dispatch");
-    await kickAssistant(assistantId);
+  // `kickAssistant` itself never throws; the import is inside the same
+  // guard so a module that fails to load cannot turn a message that already
+  // committed into a 500. The tick picks the message up either way.
+  async (assistant) => {
+    try {
+      const { kickAssistant } = await import("./dispatch");
+      await kickAssistant(assistant);
+    } catch (error) {
+      logger.error("Assistant kick could not run; the next tick will pick it up", {
+        assistantId: assistant.assistantId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   },
 );

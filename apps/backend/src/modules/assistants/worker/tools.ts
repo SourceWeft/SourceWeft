@@ -149,11 +149,11 @@ export function createReportTool(
           runId: ctx.runId,
           error: error instanceof Error ? error.message : String(error),
         });
+        // The detail is logged above; the model gets a fixed message, never
+        // a raw database or driver error.
         return toolError(
           "REPORT_FAILED",
-          error instanceof Error && error.message
-            ? error.message
-            : "The report could not be saved.",
+          "The report could not be saved. Try report again; if it keeps failing, end the turn and say so.",
         );
       }
     },

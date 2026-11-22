@@ -337,6 +337,27 @@ test("a run refused for credits blocks the ticket on insufficient credits", asyn
   );
 });
 
+test("a run that failed with a generic code while its payer has no credits blocks on insufficient credits, counting no failure", async () => {
+  const s = await setup();
+  const { ticket, runId } = await workingTicket(s);
+  // Refused for credits mid-run: the turn's error mapping stores a generic code.
+  await f.setRunStatus(runId, { status: "failed", errorCode: "CHAT_RUN_FAILED" });
+  f.state.noCreditsFor.add(s.a);
+
+  await tick(new Date(), f.ports);
+
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "waiting_person");
+  assert.equal(row.outcome, "blocked");
+  assert.equal(row.blockedReason, "insufficient_credits");
+  assert.equal(row.consecutiveFailures, 0);
+  assert.equal(row.currentRunId, null);
+  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0]!.payload?.reason, "insufficient_credits");
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+});
+
 test("three failed runs in a row block the ticket for repeated failure; each failure before that retries under a new key", async () => {
   const s = await setup();
   const { ticket, runId } = await workingTicket(s);
@@ -452,6 +473,14 @@ test("A without credits: A's batch stays pending with no attempt counted, and B'
   assert.equal(triggerA.status, "pending_eval");
   assert.equal(triggerA.evalAttempts, 0);
   assert.equal(triggerA.routerBatchKey, null);
+
+  // A is told their messages wait for credits; the events stay pending.
+  const toldA = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  assert.equal(toldA.length, 1);
+  assert.equal(toldA[0]!.userId, s.a);
+  assert.deepEqual(toldA[0]!.ref, { kind: "assistant", id: s.assistant.id });
+  assert.equal(toldA[0]!.payload?.reason, "insufficient_credits");
+  assert.equal(toldA[0]!.payload?.ticketId, undefined);
 
   const routerStarts = startsOf("assistant_router", s.workspaceId);
   assert.equal(routerStarts.length, 1);
@@ -701,11 +730,28 @@ test("a steward who lost access pauses the assistant; nothing new starts and run
 test("one assistant failing mid-tick does not stop the others", async () => {
   const first = await setup();
   const second = await setup();
-  const { runId } = await workingTicket(first);
-  await f.setRunStatus(runId, { status: "failed", errorCode: "RUN_CREDIT_CAP_EXCEEDED" });
+  const stuck = await queuedTicket(first, { payer: first.a, at: new Date() });
   const queued = await queuedTicket(second, { payer: second.a, at: new Date() });
+  // The first assistant's Router conversation is gone: dispatching its
+  // workers throws.
+  await f.schema.db
+    .delete(f.schema.threads)
+    .where(eq(f.schema.threads.id, first.assistant.routerThreadId));
   f.reset();
 
+  await tick(new Date(), f.ports);
+
+  assert.equal((await f.ticketRow(stuck.id))!.stage, "queued");
+  assert.equal(startsOf("assistant_ticket", first.workspaceId).length, 0);
+  // The other assistant, ticked after it, still got its worker.
+  assert.equal((await f.ticketRow(queued.id))!.stage, "working");
+  assert.equal(startsOf("assistant_ticket", second.workspaceId).length, 1);
+});
+
+test("a notification that fails is logged; the block it was about still stands", async () => {
+  const s = await setup();
+  const { runId, ticket } = await workingTicket(s);
+  await f.setRunStatus(runId, { status: "failed", errorCode: "RUN_CREDIT_CAP_EXCEEDED" });
   const failingNotify: AssistantPorts = {
     ...f.ports,
     async notify() {
@@ -713,26 +759,56 @@ test("one assistant failing mid-tick does not stop the others", async () => {
     },
   };
   await tick(new Date(), failingNotify);
+  assert.equal((await f.ticketRow(ticket.id))!.blockedReason, "credit_cap");
+});
 
-  // The block itself committed even though its notification failed...
-  const blocked = (await f.schema.db
-    .select()
-    .from(f.schema.assistantTickets)
-    .where(eq(f.schema.assistantTickets.assistantId, first.assistant.id)))[0]!;
-  assert.equal(blocked.blockedReason, "credit_cap");
-  // ...and the other assistant's ticket still started.
-  assert.equal((await f.ticketRow(queued.id))!.stage, "working");
+test("ticks never overlap: a tick started while one is running returns at once", async () => {
+  const s = await setup();
+  await queuedTicket(s, { payer: s.a, at: new Date() });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let accessChecks = 0;
+  const slow: AssistantPorts = {
+    ...f.ports,
+    async workspaceAccess(input) {
+      accessChecks += 1;
+      await gate;
+      return f.ports.workspaceAccess(input);
+    },
+  };
+
+  const first = tick(new Date(), slow);
+  await tick(new Date(), slow); // returns while the first is still waiting
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+  release();
+  await first;
+  assert.equal(accessChecks, 1);
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 1);
+
+  // Once it has finished, the next tick runs normally.
+  await tick(new Date(), slow);
+  assert.equal(accessChecks, 2);
 });
 
 // ── The immediate kick ──────────────────────────────────────────────────
 
-test("kickAssistant starts the Router's batch right away, and only logs when it cannot", async () => {
+function kickInput(s: Setup) {
+  return {
+    assistantId: s.assistant.id,
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+  };
+}
+
+test("kickAssistant starts the Router's batch right away, and nothing while the Router is busy", async () => {
   const s = await setup();
   const message = await f.service.postMessage(
     { workspaceId: s.workspaceId, userId: s.a },
     { text: "Hello", idempotencyKey: "m-1" },
   );
-  await kick(s.assistant.id, f.ports);
+  await kick(kickInput(s), f.ports);
   assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
   assert.equal((await f.triggerRow(message.item.id))!.status, "in_eval");
 
@@ -742,18 +818,92 @@ test("kickAssistant starts the Router's batch right away, and only logs when it 
     { text: "Again", idempotencyKey: "m-2" },
   );
   f.reset();
-  await kick(s.assistant.id, f.ports);
+  await kick(kickInput(s), f.ports);
   assert.equal(f.started.length, 0);
   assert.equal((await f.triggerRow(other.item.id))!.status, "pending_eval");
 
-  // A kick that fails resolves anyway: the tick is the backstop.
+  // Even once that run has ended: settling it is the tick's job, not the kick's.
   await f.setRunStatus((await assistantRow(s)).currentRouterRunId!, { status: "completed" });
+  await kick(kickInput(s), f.ports);
+  assert.equal(f.started.length, 0);
+});
+
+test("kickAssistant only logs when it cannot start, and leaves an unrecorded batch to the tick", async () => {
+  const s = await setup();
+  const message = await f.service.postMessage(
+    { workspaceId: s.workspaceId, userId: s.a },
+    { text: "Hello", idempotencyKey: "m-1" },
+  );
   const failing: AssistantPorts = {
     ...f.ports,
     async hasCredits() {
       throw new Error("billing is down");
     },
   };
-  await kick(s.assistant.id, failing);
-  await kick(randomUUID(), f.ports);
+  await kick(kickInput(s), failing);
+  assert.equal(f.started.length, 0);
+  assert.equal((await f.triggerRow(message.item.id))!.status, "pending_eval");
+  // Another workspace's assistant id under this tenant matches nothing.
+  await kick({ ...kickInput(s), assistantId: randomUUID() }, f.ports);
+  assert.equal(f.started.length, 0);
+
+  // A batch claimed by someone else whose run is not recorded yet: the kick
+  // does not touch it (it may be that caller's start in progress).
+  await f.schema.db
+    .update(f.schema.assistantTriggers)
+    .set({ status: "in_eval", routerBatchKey: "in-progress" })
+    .where(eq(f.schema.assistantTriggers.id, message.item.id));
+  await kick(kickInput(s), f.ports);
+  assert.equal(f.started.length, 0);
+  assert.equal((await f.triggerRow(message.item.id))!.routerBatchKey, "in-progress");
+});
+
+test("a Router run is recorded only over an empty slot: a second run waits until the first is settled", async () => {
+  const s = await setup();
+  // Run X is recorded (as a racing caller would have).
+  const x = await f.ports.startTurn({
+    origin: "assistant_router",
+    existingThread: true,
+    workspaceId: s.workspaceId,
+    userId: s.steward,
+    threadId: s.assistant.routerThreadId,
+    idempotencyKey: "x-batch",
+    title: "Workspace assistant",
+    content: "x",
+  });
+  await f.setCurrentRouterRun(s.assistant.id, { runId: x.run.id, batchKey: "x-batch" });
+  const message = await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+  });
+
+  // X has ended but is not settled yet (the conversation takes one active
+  // run at a time, so Y can only start once X is no longer active).
+  await f.setRunStatus(x.run.id, { status: "completed" });
+  // Another caller starts run Y on a fresh batch: X stays recorded.
+  const outcome = await claimAndStart(
+    await assistantRow(s),
+    { payerUserId: s.a, triggerIds: [message.id] },
+    f.ports,
+  );
+  assert.equal(outcome, "started");
+  const y = f.started.at(-1)!;
+  let assistant = await assistantRow(s);
+  assert.equal(assistant.currentRouterRunId, x.run.id);
+  assert.equal(assistant.currentRouterBatchKey, "x-batch");
+  assert.equal((await f.triggerRow(message.id))!.status, "in_eval");
+
+  // The tick settles X and records Y (found again by its key).
+  f.reset();
+  await tick(new Date(), f.ports);
+  assistant = await assistantRow(s);
+  assert.equal(assistant.currentRouterBatchKey, y.idempotencyKey);
+  const yRun = (await f.schema.db
+    .select()
+    .from(f.schema.chatThreadRuns)
+    .where(eq(f.schema.chatThreadRuns.idempotencyKey, y.idempotencyKey)))[0]!;
+  assert.equal(assistant.currentRouterRunId, yRun.id);
+  assert.equal((await f.triggerRow(message.id))!.status, "in_eval");
 });

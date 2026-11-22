@@ -3,10 +3,14 @@
  * (`runAssistantTick`) and the immediate kick after a member's message
  * (`kickAssistant`).
  *
- * Each tick walks every active assistant, one at a time, each under its own
- * per-assistant advisory lock (a kick and a tick never work on the same
- * assistant at once) and its own error boundary (one assistant failing is
- * logged and the tick moves on). For one assistant, in order:
+ * Each tick walks every active assistant, one at a time, each with its own
+ * error boundary (one assistant failing is logged and the tick moves on).
+ * Ticks never overlap: they run in the single scheduler process, guarded by
+ * an in-process flag. A kick only ever does step 5, which is safe to race
+ * with a tick: claiming a batch is a compare-and-set, the Router's run is
+ * recorded only over an empty slot (or the same run), and the Router
+ * conversation takes one run at a time (a second start is a 409). Steps 2-4
+ * re-read the rows they change `for update`. For one assistant, in order:
  *
  *   1. Steward check: a steward who can no longer reach the workspace pauses
  *      the assistant (`steward_left`); nothing else happens, and runs already
@@ -46,10 +50,10 @@ import {
   listTicketRowsWithRun,
   listUndeliveredRoutedTriggerRows,
   markTriggersDeliveredRows,
+  recordRouterRunRow,
   releaseInEvalTriggerRows,
   requeueOrExpireInEvalTriggerRows,
   ticketHasDeliveredTrigger,
-  tryLockAssistant,
   updateAssistantRow,
   updateScopedTicketRow,
   type AssistantRow,
@@ -120,22 +124,6 @@ function withLoggedNotify(ports: AssistantPorts): AssistantPorts {
       }
     },
   };
-}
-
-/**
- * Runs `work` holding this assistant's advisory lock, or returns null at
- * once when another tick or kick holds it. The lock lives in a transaction
- * of its own and is released when `work` ends, however it ends; `work`
- * writes through its own short transactions, not this one.
- */
-async function withAssistantLock<T>(
-  assistantId: string,
-  work: () => Promise<T>,
-): Promise<T | null> {
-  return db.transaction(async (tx) => {
-    if (!(await tryLockAssistant(tx, assistantId))) return null;
-    return work();
-  });
 }
 
 // ── 1. Steward check ────────────────────────────────────────────────────
@@ -266,6 +254,11 @@ async function notifyBlocked(
  *   `waiting_person`, plus an `ended_without_report` worker_report event;
  * - failed with `RUN_CREDIT_CAP_EXCEEDED`: blocked on `credit_cap`;
  * - failed with the billing admission code: blocked on `insufficient_credits`;
+ * - any other failure, a cancelled run, or a run that is gone, while the
+ *   payer has no credits left: blocked on `insufficient_credits`, with no
+ *   failure counted. A run refused for credits mid-turn is stored with a
+ *   generic error code (the turn's error mapping does not keep the billing
+ *   admission code), so the payer's credits are checked here instead;
  * - any other failure, a cancelled run, or a run that is gone: one more
  *   consecutive failure; at `consecutiveFailuresToBlock` blocked on
  *   `repeated_failure`, below it back to `queued` for another try.
@@ -313,6 +306,23 @@ async function settleWorkerRun(
       runId,
     });
   }
+
+  // Checked before the transaction (it is a call to billing, not a row of
+  // ours), and only when the run ended in an ordinary failure.
+  const genericFailure =
+    run?.status !== "completed" &&
+    !(
+      run?.status === "failed" &&
+      (run.errorCode === RUN_CREDIT_CAP_EXCEEDED ||
+        run.errorCode === BILLING_ADMISSION_DENIED)
+    );
+  const payerOutOfCredits =
+    genericFailure &&
+    ticket.stage === "working" &&
+    !(await ports.hasCredits({
+      teamId: assistant.teamId,
+      userId: ticket.payerUserId,
+    }));
 
   const blocked = await db.transaction(async (tx) => {
     const current = await findScopedTicketRow(scope, tx, { forUpdate: true });
@@ -362,6 +372,8 @@ async function settleWorkerRun(
       run?.status === "failed" &&
       run.errorCode === BILLING_ADMISSION_DENIED
     ) {
+      reason = "insufficient_credits";
+    } else if (payerOutOfCredits) {
       reason = "insufficient_credits";
     }
     if (reason) {
@@ -718,17 +730,22 @@ type RouterStartOutcome = "started" | "busy" | "failed" | "claim_short";
 
 /**
  * Starts the Router's turn on an already-claimed batch and records it on the
- * assistant. A 409 (the Router conversation already has a run) gives the
- * events back to `pending_eval` with no attempt counted (Review Focus 1);
- * any other failure counts as one evaluation attempt, the same as a Router
- * run that ended without deciding them, so a start that keeps failing ends
- * in `unavailable` and the steward is told rather than retrying forever.
+ * assistant. A 409 (the Router conversation already has a run) gives this
+ * caller's own freshly claimed events back to `pending_eval` with no attempt
+ * counted (Review Focus 1). Restarting a batch whose run was never recorded
+ * (`recovering`), a 409 leaves the events `in_eval`: the run holding the
+ * conversation may be this very batch's, started by a concurrent kick, and
+ * the next tick tries again. Any other failure counts as one evaluation
+ * attempt, the same as a Router run that ended without deciding them, so a
+ * start that keeps failing ends in `unavailable` and the steward is told
+ * rather than retrying forever.
  */
 async function startRouterTurn(
   assistant: AssistantRow,
   batchKey: string,
   rows: readonly AssistantTriggerRow[],
   ports: AssistantPorts,
+  options: { recovering: boolean },
 ): Promise<RouterStartOutcome> {
   const scope = scopeOf(assistant);
   const payerUserId = rows[0]!.payerUserId!;
@@ -758,10 +775,17 @@ async function startRouterTurn(
     runId = started.run.id;
   } catch (error) {
     if (isContentError(error) && error.code === CHAT_RUN_ALREADY_ACTIVE) {
-      await releaseInEvalTriggerRows(db, { ...scope, routerBatchKey: batchKey });
-      logger.info("Assistant Router conversation is busy; batch returned to the queue", {
+      if (!options.recovering) {
+        await releaseInEvalTriggerRows(db, {
+          ...scope,
+          routerBatchKey: batchKey,
+          ids: rows.map((row) => row.id),
+        });
+      }
+      logger.info("Assistant Router conversation is busy; retrying the batch later", {
         assistantId: assistant.id,
         batchKey,
+        released: !options.recovering,
       });
       return "busy";
     }
@@ -791,21 +815,23 @@ async function startRouterTurn(
     return "failed";
   }
 
-  // Written right after the start. A run that already ended by now is
-  // simply found ended by the next settle step.
-  await db.transaction(async (tx) => {
-    const current = await findAssistantRowById(
-      { id: assistant.id, teamId: assistant.teamId, workspaceId: assistant.workspaceId },
-      tx,
-      { forUpdate: true },
-    );
-    if (!current) return;
-    await updateAssistantRow(tx, current.id, {
-      currentRouterRunId: runId,
-      currentRouterBatchKey: batchKey,
-      updatedAt: new Date(),
-    });
+  // Written right after the start, and only over an empty slot (or the
+  // same run): a run that already ended by now is simply found ended by the
+  // next settle step; a different run already recorded is never replaced,
+  // and this batch stays `in_eval` until it is (see `startNextRouterBatch`).
+  const recorded = await recordRouterRunRow(db, {
+    ...scope,
+    runId,
+    batchKey,
+    now: new Date(),
   });
+  if (!recorded) {
+    logger.warn("Assistant Router run started while another was recorded; left for a later tick", {
+      assistantId: assistant.id,
+      batchKey,
+      runId,
+    });
+  }
   return "started";
 }
 
@@ -833,7 +859,11 @@ export async function claimAndStartRouterBatch(
     workspaceId: assistant.workspaceId,
   });
   if (claimedTriggerIds.length !== batch.triggerIds.length) {
-    await releaseInEvalTriggerRows(db, { ...scope, routerBatchKey: batchKey });
+    await releaseInEvalTriggerRows(db, {
+      ...scope,
+      routerBatchKey: batchKey,
+      ids: claimedTriggerIds,
+    });
     logger.warn("Assistant Router batch claim came up short; retrying next tick", {
       assistantId: assistant.id,
       selected: batch.triggerIds.length,
@@ -847,7 +877,9 @@ export async function claimAndStartRouterBatch(
     workspaceId: assistant.workspaceId,
     assistantId: assistant.id,
   });
-  return startRouterTurn(assistant, batchKey, claimed, withLoggedNotify(ports));
+  return startRouterTurn(assistant, batchKey, claimed, withLoggedNotify(ports), {
+    recovering: false,
+  });
 }
 
 /**
@@ -855,15 +887,20 @@ export async function claimAndStartRouterBatch(
  * the assistant). Events already claimed into a batch whose run was never
  * recorded (the process stopped between the claim and the write) go first,
  * under their own key: starting is idempotent on it, so this finds the run
- * if there is one and starts it if there is not. Otherwise the next batch
- * is selected payer by payer; a payer without credits is passed over,
- * their events left `pending_eval` with no attempt counted, and the next
- * payer's batch is tried in the same tick (Review Focus 3).
+ * if there is one and starts it if there is not. Only the tick does this
+ * (`recoverOrphans`); a kick leaves such a batch alone, since it may be
+ * another caller's start still in progress. Otherwise the next batch is
+ * selected payer by payer; a payer without credits is passed over and told
+ * (`assistant_ticket_blocked` about the assistant, reason
+ * `insufficient_credits`; repeats within a day merge into one), their
+ * events left `pending_eval` with no attempt counted, and the next payer's
+ * batch is tried in the same pass (Review Focus 3).
  */
 async function startNextRouterBatch(
   assistantId: string,
   scopeHint: AssistantScope,
   ports: AssistantPorts,
+  options: { recoverOrphans: boolean },
 ): Promise<void> {
   const assistant = await findAssistantRowById({
     id: assistantId,
@@ -877,13 +914,14 @@ async function startNextRouterBatch(
 
   const inEval = await listAllInEvalTriggerRows(scope);
   if (inEval.length > 0) {
+    if (!options.recoverOrphans) return;
     const batchKey = inEval[0]!.routerBatchKey!;
     const rows = inEval.filter((row) => row.routerBatchKey === batchKey);
     logger.warn("Assistant Router batch was claimed but never recorded; starting it again", {
       assistantId,
       batchKey,
     });
-    await startRouterTurn(assistant, batchKey, rows, ports);
+    await startRouterTurn(assistant, batchKey, rows, ports, { recovering: true });
     return;
   }
 
@@ -920,6 +958,16 @@ async function startNextRouterBatch(
         events: batch.triggerIds.length,
       });
       excluded.add(batch.payerUserId);
+      await ports.notify({
+        kind: "assistant_ticket_blocked",
+        teamId: assistant.teamId,
+        userId: batch.payerUserId,
+        ref: { kind: "assistant", id: assistant.id },
+        payload: {
+          assistantId: assistant.id,
+          reason: "insufficient_credits",
+        },
+      });
       continue;
     }
     await claimAndStartRouterBatch(assistant, batch, ports);
@@ -954,66 +1002,70 @@ async function tickAssistant(
   await settleRouterRun(assistant, ports);
   await settleWorkerRuns(assistant, now, ports);
   await dispatchWorkers(assistant, now, ports);
-  await startNextRouterBatch(assistant.id, scope, ports);
+  await startNextRouterBatch(assistant.id, scope, ports, { recoverOrphans: true });
 }
 
+/** Set while a tick runs in this process; ticks never overlap. */
+let tickInFlight = false;
+
 /**
- * One scheduler pass over every active assistant. Each runs on its own:
- * one that is busy (a kick holds it) is skipped until the next tick, and
- * one that fails is logged without stopping the rest.
+ * One scheduler pass over every active assistant. Only one runs at a time
+ * in this process (the scheduler is a single process): a call while one is
+ * still going returns at once. Each assistant runs on its own: one that
+ * fails is logged without stopping the rest.
  */
 export async function runAssistantTick(
   now: Date = new Date(),
   ports: AssistantPorts = assistantPorts,
 ): Promise<void> {
-  const safePorts = withLoggedNotify(ports);
-  const rows = await listActiveAssistantRows();
-  for (const row of rows) {
-    try {
-      const done = await withAssistantLock(row.id, async () => {
+  if (tickInFlight) {
+    logger.warn("Assistant tick skipped: the previous one is still running");
+    return;
+  }
+  tickInFlight = true;
+  try {
+    const safePorts = withLoggedNotify(ports);
+    const rows = await listActiveAssistantRows();
+    for (const row of rows) {
+      try {
         await tickAssistant(row, now, safePorts);
-        return true;
-      });
-      if (done === null) {
-        logger.info("Assistant tick skipped: another pass holds it", {
+      } catch (error) {
+        logger.error("Assistant tick failed", {
           assistantId: row.id,
+          error: errorMessage(error),
         });
       }
-    } catch (error) {
-      logger.error("Assistant tick failed", {
-        assistantId: row.id,
-        error: errorMessage(error),
-      });
     }
+  } finally {
+    tickInFlight = false;
   }
 }
 
 /**
- * Best-effort: right after a member's message, settle the Router's run if
- * it has ended and start its next batch, so the member does not wait for
- * the next tick. Never throws; whatever it cannot do, the tick does.
+ * Best-effort: right after a member's message, start the Router on its next
+ * batch if it is idle, so the member does not wait for the next tick. It
+ * does nothing else (settling runs and dispatching workers are the tick's),
+ * and never throws; whatever it cannot do, the tick does. Safe to run
+ * alongside a tick: see the file header.
  */
 export async function kickAssistant(
-  assistantId: string,
+  input: { assistantId: string; teamId: string; workspaceId: string },
   ports: AssistantPorts = assistantPorts,
 ): Promise<void> {
   try {
-    const safePorts = withLoggedNotify(ports);
-    const row = await findAssistantRowById({ id: assistantId });
-    if (!row || row.status !== "active") return;
-    await withAssistantLock(row.id, async () => {
-      const assistant = await findAssistantRowById({
-        id: row.id,
-        teamId: row.teamId,
-        workspaceId: row.workspaceId,
-      });
-      if (!assistant || assistant.status !== "active") return;
-      await settleRouterRun(assistant, safePorts);
-      await startNextRouterBatch(assistant.id, scopeOf(assistant), safePorts);
-    });
+    await startNextRouterBatch(
+      input.assistantId,
+      {
+        assistantId: input.assistantId,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+      },
+      withLoggedNotify(ports),
+      { recoverOrphans: false },
+    );
   } catch (error) {
     logger.error("Assistant kick failed; the next tick will pick it up", {
-      assistantId,
+      assistantId: input.assistantId,
       error: errorMessage(error),
     });
   }
