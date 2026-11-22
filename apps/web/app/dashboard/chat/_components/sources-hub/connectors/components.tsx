@@ -70,6 +70,17 @@ const syncReadinessUiByReason: Record<
     summaryKey: "connectors.readinessNoPages",
     suppressWebhookSetup: true,
   },
+  feed_blocked_address: {
+    summaryKey: "connectors.readiness.feed_blocked_address",
+  },
+  feed_timeout: { summaryKey: "connectors.readiness.feed_timeout" },
+  feed_too_large: { summaryKey: "connectors.readiness.feed_too_large" },
+  feed_not_a_feed: { summaryKey: "connectors.readiness.feed_not_a_feed" },
+  feed_http_error: { summaryKey: "connectors.readiness.feed_http_error" },
+  feed_unreachable: { summaryKey: "connectors.readiness.feed_unreachable" },
+  feed_https_required: {
+    summaryKey: "connectors.readiness.feed_https_required",
+  },
 };
 
 function formatConnectorDate(
@@ -280,6 +291,11 @@ export function getCatalogConnector(
   item: ConnectorCatalogItem,
   connectors: ConnectorItem[],
 ) {
+  // An add-only type has one connector per feed, so no single connector
+  // stands for the card.
+  if (item.addMode) {
+    return null;
+  }
   return (
     connectors.find((connector) => connector.raw.connectorType === item.id) ??
     null
@@ -405,7 +421,9 @@ function getOAuthConnectorStatus(
   return {
     kind: "available",
     label: t("connectors.status.available"),
-    detail: t("connectors.detail.available", { name: input.item.name }),
+    detail: input.item.addMode
+      ? t("connectors.detail.availableAddFeed")
+      : t("connectors.detail.available", { name: input.item.name }),
   };
 }
 
@@ -520,6 +538,7 @@ export const ConnectorCatalogCard = memoComponent(
     item,
     status,
     connector,
+    onAddFeed,
     onCancelConnector,
     onConfigure,
     onConnectConnector,
@@ -531,6 +550,8 @@ export const ConnectorCatalogCard = memoComponent(
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
     connector: ConnectorItem | null;
+    /** Add-only cards (`item.addMode`) call this instead of starting OAuth. */
+    onAddFeed?: (item: ConnectorCatalogItem) => void;
     onCancelConnector: (item: ConnectorCatalogItem) => void;
     onConfigure: () => void;
     onConnectConnector: (item: ConnectorCatalogItem) => void;
@@ -559,15 +580,22 @@ export const ConnectorCatalogCard = memoComponent(
     const canReconnect = Boolean(connector) && status.kind === "error";
     const cta = isBusy
       ? t("connectors.cta.connecting")
-      : canReconnect
-        ? t("connectors.cta.reconnect")
-        : connector
-          ? t("connectors.cta.connected")
-          : status.kind === "connected" && item.postOAuthMode !== "auto_create"
-            ? t("connectors.cta.configure")
-            : t("connectors.cta.connect");
+      : item.addMode
+        ? t("connectors.cta.addFeed")
+        : canReconnect
+          ? t("connectors.cta.reconnect")
+          : connector
+            ? t("connectors.cta.connected")
+            : status.kind === "connected" &&
+                item.postOAuthMode !== "auto_create"
+              ? t("connectors.cta.configure")
+              : t("connectors.cta.connect");
 
     function handleAction() {
+      if (item.addMode) {
+        onAddFeed?.(item);
+        return;
+      }
       if (canReconnect) {
         onReconnectConnector(item);
         return;

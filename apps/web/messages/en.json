@@ -3235,12 +3235,22 @@
       "readinessNoPages": "Connected · No pages shared",
       "readinessSetupRequired": "Connected · Setup required",
       "readinessNotReady": "Connector is not ready to sync.",
+      "readiness": {
+        "feed_blocked_address": "This feed points to an address SourceWeft cannot fetch from. Use a public https feed URL.",
+        "feed_timeout": "The feed server took too long to respond.",
+        "feed_too_large": "The feed is too large to index.",
+        "feed_not_a_feed": "This address does not serve an RSS or Atom feed.",
+        "feed_http_error": "The feed server returned an error.",
+        "feed_unreachable": "The feed server could not be reached.",
+        "feed_https_required": "Feed URLs must start with https://."
+      },
       "cta": {
         "connecting": "Connecting...",
         "connected": "Connected",
         "configure": "Configure",
         "connect": "Connect",
-        "reconnect": "Reconnect"
+        "reconnect": "Reconnect",
+        "addFeed": "Add feed"
       },
       "detail": {
         "syncing": "A connector operation is running.",
@@ -3252,7 +3262,8 @@
         "lastSync": "Last sync {date}",
         "connectedAutoCreate": "Authorization exists without an active connector. Reconnect to create a connector.",
         "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
-        "available": "Ready to connect with {name} OAuth."
+        "available": "Ready to connect with {name} OAuth.",
+        "availableAddFeed": "Add the URL of a public RSS or Atom feed."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3281,6 +3292,9 @@
         "Communication": "Communication"
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
+      "rss": {
+        "feedUrl": "Feed URL"
+      },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",
         "modeDescription": "Choose a starting mode before connecting. You can change it later in connector settings.",

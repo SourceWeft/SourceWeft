@@ -6,6 +6,7 @@ import {
   HardDrive,
   ListChecks,
   Mail,
+  Rss,
   SquareKanban,
 } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
@@ -139,6 +140,21 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsActions: true,
     supportsPeriodicSync: false,
     supportsWebhook: false,
+  },
+  {
+    id: "rss",
+    name: "RSS / Atom",
+    category: "Knowledge & Docs",
+    description:
+      "Index posts from any public RSS or Atom feed and keep them in sync.",
+    capabilities: ["Feeds", "Scheduled sync"],
+    requiresBackendRegistration: true,
+    icon: Rss,
+    isIndexable: true,
+    supportsActions: false,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+    addMode: "feed_url",
   },
 ];
 

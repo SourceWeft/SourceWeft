@@ -100,6 +100,7 @@ export function ManageConnectorsDialog({
   initialTab,
   isLoading,
   loadingError,
+  onAddFeed,
   onCancelConnector,
   onConnectConnector,
   onCopyWebhook,
@@ -123,6 +124,8 @@ export function ManageConnectorsDialog({
   initialTab: ManageConnectorsTab;
   isLoading: boolean;
   loadingError: string | null;
+  /** Opens the add-feed flow for an add-only catalog item (`addMode`). */
+  onAddFeed?: (item: ConnectorCatalogItem) => void;
   onCancelConnector: (item: ConnectorCatalogItem) => void;
   onConnectConnector: (
     item: ConnectorCatalogItem,
@@ -339,6 +342,7 @@ export function ManageConnectorsDialog({
                                 connector={connector}
                                 item={item}
                                 key={item.id}
+                                onAddFeed={onAddFeed}
                                 onCancelConnector={onCancelConnector}
                                 onConfigure={() => {
                                   if (connector) {

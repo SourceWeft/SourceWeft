@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
+import { redactUrlQuery } from "@sourceweft/contracts";
 import type {
   ConnectorActivityItem,
   ConnectorSelectionItem,
@@ -302,10 +303,19 @@ export function ConnectorSettingsDialog({
     connector.raw.connectorType === "google_drive" ||
     connector.raw.connectorType === "dropbox"
       ? 60
-      : 1;
+      : connector.raw.connectorType === "rss"
+        ? 30
+        : 1;
   const hasValidCustomFrequency =
     Number.isInteger(parsedCustomFrequency) &&
     parsedCustomFrequency >= minFrequency;
+  // A feed URL may carry a token in its query, so the view only ever shows the
+  // host and path.
+  const feedUrl =
+    connector.raw.connectorType === "rss" &&
+    typeof connector.raw.configJson.feedUrl === "string"
+      ? redactUrlQuery(connector.raw.configJson.feedUrl)
+      : "";
   const parsedGmailLimit = Number(gmailMaxMessages);
   const validGmailLimit =
     Number.isInteger(parsedGmailLimit) &&
@@ -657,6 +667,16 @@ export function ConnectorSettingsDialog({
                     latestSyncRun={latestSyncRun}
                     onChangeFileIds={handleChangeGoogleDriveFiles}
                   />
+                ) : null}
+                {feedUrl ? (
+                  <div className="rounded-lg border p-3">
+                    <p className="text-[10px] font-medium text-muted-foreground">
+                      {t("connectors.rss.feedUrl")}
+                    </p>
+                    <p className="mt-1 break-all text-xs text-foreground">
+                      {feedUrl}
+                    </p>
+                  </div>
                 ) : null}
                 {selectionSpec ? (
                   <SelectionItems

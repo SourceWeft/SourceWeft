@@ -3235,12 +3235,22 @@
       "readinessNoPages": "已連接 · 未共享任何頁面",
       "readinessSetupRequired": "已連接 · 需要設定",
       "readinessNotReady": "連接器尚未就緒，無法同步。",
+      "readiness": {
+        "feed_blocked_address": "該訂閱源指向 SourceWeft 無法存取的網路位址。請使用公開的 https 訂閱源網址。",
+        "feed_timeout": "訂閱源伺服器回應逾時。",
+        "feed_too_large": "訂閱源過大，無法建立索引。",
+        "feed_not_a_feed": "該網址提供的不是 RSS 或 Atom 訂閱源。",
+        "feed_http_error": "訂閱源伺服器傳回了錯誤。",
+        "feed_unreachable": "無法連接到訂閱源伺服器。",
+        "feed_https_required": "訂閱源網址必須以 https:// 開頭。"
+      },
       "cta": {
         "connecting": "連接中…",
         "connected": "已連接",
         "configure": "設定",
         "connect": "連接",
-        "reconnect": "重新連接"
+        "reconnect": "重新連接",
+        "addFeed": "新增訂閱源"
       },
       "detail": {
         "syncing": "連接器操作正在執行。",
@@ -3252,7 +3262,8 @@
         "lastSync": "上次同步 {date}",
         "connectedAutoCreate": "已存在授權但沒有使用中的連接器。重新連接以建立連接器。",
         "connectedConfigure": "OAuth 已連接。設定此連接器以啟用同步。",
-        "available": "可透過 {name} OAuth 進行連接。"
+        "available": "可透過 {name} OAuth 進行連接。",
+        "availableAddFeed": "新增公開 RSS 或 Atom 訂閱源的網址。"
       },
       "syncBlock": {
         "pagesLimit": "頁數額度已用完。上次同步索引了 {count} 條內容後暫停，額度恢復後會自動繼續同步。",
@@ -3281,6 +3292,9 @@
         "Communication": "溝通協作"
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
+      "rss": {
+        "feedUrl": "訂閱源網址"
+      },
       "gmail": {
         "modeTitle": "選擇 Gmail 用途",
         "modeDescription": "連接前選擇初始模式，之後仍可在連接器設定中修改。",
