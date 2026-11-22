@@ -65,7 +65,9 @@ function unwrapThreadShareResult<T>(result: ShareMutationResult<T>): T {
     return result.value;
   }
   if (result.reason === "forbidden") {
-    throw ApiError.forbidden(
+    throw new ApiError(
+      403,
+      "SHARE_FORBIDDEN",
       "Only the chat's creator or a workspace admin can share it.",
     );
   }

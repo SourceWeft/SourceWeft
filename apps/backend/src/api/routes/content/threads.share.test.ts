@@ -166,7 +166,7 @@ test("forbidden maps to 403 with the chat sharing message", async () => {
 
   expect(response.status).toBe(403);
   const body = await response.json();
-  expect(body.code).toBe("FORBIDDEN");
+  expect(body.code).toBe("SHARE_FORBIDDEN");
   expect(body.message).toBe(
     "Only the chat's creator or a workspace admin can share it.",
   );

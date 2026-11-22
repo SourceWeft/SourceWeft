@@ -135,9 +135,8 @@ test("shared: Update link re-shares and updates the snapshot date, and the switc
   );
   expect(document.body.textContent).toContain("3 views");
 
-  const searchSwitch = document.body.querySelector<HTMLElement>(
-    '[role="switch"]',
-  )!;
+  const searchSwitch =
+    document.body.querySelector<HTMLElement>('[role="switch"]')!;
   await click(searchSwitch);
   expect(client.updateThreadShare).toHaveBeenCalledWith("ws-1", "chat-1", {
     noindex: false,
@@ -187,7 +186,11 @@ test("a forbidden (403) error shows the forbidden text instead of a toast", asyn
     getThreadShare: vi.fn().mockResolvedValue({ share: null }),
     shareThread: vi
       .fn()
-      .mockRejectedValue({ status: 403, code: "FORBIDDEN", message: "no" }),
+      .mockRejectedValue({
+        status: 403,
+        code: "SHARE_FORBIDDEN",
+        message: "no",
+      }),
   });
   await mountDialog(client);
 
@@ -269,9 +272,7 @@ test("a stale share result for a chat the dialog has moved on from is ignored", 
     document.body.querySelector<HTMLInputElement>("input[readonly]")?.value,
   ).toBe(shareB.url);
   // Busy from A's still-pending request must not disable B's button either.
-  expect(button("Update link", document)?.hasAttribute("disabled")).toBe(
-    false,
-  );
+  expect(button("Update link", document)?.hasAttribute("disabled")).toBe(false);
 
   // Now A's stale share resolves; it must not overwrite B's displayed link.
   pendingShareA.resolve({ share: shareA });
@@ -280,4 +281,104 @@ test("a stale share result for a chat the dialog has moved on from is ignored", 
   expect(
     document.body.querySelector<HTMLInputElement>("input[readonly]")?.value,
   ).toBe(shareB.url);
+});
+
+test("switching to a chat whose share lookup is forbidden never shows the previous chat's link", async () => {
+  const shareA = makeShare({
+    targetId: "chat-a",
+    token: "tok-a",
+    url: "https://sourceweft.test/s/tok-a",
+  });
+  const client = fakeClient({
+    getThreadShare: vi.fn((_workspaceId: string, chatId: string) =>
+      chatId === "chat-a"
+        ? Promise.resolve({ share: shareA })
+        : Promise.reject({
+            status: 403,
+            code: "SHARE_FORBIDDEN",
+            message: "no",
+          }),
+    ),
+  });
+
+  const handle = await mountWithIntl(
+    <ShareChatDialog
+      open
+      onOpenChange={() => {}}
+      workspaceId="ws-1"
+      chatId="chat-a"
+      chatTitle="Chat A"
+      client={client}
+    />,
+  );
+  await flush(2);
+  expect(
+    document.body.querySelector<HTMLInputElement>("input[readonly]")?.value,
+  ).toBe(shareA.url);
+
+  await handle.render(
+    withIntl(
+      <ShareChatDialog
+        open
+        onOpenChange={() => {}}
+        workspaceId="ws-1"
+        chatId="chat-b"
+        chatTitle="Chat B"
+        client={client}
+      />,
+    ),
+  );
+  await flush(2);
+
+  expect(document.body.querySelector("input[readonly]")).toBeNull();
+  expect(document.body.textContent).not.toContain(shareA.url);
+  expect(document.body.textContent).toContain(
+    "Only the chat's creator or a workspace admin can share it.",
+  );
+  expect(toasts.error).not.toHaveBeenCalled();
+});
+
+test("a failed share lookup (non-403) toasts the generic error and shows no stale link", async () => {
+  const shareA = makeShare({
+    targetId: "chat-a",
+    token: "tok-a",
+    url: "https://sourceweft.test/s/tok-a",
+  });
+  const client = fakeClient({
+    getThreadShare: vi.fn((_workspaceId: string, chatId: string) =>
+      chatId === "chat-a"
+        ? Promise.resolve({ share: shareA })
+        : Promise.reject({ status: 500, code: "INTERNAL", message: "boom" }),
+    ),
+  });
+
+  const handle = await mountWithIntl(
+    <ShareChatDialog
+      open
+      onOpenChange={() => {}}
+      workspaceId="ws-1"
+      chatId="chat-a"
+      chatTitle="Chat A"
+      client={client}
+    />,
+  );
+  await flush(2);
+
+  await handle.render(
+    withIntl(
+      <ShareChatDialog
+        open
+        onOpenChange={() => {}}
+        workspaceId="ws-1"
+        chatId="chat-b"
+        chatTitle="Chat B"
+        client={client}
+      />,
+    ),
+  );
+  await flush(2);
+
+  expect(document.body.querySelector("input[readonly]")).toBeNull();
+  expect(document.body.textContent).not.toContain(shareA.url);
+  expect(toasts.error).toHaveBeenCalledWith("Couldn't update sharing.");
 });

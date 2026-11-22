@@ -126,7 +126,10 @@ export const threadShareSchema = shareLinkSchema.extend({
 });
 
 export const createThreadShareRequestSchema = z.object({
-  /** Opt out of search indexing for a sensitive one-off. Defaults to indexed. */
+  /**
+   * Search indexing for the shared chat. Defaults to noindex (true) for a
+   * new share; omitted on a re-share, the current setting is kept.
+   */
   noindex: z.boolean().optional(),
 });
 

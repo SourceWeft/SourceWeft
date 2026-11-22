@@ -94,6 +94,9 @@ export function ShareChatDialog({
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    // Drop the previous chat's share before looking up this one, so a failed
+    // lookup can never leave another chat's link, views or date on screen.
+    setShare(null);
     setForbidden(false);
     setConfirmingStop(false);
     setCopied(false);
@@ -104,8 +107,13 @@ export function ShareChatDialog({
       .then((result) => {
         if (!cancelled) setShare(result.share);
       })
-      .catch(() => {
-        // Stay in the not-shared state; creating a link surfaces its own error.
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if ((error as { status?: number } | null)?.status === 403) {
+          setForbidden(true);
+        } else {
+          toast.error(t("chats.shareDialog.updateError"));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -113,7 +121,7 @@ export function ShareChatDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, workspaceId, chatId, client]);
+  }, [open, workspaceId, chatId, client, t]);
 
   async function handleShare() {
     const requestChatId = chatId;
