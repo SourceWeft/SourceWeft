@@ -10,8 +10,16 @@ export type ChatItem = {
   status?: "ready" | "running" | "attention";
   /** The thread this sub-agent conversation nests under; null at top level. */
   parentThreadId?: string | null;
-  /** What created the thread: a person, a sub-agent or a scheduled task run. */
-  origin?: "user" | "subagent" | "scheduled";
+  /**
+   * What created the thread: a person, a sub-agent, a scheduled task run, or a
+   * workspace assistant's router/ticket worker thread.
+   */
+  origin?:
+    | "user"
+    | "subagent"
+    | "scheduled"
+    | "assistant_router"
+    | "assistant_ticket";
   /** The persona driving the thread; null for an ordinary chat. */
   personaId?: string | null;
   /** One visible level: the sub-agent conversations nested under this chat. */

@@ -30,7 +30,15 @@ export type ThreadRunFailureSummary = {
 };
 
 // `scheduled` marks a conversation a scheduled task run created.
-export const threadOriginSchema = z.enum(["user", "subagent", "scheduled"]);
+// `assistant_router` is a workspace assistant's own standing router thread;
+// `assistant_ticket` is one of its tickets' worker threads.
+export const threadOriginSchema = z.enum([
+  "user",
+  "subagent",
+  "scheduled",
+  "assistant_router",
+  "assistant_ticket",
+]);
 
 export const threadSchema = z.object({
   id: z.string(),

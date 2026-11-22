@@ -40,6 +40,7 @@
     "./thread-message-compaction": "./src/thread-message-compaction.ts",
     "./threads": "./src/threads.ts",
     "./scheduled-tasks": "./src/scheduled-tasks.ts",
+    "./assistants": "./src/assistants.ts",
     "./notifications": "./src/notifications.ts",
     "./stream": "./src/stream.ts",
     "./skills": "./src/skills.ts",
