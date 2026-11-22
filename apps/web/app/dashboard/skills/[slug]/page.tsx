@@ -57,6 +57,7 @@ import { trackSkillInstalled } from "../../../../lib/analytics-events";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../../_components/site-icons";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -418,6 +419,7 @@ export default function SkillDetailPage() {
             <div className="flex min-w-0 items-center gap-3">
               <Button
                 asChild
+                {...swipeBackProps}
                 aria-label={t("detail.back")}
                 className="h-8 w-8 rounded-full p-0"
                 size="icon-sm"

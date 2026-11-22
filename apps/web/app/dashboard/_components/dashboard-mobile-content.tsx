@@ -8,6 +8,7 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { ObservabilityRouteSkeleton } from "../../_components/route-loading-skeleton";
 import { DashboardMobileMe } from "./dashboard-mobile-me";
 import { useDashboardMobileNav } from "./dashboard-mobile-nav-state";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 const ObservabilityPage = dynamic(() => import("../observability/page"), {
   loading: () => <ObservabilityRouteSkeleton />,
@@ -39,6 +40,7 @@ export function DashboardMobileContent({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden">
           <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-3">
             <Button
+              {...swipeBackProps}
               className="h-8 w-8"
               onClick={openMe}
               size="icon"

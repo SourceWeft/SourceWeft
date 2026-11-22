@@ -14,7 +14,7 @@ import { useSidebar } from "@sourceweft/ui-web/components/ui/sidebar";
 import { useElementSize } from "../../../lib/use-element-size";
 import { resolveWorkspaceLayout } from "./workspace-layout";
 import { useDesktopTitlebar } from "../../../lib/desktop-titlebar";
-import { useLeftEdgeSwipe } from "../../../lib/left-edge-swipe";
+import { findSwipeBack, useLeftEdgeSwipe } from "../../../lib/left-edge-swipe";
 
 const PREFERENCE_KEY = "sourceweft:conversations-expanded";
 type Layout = ReturnType<typeof resolveWorkspaceLayout> & {
@@ -111,12 +111,18 @@ export function DashboardWorkspaceLayout({
     openMobile,
     setOpenMobile,
   ]);
-  // Phones open the drawer with a swipe from the left edge, as iOS apps do.
-  const openDrawer = useCallback(() => {
+  // A swipe from the left edge goes back when the page shows a back button and
+  // otherwise opens the drawer, as iOS apps do.
+  const onEdgeSwipe = useCallback(() => {
+    const back = ref.current ? findSwipeBack(ref.current) : null;
+    if (back) {
+      back.click();
+      return;
+    }
     setHubOpen(false);
     setOpenMobile(true);
-  }, [setOpenMobile]);
-  useLeftEdgeSwipe(ref, !hasRail && !openMobile, openDrawer);
+  }, [ref, setOpenMobile]);
+  useLeftEdgeSwipe(ref, !hasRail && !openMobile, onEdgeSwipe);
   const closeConversations = useCallback(() => {
     setOpenMobile(false);
     setOverlayOpen(false);

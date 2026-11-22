@@ -64,6 +64,7 @@ import type { ArtifactPreviewLayout } from "./types";
 import { isArtifactPending, payloadRecord } from "./utils";
 import { useLiveArtifact } from "./artifact-live-refresh";
 import { withArtifactVersionMediaProxyUrls } from "../chat-canvas/use-artifact-version-media";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 export function ArtifactPreviewPanel({
   artifact: openedArtifact,
@@ -249,6 +250,7 @@ export function ArtifactPreviewPanel({
         <div className="flex items-center justify-between gap-2">
           {onClose ? (
             <Button
+              {...(isPageLayout ? {} : swipeBackProps)}
               className="gap-1.5"
               onClick={onClose}
               size="xs"

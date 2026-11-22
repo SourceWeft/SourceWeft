@@ -44,6 +44,7 @@ import {
   useDashboardTeamSelector,
 } from "./dashboard-team-selector-shared";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
+import { swipeBackProps } from "@/lib/left-edge-swipe";
 
 type MobileMePanel = Exclude<SettingsCenterTab, "local">;
 type IconComponent = React.ComponentType<{ className?: string }>;
@@ -153,6 +154,7 @@ export function DashboardMobileMe() {
       <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border/70 px-1.5">
         {activePanel ? (
           <Button
+            {...swipeBackProps}
             className="size-10 shrink-0"
             onClick={() => setActivePanel(null)}
             size="icon"

@@ -82,14 +82,26 @@ export function UserSettingsSync() {
   const { setTheme } = useTheme();
   const router = useRouter();
   const locale = useLocale();
+  const savedTheme = result?.settings.appearance.theme;
+  // next-themes hands out a new `setTheme` whenever the theme changes. Apply the
+  // saved theme only when the saved value changes: re-running on a new
+  // `setTheme` put the old saved theme back while a newly picked one was still
+  // saving, so the screen flashed between the two.
+  const setThemeRef = useRef(setTheme);
+  setThemeRef.current = setTheme;
+
+  useEffect(() => {
+    if (savedTheme) {
+      setThemeRef.current(savedTheme);
+    }
+  }, [savedTheme]);
 
   useEffect(() => {
     if (!result) {
       return;
     }
 
-    const { theme, language } = result.settings.appearance;
-    setTheme(theme);
+    const { language } = result.settings.appearance;
     // Mirror the saved language into the cookie the proxy reads, so a signed-in
     // user's choice follows them across devices (§5). The account setting is the
     // one long-term truth — "system" means "follow the browser", so we clear the
@@ -113,7 +125,7 @@ export function UserSettingsSync() {
         router.refresh();
       }
     }
-  }, [setTheme, result, router, locale]);
+  }, [result, router, locale]);
 
   return null;
 }
