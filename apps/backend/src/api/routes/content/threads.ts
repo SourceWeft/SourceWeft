@@ -8,6 +8,7 @@ import {
   createThreadRequestSchema,
   endThreadQuestionsRequestSchema,
   listThreadMessagesRequestSchema,
+  archiveThreadRequestSchema,
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
   streamThreadRequestSchema,
@@ -171,11 +172,19 @@ export function registerThreadRoutes(app: Hono) {
       throw ApiError.unauthorized();
     }
 
+    const archivedQuery = c.req.query("archived");
     const parsedQuery = listThreadsRequestSchema.safeParse({
       cursor: c.req.query("cursor"),
       limit: c.req.query("limit")
         ? Number.parseInt(c.req.query("limit") as string, 10)
         : undefined,
+      // Only "true" and "false" are accepted; anything else fails validation.
+      archived:
+        archivedQuery === "true"
+          ? true
+          : archivedQuery === "false"
+            ? false
+            : archivedQuery,
     });
     if (!parsedQuery.success) {
       throw ApiError.validation(
@@ -188,6 +197,7 @@ export function registerThreadRoutes(app: Hono) {
       userId: getSessionUserId(session),
       limit: parsedQuery.data.limit,
       cursor: parsedQuery.data.cursor,
+      archived: parsedQuery.data.archived,
     });
 
     return ApiResponse.success(c, result);
@@ -490,6 +500,30 @@ export function registerThreadRoutes(app: Hono) {
       threadId: requireRouteParam(c, "id"),
       userId: getSessionUserId(session),
       chatPreferences: parsed.data,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.patch("/threads/:id/archive", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = archiveThreadRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentThreadService.setThreadArchived({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      archived: parsed.data.archived,
     });
 
     return ApiResponse.success(c, result);

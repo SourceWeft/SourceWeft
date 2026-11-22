@@ -34,6 +34,7 @@ import {
 import {
   delegatedChildChatIds,
   findChatItem,
+  insertChatByActivity,
   insertChildChatItem,
   mapChatItems,
   mapThreadToChatItem,
@@ -56,7 +57,7 @@ const DEFAULT_THREAD_CHAT_PREFERENCES: ThreadChatPreferences = {
   composerOptions: {},
 };
 
-type DashboardChatState = {
+export type DashboardChatState = {
   workTarget: import("@sourceweft/contracts").ThreadExecutionTarget | null;
   setWorkTarget: (
     target: import("@sourceweft/contracts").ThreadExecutionTarget | null,
@@ -73,6 +74,8 @@ type DashboardChatState = {
   sharedChats: ChatItem[];
   privateChats: ChatItem[];
   archivedChats: ChatItem[];
+  hasMoreArchivedChats: boolean;
+  isLoadingArchivedChats: boolean;
   hasMorePrivateChats: boolean;
   isLoadingPrivateChats: boolean;
   isWorkspaceHydrating: boolean;
@@ -101,6 +104,9 @@ type DashboardChatState = {
     workspaceName?: string,
   ) => Promise<WorkspaceSwitchResult>;
   loadMorePrivateChats: () => Promise<void>;
+  /** Loads the first page of archived chats once per workspace. */
+  loadArchivedChats: () => Promise<void>;
+  loadMoreArchivedChats: () => Promise<void>;
   startNewChat: () => void;
   createChat: (input?: {
     title?: string;
@@ -125,7 +131,8 @@ type DashboardChatState = {
   updateChatSourceCount: (id: string, sourceCount: number) => void;
   refreshChatThread: (id: string) => Promise<{ title: string } | null>;
   openChat: (id: string, title: string) => void;
-  archiveChat: (id: string) => void;
+  archiveChat: (id: string) => Promise<void>;
+  unarchiveChat: (id: string) => Promise<void>;
   deleteChat: (id: string) => Promise<void>;
   setChatVisibility: (
     id: string,
@@ -228,6 +235,15 @@ export function DashboardChatStateProvider({
   const [sharedChats, setSharedChats] = useState<ChatItem[]>([]);
   const [privateChats, setPrivateChats] = useState<ChatItem[]>([]);
   const [archivedChats, setArchivedChats] = useState<ChatItem[]>([]);
+  // The workspace whose archived chats are loaded. They are fetched the first
+  // time the archived list is opened, and again after a workspace change.
+  const [archivedChatsWorkspaceId, setArchivedChatsWorkspaceId] = useState<
+    string | null
+  >(null);
+  const [archivedChatsCursor, setArchivedChatsCursor] = useState<
+    string | null
+  >(null);
+  const [isLoadingArchivedChats, setIsLoadingArchivedChats] = useState(false);
   const [privateChatsCursor, setPrivateChatsCursor] = useState<string | null>(
     null,
   );
@@ -958,25 +974,104 @@ export function DashboardChatStateProvider({
     [archivedChats, privateChats, rememberChatPreferences, sharedChats],
   );
 
-  const archiveChat = useCallback(
-    (id: string) => {
-      const candidate = findChatItem([...sharedChats, ...privateChats], id);
+  const archivedChatsLoaded =
+    workspaceId !== null && archivedChatsWorkspaceId === workspaceId;
+  const visibleArchivedChats = useMemo(
+    () => (archivedChatsLoaded ? archivedChats : []),
+    [archivedChats, archivedChatsLoaded],
+  );
+  const hasMoreArchivedChats =
+    archivedChatsLoaded && Boolean(archivedChatsCursor);
 
+  const fetchArchivedChats = useCallback(
+    async (targetWorkspaceId: string, cursor: string | null) => {
+      setIsLoadingArchivedChats(true);
+      try {
+        const threads = await retryOnceOnServiceUnavailable(() =>
+          contentClient.listThreads(targetWorkspaceId, {
+            archived: true,
+            cursor: cursor ?? undefined,
+            limit: THREADS_PAGE_SIZE,
+          }),
+        );
+        const items = threads.items.map(mapThreadToChatItem);
+        setArchivedChats((value) => {
+          if (!cursor) return items;
+          const existing = new Set(value.map((item) => item.id));
+          return [...value, ...items.filter((item) => !existing.has(item.id))];
+        });
+        setArchivedChatsCursor(threads.nextCursor);
+        setArchivedChatsWorkspaceId(targetWorkspaceId);
+      } finally {
+        setIsLoadingArchivedChats(false);
+      }
+    },
+    [],
+  );
+
+  const loadArchivedChats = useCallback(async () => {
+    if (!workspaceId || archivedChatsLoaded || isLoadingArchivedChats) return;
+    await fetchArchivedChats(workspaceId, null);
+  }, [
+    workspaceId,
+    archivedChatsLoaded,
+    isLoadingArchivedChats,
+    fetchArchivedChats,
+  ]);
+
+  const loadMoreArchivedChats = useCallback(async () => {
+    if (
+      !workspaceId ||
+      !archivedChatsLoaded ||
+      !archivedChatsCursor ||
+      isLoadingArchivedChats
+    ) {
+      return;
+    }
+    await fetchArchivedChats(workspaceId, archivedChatsCursor);
+  }, [
+    workspaceId,
+    archivedChatsLoaded,
+    archivedChatsCursor,
+    isLoadingArchivedChats,
+    fetchArchivedChats,
+  ]);
+
+  const archiveChat = useCallback(
+    async (id: string) => {
+      if (!workspaceId) return;
+
+      await contentClient.archiveThread(workspaceId, id, { archived: true });
+
+      const candidate = findChatItem([...sharedChats, ...privateChats], id);
       setSharedChats((value) => removeChatItem(value, id));
       setPrivateChats((value) => removeChatItem(value, id));
 
-      if (candidate) {
-        setArchivedChats((value) => {
-          const exists = value.some((item) => item.id === candidate.id);
-          if (exists) return value;
-          return [
-            { ...candidate, updatedAt: new Date().toISOString() },
-            ...value,
-          ];
-        });
+      // Before the archived list is first opened it is fetched whole, so the
+      // chat only needs adding to a list that is already loaded.
+      if (candidate && archivedChatsLoaded) {
+        setArchivedChats((value) => insertChatByActivity(value, candidate));
       }
     },
-    [sharedChats, privateChats],
+    [workspaceId, sharedChats, privateChats, archivedChatsLoaded],
+  );
+
+  const unarchiveChat = useCallback(
+    async (id: string) => {
+      if (!workspaceId) return;
+
+      await contentClient.archiveThread(workspaceId, id, { archived: false });
+
+      const candidate = findChatItem(archivedChats, id);
+      setArchivedChats((value) => removeChatItem(value, id));
+      if (!candidate) return;
+      if (isSharedChat(candidate)) {
+        setSharedChats((value) => insertChatByActivity(value, candidate));
+      } else {
+        setPrivateChats((value) => insertChatByActivity(value, candidate));
+      }
+    },
+    [workspaceId, archivedChats],
   );
 
   const removeChatFromState = useCallback((id: string) => {
@@ -1123,9 +1218,9 @@ export function DashboardChatStateProvider({
 
   const clearArchivedChats = useCallback(async () => {
     const archivedIds = new Set(
-      archivedChats.flatMap((item) => [
+      visibleArchivedChats.flatMap((item) => [
         item.id,
-        ...delegatedChildChatIds(archivedChats, item.id),
+        ...delegatedChildChatIds(visibleArchivedChats, item.id),
       ]),
     );
 
@@ -1134,7 +1229,7 @@ export function DashboardChatStateProvider({
     if (!workspaceId) return;
 
     await Promise.all(
-      archivedChats.map((item) =>
+      visibleArchivedChats.map((item) =>
         contentClient.deleteThread(workspaceId, item.id),
       ),
     );
@@ -1147,7 +1242,7 @@ export function DashboardChatStateProvider({
       setThreadTitle(t("newChat.title"));
       return "";
     });
-  }, [workspaceId, archivedChats, removeChatFromState, t]);
+  }, [workspaceId, visibleArchivedChats, removeChatFromState, t]);
 
   const state = useMemo<DashboardChatState>(
     () => ({
@@ -1164,7 +1259,9 @@ export function DashboardChatStateProvider({
       threadTitle,
       sharedChats,
       privateChats,
-      archivedChats,
+      archivedChats: visibleArchivedChats,
+      hasMoreArchivedChats,
+      isLoadingArchivedChats,
       hasMorePrivateChats,
       isLoadingPrivateChats,
       isWorkspaceHydrating,
@@ -1183,6 +1280,8 @@ export function DashboardChatStateProvider({
       renameWorkspace,
       switchWorkspace,
       loadMorePrivateChats,
+      loadArchivedChats,
+      loadMoreArchivedChats,
       startNewChat,
       createChat,
       adoptChat,
@@ -1191,6 +1290,7 @@ export function DashboardChatStateProvider({
       refreshChatThread,
       openChat,
       archiveChat,
+      unarchiveChat,
       deleteChat,
       setChatVisibility,
       clearPrivateChats,
@@ -1209,7 +1309,9 @@ export function DashboardChatStateProvider({
       threadTitle,
       sharedChats,
       privateChats,
-      archivedChats,
+      visibleArchivedChats,
+      hasMoreArchivedChats,
+      isLoadingArchivedChats,
       hasMorePrivateChats,
       isLoadingPrivateChats,
       isWorkspaceHydrating,
@@ -1233,12 +1335,15 @@ export function DashboardChatStateProvider({
       updateChatSourceCount,
       refreshChatThread,
       archiveChat,
+      unarchiveChat,
       deleteChat,
       setChatVisibility,
       clearPrivateChats,
       clearArchivedChats,
       startNewChat,
       loadMorePrivateChats,
+      loadArchivedChats,
+      loadMoreArchivedChats,
     ],
   );
 

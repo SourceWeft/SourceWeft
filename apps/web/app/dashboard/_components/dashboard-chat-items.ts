@@ -165,3 +165,21 @@ export function insertChildChatItem(
 export function flattenChatItems(items: readonly ChatItem[]): ChatItem[] {
   return items.flatMap((item) => [item, ...(item.children ?? [])]);
 }
+
+/**
+ * Puts a top-level chat into a list in activity order, newest first, replacing
+ * any row it already has there. The server orders every chat list this way.
+ */
+export function insertChatByActivity(
+  items: ChatItem[],
+  chat: ChatItem,
+): ChatItem[] {
+  const activity = new Date(chat.updatedAt).getTime();
+  const others = items.filter((item) => item.id !== chat.id);
+  const index = others.findIndex(
+    (item) => new Date(item.updatedAt).getTime() < activity,
+  );
+  return index === -1
+    ? [...others, chat]
+    : [...others.slice(0, index), chat, ...others.slice(index)];
+}

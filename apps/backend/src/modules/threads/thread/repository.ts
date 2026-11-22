@@ -228,6 +228,8 @@ export async function listThreadRecordsByWorkspace(input: {
     id: string;
     activityAt: string;
   };
+  /** The archived chats instead of the main list. */
+  archived?: boolean;
 }) {
   const cursorDate = input.cursor ? new Date(input.cursor.activityAt) : null;
   const hasValidCursor =
@@ -259,7 +261,7 @@ export async function listThreadRecordsByWorkspace(input: {
       from threads
       where team_id = $1
         and workspace_id = $2
-        and archived = false
+        and archived = ${input.archived ? "true" : "false"}
         and parent_thread_id is null
         and ${visibility}
         ${cursorSql}
@@ -379,6 +381,48 @@ export async function deleteThreadRecord(input: {
       select id from deleted_thread
     `,
     [input.threadId, input.teamId, input.workspaceId, input.viewerUserId],
+  );
+
+  return result.rows.length > 0;
+}
+
+/**
+ * Archives or restores a top-level thread. The right to do so is the right to
+ * delete it: a plain editor only their own (or legacy creator-less) threads, a
+ * content admin any thread visible to them. A sub-agent thread, an invisible
+ * thread or one out of scope matches no row and returns false. Its sub-agent
+ * threads keep their own flag and stay nested under it.
+ */
+export async function setThreadArchivedRecord(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+  viewerUserId: string;
+  isContentAdmin: boolean;
+  archived: boolean;
+}) {
+  const archivableClause = input.isContentAdmin
+    ? threadVisibilityClause(4)
+    : `(created_by = $4 or created_by is null)`;
+  const result = await database.query<{ id: string }>(
+    `
+      update threads
+      set archived = $5,
+          updated_at = now()
+      where id = $1
+        and team_id = $2
+        and workspace_id = $3
+        and parent_thread_id is null
+        and ${archivableClause}
+      returning id
+    `,
+    [
+      input.threadId,
+      input.teamId,
+      input.workspaceId,
+      input.viewerUserId,
+      input.archived,
+    ],
   );
 
   return result.rows.length > 0;

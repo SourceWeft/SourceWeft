@@ -77,6 +77,8 @@ import type {
   DeleteWorkspaceMcpInstallResponse,
   DeleteSourceResponse,
   DeleteThreadResponse,
+  ArchiveThreadRequest,
+  ArchiveThreadResponse,
   DeleteWorkingFileResponse,
   DeleteWorkspaceSkillResponse,
   EnableWorkspaceSkillRequest,
@@ -868,6 +870,9 @@ export class ContentClient {
     if (input.cursor) {
       params.set("cursor", input.cursor);
     }
+    if (input.archived) {
+      params.set("archived", "true");
+    }
 
     const query = params.toString();
     return this.http.get<ListThreadsResponse>(
@@ -1083,6 +1088,17 @@ export class ContentClient {
   ) {
     return this.http.patch<UpdateThreadChatPreferencesResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/chat-preferences`,
+      input,
+    );
+  }
+
+  archiveThread(
+    workspaceId: string,
+    threadId: string,
+    input: ArchiveThreadRequest,
+  ) {
+    return this.http.patch<ArchiveThreadResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/archive`,
       input,
     );
   }

@@ -10,6 +10,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import {
   Archive,
+  ArchiveRestore,
   Bot,
   CalendarClock,
   ExternalLink,
@@ -461,6 +462,7 @@ function ChatListRow({
   nested = false,
   onAddSubagent,
   onArchive,
+  onUnarchive,
   onDelete,
   onOpenInNewWindow,
   onOpenInPanel,
@@ -474,7 +476,9 @@ function ChatListRow({
   /** A sub-agent conversation rendered under its parent row. */
   nested?: boolean;
   onAddSubagent?: (id: string, title: string) => void;
-  onArchive: (id: string) => void;
+  onArchive: (id: string) => Promise<void>;
+  /** Set on an archived chat: brings it back to the main list. */
+  onUnarchive?: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
   /** Opens a nested conversation beside its parent (parent id, child id). */
@@ -501,6 +505,23 @@ function ChatListRow({
       toast.success(shared ? t("chats.nowPrivate") : t("chats.nowVisible"));
     } catch {
       toast.error(t("chats.visibilityError"));
+    }
+  };
+
+  const handleArchive = async () => {
+    try {
+      await onArchive(item.id);
+    } catch {
+      toast.error(t("chats.archiveError"));
+    }
+  };
+
+  const handleUnarchive = async () => {
+    if (!onUnarchive) return;
+    try {
+      await onUnarchive(item.id);
+    } catch {
+      toast.error(t("chats.unarchiveError"));
     }
   };
 
@@ -640,9 +661,15 @@ function ChatListRow({
               </DropdownMenuItem>
             ) : null}
             {canArchive ? (
-              <DropdownMenuItem onSelect={() => onArchive(item.id)}>
+              <DropdownMenuItem onSelect={() => void handleArchive()}>
                 <Archive className="size-4" />
                 <span>{t("chats.archive")}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {onUnarchive ? (
+              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+                <ArchiveRestore className="size-4" />
+                <span>{t("chats.unarchive")}</span>
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
@@ -673,9 +700,14 @@ function ChatList({
   privateChats,
   sharedChats,
   archivedChats,
+  hasMoreArchived = false,
+  isLoadingArchived = false,
   onLoadMore,
+  onLoadArchived,
+  onLoadMoreArchived,
   onAddSubagent,
   onArchive,
+  onUnarchive,
   onClearPrivate,
   onClearArchived,
   onDelete,
@@ -704,9 +736,15 @@ function ChatList({
   privateChats: ChatItem[];
   sharedChats: ChatItem[];
   archivedChats: ChatItem[];
+  hasMoreArchived?: boolean;
+  isLoadingArchived?: boolean;
   onLoadMore?: () => void;
+  /** Called while the archived list is shown; loads it once per workspace. */
+  onLoadArchived?: () => Promise<void>;
+  onLoadMoreArchived?: () => Promise<void>;
   onAddSubagent?: (id: string, title: string) => void;
-  onArchive: (id: string) => void;
+  onArchive: (id: string) => Promise<void>;
+  onUnarchive?: (id: string) => Promise<void>;
   onOpenInNewWindow?: (id: string) => void;
   /** Opens a nested conversation beside its parent (parent id, child id). */
   onOpenInPanel?: (parentId: string, childId: string) => void;
@@ -736,7 +774,19 @@ function ChatList({
       ),
     [privateChats, sharedChats, archivedChats, filter, search],
   );
-  const canLoadMore = !isArchived && hasMore;
+  const canLoadMore = isArchived ? hasMoreArchived : hasMore;
+  const loadingMore = isArchived ? isLoadingArchived : isLoadingMore;
+  const loadMore = isArchived
+    ? onLoadMoreArchived
+      ? () => void onLoadMoreArchived()
+      : undefined
+    : onLoadMore;
+
+  // Archived chats are fetched the first time the list is shown, and again
+  // in another workspace (the loader changes with the workspace).
+  useEffect(() => {
+    if (isArchived && onLoadArchived) void onLoadArchived();
+  }, [isArchived, onLoadArchived]);
   // Clear actions keep their original scope, regardless of the visible subset.
   const onClear = search.trim()
     ? undefined
@@ -951,6 +1001,7 @@ function ChatList({
                     item={item}
                     onAddSubagent={isArchived ? undefined : onAddSubagent}
                     onArchive={onArchive}
+                    onUnarchive={isArchived ? onUnarchive : undefined}
                     onDelete={onDelete}
                     onOpenInNewWindow={onOpenInNewWindow}
                     onSetVisibility={isArchived ? undefined : onSetVisibility}
@@ -962,7 +1013,8 @@ function ChatList({
                     <ChatListRow
                       key={child.id}
                       active={child.id === activeId}
-                      canArchive={!isArchived}
+                      // A sub-agent chat is archived with its parent.
+                      canArchive={false}
                       item={child}
                       nested
                       onArchive={onArchive}
@@ -982,7 +1034,7 @@ function ChatList({
                 className="px-3 py-4 text-xs text-muted-foreground"
                 role="status"
               >
-                {isLoadingMore && !isArchived
+                {loadingMore
                   ? t("chats.loadingChats")
                   : canLoadMore
                     ? t("chats.noMatching")
@@ -991,17 +1043,17 @@ function ChatList({
                       : t("chats.noneYet")}
               </p>
             ) : null}
-            {canLoadMore && onLoadMore ? (
+            {canLoadMore && loadMore ? (
               <div className="px-3 py-1.5">
                 <Button
                   className="h-auto w-full justify-center px-0 py-1 text-[11px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-                  disabled={isLoadingMore}
-                  onClick={onLoadMore}
+                  disabled={loadingMore}
+                  onClick={loadMore}
                   size="xs"
                   type="button"
                   variant="ghost"
                 >
-                  {isLoadingMore ? t("chats.loading") : t("chats.loadMore")}
+                  {loadingMore ? t("chats.loading") : t("chats.loadMore")}
                 </Button>
               </div>
             ) : null}
@@ -1022,8 +1074,13 @@ export function DashboardSidebarChatPanel({
   search,
   onSearchChange,
   archivedChats,
+  hasMoreArchivedChats,
+  isLoadingArchivedChats,
   activeChatId,
   onArchiveChat,
+  onUnarchiveChat,
+  onLoadArchivedChats,
+  onLoadMoreArchivedChats,
   onClearArchivedChats,
   onClearPrivateChats,
   onCreateAgentChat,
@@ -1057,8 +1114,13 @@ export function DashboardSidebarChatPanel({
   search: string;
   onSearchChange: (value: string) => void;
   archivedChats: ChatItem[];
+  hasMoreArchivedChats: boolean;
+  isLoadingArchivedChats: boolean;
   activeChatId: string;
-  onArchiveChat: (id: string) => void;
+  onArchiveChat: (id: string) => Promise<void>;
+  onUnarchiveChat: (id: string) => Promise<void>;
+  onLoadArchivedChats: () => Promise<void>;
+  onLoadMoreArchivedChats: () => Promise<void>;
   onClearArchivedChats: () => Promise<void>;
   onClearPrivateChats: () => Promise<void>;
   /** Starts a persona-owned thread, nested under `parentThreadId` when set. */
@@ -1212,9 +1274,14 @@ export function DashboardSidebarChatPanel({
         privateChats={privateChats}
         sharedChats={sharedChats}
         archivedChats={archivedChats}
+        hasMoreArchived={hasMoreArchivedChats}
+        isLoadingArchived={isLoadingArchivedChats}
         onLoadMore={onLoadMoreChats}
+        onLoadArchived={onLoadArchivedChats}
+        onLoadMoreArchived={onLoadMoreArchivedChats}
         onAddSubagent={openSubagentPicker}
         onArchive={onArchiveChat}
+        onUnarchive={onUnarchiveChat}
         onOpenInNewWindow={onOpenChatInNewWindow}
         onOpenInPanel={onOpenChatInPanel}
         onClearPrivate={onClearPrivateChats}
