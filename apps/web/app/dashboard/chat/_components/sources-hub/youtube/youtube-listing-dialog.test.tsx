@@ -221,3 +221,75 @@ test("a refused listing says when it can be tried again", async () => {
   assert.ok(notice?.textContent?.includes("30s"));
   assert.equal(buttonNamed("Try again")?.hasAttribute("disabled"), true);
 });
+
+const TRANSCRIPT_NOTE = "Videos are transcribed by AI";
+const COST_NOTE = "Transcribing a video uses credits.";
+
+test("the transcript and cost notes appear only once the listing has loaded", async () => {
+  let resolveListing: (value: typeof LISTING) => void = () => {};
+  listYouTubeCollection.mockReturnValue(
+    new Promise((resolve) => {
+      resolveListing = resolve;
+    }),
+  );
+  await mountOpen();
+
+  assert.ok(text().includes("Loading videos"));
+  assert.ok(!text().includes(TRANSCRIPT_NOTE));
+  assert.ok(!text().includes(COST_NOTE));
+
+  resolveListing(LISTING);
+  await flush(3);
+
+  assert.ok(text().includes(TRANSCRIPT_NOTE));
+  assert.ok(text().includes(COST_NOTE));
+});
+
+test("a listing error shows no transcript note", async () => {
+  listYouTubeCollection.mockRejectedValue(
+    new HttpClientError({
+      message: "raw",
+      status: 502,
+      statusText: "Bad Gateway",
+      code: "YOUTUBE_LISTING_FAILED",
+    }),
+  );
+  await mountOpen();
+
+  assert.ok(text().includes("The videos could not be listed."));
+  assert.ok(!text().includes(TRANSCRIPT_NOTE));
+});
+
+test("a video refused for lack of ingestion pages shows the quota row", async () => {
+  listYouTubeCollection.mockResolvedValue(LISTING);
+  createUrlSource.mockImplementation(
+    async (_ws: string, input: { url: string }) => ({
+      source: { id: `id:${input.url}` },
+    }),
+  );
+  listSourceStatuses.mockImplementation(
+    async (_ws: string, input: { ids: string[] }) => ({
+      items: input.ids.map((id) => ({
+        id,
+        status: {
+          status: "failed",
+          error: "Ingestion pages limit exceeded",
+          errorCode: "PAGES_LIMIT_EXCEEDED",
+        },
+      })),
+    }),
+  );
+  await mountOpen();
+
+  await click(checkboxOf("aaaaaaaaaaa")!);
+  await click(buttonNamed("Import 1 video")!);
+  await flush(6);
+
+  const row = document.body.querySelector('[data-youtube-video="aaaaaaaaaaa"]');
+  assert.ok(
+    row?.textContent?.includes(
+      "Not imported: you have run out of ingestion pages.",
+    ),
+  );
+  assert.ok(text().includes("0 added, 0 failed, 1 not imported."));
+});

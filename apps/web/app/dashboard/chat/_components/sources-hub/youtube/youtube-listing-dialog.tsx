@@ -52,6 +52,8 @@ export function YouTubeListingDialog({
   const failed = outcomeList.filter((item) => item.kind === "failed").length;
   const skipped = outcomeList.filter((item) => item.kind === "quota").length;
 
+  // Until the listing has loaded there is nothing to describe yet; the
+  // transcript and cost notes belong next to the videos they apply to.
   const subtitle = listing
     ? [
         listing.kind === "playlist"
@@ -64,7 +66,7 @@ export function YouTubeListingDialog({
       ]
         .filter(Boolean)
         .join(" · ")
-    : t("youtube.transcriptNote");
+    : null;
 
   return (
     <Dialog onOpenChange={onOpenChange} open={url !== null}>
@@ -73,7 +75,13 @@ export function YouTubeListingDialog({
           <DialogTitle className="truncate">
             {listing?.title || t("youtube.dialogTitle")}
           </DialogTitle>
-          <DialogDescription>{subtitle}</DialogDescription>
+          {subtitle ? (
+            <DialogDescription>{subtitle}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">
+              {t("youtube.chooseVideos")}
+            </DialogDescription>
+          )}
         </DialogHeader>
 
         {phase === "loading" ? (
@@ -213,7 +221,7 @@ export function YouTubeListingDialog({
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                {t("youtube.transcriptNote")}
+                {t("youtube.transcriptNote")} {t("youtube.costNote")}
               </p>
             )}
 

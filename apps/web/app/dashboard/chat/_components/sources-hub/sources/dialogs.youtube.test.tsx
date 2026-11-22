@@ -77,6 +77,9 @@ test("a single video url still creates one source", async () => {
   await mountWithIntl(createElement(AddSourceDialog, p));
 
   expect(document.body.textContent).toContain("transcribe");
+  expect(document.body.textContent).toContain(
+    "Transcribing a video uses credits.",
+  );
   await click(footerButton("Add URL")!);
 
   expect(p.onCreateUrlSource).toHaveBeenCalledTimes(1);

@@ -392,8 +392,14 @@ const SourceRow = memoComponent(function SourceRow({
                 />
                 <TypeBadge label={source.type} />
                 {isAiTranscript ? (
-                  <span title={t("youtube.aiTranscriptionHint")}>
+                  <span
+                    data-ai-transcription-badge
+                    title={t("youtube.aiTranscriptionHint")}
+                  >
                     <TypeBadge label={t("youtube.aiTranscription")} />
+                    <span className="sr-only">
+                      {t("youtube.aiTranscriptionHint")}
+                    </span>
                   </span>
                 ) : null}
               </div>

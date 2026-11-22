@@ -3667,6 +3667,7 @@
       "loading": "Loading videos…",
       "empty": "There are no videos to add from this link.",
       "transcriptNote": "Videos are transcribed by AI from their audio, so transcripts may contain mistakes.",
+      "costNote": "Transcribing a video uses credits.",
       "import": "Import {count, plural, one {# video} other {# videos}}",
       "imported": "{count, plural, one {# video added} other {# videos added}}",
       "retry": "Try again",
@@ -3674,7 +3675,7 @@
       "rateLimited": "You have reached the limit for listing videos, which is shared with finding sources. You can try again in {wait}, at {time}.",
       "chooseVideos": "Choose videos",
       "collectionHint": "This is a YouTube {kind, select, playlist {playlist} other {channel}} link. Next, choose which videos to add.",
-      "videoHint": "SourceWeft will transcribe this video with AI and index the transcript for search.",
+      "videoHint": "SourceWeft will transcribe this video with AI and index the transcript for search. Transcribing a video uses credits.",
       "aiTranscription": "AI transcription",
       "aiTranscriptionHint": "Transcribed by AI from the video's audio. It may contain mistakes.",
       "error": {

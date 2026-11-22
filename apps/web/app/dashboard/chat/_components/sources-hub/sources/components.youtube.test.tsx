@@ -107,6 +107,11 @@ test("an AI transcript carries the AI transcription badge", async () => {
     record({ metadata: { transcriptOrigin: "ai_transcription" } }),
   );
   expect(document.body.textContent).toContain("AI transcription");
+  // The hint is not only a hover title: assistive tech reads it too.
+  const badge = document.body.querySelector("[data-ai-transcription-badge]");
+  expect(badge?.querySelector(".sr-only")?.textContent).toBe(
+    "Transcribed by AI from the video's audio. It may contain mistakes.",
+  );
 
   await unmountAll();
   await renderRow(record({ sourceType: "web_url", metadata: {} }));

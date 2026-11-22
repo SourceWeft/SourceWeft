@@ -3667,6 +3667,7 @@
       "loading": "正在載入影片…",
       "empty": "這個連結中沒有可新增的影片。",
       "transcriptNote": "影片由 AI 根據音訊轉錄，轉錄文字可能有誤。",
+      "costNote": "轉錄影片會消耗點數。",
       "import": "匯入 {count} 部影片",
       "imported": "已新增 {count} 部影片",
       "retry": "重試",
@@ -3674,7 +3675,7 @@
       "rateLimited": "已達到列出影片的上限（與查詢來源共用），將在 {time} 恢復（還需 {wait}）。",
       "chooseVideos": "選擇影片",
       "collectionHint": "這是 YouTube {kind, select, playlist {播放清單} other {頻道}}連結，下一步選擇要新增的影片。",
-      "videoHint": "SourceWeft 將用 AI 轉錄這部影片，並為轉錄文字建立搜尋索引。",
+      "videoHint": "SourceWeft 將用 AI 轉錄這部影片，並為轉錄文字建立搜尋索引。轉錄影片會消耗點數。",
       "aiTranscription": "AI 轉錄",
       "aiTranscriptionHint": "由 AI 根據影片音訊轉錄，可能有誤。",
       "error": {

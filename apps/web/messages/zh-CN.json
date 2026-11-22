@@ -3667,6 +3667,7 @@
       "loading": "正在加载视频…",
       "empty": "这个链接中没有可添加的视频。",
       "transcriptNote": "视频由 AI 根据音频转写，转写文本可能有误。",
+      "costNote": "转写视频会消耗积分。",
       "import": "导入 {count} 个视频",
       "imported": "已添加 {count} 个视频",
       "retry": "重试",
@@ -3674,7 +3675,7 @@
       "rateLimited": "已达到列出视频的上限（与查找来源共用），将在 {time} 恢复（还需 {wait}）。",
       "chooseVideos": "选择视频",
       "collectionHint": "这是 YouTube {kind, select, playlist {播放列表} other {频道}}链接，下一步选择要添加的视频。",
-      "videoHint": "SourceWeft 将用 AI 转写这个视频，并为转写文本建立搜索索引。",
+      "videoHint": "SourceWeft 将用 AI 转写这个视频，并为转写文本建立搜索索引。转写视频会消耗积分。",
       "aiTranscription": "AI 转写",
       "aiTranscriptionHint": "由 AI 根据视频音频转写，可能有误。",
       "error": {
