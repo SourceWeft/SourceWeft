@@ -1,4 +1,3 @@
-import { ConnectorAccessPolicy } from "./access-policy";
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { ConnectorOAuthService } from "./oauth-service";
@@ -27,19 +26,13 @@ import type { ConnectorStatus } from "./types";
 export class ConnectorService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
-    private readonly access = new ConnectorAccessPolicy(undefined, registry),
     private readonly oauthService: ConnectorOAuthService = new ConnectorOAuthService(
       registry,
-      access,
     ),
   ) {}
 
-  async listManifests(userId: string) {
-    const items = this.registry.listManifests();
-    const allowed = await Promise.all(
-      items.map((item) => this.access.isAvailable(item.type, userId)),
-    );
-    return { items: items.filter((_, index) => allowed[index]) };
+  listManifests() {
+    return { items: this.registry.listManifests() };
   }
 
   async listAccounts(input: {
@@ -76,7 +69,6 @@ export class ConnectorService {
       userId: input.userId,
       permission: "connector.manage",
     });
-    await this.access.requireAvailable(input.connectorType, input.userId);
     const manifest = this.registry.getManifest(input.connectorType);
     const configJson = input.configJson ?? {};
     validateObjectWithJsonSchema({
@@ -241,7 +233,6 @@ export class ConnectorService {
         "Connector not found",
       );
     }
-    await this.access.requireConnection(current, input.userId);
     if (
       input.oauthAccountId &&
       input.oauthAccountId !== current.oauthAccountId

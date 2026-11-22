@@ -11,9 +11,6 @@ const mocks = vi.hoisted(() => ({
   reauthorize: vi.fn(),
   revokeAuthorization: vi.fn(),
 }));
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 vi.mock("./permissions", () => ({
   requireConnectorWorkspace: mocks.workspace,
 }));
@@ -70,8 +67,7 @@ const registry = {
           exchangeOAuthCode: mocks.exchange,
         },
 };
-const access = { requireAvailable: vi.fn() };
-const service = new ConnectorOAuthService(registry as never, access as never);
+const service = new ConnectorOAuthService(registry as never);
 const expiresAt = new Date("2026-11-14T10:00:00.000Z");
 
 beforeEach(() => {
@@ -132,6 +128,24 @@ it.each(["finish", "finishGlobalCallback"] as const)(
     expect(mocks.createAccount).not.toHaveBeenCalled();
     expect(result.account).toEqual({ id: "existing-account" });
     expect(result.redirectAfter).toBe("http://localhost:3000/dashboard");
+  },
+);
+
+it.each(["finish", "finishGlobalCallback"] as const)(
+  "%s rechecks the user's workspace permission before exchanging the code",
+  async (method) => {
+    mocks.workspace.mockRejectedValue(new Error("membership revoked"));
+
+    await expect(call(method)).rejects.toThrow("membership revoked");
+
+    expect(mocks.workspace).toHaveBeenCalledWith({
+      workspaceId: "workspace",
+      userId: "user",
+      permission: "connector.manage",
+    });
+    expect(mocks.exchange).not.toHaveBeenCalled();
+    expect(mocks.createAccount).not.toHaveBeenCalled();
+    expect(mocks.reauthorize).not.toHaveBeenCalled();
   },
 );
 

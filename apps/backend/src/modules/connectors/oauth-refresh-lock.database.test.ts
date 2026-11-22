@@ -85,8 +85,6 @@ async function storedRow(scope: { teamId: string; workspaceId: string }, account
   return row;
 }
 
-const fakeAccess = () => ({ requireAvailable: vi.fn() });
-
 test("two service instances refresh one account with a single provider call", async () => {
   const scope = await workspace();
   const stored = await account({
@@ -116,11 +114,9 @@ test("two service instances refresh one account with a single provider call", as
   const registry = { getAdapter: () => ({ refreshOAuthToken }) };
   const serviceA = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
-    fakeAccess() as never,
   );
   const serviceB = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
-    fakeAccess() as never,
   );
 
   const input = {
@@ -169,7 +165,6 @@ test("a refusal leaves the account marked after the error is thrown", async () =
   const registry = { getAdapter: () => ({ refreshOAuthToken }) };
   const service = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
-    fakeAccess() as never,
   );
   const input = {
     teamId: scope.teamId,
@@ -212,7 +207,6 @@ test("a transport failure leaves the account active with its old tokens", async 
   const registry = { getAdapter: () => ({ refreshOAuthToken }) };
   const service = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
-    fakeAccess() as never,
   );
   const input = {
     teamId: scope.teamId,

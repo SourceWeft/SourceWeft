@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { afterEach, expect, test, vi } from "vitest";
 import { mount, unmountAll } from "@/test/react";
-import { usePreviewFeature } from "./user-settings";
+import { useUserSettings } from "./user-settings";
 
 const state = vi.hoisted(() => ({
   userId: "one" as string | undefined,
@@ -24,15 +24,11 @@ vi.mock("./sdk", () => ({
   userSettingsClient: { getSettings: state.getSettings },
 }));
 function Probe() {
-  return createElement("span", null, String(usePreviewFeature("gmail")));
+  const { data } = useUserSettings();
+  return createElement("span", null, data?.settings.appearance.theme ?? "none");
 }
-function response(gmail: boolean) {
-  return {
-    settings: {
-      appearance: { theme: "system", language: "system" },
-      preview: { gmail },
-    },
-  };
+function response(theme: "light" | "dark") {
+  return { settings: { appearance: { theme, language: "system" } } };
 }
 afterEach(async () => {
   await unmountAll();
@@ -45,9 +41,9 @@ async function settle() {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 }
-test("consumers share one fetch; switching account and signing out deny previous flags", async () => {
+test("consumers share one fetch; switching account and signing out drop the previous account's settings", async () => {
   state.getSettings
-    .mockResolvedValueOnce(response(true))
+    .mockResolvedValueOnce(response("dark"))
     .mockImplementationOnce(() => new Promise(() => {}));
   const client = new QueryClient();
   const tree = () =>
@@ -59,18 +55,18 @@ test("consumers share one fetch; switching account and signing out deny previous
     );
   const view = await mount(tree());
   await settle();
-  expect(view.container.textContent).toBe("truetrue");
+  expect(view.container.textContent).toBe("darkdark");
   expect(state.getSettings).toHaveBeenCalledTimes(1);
   state.userId = "two";
   await view.render(tree());
-  expect(view.container.textContent).toBe("falsefalse");
+  expect(view.container.textContent).toBe("nonenone");
   state.userId = undefined;
   await view.render(tree());
-  expect(view.container.textContent).toBe("falsefalse");
+  expect(view.container.textContent).toBe("nonenone");
   expect(state.getSettings).toHaveBeenCalledTimes(2);
 });
-test("focus refresh reflects revocation and failed refresh denies stale grants", async () => {
-  state.getSettings.mockResolvedValue(response(true));
+test("focus refresh picks up settings changed elsewhere", async () => {
+  state.getSettings.mockResolvedValue(response("dark"));
   const view = await mount(
     createElement(
       QueryClientProvider,
@@ -79,33 +75,12 @@ test("focus refresh reflects revocation and failed refresh denies stale grants",
     ),
   );
   await settle();
-  expect(view.container.textContent).toBe("true");
-  state.getSettings.mockRejectedValue(new Error("offline"));
+  expect(view.container.textContent).toBe("dark");
+  state.getSettings.mockResolvedValue(response("light"));
   await act(async () => {
     focusManager.setFocused(false);
     focusManager.setFocused(true);
   });
   await settle();
-  expect(view.container.textContent).toBe("false");
-  state.getSettings.mockResolvedValue(response(false));
-  await act(async () => {
-    focusManager.setFocused(false);
-    focusManager.setFocused(true);
-  });
-  await settle();
-  expect(view.container.textContent).toBe("false");
-});
-test("older payload without preview fails closed", async () => {
-  state.getSettings.mockResolvedValue({
-    settings: { appearance: { theme: "system", language: "system" } },
-  });
-  const view = await mount(
-    createElement(
-      QueryClientProvider,
-      { client: new QueryClient() },
-      createElement(Probe),
-    ),
-  );
-  await settle();
-  expect(view.container.textContent).toBe("false");
+  expect(view.container.textContent).toBe("light");
 });

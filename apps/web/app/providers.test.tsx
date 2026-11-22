@@ -10,7 +10,6 @@ const state = vi.hoisted(() => ({
   setTheme: vi.fn(),
   userId: "user-1" as string | undefined,
   settings: {
-    preview: { gmail: false },
     appearance: { theme: "system", language: "system" as string },
   },
   cookie: "" as string,
@@ -87,7 +86,6 @@ afterEach(async () => {
   state.setTheme.mockClear();
   state.userId = "user-1";
   state.settings = {
-    preview: { gmail: false },
     appearance: { theme: "system", language: "system" },
   };
   clearCookieJar();
@@ -103,7 +101,6 @@ afterEach(async () => {
 test("a fresh device with no cookie self-corrects to the account's explicit language", async () => {
   clearCookieJar();
   state.settings = {
-    preview: { gmail: false },
     appearance: { theme: "system", language: "zh-CN" },
   };
   // Rendered as "en" (e.g. what Accept-Language negotiated) while the
@@ -117,7 +114,6 @@ test("a fresh device with no cookie self-corrects to the account's explicit lang
 test("a returning visitor whose render already matches the account does not refresh", async () => {
   clearCookieJar();
   state.settings = {
-    preview: { gmail: false },
     appearance: { theme: "system", language: "zh-CN" },
   };
   await render("zh-CN");
@@ -129,7 +125,6 @@ test("a returning visitor whose render already matches the account does not refr
 test('"system" clears a stale pinned cookie and refreshes, since behavior can change', async () => {
   document.cookie = "sw_locale=zh-TW; path=/";
   state.settings = {
-    preview: { gmail: false },
     appearance: { theme: "system", language: "system" },
   };
   await render("zh-TW");
@@ -141,7 +136,6 @@ test('"system" clears a stale pinned cookie and refreshes, since behavior can ch
 test('"system" with no pinned cookie is already correct and does not refresh', async () => {
   clearCookieJar();
   state.settings = {
-    preview: { gmail: false },
     appearance: { theme: "system", language: "system" },
   };
   await render("en");
@@ -164,7 +158,6 @@ test("signed-out visitors are left alone entirely", async () => {
 test("a re-render does not re-apply the saved theme over a newer pick", async () => {
   clearCookieJar();
   state.settings = {
-    preview: { gmail: false },
     appearance: { theme: "light", language: "system" },
   };
   await render("en");
