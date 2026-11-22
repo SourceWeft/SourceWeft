@@ -30,16 +30,30 @@ beforeEach(async () => {
     randomUUID(),
     randomUUID(),
   ];
+  await schema.database.query(
+    'insert into organization (id,name,slug,"createdAt") values ($1,$1,$1,now())',
+    [teamId],
+  );
   await schema.db.insert(schema.workspaces).values({
     id: workspaceId,
     organizationId: teamId,
     name: "Thread archive",
     slug: workspaceId,
   });
+  // A guest's role is capped below workspace_admin, so the admin is an
+  // organization member with a direct workspace membership.
+  await schema.database.query(
+    'insert into "user" (id,name,email,"emailVerified","createdAt","updatedAt") values ($1,$1,$2,true,now(),now())',
+    [admin, `${admin}@example.test`],
+  );
+  await schema.database.query(
+    `insert into member (id, "organizationId", "userId", role, "createdAt") values ($1, $2, $1, 'member', now())`,
+    [admin, teamId],
+  );
   await schema.db.insert(schema.workspaceMemberships).values([
     { workspaceId, userId: owner, role: "editor", source: "guest" },
     { workspaceId, userId: member, role: "editor", source: "guest" },
-    { workspaceId, userId: admin, role: "workspace_admin", source: "guest" },
+    { workspaceId, userId: admin, role: "workspace_admin", source: "direct" },
   ]);
 });
 
