@@ -116,3 +116,92 @@ test("pretty-printed markup does not add blank lines between blocks", () => {
   assert.equal(htmlToText("<p>a</p>\n\n<p>b</p>\n"), "a\n\nb");
   assert.equal(htmlToText("<p>one <b>two</b> three</p>"), "one two three");
 });
+
+const uniqueAttrs = (count: number): string =>
+  Array.from({ length: count }, (_, i) => `a${i}=1`).join(" ");
+
+test("a tag with 60k unique attributes neither throws nor stalls, and earlier content survives", () => {
+  const html = `<p>before</p><a ${uniqueAttrs(60_000)}>after`;
+  assert.ok(html.length >= 400_000);
+  const started = Date.now();
+  const text = htmlToText(html);
+  assert.equal(text, "before");
+  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+});
+
+test("a ~4 MiB tag with 600k attributes neither throws nor stalls", () => {
+  const html = `<a ${uniqueAttrs(600_000)}>x`;
+  assert.ok(html.length >= 4 * 1024 * 1024);
+  const started = Date.now();
+  assert.equal(htmlToText(html), "");
+  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+});
+
+test("an unterminated tag with endless attributes neither throws nor stalls", () => {
+  const html = `<p>kept</p><a${" x".repeat(2_000_000)}`;
+  const started = Date.now();
+  assert.equal(htmlToText(html), "kept");
+  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+});
+
+test("an oversized end tag is cut the same way", () => {
+  const html = `<p>kept</p></a ${uniqueAttrs(60_000)}>tail`;
+  assert.equal(htmlToText(html), "kept");
+});
+
+test("an ordinary tag with ~20 attributes and a long href is unchanged", () => {
+  const href = `https://example.com/${"path/".repeat(800)}?q=${"v".repeat(500)}`;
+  assert.ok(href.length > 4_000);
+  const attrs = Array.from({ length: 20 }, (_, i) => `data-k${i}="v${i}"`).join(
+    " ",
+  );
+  const html = `<p>intro</p><a href="${href}" ${attrs}>link text</a><p>outro</p>`;
+  assert.equal(htmlToText(html), "intro\n\nlink text\n\noutro");
+});
+
+const underTwoSeconds = (html: string): string => {
+  const started = Date.now();
+  const text = htmlToText(html);
+  assert.ok(Date.now() - started < 2_000, `took ${Date.now() - started} ms`);
+  return text;
+};
+
+test("many-attribute tags cannot hide behind a quoted > or adjacent quotes", () => {
+  const quoted = `<p>kept</p><a x=">" ${uniqueAttrs(60_000)}>tail`;
+  assert.equal(underTwoSeconds(quoted), "kept");
+  const adjacent = Array.from({ length: 60_000 }, (_, i) => `a${i}="1"`).join(
+    "",
+  );
+  assert.equal(underTwoSeconds(`<p>kept</p><a ${adjacent}>tail`), "kept");
+  const slashes = Array.from({ length: 60_000 }, (_, i) => `a${i}`).join("/");
+  assert.equal(underTwoSeconds(`<p>kept</p><a ${slashes}>tail`), "kept");
+  const spaced = Array.from({ length: 60_000 }, (_, i) => `a${i} = "1"`).join(
+    " ",
+  );
+  assert.equal(underTwoSeconds(`<p>kept</p><a ${spaced}>tail`), "kept");
+});
+
+test("a many-attribute tag cannot hide after a comment or script that mentions quotes", () => {
+  const heavy = `<b ${uniqueAttrs(60_000)}>`;
+  const afterComment = `<p>kept</p><!-- <a x=" --> ${heavy} <i y="-->`;
+  assert.equal(underTwoSeconds(afterComment), "kept");
+  const afterScript = `<p>kept</p><script>var s = "<a x='";</script> ${heavy} <i y='</script>`;
+  assert.equal(underTwoSeconds(afterScript), "kept");
+});
+
+test("thousands of heavy tags (just under the attribute cap) stay fast", () => {
+  const tag = `<a ${uniqueAttrs(120)}>x</a>`;
+  const html = tag.repeat(Math.floor((5 * 1024 * 1024) / tag.length));
+  assert.ok(html.length > 4 * 1024 * 1024);
+  underTwoSeconds(html);
+});
+
+test("tags with quoted > in values, comments and script text parse as before", () => {
+  assert.equal(
+    htmlToText(
+      '<p title="a > b">one</p><!-- <b> --><script>if (a < b) {}</script><p>two</p>',
+    ),
+    "one\n\ntwo",
+  );
+  assert.equal(htmlToText("<p>a < b and c > d</p>"), "a < b and c > d");
+});
