@@ -33,7 +33,10 @@ function runPath(input: PathInput) {
     : taskPath(input);
 }
 
-/** A research run lives in the sources panel of the chat workspace. */
+/**
+ * There is no deep link to the research card yet, so a research notification
+ * leads to the chat landing page, where the sources panel lives.
+ */
 function researchPath() {
   return "/dashboard/chat";
 }

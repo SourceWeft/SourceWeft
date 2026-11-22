@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
+import { logger } from "../../../shared/logger";
 import type { AgentToolWebProvider } from "@sourceweft/contracts/agent-tools";
 import type {
   ResearchErrorCode,
@@ -126,6 +127,17 @@ function makeLoop(impl: RunLoop) {
   return { fn, inputs };
 }
 
+/** Every run gets a stub notifier by default so no test reaches the real service. */
+function runJob(
+  input: Parameters<typeof processResearchJob>[0],
+  deps: ResearchJobDeps,
+) {
+  return processResearchJob(input, {
+    notify: async () => ({ id: "n", merged: false, emailed: false }),
+    ...deps,
+  });
+}
+
 const payload = {
   runId: "run-1",
   teamId: "team-1",
@@ -141,7 +153,7 @@ test("a ready result is written as a ready run", async () => {
     report: "# Report",
     citations: [],
   }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -155,7 +167,7 @@ test("a ready result is written as a ready run", async () => {
 test("a cancelled result is written as a cancelled run", async () => {
   const store = makeRepo(baseRow());
   const loop = makeLoop(async () => ({ status: "cancelled" }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -167,7 +179,7 @@ test("a cancelled result is written as a cancelled run", async () => {
 test("a failed result records its error code", async () => {
   const store = makeRepo(baseRow());
   const loop = makeLoop(async () => ({ status: "failed", errorCode: "NO_RESULTS" }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -180,7 +192,7 @@ test("a lost initiator fails ACCESS_LOST without entering the loop", async () =>
   const loop = makeLoop(async () => {
     throw new Error("the loop must not run");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => null, runLoop: loop.fn },
   );
@@ -195,7 +207,7 @@ test("a transient failure before the final attempt rethrows for retry", async ()
     throw new Error("model timed out");
   });
   await assert.rejects(
-    processResearchJob(
+    runJob(
       { ...payload, isFinalAttempt: false },
       { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
     ),
@@ -210,7 +222,7 @@ test("a transient failure on the final attempt settles MODEL_UNAVAILABLE", async
   const loop = makeLoop(async () => {
     throw new Error("model timed out");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: true },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -225,7 +237,7 @@ test("an already-terminal run is a no-op", async () => {
   const loop = makeLoop(async () => {
     throw new Error("the loop must not run");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -254,7 +266,7 @@ test("a run found still running is resumed from its row with the original clock"
     report: "# Resumed",
     citations: [],
   }));
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, runLoop: loop.fn },
   );
@@ -282,7 +294,7 @@ function makeNotify(impl?: () => Promise<void>) {
 test("a ready run notifies its owner with only the topic", async () => {
   const store = makeRepo(baseRow());
   const sink = makeNotify();
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     {
       billing,
@@ -308,7 +320,7 @@ test("a ready run notifies its owner with only the topic", async () => {
 test("a failed run notifies research_failed", async () => {
   const store = makeRepo(baseRow());
   const sink = makeNotify();
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     {
       billing,
@@ -331,7 +343,7 @@ test("a failed run notifies research_failed", async () => {
 test("a lost initiator also notifies research_failed", async () => {
   const store = makeRepo(baseRow());
   const sink = makeNotify();
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     {
       billing,
@@ -350,7 +362,7 @@ test("a lost initiator also notifies research_failed", async () => {
 test("a cancelled run sends no notification", async () => {
   const store = makeRepo(baseRow());
   const sink = makeNotify();
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     {
       billing,
@@ -367,7 +379,7 @@ test("a cancelled run sends no notification", async () => {
 test("a repeat of a terminal run sends nothing", async () => {
   const store = makeRepo(baseRow({ status: "ready", finishedAt: new Date() }));
   const sink = makeNotify();
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     { billing, web, repo: store.repo, resolvePayer: async () => payer, notify: sink.fn },
   );
@@ -375,11 +387,12 @@ test("a repeat of a terminal run sends nothing", async () => {
 });
 
 test("a throwing notification service does not change the run's final status", async () => {
+  const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => {});
   const store = makeRepo(baseRow());
   const sink = makeNotify(async () => {
     throw new Error("notifications are down");
   });
-  await processResearchJob(
+  await runJob(
     { ...payload, isFinalAttempt: false },
     {
       billing,
@@ -396,4 +409,6 @@ test("a throwing notification service does not change the run's final status", a
   );
   assert.equal(store.get().status, "ready");
   assert.equal(sink.sent.length, 1);
+  assert.equal(errorSpy.mock.calls.length, 1);
+  errorSpy.mockRestore();
 });

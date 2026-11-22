@@ -27,7 +27,7 @@ import {
 } from "./repository";
 
 const SUBJECT = "report";
-export const RESEARCH_NOTIFICATION_REF = "source_research";
+const RESEARCH_NOTIFICATION_REF = "source_research";
 const NOTIFICATION_TOPIC_MAX_CHARS = 200;
 
 /** The run-state the job drives, injected so the logic is testable without a DB. */
