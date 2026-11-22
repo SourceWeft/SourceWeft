@@ -16,7 +16,7 @@ let teamId: string;
 let workspaceId: string;
 
 beforeAll(async () => {
-  isolated = await createIsolatedTestDatabase("research_admission");
+  isolated = await createIsolatedTestDatabase("res_admission");
   process.env.DATABASE_URL = isolated.url;
   schema = await import("@sourceweft/db");
   admission = await import("./admission");
