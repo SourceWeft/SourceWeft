@@ -1,0 +1,244 @@
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import type { AssistantPorts } from "../modules/assistants";
+import type { NotifyInput } from "../modules/notifications";
+import type { StartHostTurnInput } from "../modules/threads";
+import type { TeamAuditEntry } from "../modules/team-audit/types";
+import { createIsolatedTestDatabase } from "./isolated-database";
+
+/**
+ * A migrated database of its own plus the assistants module wired to ports
+ * the test controls, mirroring `agent-task-fixture.ts`. Everything that is
+ * the module's own (the service, the SQL) is real; what belongs to another
+ * module (notifications, audit, the host-started turn, stopping a run) is
+ * recorded or scripted here. `workspaceAccess` and `hasCredits` are left as
+ * the production implementation: they are themselves plain reads of real
+ * rows (organization role, workspace membership, billing), so a test drives
+ * them by writing those rows rather than by faking the port.
+ */
+export async function createAssistantFixture(label: string) {
+  const isolated = await createIsolatedTestDatabase(label);
+  const originalUrl = process.env.DATABASE_URL;
+  process.env.DATABASE_URL = isolated.url;
+  const schema = await import("@sourceweft/db");
+  const assistants = await import("../modules/assistants");
+
+  const notifications: NotifyInput[] = [];
+  const audits: TeamAuditEntry[] = [];
+  const started: StartHostTurnInput[] = [];
+  const stopped: Array<{
+    workspaceId: string;
+    threadId: string;
+    runId: string;
+    userId: string;
+  }> = [];
+  const kicked: string[] = [];
+  const state = {
+    credits: true,
+  };
+
+  const ports: AssistantPorts = {
+    workspaceAccess: assistants.assistantPorts.workspaceAccess,
+    hasCredits: async () => state.credits,
+    async startTurn(input) {
+      started.push(input);
+      return {
+        thread: { id: input.threadId },
+        run: { id: randomUUID() },
+        created: true,
+      };
+    },
+    async stopRun(input) {
+      stopped.push(input);
+    },
+    async notify(input) {
+      notifications.push(input);
+      return { id: randomUUID(), merged: false, emailed: false };
+    },
+    async audit(entry) {
+      audits.push(entry);
+    },
+  };
+
+  async function kickAssistant(assistantId: string) {
+    kicked.push(assistantId);
+  }
+
+  const service = new assistants.AssistantService(ports, kickAssistant);
+
+  /** A real `user` row: `member`/`workspace_memberships` reference it. */
+  async function user(id: string = randomUUID()) {
+    await schema.database.query(
+      'insert into "user" (id,name,email,"emailVerified","createdAt","updatedAt") values ($1,$1,$2,true,now(),now())',
+      [id, `${id}@example.test`],
+    );
+    return id;
+  }
+
+  /** A real organization, optionally classified personal/team. */
+  async function organization(kind?: "personal" | "team") {
+    const id = randomUUID();
+    await schema.database.query(
+      'insert into organization (id,name,slug,"createdAt") values ($1,$1,$1,now())',
+      [id],
+    );
+    if (kind) {
+      await schema.database.query(
+        "update organization set metadata = $2 where id = $1",
+        [id, JSON.stringify({ sourceweft: { kind } })],
+      );
+    }
+    return id;
+  }
+
+  /** A real `member` row: the organization-role plane (owner/admin/member). */
+  async function addMember(
+    organizationId: string,
+    userId: string,
+    role: "owner" | "admin" | "member" = "member",
+  ) {
+    await schema.database.query(
+      'insert into member (id,"organizationId","userId",role,"createdAt") values ($1,$2,$3,$4,now())',
+      [randomUUID(), organizationId, userId, role],
+    );
+  }
+
+  /**
+   * A team's shared default workspace (so every org member has derived
+   * content access, with admins/owners landing on `workspace_admin`), plus
+   * one organization member per role given. Each value is `userId` (plain
+   * member) unless given as `[userId, role]`.
+   */
+  async function workspace(
+    members: Array<string | [string, "owner" | "admin" | "member"]> = [],
+    options: { kind?: "personal" | "team" } = {},
+  ) {
+    const teamId = await organization(options.kind);
+    const workspaceId = randomUUID();
+    await schema.db.insert(schema.workspaces).values({
+      id: workspaceId,
+      organizationId: teamId,
+      name: "Assistant workspace",
+      slug: workspaceId,
+      isDefault: true,
+    });
+    for (const entry of members) {
+      const userId = Array.isArray(entry) ? entry[0] : entry;
+      const role = Array.isArray(entry) ? entry[1] : "member";
+      await user(userId);
+      await addMember(teamId, userId, role);
+    }
+    return { teamId, workspaceId };
+  }
+
+  /** Adds an explicit workspace role override for an existing org member. */
+  async function setWorkspaceRole(
+    workspaceId: string,
+    userId: string,
+    role: "workspace_admin" | "editor" | "viewer",
+  ) {
+    await schema.db
+      .insert(schema.workspaceMemberships)
+      .values({ workspaceId, userId, role, source: "direct" })
+      .onConflictDoUpdate({
+        target: [schema.workspaceMemberships.workspaceId, schema.workspaceMemberships.userId],
+        set: { role },
+      });
+  }
+
+  async function assistantRow(workspaceId: string) {
+    const [row] = await schema.db
+      .select()
+      .from(schema.assistants)
+      .where(eq(schema.assistants.workspaceId, workspaceId));
+    return row ?? null;
+  }
+
+  async function feedItemRows(assistantId: string) {
+    return schema.db
+      .select()
+      .from(schema.assistantFeedItems)
+      .where(eq(schema.assistantFeedItems.assistantId, assistantId));
+  }
+
+  async function triggerRows(assistantId: string) {
+    return schema.db
+      .select()
+      .from(schema.assistantTriggers)
+      .where(eq(schema.assistantTriggers.assistantId, assistantId));
+  }
+
+  /** Inserts a ticket directly: ticket creation is Task 6-7's Router, not this task's. */
+  async function insertTicket(input: {
+    id?: string;
+    teamId: string;
+    workspaceId: string;
+    assistantId: string;
+    payerUserId: string;
+    stage?: "queued" | "working" | "waiting_person" | "idle" | "ended";
+    currentRunId?: string | null;
+    consecutiveFailures?: number;
+  }) {
+    const id = input.id ?? randomUUID();
+    await schema.db.insert(schema.assistantTickets).values({
+      id,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      assistantId: input.assistantId,
+      workerThreadId: randomUUID(),
+      title: "Triage the inbox",
+      goal: "Keep the inbox at zero",
+      payerUserId: input.payerUserId,
+      origin: "explicit",
+      stage: input.stage ?? "working",
+      creditCap: "500",
+      consecutiveFailures: input.consecutiveFailures ?? 0,
+      currentRunId: input.currentRunId ?? null,
+    });
+    const [row] = await schema.db
+      .select()
+      .from(schema.assistantTickets)
+      .where(eq(schema.assistantTickets.id, id));
+    return row!;
+  }
+
+  function reset() {
+    notifications.length = 0;
+    audits.length = 0;
+    started.length = 0;
+    stopped.length = 0;
+    kicked.length = 0;
+    state.credits = true;
+  }
+
+  return {
+    schema,
+    assistants,
+    service,
+    ports,
+    state,
+    notifications,
+    audits,
+    started,
+    stopped,
+    kicked,
+    user,
+    organization,
+    addMember,
+    workspace,
+    setWorkspaceRole,
+    assistantRow,
+    feedItemRows,
+    triggerRows,
+    insertTicket,
+    reset,
+    async close() {
+      await schema.database.end();
+      await isolated.close();
+      if (originalUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = originalUrl;
+    },
+  };
+}
+
+export type AssistantFixture = Awaited<ReturnType<typeof createAssistantFixture>>;
