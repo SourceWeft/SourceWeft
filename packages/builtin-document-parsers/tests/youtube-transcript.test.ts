@@ -65,6 +65,61 @@ test("text before the first stamp becomes a segment at 0", () => {
   ]);
 });
 
+test("a non-stamp line after the first stamp is appended, never dropped, and other stamp forms are recognised", () => {
+  const text = [
+    "[0:00] first part",
+    "continued line",
+    "(0:31) paren stamp",
+    "0:35 - dash stamp",
+    "[0:40] end",
+  ].join("\n");
+
+  const result = parseTranscriptOutput(text, { truncated: false });
+
+  assert.deepEqual(result.segments, [
+    { startSeconds: 0, text: "first part continued line" },
+    { startSeconds: 31, text: "paren stamp" },
+    { startSeconds: 35, text: "dash stamp" },
+    { startSeconds: 40, text: "end" },
+  ]);
+});
+
+test("a pre-stamp segment at 0 merges with a first real stamp that also lands at 0", () => {
+  const text = ["some opening remark", "[0:00] actual start"].join("\n");
+
+  const result = parseTranscriptOutput(text, { truncated: false });
+
+  assert.deepEqual(result.segments, [
+    { startSeconds: 0, text: "some opening remark actual start" },
+  ]);
+});
+
+test("code fences and a preamble before the header block are ignored", () => {
+  const text = [
+    "Here is the transcript:",
+    "```",
+    "LANGUAGE: en",
+    "DURATION: 0:10",
+    "SPEECH: yes",
+    "[0:00] Hi.",
+    "```",
+  ].join("\n");
+
+  const result = parseTranscriptOutput(text, { truncated: false });
+
+  assert.deepEqual(result.segments, [{ startSeconds: 0, text: "Hi." }]);
+  assert.equal(result.language, "en");
+});
+
+test("markdown-bold header keys are recognised", () => {
+  const text = ["**LANGUAGE:** en", "**SPEECH:** yes", "[0:00] Hi."].join("\n");
+
+  const result = parseTranscriptOutput(text, { truncated: false });
+
+  assert.equal(result.language, "en");
+  assert.equal(result.speech, true);
+});
+
 test("length finish keeps complete lines", () => {
   const text = [
     "LANGUAGE: en",
@@ -83,15 +138,31 @@ test("length finish keeps complete lines", () => {
   ]);
 });
 
-test("truncated keeps the last line when it ends with terminal punctuation and a trailing newline", () => {
-  const text = "[0:00] First bit.\n[0:30] Second bit.\n";
+test("truncated keeps every line when the raw output ends with a newline, even without punctuation", () => {
+  const text = "[0:00] a.\n[0:30] still mid-sentence with no punctuation\n";
 
   const result = parseTranscriptOutput(text, { truncated: true });
 
   assert.deepEqual(result.segments, [
-    { startSeconds: 0, text: "First bit." },
-    { startSeconds: 30, text: "Second bit." },
+    { startSeconds: 0, text: "a." },
+    { startSeconds: 30, text: "still mid-sentence with no punctuation" },
   ]);
+});
+
+test("truncated drops the last line when the raw output has no trailing newline, even with punctuation", () => {
+  const text = "[0:00] a.\n[0:30] finished cleanly.";
+
+  const result = parseTranscriptOutput(text, { truncated: true });
+
+  assert.deepEqual(result.segments, [{ startSeconds: 0, text: "a." }]);
+});
+
+test("truncated trims trailing blank lines before deciding whether to drop the last content line", () => {
+  const text = "[0:00] a.\n[0:30] b.\n   ";
+
+  const result = parseTranscriptOutput(text, { truncated: true });
+
+  assert.deepEqual(result.segments, [{ startSeconds: 0, text: "a." }]);
 });
 
 test("speech no throws YOUTUBE_NO_SPEECH", async () => {
@@ -183,6 +254,50 @@ test("length finish reports partial coverage ending at the last kept segment", a
 
   assert.deepEqual(transcript.coverage, { kind: "partial", endSeconds: 0 });
   assert.deepEqual(transcript.segments, [{ startSeconds: 0, text: "First bit." }]);
+});
+
+test("the brief's truncated example (ending [1:00] half a sen) reports partial coverage ending at 0:30", async () => {
+  const fakeModel: VideoModelPort = {
+    complete: async () => ({
+      text: [
+        "LANGUAGE: en",
+        "DURATION: 2:00",
+        "SPEECH: yes",
+        "[0:00] First bit.",
+        "[0:30] Second bit.",
+        "[1:00] half a sen",
+      ].join("\n"),
+      finishReason: "length",
+    }),
+  };
+  const provider = createGeminiTranscriptProvider({ model: fakeModel });
+
+  const transcript = await provider.transcribe({
+    videoId: "abc",
+    videoUrl: canonicalVideoUrl("abc"),
+  });
+
+  assert.deepEqual(transcript.coverage, { kind: "partial", endSeconds: 30 });
+});
+
+test("truncation leaving zero segments throws YOUTUBE_TRANSCRIPT_FAILED, not YOUTUBE_NO_SPEECH", async () => {
+  const fakeModel: VideoModelPort = {
+    complete: async () => ({
+      text: "LANGUAGE: en\nDURATION: 0:10\nSPEECH: yes\n[0:00] incomplete tail",
+      finishReason: "length",
+    }),
+  };
+  const provider = createGeminiTranscriptProvider({ model: fakeModel });
+
+  await assert.rejects(
+    () => provider.transcribe({ videoId: "abc", videoUrl: canonicalVideoUrl("abc") }),
+    (error: unknown) => {
+      assert.ok(error instanceof YouTubeSourceError);
+      assert.equal(error.statusCode, 502);
+      assert.equal(error.code, "YOUTUBE_TRANSCRIPT_FAILED");
+      return true;
+    },
+  );
 });
 
 test("format renders timestamp links and partial note", () => {

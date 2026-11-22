@@ -50,7 +50,13 @@ export class YouTubeSourceParser implements SourceParser {
     const transcript = await this.deps.transcript.transcribe({ videoId, videoUrl });
 
     const title = input.preferInputTitle === true ? input.fileName : video.title;
-    const content = formatYouTubeSourceMarkdown({ video, transcript });
+    // The `# heading` must read the same as the document title: when the
+    // requested title wins, format against a video view with that title
+    // rather than the catalog's.
+    const content = formatYouTubeSourceMarkdown({
+      video: title === video.title ? video : { ...video, title },
+      transcript,
+    });
 
     return buildParsedDocument({
       parseInput: {

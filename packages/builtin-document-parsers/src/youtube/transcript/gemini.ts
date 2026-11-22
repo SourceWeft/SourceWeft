@@ -48,7 +48,25 @@ export function createGeminiTranscriptProvider(deps: {
       const truncated = result.finishReason === "length";
       const parsed = parseTranscriptOutput(text, { truncated });
 
-      if (!parsed.speech || parsed.segments.length === 0) {
+      if (parsed.segments.length === 0) {
+        // Truncation (not a lack of speech) is why there is nothing to
+        // show: the one usable line, if any, was cut off mid-write and
+        // dropped. That is a failed call, not "no speech".
+        if (truncated) {
+          throw new YouTubeSourceError(
+            502,
+            "YOUTUBE_TRANSCRIPT_FAILED",
+            "The transcription was truncated before any usable line was produced",
+          );
+        }
+        throw new YouTubeSourceError(
+          422,
+          "YOUTUBE_NO_SPEECH",
+          "This video does not appear to contain speech to transcribe",
+        );
+      }
+
+      if (!parsed.speech) {
         throw new YouTubeSourceError(
           422,
           "YOUTUBE_NO_SPEECH",

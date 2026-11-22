@@ -98,6 +98,8 @@ test("preferInputTitle keeps the requested title instead of the catalog title", 
   );
 
   assert.equal(result.title, "My custom title");
+  assert.ok(result.content.startsWith("# My custom title"));
+  assert.ok(!result.content.includes("# Me at the zoo"));
 });
 
 test("a non-video YouTube URL throws YOUTUBE_URL_UNSUPPORTED", async () => {
