@@ -111,7 +111,7 @@ test("two service instances refresh one account with a single provider call", as
       expiresAt: new Date(Date.now() + 3_600_000),
     };
   };
-  const registry = { getAdapter: () => ({ refreshOAuthToken }) };
+  const registry = { getAdapter: () => ({ exchangeOAuthCode: vi.fn(), refreshOAuthToken }) };
   const serviceA = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
   );
@@ -162,7 +162,7 @@ test("a refusal leaves the account marked after the error is thrown", async () =
   const refreshOAuthToken = vi.fn(async () => {
     throw Object.assign(new Error("invalid_grant"), { statusCode: 400 });
   });
-  const registry = { getAdapter: () => ({ refreshOAuthToken }) };
+  const registry = { getAdapter: () => ({ exchangeOAuthCode: vi.fn(), refreshOAuthToken }) };
   const service = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
   );
@@ -204,7 +204,7 @@ test("a transport failure leaves the account active with its old tokens", async 
   const refreshOAuthToken = vi.fn(async () => {
     throw new TypeError("fetch failed");
   });
-  const registry = { getAdapter: () => ({ refreshOAuthToken }) };
+  const registry = { getAdapter: () => ({ exchangeOAuthCode: vi.fn(), refreshOAuthToken }) };
   const service = new oauthServiceModule.ConnectorOAuthService(
     registry as never,
   );

@@ -12,6 +12,7 @@ import {
   updateActionRunRecord,
 } from "./repository";
 import { enqueueConnectorSyncJob } from "../content/queue";
+import { resolveCredential } from "./credential";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import { buildRequestPreview, redactConnectorSecrets } from "./security";
@@ -592,12 +593,17 @@ export class ConnectorActionRunner {
 
     const startedAt = Date.now();
     try {
-      const accessToken = await this.oauthService.getRuntimeToken({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        accountId: connector.oauthAccountId,
-        connectorType: connector.connectorType,
-      });
+      const accessToken = await resolveCredential(
+        {
+          getRuntimeToken: (input) => this.oauthService.getRuntimeToken(input),
+          getManifest: (type) => this.registry.getManifest(type),
+        },
+        {
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connector,
+        },
+      );
       const adapter = this.registry.getAdapter(connector.connectorType);
       logger.debug("Connector action adapter execution started", {
         ...connectorActionExecutionMeta({

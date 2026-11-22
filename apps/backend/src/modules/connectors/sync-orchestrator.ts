@@ -10,6 +10,7 @@ import {
 } from "../sources";
 import { getBillingDeploymentCapabilities } from "../../billing-host/bindings";
 import { workspaceService } from "../workspace";
+import { resolveCredential, type CredentialDeps } from "./credential";
 import { ConnectorError, toConnectorError } from "./errors";
 import { IngestionPageBudget, isPagesLimitExceeded } from "./ingestion-budget";
 import { requireConnectorWorkspace } from "./permissions";
@@ -278,6 +279,13 @@ export class ConnectorSyncOrchestrator {
     private readonly resolveBillingActor: ResolveConnectorBillingActor = resolveConnectorBillingActor,
   ) {
     this.indexingService = new SourceIndexingService(billing);
+  }
+
+  private credentialDeps(): CredentialDeps {
+    return {
+      getRuntimeToken: (input) => this.oauthService.getRuntimeToken(input),
+      getManifest: (type) => this.registry.getManifest(type),
+    };
   }
 
   async enqueueManualRun(input: {
@@ -860,11 +868,10 @@ export class ConnectorSyncOrchestrator {
         }
 
         const adapter = this.registry.getAdapter(connector.connectorType);
-        const accessToken = await this.oauthService.getRuntimeToken({
+        const accessToken = await resolveCredential(this.credentialDeps(), {
           teamId: input.teamId,
           workspaceId: input.workspaceId,
-          accountId: connector.oauthAccountId,
-          connectorType: connector.connectorType,
+          connector,
         });
         const targetExternalIdSet = input.targetExternalIds?.length
           ? new Set(input.targetExternalIds)
@@ -1653,11 +1660,10 @@ export class ConnectorSyncOrchestrator {
       return { ready: true };
     }
 
-    const accessToken = await this.oauthService.getRuntimeToken({
+    const accessToken = await resolveCredential(this.credentialDeps(), {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
-      accountId: connector.oauthAccountId,
-      connectorType: connector.connectorType,
+      connector,
     });
 
     return adapter.checkSyncReadiness({
