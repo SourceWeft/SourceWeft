@@ -114,6 +114,10 @@ export const assistantSchema = z.object({
 });
 export type Assistant = z.infer<typeof assistantSchema>;
 
+/** How a ticket came to exist: made explicit by a member, or inferred by the router. */
+export const ticketOriginSchema = z.enum(["explicit", "inferred"]);
+export type TicketOrigin = z.infer<typeof ticketOriginSchema>;
+
 export const assistantTicketSchema = z.object({
   id: z.string(),
   assistantId: z.string(),
@@ -121,7 +125,7 @@ export const assistantTicketSchema = z.object({
   title: z.string(),
   goal: z.string(),
   payerUserId: z.string(),
-  origin: z.enum(["explicit", "inferred"]),
+  origin: ticketOriginSchema,
   stage: ticketStageSchema,
   outcome: ticketOutcomeSchema.nullable(),
   blockedReason: ticketBlockedReasonSchema.nullable(),

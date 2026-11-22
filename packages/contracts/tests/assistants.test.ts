@@ -7,6 +7,7 @@ import {
   assistantTicketSchema,
   postAssistantMessageRequestSchema,
   ticketActionRequestSchema,
+  ticketOriginSchema,
   updateAssistantRequestSchema,
 } from "../src/assistants";
 import { threadOriginSchema } from "../src/threads";
@@ -96,6 +97,11 @@ const assistant = {
   createdAt: "2026-11-22T00:00:00.000Z",
   updatedAt: "2026-11-22T00:00:00.000Z",
 };
+
+test("a ticket origin is explicit or inferred and nothing else", () => {
+  assert.deepEqual(ticketOriginSchema.options, ["explicit", "inferred"]);
+  assert.equal(ticketOriginSchema.safeParse("automatic").success, false);
+});
 
 test("an assistant record round-trips and its status vocabulary is closed", () => {
   assert.deepEqual(assistantSchema.parse(assistant), assistant);

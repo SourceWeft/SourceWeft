@@ -1,4 +1,5 @@
 export * from "./schema/identity-workspace";
+export * from "./schema/assistants";
 export * from "./schema/billing";
 export * from "./schema/observability";
 export * from "./schema/model-gateway";
