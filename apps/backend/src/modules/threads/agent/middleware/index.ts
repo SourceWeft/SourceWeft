@@ -112,6 +112,16 @@ export type SourceWeftSubagentMiddlewareStackInput = {
   runId?: string | null;
   /** Root run start origin; child scopes share the run's wall clock. */
   turnStartedAtMs?: number | null;
+  /**
+   * Host-set credit ceiling for this run; see
+   * `SourceWeftAgentMiddlewareStackInput.creditCap`. A subagent's model calls
+   * settle into the same shared `BillingScope` as the root graph's, so the
+   * cap must gate them too — otherwise a run can overshoot it by a whole
+   * delegated subagent's step budget before the root graph gets to check again.
+   */
+  creditCap?: number;
+  /** Reads the turn's billing scope; see run-credit-cap.ts. */
+  getBillingScope?: () => BillingScope | undefined;
 };
 
 /**
@@ -138,6 +148,14 @@ export function createSourceWeftSubagentMiddlewareStack(
           stepBudget.guardAfterModel(
             humanInTheLoopMiddleware({ interruptOn: input.interruptOn }),
           ),
+        ]
+      : []),
+    ...(input.creditCap != null
+      ? [
+          createRunCreditCapMiddleware({
+            capCredits: input.creditCap,
+            getScope: input.getBillingScope ?? (() => undefined),
+          }),
         ]
       : []),
     createSourceWeftToolCallContextMiddleware({

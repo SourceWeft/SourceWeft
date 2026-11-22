@@ -774,6 +774,8 @@ export class DurableChatRunService {
     confirmationIds?: string[];
     requestedAt?: Date;
     expiresAt?: Date;
+    /** How many credits this run has cost so far; see `finishChatThreadRun`. */
+    consumedCredits?: number;
   }) {
     return markRunWaitingForApproval(input);
   }

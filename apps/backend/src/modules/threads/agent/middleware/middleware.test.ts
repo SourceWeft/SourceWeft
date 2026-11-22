@@ -181,6 +181,28 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
   assert.notStrictEqual(first.at(-1), second.at(-1));
 });
 
+test("subagent stack mounts the credit-cap middleware only when a host-set creditCap is given", () => {
+  const withoutCap = createSourceWeftSubagentMiddlewareStack({
+    ...middlewareRuntime,
+    toolObservabilityContext: { subagentType: "explore" },
+  });
+  assert.ok(
+    !withoutCap.some((middleware) => middleware.name === "SourceWeftRunCreditCap"),
+    "no creditCap → the subagent stack must not gate model calls on a cap",
+  );
+
+  const withCap = createSourceWeftSubagentMiddlewareStack({
+    ...middlewareRuntime,
+    toolObservabilityContext: { subagentType: "explore" },
+    creditCap: 10,
+    getBillingScope: () => undefined,
+  });
+  assert.ok(
+    withCap.some((middleware) => middleware.name === "SourceWeftRunCreditCap"),
+    "creditCap set → a delegated subagent's model calls must settle through the same cap check as the root graph's",
+  );
+});
+
 test("tool retry only retries safe read-only tools", async () => {
   const stack = await createSourceWeftAgentMiddlewareStack({
     ...middlewareRuntime,

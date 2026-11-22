@@ -1184,6 +1184,8 @@ export async function buildThreadAgentAssembly(
       traceContext,
       runId: wallClockRunId,
       turnStartedAtMs,
+      creditCap: prepared.creditCap,
+      getBillingScope,
       toolObservabilityContext: {
         runId: prepared.runTraceId,
         teamId: prepared.workspace.organizationId,

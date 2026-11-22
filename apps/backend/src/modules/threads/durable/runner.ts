@@ -2500,6 +2500,7 @@ export async function processThreadChatRunJob(
           confirmationIds: extractPendingConfirmationIds(
             finalSnapshot.toolCalls,
           ),
+          consumedCredits: runConsumedCredits ?? 0,
         })
       : await durableChatRunService.finishRun({
           run,

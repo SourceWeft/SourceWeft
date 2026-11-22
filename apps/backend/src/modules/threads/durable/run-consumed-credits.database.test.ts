@@ -225,3 +225,79 @@ test("a run that settles once and then fails records only what was settled", asy
   });
   assert.equal(stored?.consumedCredits, 2);
 });
+
+test("a run that pauses for approval keeps its pre-pause spend through to completion", async () => {
+  await repository.markChatThreadRunRunning({ runId: run.id, teamId, workspaceId });
+  const assistantMessageId = randomUUID();
+  await messages.createMessageRecord({
+    id: assistantMessageId,
+    teamId,
+    workspaceId,
+    threadId,
+    role: "assistant",
+    content: "",
+    createdBy: null,
+    metadata: { renderBlocks: [] },
+  });
+
+  // The run settled 4 credits (two 2-credit model calls) before a tool asked
+  // for confirmation and the run paused at waiting_for_approval.
+  const waiting = await repository.markChatThreadRunWaitingForApproval({
+    runId: run.id,
+    teamId,
+    workspaceId,
+    assistantMessageId,
+    consumedCredits: 4,
+    snapshotJson: {
+      finishReason: "tool_confirmation_requested",
+      pendingConfirmationIds: ["confirmation-1"],
+      toolCalls: [
+        {
+          id: "approval-call-1",
+          tool: "approval_tool",
+          input: {},
+          output: {
+            type: "tool_confirmation_request",
+            id: "confirmation-1",
+            status: "proposed",
+          },
+          status: "approval_requested",
+          latencyMs: null,
+          error: null,
+          sequence: 1,
+        },
+      ],
+    },
+  });
+  assert.equal(waiting?.status, "waiting_for_approval");
+  assert.equal(
+    waiting?.consumedCredits,
+    4,
+    "the pre-pause spend must already be on the row while waiting_for_approval",
+  );
+
+  const approved = await repository.recordChatThreadRunConfirmationResponse({
+    runId: run.id,
+    teamId,
+    workspaceId,
+    confirmationId: "confirmation-1",
+    confirmation: {
+      type: "tool_confirmation_request",
+      id: "confirmation-1",
+      status: "approved",
+    },
+  });
+
+  assert.equal(approved?.status, "completed");
+  assert.equal(
+    approved?.consumedCredits,
+    4,
+    "answering the confirmation completes the run directly (bypassing finishChatThreadRun) and must not reset consumed_credits",
+  );
+  const stored = await repository.findChatThreadRunById({
+    runId: run.id,
+    teamId,
+    workspaceId,
+  });
+  assert.equal(stored?.consumedCredits, 4);
+});
