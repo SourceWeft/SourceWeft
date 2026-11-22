@@ -4,6 +4,7 @@ import { validateThreadExecutionTarget } from "../devices/service";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 import { findCitationByMessageRank } from "../citations";
 import { sharingService } from "../sharing";
+import { revokeShareLink } from "../sharing/store";
 import { ContentError } from "../content/errors";
 import type { MessageRecord } from "../content/types";
 import { requireContentWorkspace } from "../workspace/guards";
@@ -473,6 +474,10 @@ class ContentThreadService {
     if (!deleted) {
       throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
     }
+
+    // The snapshot row goes with the thread (FK cascade); the link itself is
+    // revoked so the token stops resolving rather than dangling.
+    await revokeShareLink({ targetType: "thread", targetId: input.threadId });
 
     return {
       deleted: true as const,

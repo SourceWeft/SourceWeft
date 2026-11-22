@@ -28,19 +28,22 @@ export async function findActiveShareByTarget(input: {
 
 /**
  * The subset of the given artifact ids that currently have a live, public share
- * link (non-revoked, unexpired, `is_public`). Backs the "Public" badge in the
- * artifacts hub, resolved in one batched query rather than a per-artifact
- * lookup. Empty input short-circuits to avoid an `IN ()` no-op query.
+ * link (non-revoked, unexpired, `is_public`), each mapped to that link's token.
+ * Backs the "Public" badge in the artifacts hub and the artifact cards of a
+ * shared chat, resolved in one batched query rather than a per-artifact
+ * lookup. The partial unique index allows one live share per target, so each
+ * id maps to a single token. Empty input short-circuits to avoid an `IN ()`
+ * no-op query.
  */
 export async function findPubliclySharedArtifactIds(
   artifactIds: string[],
-): Promise<Set<string>> {
+): Promise<Map<string, string>> {
   if (artifactIds.length === 0) {
-    return new Set();
+    return new Map();
   }
 
   const rows = await db
-    .selectDistinct({ targetId: shareLinks.targetId })
+    .select({ targetId: shareLinks.targetId, token: shareLinks.token })
     .from(shareLinks)
     .where(
       and(
@@ -52,7 +55,7 @@ export async function findPubliclySharedArtifactIds(
       ),
     );
 
-  return new Set(rows.map((row) => row.targetId));
+  return new Map(rows.map((row) => [row.targetId, row.token]));
 }
 
 /**

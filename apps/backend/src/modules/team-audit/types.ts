@@ -21,6 +21,9 @@ export type TeamAuditAction =
   | "artifact.page_navigation_attempt"
   | "artifact.records_exported"
   | "artifact.records_cleared"
+  | "thread.shared"
+  | "thread.share_updated"
+  | "thread.share_revoked"
   | "workspace.guest_invited"
   | "workspace.guest_accepted"
   | "workspace.guest_revoked"
@@ -47,6 +50,7 @@ export type TeamAuditTargetType =
   | "workspace_member"
   | "member"
   | "artifact"
+  | "thread"
   | "guest"
   | "sso_provider"
   | "agent_task";

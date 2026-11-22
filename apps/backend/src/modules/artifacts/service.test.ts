@@ -115,7 +115,7 @@ test("artifact summaries are bounded and never load type handlers", async () => 
     nextCursor: null,
   });
   mocks.findPubliclySharedArtifactIds.mockResolvedValue(
-    new Set(["artifact-0"]),
+    new Map([["artifact-0", "tok-0"]]),
   );
   mocks.findPendingSharedApprovalArtifactIdsForViewer.mockResolvedValue(
     new Set(["artifact-1"]),
@@ -261,7 +261,7 @@ test("current Video Presentation detail is also a safe exact-version projection"
     id: "workspace-1",
     organizationId: "team-1",
   });
-  mocks.findPubliclySharedArtifactIds.mockResolvedValue(new Set());
+  mocks.findPubliclySharedArtifactIds.mockResolvedValue(new Map());
   const artifact = {
     id: "artifact-1",
     teamId: "team-1",
@@ -1315,7 +1315,7 @@ test("a type without version media names the current version it shows", async ()
     id: "workspace-1",
     organizationId: "team-1",
   });
-  mocks.findPubliclySharedArtifactIds.mockResolvedValue(new Set());
+  mocks.findPubliclySharedArtifactIds.mockResolvedValue(new Map());
   mocks.loadArtifactViewHandlerRegistry.mockResolvedValue(
     createArtifactViewHandlerRegistry([]),
   );
