@@ -190,6 +190,21 @@ export const deleteThreadResponseSchema = z.object({
 export const listThreadsRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().trim().min(1).max(1024).optional(),
+  /** List archived chats instead of the main list. */
+  archived: z.boolean().optional(),
+});
+
+/**
+ * Archives a top-level chat, or brings it back with `archived: false`. Its
+ * sub-agent conversations stay nested under it either way.
+ */
+export const archiveThreadRequestSchema = z.object({
+  archived: z.boolean(),
+});
+
+export const archiveThreadResponseSchema = z.object({
+  threadId: z.string(),
+  archived: z.boolean(),
 });
 
 export const threadListItemSchema = threadWithChatPreferencesSchema.extend({
@@ -270,6 +285,8 @@ export type CreateThreadResponse = z.infer<typeof createThreadResponseSchema>;
 export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
 export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;
 export type ListThreadsRequest = z.infer<typeof listThreadsRequestSchema>;
+export type ArchiveThreadRequest = z.infer<typeof archiveThreadRequestSchema>;
+export type ArchiveThreadResponse = z.infer<typeof archiveThreadResponseSchema>;
 export type ListThreadsResponse = z.infer<typeof listThreadsResponseSchema>;
 export type ThreadCommandRequest = z.infer<typeof threadCommandRequestSchema>;
 export type UpdateThreadModelSettingsRequest = z.infer<

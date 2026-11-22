@@ -20,6 +20,7 @@ import {
   findRecentThreadRecordByUser,
   listChildThreadRecords,
   listThreadRecordsByWorkspace,
+  setThreadArchivedRecord,
   updateThreadChatPreferencesRecord,
   updateThreadModelSettingsRecord,
   updateThreadVisibilityRecord,
@@ -217,6 +218,7 @@ class ContentThreadService {
     userId: string;
     limit?: number;
     cursor?: string;
+    archived?: boolean;
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
@@ -234,6 +236,7 @@ class ContentThreadService {
       viewerUserId: input.userId,
       limit: limit + 1,
       cursor: decodedCursor,
+      archived: input.archived ?? false,
     });
 
     const pageItems = items.slice(0, limit);
@@ -463,6 +466,43 @@ class ContentThreadService {
       deleted: true as const,
       threadId: input.threadId,
     };
+  }
+
+  async setThreadArchived(input: {
+    workspaceId: string;
+    threadId: string;
+    userId: string;
+    archived: boolean;
+  }) {
+    const workspace = await requireContentWorkspace({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    // Archiving hides the chat from everyone who can see it, so it takes the
+    // same standing as deleting it.
+    const access = await workspaceService.resolveAccess({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+    const isContentAdmin = access
+      ? workspaceService.canAdministerContent(access)
+      : false;
+
+    const updated = await setThreadArchivedRecord({
+      threadId: input.threadId,
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      viewerUserId: input.userId,
+      isContentAdmin,
+      archived: input.archived,
+    });
+
+    if (!updated) {
+      throw new ContentError(404, "THREAD_NOT_FOUND", "Thread not found");
+    }
+
+    return { threadId: input.threadId, archived: input.archived };
   }
 
   async updateThreadModelSettings(input: {
