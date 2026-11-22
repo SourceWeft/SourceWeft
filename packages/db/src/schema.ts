@@ -13,6 +13,7 @@ export * from "./schema/skills-market";
 export * from "./schema/mcp-catalog";
 export * from "./schema/notes";
 export * from "./schema/source-guides";
+export * from "./schema/source-research";
 export * from "./schema/artifacts";
 export * from "./schema/artifact-records";
 export * from "./schema/study";
