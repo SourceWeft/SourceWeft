@@ -77,15 +77,18 @@ function parseStampSeconds(raw: string): number | null {
  * whitespace with no newline at all) are trimmed first, so the check always
  * targets the actual last content line rather than an empty one.
  */
-function dropTruncatedTailLine(lines: string[], rawText: string): string[] {
+function dropTruncatedTailLine(
+  lines: string[],
+  rawText: string,
+): { kept: string[]; dropped?: string } {
   let end = lines.length;
   while (end > 0 && (lines[end - 1] ?? "").trim() === "") {
     end -= 1;
   }
   const trimmed = lines.slice(0, end);
-  if (trimmed.length === 0) return trimmed;
+  if (trimmed.length === 0 || rawText.endsWith("\n")) return { kept: trimmed };
 
-  return rawText.endsWith("\n") ? trimmed : trimmed.slice(0, -1);
+  return { kept: trimmed.slice(0, -1), dropped: trimmed[trimmed.length - 1] };
 }
 
 export function parseTranscriptOutput(
@@ -99,8 +102,17 @@ export function parseTranscriptOutput(
   warnings: string[];
 } {
   let lines = text.split("\n");
+  // A `SPEECH:` verdict is a whole answer in itself: even as the cut-off
+  // last line it still says whether the video has speech (a cut-off
+  // `SPEECH: n` matches neither value and is ignored).
+  let truncatedSpeechVerdict: boolean | undefined;
   if (opts.truncated) {
-    lines = dropTruncatedTailLine(lines, text);
+    const { kept, dropped } = dropTruncatedTailLine(lines, text);
+    lines = kept;
+    const speechMatch = dropped === undefined ? null : SPEECH_RE.exec(dropped.trim());
+    if (speechMatch) {
+      truncatedSpeechVerdict = speechMatch[1]!.toLowerCase() === "yes";
+    }
   }
 
   // Any header line's index, so lines before it (a model preamble) can be
@@ -203,6 +215,10 @@ export function parseTranscriptOutput(
     } else {
       segments.push({ startSeconds: 0, text: line });
     }
+  }
+
+  if (truncatedSpeechVerdict !== undefined) {
+    speech = truncatedSpeechVerdict;
   }
 
   return { language, durationSeconds, speech, segments, warnings };

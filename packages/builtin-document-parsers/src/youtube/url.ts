@@ -19,7 +19,9 @@ export type YouTubeUrlTarget =
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const PLAYLIST_ID_RE = /^[A-Za-z0-9_-]{10,64}$/;
 const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
-const HANDLE_RE = /^@[A-Za-z0-9._-]{3,30}$/;
+// YouTube handles may use letters and digits of any script (`@小明频道`), plus
+// marks for scripts that need them and the separators YouTube allows.
+const HANDLE_RE = /^@[\p{L}\p{N}\p{M}._·-]{3,30}$/u;
 
 const YOUTUBE_HOSTS = new Set([
   "youtube.com",
@@ -50,6 +52,20 @@ function toUrl(input: string): URL | null {
 
 function splitPath(pathname: string): string[] {
   return pathname.split("/").filter((segment) => segment.length > 0);
+}
+
+/**
+ * A path segment as the user wrote it: `URL` percent-encodes non-ASCII
+ * characters, and a pasted link may already be encoded. Decoded exactly once
+ * here, so a channel reference carries its plain value and whoever builds a
+ * URL from it encodes it exactly once. `null` for a malformed escape.
+ */
+function decodeSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
 }
 
 export function parseYouTubeUrl(input: string): YouTubeUrlTarget | null {
@@ -87,7 +103,15 @@ export function parseYouTubeUrl(input: string): YouTubeUrlTarget | null {
     return null;
   }
 
-  if (first === "shorts" || first === "live" || first === "embed") {
+  if (first === "embed" && second === "videoseries") {
+    const list = url.searchParams.get("list");
+    if (list && PLAYLIST_ID_RE.test(list)) {
+      return { kind: "playlist", playlistId: list };
+    }
+    return null;
+  }
+
+  if (first === "shorts" || first === "live" || first === "embed" || first === "v") {
     if (second && VIDEO_ID_RE.test(second)) {
       return { kind: "video", videoId: second };
     }
@@ -95,8 +119,9 @@ export function parseYouTubeUrl(input: string): YouTubeUrlTarget | null {
   }
 
   if (first && first.startsWith("@")) {
-    if (HANDLE_RE.test(first)) {
-      return { kind: "channel", channel: { type: "handle", value: first.slice(1) } };
+    const handle = decodeSegment(first);
+    if (handle && HANDLE_RE.test(handle)) {
+      return { kind: "channel", channel: { type: "handle", value: handle.slice(1) } };
     }
     return null;
   }
@@ -109,15 +134,17 @@ export function parseYouTubeUrl(input: string): YouTubeUrlTarget | null {
   }
 
   if (first === "user") {
-    if (second) {
-      return { kind: "channel", channel: { type: "user", value: second } };
+    const user = second ? decodeSegment(second) : null;
+    if (user) {
+      return { kind: "channel", channel: { type: "user", value: user } };
     }
     return null;
   }
 
   if (first === "c") {
-    if (second) {
-      return { kind: "channel", channel: { type: "custom", value: second } };
+    const custom = second ? decodeSegment(second) : null;
+    if (custom) {
+      return { kind: "channel", channel: { type: "custom", value: custom } };
     }
     return null;
   }

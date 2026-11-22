@@ -84,6 +84,41 @@ const cases: { name: string; input: string; expected: YouTubeUrlTarget | null }[
     expected: { kind: "channel", channel: { type: "custom", value: "Google" } },
   },
   {
+    name: "unicode channel handle url",
+    input: "https://www.youtube.com/@小明频道",
+    expected: { kind: "channel", channel: { type: "handle", value: "小明频道" } },
+  },
+  {
+    name: "percent-encoded unicode channel handle url",
+    input: `https://www.youtube.com/@${encodeURIComponent("小明频道")}/videos`,
+    expected: { kind: "channel", channel: { type: "handle", value: "小明频道" } },
+  },
+  {
+    name: "handle with a malformed percent escape",
+    input: "https://www.youtube.com/@abc%E5%",
+    expected: null,
+  },
+  {
+    name: "legacy user url with an encoded space is decoded once",
+    input: "https://www.youtube.com/user/Foo%20Bar",
+    expected: { kind: "channel", channel: { type: "user", value: "Foo Bar" } },
+  },
+  {
+    name: "legacy custom url with unicode is decoded",
+    input: "https://www.youtube.com/c/小明",
+    expected: { kind: "channel", channel: { type: "custom", value: "小明" } },
+  },
+  {
+    name: "embedded playlist url",
+    input: "https://www.youtube.com/embed/videoseries?list=PLxyz12345",
+    expected: { kind: "playlist", playlistId: "PLxyz12345" },
+  },
+  {
+    name: "legacy /v/ video url",
+    input: "https://www.youtube.com/v/jNQXAC9IVRw?version=3",
+    expected: { kind: "video", videoId: "jNQXAC9IVRw" },
+  },
+  {
     name: "non-YouTube host with a watch-shaped path",
     input: "https://example.com/watch?v=jNQXAC9IVRw",
     expected: null,

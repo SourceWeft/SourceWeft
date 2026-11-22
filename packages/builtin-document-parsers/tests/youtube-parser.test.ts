@@ -45,6 +45,7 @@ function createFixtureTranscript(): YouTubeTranscriptProvider {
         origin: "ai_transcription" as const,
         providerId: "gemini",
         model: "google/gemini-2.5-flash",
+        finishReason: "stop",
         warnings: [],
       };
     },
@@ -87,6 +88,7 @@ test("parses a video source into timestamped markdown with ai_transcription meta
   assert.equal(result.metadata.transcriptModel, "google/gemini-2.5-flash");
   assert.equal(result.metadata.transcriptLanguage, "en");
   assert.equal(result.metadata.titleSource, "oembed");
+  assert.equal(result.metadata.transcriptFinishReason, "stop");
   assert.equal(result.title, "Me at the zoo");
 });
 

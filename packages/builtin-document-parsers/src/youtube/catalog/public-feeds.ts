@@ -21,6 +21,9 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_COLLECTION_ENTRIES = 15;
 const FEEDS_BASE_URL = "https://www.youtube.com/feeds/videos.xml";
 
+/** Hosts a channel page may finish on; anything else (a consent wall) is not the page. */
+const CHANNEL_PAGE_HOSTS = new Set(["www.youtube.com", "youtube.com", "m.youtube.com"]);
+
 const CHANNEL_ID_JSON_RE = /"channelId":"(UC[A-Za-z0-9_-]{22})"/;
 const CHANNEL_ID_CANONICAL_LINK_RE =
   /<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[A-Za-z0-9_-]{22})"/;
@@ -38,6 +41,16 @@ function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+/** The host the request finished on after redirects; `null` when unknown. */
+function finalResponseHost(response: Response): string | null {
+  if (!response.url) return null;
+  try {
+    return new URL(response.url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -46,7 +59,13 @@ export function createPublicFeedsCatalogProvider(
   deps: PublicFeedsCatalogProviderDeps,
 ): YouTubeCatalogProvider {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const xmlParser = new XMLParser({ ignoreAttributes: false });
+  // Feed text stays text (a title "2024" or an all-digit video id must not
+  // become a number), and HTML entities such as `&#39;` are decoded.
+  const xmlParser = new XMLParser({
+    ignoreAttributes: false,
+    parseTagValue: false,
+    htmlEntities: true,
+  });
 
   function fetchWithTimeout(url: string): Promise<Response> {
     return deps.fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
@@ -112,6 +131,17 @@ export function createPublicFeedsCatalogProvider(
       );
     }
 
+    // A redirect off YouTube (consent.youtube.com, a sign-in wall) says
+    // nothing about whether the channel exists: the listing failed.
+    const finalHost = finalResponseHost(response);
+    if (finalHost !== null && !CHANNEL_PAGE_HOSTS.has(finalHost)) {
+      throw new YouTubeSourceError(
+        502,
+        "YOUTUBE_LISTING_FAILED",
+        `Channel page ${pageUrl} redirected to ${finalHost}`,
+      );
+    }
+
     if (response.status === 404) {
       throw new YouTubeSourceError(
         404,
@@ -158,13 +188,13 @@ export function createPublicFeedsCatalogProvider(
         return `${FEEDS_BASE_URL}?user=${encodeURIComponent(channel.value)}`;
       case "handle": {
         const channelId = await resolveChannelIdFromPage(
-          `https://www.youtube.com/@${channel.value}`,
+          `https://www.youtube.com/@${encodeURIComponent(channel.value)}`,
         );
         return `${FEEDS_BASE_URL}?channel_id=${encodeURIComponent(channelId)}`;
       }
       case "custom": {
         const channelId = await resolveChannelIdFromPage(
-          `https://www.youtube.com/c/${channel.value}`,
+          `https://www.youtube.com/c/${encodeURIComponent(channel.value)}`,
         );
         return `${FEEDS_BASE_URL}?channel_id=${encodeURIComponent(channelId)}`;
       }
@@ -244,14 +274,19 @@ export function createPublicFeedsCatalogProvider(
       );
     }
 
-    const feed = parsed.feed as Record<string, unknown> | undefined;
-    if (!feed) {
+    if (!("feed" in parsed)) {
       throw new YouTubeSourceError(
         502,
         "YOUTUBE_LISTING_FAILED",
         `Feed ${feedUrl} did not contain an Atom <feed> element`,
       );
     }
+    // An empty `<feed></feed>` parses to an empty string: a collection with
+    // no videos, not a broken feed.
+    const feed =
+      parsed.feed && typeof parsed.feed === "object"
+        ? (parsed.feed as Record<string, unknown>)
+        : {};
 
     const title = asOptionalString(feed.title) ?? "";
     const author = feed.author as Record<string, unknown> | undefined;

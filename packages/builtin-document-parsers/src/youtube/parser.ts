@@ -74,6 +74,7 @@ export class YouTubeSourceParser implements SourceParser {
         transcriptProvider: this.deps.transcript.id,
         transcriptOrigin: transcript.origin,
         transcriptModel: transcript.model,
+        transcriptFinishReason: transcript.finishReason,
         transcriptLanguage: transcript.language,
         durationSeconds: transcript.durationSeconds,
         coverage: transcript.coverage,

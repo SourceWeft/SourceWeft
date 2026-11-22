@@ -20,6 +20,11 @@ export type YouTubeTranscript = {
   origin: "ai_transcription" | "captions";
   providerId: string;
   model?: string;
+  /**
+   * The model's raw finish reason, kept for diagnosis. Anything other than
+   * `"stop"` (or none) means the output was cut short: coverage is partial.
+   */
+  finishReason?: string;
   warnings: string[];
 };
 

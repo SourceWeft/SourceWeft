@@ -21,6 +21,11 @@ function formatTimestamp(totalSeconds: number): string {
   return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
+/** Escapes the characters that would end or break markdown link text. */
+function escapeLinkText(text: string): string {
+  return text.replace(/[\\[\]()]/g, (char) => `\\${char}`);
+}
+
 export function formatYouTubeSourceMarkdown(input: {
   video: YouTubeVideoInfo;
   transcript: YouTubeTranscript;
@@ -30,7 +35,7 @@ export function formatYouTubeSourceMarkdown(input: {
   const headerLines: string[] = [`# ${video.title}`];
 
   if (video.channelTitle && video.channelUrl) {
-    headerLines.push(`Channel: [${video.channelTitle}](${video.channelUrl})`);
+    headerLines.push(`Channel: [${escapeLinkText(video.channelTitle)}](${video.channelUrl})`);
   }
 
   headerLines.push(`Video: ${canonicalVideoUrl(video.videoId)}`);

@@ -368,3 +368,92 @@ test("format renders a timestamp over an hour as h:mm:ss", () => {
   );
   assert.ok(!markdown.includes("Channel:"));
 });
+
+// Every finishReason other than "stop" (or none at all) means the model did
+// not finish on its own: the output is treated as truncated.
+for (const [finishReason, expected] of [
+  ["content_filter", "partial"],
+  ["error", "partial"],
+  ["stop", "complete"],
+  [undefined, "complete"],
+] as const) {
+  test(`finishReason ${String(finishReason)} gives ${expected} coverage and is exposed raw`, async () => {
+    const fakeModel: VideoModelPort = {
+      complete: async () => ({
+        text: [
+          "LANGUAGE: en",
+          "DURATION: 2:00",
+          "SPEECH: yes",
+          "[0:00] First bit.",
+          "[0:30] Second bit cut",
+        ].join("\n"),
+        ...(finishReason === undefined ? {} : { finishReason }),
+      }),
+    };
+    const provider = createGeminiTranscriptProvider({ model: fakeModel });
+
+    const transcript = await provider.transcribe({
+      videoId: "abc",
+      videoUrl: canonicalVideoUrl("abc"),
+    });
+
+    assert.equal(transcript.finishReason, finishReason);
+    if (expected === "partial") {
+      assert.deepEqual(transcript.coverage, { kind: "partial", endSeconds: 0 });
+      assert.deepEqual(transcript.segments, [{ startSeconds: 0, text: "First bit." }]);
+    } else {
+      assert.deepEqual(transcript.coverage, { kind: "complete" });
+      assert.equal(transcript.segments.length, 2);
+    }
+  });
+}
+
+for (const text of [
+  "LANGUAGE: en\nDURATION: 0:10\nSPEECH: no\n",
+  "LANGUAGE: en\nDURATION: 0:10\nSPEECH: no",
+]) {
+  test(`SPEECH: no with a length finish and zero segments is YOUTUBE_NO_SPEECH, not a failure (${JSON.stringify(text.slice(-4))})`, async () => {
+    const fakeModel: VideoModelPort = {
+      complete: async () => ({ text, finishReason: "length" }),
+    };
+    const provider = createGeminiTranscriptProvider({ model: fakeModel });
+
+    await assert.rejects(
+      () => provider.transcribe({ videoId: "abc", videoUrl: canonicalVideoUrl("abc") }),
+      (error: unknown) => {
+        assert.ok(error instanceof YouTubeSourceError);
+        assert.equal(error.statusCode, 422);
+        assert.equal(error.code, "YOUTUBE_NO_SPEECH");
+        return true;
+      },
+    );
+  });
+}
+
+test("format escapes markdown link-text characters in the channel title", () => {
+  const video: YouTubeVideoInfo = {
+    videoId: "jNQXAC9IVRw",
+    title: "Talk [Part 1] (draft)",
+    titleSource: "oembed",
+    channelTitle: "Foo [Bar]",
+    channelUrl: "https://www.youtube.com/channel/UC4QobU6STFB0P71PMvOGN5A",
+  };
+  const transcript: YouTubeTranscript = {
+    segments: [{ startSeconds: 0, text: "Hi." }],
+    coverage: { kind: "complete" },
+    origin: "ai_transcription",
+    providerId: "gemini",
+    warnings: [],
+  };
+
+  const markdown = formatYouTubeSourceMarkdown({ video, transcript });
+
+  assert.ok(
+    markdown.includes(
+      "Channel: [Foo \\[Bar\\]](https://www.youtube.com/channel/UC4QobU6STFB0P71PMvOGN5A)",
+    ),
+    markdown,
+  );
+  // The video title is a heading, not link text: it stays as written.
+  assert.ok(markdown.includes("# Talk [Part 1] (draft)\n"), markdown);
+});

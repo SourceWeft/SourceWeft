@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { YouTubeSourceError } from "../src/youtube/errors";
 import { createPublicFeedsCatalogProvider } from "../src/youtube/catalog/public-feeds";
 import type { YouTubeCollection, YouTubeVideoInfo } from "../src/youtube/catalog/types";
+import { parseYouTubeUrl, type YouTubeUrlTarget } from "../src/youtube/url";
 
 const VIDEO_ID = "jNQXAC9IVRw";
 const OEMBED_URL = `https://www.youtube.com/oembed?url=${encodeURIComponent(
@@ -399,3 +400,131 @@ test("provider id is public-feeds", () => {
   }) as typeof fetch });
   assert.equal(provider.id, "public-feeds");
 });
+
+function withFinalUrl(factory: () => Response, url: string): () => Response {
+  return () => {
+    const response = factory();
+    Object.defineProperty(response, "url", { value: url });
+    return response;
+  };
+}
+
+test("a unicode handle's channel page URL is encoded exactly once", async () => {
+  const target = parseYouTubeUrl(`https://www.youtube.com/@${encodeURIComponent("小明频道")}`);
+  assert.deepEqual(target, { kind: "channel", channel: { type: "handle", value: "小明频道" } });
+  const handlePageUrl = `https://www.youtube.com/@${encodeURIComponent("小明频道")}`;
+  const channelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
+  const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+  const fetchFn = createFakeFetch({
+    [handlePageUrl]: textResponse(200, `{"channelId":"${channelId}"}`),
+    [feedUrl]: textResponse(200, atomFeed({ title: "小明频道", entries: [] }), "application/atom+xml"),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  const collection = await provider.listCollection(
+    target as Extract<YouTubeUrlTarget, { kind: "channel" }>,
+  );
+
+  assert.equal(collection.title, "小明频道");
+  assert.deepEqual((fetchFn as unknown as { seen: string[] }).seen, [handlePageUrl, feedUrl]);
+});
+
+test("a legacy user link with an encoded character is not double-encoded in the feed URL", async () => {
+  const target = parseYouTubeUrl("https://www.youtube.com/user/Foo%20Bar");
+  const feedUrl = "https://www.youtube.com/feeds/videos.xml?user=Foo%20Bar";
+  const fetchFn = createFakeFetch({
+    [feedUrl]: textResponse(200, atomFeed({ title: "Foo Bar", entries: [] }), "application/atom+xml"),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  const collection = await provider.listCollection(
+    target as Extract<YouTubeUrlTarget, { kind: "channel" }>,
+  );
+
+  assert.equal(collection.title, "Foo Bar");
+});
+
+test("a channel page that lands on a non-YouTube host (consent wall) is YOUTUBE_LISTING_FAILED", async () => {
+  const handlePageUrl = "https://www.youtube.com/@GoogleDevelopers";
+  const fetchFn = createFakeFetch({
+    [handlePageUrl]: withFinalUrl(
+      textResponse(200, "<html>Before you continue to YouTube</html>"),
+      "https://consent.youtube.com/m?continue=https%3A%2F%2Fwww.youtube.com%2F%40GoogleDevelopers",
+    ),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  await assert.rejects(
+    () =>
+      provider.listCollection({
+        kind: "channel",
+        channel: { type: "handle", value: "GoogleDevelopers" },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof YouTubeSourceError);
+      assert.equal(error.statusCode, 502);
+      assert.equal(error.code, "YOUTUBE_LISTING_FAILED");
+      return true;
+    },
+  );
+});
+
+test("a channel page whose final URL stays on www.youtube.com still resolves", async () => {
+  const handlePageUrl = "https://www.youtube.com/@GoogleDevelopers";
+  const channelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
+  const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+  const fetchFn = createFakeFetch({
+    [handlePageUrl]: withFinalUrl(
+      textResponse(200, `{"channelId":"${channelId}"}`),
+      handlePageUrl,
+    ),
+    [feedUrl]: textResponse(200, atomFeed({ title: "Devs", entries: [] }), "application/atom+xml"),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  const collection = await provider.listCollection({
+    kind: "channel",
+    channel: { type: "handle", value: "GoogleDevelopers" },
+  });
+
+  assert.equal(collection.title, "Devs");
+});
+
+test("feed text stays a string and HTML entities are decoded", async () => {
+  const feedUrl = "https://www.youtube.com/feeds/videos.xml?playlist_id=PLxyz12345";
+  const xml = atomFeed({
+    title: "2024",
+    entries: [{ videoId: "12345678901", title: "It&#39;s 1999" }],
+  });
+  const fetchFn = createFakeFetch({
+    [feedUrl]: textResponse(200, xml, "application/atom+xml"),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  const collection = await provider.listCollection({ kind: "playlist", playlistId: "PLxyz12345" });
+
+  assert.equal(collection.title, "2024");
+  assert.equal(collection.videos[0]?.videoId, "12345678901");
+  assert.equal(collection.videos[0]?.title, "It's 1999");
+});
+
+for (const xml of [
+  "<feed></feed>",
+  '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+]) {
+  test(`an empty feed is an empty listing, not a failure (${xml.length} chars)`, async () => {
+    const feedUrl = "https://www.youtube.com/feeds/videos.xml?playlist_id=PLempty123";
+    const fetchFn = createFakeFetch({
+      [feedUrl]: textResponse(200, xml, "application/atom+xml"),
+    });
+    const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+    const collection = await provider.listCollection({
+      kind: "playlist",
+      playlistId: "PLempty123",
+    });
+
+    assert.equal(collection.kind, "playlist");
+    assert.deepEqual(collection.videos, []);
+  });
+}

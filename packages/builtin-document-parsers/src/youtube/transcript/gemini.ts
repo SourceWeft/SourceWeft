@@ -23,6 +23,15 @@ SPEECH: <yes if the video contains speech, otherwise no>
 [H:MM:SS] <what is said from this moment>
 Start a new timestamped line at least every 30 seconds and whenever the speaker or topic changes. Timestamps are the start time of the line and must increase.`;
 
+/**
+ * Only a `"stop"` finish (or a provider that reports none) is a model that
+ * ended on its own. `length`, `content_filter`, `error` or anything else
+ * means the output may stop mid-line, so it is treated as truncated.
+ */
+function isTruncatedFinish(finishReason: string | undefined): boolean {
+  return finishReason !== undefined && finishReason !== "stop";
+}
+
 export function createGeminiTranscriptProvider(deps: {
   model: VideoModelPort;
 }): YouTubeTranscriptProvider {
@@ -45,8 +54,18 @@ export function createGeminiTranscriptProvider(deps: {
         );
       }
 
-      const truncated = result.finishReason === "length";
+      const truncated = isTruncatedFinish(result.finishReason);
       const parsed = parseTranscriptOutput(text, { truncated });
+
+      // The model saying there is no speech wins over truncation: a
+      // `SPEECH: no` answer cut short is still "no speech".
+      if (!parsed.speech) {
+        throw new YouTubeSourceError(
+          422,
+          "YOUTUBE_NO_SPEECH",
+          "This video does not appear to contain speech to transcribe",
+        );
+      }
 
       if (parsed.segments.length === 0) {
         // Truncation (not a lack of speech) is why there is nothing to
@@ -59,14 +78,6 @@ export function createGeminiTranscriptProvider(deps: {
             "The transcription was truncated before any usable line was produced",
           );
         }
-        throw new YouTubeSourceError(
-          422,
-          "YOUTUBE_NO_SPEECH",
-          "This video does not appear to contain speech to transcribe",
-        );
-      }
-
-      if (!parsed.speech) {
         throw new YouTubeSourceError(
           422,
           "YOUTUBE_NO_SPEECH",
@@ -89,6 +100,7 @@ export function createGeminiTranscriptProvider(deps: {
         origin: "ai_transcription",
         providerId: "gemini",
         model: result.model,
+        ...(result.finishReason === undefined ? {} : { finishReason: result.finishReason }),
         warnings: parsed.warnings,
       };
     },
