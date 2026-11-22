@@ -3674,7 +3674,7 @@
       "errorBusy": "Listing videos is unavailable for a moment. Try again shortly.",
       "rateLimited": "You have reached the limit for listing videos, which is shared with finding sources. You can try again in {wait}, at {time}.",
       "chooseVideos": "Choose videos",
-      "collectionHint": "This is a YouTube {kind, select, playlist {playlist} other {channel}} link. Next, choose which videos to add.",
+      "collectionHint": "This is a YouTube {kind, select, playlist {playlist link} other {channel link}}. Next, choose which videos to add.",
       "videoHint": "SourceWeft will transcribe this video with AI and index the transcript for search. Transcribing a video uses credits.",
       "aiTranscription": "AI transcription",
       "aiTranscriptionHint": "Transcribed by AI from the video's audio. It may contain mistakes.",
