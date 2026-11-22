@@ -29,8 +29,32 @@ vi.mock("./empty-state", () => ({
     return null;
   },
 }));
+const listProps = vi.hoisted(() => ({
+  current: null as Record<string, unknown> | null,
+}));
 vi.mock("./message-list", () => ({
-  MessageList: () => null,
+  MessageList: (props: Record<string, unknown>) => {
+    listProps.current = props;
+    return null;
+  },
+}));
+const barItems = vi.hoisted(() => ({
+  tool: undefined as unknown,
+  question: undefined as unknown,
+}));
+vi.mock("./tool-confirmation", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ToolInterventionBar: (props: { items?: unknown }) => {
+    barItems.tool = props.items;
+    return null;
+  },
+}));
+vi.mock("./user-question-panel", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  UserQuestionInterventionBar: (props: { items?: unknown }) => {
+    barItems.question = props.items;
+    return null;
+  },
 }));
 vi.mock("../local-conversation-status", () => ({
   useLocalOperationStatus: () => ({ blocked: false }),
@@ -43,6 +67,9 @@ vi.mock("../../../../../lib/analytics-events", () => ({
 
 beforeEach(() => {
   composerProps.current = null;
+  listProps.current = null;
+  barItems.tool = undefined;
+  barItems.question = undefined;
 });
 afterEach(unmountAll);
 
@@ -146,4 +173,28 @@ test("a conversation that takes no messages shows its notice instead of the comp
   );
   assert.equal(composerProps.current, null);
   assert.ok(view.container.querySelector('[data-testid="notice"]'));
+  // Every other way to start a turn is withdrawn too: the server refuses
+  // them all in such a conversation.
+  assert.ok(listProps.current);
+  assert.equal(listProps.current.onContinueAgentRun, undefined);
+  assert.equal(listProps.current.onRefreshLatest, undefined);
+  assert.equal(listProps.current.onRestartFromMessage, undefined);
+  assert.deepEqual(barItems.tool, []);
+  assert.deepEqual(barItems.question, []);
+});
+
+test("an ordinary conversation keeps continue, refresh and restart", async () => {
+  await mountWithIntl(
+    createElement(ChatCanvas, {
+      ...threadProps,
+      activeRunLookupPending: false,
+      chatExecutionState: "idle",
+      onRefreshLatest: vi.fn(),
+      onRestartFromMessage: vi.fn(),
+    }),
+  );
+  assert.ok(listProps.current);
+  assert.equal(typeof listProps.current.onContinueAgentRun, "function");
+  assert.equal(typeof listProps.current.onRefreshLatest, "function");
+  assert.equal(typeof listProps.current.onRestartFromMessage, "function");
 });

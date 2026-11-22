@@ -160,11 +160,16 @@ export function useThreadPageController({
   // The assistant's Router conversation is never in the chat list; look a
   // host-owned thread up on its own so it opens (read-only) instead of
   // reading as missing.
-  const unlistedHostOwned = useUnlistedHostOwnedThread(
+  const unlistedHostOwned = useUnlistedHostOwnedThread({
     workspaceId,
     threadId,
-    Boolean(listedChatItem),
-  );
+    listed: Boolean(listedChatItem),
+    listsSettled:
+      hasWorkspaceHydrated &&
+      !isWorkspaceHydrating &&
+      !isLoadingPrivateChats &&
+      !pendingWorkspaceId,
+  });
   const chatItem = listedChatItem ?? unlistedHostOwned.item;
   const threadTitle = chatItem?.title ?? t("thread.fallbackTitle");
   const isScheduledRun = chatItem?.origin === "scheduled";

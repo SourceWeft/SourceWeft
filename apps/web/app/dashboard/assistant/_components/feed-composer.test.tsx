@@ -116,3 +116,23 @@ test("a paused assistant takes no messages and says why", async () => {
   expect(button("Send", container).disabled).toBe(true);
   expect(container.textContent).toContain("The assistant is paused.");
 });
+
+test("text typed while a send is in flight is kept as the next message", async () => {
+  let finish: (value: unknown) => void = () => {};
+  postMessage.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const { container } = await mountWithIntl(
+    <FeedComposer workspaceId="ws_1" />,
+  );
+  await write(container, "First request");
+  await click(button("Send", container));
+  await write(container, "First request\nAnd a follow-up");
+  await act(async () => finish({ item: { id: "f1" } }));
+  await flush(3);
+
+  expect(postMessage).toHaveBeenCalledTimes(1);
+  expect(field(container).value).toBe("First request\nAnd a follow-up");
+});

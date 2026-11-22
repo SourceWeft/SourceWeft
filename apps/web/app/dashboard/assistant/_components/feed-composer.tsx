@@ -58,7 +58,9 @@ export function FeedComposer({
     try {
       await postMessage.mutateAsync({ text, idempotencyKey: key });
       pending.current = null;
-      setDraft("");
+      // Clear only what was sent: anything typed while the send was in
+      // flight stays, as the next message.
+      setDraft((current) => (current.trim() === text ? "" : current));
     } catch (error) {
       // The draft and its key stay, so a retry is the same send.
       toast.error(

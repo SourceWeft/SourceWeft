@@ -660,6 +660,10 @@ export function ChatCanvas({
     },
     [],
   );
+  // A conversation that takes no messages from the viewer (a workspace
+  // assistant's own) also takes no continue, refresh, restart, approval or
+  // answer from them: the server refuses every one of those turns.
+  const viewerReadOnly = Boolean(composerNotice);
   const continuationDisabled =
     !onSendMessage ||
     !workspaceId ||
@@ -775,7 +779,9 @@ export function ChatCanvas({
         <MessageList
           continuationDisabled={continuationDisabled}
           onContinueAgentRun={
-            onSendMessage ? handleContinueAgentRun : undefined
+            onSendMessage && !viewerReadOnly
+              ? handleContinueAgentRun
+              : undefined
           }
           activeThreadRun={activeThreadRun}
           activeVersionByGroup={activeVersionByGroup}
@@ -790,9 +796,13 @@ export function ChatCanvas({
           onArtifactPreview={onArtifactPreview}
           onCitationClick={onCitationClick}
           onLoadOlderMessages={onLoadOlderMessages}
-          onRefreshLatest={localStatus.blocked ? undefined : onRefreshLatest}
+          onRefreshLatest={
+            localStatus.blocked || viewerReadOnly ? undefined : onRefreshLatest
+          }
           onRestartFromMessage={
-            localStatus.blocked ? undefined : onRestartFromMessage
+            localStatus.blocked || viewerReadOnly
+              ? undefined
+              : onRestartFromMessage
           }
           onSourcePreview={onSourcePreview}
           onWorkfileClick={onWorkfileClick}
@@ -804,7 +814,7 @@ export function ChatCanvas({
       <ToolInterventionBar
         activeIntervention={activeIntervention}
         activeThreadRun={activeThreadRun}
-        items={activeConfirmationItems}
+        items={viewerReadOnly ? [] : activeConfirmationItems}
         onInterventionSettled={({ decision, result, item }) => {
           const settled = settleToolConfirmationDecision({
             decision,
@@ -903,7 +913,7 @@ export function ChatCanvas({
       />
 
       <UserQuestionInterventionBar
-        items={pendingQuestionItems}
+        items={viewerReadOnly ? [] : pendingQuestionItems}
         onSettled={({ answer, item }) => {
           if (localStatus.blocked) {
             if (answer.status === "cancelled") onStopStreaming?.();

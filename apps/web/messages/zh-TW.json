@@ -1726,7 +1726,7 @@
   "dashboardAssistant": {
     "page": {
       "title": "工作區助理",
-      "subtitle": "在共享動態裡提出工作請求。助理會為每個請求開一個工單，並在這裡彙報進展。",
+      "subtitle": "在共享動態裡提出工作請求。助理會為每個請求開一個工單，並在這裡回報進度。",
       "loading": "正在載入助理…",
       "loadError": "無法載入助理。",
       "feedHeading": "動態",
@@ -7297,7 +7297,7 @@
       "assistant_reply": "助理回覆了你的訊息。",
       "assistant_question": "「{taskName}」有問題要問你。",
       "assistant_ticket_blocked": "「{taskName}」已停止：{reason, select, credit_cap {達到額度上限} insufficient_credits {你的額度不足} other {多次執行失敗}}。",
-      "assistant_messages_blocked": "你發給助理的訊息正在等待：你的額度不足。",
+      "assistant_messages_blocked": "你傳給助理的訊息正在等待：你的額度不足。",
       "assistant_unavailable": "助理有 {count} 則訊息無法處理。",
       "unknown": "關於「{taskName}」的更新。"
     },

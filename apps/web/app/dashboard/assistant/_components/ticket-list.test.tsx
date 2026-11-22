@@ -69,6 +69,7 @@ test("a ticket waiting for a person offers retry and close; a working one does n
         ticket({ id: "t_work", title: "Running job" }),
       ]}
       members={[]}
+      canWrite
     />,
   );
   const waiting = container.querySelector('[data-ticket-id="t_wait"]')!;
@@ -97,6 +98,7 @@ test("tickets are grouped into needs-a-person, in progress and idle; ended ones 
         ticket({ id: "e", stage: "ended", title: "Done long ago" }),
       ]}
       members={[]}
+      canWrite
     />,
   );
   const groups = [...container.querySelectorAll("section[data-group]")].map(
@@ -117,9 +119,31 @@ test("tickets are grouped into needs-a-person, in progress and idle; ended ones 
 
 test("each ticket links to its worker conversation", async () => {
   const { container } = await mountWithIntl(
-    <TicketList workspaceId="ws_1" tickets={[ticket()]} members={[]} />,
+    <TicketList
+      workspaceId="ws_1"
+      tickets={[ticket()]}
+      members={[]}
+      canWrite
+    />,
   );
   expect(
     container.querySelector('a[href="/dashboard/chat/th_worker_1"]'),
   ).not.toBeNull();
+});
+
+test("a member without write access sees a waiting ticket but no retry or close", async () => {
+  const { container } = await mountWithIntl(
+    <TicketList
+      workspaceId="ws_1"
+      tickets={[ticket({ id: "t_wait", stage: "waiting_person" })]}
+      members={[]}
+      canWrite={false}
+    />,
+  );
+  const waiting = container.querySelector(
+    '[data-ticket-id="t_wait"]',
+  ) as HTMLElement;
+  expect(waiting).not.toBeNull();
+  expect(buttons("Retry", waiting)).toHaveLength(0);
+  expect(buttons("Close", waiting)).toHaveLength(0);
 });

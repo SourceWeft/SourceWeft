@@ -1726,7 +1726,7 @@
   "dashboardAssistant": {
     "page": {
       "title": "工作区助理",
-      "subtitle": "在共享动态里提出工作请求。助理会为每个请求开一个工单，并在这里汇报进展。",
+      "subtitle": "在共享动态里提出工作请求。助理会为每个请求开一个工单，并在这里回报进度。",
       "loading": "正在加载助理…",
       "loadError": "无法加载助理。",
       "feedHeading": "动态",
@@ -7297,7 +7297,7 @@
       "assistant_reply": "助理回复了你的消息。",
       "assistant_question": "“{taskName}”有问题要问你。",
       "assistant_ticket_blocked": "“{taskName}”已停止：{reason, select, credit_cap {达到额度上限} insufficient_credits {你的额度不足} other {多次运行失败}}。",
-      "assistant_messages_blocked": "你发给助理的消息正在等待：你的额度不足。",
+      "assistant_messages_blocked": "你传给助理的消息正在等待：你的额度不足。",
       "assistant_unavailable": "助理有 {count} 条消息无法处理。",
       "unknown": "关于“{taskName}”的更新。"
     },

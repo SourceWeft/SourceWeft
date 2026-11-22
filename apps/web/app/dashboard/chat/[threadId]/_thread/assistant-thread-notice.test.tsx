@@ -8,7 +8,7 @@ vi.mock("next/link", () => ({
 }));
 
 import { AssistantThreadNotice } from "./assistant-thread-notice";
-import { isHostOwnedChat } from "./host-owned-thread";
+import { isHostOwnedChat, unlistedLookupState } from "./host-owned-thread";
 import { mountWithIntl, unmountAll } from "@/test/react";
 
 afterEach(unmountAll);
@@ -37,4 +37,34 @@ test("the Router's work log and a ticket conversation each say they take no mess
   expect(ticket.container.textContent).toContain(
     "belongs to an assistant ticket",
   );
+});
+
+test("a thread is looked up on its own only once the lists have settled without it", () => {
+  const base = {
+    workspaceId: "ws_1",
+    listed: false,
+    listsSettled: true,
+    queryPending: true,
+  };
+  // Lists settled, thread not in them: look it up, and hold the
+  // "missing thread" verdict until the answer comes.
+  expect(unlistedLookupState(base)).toEqual({ enabled: true, pending: true });
+  expect(unlistedLookupState({ ...base, queryPending: false })).toEqual({
+    enabled: true,
+    pending: false,
+  });
+  // A cold open while the lists still load: no extra request.
+  expect(unlistedLookupState({ ...base, listsSettled: false })).toEqual({
+    enabled: false,
+    pending: false,
+  });
+  // The lists hold it, or there is no workspace: nothing to look up.
+  expect(unlistedLookupState({ ...base, listed: true })).toEqual({
+    enabled: false,
+    pending: false,
+  });
+  expect(unlistedLookupState({ ...base, workspaceId: null })).toEqual({
+    enabled: false,
+    pending: false,
+  });
 });

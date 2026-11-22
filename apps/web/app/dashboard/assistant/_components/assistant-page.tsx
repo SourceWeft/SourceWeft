@@ -27,20 +27,26 @@ export function AssistantPage() {
   const viewerId = session?.user?.id ?? null;
   const assistantQuery = useAssistant(workspaceId);
   const assistant = assistantQuery.data ?? null;
-  const members = useAssistantMembers(workspaceId).data ?? [];
+  const membersQuery = useAssistantMembers(workspaceId);
+  const members = membersQuery.data ?? [];
   const { isAdmin, canWrite } = viewerStanding(members, viewerId);
   const feed = useAssistantFeed(workspaceId, Boolean(assistant));
   const tickets = useAssistantTickets(workspaceId, Boolean(assistant));
 
-  // Loading until the first answer: `isPending`, so a query paused for the
-  // network does not read as "not enabled". With no workspace the query
-  // never runs, so that case is not loading.
+  // Loading until the first answers: `isPending`, so a query paused for the
+  // network does not read as "not enabled". With no workspace the queries
+  // never run, so that case is not loading. The members decide whether the
+  // viewer is an admin and who the steward is, so the page waits for them
+  // too rather than show "ask an admin" or "a former member" in the meantime.
   const loading =
-    !hasWorkspaceHydrated || (Boolean(workspaceId) && assistantQuery.isPending);
+    !hasWorkspaceHydrated ||
+    (Boolean(workspaceId) &&
+      (assistantQuery.isPending || membersQuery.isPending));
 
-  const steward = assistant
-    ? (memberName(members, assistant.stewardUserId) ?? t("feed.formerMember"))
-    : null;
+  const steward =
+    !loading && assistant
+      ? (memberName(members, assistant.stewardUserId) ?? t("feed.formerMember"))
+      : null;
   const disabledReason = !assistant
     ? null
     : assistant.status === "paused"
@@ -78,7 +84,7 @@ export function AssistantPage() {
             </p>
           ) : null}
         </div>
-        {assistant ? (
+        {assistant && !loading ? (
           <AssistantMenu
             assistant={assistant}
             workspaceId={workspaceId}
@@ -146,6 +152,7 @@ export function AssistantPage() {
                 workspaceId={workspaceId}
                 tickets={tickets.data ?? []}
                 members={members}
+                canWrite={canWrite}
                 highlightTicketId={params.get("ticket")}
               />
             )}

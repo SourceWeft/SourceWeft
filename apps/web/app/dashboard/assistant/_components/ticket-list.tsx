@@ -37,11 +37,14 @@ export function TicketList({
   workspaceId,
   tickets,
   members,
+  canWrite,
   highlightTicketId = null,
 }: {
   workspaceId: string | null;
   tickets: readonly AssistantTicket[];
   members: readonly WorkspaceMember[];
+  /** Retry and Close are writes; a read-only member is not offered them. */
+  canWrite: boolean;
   /** The ticket a notification pointed at, scrolled to and marked. */
   highlightTicketId?: string | null;
 }) {
@@ -75,6 +78,7 @@ export function TicketList({
                 ticket={ticket}
                 members={members}
                 workspaceId={workspaceId}
+                canWrite={canWrite}
                 highlighted={ticket.id === highlightTicketId}
               />
             ))}
@@ -89,11 +93,13 @@ function TicketRow({
   ticket,
   members,
   workspaceId,
+  canWrite,
   highlighted,
 }: {
   ticket: AssistantTicket;
   members: readonly WorkspaceMember[];
   workspaceId: string | null;
+  canWrite: boolean;
   highlighted: boolean;
 }) {
   const t = useTranslations("dashboardAssistant");
@@ -102,6 +108,7 @@ function TicketRow({
   const ref = React.useRef<HTMLLIElement>(null);
   const payer = memberName(members, ticket.payerUserId);
   const needsPerson = ticket.stage === "waiting_person";
+  const canAct = needsPerson && canWrite;
   const busy = retryTicket.isPending || closeTicket.isPending;
 
   React.useEffect(() => {
@@ -144,7 +151,7 @@ function TicketRow({
           {ticket.lastReportSummary}
         </p>
       ) : null}
-      {needsPerson ? (
+      {canAct ? (
         <div className="flex gap-2 pt-1">
           <Button
             size="sm"

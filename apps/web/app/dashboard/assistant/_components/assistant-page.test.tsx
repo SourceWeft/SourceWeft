@@ -65,6 +65,7 @@ function assistant(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   hooks.useAssistantMembers.mockReturnValue({
     data: [{ userId: "u_me", name: "Me", email: null }],
+    isPending: false,
   });
   hooks.viewerStanding.mockReturnValue({ isAdmin: false, canWrite: true });
   hooks.useAssistantFeed.mockReturnValue({
@@ -142,4 +143,34 @@ test("a failed load says so", async () => {
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     "Could not load",
   );
+});
+
+test("while the members are loading the page waits, instead of telling an admin to ask one", async () => {
+  hooks.useAssistant.mockReturnValue({
+    data: null,
+    isPending: false,
+    isError: false,
+  });
+  hooks.useAssistantMembers.mockReturnValue({
+    data: undefined,
+    isPending: true,
+  });
+  const { container } = await mountWithIntl(<AssistantPage />);
+  expect(container.querySelector('[data-testid="enable"]')).toBeNull();
+  expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+});
+
+test("while the members are loading an enabled assistant names no steward yet", async () => {
+  hooks.useAssistant.mockReturnValue({
+    data: assistant({ stewardUserId: "u_other" }),
+    isPending: false,
+    isError: false,
+  });
+  hooks.useAssistantMembers.mockReturnValue({
+    data: undefined,
+    isPending: true,
+  });
+  const { container } = await mountWithIntl(<AssistantPage />);
+  expect(container.textContent).not.toContain("A former member");
+  expect(container.textContent).not.toContain("Steward:");
 });

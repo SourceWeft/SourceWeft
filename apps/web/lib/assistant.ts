@@ -136,7 +136,8 @@ export function useAssistantMutations(workspaceId: string | null) {
     ),
     closeTicket: useAction((ticketId: string) =>
       assistantClient.closeTicket(need(), ticketId, {
-        // One key per click: a double click closes once.
+        // A fresh key per click. A double click is stopped by the buttons'
+        // busy state, not by the key; closing an ended ticket is a no-op.
         idempotencyKey: crypto.randomUUID(),
       }),
     ),
