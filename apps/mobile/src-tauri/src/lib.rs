@@ -268,7 +268,8 @@ unsafe fn add_loading_bar(launch_view: *mut objc2::runtime::AnyObject) {
     // splash.html puts the bar's top 32 points below the middle of the web view's span.
     const BELOW_CENTRE: f64 = 32.0 + HEIGHT / 2.0;
 
-    // The storyboard's first subview is the hidden span the web view lays its pages out in.
+    // The storyboard's first subview is the hidden span the wordmark is centred in, placed
+    // where the web view centres its pages (see LaunchScreen.storyboard).
     let subviews: *mut AnyObject = msg_send![&*launch_view, subviews];
     let span: *mut AnyObject = msg_send![&*subviews, firstObject];
     if span.is_null() {

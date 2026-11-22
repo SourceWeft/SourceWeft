@@ -294,6 +294,25 @@ test("Google Sign-In's reversed iOS client is a registered URL scheme", () => {
   );
 });
 
+// iOS renders the launch image with other safe-area insets than the running
+// app (about 44 top and 0 bottom on an iPhone 16 Pro, against 62 and 34), so a
+// wordmark centred in the safe area jumped 8pt when the app took over. The span
+// the wordmark is centred in is tied to the screen instead: 28pt below its top
+// (62 - 34, the web view's offset on Dynamic Island iPhones) down to its bottom.
+test("the launch wordmark is placed from the screen, not the safe area", () => {
+  const storyboard = read(resolve(apple, "LaunchScreen.storyboard"));
+  const constraint = (id) =>
+    storyboard.match(new RegExp(`<constraint [^>]*id="${id}"/>`))?.[0] ?? "";
+  assert.match(constraint("Sp1-Top-Cn1"), /secondItem="5EZ-qb-Rvc"/);
+  assert.match(constraint("Sp1-Top-Cn1"), /constant="28"/);
+  assert.match(constraint("Sp1-Bot-Cn1"), /secondItem="5EZ-qb-Rvc"/);
+  assert.match(constraint("Cy1-Lb-Sw1"), /secondItem="Sp1-Ar-Ea1"/);
+  assert.doesNotMatch(
+    constraint("Sp1-Top-Cn1") + constraint("Sp1-Bot-Cn1"),
+    /vDu-zF-Fre/,
+  );
+});
+
 // The launch image, the splash page and the web cover show the same text
 // wordmark, with no image, so the hand-over between them does not change.
 test("the launch image, splash and web cover show the same text wordmark", () => {

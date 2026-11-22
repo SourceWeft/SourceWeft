@@ -6,10 +6,11 @@
     <meta name="color-scheme" content="light dark" />
     <title>SourceWeft</title>
     <!-- Shown while the web app loads. Without viewport-fit=cover the viewport runs from
-         below the status bar to the bottom of the screen, as it does for the web app's own
-         launch cover, and LaunchScreen.storyboard centres its wordmark in that same span, so
-         the three hand over without the wordmark moving. If loading takes a while it says
-         so; if it fails (the app opens this page as #failed), it offers a retry. -->
+         the safe-area top to the safe-area bottom, as it does for the web app's own launch
+         cover, and LaunchScreen.storyboard puts its wordmark at the centre of that span on
+         Dynamic Island iPhones, so the three hand over without the wordmark moving. If
+         loading takes a while it says so; if it fails (the app opens this page as
+         #failed), it offers a retry. -->
     <style>
       :root { --bg: #ffffff; --fg: #000000; --muted: #737373; }
       @media (prefers-color-scheme: dark) {
