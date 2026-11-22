@@ -1,6 +1,7 @@
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 
-export type SidebarChatFilter = "all" | "shared" | "private" | "scheduled" | "archived";
+export type SidebarChatFilter =
+  "all" | "shared" | "private" | "scheduled" | "assistant" | "archived";
 
 export function getSidebarChatItems({
   privateChats,
@@ -38,9 +39,13 @@ export function getSidebarChatItems({
         filter === "archived" ||
         (filter === "scheduled"
           ? item.origin === "scheduled"
-          : filter === "shared"
-            ? isSharedChat(item)
-            : !isSharedChat(item)),
+          : filter === "assistant"
+            ? // A workspace assistant's ticket conversations; its Router
+              // conversation is a work log and never listed.
+              item.origin === "assistant_ticket"
+            : filter === "shared"
+              ? isSharedChat(item)
+              : !isSharedChat(item)),
     )
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }

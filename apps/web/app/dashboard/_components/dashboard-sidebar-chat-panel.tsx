@@ -14,6 +14,7 @@ import {
   ArchiveRestore,
   Bot,
   CalendarClock,
+  ConciergeBell,
   Download,
   ExternalLink,
   Link2,
@@ -988,7 +989,9 @@ function ChatList({
         ? t("chats.archived")
         : filter === "scheduled"
           ? t("chats.scheduled")
-          : t("chats.private");
+          : filter === "assistant"
+            ? t("chats.assistant")
+            : t("chats.private");
 
   const renderChat = (item: ChatItem) => (
     <Fragment key={item.id}>
@@ -1170,6 +1173,7 @@ function ChatList({
                   value === "shared" ||
                   value === "private" ||
                   value === "scheduled" ||
+                  value === "assistant" ||
                   value === "archived"
                 ) {
                   setFilter(value);
@@ -1191,6 +1195,10 @@ function ChatList({
               <DropdownMenuRadioItem value="scheduled">
                 <CalendarClock className="size-4" />
                 {t("chats.scheduled")}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="assistant">
+                <ConciergeBell className="size-4" />
+                {t("chats.assistant")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="archived">
                 <Archive className="size-4" />

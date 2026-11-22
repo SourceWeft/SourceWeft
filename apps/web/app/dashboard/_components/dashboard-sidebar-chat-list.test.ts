@@ -126,3 +126,24 @@ test("the scheduled filter keeps only the conversations a task run created", () 
     ["run-2", "run-1"],
   );
 });
+
+test("the assistant filter keeps only assistant ticket conversations", () => {
+  const filtered = getSidebarChatItems({
+    ...input,
+    privateChats: [
+      chat("ticket-1", "private", 7, "assistant_ticket"),
+      chat("ordinary", "private", 5, "user"),
+      chat("run", "private", 4, "scheduled"),
+    ],
+    sharedChats: [
+      chat("ticket-2", "workspace", 8, "assistant_ticket"),
+      // The Router's own conversation is a work log, never a listed ticket.
+      chat("router", "workspace", 9, "assistant_router"),
+    ],
+    filter: "assistant",
+  });
+  assert.deepEqual(
+    filtered.map((item) => item.id),
+    ["ticket-2", "ticket-1"],
+  );
+});

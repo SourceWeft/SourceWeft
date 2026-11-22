@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   CalendarClock,
   ChevronRight,
+  ConciergeBell,
   CreditCard,
   Info,
   LayoutGrid,
@@ -250,6 +251,17 @@ export function DashboardMobileMe() {
                   icon={CalendarClock}
                   label={t("nav.scheduled")}
                   tint="bg-orange-500"
+                />
+              </Link>
+              <Link
+                className={rowClass}
+                href="/dashboard/assistant"
+                onClick={openMain}
+              >
+                <MeRowContent
+                  icon={ConciergeBell}
+                  label={t("nav.assistant")}
+                  tint="bg-violet-500"
                 />
               </Link>
               <button

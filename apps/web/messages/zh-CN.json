@@ -1007,7 +1007,8 @@
       "more": "更多",
       "me": "我",
       "mainNavigation": "主导航",
-      "scheduled": "定时任务"
+      "scheduled": "定时任务",
+      "assistant": "助理"
     },
     "sidebar": {
       "newChat": "新建对话",
@@ -1043,6 +1044,7 @@
       "shared": "共享",
       "private": "私密",
       "scheduled": "定时任务",
+      "assistant": "助理",
       "archived": "归档",
       "clearFilter": "清除{filter}筛选",
       "openActions": "打开对话操作",
@@ -1095,6 +1097,7 @@
         "shared": "没有共享对话。",
         "private": "没有私密对话。",
         "scheduled": "没有定时任务的结果。",
+        "assistant": "没有助理工单。",
         "archived": "没有归档对话。"
       },
       "loading": "加载中…",
@@ -1718,6 +1721,113 @@
       "logoUnavailable": "标志不可用：{name}",
       "publisherAvatar": "{name} 的 GitHub 发布者头像",
       "logo": "{name} 标志"
+    }
+  },
+  "dashboardAssistant": {
+    "page": {
+      "title": "工作区助理",
+      "subtitle": "在共享动态里提出工作请求。助理会为每个请求开一个工单，并在这里汇报进展。",
+      "loading": "正在加载助理…",
+      "loadError": "无法加载助理。",
+      "feedHeading": "动态",
+      "ticketsHeading": "工单",
+      "steward": "负责人：{name}"
+    },
+    "status": {
+      "active": "运行中",
+      "paused": "已暂停"
+    },
+    "statusReason": {
+      "steward_left": "负责人已离开工作区，助理已暂停。管理员可以指定新的负责人，然后恢复运行。",
+      "by_admin": "已由工作区成员暂停。"
+    },
+    "enable": {
+      "title": "助理尚未启用",
+      "body": "启用后，成员在共享动态里提出工作请求，助理把每个请求作为单独的工单来处理，费用由提出请求的人支付。",
+      "button": "启用助理",
+      "askAdmin": "请联系工作区管理员启用助理。"
+    },
+    "feed": {
+      "empty": "还没有消息。在下方向助理提出请求吧。",
+      "loadError": "无法加载动态。",
+      "loadOlder": "加载更早的消息",
+      "you": "你",
+      "assistant": "助理",
+      "formerMember": "已离开的成员",
+      "ticket": "工单：{title}",
+      "openConversation": "打开对话"
+    },
+    "composer": {
+      "label": "给助理发送消息",
+      "placeholder": "请助理帮你做点什么…",
+      "send": "发送",
+      "sending": "正在发送…",
+      "hint": "按 {shortcut} 发送。",
+      "paused": "助理已暂停，暂不接收新消息。",
+      "readOnly": "你可以查看动态，但不能在这个工作区发送消息。",
+      "tooLong": "消息最多 {max} 个字符。",
+      "sendFailed": "消息没有发送成功，内容还在输入框里，请重试。"
+    },
+    "tickets": {
+      "groups": {
+        "needsPerson": "需要你处理",
+        "inProgress": "进行中",
+        "idle": "空闲"
+      },
+      "empty": "没有未结束的工单。",
+      "loadError": "无法加载工单。",
+      "requestedBy": "由 {name} 提出",
+      "retry": "重试",
+      "close": "关闭",
+      "openConversation": "打开对话",
+      "stage": {
+        "queued": "排队中",
+        "working": "处理中",
+        "waiting_person": "等待处理",
+        "idle": "空闲",
+        "ended": "已结束"
+      },
+      "blockedReason": {
+        "credit_cap": "已停止：达到额度上限。",
+        "insufficient_credits": "已停止：提出请求的人额度不足。",
+        "repeated_failure": "已停止：多次运行失败。"
+      }
+    },
+    "menu": {
+      "open": "助理操作",
+      "pause": "暂停",
+      "resume": "恢复",
+      "changeSteward": "更换负责人",
+      "viewWorkLog": "查看工作记录"
+    },
+    "steward": {
+      "title": "更换负责人",
+      "body": "助理无法处理消息时会通知负责人。请选择能访问这个工作区的成员。",
+      "label": "负责人",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "toasts": {
+      "enabled": "助理已启用。",
+      "paused": "助理已暂停。",
+      "resumed": "助理已恢复。",
+      "stewardChanged": "负责人已更换。",
+      "retried": "工单已重新开始处理。",
+      "closed": "工单已关闭。"
+    },
+    "errors": {
+      "ASSISTANT_ALREADY_ENABLED": "助理已经启用。",
+      "ASSISTANT_FORBIDDEN": "你没有权限执行这个操作。",
+      "ASSISTANT_NOT_FOUND": "这个工作区还没有启用助理。",
+      "ASSISTANT_TICKET_NOT_FOUND": "这个工单已不存在。",
+      "ASSISTANT_PAUSED": "助理已暂停。",
+      "ASSISTANT_VERSION_CONFLICT": "助理刚被别人修改过，请重试。",
+      "generic": "出了点问题，请重试。"
+    },
+    "threadNotice": {
+      "router": "这是助理的工作记录。助理会自行运行，这里不接收消息。",
+      "ticket": "这个对话属于助理的一个工单，这里不接收消息。",
+      "open": "去和助理对话"
     }
   },
   "dashboardChat": {
@@ -7184,6 +7294,11 @@
       "research_failed": "你关于“{topic}”的研究未能完成。",
       "artifact_generation_failed": "“{title}”生成失败。在资料中心的“制品”中打开它，可查看原因。",
       "artifact_regeneration_failed": "“{title}”重新生成失败，上一个版本仍保留。打开它可查看原因。",
+      "assistant_reply": "助理回复了你的消息。",
+      "assistant_question": "“{taskName}”有问题要问你。",
+      "assistant_ticket_blocked": "“{taskName}”已停止：{reason, select, credit_cap {达到额度上限} insufficient_credits {你的额度不足} other {多次运行失败}}。",
+      "assistant_messages_blocked": "你发给助理的消息正在等待：你的额度不足。",
+      "assistant_unavailable": "助理有 {count} 条消息无法处理。",
       "unknown": "关于“{taskName}”的更新。"
     },
     "composer": {

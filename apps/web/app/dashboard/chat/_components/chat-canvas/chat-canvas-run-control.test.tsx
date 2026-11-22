@@ -134,3 +134,16 @@ test("the new-chat composer has no lookup and offers Send immediately", async ()
   assert.equal(composer().onStopStreaming, undefined);
   assert.equal(composer().submitDisabled, false);
 });
+
+test("a conversation that takes no messages shows its notice instead of the composer", async () => {
+  const view = await mountWithIntl(
+    createElement(ChatCanvas, {
+      ...threadProps,
+      activeRunLookupPending: false,
+      chatExecutionState: "idle",
+      composerNotice: createElement("p", { "data-testid": "notice" }, "No"),
+    }),
+  );
+  assert.equal(composerProps.current, null);
+  assert.ok(view.container.querySelector('[data-testid="notice"]'));
+});

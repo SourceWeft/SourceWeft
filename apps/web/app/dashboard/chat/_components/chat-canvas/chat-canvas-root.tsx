@@ -156,6 +156,7 @@ export function ChatCanvas({
   activeRunLookupPending = false,
   otherUserRunActive = false,
   typingIndicator,
+  composerNotice,
   onComposerType,
   queuedSends = [],
   onCancelQueuedSend,
@@ -225,6 +226,11 @@ export function ChatCanvas({
   // them a Stop button for a run they don't own.
   otherUserRunActive?: boolean;
   typingIndicator?: ReactNode;
+  /**
+   * Shown instead of the composer in a conversation that takes no messages
+   * from the viewer (a workspace assistant's own conversation).
+   */
+  composerNotice?: ReactNode;
   onComposerType?: () => void;
   // Messages the user submitted while a run was streaming, awaiting auto-send
   // when the thread frees. Rendered as a compact stack above the composer.
@@ -1000,70 +1006,74 @@ export function ChatCanvas({
             </div>
           ) : null}
           {typingIndicator}
-          <Composer
-            onRegisterContinuationInput={registerContinuationInput}
-            draftKey={composerDraftKey}
-            dictationWorkspaceId={workspaceId}
-            placeholder={
-              localStatus.blocked
-                ? `${localStatus.message ?? t("chatRoot.computerUnavailable")} ${t("chatRoot.keepWritingDraft")}`
-                : undefined
-            }
-            workingFolderSlot={workingFolderSlot}
-            className="w-full"
-            allSources={allSources}
-            sourceMentionLoader={sourceMentionLoader}
-            submitDisabled={isSubmitDisabledForRun}
-            isStopping={isStopping}
-            initialAttachments={editingInitialAttachments}
-            initialCommand={composerInitialCommand}
-            initialInput={composerInitialInput}
-            isEditing={isEditing}
-            inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
-            onCancelEditing={onCancelEditing}
-            onRemoveSource={handleRemoveSource}
-            onSkillSelectionChange={handleSkillSelectionChange}
-            onSearchEnabledChange={onSearchEnabledChange}
-            onSubmit={(
-              message,
-              tools,
-              command,
-              skillIds,
-              content,
-              invocation,
-            ) =>
-              handleSendMessage({
-                content: content ?? message.text.trim(),
-                images: promptFilesToImages(message.files),
-                mentionedSourceIds: message.mentionedSourceIds,
-                skillIds,
+          {composerNotice ? (
+            composerNotice
+          ) : (
+            <Composer
+              onRegisterContinuationInput={registerContinuationInput}
+              draftKey={composerDraftKey}
+              dictationWorkspaceId={workspaceId}
+              placeholder={
+                localStatus.blocked
+                  ? `${localStatus.message ?? t("chatRoot.computerUnavailable")} ${t("chatRoot.keepWritingDraft")}`
+                  : undefined
+              }
+              workingFolderSlot={workingFolderSlot}
+              className="w-full"
+              allSources={allSources}
+              sourceMentionLoader={sourceMentionLoader}
+              submitDisabled={isSubmitDisabledForRun}
+              isStopping={isStopping}
+              initialAttachments={editingInitialAttachments}
+              initialCommand={composerInitialCommand}
+              initialInput={composerInitialInput}
+              isEditing={isEditing}
+              inputKey={threadTitle + "-" + (composerResetKey ?? 0)}
+              onCancelEditing={onCancelEditing}
+              onRemoveSource={handleRemoveSource}
+              onSkillSelectionChange={handleSkillSelectionChange}
+              onSearchEnabledChange={onSearchEnabledChange}
+              onSubmit={(
+                message,
                 tools,
                 command,
+                skillIds,
+                content,
                 invocation,
-              })
-            }
-            onStopStreaming={composerStopStreaming}
-            stopPending={isComposerStopPending}
-            onType={onComposerType}
-            onThinkingSettingsChange={onThinkingSettingsChange}
-            searchEnabled={searchEnabled}
-            availableSkills={availableSkills}
-            capabilityCatalog={capabilityCatalog}
-            selectedSkillIds={selectedSkillIds}
-            selectedMcpInstallIds={selectedMcpInstallIds}
-            selectedMcpToolIds={selectedMcpToolIds}
-            selectedSources={selectedSources}
-            thinkingCapabilities={thinkingCapabilities}
-            thinkingSettings={thinkingSettings}
-            modelCapabilities={modelCapabilities}
-            imageModelAvailable={imageModelAvailable}
-            imageModelAlias={imageModelAlias}
-            notionConnectorId={notionConnectorId}
-            disabledToolNames={disabledToolNames}
-            onDisabledToolNamesChange={onDisabledToolNamesChange}
-            composerOptions={composerOptions}
-            onComposerOptionsChange={onComposerOptionsChange}
-          />
+              ) =>
+                handleSendMessage({
+                  content: content ?? message.text.trim(),
+                  images: promptFilesToImages(message.files),
+                  mentionedSourceIds: message.mentionedSourceIds,
+                  skillIds,
+                  tools,
+                  command,
+                  invocation,
+                })
+              }
+              onStopStreaming={composerStopStreaming}
+              stopPending={isComposerStopPending}
+              onType={onComposerType}
+              onThinkingSettingsChange={onThinkingSettingsChange}
+              searchEnabled={searchEnabled}
+              availableSkills={availableSkills}
+              capabilityCatalog={capabilityCatalog}
+              selectedSkillIds={selectedSkillIds}
+              selectedMcpInstallIds={selectedMcpInstallIds}
+              selectedMcpToolIds={selectedMcpToolIds}
+              selectedSources={selectedSources}
+              thinkingCapabilities={thinkingCapabilities}
+              thinkingSettings={thinkingSettings}
+              modelCapabilities={modelCapabilities}
+              imageModelAvailable={imageModelAvailable}
+              imageModelAlias={imageModelAlias}
+              notionConnectorId={notionConnectorId}
+              disabledToolNames={disabledToolNames}
+              onDisabledToolNamesChange={onDisabledToolNamesChange}
+              composerOptions={composerOptions}
+              onComposerOptionsChange={onComposerOptionsChange}
+            />
+          )}
         </div>
       </div>
     </section>
