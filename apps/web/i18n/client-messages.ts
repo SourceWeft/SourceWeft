@@ -20,7 +20,8 @@ export const CLIENT_NAMESPACES = {
    * privacy, terms). `authLocale` feeds Better Auth's localization through
    * `useMessages()` in `app/providers.tsx`. `authPages.oneTap` is read by
    * `GoogleOneTap`, which mounts in the root providers on every route.
-   * `table` is read by the table viewer on the public share page.
+   * `table` and `study` are read by the table and study viewers on the
+   * public share page.
    */
   root: [
     "artifactShare",
@@ -34,6 +35,7 @@ export const CLIENT_NAMESPACES = {
     "header",
     "languageSwitcher",
     "mobileRouteSheet",
+    "study",
     "table",
     "ui",
   ],
@@ -114,6 +116,7 @@ export const CLIENT_NAMESPACES = {
     "mcp.authMethod",
     "mcp.badges.runtime",
     "mcp.readme",
+    "study",
     "table",
   ],
   /** `app/artifact-preview`: renders the chat canvas around a shared artifact. */
@@ -136,6 +139,7 @@ export const CLIENT_NAMESPACES = {
     "mcp.authMethod",
     "mcp.badges.runtime",
     "mcp.readme",
+    "study",
     "table",
   ],
 } as const satisfies Record<string, readonly string[]>;

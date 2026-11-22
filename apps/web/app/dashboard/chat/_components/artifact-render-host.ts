@@ -8,6 +8,7 @@
  * capability component has already configured it.
  */
 import { configureArtifactRenderHost } from "@sourceweft/agent-tool-registry/ui";
+import { configureStudyHost } from "@sourceweft/builtin-tool-study/ui";
 import { configureTableHost } from "@sourceweft/builtin-tool-table/ui";
 import { createAppArtifactRecordsTransport } from "../../../../lib/artifact-records-transport";
 import { apiBaseUrl, contentClient } from "../../../../lib/sdk";
@@ -22,6 +23,7 @@ import {
   getToolOutputValue,
 } from "./chat-canvas/message-assets";
 import { useArtifactSnapshot } from "./chat-canvas/use-artifact-snapshot";
+import { webStudyHost } from "./artifact-preview/study-host";
 import { webTableHost } from "./artifact-preview/table-host";
 import { emitArtifactApprovalChanged } from "./sources-hub/artifacts/artifact-approval-events";
 
@@ -61,3 +63,4 @@ configureArtifactRenderHost({
 });
 
 configureTableHost(webTableHost);
+configureStudyHost(webStudyHost);

@@ -1,4 +1,4 @@
-import type { StudyKind, StudySize } from "@sourceweft/contracts/study";
+import type { StudyKind } from "@sourceweft/contracts/study";
 
 /**
  * Cost bounds of one study generation. Code constants, not settings: they
@@ -14,12 +14,8 @@ export {
   SINGLE_PASS_MAX_INPUT_TOKENS,
 } from "@sourceweft/grounded-generation";
 
-/** Item counts per size step; mind maps count nodes below the root. */
-export const STUDY_SIZE_COUNTS: Record<StudyKind, Record<StudySize, number>> = {
-  flashcards: { fewer: 10, standard: 20, more: 40 },
-  quiz: { fewer: 5, standard: 10, more: 20 },
-  mindmap: { fewer: 20, standard: 40, more: 80 },
-};
+/** Item counts per size step (shared with the generate dialog). */
+export { STUDY_SIZE_COUNTS } from "@sourceweft/contracts/study";
 
 /** Items are asked for at this multiple of the request, then cut back. */
 export const OVERGENERATE_FACTOR = 1.3;

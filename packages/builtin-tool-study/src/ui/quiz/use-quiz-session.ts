@@ -101,6 +101,7 @@ export function useQuizSession({
       if (!interactive || !attemptId) return true;
       try {
         await host.saveQuizAnswers({
+          workspaceId,
           attemptId,
           answers,
           ...(finish ? { finish: true } : {}),
@@ -111,7 +112,7 @@ export function useQuizSession({
         return false;
       }
     },
-    [host, interactive],
+    [host, interactive, workspaceId],
   );
 
   const start = useCallback(

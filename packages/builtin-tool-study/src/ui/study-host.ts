@@ -68,6 +68,8 @@ export type StudyHost = {
     input: StudyVersionRef & { itemIds?: readonly string[] },
   ): Promise<QuizAttemptView>;
   saveQuizAnswers(input: {
+    /** The workspace the attempt's artifact belongs to. */
+    workspaceId: string;
     attemptId: string;
     answers: Readonly<Record<string, QuizAnswer>>;
     finish?: boolean;
@@ -90,8 +92,93 @@ export type StudyHost = {
   downloadText(fileName: string, mimeType: string, body: string): void;
   getFreshness(ref: StudyVersionRef): Promise<StudyFreshness>;
   /** Present when the app can regenerate (retry a failure, refresh a stale artifact). */
-  readonly requestRegenerate?: (ref: StudyVersionRef) => void;
+  readonly requestRegenerate?: (ref: StudyVersionRef) => void | Promise<void>;
 };
+
+/**
+ * Every translation key the study viewers and the shared evidence and
+ * staleness components ask the host for, so an app can check its catalogs
+ * cover them. Keys built from a value are listed once per value.
+ */
+export const STUDY_TRANSLATION_KEYS = [
+  "study.status.queued",
+  "study.status.generating",
+  "study.error.retry",
+  "study.error.cannotDisplay",
+  "study.error.code.INSUFFICIENT_CREDITS",
+  "study.error.code.INPUT_TOO_LARGE",
+  "study.error.code.NO_INDEXED_SOURCES",
+  "study.error.code.MODEL_UNAVAILABLE",
+  "study.error.code.GENERATION_QUALITY_TOO_LOW",
+  "study.error.code.SOURCE_NOT_READABLE",
+  "study.error.code.UNKNOWN",
+  "study.evidence.show",
+  "study.evidence.hide",
+  "study.evidence.sourceChanged",
+  "study.evidence.openSource",
+  "study.stale.message",
+  "study.stale.sourceDeleted",
+  "study.stale.regenerate",
+  "study.flashcards.label",
+  "study.flashcards.mode.browse",
+  "study.flashcards.mode.review",
+  "study.flashcards.progress",
+  "study.flashcards.exportAnki",
+  "study.flashcards.showFront",
+  "study.flashcards.showBack",
+  "study.flashcards.showingFront",
+  "study.flashcards.showingBack",
+  "study.flashcards.gradeFailed",
+  "study.flashcards.nothingDue",
+  "study.flashcards.done",
+  "study.flashcards.restart",
+  "study.flashcards.previous",
+  "study.flashcards.next",
+  "study.flashcards.hintFlip",
+  "study.flashcards.hintGrade",
+  "study.flashcards.gradeLabel",
+  "study.flashcards.grade.again",
+  "study.flashcards.grade.hard",
+  "study.flashcards.grade.good",
+  "study.flashcards.grade.easy",
+  "study.quiz.loading",
+  "study.quiz.intro",
+  "study.quiz.start",
+  "study.quiz.saveFailed",
+  "study.quiz.questionOf",
+  "study.quiz.previous",
+  "study.quiz.submit",
+  "study.quiz.next",
+  "study.quiz.true",
+  "study.quiz.false",
+  "study.quiz.chooseOne",
+  "study.quiz.chooseAll",
+  "study.quiz.yourAnswer",
+  "study.quiz.referenceAnswer",
+  "study.quiz.showReference",
+  "study.quiz.selfGrade.knew",
+  "study.quiz.selfGrade.missed",
+  "study.quiz.result.score",
+  "study.quiz.result.selfGraded",
+  "study.quiz.practiceMistakes",
+  "study.quiz.restart",
+  "study.quiz.verdict.correct",
+  "study.quiz.verdict.wrong",
+  "study.quiz.verdict.self.knew",
+  "study.quiz.verdict.self.missed",
+  "study.quiz.verdict.self.none",
+  "study.quiz.correctAnswer",
+  "study.mindmap.view.map",
+  "study.mindmap.view.outline",
+  "study.mindmap.exportMarkdown",
+  "study.mindmap.exportJson",
+  "study.mindmap.detailLabel",
+  "study.mindmap.askPrompt",
+  "study.mindmap.askInChat",
+  "study.mindmap.expand",
+  "study.mindmap.collapse",
+  "study.mindmap.outlineLabel",
+] as const;
 
 function notAvailable(): Promise<never> {
   return Promise.reject(new Error("Learning state is not available here"));

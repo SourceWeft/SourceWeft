@@ -208,6 +208,15 @@ export const STUDY_SIZES = ["fewer", "standard", "more"] as const;
 export const studySizeSchema = z.enum(STUDY_SIZES);
 export type StudySize = z.infer<typeof studySizeSchema>;
 
+/** Item counts per size step; mind maps count nodes below the root. */
+export const STUDY_SIZE_COUNTS: Readonly<
+  Record<StudyArtifactType, Readonly<Record<StudySize, number>>>
+> = {
+  flashcards: { fewer: 10, standard: 20, more: 40 },
+  quiz: { fewer: 5, standard: 10, more: 20 },
+  mindmap: { fewer: 20, standard: 40, more: 80 },
+};
+
 export const STUDY_DIFFICULTIES = ["easy", "mixed", "hard"] as const;
 export const studyDifficultySchema = z.enum(STUDY_DIFFICULTIES);
 export type StudyDifficulty = z.infer<typeof studyDifficultySchema>;

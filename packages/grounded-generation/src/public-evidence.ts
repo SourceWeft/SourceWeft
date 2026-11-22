@@ -13,7 +13,8 @@ import type { GroundedEvidence } from "@sourceweft/contracts/grounded-evidence";
  * Built field by field, not by deleting the private ones, so a field a producer
  * adds to evidence later stays private until someone decides it may travel.
  * Pure and browser-safe; shared by every grounded artifact type (tables and
- * study artifacts) so they strip the same way.
+ * study artifacts) so they strip the same way. Study artifacts narrow it
+ * further to the source alone (`publicStudyContent`).
  */
 export type PublicGroundedEvidence = {
   readonly kind: GroundedEvidence["kind"];

@@ -165,7 +165,7 @@ describe("StudyArtifactView", () => {
         createRecordingStudyHost(),
         view({
           status: "running",
-          payload: { study: { progress: { completed: 2, total: 5 } } },
+          payload: { study: { progress: { stage: "generate", done: 2, total: 5 } } },
         }),
       ),
     );

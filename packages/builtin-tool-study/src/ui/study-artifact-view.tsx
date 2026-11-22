@@ -22,10 +22,13 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** `payload.study.progress` while generating; tolerant of anything else. */
+/**
+ * `payload.study.progress` while generating (`done` of `total`, as the job
+ * writes it); tolerant of anything else.
+ */
 function readProgress(payload: Record<string, unknown>) {
   const progress = record(record(payload.study)?.progress);
-  const completed = progress?.completed;
+  const completed = progress?.done;
   const total = progress?.total;
   return typeof completed === "number" && typeof total === "number" && total > 0
     ? { completed: Math.min(completed, total), total }

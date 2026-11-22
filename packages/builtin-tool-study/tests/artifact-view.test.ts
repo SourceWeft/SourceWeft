@@ -76,7 +76,7 @@ for (const [artifactType, fixture] of [
   ["quiz", quizFixtureEn],
   ["mindmap", mindmapFixtureEn],
 ] as const) {
-  test(`the public payload of ${artifactType} has no evidence quote, start or end offsets`, async () => {
+  test(`the public payload of ${artifactType} has no evidence quote, offsets or chunk ids`, async () => {
     const handlers = await createArtifactViewHandlers();
     const handler = handlers.find((candidate) => candidate.artifactType === artifactType)!;
     assert.ok(handler.buildPublicPayload, `${artifactType} offers a public payload`);
@@ -88,7 +88,7 @@ for (const [artifactType, fixture] of [
     });
     assert.ok(payload);
     const serialized = JSON.stringify(payload);
-    for (const field of ["quote", "startChar", "endChar", "quoteHash", "headingPath"]) {
+    for (const field of ["quote", "startChar", "endChar", "quoteHash", "headingPath", "chunkId", "chunkNo"]) {
       assert.doesNotMatch(serialized, new RegExp(`"${field}"`), field);
     }
     for (const quote of quotes) {

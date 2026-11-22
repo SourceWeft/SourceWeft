@@ -38,11 +38,25 @@ function mapEvidence<E>(
 }
 
 /**
+ * Evidence as a public study share carries it: only the source an item was
+ * cited from. The shared grounded allow-list is narrowed further, so no
+ * document or chunk identifier leaves the workspace with a study set.
+ */
+export type PublicStudyEvidence = Pick<PublicGroundedEvidence, "kind" | "sourceId">;
+
+function toPublicStudyEvidence(evidence: readonly StudyEvidence[]): PublicStudyEvidence[] {
+  return toPublicGroundedEvidenceList(evidence).map(({ kind, sourceId }) => ({
+    kind,
+    sourceId,
+  }));
+}
+
+/**
  * The payload a public share hands an anonymous browser: the validated
- * content, each item's evidence reduced to where it was cited from.
+ * content, each item's evidence reduced to the source it was cited from.
  */
 export function publicStudyContent(content: StudyContent): Record<string, unknown> {
-  return mapEvidence<PublicGroundedEvidence>(content, toPublicGroundedEvidenceList);
+  return mapEvidence<PublicStudyEvidence>(content, toPublicStudyEvidence);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
