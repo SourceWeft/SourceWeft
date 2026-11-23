@@ -54,7 +54,12 @@ export function DashboardMobileContent({
               {t("common.observe")}
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-hidden">
+          {/* A flex column, so the page's own flex-1 root takes this height
+              and its list scrolls instead of growing past the screen. */}
+          <div
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            data-testid="mobile-observability-body"
+          >
             <ObservabilityPage />
           </div>
         </div>
