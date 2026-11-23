@@ -277,6 +277,20 @@ test("a sub-agent chat cannot be shared", async () => {
   });
 });
 
+test("an assistant conversation cannot be shared, even by its creator", async () => {
+  for (const origin of ["assistant_router", "assistant_ticket"] as const) {
+    const thread = await chat(`Assistant ${origin}`);
+    await schema.db
+      .update(schema.threads)
+      .set({ origin })
+      .where(eq(schema.threads.id, thread.id));
+    assert.deepEqual(await shares.shareThread(scope(thread.id)), {
+      ok: false,
+      reason: "not_found",
+    });
+  }
+});
+
 test("the public view is frozen until the chat is shared again on the same link", async () => {
   const thread = await chat("Before");
   await message(thread.id, { content: "First" });

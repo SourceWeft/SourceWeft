@@ -31,6 +31,7 @@ import {
   selectExportMessages,
 } from "../export/messages";
 import { listMessageRecordsByThread } from "../message-repository";
+import { isHostOwnedThreadOrigin } from "../thread/host-owned";
 import { findThreadRecord } from "../thread/repository";
 import {
   deleteThreadShareSnapshot,
@@ -114,7 +115,13 @@ export class ThreadShareService {
     if (!thread || !canViewThread(input.userId, thread)) {
       return { ok: false, reason: "not_found" };
     }
-    if (thread.parentThreadId !== null || thread.origin === "subagent") {
+    // A sub-agent's chat, and a workspace assistant's own conversations (the
+    // Router's work log holds every member's messages), are never shared.
+    if (
+      thread.parentThreadId !== null ||
+      thread.origin === "subagent" ||
+      isHostOwnedThreadOrigin(thread.origin)
+    ) {
       return { ok: false, reason: "not_found" };
     }
 
