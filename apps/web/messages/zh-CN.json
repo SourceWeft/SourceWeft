@@ -5260,7 +5260,9 @@
         "gateway_config_unavailable": "全局模型网关配置尚未同步。",
         "provider_not_found": "全局模型网关配置中没有提供方“{provider}”。",
         "provider_capability_missing": "提供方“{provider}”未声明支持 chat 和 json_schema。",
-        "provider_credential_headers": "提供方“{provider}”的定义自带凭据请求头，系统模型不会沿用。"
+        "provider_credential_headers": "提供方“{provider}”的定义自带凭据请求头，系统模型不会沿用。",
+        "provider_routing_invalid": "SYSTEM_MODEL_PROVIDER_ONLY 里有空的条目。",
+        "provider_routing_unsupported": "已设置 SYSTEM_MODEL_PROVIDER_ONLY，但提供方“{provider}”不是 OpenRouter 提供方。"
       },
       "failed": "无法保存。",
       "loadFailed": "无法加载概览设置。",

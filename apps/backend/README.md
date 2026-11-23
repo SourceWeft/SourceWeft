@@ -201,8 +201,18 @@ Model gateway catalog sync:
     "requestedDimensions": 1024,
     "pricing": { "inputCostPerToken": 0.00000001 },
     "targets": [
-      { "gatewaySlug": "deepinfra-default", "providerName": "deepinfra", "targetModel": "BAAI/bge-m3", "priority": 1 },
-      { "gatewaySlug": "siliconflow-cn-default", "providerName": "siliconflow-cn", "targetModel": "Pro/BAAI/bge-m3", "priority": 2 }
+      {
+        "gatewaySlug": "deepinfra-default",
+        "providerName": "deepinfra",
+        "targetModel": "BAAI/bge-m3",
+        "priority": 1
+      },
+      {
+        "gatewaySlug": "siliconflow-cn-default",
+        "providerName": "siliconflow-cn",
+        "targetModel": "Pro/BAAI/bge-m3",
+        "priority": 2
+      }
     ],
     "isDefault": true,
     "isActive": true
@@ -259,11 +269,11 @@ Model gateway catalog sync:
   fields; `n`, `response_format` and `quality` are not sent). `sizing` is
   `size` (`"1344x768"`), `dimensions` (`width`/`height`) or `aspect_ratio`
   (`aspect_ratio: "16:9"`; ratios outside the native enum `1:1, 16:9, 9:16,
-  4:3, 3:4, 3:2, 2:3` are sent as `custom` with `width`/`height`). Pixel
+4:3, 3:4, 3:2, 2:3` are sent as `custom` with `width`/`height`). Pixel
   values for `dimensions` and `custom` are scaled into 256–1440 in multiples
   of 16. `auto` sends no sizing field on the `dimensions` and `aspect_ratio`
   conventions. Omitting `request` means `{ "endpoint": "openai", "sizing":
-  "size" }`, today's wire format; any other value fails configuration loading.
+"size" }`, today's wire format; any other value fails configuration loading.
   A native reply's `images[]` data URLs are decoded like OpenAI `b64_json`
   (MIME type and pixel size recorded on the artifact), and a reported
   `inference_status.cost` becomes the actual Provider cost, as OpenRouter's
@@ -280,13 +290,14 @@ categories that come with them. These go through the system model (`withSystemMo
 Model calls a user triggers (titles, ingestion, retrieval) stay billed to that
 user's team.
 
-| Variable                  | Meaning                                                                                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SYSTEM_MODEL_ENABLED`    | Strict boolean, default `false`. Only `true`, `false`, `1` or `0` (any case, surrounding whitespace ignored); any other value fails configuration loading.                            |
-| `SYSTEM_MODEL_PROVIDER`   | The `providerName` of a gateway in the global gateway config whose definition is borrowed, e.g. `openrouter`.                                                                         |
-| `SYSTEM_MODEL_API_KEY`    | The dedicated key for these calls.                                                                                                                                                    |
-| `SYSTEM_MODEL_NAME`       | The model id at that Provider, e.g. `deepseek/deepseek-v4.1-flash`.                                                                                                                   |
-| `MARKET_AI_OFF_PEAK_ONLY` | Optional strict boolean, default `false`. Enable on API, scheduler and worker to defer market AI generation and translations during weekday Beijing time 09:00–12:00 and 14:00–18:00. |
+| Variable                     | Meaning                                                                                                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYSTEM_MODEL_ENABLED`       | Strict boolean, default `false`. Only `true`, `false`, `1` or `0` (any case, surrounding whitespace ignored); any other value fails configuration loading.                            |
+| `SYSTEM_MODEL_PROVIDER`      | The `providerName` of a gateway in the global gateway config whose definition is borrowed, e.g. `openrouter`.                                                                         |
+| `SYSTEM_MODEL_API_KEY`       | The dedicated key for these calls.                                                                                                                                                    |
+| `SYSTEM_MODEL_NAME`          | The model id at that Provider, e.g. `deepseek/deepseek-v4.1-flash`.                                                                                                                   |
+| `SYSTEM_MODEL_PROVIDER_ONLY` | Optional. OpenRouter hosts the model is restricted to, comma-separated (e.g. `sail-research/fp4`). Empty: OpenRouter picks the host. Only valid with an OpenRouter Provider.          |
+| `MARKET_AI_OFF_PEAK_ONLY`    | Optional strict boolean, default `false`. Enable on API, scheduler and worker to defer market AI generation and translations during weekday Beijing time 09:00–12:00 and 14:00–18:00. |
 
 With `MARKET_AI_OFF_PEAK_ONLY=true`, MCP/Skill overview jobs, their retries,
 and MCP summary translations wait for the next off-peak window. The scheduler
@@ -307,6 +318,14 @@ jobs already delayed keep their recorded due time and resume then.
   `supports`). It never uses that Provider's `*_API_KEY` or its `*_ENABLED`
   state: a Provider disabled for GLOBAL traffic can still lend its definition,
   and an empty `SYSTEM_MODEL_API_KEY` is never replaced by the global key.
+- `SYSTEM_MODEL_PROVIDER_ONLY` becomes the route target's `providerRouting.only`,
+  validated like a global gateway target's, so OpenRouter sends the request
+  only to those hosts; there is no fallback to another host. Set with a Provider
+  whose kind is not `openrouter`, or with an empty entry, the system model is
+  not ready (`provider_routing_unsupported`, `provider_routing_invalid`). The
+  hosts are part of the model identity, so changing them makes earlier
+  overviews stale, like changing the model; when the setting is empty the
+  identity is the same as without it.
 - Calls run through the same builder as tenant calls, so the endpoint policy,
   model capability rules, adapters and retries are the same. The timeout is 120
   seconds and a call is retried twice.

@@ -9,6 +9,7 @@ const NAMES = [
   "SYSTEM_MODEL_PROVIDER",
   "SYSTEM_MODEL_API_KEY",
   "SYSTEM_MODEL_NAME",
+  "SYSTEM_MODEL_PROVIDER_ONLY",
   "MARKET_AI_OFF_PEAK_ONLY",
 ] as const;
 
@@ -36,8 +37,26 @@ test("the system model is off and unconfigured by default", async () => {
     provider: "",
     apiKey: "",
     model: "",
+    providerOnly: [],
   });
 });
+
+for (const [value, expected] of [
+  [" sail-research/fp4 ", ["sail-research/fp4"]],
+  [
+    "sail-research/fp4, pearl-research/fp8",
+    ["sail-research/fp4", "pearl-research/fp8"],
+  ],
+  // Kept as written, so readiness reports the empty entry.
+  ["sail-research/fp4,,", ["sail-research/fp4", "", ""]],
+  ["   ", []],
+] as const) {
+  test(`SYSTEM_MODEL_PROVIDER_ONLY=${JSON.stringify(value)} is read as written`, async () => {
+    vi.stubEnv("SYSTEM_MODEL_PROVIDER_ONLY", value);
+    const { config } = await import("./config");
+    assert.deepEqual(config.systemModel.providerOnly, expected);
+  });
+}
 
 test("market off-peak scheduling is optional and disabled by default", async () => {
   const { config } = await import("./config");
@@ -70,6 +89,7 @@ test("settings are trimmed, and the key does not enable anything", async () => {
     provider: "openrouter",
     apiKey: "sk-test-key",
     model: "deepseek/deepseek-v4.1-flash",
+    providerOnly: [],
   });
 });
 
@@ -114,6 +134,7 @@ test("Docker and backend examples agree on the system model defaults", () => {
     SYSTEM_MODEL_PROVIDER: "",
     SYSTEM_MODEL_API_KEY: "",
     SYSTEM_MODEL_NAME: "",
+    SYSTEM_MODEL_PROVIDER_ONLY: "",
   })) {
     const line = new RegExp(`^${name}=${value}$`, "m");
     assert.match(backend, line, `apps/backend/.env.example ${name}`);

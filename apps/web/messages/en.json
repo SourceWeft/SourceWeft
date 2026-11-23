@@ -5260,7 +5260,9 @@
         "gateway_config_unavailable": "The global model gateway configuration has not been synchronized.",
         "provider_not_found": "Provider “{provider}” is not in the global model gateway configuration.",
         "provider_capability_missing": "Provider “{provider}” does not declare chat and json_schema support.",
-        "provider_credential_headers": "Provider “{provider}” sends credential headers of its own, which the system model does not reuse."
+        "provider_credential_headers": "Provider “{provider}” sends credential headers of its own, which the system model does not reuse.",
+        "provider_routing_invalid": "SYSTEM_MODEL_PROVIDER_ONLY has an empty entry.",
+        "provider_routing_unsupported": "SYSTEM_MODEL_PROVIDER_ONLY is set, but Provider “{provider}” is not an OpenRouter Provider."
       },
       "failed": "Could not save.",
       "loadFailed": "Could not load the overview settings.",
