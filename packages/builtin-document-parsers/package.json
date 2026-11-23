@@ -8,7 +8,9 @@
     ".": "./src/index.ts",
     "./providers": "./src/providers/index.ts",
     "./formats": "./src/anydoc-formats.ts",
-    "./file-types": "./src/source-file-types.ts"
+    "./file-types": "./src/source-file-types.ts",
+    "./youtube-url": "./src/youtube/url.ts",
+    "./youtube": "./src/youtube/index.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",
@@ -20,6 +22,7 @@
     "@langchain/textsplitters": "^1.0.2",
     "@sourceweft/anydoc": "workspace:*",
     "@sourceweft/capability-contracts": "workspace:*",
+    "fast-xml-parser": "5.7.3",
     "pdfjs-dist": "^6.2.108",
     "srt-parser-2": "1.2.3",
     "zod": "^4.6.6"

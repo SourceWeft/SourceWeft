@@ -96,7 +96,14 @@ export function toApiError(error: unknown): ApiError {
   }
 
   if (isContentError(error)) {
-    return new ApiError(error.statusCode, error.code, error.message);
+    const details =
+      error.exposeDetails === true &&
+      error.details &&
+      typeof error.details === "object" &&
+      !Array.isArray(error.details)
+        ? (error.details as Record<string, unknown>)
+        : undefined;
+    return new ApiError(error.statusCode, error.code, error.message, details);
   }
 
   if (isAgentTaskError(error)) {

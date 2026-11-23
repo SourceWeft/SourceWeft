@@ -1097,6 +1097,31 @@ test("the shipped OrcaRouter key does not activate the Provider", async () => {
   }
 });
 
+test("shipped config declares a non-default youtube-transcript vision profile", async () => {
+  const loaded = await loadGlobalModelGatewayConfig(
+    resolve("config/model-gateway.global.json"),
+  );
+  const visionDefault = loaded?.visionProfiles.find(
+    (entry) => entry.profileAlias === "vision-default",
+  );
+  const youtubeTranscript = loaded?.visionProfiles.find(
+    (entry) => entry.profileAlias === "youtube-transcript",
+  );
+  assert.equal(visionDefault?.isDefault, true);
+  assert.equal(youtubeTranscript?.modelAlias, "youtube-transcript");
+  assert.equal(youtubeTranscript?.isDefault, false);
+  assert.equal(youtubeTranscript?.isActive, true);
+  assert.deepEqual(youtubeTranscript?.targets, [
+    {
+      gatewaySlug: "openrouter-default",
+      providerName: "openrouter",
+      targetModel: "google/gemini-2.5-flash",
+      priority: 1,
+      weight: 100,
+    },
+  ]);
+});
+
 test.each([
   null,
   "",

@@ -98,6 +98,7 @@ import {
   useSourceDiscoveryAvailable,
 } from "./discovery/source-discovery-dialog";
 import { ResearchDialog } from "./research/research-dialog";
+import { YouTubeListingDialog } from "./youtube/youtube-listing-dialog";
 import { ResearchEntry } from "./research/research-entry";
 import { useSources } from "./sources/use-sources";
 import {
@@ -365,6 +366,10 @@ export function SourcesHub({
   >(new Map());
   const addSourceDialog = useAddSourceDialogState();
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
+  const [youTubeListing, setYouTubeListing] = useState<{
+    url: string;
+    parentSourceId: string | null;
+  } | null>(null);
   const discoveryAvailable = useSourceDiscoveryAvailable(workspaceId);
   const [researchOpen, setResearchOpen] = useState(false);
   const {
@@ -1517,6 +1522,18 @@ export function SourcesHub({
       />
 
       {workspaceId ? (
+        <YouTubeListingDialog
+          onImported={() => void refreshSources()}
+          onOpenChange={(open) => {
+            if (!open) setYouTubeListing(null);
+          }}
+          parentSourceId={youTubeListing?.parentSourceId ?? null}
+          url={youTubeListing?.url ?? null}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+
+      {workspaceId ? (
         <SourceDiscoveryDialog
           onImported={() => void refreshSources()}
           onOpenChange={setDiscoveryOpen}
@@ -1550,6 +1567,13 @@ export function SourcesHub({
         onClose={addSourceDialog.close}
         onCreateTextSource={() => void handleCreateTextSource()}
         onCreateUrlSource={() => void handleCreateUrlSource()}
+        onOpenYouTubeListing={(url) => {
+          setYouTubeListing({
+            url,
+            parentSourceId: addSourceDialog.parentSourceId,
+          });
+          addSourceDialog.close(false);
+        }}
         onDragEnter={addSourceDialog.handleDragEnter}
         onDragLeave={addSourceDialog.handleDragLeave}
         onDragOver={addSourceDialog.handleDragOver}

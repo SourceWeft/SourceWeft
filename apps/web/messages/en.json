@@ -3658,6 +3658,37 @@
       },
       "add": "Discover"
     },
+    "youtube": {
+      "dialogTitle": "Add YouTube videos",
+      "playlist": "Playlist",
+      "channel": "Channel",
+      "byChannel": "by {channel}",
+      "videoCount": "{count, plural, one {# video} other {# videos}}",
+      "loading": "Loading videos…",
+      "empty": "There are no videos to add from this link.",
+      "transcriptNote": "Videos are transcribed by AI from their audio, so transcripts may contain mistakes.",
+      "costNote": "Transcribing a video uses credits.",
+      "import": "Import {count, plural, one {# video} other {# videos}}",
+      "imported": "{count, plural, one {# video added} other {# videos added}}",
+      "retry": "Try again",
+      "errorBusy": "Listing videos is unavailable for a moment. Try again shortly.",
+      "rateLimited": "You have reached the limit for listing videos, which is shared with finding sources. You can try again in {wait}, at {time}.",
+      "chooseVideos": "Choose videos",
+      "collectionHint": "This is a YouTube {kind, select, playlist {playlist link} other {channel link}}. Next, choose which videos to add.",
+      "videoHint": "SourceWeft will transcribe this video with AI and index the transcript for search. Transcribing a video uses credits.",
+      "aiTranscription": "AI transcription",
+      "aiTranscriptionHint": "Transcribed by AI from the video's audio. It may contain mistakes.",
+      "error": {
+        "YOUTUBE_URL_UNSUPPORTED": "This YouTube link is not supported. Use a link to a video, playlist or channel.",
+        "YOUTUBE_COLLECTION_URL": "This link is a playlist or channel. Choose the videos to add from it.",
+        "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED": "YouTube transcription is not available on this server.",
+        "YOUTUBE_VIDEO_UNAVAILABLE": "This video is private, removed or otherwise unavailable.",
+        "YOUTUBE_NO_SPEECH": "No speech was found in this video, so there is no transcript.",
+        "YOUTUBE_TRANSCRIPT_FAILED": "The video could not be transcribed. Try again later.",
+        "YOUTUBE_LISTING_FAILED": "The videos could not be listed. Try again in a moment.",
+        "YOUTUBE_CHANNEL_NOT_FOUND": "This channel could not be found."
+      }
+    },
     "noteOrigin": {
       "title": "Saved note",
       "edit": "Edit",

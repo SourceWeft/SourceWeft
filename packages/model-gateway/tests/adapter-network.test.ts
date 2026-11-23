@@ -157,6 +157,49 @@ for (const kind of compatibleChatKinds) {
   }
 }
 
+// CRITICAL check (Task 4 brief step 3): proves the *installed*
+// @langchain/openai Completions converter (`convertMessagesToCompletionsMessageParams`)
+// passes an unknown `{ type: "video_url", video_url: { url } }` content part
+// through unchanged onto the wire. This exercises the real SDK conversion —
+// not a mock of it — via the same openrouter/cloudflare-aig chat adapters the
+// `youtube-transcript` vision profile and other compat routes use.
+const videoContentMessages = [
+  {
+    role: "user" as const,
+    content: [
+      { type: "text" as const, text: "Summarize this video" },
+      {
+        type: "video_url" as const,
+        video_url: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+      },
+    ],
+  },
+];
+
+for (const kind of ["openrouter", "cloudflare-aig"] satisfies ProviderKind[]) {
+  test(`${kind} chat forwards a video_url content part unchanged to the wire`, async (t) => {
+    isolateAmbientCredentials(t);
+    const requests: Request[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      return openAiChatResponse(false);
+    };
+    const gateway = createModelGateway(providerConfig(kind, fetch));
+    const result = await gateway.chat.complete(
+      { model: "network-test", messages: videoContentMessages },
+      { maxRetries: 0 },
+    );
+    assert.equal(result.raw.content, "hello");
+    assert.equal(requests.length, 1);
+    const body = (await requests[0]!.json()) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    const userMessage = body.messages.find((m) => m.role === "user");
+    assert.deepEqual(userMessage?.content, videoContentMessages[0]!.content);
+  });
+}
+
 for (const kind of [
   "openai",
   "openai-compatible",

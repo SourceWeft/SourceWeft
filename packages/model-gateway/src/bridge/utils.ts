@@ -122,7 +122,13 @@ function gatewayContentToText(content: GatewayMessage["content"]) {
     return content;
   }
   return content
-    .map((part) => (part.type === "text" ? part.text : "[image]"))
+    .map((part) =>
+      part.type === "text"
+        ? part.text
+        : part.type === "video_url"
+          ? "[video]"
+          : "[image]",
+    )
     .join("\n")
     .trim();
 }

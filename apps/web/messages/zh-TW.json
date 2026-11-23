@@ -2027,11 +2027,11 @@
       "dictation": {
         "start": "語音輸入",
         "stop": "停止語音輸入",
-        "transcribing": "正在轉寫…",
+        "transcribing": "正在轉錄…",
         "permissionDenied": "麥克風權限被拒絕。請在瀏覽器或系統設定中允許本站使用麥克風，然後重試。",
         "noDevice": "找不到麥克風。",
         "insufficientCredits": "點數不足，無法繼續語音輸入。",
-        "failed": "轉寫失敗，已輸入的文字會保留。",
+        "failed": "轉錄失敗，已輸入的文字會保留。",
         "rateLimited": "語音輸入過於頻繁，請稍後再試。",
         "silenceTimeout": "一分鐘內沒有偵測到語音，語音輸入已停止。",
         "maxDuration": "語音輸入已達到 10 分鐘上限，已停止。",
@@ -3657,6 +3657,37 @@
         "team": "你的團隊已達到每小時查詢來源的上限，將在 {time} 恢復（還需 {wait}）。"
       },
       "add": "發現"
+    },
+    "youtube": {
+      "dialogTitle": "新增 YouTube 影片",
+      "playlist": "播放清單",
+      "channel": "頻道",
+      "byChannel": "來自 {channel}",
+      "videoCount": "{count} 部影片",
+      "loading": "正在載入影片…",
+      "empty": "這個連結中沒有可新增的影片。",
+      "transcriptNote": "影片由 AI 根據音訊轉錄，轉錄文字可能有誤。",
+      "costNote": "轉錄影片會消耗點數。",
+      "import": "匯入 {count} 部影片",
+      "imported": "已新增 {count} 部影片",
+      "retry": "重試",
+      "errorBusy": "暫時無法列出影片，請稍後再試。",
+      "rateLimited": "已達到列出影片的上限（與查詢來源共用），將在 {time} 恢復（還需 {wait}）。",
+      "chooseVideos": "選擇影片",
+      "collectionHint": "這是 YouTube {kind, select, playlist {播放清單} other {頻道}}連結，下一步選擇要新增的影片。",
+      "videoHint": "SourceWeft 將用 AI 轉錄這部影片，並為轉錄文字建立搜尋索引。轉錄影片會消耗點數。",
+      "aiTranscription": "AI 轉錄",
+      "aiTranscriptionHint": "由 AI 根據影片音訊轉錄，可能有誤。",
+      "error": {
+        "YOUTUBE_URL_UNSUPPORTED": "不支援這個 YouTube 連結，請使用影片、播放清單或頻道連結。",
+        "YOUTUBE_COLLECTION_URL": "這是播放清單或頻道連結，請從中選擇要新增的影片。",
+        "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED": "此伺服器未啟用 YouTube 轉錄。",
+        "YOUTUBE_VIDEO_UNAVAILABLE": "這部影片無法觀看，可能是私密影片或已被刪除。",
+        "YOUTUBE_NO_SPEECH": "這部影片中沒有偵測到語音，因此沒有轉錄文字。",
+        "YOUTUBE_TRANSCRIPT_FAILED": "無法轉錄這部影片，請稍後再試。",
+        "YOUTUBE_LISTING_FAILED": "無法列出影片，請稍後再試。",
+        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到這個頻道。"
+      }
     },
     "noteOrigin": {
       "title": "已儲存的筆記",

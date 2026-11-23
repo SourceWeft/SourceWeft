@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Folder, Loader2, Upload, X } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { parseYouTubeUrl } from "@sourceweft/builtin-document-parsers/youtube-url";
 
 import {
   AlertDialog,
@@ -154,6 +155,7 @@ export function AddSourceDialog({
   onClose,
   onCreateTextSource,
   onCreateUrlSource,
+  onOpenYouTubeListing,
   onDragEnter,
   onDragLeave,
   onDragOver,
@@ -184,6 +186,8 @@ export function AddSourceDialog({
   onClose: (open: boolean) => void;
   onCreateTextSource: () => void;
   onCreateUrlSource: () => void;
+  /** A playlist or channel link: pick its videos instead of adding the link. */
+  onOpenYouTubeListing: (url: string) => void;
   onDragEnter: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -202,6 +206,11 @@ export function AddSourceDialog({
   urlValue: string;
 }) {
   const t = useTranslations("dashboardSourcesHub");
+  const trimmedUrl = urlValue.trim();
+  const youTubeTarget =
+    addTab === "URL" && trimmedUrl ? parseYouTubeUrl(trimmedUrl) : null;
+  const youTubeCollection =
+    youTubeTarget && youTubeTarget.kind !== "video" ? youTubeTarget.kind : null;
   return (
     <Dialog onOpenChange={onClose} open={isOpen}>
       <DialogContent
@@ -266,13 +275,19 @@ export function AddSourceDialog({
                   type="url"
                   value={urlValue}
                 />
-                <Input
-                  onChange={(event) => onUrlTitleChange(event.target.value)}
-                  placeholder={t("addSourceDialog.urlTitlePlaceholder")}
-                  value={urlTitle}
-                />
+                {youTubeCollection ? null : (
+                  <Input
+                    onChange={(event) => onUrlTitleChange(event.target.value)}
+                    placeholder={t("addSourceDialog.urlTitlePlaceholder")}
+                    value={urlTitle}
+                  />
+                )}
                 <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-6 text-center text-xs text-muted-foreground">
-                  {t("addSourceDialog.urlHint")}
+                  {youTubeCollection
+                    ? t("youtube.collectionHint", { kind: youTubeCollection })
+                    : youTubeTarget
+                      ? t("youtube.videoHint")
+                      : t("addSourceDialog.urlHint")}
                 </div>
               </div>
             ) : (
@@ -397,7 +412,9 @@ export function AddSourceDialog({
               addTab === "Text"
                 ? onCreateTextSource()
                 : addTab === "URL"
-                  ? onCreateUrlSource()
+                  ? youTubeCollection
+                    ? onOpenYouTubeListing(trimmedUrl)
+                    : onCreateUrlSource()
                   : onUploadFiles()
             }
             type="button"
@@ -412,7 +429,9 @@ export function AddSourceDialog({
                 {addTab === "Text"
                   ? t("addSourceDialog.createSource")
                   : addTab === "URL"
-                    ? t("addSourceDialog.addUrl")
+                    ? youTubeCollection
+                      ? t("youtube.chooseVideos")
+                      : t("addSourceDialog.addUrl")
                     : t("addSourceDialog.uploadFiles")}
               </>
             )}
@@ -612,9 +631,7 @@ export function ReadmeDialog({
       >
         <DialogHeader>
           <DialogTitle>{t("readmeDialog.title")}</DialogTitle>
-          <DialogDescription>
-            {t("readmeDialog.description")}
-          </DialogDescription>
+          <DialogDescription>{t("readmeDialog.description")}</DialogDescription>
         </DialogHeader>
         {readmeSource ? (
           <div className="flex items-center gap-2 rounded-lg border bg-muted/25 px-3 py-2">
