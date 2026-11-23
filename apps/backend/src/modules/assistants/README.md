@@ -66,10 +66,29 @@ genuinely new message, after the write commits.
 Task 5 only acts on tickets the Router already created (Task 6-7 owns
 creation and the decision that produces one): `closeTicket` ends it
 (idempotent — already-`ended` is a no-op) and stops its worker run if one is
-going; `retryTicket` inserts one more trigger already `decided` and routed
-straight to the ticket (skipping evaluation) and clears its consecutive
-failure count. The retry's own trigger id is derived from the ticket and the
-caller's idempotency key, so a repeated click adds no second event.
+going, as the run's own user (whoever closes it is often not the payer);
+`retryTicket`, allowed only to the ticket's payer (anyone else gets 403
+`ASSISTANT_TICKET_NOT_PAYER`: the retried run is billed to them), inserts
+one more trigger already `decided` and routed straight to the ticket
+(skipping evaluation) and clears its consecutive failure count. The retry's
+own trigger id is derived from the ticket and the caller's idempotency key,
+so a repeated click adds no second event.
+
+## Routing rules
+
+`route_to_ticket` (`router/tools.ts`) refuses, with a tool result that
+decides nothing and says what to do instead: an ended ticket
+(`create_ticket`); events of a different payer than the ticket's
+(`create_ticket` for that member — nobody is billed for another member's
+request); a non-member event (a report) for a ticket waiting for a person
+or blocked (`ignore`, then `say` to the payer); and a ticket's own report
+sent back once it already was `ASSISTANT_LIMITS.reworkWithoutMemberMax`
+times since a member's input last reached it (counted from the decisions,
+no counter column). A routed event reaches the worker with the Router's
+note beside it (`<router-note>`), its instruction for that delivery.
+A worker run's credit cap is what the ticket's earlier runs left of
+`credit_cap`; nothing left blocks the ticket on `credit_cap` without
+starting a run.
 
 ## Worker and dispatch
 
