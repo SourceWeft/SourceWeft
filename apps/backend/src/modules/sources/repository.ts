@@ -1183,7 +1183,7 @@ export async function createSourceDocumentChunksAndEmbeddings(
           documentId,
           chunkNo: index,
           content: segment.text,
-          headingPath: null,
+          headingPath: segment.headingPath ?? null,
           startOffset: segment.startIndex,
           endOffset: segment.endIndex,
           language: null,
