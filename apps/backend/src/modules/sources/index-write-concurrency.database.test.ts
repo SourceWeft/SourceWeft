@@ -10,6 +10,7 @@ import type { EmbeddingIndexIdentity } from "../../shared/model-gateway/embeddin
 import { eq } from "drizzle-orm";
 let {
   chunkEmbeddings,
+  chunks,
   database,
   db,
   documents,
@@ -37,6 +38,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = isolated.url;
   ({
     chunkEmbeddings,
+    chunks,
     database,
     db,
     documents,
@@ -359,4 +361,30 @@ test("an error after embedding writes rolls the whole replacement back", async (
     (error) => error === failure,
   );
   assert.deepEqual(await indexSnapshot(), before);
+});
+
+test("each chunk keeps the heading path the chunker gave it", async () => {
+  const text = "# Guide\nIntro.\n## Install\nSteps.";
+  const split = text.indexOf("## Install");
+  await createSourceDocumentChunksAndEmbeddings({
+    ...input(null, text),
+    embeddings: [
+      [0.25, 0.75],
+      [0.5, 0.5],
+    ],
+    chunks: [
+      { text: text.slice(0, split), startIndex: 0, endIndex: split, tokenCount: 4, headingPath: "Guide" },
+      { text: text.slice(split), startIndex: split, endIndex: text.length, tokenCount: 4 },
+    ],
+  });
+
+  const stored = await db
+    .select({ chunkNo: chunks.chunkNo, headingPath: chunks.headingPath })
+    .from(chunks)
+    .where(eq(chunks.sourceId, sourceId))
+    .orderBy(chunks.chunkNo);
+  assert.deepEqual(stored, [
+    { chunkNo: 0, headingPath: "Guide" },
+    { chunkNo: 1, headingPath: null },
+  ]);
 });

@@ -162,3 +162,12 @@ test("chunkSourceContent does not start HTML chunks inside tag attributes", asyn
     );
   }
 });
+
+test("chunkSourceContent keeps the markdown section path of each chunk", async () => {
+  const body = (word: string) => `${word} `.repeat(120).trim();
+  const content = ["# CLI", body("intro"), "## Exit codes", body("codes")].join("\n\n");
+  const chunks = await chunkSourceContent(content, { chunkSize: 700 });
+
+  assert.equal(chunks[0]?.headingPath, "CLI");
+  assert.equal(chunks.at(-1)?.headingPath, "CLI > Exit codes");
+});
