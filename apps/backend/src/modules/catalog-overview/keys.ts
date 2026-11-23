@@ -32,7 +32,8 @@ export function overviewResultKey(input: {
 
 /**
  * Non-secret identity of the model an analysis ran on: the system model's
- * Provider, endpoint and model. Credentials and their rotation are excluded.
+ * Provider, endpoint, model and pinned OpenRouter hosts. Credentials and their
+ * rotation are excluded.
  */
 export function overviewModelIdentity(identity: SystemModelIdentity) {
   return {
@@ -41,6 +42,8 @@ export function overviewModelIdentity(identity: SystemModelIdentity) {
     baseUrl: identity.baseUrl,
     apiVersion: identity.apiVersion,
     model: identity.model,
+    // Only when pinned, so an unrestricted model keeps the key it always had.
+    ...(identity.providerOnly ? { providerOnly: identity.providerOnly } : {}),
   };
 }
 

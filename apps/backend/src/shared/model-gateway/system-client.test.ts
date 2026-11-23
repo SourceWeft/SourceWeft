@@ -1058,3 +1058,131 @@ test("the model identity names the model and endpoint, never the credential", as
   useSettings({ apiKey: "" });
   assert.equal(await resolveSystemModelIdentity(), null);
 });
+
+const PINNED = ["sail-research/fp4"];
+
+test("SYSTEM_MODEL_PROVIDER_ONLY pins an OpenRouter target and is reported, never ignored, when unusable", () => {
+  const routed = routedFixture();
+  const pinned = settings({ providerOnly: PINNED });
+  const readiness = evaluateSystemModelReadiness(pinned, routed);
+  assert.equal(readiness.ready, true);
+  assert.deepEqual(readiness.problems, []);
+  const system = buildSystemModelRoutedConfig(routed, pinned, readiness);
+  assert.deepEqual(system.modelRoutes[SYSTEM_MODEL_ROUTE]!.targets, [
+    {
+      provider: "openrouter",
+      model: MODEL,
+      priority: 1,
+      weight: 100,
+      providerRouting: { only: PINNED },
+    },
+  ]);
+
+  // An empty list is no restriction at all.
+  const unpinned = evaluateSystemModelReadiness(
+    settings({ providerOnly: [] }),
+    routed,
+  );
+  assert.equal(unpinned.ready, true);
+  assert.deepEqual(
+    buildSystemModelRoutedConfig(
+      routed,
+      settings({ providerOnly: [] }),
+      unpinned,
+    ).modelRoutes[SYSTEM_MODEL_ROUTE]!.targets,
+    [{ provider: "openrouter", model: MODEL, priority: 1, weight: 100 }],
+  );
+
+  const malformed = evaluateSystemModelReadiness(
+    settings({ providerOnly: ["sail-research/fp4", ""] }),
+    routed,
+  );
+  assert.equal(malformed.ready, false);
+  assert.equal(malformed.configured, false);
+  assert.deepEqual(malformed.problems, ["provider_routing_invalid"]);
+  assert.match(
+    malformed.reason!,
+    /SYSTEM_MODEL_PROVIDER_ONLY has an empty entry/,
+  );
+
+  const notOpenRouter = evaluateSystemModelReadiness(
+    pinned,
+    routedFixture({ kind: "deepseek", baseUrl: "https://api.deepseek.test" }),
+  );
+  assert.equal(notOpenRouter.ready, false);
+  assert.deepEqual(notOpenRouter.problems, ["provider_routing_unsupported"]);
+  assert.match(
+    notOpenRouter.reason!,
+    /Provider 'openrouter' is not an OpenRouter Provider/,
+  );
+  assert.throws(
+    () =>
+      buildSystemModelRoutedConfig(
+        routed,
+        settings({ providerOnly: [""] }),
+        readiness,
+      ),
+    SystemModelUnavailableError,
+  );
+});
+
+test("a pinned call asks OpenRouter for only those hosts, and the log line names them", async () => {
+  useSettings({ providerOnly: PINNED });
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  const { seen } = mockProvider();
+  const info = vi.spyOn(logger, "info");
+  await withSystemModel(context(), (chat) => chat.complete({ messages }));
+  assert.equal(seen.length, 1);
+  const provider = seen[0]!.body.provider as Record<string, unknown>;
+  assert.deepEqual(provider.only, PINNED);
+  const [line] = systemCallLogs(info);
+  assert.deepEqual((line![1] as Record<string, unknown>).providerOnly, PINNED);
+  info.mockRestore();
+});
+
+test("an unpinned call sends no host restriction", async () => {
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  const { seen } = mockProvider();
+  await withSystemModel(context(), (chat) => chat.complete({ messages }));
+  assert.equal(
+    (seen[0]!.body.provider as Record<string, unknown> | undefined)?.only,
+    undefined,
+  );
+});
+
+test("a pin that cannot be honoured makes no model request", async () => {
+  useSettings({ providerOnly: PINNED });
+  mocks.loadRouted.mockResolvedValue(
+    routedFixture({ kind: "deepseek", baseUrl: "https://api.deepseek.test" }),
+  );
+  const { fetchSpy } = mockProvider();
+  await assert.rejects(
+    withSystemModel(context(), (chat) => chat.complete({ messages })),
+    (error: unknown) => {
+      assert.ok(error instanceof SystemModelUnavailableError);
+      assert.deepEqual(error.readiness.problems, [
+        "provider_routing_unsupported",
+      ]);
+      return true;
+    },
+  );
+  assert.equal(fetchSpy.mock.calls.length, 0);
+});
+
+test("changing the pinned hosts rebuilds the client and changes the identity", async () => {
+  mocks.loadRouted.mockResolvedValue(routedFixture({}, randomUUID()));
+  mockProvider();
+  const call = () =>
+    withSystemModel(context(), (chat) => chat.complete({ messages }));
+  await call();
+  const unpinned = await resolveSystemModelIdentity();
+  assert.equal(unpinned && "providerOnly" in unpinned, false);
+  assert.equal(mocks.createModelGateway.mock.calls.length, 1);
+  useSettings({ providerOnly: PINNED });
+  await call();
+  assert.equal(mocks.createModelGateway.mock.calls.length, 2);
+  assert.deepEqual(await resolveSystemModelIdentity(), {
+    ...unpinned,
+    providerOnly: PINNED,
+  });
+});

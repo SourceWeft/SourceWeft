@@ -6,6 +6,7 @@ import {
   type ChatCompleteInput,
   type ChatCompleteResult,
   type ModelGateway,
+  type ProviderRoutingConfig,
   type ThinkingConfig,
 } from "@sourceweft/model-gateway";
 import { config } from "../config";
@@ -22,6 +23,7 @@ import {
   resolveModelPricingFromCatalog,
 } from "./sync-pricing";
 import { applyThinkingSupportDefaults } from "./thinking-defaults";
+import { asOptionalProviderRouting } from "./global-config";
 import type { RoutedGatewayConfig } from "./types";
 
 /**
@@ -74,6 +76,11 @@ export type SystemModelSettings = {
   provider: string;
   apiKey: string;
   model: string;
+  /**
+   * SYSTEM_MODEL_PROVIDER_ONLY: the OpenRouter hosts the model is restricted
+   * to, as written. Empty (or absent) means no restriction.
+   */
+  providerOnly?: readonly string[];
 };
 
 export type SystemModelProblem =
@@ -84,7 +91,9 @@ export type SystemModelProblem =
   | "gateway_config_unavailable"
   | "provider_not_found"
   | "provider_capability_missing"
-  | "provider_credential_headers";
+  | "provider_credential_headers"
+  | "provider_routing_invalid"
+  | "provider_routing_unsupported";
 
 export type SystemModelReadiness = {
   /** SYSTEM_MODEL_ENABLED. */
@@ -138,6 +147,30 @@ function problemMessage(
       return `Provider '${settings.provider}' does not declare support for ${missingSupports.join(", ")}`;
     case "provider_credential_headers":
       return `Provider '${settings.provider}' sends credential headers of its own, which the system model does not reuse`;
+    case "provider_routing_invalid":
+      return "SYSTEM_MODEL_PROVIDER_ONLY has an empty entry";
+    case "provider_routing_unsupported":
+      return `SYSTEM_MODEL_PROVIDER_ONLY is set, but Provider '${settings.provider}' is not an OpenRouter Provider`;
+  }
+}
+
+/**
+ * The route target's `providerRouting` from SYSTEM_MODEL_PROVIDER_ONLY,
+ * validated like a global gateway target's: undefined when unset, null when
+ * the list is malformed.
+ */
+function systemModelProviderRouting(
+  settings: SystemModelSettings,
+): ProviderRoutingConfig | undefined | null {
+  const only = settings.providerOnly ?? [];
+  if (only.length === 0) return undefined;
+  try {
+    return asOptionalProviderRouting(
+      { only: [...only] },
+      "SYSTEM_MODEL_PROVIDER_ONLY",
+    );
+  } catch {
+    return null;
   }
 }
 
@@ -152,6 +185,8 @@ export function evaluateSystemModelReadiness(
   const problems: SystemModelProblem[] = [];
   let missingSupports: string[] = [];
   if (!settings.enabled) problems.push("disabled");
+  const providerRouting = systemModelProviderRouting(settings);
+  if (providerRouting === null) problems.push("provider_routing_invalid");
   if (!settings.provider) {
     problems.push("provider_unset");
   } else if (!routed) {
@@ -170,6 +205,10 @@ export function evaluateSystemModelReadiness(
       // all but name; like BYOK, the system model refuses to borrow it.
       if (hasConfiguredCredentialHeaders(provider))
         problems.push("provider_credential_headers");
+      // Host restriction is OpenRouter's `provider.only`; any other Provider
+      // would drop it, so the setting must not be silently ignored.
+      if (providerRouting && provider.kind !== "openrouter")
+        problems.push("provider_routing_unsupported");
     }
   }
   if (!settings.apiKey) problems.push("api_key_unset");
@@ -210,6 +249,8 @@ export type SystemModelIdentity = {
   baseUrl: string;
   apiVersion: string | null;
   model: string;
+  /** The OpenRouter hosts the model is pinned to; absent when unrestricted. */
+  providerOnly?: string[];
 };
 
 /**
@@ -225,6 +266,7 @@ export async function resolveSystemModelIdentity(): Promise<SystemModelIdentity 
   const readiness = evaluateSystemModelReadiness(settings, routed);
   const provider = routed?.providers[settings.provider];
   if (!readiness.configured || !provider) return null;
+  const providerRouting = systemModelProviderRouting(settings);
   const url = new URL(provider.baseUrl);
   return {
     provider: settings.provider,
@@ -232,6 +274,9 @@ export async function resolveSystemModelIdentity(): Promise<SystemModelIdentity 
     baseUrl: `${url.origin}${url.pathname}`,
     apiVersion: url.searchParams.get("api-version"),
     model: settings.model,
+    ...(providerRouting?.only
+      ? { providerOnly: [...providerRouting.only] }
+      : {}),
   };
 }
 
@@ -255,7 +300,8 @@ export function buildSystemModelRoutedConfig(
   readiness: SystemModelReadiness,
 ): RoutedGatewayConfig {
   const borrowed = routed.providers[settings.provider];
-  if (!readiness.ready || !borrowed) {
+  const providerRouting = systemModelProviderRouting(settings);
+  if (!readiness.ready || !borrowed || providerRouting === null) {
     throw new SystemModelUnavailableError(readiness);
   }
   return {
@@ -289,6 +335,7 @@ export function buildSystemModelRoutedConfig(
             model: settings.model,
             priority: 1,
             weight: 100,
+            ...(providerRouting ? { providerRouting } : {}),
           },
         ],
       },
@@ -316,6 +363,7 @@ function systemModelClient(
     routed.versionId,
     settings.provider,
     settings.model,
+    settings.providerOnly ?? [],
   ]);
   if (cachedClient?.cacheKey === cacheKey) return cachedClient.client;
   const client = createModelGateway({
@@ -410,6 +458,9 @@ function logCall(input: {
     scopeId: input.context.scopeId,
     provider: input.settings.provider,
     model: input.settings.model,
+    ...(input.settings.providerOnly?.length
+      ? { providerOnly: input.settings.providerOnly }
+      : {}),
     status: input.error === undefined ? "ok" : "error",
     errorCode: input.error === undefined ? null : errorCodeOf(input.error),
     durationMs: Date.now() - input.startedAt,

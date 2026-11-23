@@ -5260,7 +5260,9 @@
         "gateway_config_unavailable": "全域模型閘道器設定尚未同步。",
         "provider_not_found": "全域模型閘道器設定中沒有提供方「{provider}」。",
         "provider_capability_missing": "提供方「{provider}」未宣告支援 chat 和 json_schema。",
-        "provider_credential_headers": "提供方「{provider}」的定義自帶憑證請求標頭，系統模型不會沿用。"
+        "provider_credential_headers": "提供方「{provider}」的定義自帶憑證請求標頭，系統模型不會沿用。",
+        "provider_routing_invalid": "SYSTEM_MODEL_PROVIDER_ONLY 裡有空的條目。",
+        "provider_routing_unsupported": "已設定 SYSTEM_MODEL_PROVIDER_ONLY，但提供方「{provider}」不是 OpenRouter 提供方。"
       },
       "failed": "無法儲存。",
       "loadFailed": "無法載入概覽設定。",

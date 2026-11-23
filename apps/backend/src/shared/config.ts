@@ -114,6 +114,14 @@ function parseCsv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
+/** SYSTEM_MODEL_PROVIDER_ONLY: blank means no restriction. */
+function parseProviderOnly(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [];
+  }
+  return value.split(",").map((item) => item.trim());
+}
+
 /**
  * Confidential OAuth clients for MCP providers that don't support Dynamic Client
  * Registration (e.g. Stripe, GitHub). Parsed from a JSON array of
@@ -852,6 +860,10 @@ export const config = {
     provider: process.env.SYSTEM_MODEL_PROVIDER?.trim() || "",
     apiKey: process.env.SYSTEM_MODEL_API_KEY?.trim() || "",
     model: process.env.SYSTEM_MODEL_NAME?.trim() || "",
+    // OpenRouter hosts the system model is restricted to (`provider.only`),
+    // comma-separated. Entries are kept as written, empty ones included, so
+    // a malformed list is reported by readiness instead of quietly shrunk.
+    providerOnly: parseProviderOnly(process.env.SYSTEM_MODEL_PROVIDER_ONLY),
   },
   openrouterModelsApiUrl:
     process.env.OPENROUTER_MODELS_API_URL ||

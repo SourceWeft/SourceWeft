@@ -1,4 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 const mocks = vi.hoisted(() => ({
   withSystemModel: vi.fn(),
@@ -135,4 +136,30 @@ test("the model configuration key follows the system model, and is null without 
   );
   mocks.identity.mockResolvedValue(null);
   expect(await resolveOverviewModelConfigurationKey()).toBeNull();
+});
+
+test("pinned hosts change the configuration key; an unpinned model keeps the key it always had", () => {
+  const identity = {
+    provider: "openrouter",
+    kind: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiVersion: null,
+    model: "a/b",
+  };
+  // The key stored for analyses before hosts could be pinned.
+  const legacy = createHash("sha256")
+    .update(JSON.stringify({ systemModel: identity }))
+    .digest("hex");
+  expect(overviewModelConfigurationKey(identity)).toBe(legacy);
+  const sail = overviewModelConfigurationKey({
+    ...identity,
+    providerOnly: ["sail-research/fp4"],
+  });
+  expect(sail).not.toBe(legacy);
+  expect(
+    overviewModelConfigurationKey({
+      ...identity,
+      providerOnly: ["pearl-research/fp8"],
+    }),
+  ).not.toBe(sail);
 });
