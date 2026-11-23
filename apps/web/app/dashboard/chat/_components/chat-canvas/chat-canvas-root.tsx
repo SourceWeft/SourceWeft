@@ -806,6 +806,7 @@ export function ChatCanvas({
           }
           onSourcePreview={onSourcePreview}
           onWorkfileClick={onWorkfileClick}
+          readOnly={viewerReadOnly}
           resolvedConfirmations={confirmationResolutions}
           workspaceId={workspaceId}
         />

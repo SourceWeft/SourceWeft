@@ -179,6 +179,8 @@ test("a conversation that takes no messages shows its notice instead of the comp
   assert.equal(listProps.current.onContinueAgentRun, undefined);
   assert.equal(listProps.current.onRefreshLatest, undefined);
   assert.equal(listProps.current.onRestartFromMessage, undefined);
+  // ...and the Edit prompt pencil is not even shown.
+  assert.equal(listProps.current.readOnly, true);
   assert.deepEqual(barItems.tool, []);
   assert.deepEqual(barItems.question, []);
 });
@@ -197,4 +199,5 @@ test("an ordinary conversation keeps continue, refresh and restart", async () =>
   assert.equal(typeof listProps.current.onContinueAgentRun, "function");
   assert.equal(typeof listProps.current.onRefreshLatest, "function");
   assert.equal(typeof listProps.current.onRestartFromMessage, "function");
+  assert.equal(listProps.current.readOnly, false);
 });
