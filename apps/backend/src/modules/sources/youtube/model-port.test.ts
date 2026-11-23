@@ -71,6 +71,7 @@ test("runs on its own OpenRouter Gemini provider with the deployment's OpenRoute
   await createBilledVideoModelPort(portInput);
   assert.deepEqual(mocks.buildStandalone.mock.calls[0]![0], {
     id: "youtube-transcript",
+    providerName: "openrouter",
     providerKind: "openrouter",
     baseUrl: "https://openrouter.ai/api/v1",
     model: "google/gemini-2.5-flash",
