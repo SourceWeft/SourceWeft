@@ -260,9 +260,9 @@ export type StartHostTurnInput = StartScheduledTurnInput & {
   /**
    * The turn starts with none of the conversation's earlier turns in its
    * model context: no base checkpoint and a graph thread of its own, keyed
-   * by the run's idempotency key (so a redelivered run continues its own
-   * graph). The conversation's messages are still stored and shown as
-   * usual. For a host whose every turn carries what it needs (a Router
+   * by the run's idempotency key (a start retried under a `:retry-N` key gets
+   * a new, empty one). The conversation's messages are still stored and
+   * shown as usual. For a host whose every turn carries what it needs (a Router
    * batch); a conversation meant to remember stays without it.
    */
   freshContext?: boolean;

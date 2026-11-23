@@ -182,6 +182,8 @@ test("three queued tickets and two slots: the first tick starts two; the third t
     visibility: routerThread[0]!.visibility,
   });
   assert.match(first[0]!.content, /Please look into it/);
+  // Ticket conversations keep their history; only the Router starts fresh.
+  for (const start of first) assert.equal(start.freshContext, undefined);
   for (const ticket of [t1, t2]) {
     const row = (await f.ticketRow(ticket.id))!;
     assert.equal(row.stage, "working");

@@ -295,6 +295,11 @@ test("an additive origin in an unattended run gets the unattended allow-list plu
     ]);
     assert.equal(runtimePrompt.includes("<scheduled_run>"), false);
     assert.ok(runtimePrompt.trimEnd().endsWith(WORKER_PROMPT));
+    // Only a replace-tools turn drops the to-do list and the chat base prompt.
+    for (const turn of [agent, plain]) {
+      assert.equal(turn.todoList, undefined);
+      assert.equal(turn.chatBasePrompt, undefined);
+    }
     assert.deepEqual(seen.at(-1)?.hostContext, {});
   } finally {
     unregisterOriginTurnProvider("assistant_ticket");
