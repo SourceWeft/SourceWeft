@@ -20,6 +20,8 @@ import {
  */
 export const YOUTUBE_TRANSCRIPT_SERVICE = {
   id: "youtube-transcript",
+  /** Keeps OpenRouter's response adapter (its inline `usage.cost`) on the call. */
+  providerName: "openrouter",
   providerKind: "openrouter",
   baseUrl: "https://openrouter.ai/api/v1",
   model: "google/gemini-2.5-flash",
@@ -191,6 +193,7 @@ export async function createBilledVideoModelPort(input: {
   const service = YOUTUBE_TRANSCRIPT_SERVICE;
   const standaloneConfig = buildStandaloneGatewayConfig({
     id: service.id,
+    providerName: service.providerName,
     providerKind: service.providerKind,
     baseUrl: service.baseUrl,
     model: service.model,

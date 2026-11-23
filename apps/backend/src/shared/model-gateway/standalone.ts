@@ -10,8 +10,16 @@ import type { RoutedGatewayConfig } from "./types";
  * so the call is still admitted, billed and observed like any other.
  */
 export type StandaloneProvider = {
-  /** Snapshot id, provider name and route alias in one. */
+  /** Snapshot id and the route alias the feature calls. */
   id: string;
+  /**
+   * The provider's own name (`openrouter`, `deepinfra`, …). Provider response
+   * adapters — inline cost, usage normalization — are looked up by this name,
+   * so it must be the real provider's, never the feature's id: a call under
+   * any other name loses the provider's reported cost and is billed only the
+   * minimum credit.
+   */
+  providerName: string;
   providerKind: ModelGatewayProviderKind;
   baseUrl: string;
   model: string;
@@ -28,7 +36,7 @@ export function buildStandaloneGatewayConfig(
   return {
     versionId: `standalone:${provider.id}`,
     providers: {
-      [provider.id]: {
+      [provider.providerName]: {
         gatewayConfigId: null,
         kind: provider.providerKind,
         baseUrl: provider.baseUrl,
@@ -50,7 +58,7 @@ export function buildStandaloneGatewayConfig(
     modelRoutes: {
       [provider.id]: {
         strategy: "priority",
-        targets: [{ provider: provider.id, model: provider.model }],
+        targets: [{ provider: provider.providerName, model: provider.model }],
       },
     },
   };

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  getProviderResponseAdapter,
   resolveModelGatewayConfig,
   resolveRequestTarget,
 } from "@sourceweft/model-gateway";
@@ -9,6 +10,7 @@ import { buildStandaloneGatewayConfig } from "./standalone";
 
 const PROVIDER = {
   id: "feature-service",
+  providerName: "openrouter",
   providerKind: "openrouter" as const,
   baseUrl: "https://openrouter.ai/api/v1",
   model: "google/gemini-2.5-flash",
@@ -21,8 +23,8 @@ const PROVIDER = {
 test("a standalone provider has no gateway row and is never BYOK", () => {
   const snapshot = buildStandaloneGatewayConfig(PROVIDER);
   assert.equal(snapshot.versionId, "standalone:feature-service");
-  assert.deepEqual(Object.keys(snapshot.providers), ["feature-service"]);
-  const provider = snapshot.providers["feature-service"]!;
+  assert.deepEqual(Object.keys(snapshot.providers), ["openrouter"]);
+  const provider = snapshot.providers.openrouter!;
   assert.equal(provider.gatewayConfigId, null);
   assert.equal(provider.isBYOK, false);
   assert.equal(provider.globalReady, true);
@@ -32,7 +34,7 @@ test("a standalone provider has no gateway row and is never BYOK", () => {
   assert.equal(provider.defaultHeaders["X-OpenRouter-Title"], "SourceWeft");
 });
 
-test("its one route resolves to the declared provider and model", async () => {
+test("its one route, under the feature's id, resolves to the declared provider and model", async () => {
   const resolved = resolveModelGatewayConfig(
     buildRoutedModelGatewayConfig(buildStandaloneGatewayConfig(PROVIDER)),
   );
@@ -40,8 +42,11 @@ test("its one route resolves to the declared provider and model", async () => {
     model: "feature-service",
     profileAlias: "feature-service",
   });
-  assert.equal(target.provider, "feature-service");
+  assert.equal(target.provider, "openrouter");
   assert.equal(target.providerKind, "openrouter");
+  // Billing reads the provider's reported cost through this adapter; under
+  // the feature's id the lookup misses and the call is billed the minimum.
+  assert.ok(getProviderResponseAdapter(target.provider));
   assert.equal(target.providerModel, "google/gemini-2.5-flash");
   assert.equal(target.baseUrl, "https://openrouter.ai/api/v1");
   assert.equal(target.apiKey, "test-key");
