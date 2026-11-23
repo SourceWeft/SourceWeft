@@ -1,12 +1,24 @@
 import { createAuthPlugin } from "@better-auth-ui/core"
+import dynamic from "next/dynamic"
 import {
   magicLinkPlugin as coreMagicLinkPlugin,
   type MagicLinkPluginOptions
 } from "@better-auth-ui/core/plugins/magic-link"
 
-import { MagicLink } from "@/app/_components/auth/magic-link"
 import { MagicLinkButton } from "@/app/_components/auth/magic-link-button"
-import { MagicLinkSent } from "@/app/_components/auth/magic-link-sent"
+
+// Loaded when first shown: every page registers this plugin, but these views,
+// cards and tabs appear only once someone opens them.
+const MagicLink = dynamic(() =>
+  import("@/app/_components/auth/magic-link").then(
+    (module) => module.MagicLink
+  )
+)
+const MagicLinkSent = dynamic(() =>
+  import("@/app/_components/auth/magic-link-sent").then(
+    (module) => module.MagicLinkSent
+  )
+)
 
 export const magicLinkPlugin = createAuthPlugin(
   coreMagicLinkPlugin.id,
