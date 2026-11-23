@@ -127,6 +127,9 @@ send, edit, regenerate or resume is refused with 403 `THREAD_HOST_OWNED`, in
 `prepareThreadTurn` (every durable or direct turn). Their turns get the
 provider's prompt instead of the `<scheduled_run>` block, and a host-owned
 turn with no registered provider fails rather than running unequipped.
+Deleting, archiving or changing the visibility of one is refused with the
+same 403, for its creator and an admin alike (the host depends on it);
+renaming stays allowed.
 
 ## Traps
 

@@ -29,6 +29,7 @@ import {
   updateThreadModelSettingsRecord,
   updateThreadVisibilityRecord,
 } from "./thread/repository";
+import { assertThreadManageable } from "./thread/host-owned";
 import { buildSearchSnippet } from "./thread/search-snippet";
 import {
   listMessageRecordPageByThread,
@@ -473,6 +474,27 @@ export async function startHostTurn(input: StartHostTurnInput): Promise<{
   }
 }
 
+/**
+ * Refuses managing (delete, archive, visibility) a host-owned conversation
+ * the caller can see; one they cannot see is left to the caller's own
+ * "not found", so the refusal never reveals a conversation.
+ */
+async function refuseHostOwnedManagement(input: {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+  userId: string;
+}) {
+  const thread = await findThreadRecord({
+    threadId: input.threadId,
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+  });
+  if (thread && canViewThread(input.userId, thread)) {
+    assertThreadManageable(thread);
+  }
+}
+
 class ContentThreadService {
   async listThreads(input: {
     workspaceId: string;
@@ -705,6 +727,13 @@ class ContentThreadService {
       userId: input.userId,
     });
 
+    await refuseHostOwnedManagement({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+      userId: input.userId,
+    });
+
     // A plain editor may delete only their own threads; a content admin may
     // delete any thread visible to them. Resolve the caller's content-plane
     // standing to decide which.
@@ -746,6 +775,13 @@ class ContentThreadService {
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    await refuseHostOwnedManagement({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
       userId: input.userId,
     });
 
@@ -999,6 +1035,13 @@ class ContentThreadService {
   }) {
     const workspace = await requireContentWorkspace({
       workspaceId: input.workspaceId,
+      userId: input.userId,
+    });
+
+    await refuseHostOwnedManagement({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
       userId: input.userId,
     });
 

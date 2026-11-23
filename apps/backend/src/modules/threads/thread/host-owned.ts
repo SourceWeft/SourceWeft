@@ -40,3 +40,21 @@ export function assertTurnAllowedInThread(
     "This conversation is run by the workspace assistant and does not take messages",
   );
 }
+
+/**
+ * Refuses deleting, archiving or changing the visibility of a host-owned
+ * conversation, whoever asks (its creator and a workspace admin included):
+ * the host depends on it — the assistant's Router keeps working in it, and
+ * its ticket conversations share the Router conversation's visibility.
+ * Renaming does not touch any of that and stays allowed.
+ */
+export function assertThreadManageable(thread: {
+  origin?: ThreadOrigin | null;
+}): void {
+  if (!isHostOwnedThreadOrigin(thread.origin)) return;
+  throw new ContentError(
+    403,
+    "THREAD_HOST_OWNED",
+    "This conversation is run by the workspace assistant; it cannot be deleted, archived or have its visibility changed",
+  );
+}
