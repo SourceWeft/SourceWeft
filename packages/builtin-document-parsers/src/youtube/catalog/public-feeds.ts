@@ -24,9 +24,14 @@ const FEEDS_BASE_URL = "https://www.youtube.com/feeds/videos.xml";
 /** Hosts a channel page may finish on; anything else (a consent wall) is not the page. */
 const CHANNEL_PAGE_HOSTS = new Set(["www.youtube.com", "youtube.com", "m.youtube.com"]);
 
-const CHANNEL_ID_JSON_RE = /"channelId":"(UC[A-Za-z0-9_-]{22})"/;
+/**
+ * The page's own channel id. A bare `"channelId"` is not used: channel pages
+ * carry other channels' ids (featured channels, recommendations) in
+ * ytInitialData before their own metadata.
+ */
 const CHANNEL_ID_CANONICAL_LINK_RE =
   /<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[A-Za-z0-9_-]{22})"/;
+const CHANNEL_ID_EXTERNAL_ID_RE = /"externalId":"(UC[A-Za-z0-9_-]{22})"/;
 
 export type PublicFeedsCatalogProviderDeps = {
   fetch: typeof fetch;
@@ -160,7 +165,7 @@ export function createPublicFeedsCatalogProvider(
 
     const html = await response.text();
     const channelId =
-      html.match(CHANNEL_ID_JSON_RE)?.[1] ?? html.match(CHANNEL_ID_CANONICAL_LINK_RE)?.[1];
+      html.match(CHANNEL_ID_CANONICAL_LINK_RE)?.[1] ?? html.match(CHANNEL_ID_EXTERNAL_ID_RE)?.[1];
 
     if (!channelId) {
       throw new YouTubeSourceError(
