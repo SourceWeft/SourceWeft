@@ -120,6 +120,63 @@ export const publicSharedArtifactResponseSchema = z.object({
   artifact: publicSharedArtifactSchema,
 });
 
+/** The owner-facing view of a thread share (adds the frozen snapshot time). */
+export const threadShareSchema = shareLinkSchema.extend({
+  snapshotTakenAt: z.string(),
+});
+
+export const createThreadShareRequestSchema = z.object({
+  /**
+   * Search indexing for the shared chat. Defaults to noindex (true) for a
+   * new share; omitted on a re-share, the current setting is kept.
+   */
+  noindex: z.boolean().optional(),
+});
+
+export const updateThreadShareRequestSchema = z.object({
+  noindex: z.boolean(),
+});
+
+/**
+ * The public projection a viewer of a shared chat receives: a frozen
+ * snapshot taken when the share was created, never the live thread. No
+ * workspace, thread, or creator-identity leakage.
+ */
+export const publicSharedChatSchema = z.object({
+  title: z.string(),
+  takenAt: z.string(),
+  assistantName: z.string().nullable(),
+  noindex: z.boolean(),
+  messages: z.array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      createdAt: z.string(),
+      /** Markdown; image refs are already absolute URLs. */
+      content: z.string(),
+      stopped: z.boolean(),
+      citations: z.array(
+        z.object({
+          n: z.number().int(),
+          title: z.string(),
+          url: z.string().nullable(),
+        }),
+      ),
+      images: z.array(z.object({ name: z.string(), url: z.string() })),
+      artifacts: z.array(
+        z.object({
+          kind: z.string(),
+          title: z.string(),
+          publicUrl: z.string().nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+
+export const publicSharedChatResponseSchema = z.object({
+  chat: publicSharedChatSchema,
+});
+
 export type ShareTargetType = z.infer<typeof shareTargetTypeSchema>;
 export type ShareAccessLevel = z.infer<typeof shareAccessLevelSchema>;
 export type ShareLink = z.infer<typeof shareLinkSchema>;
@@ -134,4 +191,15 @@ export type GetShareResponse = z.infer<typeof getShareResponseSchema>;
 export type PublicSharedArtifact = z.infer<typeof publicSharedArtifactSchema>;
 export type PublicSharedArtifactResponse = z.infer<
   typeof publicSharedArtifactResponseSchema
+>;
+export type ThreadShare = z.infer<typeof threadShareSchema>;
+export type CreateThreadShareRequest = z.infer<
+  typeof createThreadShareRequestSchema
+>;
+export type UpdateThreadShareRequest = z.infer<
+  typeof updateThreadShareRequestSchema
+>;
+export type PublicSharedChat = z.infer<typeof publicSharedChatSchema>;
+export type PublicSharedChatResponse = z.infer<
+  typeof publicSharedChatResponseSchema
 >;

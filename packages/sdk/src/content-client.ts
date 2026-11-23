@@ -59,6 +59,9 @@ import type {
   UpdateArtifactShareRequest,
   ShareResponse,
   GetShareResponse,
+  CreateThreadShareRequest,
+  UpdateThreadShareRequest,
+  ThreadShare,
   CitationDetailResponse,
   CreateByokCredentialRequest,
   CreateByokCredentialResponse,
@@ -431,6 +434,40 @@ export class ContentClient {
     return this.http.patch<ShareResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/share`,
       input,
+    );
+  }
+
+  getThreadShare(workspaceId: string, threadId: string) {
+    return this.http.get<{ share: ThreadShare | null }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
+    );
+  }
+
+  shareThread(
+    workspaceId: string,
+    threadId: string,
+    input: CreateThreadShareRequest = {},
+  ) {
+    return this.http.post<{ share: ThreadShare }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
+      input,
+    );
+  }
+
+  updateThreadShare(
+    workspaceId: string,
+    threadId: string,
+    input: UpdateThreadShareRequest,
+  ) {
+    return this.http.patch<{ share: ThreadShare }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
+      input,
+    );
+  }
+
+  revokeThreadShare(workspaceId: string, threadId: string) {
+    return this.http.delete<{ revoked: true }>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/share`,
     );
   }
 

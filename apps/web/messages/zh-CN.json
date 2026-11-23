@@ -1067,6 +1067,7 @@
       "export": "导出为 Markdown",
       "exporting": "正在准备导出…",
       "exportError": "无法导出此对话。",
+      "share": "分享",
       "delete": "删除",
       "nowPrivate": "对话已设为私密",
       "nowVisible": "对话现在对工作区可见",
@@ -1101,7 +1102,23 @@
       "clearAllButton": "清除全部",
       "addSubagent": "添加子智能体",
       "openInNewWindow": "在新窗口中打开",
-      "openBesideParent": "在父会话旁打开"
+      "openBesideParent": "在父会话旁打开",
+      "shareDialog": {
+        "title": "分享对话",
+        "notSharedDescription": "拿到链接的人可以看到这个对话现在的样子。之后的新消息不会公开，除非你更新链接。",
+        "createLink": "创建链接",
+        "copy": "复制",
+        "copied": "已复制",
+        "updateLink": "更新链接",
+        "stopSharing": "停止分享",
+        "stopSharingConfirm": "停止分享这个对话？链接将失效。",
+        "snapshotFrom": "快照时间：{date}",
+        "allowSearchEngines": "允许搜索引擎收录",
+        "allowSearchEnginesOff": "关闭时，只有拿到链接的人能看到。",
+        "views": "{count} 次浏览",
+        "updateError": "无法更新分享设置。",
+        "forbidden": "只有对话的创建者或工作区管理员可以分享。"
+      }
     },
     "account": {
       "accountAndSettings": "账户与设置",
@@ -7145,6 +7162,31 @@
         "cancelled": "这次定时任务已被停止。",
         "needsApproval": "这次定时任务需要你的批准，而定时任务无法请求批准。"
       }
+    }
+  },
+  "sharedChat": {
+    "sharedOnAsOf": "在 SourceWeft 上分享 · 内容截至 {date}",
+    "user": "用户",
+    "assistant": "助手",
+    "stopped": "已停止",
+    "madeWith": "由 SourceWeft 制作",
+    "unavailable": "这个分享不可用",
+    "sources": "来源",
+    "artifactKinds": {
+      "file": "文件",
+      "html": "网页",
+      "report": "报告",
+      "slides": "幻灯片",
+      "mindmap": "思维导图",
+      "podcast": "播客",
+      "audio_overview": "音频概览",
+      "video_overview": "视频概览",
+      "video_presentation": "视频演示",
+      "flashcards": "闪卡",
+      "quiz": "测验",
+      "table": "表格",
+      "infographic": "信息图",
+      "image": "图片"
     }
   }
 }

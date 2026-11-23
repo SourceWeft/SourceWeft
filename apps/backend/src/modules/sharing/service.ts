@@ -27,8 +27,9 @@ export type ShareMutationResult<T> =
  * grant, so — like Claude/NotebookLM public links — the path is just the opaque
  * id with no title slug: nothing about the content leaks into the URL.
  */
-function shareUrl(token: string) {
-  return `${config.auth.webBaseUrl}/artifact/${token}`;
+export function shareUrl(targetType: ShareLink["targetType"], token: string) {
+  const path = targetType === "thread" ? "chat" : "artifact";
+  return `${config.auth.webBaseUrl}/${path}/${token}`;
 }
 
 /** Public backend endpoints the share page and its iframe fetch. */
@@ -50,11 +51,12 @@ function publicShareAssetUrl(token: string, fileName: string) {
   return `${config.auth.baseUrl}/v1/public/shares/${token}/assets/${encodeURIComponent(fileName)}`;
 }
 
-function toShareLink(row: ShareLinkRow): ShareLink {
+export function toShareLink(row: ShareLinkRow): ShareLink {
+  const targetType = row.targetType as ShareLink["targetType"];
   return {
     token: row.token,
-    url: shareUrl(row.token),
-    targetType: row.targetType as ShareLink["targetType"],
+    url: shareUrl(targetType, row.token),
+    targetType,
     targetId: row.targetId,
     isPublic: row.isPublic,
     noindex: row.noindex,

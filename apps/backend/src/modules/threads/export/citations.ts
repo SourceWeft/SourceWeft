@@ -15,7 +15,8 @@ const CITATION_PATTERN =
   /[[【]\u200B?citation:\s*([\w:-]+(?:\s*,\s*[\w:-]+)*)\s*\u200B?[\]】]/g;
 
 /** Fenced blocks (closed or running to the end) and inline code spans. */
-const CODE_PATTERN = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g;
+export const CODE_PATTERN =
+  /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g;
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0

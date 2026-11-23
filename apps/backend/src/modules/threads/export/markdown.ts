@@ -1,5 +1,9 @@
 import type { ExportThreadLocale } from "@sourceweft/contracts";
-import { createFootnotes, formatFootnote, type ExportCitation } from "./citations";
+import {
+  createFootnotes,
+  formatFootnote,
+  type ExportCitation,
+} from "./citations";
 import { exportLabels, type ArtifactType, type ExportLabels } from "./labels";
 
 /** An image in the export; a null path means it could not be included. */
@@ -63,7 +67,7 @@ function imageMarkdown(image: ExportImage, labels: ExportLabels) {
     : `[${labels.imageUnavailable}: ${escapeLinkText(image.name)}]`;
 }
 
-function referencedArtifactId(url: string) {
+export function referencedArtifactId(url: string) {
   return (
     /\/artifacts\/([^/?#]+)/.exec(url)?.[1] ??
     /[?&]artifactId=([^&#]+)/.exec(url)?.[1] ??
@@ -73,13 +77,15 @@ function referencedArtifactId(url: string) {
 
 /**
  * Puts each generated image where the answer already points at it, and
- * returns the ones the answer never mentions so they can be appended.
+ * returns the ones the answer never mentions so they can be appended. The
+ * caller decides how a placed image renders (export Markdown, a snapshot
+ * placeholder, …) via `render`.
  */
-function placeGeneratedImages(
+export function placeGeneratedImages<Image extends { artifactId: string }>(
   content: string,
-  images: RenderableMessage["generatedImages"],
-  labels: ExportLabels,
-) {
+  images: Image[],
+  render: (image: Image) => string,
+): { text: string; remaining: Image[] } {
   const byId = new Map(images.map((image) => [image.artifactId, image]));
   const placed = new Set<string>();
   const text = content.replace(MARKDOWN_IMAGE, (markdown, url: string) => {
@@ -92,7 +98,7 @@ function placeGeneratedImages(
       return "";
     }
     placed.add(image.artifactId);
-    return imageMarkdown(image, labels);
+    return render(image);
   });
   return {
     text,
@@ -126,7 +132,7 @@ export function renderChatMarkdown(input: {
     const placed = placeGeneratedImages(
       message.content,
       message.generatedImages,
-      labels,
+      (image) => imageMarkdown(image, labels),
     );
     const cited = footnotes.replace(placed.text, message.citations);
     const body = cited.text.replace(/\n{3,}/g, "\n\n").trim();

@@ -216,3 +216,10 @@ test("artifact page storage leaves role checks to the records service", async ()
   ])
     assert.equal((await call("DELETE", path)).status, 403, path);
 });
+
+test("sharing a chat keeps the default editor requirement; a viewer is refused", async () => {
+  withAccess({ role: "viewer" });
+  const response = await call("POST", "/threads/t/share");
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "WORKSPACE_ROLE_REQUIRED");
+});

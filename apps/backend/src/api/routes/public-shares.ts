@@ -11,10 +11,25 @@ import {
 import { contentArtifactsService } from "../../modules/artifacts";
 import { renderableArtifactBody } from "../../modules/artifact-records/runtime";
 import { sharingService } from "../../modules/sharing";
+import { incrementShareViewCount } from "../../modules/sharing/store";
+import { threadShareService } from "../../modules/threads/share/service";
 import { config } from "../../shared/config";
+import { logger } from "../../shared/logger";
 import { ApiError, ApiResponse } from "../response/api-response";
 import { readHostJsonBody } from "./content/artifact-records";
 import { requireRouteParam } from "./content/helpers";
+
+/** Content types a browser may render inline; anything else downloads instead. */
+const INLINE_CHAT_IMAGE_CONTENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+]);
+
+/** Bounded to 1-9999: a defensive cap, not a real limit on shared chat images. */
+const CHAT_IMAGE_N_PATTERN = /^[1-9]\d{0,3}$/;
 
 /**
  * Content-Security-Policy for served artifact bytes.
@@ -148,6 +163,73 @@ export function registerPublicShareRoutes(app: Hono) {
       c.header("X-Robots-Tag", "noindex");
     }
     return ApiResponse.success(c, { artifact });
+  });
+
+  app.get("/v1/public/shares/:token/chat", async (c) => {
+    const token = requireRouteParam(c, "token");
+    const chat = await threadShareService.resolvePublicChat(
+      token,
+      config.auth.baseUrl,
+    );
+    if (!chat) {
+      throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
+    }
+
+    // Counted here, not in the service: the JSON projection is the one load
+    // per visit worth counting (unlike the artifact page, which fetches
+    // metadata and bytes separately), same throttle as the other public reads.
+    if (
+      shouldCountView(
+        token,
+        clientIpOf({
+          cfConnectingIp: c.req.header("cf-connecting-ip"),
+          xRealIp: c.req.header("x-real-ip"),
+          xForwardedFor: c.req.header("x-forwarded-for"),
+        }),
+        Date.now(),
+      )
+    ) {
+      void incrementShareViewCount(token).catch((error) => {
+        logger.warn("share_view_count_increment_failed", {
+          token,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
+    if (chat.noindex) {
+      c.header("X-Robots-Tag", "noindex");
+    }
+    return ApiResponse.success(c, { chat });
+  });
+
+  app.get("/v1/public/shares/:token/chat/images/:n", async (c) => {
+    const token = requireRouteParam(c, "token");
+    const rawN = requireRouteParam(c, "n");
+    if (!CHAT_IMAGE_N_PATTERN.test(rawN)) {
+      throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
+    }
+
+    const image = await threadShareService.resolvePublicChatImage(
+      token,
+      Number(rawN),
+    );
+    if (!image) {
+      throw new ApiError(404, "SHARE_NOT_FOUND", "This share is not available");
+    }
+
+    const inline = INLINE_CHAT_IMAGE_CONTENT_TYPES.has(image.contentType);
+    c.header(
+      "Content-Type",
+      inline ? image.contentType : "application/octet-stream",
+    );
+    if (!inline) {
+      c.header("Content-Disposition", "attachment");
+    }
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Content-Security-Policy", "default-src 'none'; sandbox");
+    c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);
+    return c.body(Buffer.from(image.body));
   });
 
   app.get(
