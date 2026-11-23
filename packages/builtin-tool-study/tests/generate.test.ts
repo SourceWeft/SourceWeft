@@ -714,3 +714,26 @@ test("prompt handles cover the whole single-pass corpus", async () => {
   );
   assert.deepEqual(promptHandles(calls[0]!.user), ["c1", "c2", "c3", "c4", "c5", "c6", "c7"]);
 });
+
+test("trimming the surplus keeps every section before a second item from any, and the deck stays in source order", async () => {
+  // Twelve chunks in three sections of four; the model writes a card per chunk,
+  // so the first six cards in generation order all come from sections 1 and 2.
+  const { model } = flashcardModel();
+  const result = await generateStudyContent(
+    { model, anchor: factAnchor() },
+    baseInput("flashcards", factChunks(12), {
+      options: { count: 6, difficulty: "mixed", language: "en" },
+    }),
+  );
+  if (result.content.kind !== "flashcards") throw new Error("kind");
+  const sections = result.content.items.map((item) => item.evidence[0]!.headingPath);
+  assert.deepEqual(
+    [...new Set(sections)].sort(),
+    ["Section 1", "Section 2", "Section 3"],
+  );
+  for (const section of ["Section 1", "Section 2", "Section 3"]) {
+    assert.equal(sections.filter((value) => value === section).length, 2, section);
+  }
+  const chunkNos = result.content.items.map((item) => item.evidence[0]!.chunkNo!);
+  assert.deepEqual(chunkNos, [...chunkNos].sort((a, b) => a - b));
+});

@@ -84,6 +84,14 @@ export function buildGenerationPrompt(input: {
         ? `Write ${input.count} flashcards. ${DIFFICULTY_TEXT[input.difficulty]}`
         : `Write ${input.count} quiz questions. ${DIFFICULTY_TEXT[input.difficulty]}`;
 
+  const headings = new Set(
+    input.chunks.flatMap((chunk) => (chunk.headingPath ? [chunk.headingPath] : [])),
+  );
+  const spread =
+    input.kind !== "mindmap" && headings.size > 1
+      ? " Spread them over the sections named by the chunks' heading attributes: give every section one before giving any section a second, as far as the count allows."
+      : "";
+
   const focus = input.focus?.trim()
     ? `\n\n<<<FOCUS>>>\n${defuseDelimiters(input.focus.trim())}\n<<<END FOCUS>>>`
     : "";
@@ -91,7 +99,7 @@ export function buildGenerationPrompt(input: {
   // Corpus first, instructions last: a stable prefix for any implicit cache.
   const user = [
     renderCorpus(input.chunks),
-    `Task: ${task}`,
+    `Task: ${task}${spread}`,
     `Output language (BCP 47): ${input.language}.`,
   ].join("\n\n");
 

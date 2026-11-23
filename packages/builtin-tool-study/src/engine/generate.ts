@@ -32,6 +32,7 @@ import {
   StudyInputTooLargeError,
   type CorpusGroup,
 } from "./corpus";
+import { coverageFirst } from "./coverage";
 import { dedupeItems } from "./dedupe";
 import {
   assembleRoot,
@@ -370,7 +371,12 @@ export async function generateStudyContent(
     difficulty: (item) => item.difficulty,
   });
   addDrop(dropped, "duplicate", deduped.dropped);
-  candidates = deduped.kept;
+  // Source order, for the finished deck; selection walks the sections in turn.
+  const sourceOrder = new Map(deduped.kept.map((item, index) => [item.id, index]));
+  candidates = coverageFirst(deduped.kept, (item) => {
+    const first = evidence.get(item.id)![0]!;
+    return first.headingPath ?? first.chunkId;
+  });
 
   const kept: Candidate[] = [];
   for (const item of candidates) {
@@ -408,6 +414,7 @@ export async function generateStudyContent(
 
   assertRetention({ kept: kept.length, requested, generated, dropped });
   await progress({ stage: "finalize", done: 1, total: 1 });
+  kept.sort((a, b) => sourceOrder.get(a.id)! - sourceOrder.get(b.id)!);
 
   const difficulties = kept.map((item) => item.difficulty);
   if (kind === "flashcards") {

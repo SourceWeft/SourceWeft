@@ -78,3 +78,15 @@ test("resolveStudyOptions fills size, difficulty and language", () => {
     25,
   );
 });
+
+test("card and question prompts ask for one item per section before any second", () => {
+  const spread = /give every section one before giving any section a second/;
+  const headed = assembleCorpus(factChunks(8)).chunks;
+  const oneSection = assembleCorpus(factChunks(4)).chunks;
+  const prompt = (kind: "flashcards" | "quiz" | "mindmap", chunks = headed) =>
+    buildGenerationPrompt({ kind, chunks, count: 6, difficulty: "mixed", language: "en" }).user;
+  assert.match(prompt("flashcards"), spread);
+  assert.match(prompt("quiz"), spread);
+  assert.doesNotMatch(prompt("mindmap"), spread);
+  assert.doesNotMatch(prompt("flashcards", oneSection), spread);
+});

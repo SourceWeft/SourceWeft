@@ -199,13 +199,16 @@ export function topHeading(headingPath: string): string {
 /**
  * Heading coverage: the share of the source's headed sections that at least
  * one item cites. With `level: "top"` sections are first-level headings (the
- * mind map gate); otherwise every distinct heading path counts.
+ * mind map gate); otherwise every distinct heading path counts. `reachable`
+ * measures the same sections against what the set could cover at most, the
+ * smaller of the section count and the item count: twenty cards cannot cover
+ * sixty sections, so a long source is not failed for being long.
  */
 export function headingCoverageOf(input: {
   chunks: readonly { chunkId: string; headingPath: string | null }[];
   items: readonly EvalItem[];
   level?: "path" | "top";
-}): { covered: Ratio; missing: string[] } | null {
+}): { covered: Ratio; reachable: Ratio; missing: string[] } | null {
   const sectionOf = (headingPath: string) =>
     input.level === "top" ? topHeading(headingPath) : headingPath;
   const sectionByChunk = new Map<string, string>();
@@ -222,7 +225,12 @@ export function headingCoverageOf(input: {
     }
   }
   const missing = [...sections].filter((section) => !cited.has(section));
-  return { covered: ratio(sections.size - missing.length, sections.size), missing };
+  const coveredCount = sections.size - missing.length;
+  return {
+    covered: ratio(coveredCount, sections.size),
+    reachable: ratio(coveredCount, Math.min(sections.size, input.items.length)),
+    missing,
+  };
 }
 
 const HAN = /\p{Script=Han}/u;
