@@ -238,7 +238,7 @@ test("handle resolves via channel page then channel feed", async () => {
   const fetchFn = createFakeFetch({
     [handlePageUrl]: textResponse(
       200,
-      `<html><script>var ytInitialData = {"channelId":"${channelId}", "other":true};</script></html>`,
+      `<html><script>var ytInitialData = {"metadata":{"channelMetadataRenderer":{"externalId":"${channelId}"}}};</script></html>`,
     ),
     [feedUrl]: textResponse(200, xml, "application/atom+xml"),
   });
@@ -256,7 +256,78 @@ test("handle resolves via channel page then channel feed", async () => {
   assert.equal(collection.videos[0]?.videoId, "video000003");
 });
 
-test("custom channel resolves via canonical link when channelId JSON is absent", async () => {
+test("handle page resolves its own channel, not the first channelId on the page", async () => {
+  // Real @handle pages carry other channels' ids (featured channels,
+  // recommendations) in ytInitialData before the channel's own metadata.
+  const handlePageUrl = "https://www.youtube.com/@3blue1brown";
+  const ownChannelId = "UCYO_jab_esuFRV4b17AJtAw";
+  const otherChannelId = "UC1_uAIS3r8Vu6JjXWvastJg";
+  const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${ownChannelId}`;
+  const fetchFn = createFakeFetch({
+    [handlePageUrl]: textResponse(
+      200,
+      `<html><head><link rel="canonical" href="https://www.youtube.com/channel/${ownChannelId}"></head>` +
+        `<script>var ytInitialData = {"channelId":"${otherChannelId}",` +
+        `"metadata":{"channelMetadataRenderer":{"externalId":"${ownChannelId}"}}};</script></html>`,
+    ),
+    [feedUrl]: textResponse(200, atomFeed({ title: "3Blue1Brown", entries: [] }), "application/atom+xml"),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  const collection = await provider.listCollection({
+    kind: "channel",
+    channel: { type: "handle", value: "3blue1brown" },
+  });
+
+  assert.equal(collection.title, "3Blue1Brown");
+  assert.deepEqual((fetchFn as unknown as { seen: string[] }).seen, [handlePageUrl, feedUrl]);
+});
+
+test("handle page without a canonical link resolves via channelMetadataRenderer externalId", async () => {
+  const handlePageUrl = "https://www.youtube.com/@GoogleDevelopers";
+  const channelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
+  const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+  const fetchFn = createFakeFetch({
+    [handlePageUrl]: textResponse(
+      200,
+      `<script>var ytInitialData = {"channelId":"UC1_uAIS3r8Vu6JjXWvastJg",` +
+        `"metadata":{"channelMetadataRenderer":{"title":"Devs","externalId":"${channelId}"}}};</script>`,
+    ),
+    [feedUrl]: textResponse(200, atomFeed({ title: "Devs", entries: [] }), "application/atom+xml"),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  const collection = await provider.listCollection({
+    kind: "channel",
+    channel: { type: "handle", value: "GoogleDevelopers" },
+  });
+
+  assert.equal(collection.title, "Devs");
+  assert.deepEqual((fetchFn as unknown as { seen: string[] }).seen, [handlePageUrl, feedUrl]);
+});
+
+test("handle page with only other channels' ids throws YOUTUBE_CHANNEL_NOT_FOUND", async () => {
+  const handlePageUrl = "https://www.youtube.com/@OnlyOthers";
+  const fetchFn = createFakeFetch({
+    [handlePageUrl]: textResponse(200, `{"channelId":"UC1_uAIS3r8Vu6JjXWvastJg"}`),
+  });
+  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
+
+  await assert.rejects(
+    () =>
+      provider.listCollection({
+        kind: "channel",
+        channel: { type: "handle", value: "OnlyOthers" },
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof YouTubeSourceError);
+      assert.equal(error.code, "YOUTUBE_CHANNEL_NOT_FOUND");
+      return true;
+    },
+  );
+});
+
+test("custom channel resolves via canonical link", async () => {
   const customPageUrl = "https://www.youtube.com/c/Google";
   const channelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
   const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
@@ -416,7 +487,7 @@ test("a unicode handle's channel page URL is encoded exactly once", async () => 
   const channelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
   const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
   const fetchFn = createFakeFetch({
-    [handlePageUrl]: textResponse(200, `{"channelId":"${channelId}"}`),
+    [handlePageUrl]: textResponse(200, `{"externalId":"${channelId}"}`),
     [feedUrl]: textResponse(200, atomFeed({ title: "小明频道", entries: [] }), "application/atom+xml"),
   });
   const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
@@ -475,7 +546,7 @@ test("a channel page whose final URL stays on www.youtube.com still resolves", a
   const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
   const fetchFn = createFakeFetch({
     [handlePageUrl]: withFinalUrl(
-      textResponse(200, `{"channelId":"${channelId}"}`),
+      textResponse(200, `{"externalId":"${channelId}"}`),
       handlePageUrl,
     ),
     [feedUrl]: textResponse(200, atomFeed({ title: "Devs", entries: [] }), "application/atom+xml"),
