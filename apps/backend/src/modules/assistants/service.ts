@@ -21,6 +21,7 @@ import { assistantPorts, type AssistantPorts } from "./ports";
 import {
   endTicketRow,
   findAssistantRow,
+  findChatRunRow,
   findFeedItemRow,
   findTicketRow,
   findTriggerRow,
@@ -57,8 +58,8 @@ function ticketNotFound() {
   );
 }
 
-function forbidden(message: string) {
-  return new AssistantError(403, "ASSISTANT_FORBIDDEN", message);
+function forbidden(message: string, code = "ASSISTANT_FORBIDDEN") {
+  return new AssistantError(403, code, message);
 }
 
 function alreadyEnabled() {
@@ -550,8 +551,10 @@ export class AssistantService {
 
   /**
    * Ends a ticket. Already-ended is a no-op (idempotent), not an error. A
-   * worker run still going for it is stopped first, same as a person
-   * stopping their own chat run.
+   * worker run still going for it is stopped first — as the run's own user
+   * (its payer), the same way the dispatch tick stops a run past its time
+   * limit: only a run's own user may stop it, and whoever closes the ticket
+   * (the steward, any member with write access) is often someone else.
    */
   async closeTicket(
     caller: Caller,
@@ -566,12 +569,20 @@ export class AssistantService {
       return { ticket: presentTicket(ticket) };
     }
     if (ticket.currentRunId) {
-      await this.ports.stopRun({
-        workspaceId: caller.workspaceId,
-        threadId: ticket.workerThreadId,
+      const run = await findChatRunRow({
         runId: ticket.currentRunId,
-        userId: caller.userId,
+        teamId: access.teamId,
+        workspaceId: caller.workspaceId,
       });
+      // A run that is gone has nothing left to stop.
+      if (run) {
+        await this.ports.stopRun({
+          workspaceId: caller.workspaceId,
+          threadId: ticket.workerThreadId,
+          runId: run.id,
+          userId: run.userId,
+        });
+      }
     }
     const updated = await endTicketRow(db, {
       ticketId: ticket.id,
@@ -589,6 +600,9 @@ export class AssistantService {
    * whether this call is the one that recorded the retry (`true`) or an
    * idempotent replay of one that already had (`false`), the same
    * created/replayed distinction `postMessage` reports.
+   *
+   * Only the ticket's payer may retry it: the run it starts is billed to
+   * them, and nobody else may spend their credits.
    */
   async retryTicket(
     caller: Caller,
@@ -601,6 +615,12 @@ export class AssistantService {
     );
     if (!access.canWrite) {
       throw forbidden("You do not have write access to this workspace");
+    }
+    if (ticket.payerUserId !== caller.userId) {
+      throw forbidden(
+        "Only the member who pays for this ticket can retry it",
+        "ASSISTANT_TICKET_NOT_PAYER",
+      );
     }
 
     const triggerId = deterministicId(

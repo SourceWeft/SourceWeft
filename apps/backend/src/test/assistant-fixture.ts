@@ -110,7 +110,19 @@ export async function createAssistantFixture(label: string) {
         created: inserted.length > 0,
       };
     },
+    // Like `durableChatRunService.stopRun`, only the run's own user may
+    // stop it: anyone else gets the same 404 production gives them.
     async stopRun(input) {
+      const [run] = await schema.db
+        .select({ userId: schema.chatThreadRuns.userId })
+        .from(schema.chatThreadRuns)
+        .where(eq(schema.chatThreadRuns.id, input.runId));
+      if (run && run.userId !== input.userId) {
+        throw Object.assign(new Error("Chat run not found"), {
+          statusCode: 404,
+          code: "CHAT_RUN_NOT_FOUND",
+        });
+      }
       stopped.push(input);
     },
     async notify(input) {

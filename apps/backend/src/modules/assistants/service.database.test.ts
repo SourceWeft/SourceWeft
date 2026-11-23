@@ -418,16 +418,45 @@ test("closing a ticket ends it, and closing again is a no-op", async () => {
   assert.equal(closedAgain.endedAt, closed.endedAt);
 });
 
+/** A ticket paid for by `payer`, with a worker run of theirs still going in
+ * its conversation. */
+async function ticketWithRunningRun(input: {
+  teamId: string;
+  workspaceId: string;
+  assistantId: string;
+  payer: string;
+}) {
+  const workerThreadId = randomUUID();
+  const started = await f.ports.startTurn({
+    origin: "assistant_ticket",
+    workspaceId: input.workspaceId,
+    userId: input.payer,
+    threadId: workerThreadId,
+    idempotencyKey: randomUUID(),
+    title: "Ticket",
+    content: "Work on it",
+    hostContext: { assistantId: input.assistantId },
+  });
+  await f.setRunStatus(started.run.id, { status: "running" });
+  const ticket = await f.insertTicket({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    assistantId: input.assistantId,
+    payerUserId: input.payer,
+    workerThreadId,
+    currentRunId: started.run.id,
+  });
+  return { ticket, runId: started.run.id };
+}
+
 test("closing a ticket with a run in flight stops it", async () => {
   const { ownerCaller, teamId, workspaceId } = await teamWithOwnerAndMember();
   const assistant = await f.service.enable(ownerCaller);
-  const runId = randomUUID();
-  const ticket = await f.insertTicket({
+  const { ticket, runId } = await ticketWithRunningRun({
     teamId,
     workspaceId,
     assistantId: assistant.id,
-    payerUserId: ownerCaller.userId,
-    currentRunId: runId,
+    payer: ownerCaller.userId,
   });
 
   await f.service.closeTicket(ownerCaller, ticket.id, {
@@ -437,6 +466,66 @@ test("closing a ticket with a run in flight stops it", async () => {
   assert.equal(f.stopped.length, 1);
   assert.equal(f.stopped[0]!.runId, runId);
   assert.equal(f.stopped[0]!.threadId, ticket.workerThreadId);
+});
+
+test("the steward closes a ticket whose run belongs to another payer: the run is stopped as its own user and the ticket ends", async () => {
+  const { ownerCaller, memberCaller, teamId, workspaceId } =
+    await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const { ticket, runId } = await ticketWithRunningRun({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payer: memberCaller.userId,
+  });
+
+  const { ticket: closed } = await f.service.closeTicket(ownerCaller, ticket.id, {
+    idempotencyKey: randomUUID(),
+  });
+
+  assert.equal(closed.stage, "ended");
+  assert.equal(f.stopped.length, 1);
+  assert.equal(f.stopped[0]!.runId, runId);
+  assert.equal(f.stopped[0]!.userId, memberCaller.userId);
+});
+
+test("only the ticket's payer may retry it; anyone else is refused with a 403 and nothing is written", async () => {
+  const { ownerCaller, memberCaller, teamId, workspaceId } =
+    await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const ticket = await f.insertTicket({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: memberCaller.userId,
+    consecutiveFailures: 3,
+  });
+
+  // The steward (a workspace admin) is not the payer: a retry would bill
+  // the member for a run they did not ask for.
+  assert.equal(
+    await refusal(() =>
+      f.service.retryTicket(ownerCaller, ticket.id, {
+        idempotencyKey: randomUUID(),
+      }),
+    ),
+    "403 ASSISTANT_TICKET_NOT_PAYER",
+  );
+  assert.equal(
+    (await f.triggerRows(assistant.id)).filter(
+      (row) => row.routedTicketId === ticket.id,
+    ).length,
+    0,
+  );
+  assert.equal((await f.ticketRow(ticket.id))!.consecutiveFailures, 3);
+
+  const { ticket: retried, created } = await f.service.retryTicket(
+    memberCaller,
+    ticket.id,
+    { idempotencyKey: randomUUID() },
+  );
+  assert.equal(created, true);
+  assert.equal(retried.consecutiveFailures, 0);
 });
 
 test("a non-member gets a 404 for a ticket action, not a 403", async () => {
