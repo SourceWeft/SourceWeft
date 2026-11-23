@@ -79,7 +79,9 @@ class ConnectorSyncBlocked extends Error {
 }
 
 type UpsertItemResult =
-  | { kind: "indexed" }
+  // `updated` is true when the item already had a source row (a changed item or
+  // a revived archived one) and false when it was first indexed in this run.
+  | { kind: "indexed"; updated: boolean }
   | { kind: "unchanged" }
   | { kind: "oversized"; requestedPages: number; cycleCapacity: number }
   | { kind: "skipped"; reason: ConnectorItemSkipReason };
@@ -795,6 +797,13 @@ export class ConnectorSyncOrchestrator {
       let discoveredCount = 0;
       let indexedCount = 0;
       let failedCount = 0;
+      // Of `indexedCount`, how many were already known (`updatedCount`); the
+      // rest of the discovered items were left alone (`unchangedCount`) or
+      // declined by the connector (`skippedCount`, which includes items too
+      // large for the page quota). Kept in the run metadata, not a column.
+      let updatedCount = 0;
+      let unchangedCount = 0;
+      let skippedCount = 0;
       const itemFailures: Array<Record<string, unknown>> = [];
       const oversizedItems: Array<Record<string, unknown>> = [];
       const skippedItems: Array<Record<string, unknown>> = [];
@@ -802,6 +811,9 @@ export class ConnectorSyncOrchestrator {
       // only it may clear the block; a webhook run for other items keeps it.
       const clearsSyncBlock = !input.targetExternalIds?.length;
       const runMetadata = () => ({
+        updatedCount,
+        unchangedCount,
+        skippedCount,
         ...(itemFailures.length ? { itemFailures } : {}),
         ...(oversizedItems.length ? { oversizedItems } : {}),
         ...(skippedItems.length ? { skippedItems } : {}),
@@ -937,11 +949,22 @@ export class ConnectorSyncOrchestrator {
               });
               if (result.kind === "indexed") {
                 indexedCount += 1;
+                if (result.updated) updatedCount += 1;
                 await incrementSyncRunCounts({
                   ...input,
                   indexedDelta: 1,
+                  ...(result.updated
+                    ? { metadataPatch: { updatedCount } }
+                    : {}),
+                });
+              } else if (result.kind === "unchanged") {
+                unchangedCount += 1;
+                await incrementSyncRunCounts({
+                  ...input,
+                  metadataPatch: { unchangedCount },
                 });
               } else if (result.kind === "oversized") {
+                skippedCount += 1;
                 oversizedItems.push({
                   externalId: item.externalId,
                   title: item.title,
@@ -950,9 +973,13 @@ export class ConnectorSyncOrchestrator {
                 });
                 await incrementSyncRunCounts({
                   ...input,
-                  metadataPatch: { oversizedItems: oversizedItems.slice(-20) },
+                  metadataPatch: {
+                    skippedCount,
+                    oversizedItems: oversizedItems.slice(-20),
+                  },
                 });
               } else if (result.kind === "skipped") {
+                skippedCount += 1;
                 skippedItems.push({
                   externalId: item.externalId,
                   title: item.title,
@@ -960,7 +987,10 @@ export class ConnectorSyncOrchestrator {
                 });
                 await incrementSyncRunCounts({
                   ...input,
-                  metadataPatch: { skippedItems: skippedItems.slice(-20) },
+                  metadataPatch: {
+                    skippedCount,
+                    skippedItems: skippedItems.slice(-20),
+                  },
                 });
               }
             } catch (error) {
@@ -1495,7 +1525,7 @@ export class ConnectorSyncOrchestrator {
     }
     if (pages !== null) input.budget.consumed(pages);
 
-    return { kind: "indexed" };
+    return { kind: "indexed", updated: existing != null };
   }
 
   /**

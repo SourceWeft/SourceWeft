@@ -3756,12 +3756,15 @@
         "reason": "Reason",
         "requestPreview": "Request",
         "riskLevel": "Risk",
+        "skippedCount": "Skipped",
         "source": "Source",
         "targetExternalIds": "Targets",
         "targetExternalIdCount": "Target count",
         "targeted": "Targeted",
         "syncRunId": "Linked sync",
-        "triggerType": "Trigger"
+        "triggerType": "Trigger",
+        "unchangedCount": "Unchanged",
+        "updatedCount": "Updated"
       }
     },
     "sourceGuide": {

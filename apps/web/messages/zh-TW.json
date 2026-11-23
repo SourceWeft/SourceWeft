@@ -3756,12 +3756,15 @@
         "reason": "原因",
         "requestPreview": "請求",
         "riskLevel": "風險",
+        "skippedCount": "已跳過",
         "source": "來源",
         "targetExternalIds": "目標",
         "targetExternalIdCount": "目標數量",
         "targeted": "已定向",
         "syncRunId": "關聯同步",
-        "triggerType": "觸發方式"
+        "triggerType": "觸發方式",
+        "unchangedCount": "未變化",
+        "updatedCount": "已更新"
       }
     },
     "sourceGuide": {

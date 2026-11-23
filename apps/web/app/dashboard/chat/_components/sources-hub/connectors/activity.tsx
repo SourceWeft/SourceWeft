@@ -67,12 +67,15 @@ const knownConnectorActivitySummaryKeys = new Set<string>([
   "reason",
   "requestPreview",
   "riskLevel",
+  "skippedCount",
   "source",
   "targetExternalIds",
   "targetExternalIdCount",
   "targeted",
   "syncRunId",
   "triggerType",
+  "unchangedCount",
+  "updatedCount",
 ]);
 
 const hiddenConnectorActivitySummaryKeys = new Set([
@@ -152,7 +155,7 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
         value !== null &&
         value !== undefined,
     )
-    .slice(0, 6);
+    .slice(0, 10);
   return (
     <div className="rounded-lg border bg-background p-2.5 text-xs">
       <div className="flex min-w-0 items-start gap-2">
