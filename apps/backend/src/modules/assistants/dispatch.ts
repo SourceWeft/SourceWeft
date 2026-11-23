@@ -887,6 +887,10 @@ async function startRouterTurn(
       title: ROUTER_THREAD_TITLE,
       content,
       hostContext: { assistantId: assistant.id, batchKey },
+      // Each batch carries its own context (related tickets, recent feed),
+      // so the Router reads no earlier batch: measured, history was 70% of
+      // its input and forced a summary call every few turns.
+      freshContext: true,
     });
     runId = started.run.id;
   } catch (error) {

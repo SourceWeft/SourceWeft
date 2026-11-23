@@ -725,6 +725,7 @@ test("A without credits: A's batch stays pending with no attempt counted, and B'
     userId: s.b,
     idempotencyKey: batchKey,
     hostContext: { assistantId: s.assistant.id, batchKey },
+    freshContext: true,
   });
   // B's event is the batch; A's appears at most as recent feed context.
   assert.ok(

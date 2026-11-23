@@ -217,6 +217,46 @@ test("the Router conversation is reused: another member starting the next run is
   );
 });
 
+test("a fresh-context start queues a run with no base checkpoint and a graph thread of its own", async () => {
+  const router = await routerThread();
+  const idempotencyKey = key();
+  const { run } = await startHostTurn({
+    workspaceId,
+    userId: steward,
+    threadId: router.id,
+    idempotencyKey,
+    title: "ignored",
+    content: "batch",
+    origin: "assistant_router",
+    existingThread: true,
+    freshContext: true,
+  });
+  const request = run.requestJson as Record<string, unknown>;
+  assert.equal(request.agentBaseCheckpoint, null);
+  assert.equal(
+    request.agentRunThreadId,
+    `thread:${router.id}:host:${idempotencyKey}`,
+  );
+  // Without it the run continues the conversation's own graph.
+  await schema.db
+    .update(schema.chatThreadRuns)
+    .set({ status: "completed", finishedAt: new Date() })
+    .where(eq(schema.chatThreadRuns.id, run.id));
+  const { run: plain } = await startHostTurn({
+    workspaceId,
+    userId: steward,
+    threadId: router.id,
+    idempotencyKey: key(),
+    title: "ignored",
+    content: "batch",
+    origin: "assistant_router",
+    existingThread: true,
+  });
+  const plainRequest = plain.requestJson as Record<string, unknown>;
+  assert.equal("agentBaseCheckpoint" in plainRequest, false);
+  assert.equal("agentRunThreadId" in plainRequest, false);
+});
+
 test("an existing-thread start only reaches a conversation of that origin the member can see", async () => {
   const notFound = (error: { statusCode?: number; code?: string }) =>
     error.statusCode === 404 && error.code === "THREAD_NOT_FOUND";

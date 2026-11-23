@@ -257,6 +257,15 @@ export type StartHostTurnInput = StartScheduledTurnInput & {
    * selection are left as they are, so `sourceIds` may not be given.
    */
   existingThread?: boolean;
+  /**
+   * The turn starts with none of the conversation's earlier turns in its
+   * model context: no base checkpoint and a graph thread of its own, keyed
+   * by the run's idempotency key (so a redelivered run continues its own
+   * graph). The conversation's messages are still stored and shown as
+   * usual. For a host whose every turn carries what it needs (a Router
+   * batch); a conversation meant to remember stays without it.
+   */
+  freshContext?: boolean;
 };
 
 function assertHostContext(hostContext: StartHostTurnInput["hostContext"]) {
@@ -444,6 +453,12 @@ export async function startHostTurn(input: StartHostTurnInput): Promise<{
     ...(input.creditCap !== undefined ? { creditCap: input.creditCap } : {}),
     ...(input.hostContext !== undefined
       ? { hostContext: { ...input.hostContext } }
+      : {}),
+    ...(input.freshContext
+      ? {
+          agentBaseCheckpoint: null,
+          agentRunThreadId: `thread:${thread.id}:host:${idempotencyKey}`,
+        }
       : {}),
   };
   try {
