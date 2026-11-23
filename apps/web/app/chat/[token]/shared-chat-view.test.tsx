@@ -337,6 +337,38 @@ test("a generated image placed inline in an answer shows once, where the text pu
   assert.ok(html.indexOf(OWN_IMAGE) < html.indexOf("Done."));
 });
 
+test("an unplaced image is still shown when an inline image's number starts with its number", async () => {
+  const image1 = "https://api.test/v1/public/shares/tok-1/chat/images/1";
+  const image10 = "https://api.test/v1/public/shares/tok-1/chat/images/10";
+  const html = await render(
+    chat({
+      messages: [
+        message({
+          role: "assistant",
+          content: `Inline:\n\n![Ten](${image10})`,
+          images: [
+            { name: "One", url: image1 },
+            { name: "Ten", url: image10 },
+          ],
+        }),
+      ],
+    }),
+  );
+
+  const imgTags = html.match(/<img[^>]*>/g) ?? [];
+  assert.equal(imgTags.length, 2, imgTags.join("\n"));
+  assert.equal(
+    imgTags.filter((tag) => tag.includes(`src="${image1}"`)).length,
+    1,
+    imgTags.join("\n"),
+  );
+  assert.equal(
+    imgTags.filter((tag) => tag.includes(`src="${image10}"`)).length,
+    1,
+    imgTags.join("\n"),
+  );
+});
+
 test("the unavailable view shows its message", async () => {
   const html = await renderUnavailable();
   // renderToStaticMarkup escapes the apostrophe as a numeric entity.

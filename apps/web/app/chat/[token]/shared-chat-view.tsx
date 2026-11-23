@@ -147,6 +147,25 @@ function SharedChatArtifactCards({
   );
 }
 
+/**
+ * Whether `content` contains `url` as a whole URL, not as the start of a
+ * longer one: image URLs end in their number, so `…/images/1` is a prefix of
+ * `…/images/10`.
+ */
+function contentHasUrl(content: string, url: string) {
+  for (
+    let index = content.indexOf(url);
+    index !== -1;
+    index = content.indexOf(url, index + 1)
+  ) {
+    const next = content.charAt(index + url.length);
+    if (!/[\w%./?#&=~+-]/.test(next)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Images after the text, skipping any URL the content already rendered inline. */
 function SharedChatMessageImages({
   content,
@@ -155,7 +174,7 @@ function SharedChatMessageImages({
   content: string;
   images: SharedMessage["images"];
 }) {
-  const extra = images.filter((image) => !content.includes(image.url));
+  const extra = images.filter((image) => !contentHasUrl(content, image.url));
   if (extra.length === 0) {
     return null;
   }
