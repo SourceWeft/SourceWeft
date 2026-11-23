@@ -54,6 +54,7 @@ import {
   recordRouterRunRow,
   releaseInEvalTriggerRows,
   requeueOrExpireInEvalTriggerRows,
+  sumThreadRunCredits,
   ticketHasDeliveredTrigger,
   updateAssistantRow,
   updateScopedTicketRow,
@@ -567,6 +568,39 @@ async function dispatchTicket(
     return "blocked";
   }
 
+  // The cap is the whole ticket's, not each run's: a run gets only what its
+  // earlier runs left. Nothing left blocks the ticket on `credit_cap`, the
+  // same state a run stopped at its cap leaves — told once, like above.
+  const spent = await sumThreadRunCredits({
+    threadId: ticket.workerThreadId,
+    teamId: assistant.teamId,
+    workspaceId: assistant.workspaceId,
+  });
+  const remainingCredits = Number(ticket.creditCap) - spent;
+  if (remainingCredits <= 0) {
+    if (ticket.outcome === "blocked" && ticket.blockedReason === "credit_cap") {
+      return "blocked";
+    }
+    const changed = await db.transaction(async (tx) => {
+      const current = await findScopedTicketRow(ticketScope, tx, { forUpdate: true });
+      if (!current || current.stage === "working" || current.stage === "ended") {
+        return false;
+      }
+      await updateScopedTicketRow(tx, ticketScope, blockedValues("credit_cap", now));
+      return true;
+    });
+    if (changed) {
+      logger.warn("Assistant ticket has spent its credit cap; not starting a run", {
+        assistantId: assistant.id,
+        ticketId: ticket.id,
+        creditCap: Number(ticket.creditCap),
+        spent,
+      });
+      await notifyBlocked(ports, assistant, ticket, "credit_cap");
+    }
+    return "blocked";
+  }
+
   const delivery = await deliveryFor(scope, candidate);
   const content = renderWorkerDelivery({
     kind: delivery.kind,
@@ -590,7 +624,7 @@ async function dispatchTicket(
       ),
       title: ticket.title,
       content,
-      creditCap: Number(ticket.creditCap),
+      creditCap: remainingCredits,
       hostContext: { assistantId: assistant.id, ticketId: ticket.id },
     });
     runId = started.run.id;

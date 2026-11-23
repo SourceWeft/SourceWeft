@@ -915,6 +915,32 @@ export async function chatRunExistsForKey(input: {
   return Boolean(row);
 }
 
+/**
+ * Credits every run in one conversation has cost so far (a ticket's worker
+ * conversation: the runs of that ticket). A run still going has recorded
+ * nothing yet and counts as 0 here; the dispatch tick only asks between
+ * runs.
+ */
+export async function sumThreadRunCredits(input: {
+  threadId: string;
+  teamId: string;
+  workspaceId: string;
+}): Promise<number> {
+  const [row] = await db
+    .select({
+      value: sql<string | null>`sum(${chatThreadRuns.consumedCredits})`,
+    })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.threadId, input.threadId),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    );
+  return Number(row?.value ?? 0);
+}
+
 /** The visibility of a conversation, scoped to its tenant; null when gone. */
 export async function findThreadVisibility(input: {
   threadId: string;

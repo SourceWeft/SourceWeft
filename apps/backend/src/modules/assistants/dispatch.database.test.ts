@@ -320,6 +320,98 @@ test("RUN_CREDIT_CAP_EXCEEDED blocks the ticket on its credit cap and notifies t
   assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
 });
 
+/** An idle ticket whose earlier, finished worker runs spent `spent` of its
+ * `creditCap`, with a member's new message routed to it. */
+async function ticketWithSpentRuns(
+  s: Setup,
+  input: { creditCap: number; spent: number[] },
+) {
+  const now = new Date();
+  const workerThreadId = randomUUID();
+  for (const credits of input.spent) {
+    const started = await f.ports.startTurn({
+      origin: "assistant_ticket",
+      workspaceId: s.workspaceId,
+      userId: s.a,
+      threadId: workerThreadId,
+      idempotencyKey: randomUUID(),
+      title: "Earlier run",
+      content: "Earlier work",
+    });
+    await f.setRunStatus(started.run.id, { status: "completed" });
+    await f.schema.db
+      .update(f.schema.chatThreadRuns)
+      .set({ consumedCredits: String(credits) })
+      .where(eq(f.schema.chatThreadRuns.id, started.run.id));
+  }
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    stage: "idle",
+    workerThreadId,
+    creditCap: input.creditCap,
+    createdAt: minutesAgo(now, 90),
+  });
+  // Delivered with the ticket's first run.
+  await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    status: "decided",
+    routedTicketId: ticket.id,
+    deliveredAt: minutesAgo(now, 60),
+    createdAt: minutesAgo(now, 61),
+  });
+  await routeEvent(s, ticket.id, {
+    payer: s.a,
+    sourceKind: "member_message",
+    at: minutesAgo(now, 1),
+  });
+  f.reset();
+  return ticket;
+}
+
+test("the credit cap covers the whole ticket: earlier runs that spent it block the ticket on credit_cap, and no run starts", async () => {
+  const s = await setup();
+  const ticket = await ticketWithSpentRuns(s, { creditCap: 100, spent: [60, 40] });
+
+  await tick(new Date(), f.ports);
+
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+  const row = (await f.ticketRow(ticket.id))!;
+  assert.equal(row.stage, "waiting_person");
+  assert.equal(row.outcome, "blocked");
+  assert.equal(row.blockedReason, "credit_cap");
+  assert.equal(row.currentRunId, null);
+  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0]!.payload?.reason, "credit_cap");
+
+  // Told once: the next tick leaves it as it is.
+  f.reset();
+  await tick(new Date(), f.ports);
+  assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
+  assert.equal(
+    f.notifications.filter((n) => n.kind === "assistant_ticket_blocked").length,
+    0,
+  );
+});
+
+test("a worker run gets only what is left of the ticket's credit cap", async () => {
+  const s = await setup();
+  const ticket = await ticketWithSpentRuns(s, { creditCap: 100, spent: [30] });
+
+  await tick(new Date(), f.ports);
+
+  const [start] = startsOf("assistant_ticket", s.workspaceId);
+  assert.ok(start);
+  assert.equal(start.hostContext?.ticketId, ticket.id);
+  assert.equal(start.creditCap, 70);
+});
+
 test("a run refused for credits blocks the ticket on insufficient credits", async () => {
   const s = await setup();
   const { ticket, runId } = await workingTicket(s);
