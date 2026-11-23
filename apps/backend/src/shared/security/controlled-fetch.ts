@@ -13,7 +13,9 @@ import {
  * `allowCrossOriginRedirects` (default false) is for credential-free public
  * fetches only. When true, a cross-origin redirect is followed only if the
  * target passes the endpoint policy and the pinned-DNS socket check, and the
- * credential headers are dropped from that hop.
+ * credential headers are dropped from that hop. A request body is NOT
+ * dropped: it is still forwarded on a cross-origin 307/308, so this option is
+ * only for body-less (GET) callers.
  */
 export function createControlledFetch(
   policyInput: EndpointPolicy,

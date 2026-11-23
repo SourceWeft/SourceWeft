@@ -278,6 +278,42 @@ describe("createConnector for a none connector", () => {
       });
     });
 
+    test("a sibling carrying platform readiness metadata is still the same feed", async () => {
+      mocks.listSourceConnectorRecords.mockResolvedValue([
+        existing({
+          configJson: {
+            feedUrl: "https://example.com/feed.xml",
+            syncReadiness: {
+              ready: false,
+              reason: "feed_timeout",
+              message: "The feed did not respond in time.",
+              checkedAt: "2026-11-23T00:00:00.000Z",
+            },
+          },
+        }),
+      ]);
+
+      const error = await rejection(create(service(noneRegistry())));
+      assert.equal(error.statusCode, 409);
+      assert.equal(error.code, "CONNECTOR_ALREADY_EXISTS");
+      assert.equal(error.details?.connectorId, "existing");
+      assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 0);
+      assert.equal(checkSyncReadiness.mock.calls.length, 0);
+    });
+
+    test("a different feed is allowed even when the sibling carries readiness metadata", async () => {
+      mocks.listSourceConnectorRecords.mockResolvedValue([
+        existing({
+          configJson: {
+            feedUrl: "https://example.com/other.xml",
+            syncReadiness: { ready: false, reason: "feed_timeout" },
+          },
+        }),
+      ]);
+      await create(service(noneRegistry()));
+      assert.equal(mocks.createSourceConnectorRecord.mock.calls.length, 1);
+    });
+
     test("a different config is allowed", async () => {
       mocks.listSourceConnectorRecords.mockResolvedValue([
         existing({ configJson: { feedUrl: "https://example.com/other.xml" } }),

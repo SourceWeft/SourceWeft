@@ -39,6 +39,11 @@ import {
 } from "./repository";
 import { ConnectorOAuthService } from "./oauth-service";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
+import {
+  hasSyncReadinessMetadata,
+  withSyncReadinessMetadata,
+  withoutSyncReadinessMetadata,
+} from "./sync-readiness-metadata";
 import { resolveExtractedFile } from "./extracted-file";
 import { isConnectorExtractedFile, isConnectorItemSkipError } from "./types";
 import type {
@@ -172,33 +177,6 @@ function resolveNextScheduledAt(frequencyMinutes: number | null) {
     return null;
   }
   return new Date(Date.now() + frequencyMinutes * 60 * 1000);
-}
-
-function withSyncReadinessMetadata(
-  configJson: Record<string, unknown>,
-  readiness: ConnectorSyncReadinessResult,
-) {
-  return {
-    ...configJson,
-    syncReadiness: {
-      ready: false,
-      reason: readiness.reason ?? "connector_not_ready",
-      message: readiness.message ?? "Connector is not ready to sync.",
-      checkedAt: new Date().toISOString(),
-    },
-  };
-}
-
-function hasSyncReadinessMetadata(configJson: Record<string, unknown>) {
-  return Object.prototype.hasOwnProperty.call(configJson, "syncReadiness");
-}
-
-function withoutSyncReadinessMetadata(configJson: Record<string, unknown>) {
-  if (!hasSyncReadinessMetadata(configJson)) {
-    return configJson;
-  }
-  const { syncReadiness: _syncReadiness, ...rest } = configJson;
-  return rest;
 }
 
 function skippedRunMetadata(

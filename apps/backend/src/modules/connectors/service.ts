@@ -1,6 +1,7 @@
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { comparableConfig } from "./json-compare";
+import { withoutSyncReadinessMetadata } from "./sync-readiness-metadata";
 import { ConnectorOAuthService } from "./oauth-service";
 import { requireConnectorWorkspace } from "./permissions";
 import {
@@ -188,7 +189,10 @@ export class ConnectorService {
     if (isNone) {
       // A credential-free connector has no account to make two of them
       // distinct, so the configuration is its identity.
-      const wanted = comparableConfig(configJson);
+      // The platform's own readiness marker is not part of the identity.
+      const identity = (config: Record<string, unknown>) =>
+        comparableConfig(withoutSyncReadinessMetadata(config));
+      const wanted = identity(configJson);
       const siblings = await listSourceConnectorRecords({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,
@@ -197,7 +201,7 @@ export class ConnectorService {
       const duplicate = siblings.find(
         (sibling) =>
           sibling.connectorType === input.connectorType &&
-          comparableConfig(sibling.configJson) === wanted,
+          identity(sibling.configJson) === wanted,
       );
       if (duplicate) {
         throw new ConnectorError(
