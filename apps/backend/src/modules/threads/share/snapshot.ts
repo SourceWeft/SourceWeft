@@ -176,7 +176,10 @@ export function buildChatSnapshot(input: {
       placedImages,
       (image) => `![${escapeAltText(image.name)}](sw-image:${image.n})`,
     );
-    for (const image of placed.remaining) {
+    // Every generated image is listed on the message, including those placed
+    // in the text: the public page only shows images listed here, and skips
+    // a listed one the content already shows.
+    for (const image of placedImages) {
       messageImages.push({ n: image.n, name: image.name });
     }
 

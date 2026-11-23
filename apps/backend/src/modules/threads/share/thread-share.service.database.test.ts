@@ -487,5 +487,10 @@ test("an image reference in the content becomes a public image URL", async () =>
     view?.messages[1]?.content,
     `Look: ![Cat](${API}/v1/public/shares/${share.token}/chat/images/1)`,
   );
-  assert.deepEqual(view?.messages[1]?.images, []);
+  assert.deepEqual(view?.messages[1]?.images, [
+    {
+      name: "Cat",
+      url: `${API}/v1/public/shares/${share.token}/chat/images/1`,
+    },
+  ]);
 });

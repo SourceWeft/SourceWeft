@@ -211,6 +211,9 @@ test("a generated image referenced in the answer is placed in place, and recorde
   assert.deepEqual(result.images, [
     { n: 1, source: "artifact", artifactId: "a9", mimeType: "image/png" },
   ]);
+  // Listed on the message too, so the public page's image allowlist admits
+  // it; the page skips any listed image the content already shows.
+  assert.deepEqual(result.messages[0]?.images, [{ n: 1, name: "cat.png" }]);
 });
 
 test("a generated image without a reference goes to images only", () => {

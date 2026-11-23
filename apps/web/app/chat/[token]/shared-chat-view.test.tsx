@@ -317,6 +317,26 @@ test("raw HTML is not parsed and images are limited to the share's own image URL
   );
 });
 
+test("a generated image placed inline in an answer shows once, where the text puts it", async () => {
+  const html = await render(
+    chat({
+      messages: [
+        message({
+          role: "assistant",
+          content: `Here is the cat:\n\n![Cat](${OWN_IMAGE})\n\nDone.`,
+          images: [{ name: "Cat", url: OWN_IMAGE }],
+        }),
+      ],
+    }),
+  );
+
+  const imgTags = html.match(/<img[^>]*>/g) ?? [];
+  assert.equal(imgTags.length, 1, imgTags.join("\n"));
+  assert.ok(imgTags[0]?.includes(OWN_IMAGE), imgTags.join("\n"));
+  assert.ok(html.indexOf("Here is the cat") < html.indexOf(OWN_IMAGE));
+  assert.ok(html.indexOf(OWN_IMAGE) < html.indexOf("Done."));
+});
+
 test("the unavailable view shows its message", async () => {
   const html = await renderUnavailable();
   // renderToStaticMarkup escapes the apostrophe as a numeric entity.
