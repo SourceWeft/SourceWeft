@@ -1069,6 +1069,14 @@
       "exportError": "無法匯出此對話。",
       "share": "分享",
       "delete": "刪除",
+      "deleteDialog": {
+        "title": "刪除這個對話？",
+        "description": "「{title}」將被永久刪除，包括其中的訊息和它建立的子代理程式對話。如果它有公開連結，連結將失效。此操作無法撤銷。",
+        "cancel": "取消",
+        "confirm": "刪除",
+        "deleting": "正在刪除…",
+        "error": "無法刪除此對話。"
+      },
       "nowPrivate": "對話已設為私密",
       "nowVisible": "對話現在對工作區可見",
       "visibilityError": "無法更改此對話的可見性。",

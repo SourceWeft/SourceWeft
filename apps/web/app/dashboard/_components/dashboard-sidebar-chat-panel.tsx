@@ -93,6 +93,7 @@ import { contentClient } from "../../../lib/sdk";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
 import { DashboardPersonaManager } from "./dashboard-persona-manager";
 import { ShareChatDialog } from "./share-chat-dialog";
+import { DeleteChatDialog } from "./delete-chat-dialog";
 
 function WorkspaceSwitcher({
   workspaceId,
@@ -523,6 +524,7 @@ function ChatListRow({
   const locale = useLocale();
   const t = useTranslations("dashboardNav");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(item.title);
   const renameRequestedRef = useRef(false);
@@ -823,7 +825,7 @@ function ChatListRow({
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem
-              onSelect={() => void onDelete(item.id)}
+              onSelect={() => setConfirmingDelete(true)}
               variant="destructive"
             >
               <Trash2 className="size-4" />
@@ -832,6 +834,12 @@ function ChatListRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <DeleteChatDialog
+        open={confirmingDelete}
+        title={item.title}
+        onOpenChange={setConfirmingDelete}
+        onConfirm={() => onDelete(item.id)}
+      />
     </SidebarMenuItem>
   );
 }

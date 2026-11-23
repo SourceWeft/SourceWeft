@@ -1069,6 +1069,14 @@
       "exportError": "Couldn't export this chat.",
       "share": "Share",
       "delete": "Delete",
+      "deleteDialog": {
+        "title": "Delete this chat?",
+        "description": "“{title}” will be deleted permanently, along with its messages and any sub-agent chats it started. If it has a public link, the link stops working. This can't be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "deleting": "Deleting…",
+        "error": "Couldn't delete this chat."
+      },
       "nowPrivate": "Chat is now private",
       "nowVisible": "Chat is now visible to the workspace",
       "visibilityError": "Could not change who can see this chat.",
