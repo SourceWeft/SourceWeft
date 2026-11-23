@@ -132,6 +132,65 @@ test("research notifications name the topic", async () => {
   );
 });
 
+test("workspace assistant notifications read in words, each from its own payload", async () => {
+  const assistantPath = "/dashboard/assistant";
+  hooks.useNotifications.mockReturnValue({
+    data: {
+      pages: [
+        {
+          notifications: [
+            item({
+              id: "a1",
+              kind: "assistant_reply",
+              payload: { assistantId: "as1" },
+              path: assistantPath,
+            }),
+            item({
+              id: "a2",
+              kind: "assistant_question",
+              payload: { ticketId: "t1", taskName: "Release notes" },
+              path: `${assistantPath}?ticket=t1`,
+            }),
+            item({
+              id: "a3",
+              kind: "assistant_ticket_blocked",
+              payload: { taskName: "Audit", reason: "credit_cap" },
+              path: `${assistantPath}?ticket=t2`,
+            }),
+            item({
+              id: "a4",
+              kind: "assistant_ticket_blocked",
+              payload: { assistantId: "as1", reason: "insufficient_credits" },
+              path: assistantPath,
+            }),
+            item({
+              id: "a5",
+              kind: "assistant_unavailable",
+              payload: { assistantId: "as1", unavailableCount: 3 },
+              path: assistantPath,
+            }),
+          ],
+          nextCursor: null,
+        },
+      ],
+    },
+    isLoading: false,
+    isError: false,
+    hasNextPage: false,
+  });
+  const { container } = await mountWithIntl(
+    <NotificationList workspaceId="ws_1" />,
+  );
+  const text = container.textContent;
+  expect(text).toContain("The assistant replied to your message.");
+  expect(text).toContain('"Release notes" has a question for you.');
+  expect(text).toContain('"Audit" stopped: it reached its credit cap.');
+  expect(text).toContain(
+    "Your messages to the assistant are waiting: you are out of credits.",
+  );
+  expect(text).toContain("The assistant could not handle 3 messages.");
+});
+
 test("an unknown kind still reads sensibly", async () => {
   hooks.useNotifications.mockReturnValue({
     data: {
@@ -182,14 +241,22 @@ test("a failed background generation names what failed and leads to its conversa
               id: "n2",
               kind: "artifact_generation_failed",
               ref: { kind: "artifact", id: "a1" },
-              payload: { title: "Flashcards: Cedar Beacon", threadId: "th1", regeneration: false },
+              payload: {
+                title: "Flashcards: Cedar Beacon",
+                threadId: "th1",
+                regeneration: false,
+              },
               path: "/dashboard/chat/th1",
             }),
             item({
               id: "n3",
               kind: "artifact_generation_failed",
               ref: { kind: "artifact", id: "a2" },
-              payload: { title: "Quiz: Orchid", threadId: "th1", regeneration: true },
+              payload: {
+                title: "Quiz: Orchid",
+                threadId: "th1",
+                regeneration: true,
+              },
               path: "/dashboard/chat/th1",
             }),
           ],
@@ -205,10 +272,10 @@ test("a failed background generation names what failed and leads to its conversa
     <NotificationList workspaceId="ws_1" />,
   );
   expect(container.textContent).toContain(
-    "\"Flashcards: Cedar Beacon\" could not be generated.",
+    '"Flashcards: Cedar Beacon" could not be generated.',
   );
   expect(container.textContent).toContain(
-    "\"Quiz: Orchid\" could not be regenerated. The previous version is kept",
+    '"Quiz: Orchid" could not be regenerated. The previous version is kept',
   );
   container.querySelector("button")!.click();
   expect(nav.push).toHaveBeenCalledWith("/dashboard/chat/th1");

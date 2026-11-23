@@ -8,14 +8,14 @@ the `durable` / `stream` split is the part that most often gets misread.
 
 ## Layout
 
-| Directory | Responsibility | Entry point |
-|---|---|---|
+| Directory  | Responsibility                                                                                                 | Entry point                                                                 |
+| ---------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `durable/` | Run lifecycle: BullMQ queueing, heartbeats, cancellation, approval pauses, stale detection, Redis event buffer | `service.ts` `DurableChatRunService`, `runner.ts` `processThreadChatRunJob` |
-| `stream/` | Turns one turn into a stream of SSE events | `service.ts` `streamThreadEvents` |
-| `turn/` | Prepares and finalizes a single turn (orchestration, not the agent itself) | `service.ts` `prepareThreadTurn` / `finalizeThreadTurn` |
-| `agent/` | The deepagents runtime, tools, middleware, sandbox, filesystem backends | `index.ts` `createThreadAgent`, `turn/runner.ts` `invokeDeepAgentTurn` |
-| `thread/` | The thread record itself: repository, title generation, model catalog | `repository.ts` |
-| (root) | Thread CRUD, preferences, message repository | `service.ts` `contentThreadService` |
+| `stream/`  | Turns one turn into a stream of SSE events                                                                     | `service.ts` `streamThreadEvents`                                           |
+| `turn/`    | Prepares and finalizes a single turn (orchestration, not the agent itself)                                     | `service.ts` `prepareThreadTurn` / `finalizeThreadTurn`                     |
+| `agent/`   | The deepagents runtime, tools, middleware, sandbox, filesystem backends                                        | `index.ts` `createThreadAgent`, `turn/runner.ts` `invokeDeepAgentTurn`      |
+| `thread/`  | The thread record itself: repository, title generation, model catalog                                          | `repository.ts`                                                             |
+| (root)     | Thread CRUD, preferences, message repository                                                                   | `service.ts` `contentThreadService`                                         |
 
 ## durable vs stream
 
@@ -24,7 +24,7 @@ The single most important fact: **the dependency is one-way.** `stream/`,
 imports `stream/`.
 
 - **`stream/`** does not manage run lifecycle and knows nothing about durable
-  runs. It is *not* stateless, though — it writes the user message
+  runs. It is _not_ stateless, though — it writes the user message
   (`turn/preparer.ts`) and the assistant message (`turn/finalizer.ts`) to the
   database. Describe it as "unaware of runs", not "stateless".
 - **`durable/`** owns everything about a run: status transitions, the BullMQ
@@ -92,7 +92,7 @@ Triggered when a turn finishes with `finishReason === "tool_confirmation_request
 `pendingConfirmationIds` in the snapshot.
 
 **Answering an approval does not resume the run.** The run is closed as
-`completed`, and the client must start a *new* run with `mode: "resume"` and a
+`completed`, and the client must start a _new_ run with `mode: "resume"` and a
 `toolApprovalResume` payload. Expired approvals are swept by the scheduler.
 
 ## Scheduled turns
@@ -107,11 +107,35 @@ sandbox, no `askUser`, nothing that asks for approval, no automatic title, and
 a `<scheduled_run>` block in the runtime prompt. A later turn a person sends
 in the same conversation is an ordinary attended turn.
 
+`startScheduledTurn` is a thin wrapper over `startHostTurn`, which other hosts
+(the workspace assistant) use with their own origin (`assistant_router`,
+`assistant_ticket`), visibility, queue priority, `creditCap` and a small
+host-only `hostContext` (at most 1 KB). With `existingThread: true` it reuses
+a conversation the host created earlier instead of creating one, so another
+member can start the next run in it. A host equips turns in its conversations
+by registering an origin provider at worker startup
+(`agent/origin-providers.ts`): `replaceTools: true` binds the provider's tools
+only (no sub-agents, no `task`, no `write_todos`, no filesystem tools, no chat base prompt), `replaceTools: false`
+adds them on top of the unattended allow-list; either can append a runtime
+prompt fragment. Threads never imports the host. `assistant_router`
+conversations are left out of the chat list.
+
+`assistant_router` and `assistant_ticket` conversations are host-owned
+(`thread/host-owned.ts`): only `startHostTurn` runs turns there. A member's
+send, edit, regenerate or resume is refused with 403 `THREAD_HOST_OWNED`, in
+`durableChatRunService.getOrCreateRun` (before a run row exists) and again in
+`prepareThreadTurn` (every durable or direct turn). Their turns get the
+provider's prompt instead of the `<scheduled_run>` block, and a host-owned
+turn with no registered provider fails rather than running unequipped.
+Deleting, archiving or changing the visibility of one is refused with the
+same 403, for its creator and an admin alike (the host depends on it);
+renaming stays allowed.
+
 ## Traps
 
 1. **Stale detection has two thresholds.** A `queued` run with no `jobId` is
    stale after 10s; everything else after 10min without a heartbeat.
-   `waiting_for_approval` is explicitly excluded and is *never* considered
+   `waiting_for_approval` is explicitly excluded and is _never_ considered
    stale — only the TTL sweep can clear it. Reads and writes of the thread
    recover a stale run on the spot; the scheduler also sweeps them, because a
    run whose worker died can sit unread, and BullMQ redelivers its stalled job
@@ -126,7 +150,7 @@ in the same conversation is an ordinary attended turn.
    exists because the race is real.
 
 3. **Idempotency keys have two forms.** A key ending in
-   `SOURCEWEFT_WEB_RUN_STOP_SUFFIX` means *stop this run*, not *run this*.
+   `SOURCEWEFT_WEB_RUN_STOP_SUFFIX` means _stop this run_, not _run this_.
    Re-sending the same run key re-attaches to the existing stream instead of
    creating a second run.
 

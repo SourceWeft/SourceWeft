@@ -15,6 +15,7 @@ import { ChatCanvasPanelSkeleton } from "../../../../_components/route-loading-s
 import type { ChatUiState } from "../../_components/chat-ui-state";
 import { ThreadDialogs } from "./thread-dialogs";
 import { ScheduledRunNotice } from "./scheduled-run-notice";
+import { AssistantThreadNotice } from "./assistant-thread-notice";
 import { ThreadHeader } from "./thread-header";
 import { ThreadPresenceAvatars } from "./thread-presence-avatars";
 import { ThreadTypingIndicator } from "./thread-typing-indicator";
@@ -171,6 +172,7 @@ export function DashboardChatThreadPageView({
   threadId,
   threadTitle,
   isScheduledRun,
+  hostOwnedOrigin,
   parentThread,
   openParentThread,
   openThreadInNewWindow,
@@ -371,6 +373,11 @@ export function DashboardChatThreadPageView({
               activeRunLookupPending={activeRunLookupPending}
               otherUserRunActive={otherUserRunActive}
               typingIndicator={<ThreadTypingIndicator typing={typingViewers} />}
+              composerNotice={
+                hostOwnedOrigin ? (
+                  <AssistantThreadNotice origin={hostOwnedOrigin} />
+                ) : undefined
+              }
               onComposerType={onComposerType}
               queuedSends={queuedSends}
               onCancelQueuedSend={onCancelQueuedSend}

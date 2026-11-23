@@ -21,5 +21,6 @@ export const WORKER_SHUTDOWN_MESSAGE =
 export const TOOL_APPROVAL_EXPIRED_CODE = "TOOL_APPROVAL_EXPIRED";
 export const TOOL_APPROVAL_EXPIRED_MESSAGE = "Tool approval request expired";
 export const ACTIVE_RUN_CONSTRAINT = "chat_thread_runs_thread_active_uq";
+export const RUN_IDEMPOTENCY_CONSTRAINT = "chat_thread_runs_idempotency_uq";
 export const EXPIRED_APPROVAL_SWEEP_LIMIT = 100;
 export const STALE_ACTIVE_RUN_SWEEP_LIMIT = 100;

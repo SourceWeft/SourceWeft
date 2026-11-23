@@ -1,6 +1,7 @@
 import { desc, sql } from "drizzle-orm";
 import { messageRoleSchema } from "@sourceweft/contracts/messages";
 import { threadRunStatusSchema } from "@sourceweft/contracts/stream";
+import { threadOriginSchema } from "@sourceweft/contracts/threads";
 import {
   compactToolCallOperations,
   expandToolCallOperations,
@@ -62,7 +63,7 @@ type ThreadModelSettings = {
 };
 type MessageRole = (typeof messageRoleSchema.options)[number];
 type ThreadVisibility = "private" | "workspace" | "public_link";
-type ThreadOrigin = "user" | "subagent" | "scheduled";
+type ThreadOrigin = (typeof threadOriginSchema.options)[number];
 /**
  * Domain enums live in @sourceweft/contracts so the wire schema, the column
  * type, and the CHECK constraint below cannot drift apart. The dependency only
@@ -154,7 +155,7 @@ export const threads = pgTable(
     ),
     check(
       "threads_origin_check",
-      sql`${table.origin} in ('user', 'subagent', 'scheduled')`,
+      sql`${table.origin} in (${sqlEnumList(threadOriginSchema.options)})`,
     ),
     index("threads_workspace_parent_idx").on(
       table.workspaceId,
@@ -351,6 +352,9 @@ export const chatThreadRuns = pgTable(
       mode: "date",
     }),
     finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+    // How many credits this run cost, for a ticket's worker run to roll up
+    // against its credit cap. Null until the run settles; no default.
+    consumedCredits: numeric("consumed_credits"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -380,6 +384,10 @@ export const chatThreadRuns = pgTable(
     check(
       "chat_thread_runs_event_offset_check",
       sql`${table.eventOffset} >= 0`,
+    ),
+    check(
+      "chat_thread_runs_consumed_credits_check",
+      sql`${table.consumedCredits} is null or ${table.consumedCredits} >= 0`,
     ),
     uniqueIndex("chat_thread_runs_idempotency_uq").on(
       table.teamId,

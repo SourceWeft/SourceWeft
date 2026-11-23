@@ -180,10 +180,11 @@ async function sendNotificationEmail(input: {
     // as a whole, because mail is forwarded and stored outside our control.
     const rawName =
       typeof input.payload.taskName === "string" ? input.payload.taskName : "";
+    const fallbackName = definition.fallbackName ?? FALLBACK_TASK_NAME;
     const taskName =
       rawName.replace(/\s+/g, " ").trim().slice(0, 80) ||
-      FALLBACK_TASK_NAME[locale] ||
-      FALLBACK_TASK_NAME.en!;
+      fallbackName[locale] ||
+      fallbackName.en!;
     const url = new URL(
       definition.path({ refId: input.refId, payload: input.payload }),
       config.auth.webBaseUrl,

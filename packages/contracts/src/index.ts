@@ -8,6 +8,7 @@ export * from "./messages";
 export * from "./thread-message-compaction";
 export * from "./threads";
 export * from "./scheduled-tasks";
+export * from "./assistants";
 export * from "./personas";
 export * from "./source-selection";
 export * from "./files";

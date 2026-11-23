@@ -221,6 +221,7 @@ export async function* invokeDeepAgentTurn(input: {
       runtimePrompt: runtimePromptContext.runtimePrompt,
       model: billedModel,
       abortSignal: input.abortSignal,
+      getBillingScope: () => runtime.billingScope ?? undefined,
     });
     const {
       agent: assembledAgent,

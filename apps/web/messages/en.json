@@ -1007,7 +1007,8 @@
       "more": "More",
       "me": "Me",
       "mainNavigation": "Main navigation",
-      "scheduled": "Scheduled"
+      "scheduled": "Scheduled",
+      "assistant": "Assistant"
     },
     "sidebar": {
       "newChat": "New chat",
@@ -1043,6 +1044,7 @@
       "shared": "Shared",
       "private": "Private",
       "scheduled": "Scheduled",
+      "assistant": "Assistant",
       "archived": "Archived",
       "clearFilter": "Clear {filter} filter",
       "openActions": "Open chat actions",
@@ -1095,6 +1097,7 @@
         "shared": "No shared chats.",
         "private": "No private chats.",
         "scheduled": "No scheduled results.",
+        "assistant": "No assistant tickets.",
         "archived": "No archived chats."
       },
       "loading": "Loading...",
@@ -1718,6 +1721,114 @@
       "logoUnavailable": "Logo unavailable: {name}",
       "publisherAvatar": "GitHub publisher avatar for {name}",
       "logo": "{name} logo"
+    }
+  },
+  "dashboardAssistant": {
+    "page": {
+      "title": "Workspace assistant",
+      "subtitle": "Ask for work in one shared feed. The assistant opens a ticket for each request and reports back here.",
+      "loading": "Loading the assistant…",
+      "loadError": "Could not load the assistant.",
+      "feedHeading": "Activity",
+      "ticketsHeading": "Tickets",
+      "steward": "Steward: {name}"
+    },
+    "status": {
+      "active": "Active",
+      "paused": "Paused"
+    },
+    "statusReason": {
+      "steward_left": "Paused because its steward left the workspace. An admin can choose a new steward, then resume it.",
+      "by_admin": "Paused by a workspace member."
+    },
+    "enable": {
+      "title": "The assistant is not enabled",
+      "body": "Once enabled, members ask for work in a shared feed and the assistant runs each request as its own ticket, paid for by whoever asked.",
+      "button": "Enable assistant",
+      "askAdmin": "Ask a workspace admin to enable the assistant."
+    },
+    "feed": {
+      "empty": "No messages yet. Ask the assistant for something below.",
+      "loadError": "Could not load the activity.",
+      "loadOlder": "Load earlier messages",
+      "you": "You",
+      "assistant": "Assistant",
+      "formerMember": "A former member",
+      "ticket": "Ticket: {title}",
+      "openConversation": "Open conversation"
+    },
+    "composer": {
+      "label": "Message the assistant",
+      "placeholder": "Ask the assistant for something…",
+      "send": "Send",
+      "sending": "Sending…",
+      "hint": "Press {shortcut} to send.",
+      "paused": "The assistant is paused, so it is not taking new messages.",
+      "readOnly": "You can read this feed but cannot send messages in this workspace.",
+      "tooLong": "Messages are limited to {max} characters.",
+      "sendFailed": "Your message was not sent. It is still in the box; try again."
+    },
+    "tickets": {
+      "groups": {
+        "needsPerson": "Needs a person",
+        "inProgress": "In progress",
+        "idle": "Idle"
+      },
+      "empty": "No open tickets.",
+      "loadError": "Could not load the tickets.",
+      "requestedBy": "Requested by {name}",
+      "retry": "Retry",
+      "close": "Close",
+      "openConversation": "Open conversation",
+      "stage": {
+        "queued": "Queued",
+        "working": "Working",
+        "waiting_person": "Waiting for a person",
+        "idle": "Idle",
+        "ended": "Ended"
+      },
+      "blockedReason": {
+        "credit_cap": "Stopped: it reached its credit cap.",
+        "insufficient_credits": "Stopped: the requester is out of credits.",
+        "repeated_failure": "Stopped after repeated failed runs."
+      }
+    },
+    "menu": {
+      "open": "Assistant actions",
+      "pause": "Pause",
+      "resume": "Resume",
+      "changeSteward": "Change steward",
+      "viewWorkLog": "View work log"
+    },
+    "steward": {
+      "title": "Change steward",
+      "body": "The steward is told when the assistant cannot handle messages. Choose someone who can access this workspace.",
+      "label": "Steward",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "toasts": {
+      "enabled": "Assistant enabled.",
+      "paused": "Assistant paused.",
+      "resumed": "Assistant resumed.",
+      "stewardChanged": "Steward changed.",
+      "retried": "Ticket sent back to work.",
+      "closed": "Ticket closed."
+    },
+    "errors": {
+      "ASSISTANT_ALREADY_ENABLED": "The assistant is already enabled.",
+      "ASSISTANT_FORBIDDEN": "You do not have permission to do that.",
+      "ASSISTANT_NOT_FOUND": "The assistant is not enabled in this workspace.",
+      "ASSISTANT_TICKET_NOT_FOUND": "This ticket no longer exists.",
+      "ASSISTANT_TICKET_NOT_PAYER": "Only the member who pays for this ticket can retry it.",
+      "ASSISTANT_PAUSED": "The assistant is paused.",
+      "ASSISTANT_VERSION_CONFLICT": "Someone else changed the assistant just now. Try again.",
+      "generic": "Something went wrong. Try again."
+    },
+    "threadNotice": {
+      "router": "This is the assistant's work log. It runs on its own and does not take messages here.",
+      "ticket": "This conversation belongs to an assistant ticket and does not take messages here.",
+      "open": "Talk to the assistant"
     }
   },
   "dashboardChat": {
@@ -7184,6 +7295,11 @@
       "research_failed": "Your research on \"{topic}\" could not be completed.",
       "artifact_generation_failed": "\"{title}\" could not be generated. Open it in the Hub's Artifacts tab to see why.",
       "artifact_regeneration_failed": "\"{title}\" could not be regenerated. The previous version is kept; open it to see why.",
+      "assistant_reply": "The assistant replied to your message.",
+      "assistant_question": "\"{taskName}\" has a question for you.",
+      "assistant_ticket_blocked": "\"{taskName}\" stopped: {reason, select, credit_cap {it reached its credit cap} insufficient_credits {you are out of credits} other {its runs kept failing}}.",
+      "assistant_messages_blocked": "Your messages to the assistant are waiting: you are out of credits.",
+      "assistant_unavailable": "The assistant could not handle {count, plural, one {# message} other {# messages}}.",
       "unknown": "Update about \"{taskName}\"."
     },
     "composer": {

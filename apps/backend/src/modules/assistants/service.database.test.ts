@@ -1,0 +1,581 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, test } from "vitest";
+import {
+  createAssistantFixture,
+  type AssistantFixture,
+} from "../../test/assistant-fixture";
+
+let f: AssistantFixture;
+
+beforeAll(async () => {
+  f = await createAssistantFixture("assistant_svc");
+}, 120_000);
+
+beforeEach(() => f.reset());
+
+afterAll(async () => {
+  await f?.close();
+});
+
+/** The error code a rejected call carries, or null when it went through. */
+async function refusal(run: () => Promise<unknown>) {
+  try {
+    await run();
+    return null;
+  } catch (error) {
+    const { statusCode, code } = error as {
+      statusCode?: number;
+      code?: string;
+    };
+    return `${statusCode} ${code}`;
+  }
+}
+
+/** A team workspace with one owner (container admin) and one plain member. */
+async function teamWithOwnerAndMember() {
+  const owner = randomUUID();
+  const member = randomUUID();
+  const { teamId, workspaceId } = await f.workspace(
+    [
+      [owner, "owner"],
+      [member, "member"],
+    ],
+    { kind: "team" },
+  );
+  return {
+    owner,
+    member,
+    teamId,
+    workspaceId,
+    ownerCaller: { workspaceId, userId: owner },
+    memberCaller: { workspaceId, userId: member },
+  };
+}
+
+test("only a container admin may enable the assistant; a plain member is refused", async () => {
+  const { memberCaller } = await teamWithOwnerAndMember();
+  assert.equal(
+    await refusal(() => f.service.enable(memberCaller)),
+    "403 ASSISTANT_FORBIDDEN",
+  );
+  assert.equal(await f.assistantRow(memberCaller.workspaceId), null);
+});
+
+test("enabling stands up a Router thread and makes the admin the steward", async () => {
+  const { owner, teamId, workspaceId, ownerCaller } =
+    await teamWithOwnerAndMember();
+
+  const assistant = await f.service.enable(ownerCaller);
+
+  assert.equal(assistant.workspaceId, workspaceId);
+  assert.equal(assistant.stewardUserId, owner);
+  assert.equal(assistant.status, "active");
+  assert.equal(assistant.statusReason, null);
+  assert.equal(assistant.version, 1);
+
+  const thread = await f.schema.db.query.threads.findFirst({
+    where: (t, { eq }) => eq(t.id, assistant.routerThreadId),
+  });
+  assert.ok(thread, "the Router thread was created");
+  assert.equal(thread!.origin, "assistant_router");
+  assert.equal(thread!.teamId, teamId);
+  assert.equal(thread!.workspaceId, workspaceId);
+  assert.equal(thread!.createdBy, owner);
+  // A team workspace's Router conversation is visible to the whole team.
+  assert.equal(thread!.visibility, "workspace");
+
+  assert.deepEqual(
+    f.audits.map((entry) => [entry.action, entry.actorUserId, entry.teamId]),
+    [["assistant.enabled", owner, teamId]],
+  );
+});
+
+test("a personal workspace's Router thread defaults to private visibility", async () => {
+  const owner = randomUUID();
+  const { workspaceId } = await f.workspace([[owner, "owner"]], {
+    kind: "personal",
+  });
+  const assistant = await f.service.enable({ workspaceId, userId: owner });
+  const thread = await f.schema.db.query.threads.findFirst({
+    where: (t, { eq }) => eq(t.id, assistant.routerThreadId),
+  });
+  assert.equal(thread!.visibility, "private");
+});
+
+test("enabling an already-enabled workspace is refused, even by the same admin", async () => {
+  const { ownerCaller, workspaceId } = await teamWithOwnerAndMember();
+  await f.service.enable(ownerCaller);
+
+  assert.equal(
+    await refusal(() => f.service.enable(ownerCaller)),
+    "409 ASSISTANT_ALREADY_ENABLED",
+  );
+  // Still exactly one assistant row for the workspace.
+  const row = await f.assistantRow(workspaceId);
+  assert.ok(row);
+});
+
+test("two different admins racing to enable the same workspace: exactly one wins, the other is a typed 409, never a raw 500", async () => {
+  // A sequential "A enables, then B enables" never reaches the vulnerable
+  // code at all: B's own pre-check (`findAssistantRow`) already sees A's
+  // committed row and throws 409 before ever touching the Router thread.
+  // The bug only lives in the window where both calls' pre-checks see
+  // nothing yet and both reach `createThreadRecord` for the same
+  // deterministic thread id — which only real concurrency can exercise.
+  const owner = randomUUID();
+  const secondAdmin = randomUUID();
+  const { workspaceId } = await f.workspace(
+    [
+      [owner, "owner"],
+      [secondAdmin, "admin"],
+    ],
+    { kind: "team" },
+  );
+  const callerA = { workspaceId, userId: owner };
+  const callerB = { workspaceId, userId: secondAdmin };
+
+  const [resultA, resultB] = await Promise.allSettled([
+    f.service.enable(callerA),
+    f.service.enable(callerB),
+  ]);
+  const settled: PromiseSettledResult<unknown>[] = [resultA, resultB];
+
+  const fulfilled = settled.filter((result) => result.status === "fulfilled");
+  const rejected = settled.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1, "exactly one enable succeeds");
+  assert.equal(rejected.length, 1, "exactly one enable is refused");
+
+  const { statusCode, code } = (rejected[0] as PromiseRejectedResult)
+    .reason as {
+    statusCode?: number;
+    code?: string;
+  };
+  assert.equal(statusCode, 409);
+  assert.equal(code, "ASSISTANT_ALREADY_ENABLED");
+
+  // Exactly one assistant row, pointing at exactly one Router thread.
+  const row = await f.assistantRow(workspaceId);
+  assert.ok(row);
+  const threads = await f.schema.db
+    .select()
+    .from(f.schema.threads)
+    .where(
+      and(
+        eq(f.schema.threads.workspaceId, workspaceId),
+        eq(f.schema.threads.origin, "assistant_router"),
+      ),
+    );
+  assert.equal(threads.length, 1);
+  assert.equal(threads[0]!.id, row!.routerThreadId);
+});
+
+test("get on someone else's workspace is a 404, not a 403", async () => {
+  const { workspaceId } = await teamWithOwnerAndMember();
+  const outsider = randomUUID();
+  await f.user(outsider);
+
+  assert.equal(
+    await refusal(() => f.service.get({ workspaceId, userId: outsider })),
+    "404 ASSISTANT_NOT_FOUND",
+  );
+});
+
+test("get returns null for a workspace member before the assistant is enabled", async () => {
+  const { memberCaller } = await teamWithOwnerAndMember();
+  const { assistant } = await f.service.get(memberCaller);
+  assert.equal(assistant, null);
+});
+
+test("the same idempotency key posted twice leaves one feed item and one trigger, and wakes the assistant only once", async () => {
+  const { ownerCaller, memberCaller, member } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const idempotencyKey = randomUUID();
+
+  const first = await f.service.postMessage(memberCaller, {
+    text: "Please tidy the backlog",
+    idempotencyKey,
+  });
+  assert.equal(first.created, true);
+  assert.equal(first.item.authorUserId, member);
+  assert.equal(first.item.kind, "member_message");
+
+  const second = await f.service.postMessage(memberCaller, {
+    text: "Please tidy the backlog",
+    idempotencyKey,
+  });
+  assert.equal(second.created, false);
+  assert.equal(second.item.id, first.item.id);
+
+  const feedItems = await f.feedItemRows(assistant.id);
+  assert.equal(feedItems.length, 1);
+  const triggers = await f.triggerRows(assistant.id);
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0]!.dedupeKey, first.item.id);
+  assert.equal(triggers[0]!.sourceKind, "member_message");
+  assert.equal(triggers[0]!.status, "pending_eval");
+
+  assert.deepEqual(f.kicked, [assistant.id]);
+});
+
+test("a feed cursor naming another tenant's item is ignored, not a cross-tenant leak or an error", async () => {
+  const tenantA = await teamWithOwnerAndMember();
+  await f.service.enable(tenantA.ownerCaller);
+  const { item: itemA } = await f.service.postMessage(tenantA.ownerCaller, {
+    text: "Tenant A's own message",
+    idempotencyKey: randomUUID(),
+  });
+
+  const tenantB = await teamWithOwnerAndMember();
+  await f.service.enable(tenantB.ownerCaller);
+  const { item: itemB } = await f.service.postMessage(tenantB.ownerCaller, {
+    text: "Tenant B's own message",
+    idempotencyKey: randomUUID(),
+  });
+
+  // Naming tenant B's own feed item as the cursor for tenant A's feed must
+  // not reach across tenants: the lookup is scoped (team, workspace,
+  // assistant), so the cursor is simply not found and treated as none at
+  // all — tenant A's page comes back from the top, never tenant B's rows.
+  const page = await f.service.listFeed(tenantA.ownerCaller, {
+    before: itemB.id,
+  });
+  assert.deepEqual(
+    page.items.map((item) => item.id),
+    [itemA.id],
+  );
+
+  const otherPage = await f.service.listFeed(tenantB.ownerCaller, {
+    before: itemA.id,
+  });
+  assert.deepEqual(
+    otherPage.items.map((item) => item.id),
+    [itemB.id],
+  );
+});
+
+test("a paused assistant refuses a new member message", async () => {
+  const { ownerCaller, memberCaller } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+
+  await f.service.update(ownerCaller, {
+    version: assistant.version,
+    action: "pause",
+  });
+
+  assert.equal(
+    await refusal(() =>
+      f.service.postMessage(memberCaller, {
+        text: "Anyone there?",
+        idempotencyKey: randomUUID(),
+      }),
+    ),
+    "409 ASSISTANT_PAUSED",
+  );
+});
+
+test("update with a stale version is refused", async () => {
+  const { ownerCaller } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+
+  await f.service.update(ownerCaller, {
+    version: assistant.version,
+    action: "pause",
+  });
+
+  assert.equal(
+    await refusal(() =>
+      f.service.update(ownerCaller, {
+        version: assistant.version, // the version before the pause above
+        action: "resume",
+      }),
+    ),
+    "409 ASSISTANT_VERSION_CONFLICT",
+  );
+});
+
+test("changing the steward requires a container admin and records an audit entry", async () => {
+  const { owner, member, teamId, ownerCaller, memberCaller } =
+    await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+
+  // A plain member may not appoint themselves steward.
+  assert.equal(
+    await refusal(() =>
+      f.service.update(memberCaller, {
+        version: assistant.version,
+        stewardUserId: member,
+      }),
+    ),
+    "403 ASSISTANT_FORBIDDEN",
+  );
+
+  const newSteward = randomUUID();
+  await f.user(newSteward);
+  await f.addMember(teamId, newSteward, "admin");
+
+  const { assistant: updated } = await f.service.update(ownerCaller, {
+    version: assistant.version,
+    stewardUserId: newSteward,
+  });
+
+  assert.equal(updated.stewardUserId, newSteward);
+  assert.equal(updated.version, assistant.version + 1);
+  assert.deepEqual(
+    f.audits
+      .filter((entry) => entry.action === "assistant.steward_changed")
+      .map((entry) => [entry.action, entry.actorUserId, entry.targetId]),
+    [["assistant.steward_changed", owner, assistant.id]],
+  );
+});
+
+test("the new steward must still be able to reach the workspace", async () => {
+  const { ownerCaller } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const outsider = randomUUID();
+  await f.user(outsider);
+
+  assert.equal(
+    await refusal(() =>
+      f.service.update(ownerCaller, {
+        version: assistant.version,
+        stewardUserId: outsider,
+      }),
+    ),
+    "403 ASSISTANT_FORBIDDEN",
+  );
+});
+
+test("retrying a ticket routes one decided event to it and clears its failure count", async () => {
+  const { ownerCaller, teamId, workspaceId } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const ticket = await f.insertTicket({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: ownerCaller.userId,
+    consecutiveFailures: 3,
+  });
+
+  const { ticket: retried, created } = await f.service.retryTicket(
+    ownerCaller,
+    ticket.id,
+    { idempotencyKey: randomUUID() },
+  );
+
+  assert.equal(retried.consecutiveFailures, 0);
+  assert.equal(created, true);
+
+  const triggers = await f.triggerRows(assistant.id);
+  const routed = triggers.filter((row) => row.routedTicketId === ticket.id);
+  assert.equal(routed.length, 1);
+  assert.equal(routed[0]!.status, "decided");
+});
+
+test("retrying with the same idempotency key adds no second event", async () => {
+  const { ownerCaller, teamId, workspaceId } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const ticket = await f.insertTicket({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: ownerCaller.userId,
+    consecutiveFailures: 2,
+  });
+  const idempotencyKey = randomUUID();
+
+  const first = await f.service.retryTicket(ownerCaller, ticket.id, {
+    idempotencyKey,
+  });
+  const second = await f.service.retryTicket(ownerCaller, ticket.id, {
+    idempotencyKey,
+  });
+
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  const triggers = await f.triggerRows(assistant.id);
+  const routed = triggers.filter((row) => row.routedTicketId === ticket.id);
+  assert.equal(routed.length, 1);
+});
+
+test("closing a ticket ends it, and closing again is a no-op", async () => {
+  const { ownerCaller, teamId, workspaceId } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const ticket = await f.insertTicket({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: ownerCaller.userId,
+  });
+
+  const { ticket: closed } = await f.service.closeTicket(
+    ownerCaller,
+    ticket.id,
+    {
+      idempotencyKey: randomUUID(),
+    },
+  );
+  assert.equal(closed.stage, "ended");
+  assert.ok(closed.endedAt);
+
+  const { ticket: closedAgain } = await f.service.closeTicket(
+    ownerCaller,
+    ticket.id,
+    { idempotencyKey: randomUUID() },
+  );
+  assert.equal(closedAgain.stage, "ended");
+  assert.equal(closedAgain.endedAt, closed.endedAt);
+});
+
+/** A ticket paid for by `payer`, with a worker run of theirs still going in
+ * its conversation. */
+async function ticketWithRunningRun(input: {
+  teamId: string;
+  workspaceId: string;
+  assistantId: string;
+  payer: string;
+}) {
+  const workerThreadId = randomUUID();
+  const started = await f.ports.startTurn({
+    origin: "assistant_ticket",
+    workspaceId: input.workspaceId,
+    userId: input.payer,
+    threadId: workerThreadId,
+    idempotencyKey: randomUUID(),
+    title: "Ticket",
+    content: "Work on it",
+    hostContext: { assistantId: input.assistantId },
+  });
+  await f.setRunStatus(started.run.id, { status: "running" });
+  const ticket = await f.insertTicket({
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    assistantId: input.assistantId,
+    payerUserId: input.payer,
+    workerThreadId,
+    currentRunId: started.run.id,
+  });
+  return { ticket, runId: started.run.id };
+}
+
+test("closing a ticket with a run in flight stops it", async () => {
+  const { ownerCaller, teamId, workspaceId } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const { ticket, runId } = await ticketWithRunningRun({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payer: ownerCaller.userId,
+  });
+
+  await f.service.closeTicket(ownerCaller, ticket.id, {
+    idempotencyKey: randomUUID(),
+  });
+
+  assert.equal(f.stopped.length, 1);
+  assert.equal(f.stopped[0]!.runId, runId);
+  assert.equal(f.stopped[0]!.threadId, ticket.workerThreadId);
+});
+
+test("the steward closes a ticket whose run belongs to another payer: the run is stopped as its own user and the ticket ends", async () => {
+  const { ownerCaller, memberCaller, teamId, workspaceId } =
+    await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const { ticket, runId } = await ticketWithRunningRun({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payer: memberCaller.userId,
+  });
+
+  const { ticket: closed } = await f.service.closeTicket(
+    ownerCaller,
+    ticket.id,
+    {
+      idempotencyKey: randomUUID(),
+    },
+  );
+
+  assert.equal(closed.stage, "ended");
+  assert.equal(f.stopped.length, 1);
+  assert.equal(f.stopped[0]!.runId, runId);
+  assert.equal(f.stopped[0]!.userId, memberCaller.userId);
+});
+
+test("only the ticket's payer may retry it; anyone else is refused with a 403 and nothing is written", async () => {
+  const { ownerCaller, memberCaller, teamId, workspaceId } =
+    await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const ticket = await f.insertTicket({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: memberCaller.userId,
+    consecutiveFailures: 3,
+  });
+
+  // The steward (a workspace admin) is not the payer: a retry would bill
+  // the member for a run they did not ask for.
+  assert.equal(
+    await refusal(() =>
+      f.service.retryTicket(ownerCaller, ticket.id, {
+        idempotencyKey: randomUUID(),
+      }),
+    ),
+    "403 ASSISTANT_TICKET_NOT_PAYER",
+  );
+  assert.equal(
+    (await f.triggerRows(assistant.id)).filter(
+      (row) => row.routedTicketId === ticket.id,
+    ).length,
+    0,
+  );
+  assert.equal((await f.ticketRow(ticket.id))!.consecutiveFailures, 3);
+
+  const { ticket: retried, created } = await f.service.retryTicket(
+    memberCaller,
+    ticket.id,
+    { idempotencyKey: randomUUID() },
+  );
+  assert.equal(created, true);
+  assert.equal(retried.consecutiveFailures, 0);
+});
+
+test("a non-member gets a 404 for a ticket action, not a 403", async () => {
+  const { ownerCaller, teamId, workspaceId } = await teamWithOwnerAndMember();
+  const assistant = await f.service.enable(ownerCaller);
+  const ticket = await f.insertTicket({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: ownerCaller.userId,
+  });
+
+  const outsider = randomUUID();
+  await f.user(outsider);
+  // Not even a member of the workspace: the same "not found" as every other
+  // non-member lookup in this module, same as `get`.
+  assert.equal(
+    await refusal(() =>
+      f.service.closeTicket({ workspaceId, userId: outsider }, ticket.id, {
+        idempotencyKey: randomUUID(),
+      }),
+    ),
+    "404 ASSISTANT_NOT_FOUND",
+  );
+});
+
+test("a workspace member gets a 404 for a ticket id that is not theirs", async () => {
+  const { ownerCaller, memberCaller } = await teamWithOwnerAndMember();
+  await f.service.enable(ownerCaller);
+
+  assert.equal(
+    await refusal(() =>
+      f.service.closeTicket(memberCaller, randomUUID(), {
+        idempotencyKey: randomUUID(),
+      }),
+    ),
+    "404 ASSISTANT_TICKET_NOT_FOUND",
+  );
+});

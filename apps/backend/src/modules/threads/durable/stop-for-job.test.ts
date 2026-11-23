@@ -61,6 +61,7 @@ function createRun(
     startedAt: now,
     heartbeatAt: now,
     finishedAt: null,
+    consumedCredits: null,
     createdAt: now,
     updatedAt: now,
     ...input,

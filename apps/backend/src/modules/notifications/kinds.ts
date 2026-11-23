@@ -17,6 +17,11 @@ export interface NotificationKindDefinition {
   template: string | null;
   /** Where the notification leads, relative to the web base URL. */
   path(input: PathInput): string;
+  /**
+   * What the mail calls the subject when the payload names none
+   * (`payload.taskName` missing), per locale. Defaults to "a scheduled task".
+   */
+  fallbackName?: Readonly<Record<string, string>>;
 }
 
 function taskPath({ refId }: PathInput) {
@@ -47,6 +52,17 @@ function conversationPath({ payload }: PathInput) {
  */
 function researchPath() {
   return "/dashboard/chat";
+}
+
+/**
+ * The workspace assistant's page; a notification about one ticket opens it
+ * on that ticket (`payload.ticketId`).
+ */
+function assistantPath({ payload }: PathInput) {
+  const ticketId = payload.ticketId;
+  return typeof ticketId === "string" && ticketId
+    ? `/dashboard/assistant?ticket=${encodeURIComponent(ticketId)}`
+    : "/dashboard/assistant";
 }
 
 /**
@@ -124,6 +140,44 @@ export const NOTIFICATION_KINDS = {
     defaultEmail: false,
     template: null,
     path: conversationPath,
+  },
+  // The workspace assistant's Router replied to a member's message in the
+  // shared feed. In-app only: the reply is right there in the feed.
+  assistant_reply: {
+    defaultEmail: false,
+    template: null,
+    path: assistantPath,
+  },
+  // A ticket's worker asked its payer a question and is waiting for them.
+  assistant_question: {
+    defaultEmail: true,
+    template: "notification.assistant-question",
+    path: assistantPath,
+  },
+  // A ticket stopped on its own: its credit cap, the payer's credits, or
+  // repeated failed runs (`payload.reason`). Also sent with no ticket
+  // (`ref` = the assistant) when the payer's own messages wait for credits
+  // before the assistant can even look at them.
+  assistant_ticket_blocked: {
+    defaultEmail: true,
+    template: "notification.assistant-ticket-blocked",
+    path: assistantPath,
+    fallbackName: {
+      en: "your messages to the assistant",
+      // Worded 传给 (as the web catalog's `assistant_messages_blocked`) so
+      // the generated zh-TW reads 傳給.
+      "zh-CN": "你传给助理的消息",
+      // Generated with toTaiwanTraditional (@sourceweft/i18n/hant, the web's
+      // i18n:hant converter and glossary) from the zh-CN value.
+      "zh-TW": "你傳給助理的訊息",
+    },
+  },
+  // Messages the Router could not decide after every retry; sent to the
+  // steward.
+  assistant_unavailable: {
+    defaultEmail: true,
+    template: "notification.assistant-unavailable",
+    path: assistantPath,
   },
 } as const satisfies Record<string, NotificationKindDefinition>;
 

@@ -33,6 +33,7 @@ const scope: ChatThreadRunRecord = {
   startedAt: null,
   heartbeatAt: null,
   finishedAt: null,
+  consumedCredits: null,
   createdAt: "2026-10-16T00:00:00Z",
   updatedAt: "2026-10-16T00:00:00Z",
 };

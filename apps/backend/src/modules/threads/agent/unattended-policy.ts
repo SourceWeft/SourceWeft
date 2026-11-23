@@ -72,13 +72,24 @@ function isMcpToolName(toolName: string) {
   return toolName.startsWith("mcp__");
 }
 
+export type UnattendedToolPolicyOptions = {
+  gatedToolNames: ReadonlySet<string>;
+  /**
+   * Names allowed on top of the allow-list: the tools a host's origin
+   * provider binds for this turn (see `origin-providers.ts`). A gated tool
+   * stays excluded even when it is named here.
+   */
+  extraAllowed?: ReadonlySet<string>;
+};
+
 /** Whether one tool may be bound in an unattended turn. */
 export function isUnattendedToolAllowed(
   toolName: string,
-  options: { gatedToolNames: ReadonlySet<string> },
+  options: UnattendedToolPolicyOptions,
 ) {
   if (options.gatedToolNames.has(toolName)) return false;
   if (UNATTENDED_TOOL_ALLOWLIST.has(toolName)) return true;
+  if (options.extraAllowed?.has(toolName)) return true;
   // An MCP tool is bound under its own name and is not in the registry; one
   // the risk gate does not stop is a verified install's read-only tool.
   return isMcpToolName(toolName) && !getAgentToolDefinition(toolName);
@@ -91,7 +102,7 @@ export function isUnattendedToolAllowed(
  */
 export function filterToolsForUnattendedRun<T extends { name: string }>(
   tools: readonly T[],
-  options: { gatedToolNames: ReadonlySet<string> },
+  options: UnattendedToolPolicyOptions,
 ): T[] {
   return tools.filter((tool) => isUnattendedToolAllowed(tool.name, options));
 }

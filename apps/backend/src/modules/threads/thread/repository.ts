@@ -182,7 +182,12 @@ export async function createThreadRecord(input: {
         execution_target_json
       )
       values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb)
-      on conflict (id) do nothing
+      -- No conflict target: two concurrent inserts of one id can trip
+      -- threads_id_workspace_team_uq before the primary key, and an
+      -- "on conflict (id)" arbiter does not cover it. Every unique
+      -- constraint on threads includes id, so this still only skips a row
+      -- with the same id.
+      on conflict do nothing
       returning ${THREAD_RETURNING_SQL}
     `,
     [
@@ -272,6 +277,9 @@ export async function listThreadRecordsByWorkspace(input: {
         and workspace_id = $2
         and archived = ${input.archived ? "true" : "false"}
         and parent_thread_id is null
+        -- A workspace assistant's Router conversation is its own working
+        -- thread, not a chat anyone opened; it stays out of the chat list.
+        and origin <> 'assistant_router'
         and ${visibility}
         ${input.archived ? "" : `and not exists (${VIEWER_PIN_SQL})`}
         ${cursorSql}

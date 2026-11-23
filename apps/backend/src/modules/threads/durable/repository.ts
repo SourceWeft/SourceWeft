@@ -230,6 +230,8 @@ function mapRun(row: ChatThreadRunRow): ChatThreadRunRecord {
     startedAt: row.startedAt?.toISOString() ?? null,
     heartbeatAt: row.heartbeatAt?.toISOString() ?? null,
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    consumedCredits:
+      row.consumedCredits === null ? null : Number(row.consumedCredits),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -962,6 +964,10 @@ export async function requestChatThreadRunCancel(input: {
           snapshotJson: completedSnapshot as unknown as Record<string, unknown>,
           finishedAt: now,
           updatedAt: now,
+          // Bypasses finishChatThreadRun; keep whatever was already recorded
+          // (e.g. from a prior waiting_for_approval pause) rather than leave
+          // consumed_credits null.
+          consumedCredits: context.runRow.consumedCredits ?? "0",
         })
         .where(
           and(
@@ -1081,6 +1087,12 @@ export async function recordChatThreadRunConfirmationResponse(input: {
               errorCode: null,
               errorMessage: null,
               finishedAt: now,
+              // This completes the run directly, bypassing finishChatThreadRun;
+              // nothing was newly settled by answering a confirmation, so this
+              // only has to keep whatever figure the run already carries (from
+              // markChatThreadRunWaitingForApproval, or 0 if it never paused
+              // through that path) rather than leave it null.
+              consumedCredits: context.runRow.consumedCredits ?? "0",
             }
           : {}),
         updatedAt: now,
@@ -1124,6 +1136,14 @@ export async function markChatThreadRunWaitingForApproval(input: {
   teamId: string;
   workspaceId: string;
   snapshotJson: ChatRunSnapshot;
+  /**
+   * How many credits this run has cost so far. The run is not finished yet
+   * (a tool confirmation can still resume it to more model calls), but the
+   * figure must survive a later direct-complete (confirmation response,
+   * cancel-before-commit) that never recomputes it — see
+   * `recordChatThreadRunConfirmationResponse` and `requestChatThreadRunCancel`.
+   */
+  consumedCredits?: number;
 }) {
   const row = await db.transaction(async (tx) => {
     const context = await lockRunSnapshotContext(tx, input);
@@ -1142,6 +1162,9 @@ export async function markChatThreadRunWaitingForApproval(input: {
           ? { assistantMessageId: input.assistantMessageId }
           : {}),
         snapshotJson: snapshot as unknown as Record<string, unknown>,
+        ...(input.consumedCredits !== undefined
+          ? { consumedCredits: String(input.consumedCredits) }
+          : {}),
         updatedAt: new Date(),
       })
       .where(
@@ -1179,6 +1202,16 @@ export async function finishChatThreadRun(input: {
   protectedOperationTerminalReason?: string;
   errorCode?: string | null;
   errorMessage?: string | null;
+  /**
+   * How many credits this run cost. Omitted or undefined keeps whatever the
+   * row already carries (e.g. a figure recorded while the run was paused at
+   * `waiting_for_approval`), falling back to 0 only when the row has never
+   * recorded one: every run finishes with a number, never null, so a
+   * ticket's cap rollup never has to treat "unknown" as "free" — and a
+   * caller that recomputes nothing (stale recovery, a lost-race cancel)
+   * never stomps a figure a different writer already settled.
+   */
+  consumedCredits?: number;
   /** Recovery must recheck liveness after acquiring the run row lock. */
   staleAt?: Date;
 }) {
@@ -1197,6 +1230,11 @@ export async function finishChatThreadRun(input: {
     ) {
       return null;
     }
+    const consumedCredits =
+      input.consumedCredits ??
+      (context.runRow.consumedCredits !== null
+        ? Number(context.runRow.consumedCredits)
+        : 0);
     const now = new Date();
     const projectedRun: ChatThreadRunRecord = {
       ...mapRun(context.runRow),
@@ -1213,6 +1251,7 @@ export async function finishChatThreadRun(input: {
       errorMessage: input.errorMessage ?? null,
       finishedAt: now.toISOString(),
       updatedAt: now.toISOString(),
+      consumedCredits,
     };
     const mergedSnapshot =
       input.snapshotMode === "terminal_patch"
@@ -1256,6 +1295,7 @@ export async function finishChatThreadRun(input: {
         errorMessage: input.errorMessage ?? null,
         finishedAt: now,
         updatedAt: now,
+        consumedCredits: String(consumedCredits),
       })
       .where(
         and(

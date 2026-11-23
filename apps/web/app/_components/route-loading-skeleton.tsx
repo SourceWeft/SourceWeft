@@ -10,6 +10,7 @@ import { ChatHeaderSkeleton } from "./chat-header-skeleton";
 import { CatalogRouteSkeleton } from "./catalog-loading-skeleton";
 import { TraceListSkeletonRows } from "../dashboard/observability/trace-loading-skeleton";
 import { ScheduledTasksRouteSkeleton } from "../dashboard/scheduled/_components/scheduled-tasks-skeleton";
+import { AssistantRouteSkeleton } from "../dashboard/assistant/_components/assistant-skeleton";
 
 type SkeletonProps = {
   className?: string;
@@ -110,6 +111,8 @@ export function DashboardSkeletonContentForPath({
     return <SkillDetailSkeletonContent kind="mcp" />;
   if (pathname.replace(/\/+$/, "") === "/dashboard/scheduled")
     return <ScheduledTasksRouteSkeleton />;
+  if (pathname.replace(/\/+$/, "") === "/dashboard/assistant")
+    return <AssistantRouteSkeleton />;
   if (pathname.startsWith("/dashboard/billing")) {
     return (
       <BillingSkeletonContent

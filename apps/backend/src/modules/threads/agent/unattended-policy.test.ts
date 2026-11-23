@@ -118,6 +118,19 @@ test("a tool that would ask for approval is never bound, even an allow-listed on
   );
 });
 
+test("a host's extra tools are allowed on top of the allow-list, but never a gated one", () => {
+  assert.deepEqual(
+    filterToolsForUnattendedRun(
+      named("search_sources", "report", "publish_artifact", "say"),
+      {
+        gatedToolNames: new Set(["say"]),
+        extraAllowed: new Set(["report", "say"]),
+      },
+    ).map((tool) => tool.name),
+    ["search_sources", "report"],
+  );
+});
+
 test("the filesystem is read-only: read tools on a deny-write policy", () => {
   assert.deepEqual(UNATTENDED_FILESYSTEM_PERMISSIONS.at(-1), {
     operations: ["write"],
@@ -176,4 +189,24 @@ test("the scheduled-run prompt tells the model nobody is there", () => {
   assert.ok(SCHEDULED_RUN_PROMPT.endsWith("</scheduled_run>"));
   assert.match(SCHEDULED_RUN_PROMPT, /nobody is present/);
   assert.match(SCHEDULED_RUN_PROMPT, /Do not ask questions/);
+});
+
+test("todoList: false leaves only the todo middleware out of the root stack", async () => {
+  const base = {
+    backend: {} as never,
+    model: {} as never,
+    modelAlias: "chat-default",
+    filesystemMounts: [],
+  };
+  const names = (stack: Array<{ name: string }>) =>
+    stack.map((middleware) => middleware.name);
+  const withTodos = names(await createSourceWeftAgentMiddlewareStack(base));
+  const withoutTodos = names(
+    await createSourceWeftAgentMiddlewareStack({ ...base, todoList: false }),
+  );
+  assert.ok(withTodos.includes("todoListMiddleware"));
+  assert.deepEqual(
+    withTodos.filter((name) => name !== "todoListMiddleware"),
+    withoutTodos,
+  );
 });

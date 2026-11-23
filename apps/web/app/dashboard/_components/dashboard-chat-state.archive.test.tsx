@@ -14,6 +14,7 @@ const sdk = vi.hoisted(() => ({
   getChatBootstrap: vi.fn(),
   listThreads: vi.fn(),
   archiveThread: vi.fn(),
+  deleteThread: vi.fn(),
 }));
 
 vi.mock("../../../lib/auth-client", () => ({
@@ -27,6 +28,7 @@ vi.mock("../../../lib/sdk", () => ({
   contentClient: {
     listThreads: sdk.listThreads,
     archiveThread: sdk.archiveThread,
+    deleteThread: sdk.deleteThread,
   },
   dashboardClient: { getChatBootstrap: sdk.getChatBootstrap },
   workspaceClient: {},
@@ -197,4 +199,28 @@ test("a failed archive leaves the chat where it was and reports the error", asyn
   );
   expect(failure).toBeInstanceOf(Error);
   expect(ids(state.privateChats)).toEqual(["newest", "middle"]);
+});
+
+test("clearing private chats leaves the workspace assistant's own conversations alone", async () => {
+  sdk.getChatBootstrap.mockResolvedValueOnce({
+    ...(await sdk.getChatBootstrap()),
+    privateChats: {
+      items: [
+        thread("newest", "2026-11-03T00:00:00.000Z"),
+        {
+          ...thread("ticket", "2026-11-02T00:00:00.000Z"),
+          origin: "assistant_ticket",
+        },
+      ],
+      nextCursor: null,
+    },
+  });
+  sdk.getChatBootstrap.mockClear();
+  sdk.deleteThread.mockReset().mockResolvedValue({ deleted: true });
+  await loadDashboard();
+  expect(ids(state.privateChats)).toEqual(["newest", "ticket"]);
+
+  await run(() => state.clearPrivateChats());
+  expect(sdk.deleteThread.mock.calls).toEqual([["ws-1", "newest"]]);
+  expect(ids(state.privateChats)).toEqual(["ticket"]);
 });

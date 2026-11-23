@@ -93,6 +93,8 @@ import {
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
 import { findChatItem } from "../../../_components/dashboard-chat-items";
+import { isHostOwnedChat } from "../../../_components/host-owned-chat";
+import { useUnlistedHostOwnedThread } from "./host-owned-thread";
 import {
   isEmbedMode,
   joinPathAndQuery,
@@ -149,9 +151,30 @@ export function useThreadPageController({
 
   // The thread may be a sub-agent conversation nested under another chat, so
   // look one level down as well as at the top level.
-  const chatItem = findChatItem([...privateChats, ...sharedChats], threadId);
+  const listedChatItem = findChatItem(
+    [...privateChats, ...sharedChats],
+    threadId,
+  );
+  // The assistant's Router conversation is never in the chat list; look a
+  // host-owned thread up on its own so it opens (read-only) instead of
+  // reading as missing.
+  const unlistedHostOwned = useUnlistedHostOwnedThread({
+    workspaceId,
+    threadId,
+    listed: Boolean(listedChatItem),
+    listsSettled:
+      hasWorkspaceHydrated &&
+      !isWorkspaceHydrating &&
+      !isLoadingPrivateChats &&
+      !pendingWorkspaceId,
+  });
+  const chatItem = listedChatItem ?? unlistedHostOwned.item;
   const threadTitle = chatItem?.title ?? t("thread.fallbackTitle");
   const isScheduledRun = chatItem?.origin === "scheduled";
+  // A workspace assistant's own conversation takes no messages from members.
+  const hostOwnedOrigin = isHostOwnedChat(chatItem)
+    ? (chatItem?.origin ?? null)
+    : null;
   const parentThreadId = chatItem?.parentThreadId ?? null;
   // A sub-agent conversation shows where it came from. The parent's title is
   // whatever the sidebar currently knows, with a neutral fallback until then.
@@ -839,6 +862,7 @@ export function useThreadPageController({
     }
     if (
       !chatItem &&
+      !unlistedHostOwned.pending &&
       (modelCatalogStatus === "error" ||
         (!isLoadingPrivateChats && !hasMorePrivateChats))
     ) {
@@ -862,6 +886,7 @@ export function useThreadPageController({
     modelCatalogStatus,
     pendingWorkspaceId,
     targetThreadMessagesKey,
+    unlistedHostOwned.pending,
     workspaceId,
   ]);
   const isThreadSwitching = Boolean(
@@ -1503,6 +1528,7 @@ export function useThreadPageController({
     threadId,
     threadTitle,
     isScheduledRun,
+    hostOwnedOrigin,
     parentThread,
     openParentThread,
     openThreadInNewWindow,

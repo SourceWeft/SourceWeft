@@ -23,6 +23,10 @@ const KNOWN_KINDS = new Set([
   "task_paused_repeated_failure",
   "research_ready",
   "research_failed",
+  "assistant_reply",
+  "assistant_question",
+  "assistant_ticket_blocked",
+  "assistant_unavailable",
 ]);
 
 export function useNotificationText() {
@@ -41,8 +45,19 @@ export function useNotificationText() {
       typeof item.payload.taskName === "string" ? item.payload.taskName : "";
     const topic =
       typeof item.payload.topic === "string" ? item.payload.topic : "";
+    // An assistant block with no ticket (`payload.taskName` absent) is about
+    // the payer's own messages waiting for credits, not about one ticket.
+    if (item.kind === "assistant_ticket_blocked" && !taskName) {
+      return t("notification.assistant_messages_blocked");
+    }
+    const reason =
+      typeof item.payload.reason === "string" ? item.payload.reason : "";
+    const count =
+      typeof item.payload.unavailableCount === "number"
+        ? item.payload.unavailableCount
+        : 1;
     const kind = KNOWN_KINDS.has(item.kind) ? item.kind : "unknown";
-    return t(`notification.${kind}`, { taskName, topic });
+    return t(`notification.${kind}`, { taskName, topic, reason, count });
   };
 }
 

@@ -14,6 +14,7 @@ import {
   ArchiveRestore,
   Bot,
   CalendarClock,
+  ConciergeBell,
   Download,
   ExternalLink,
   Link2,
@@ -91,6 +92,7 @@ import {
 } from "./dashboard-shortcuts";
 import { contentClient } from "../../../lib/sdk";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
+import { isHostOwnedChat } from "./host-owned-chat";
 import { DashboardPersonaManager } from "./dashboard-persona-manager";
 import { ShareChatDialog } from "./share-chat-dialog";
 import { DeleteChatDialog } from "./delete-chat-dialog";
@@ -538,6 +540,9 @@ function ChatListRow({
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt, locale);
   const shared = isSharedChat(item);
   const parentThreadId = item.parentThreadId;
+  // The assistant depends on its own conversations: the server refuses
+  // deleting, archiving or re-scoping them, so they are not offered.
+  const hostOwned = isHostOwnedChat(item);
 
   const handleToggleVisibility = async () => {
     if (!onSetVisibility) return;
@@ -769,13 +774,13 @@ function ChatListRow({
                 <span>{t("chats.export")}</span>
               </DropdownMenuItem>
             ) : null}
-            {!nested && onShare ? (
+            {!nested && onShare && !hostOwned ? (
               <DropdownMenuItem onSelect={() => onShare(item.id, item.title)}>
                 <Share className="size-4" />
                 <span>{t("chats.share")}</span>
               </DropdownMenuItem>
             ) : null}
-            {onSetVisibility ? (
+            {onSetVisibility && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
                 {shared ? (
                   <>
@@ -812,25 +817,27 @@ function ChatListRow({
                 <span>{t("chats.openInNewWindow")}</span>
               </DropdownMenuItem>
             ) : null}
-            {canArchive ? (
+            {canArchive && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleArchive()}>
                 <Archive className="size-4" />
                 <span>{t("chats.archive")}</span>
               </DropdownMenuItem>
             ) : null}
-            {onUnarchive ? (
+            {onUnarchive && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleUnarchive()}>
                 <ArchiveRestore className="size-4" />
                 <span>{t("chats.unarchive")}</span>
               </DropdownMenuItem>
             ) : null}
-            <DropdownMenuItem
-              onSelect={() => setConfirmingDelete(true)}
-              variant="destructive"
-            >
-              <Trash2 className="size-4" />
-              <span>{t("chats.delete")}</span>
-            </DropdownMenuItem>
+            {hostOwned ? null : (
+              <DropdownMenuItem
+                onSelect={() => setConfirmingDelete(true)}
+                variant="destructive"
+              >
+                <Trash2 className="size-4" />
+                <span>{t("chats.delete")}</span>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -953,7 +960,15 @@ function ChatList({
         pinnedIds,
         filter,
       ),
-    [privateChats, sharedChats, archivedChats, filter, search, searchState, pinnedIds],
+    [
+      privateChats,
+      sharedChats,
+      archivedChats,
+      filter,
+      search,
+      searchState,
+      pinnedIds,
+    ],
   );
   const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
   const canLoadMore = isArchived ? hasMoreArchived : hasMore;
@@ -988,7 +1003,9 @@ function ChatList({
         ? t("chats.archived")
         : filter === "scheduled"
           ? t("chats.scheduled")
-          : t("chats.private");
+          : filter === "assistant"
+            ? t("chats.assistant")
+            : t("chats.private");
 
   const renderChat = (item: ChatItem) => (
     <Fragment key={item.id}>
@@ -1170,6 +1187,7 @@ function ChatList({
                   value === "shared" ||
                   value === "private" ||
                   value === "scheduled" ||
+                  value === "assistant" ||
                   value === "archived"
                 ) {
                   setFilter(value);
@@ -1191,6 +1209,10 @@ function ChatList({
               <DropdownMenuRadioItem value="scheduled">
                 <CalendarClock className="size-4" />
                 {t("chats.scheduled")}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="assistant">
+                <ConciergeBell className="size-4" />
+                {t("chats.assistant")}
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="archived">
                 <Archive className="size-4" />

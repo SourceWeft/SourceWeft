@@ -22,6 +22,7 @@ import {
   runConnectorPersonalDataPass,
 } from "./schedules/connector-personal-data";
 import { scheduleAgentTasks } from "./schedules/agent-tasks";
+import { runAssistantTick } from "../modules/assistants";
 import {
   GITHUB_REGISTRY_INTERVAL_MS,
   scheduleGithubRegistryEnrichment,
@@ -81,6 +82,9 @@ async function tick() {
     jobs.push(scheduleConnectorSyncs());
     // Scheduled tasks: due slots become chat runs, ended runs are settled.
     jobs.push(scheduleAgentTasks());
+    // Workspace assistants: settle ended Router/worker runs, start worker
+    // runs for tickets and the Router on its next batch.
+    jobs.push(runAssistantTick());
     jobs.push(durableChatRunService.expireWaitingApprovals());
     jobs.push(durableChatRunService.failStaleActiveRuns());
     jobs.push(agentSandboxService.cleanupExpiredSandboxes());

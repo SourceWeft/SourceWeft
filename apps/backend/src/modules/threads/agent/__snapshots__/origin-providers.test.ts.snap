@@ -1,0 +1,734 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a turn with no origin provider is assembled exactly as before > attended 1`] = `
+{
+  "endsWithScheduledRunBlock": false,
+  "extraMiddleware": [
+    {
+      "name": "FileImageContext",
+      "tools": [],
+    },
+  ],
+  "hasInterruptOn": true,
+  "interruptOn": [
+    "enable_skill",
+    "mcp__docs__delete_page",
+    "send_gmail_message",
+  ],
+  "permissions": [
+    {
+      "mode": "deny",
+      "operations": [
+        "read",
+        "write",
+      ],
+      "paths": [
+        "/conversation_history",
+        "/conversation_history/**",
+        "/large_tool_results",
+        "/large_tool_results/**",
+      ],
+    },
+    {
+      "mode": "allow",
+      "operations": [
+        "read",
+      ],
+      "paths": [
+        "/",
+      ],
+    },
+    {
+      "mode": "deny",
+      "operations": [
+        "read",
+      ],
+      "paths": [
+        "/**",
+      ],
+    },
+    {
+      "mode": "deny",
+      "operations": [
+        "write",
+      ],
+      "paths": [
+        "/**",
+      ],
+    },
+  ],
+  "scheduledRunBlock": false,
+  "subagents": [
+    {
+      "interruptOn": [
+        "enable_skill",
+        "mcp__docs__delete_page",
+        "send_gmail_message",
+      ],
+      "middleware": [
+        {
+          "name": "FileImageContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallCountChannels",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepBudget",
+          "tools": [],
+        },
+        {
+          "name": "patchToolCallsMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "HumanInTheLoopMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftAskUser",
+          "tools": [
+            "askUser",
+          ],
+        },
+        {
+          "name": "ToolCallLimitMiddleware[askUser]",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRepeatToolCallReminder",
+          "tools": [],
+        },
+        {
+          "name": "toolErrorMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolObservability",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolExecutionTimeout",
+          "tools": [],
+        },
+        {
+          "name": "toolRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SummarizationMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftUnansweredToolCalls",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallScope",
+          "tools": [],
+        },
+        {
+          "name": "modelRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallAttempt",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftClosingToolGovernance",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepFinalization",
+          "tools": [],
+        },
+      ],
+      "name": "general-purpose",
+      "tools": [
+        "enable_skill",
+        "mcp__docs__delete_page",
+        "mcp__docs__search",
+        "publish_artifact",
+        "read_document",
+        "search_files",
+        "search_notion_pages",
+        "search_skills",
+        "search_sources",
+        "send_gmail_message",
+        "view_image",
+        "web_fetch",
+        "web_search",
+      ],
+    },
+    {
+      "interruptOn": [],
+      "middleware": [
+        {
+          "name": "FilesystemMiddleware",
+          "tools": [
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+          ],
+        },
+        {
+          "name": "FileImageContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallCountChannels",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepBudget",
+          "tools": [],
+        },
+        {
+          "name": "patchToolCallsMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftAskUser",
+          "tools": [
+            "askUser",
+          ],
+        },
+        {
+          "name": "ToolCallLimitMiddleware[askUser]",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRepeatToolCallReminder",
+          "tools": [],
+        },
+        {
+          "name": "toolErrorMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolObservability",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolExecutionTimeout",
+          "tools": [],
+        },
+        {
+          "name": "toolRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SummarizationMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftUnansweredToolCalls",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallScope",
+          "tools": [],
+        },
+        {
+          "name": "modelRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallAttempt",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftClosingToolGovernance",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepFinalization",
+          "tools": [],
+        },
+      ],
+      "name": "explore",
+      "tools": [
+        "read_document",
+        "search_files",
+        "search_sources",
+        "view_image",
+      ],
+    },
+    {
+      "interruptOn": [],
+      "middleware": [
+        {
+          "name": "FilesystemMiddleware",
+          "tools": [
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+          ],
+        },
+        {
+          "name": "FileImageContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallCountChannels",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepBudget",
+          "tools": [],
+        },
+        {
+          "name": "patchToolCallsMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftAskUser",
+          "tools": [
+            "askUser",
+          ],
+        },
+        {
+          "name": "ToolCallLimitMiddleware[askUser]",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRepeatToolCallReminder",
+          "tools": [],
+        },
+        {
+          "name": "toolErrorMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolObservability",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolExecutionTimeout",
+          "tools": [],
+        },
+        {
+          "name": "toolRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SummarizationMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftUnansweredToolCalls",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallScope",
+          "tools": [],
+        },
+        {
+          "name": "modelRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallAttempt",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftClosingToolGovernance",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepFinalization",
+          "tools": [],
+        },
+      ],
+      "name": "plan",
+      "tools": [
+        "read_document",
+        "search_files",
+        "search_sources",
+        "view_image",
+      ],
+    },
+  ],
+  "tools": [
+    "enable_skill",
+    "mcp__docs__delete_page",
+    "mcp__docs__search",
+    "publish_artifact",
+    "read_document",
+    "search_files",
+    "search_notion_pages",
+    "search_skills",
+    "search_sources",
+    "send_gmail_message",
+    "view_image",
+    "web_fetch",
+    "web_search",
+  ],
+  "unattended": false,
+}
+`;
+
+exports[`a turn with no origin provider is assembled exactly as before > unattended 1`] = `
+{
+  "endsWithScheduledRunBlock": true,
+  "extraMiddleware": [
+    {
+      "name": "FilesystemMiddleware",
+      "tools": [
+        "glob",
+        "grep",
+        "ls",
+        "read_file",
+      ],
+    },
+    {
+      "name": "FileImageContext",
+      "tools": [],
+    },
+  ],
+  "hasInterruptOn": false,
+  "interruptOn": [],
+  "permissions": [
+    {
+      "mode": "allow",
+      "operations": [
+        "read",
+      ],
+      "paths": [
+        "/",
+      ],
+    },
+    {
+      "mode": "allow",
+      "operations": [
+        "read",
+      ],
+      "paths": [
+        "/kb",
+        "/kb/**",
+        "/files",
+        "/files/**",
+        "/skills",
+        "/skills/**",
+      ],
+    },
+    {
+      "mode": "deny",
+      "operations": [
+        "read",
+      ],
+      "paths": [
+        "/**",
+      ],
+    },
+    {
+      "mode": "deny",
+      "operations": [
+        "write",
+      ],
+      "paths": [
+        "/**",
+      ],
+    },
+  ],
+  "scheduledRunBlock": true,
+  "subagents": [
+    {
+      "interruptOn": [],
+      "middleware": [
+        {
+          "name": "FilesystemMiddleware",
+          "tools": [
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+          ],
+        },
+        {
+          "name": "FileImageContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallCountChannels",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepBudget",
+          "tools": [],
+        },
+        {
+          "name": "patchToolCallsMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRepeatToolCallReminder",
+          "tools": [],
+        },
+        {
+          "name": "toolErrorMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolObservability",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolExecutionTimeout",
+          "tools": [],
+        },
+        {
+          "name": "toolRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SummarizationMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftUnansweredToolCalls",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallScope",
+          "tools": [],
+        },
+        {
+          "name": "modelRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallAttempt",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftClosingToolGovernance",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepFinalization",
+          "tools": [],
+        },
+      ],
+      "name": "general-purpose",
+      "tools": [
+        "mcp__docs__search",
+        "read_document",
+        "search_files",
+        "search_sources",
+        "view_image",
+        "web_fetch",
+        "web_search",
+      ],
+    },
+    {
+      "interruptOn": [],
+      "middleware": [
+        {
+          "name": "FilesystemMiddleware",
+          "tools": [
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+          ],
+        },
+        {
+          "name": "FileImageContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallCountChannels",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepBudget",
+          "tools": [],
+        },
+        {
+          "name": "patchToolCallsMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRepeatToolCallReminder",
+          "tools": [],
+        },
+        {
+          "name": "toolErrorMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolObservability",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolExecutionTimeout",
+          "tools": [],
+        },
+        {
+          "name": "toolRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SummarizationMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftUnansweredToolCalls",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallScope",
+          "tools": [],
+        },
+        {
+          "name": "modelRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallAttempt",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftClosingToolGovernance",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepFinalization",
+          "tools": [],
+        },
+      ],
+      "name": "explore",
+      "tools": [
+        "read_document",
+        "search_files",
+        "search_sources",
+        "view_image",
+      ],
+    },
+    {
+      "interruptOn": [],
+      "middleware": [
+        {
+          "name": "FilesystemMiddleware",
+          "tools": [
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+          ],
+        },
+        {
+          "name": "FileImageContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallCountChannels",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepBudget",
+          "tools": [],
+        },
+        {
+          "name": "patchToolCallsMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolCallContext",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRepeatToolCallReminder",
+          "tools": [],
+        },
+        {
+          "name": "toolErrorMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolObservability",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftToolExecutionTimeout",
+          "tools": [],
+        },
+        {
+          "name": "toolRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SummarizationMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftUnansweredToolCalls",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallScope",
+          "tools": [],
+        },
+        {
+          "name": "modelRetryMiddleware",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftModelCallAttempt",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftClosingToolGovernance",
+          "tools": [],
+        },
+        {
+          "name": "SourceWeftRunStepFinalization",
+          "tools": [],
+        },
+      ],
+      "name": "plan",
+      "tools": [
+        "read_document",
+        "search_files",
+        "search_sources",
+        "view_image",
+      ],
+    },
+  ],
+  "tools": [
+    "mcp__docs__search",
+    "read_document",
+    "search_files",
+    "search_sources",
+    "view_image",
+    "web_fetch",
+    "web_search",
+  ],
+  "unattended": true,
+}
+`;

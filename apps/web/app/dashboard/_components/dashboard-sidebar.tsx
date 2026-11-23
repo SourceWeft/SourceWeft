@@ -9,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   CalendarClock,
+  ConciergeBell,
   LayoutDashboard,
   MessageSquareText,
   MoreHorizontal,
@@ -85,6 +86,13 @@ const navMain: NavItem[] = [
     href: "/dashboard/scheduled",
     icon: CalendarClock,
     match: (p) => p.startsWith("/dashboard/scheduled"),
+    more: true,
+  },
+  {
+    labelKey: "nav.assistant",
+    href: "/dashboard/assistant",
+    icon: ConciergeBell,
+    match: (p) => p.startsWith("/dashboard/assistant"),
     more: true,
   },
   {

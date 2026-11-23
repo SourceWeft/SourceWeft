@@ -35,6 +35,8 @@ import {
   updateChatThreadRunProgress,
 } from "./repository";
 import { chatRunStreamManager } from "./stream-manager";
+import { findThreadRecord } from "../thread/repository";
+import { assertTurnAllowedInThread } from "../thread/host-owned";
 import { SOURCEWEFT_WEB_RUN_STOP_SUFFIX } from "./constants";
 import type {
   ChatRunSnapshot,
@@ -174,6 +176,8 @@ type FinishRunInput = {
   snapshot?: ChatRunSnapshot;
   errorCode?: string | null;
   errorMessage?: string | null;
+  /** How many credits this run cost; omitted settles to 0. */
+  consumedCredits?: number;
 };
 
 /**
@@ -214,6 +218,7 @@ async function finishRunWithDependencies(
     snapshotJson: input.snapshot,
     errorCode: input.errorCode,
     errorMessage: input.errorMessage,
+    consumedCredits: input.consumedCredits,
   });
   if (
     finished &&
@@ -326,6 +331,15 @@ export class DurableChatRunService {
       }
       return { run: existing, created: false };
     }
+
+    // Only the host starts turns in a conversation it owns; refused here,
+    // before a run row exists, and again by the turn preparer.
+    const thread = await findThreadRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      threadId: input.threadId,
+    });
+    if (thread) assertTurnAllowedInThread(thread, input.request);
 
     const active = await findActiveChatThreadRun({
       teamId: workspace.organizationId,
@@ -771,6 +785,8 @@ export class DurableChatRunService {
     confirmationIds?: string[];
     requestedAt?: Date;
     expiresAt?: Date;
+    /** How many credits this run has cost so far; see `finishChatThreadRun`. */
+    consumedCredits?: number;
   }) {
     return markRunWaitingForApproval(input);
   }

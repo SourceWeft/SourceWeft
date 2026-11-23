@@ -42,7 +42,14 @@ export type TeamAuditAction =
   | "agent_task.resumed"
   | "agent_task.blocked"
   | "agent_task.deleted"
-  | "agent_task.run_requested";
+  | "agent_task.run_requested"
+  // Workspace assistant (#692). `actorUserId` is always the admin who acted;
+  // the platform never changes these on its own in this task (Task 7 adds
+  // the steward-left pause, with actor null).
+  | "assistant.enabled"
+  | "assistant.paused"
+  | "assistant.resumed"
+  | "assistant.steward_changed";
 
 export type TeamAuditTargetType =
   | "skill"
@@ -53,7 +60,8 @@ export type TeamAuditTargetType =
   | "thread"
   | "guest"
   | "sso_provider"
-  | "agent_task";
+  | "agent_task"
+  | "assistant";
 
 export type TeamAuditEntry = {
   teamId: string;

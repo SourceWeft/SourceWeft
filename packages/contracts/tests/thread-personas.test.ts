@@ -40,6 +40,8 @@ test("a thread carries its parent link, persona, and origin", () => {
     "user",
     "subagent",
     "scheduled",
+    "assistant_router",
+    "assistant_ticket",
   ]);
   const child = threadSchema.parse({
     ...baseThread,
