@@ -190,3 +190,23 @@ test("the scheduled-run prompt tells the model nobody is there", () => {
   assert.match(SCHEDULED_RUN_PROMPT, /nobody is present/);
   assert.match(SCHEDULED_RUN_PROMPT, /Do not ask questions/);
 });
+
+test("todoList: false leaves only the todo middleware out of the root stack", async () => {
+  const base = {
+    backend: {} as never,
+    model: {} as never,
+    modelAlias: "chat-default",
+    filesystemMounts: [],
+  };
+  const names = (stack: Array<{ name: string }>) =>
+    stack.map((middleware) => middleware.name);
+  const withTodos = names(await createSourceWeftAgentMiddlewareStack(base));
+  const withoutTodos = names(
+    await createSourceWeftAgentMiddlewareStack({ ...base, todoList: false }),
+  );
+  assert.ok(withTodos.includes("todoListMiddleware"));
+  assert.deepEqual(
+    withTodos.filter((name) => name !== "todoListMiddleware"),
+    withoutTodos,
+  );
+});

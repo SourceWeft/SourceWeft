@@ -1369,6 +1369,7 @@ export async function buildThreadAgentAssembly(
       fileImages.middleware(),
     ],
     unattended: restricted,
+    ...(replaceTools ? { todoList: false } : {}),
     creditCap: prepared.creditCap,
     getBillingScope,
     contextCompressionReportKey: prepared.userMessage.id,

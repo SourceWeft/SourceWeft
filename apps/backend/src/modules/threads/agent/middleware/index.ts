@@ -76,6 +76,8 @@ export type SourceWeftAgentMiddlewareStackInput = {
   interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
   /** False leaves the `askUser` tool out (an unattended turn). Default true. */
   askUser?: boolean;
+  /** False leaves `write_todos` and its prompt out (a Router). Default true. */
+  todoList?: boolean;
   contextCompressionReportKey?: string;
   execution?: LangChainModelExecutionConfig;
   extraMiddleware?: AgentMiddleware[];
@@ -250,7 +252,7 @@ export async function createSourceWeftAgentMiddlewareStack(
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
-    todoListMiddleware(),
+    ...(input.todoList === false ? [] : [todoListMiddleware()]),
     // Proactive `askUser` (+ a per-turn call cap). Enabled by default; see
     // config.chat.agent.askUserEnabled. Also added to the sub-agent stack.
     ...askUserMiddleware(input.askUser),

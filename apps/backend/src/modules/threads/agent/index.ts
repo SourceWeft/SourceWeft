@@ -76,6 +76,8 @@ export interface CreateThreadAgentParams {
   interruptOn?: Record<string, boolean | InterruptOnConfig>;
   /** Nobody is present: no `askUser` tool. See `unattended-policy.ts`. */
   unattended?: boolean;
+  /** False binds no `write_todos` tool (a Router). Default true. */
+  todoList?: boolean;
   /**
    * Host-set credit ceiling for this run; undefined leaves the run uncapped.
    * See `StreamThreadEventInput.creditCap`.
@@ -125,6 +127,7 @@ export async function createThreadAgent(
     commandExecutionPolicy: params.commandExecutionPolicy,
     interruptOn: params.interruptOn,
     askUser: !params.unattended,
+    todoList: params.todoList,
     extraMiddleware: params.extraMiddleware,
     filesystemMounts,
     toolObservabilityContext: params.toolObservabilityContext,

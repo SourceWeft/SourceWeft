@@ -10,8 +10,8 @@
  * this registry.
  *
  * - `replaceTools: true` (a Router): the turn binds the provider's tools and
- *   nothing else — no business tools, no sub-agents, no `askUser`, and the
- *   built-in filesystem tools stay read-only as in an unattended run.
+ *   nothing else — no business tools, no sub-agents, no `askUser`, no
+ *   `write_todos` and no filesystem tools.
  * - `replaceTools: false` (a Worker): the provider's tools are bound next to
  *   the turn's own; in an unattended run they are allowed on top of the
  *   unattended allow-list.
@@ -27,6 +27,22 @@ import type { ThreadOrigin } from "@sourceweft/contracts";
  * factory, and hosts import this registry at worker startup.
  */
 const TASK_TOOL_NAME = "task";
+
+/**
+ * Deep Agents' filesystem tools. Its filesystem middleware is always mounted
+ * and refuses a tool list without `read_file`, so a replace-tools turn keeps
+ * the (read-only) middleware and these are excluded instead.
+ */
+const FILESYSTEM_TOOL_NAMES = [
+  "ls",
+  "read_file",
+  "write_file",
+  "edit_file",
+  "delete",
+  "glob",
+  "grep",
+  "execute",
+] as const;
 
 /** What a provider learns about the turn it is equipping. */
 export type OriginTurnContext = {
@@ -84,14 +100,14 @@ export function getOriginTurnProvider(
 }
 
 /**
- * Keeps Deep Agents' `task` tool away from a replace-tools turn. Deep Agents
- * adds its own general-purpose delegate whenever the roster does not name
- * one, so an empty roster alone still binds `task`; this hides it from the
- * model and refuses a call to it, the same way Deep Agents' own profile tool
- * exclusion does.
+ * Keeps the tools Deep Agents always binds away from a replace-tools turn:
+ * `task` (it adds its own general-purpose delegate whenever the roster does
+ * not name one, so an empty roster alone still binds it) and the filesystem
+ * tools. Hides them from the model and refuses a call to them, the same way
+ * Deep Agents' own profile tool exclusion does.
  */
 export function createOriginToolExclusionMiddleware() {
-  const excluded = new Set([TASK_TOOL_NAME]);
+  const excluded = new Set<string>([TASK_TOOL_NAME, ...FILESYSTEM_TOOL_NAMES]);
   const toolName = (tool: unknown) =>
     tool && typeof tool === "object" && "name" in tool
       ? (tool as { name?: unknown }).name

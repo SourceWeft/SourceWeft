@@ -13,6 +13,7 @@ type AgentParams = {
   interruptOn?: Record<string, unknown>;
   permissions?: unknown;
   unattended?: boolean;
+  todoList?: boolean;
   extraMiddleware: Named[];
   runtimePrompt: string;
   subagents: Array<{
@@ -225,7 +226,10 @@ test("a replace-tools origin binds only its provider's tools, no sub-agents and 
     );
     assert.ok(exclusion, "task tool exclusion middleware");
     assert.equal(agent.unattended, true);
-    // The built-in filesystem tools stay the read tools of an unattended run.
+    // No `write_todos`: the todo middleware is not mounted.
+    assert.equal(agent.todoList, false);
+    // Deep Agents always mounts its filesystem middleware, so it stays the
+    // read-only one of an unattended run and its tools are excluded too.
     const filesystem = agent.extraMiddleware.find((middleware) =>
       names(middleware.tools).includes("read_file"),
     );
@@ -371,7 +375,7 @@ test("a host-owned conversation whose host is not wired fails the turn", async (
   }
 });
 
-test("the task exclusion hides `task` from the model and refuses a call to it", async () => {
+test("the origin tool exclusion hides `task` and the filesystem tools from the model and refuses a call to them", async () => {
   const { createOriginToolExclusionMiddleware } =
     await import("./origin-providers");
   const middleware = createOriginToolExclusionMiddleware() as unknown as {
@@ -387,7 +391,17 @@ test("the task exclusion hides `task` from the model and refuses a call to it", 
 
   const seenRequests: Array<{ tools?: unknown[] }> = [];
   await middleware.wrapModelCall(
-    { tools: [{ name: "say" }, { name: "task" }, { name: "open_ticket" }] },
+    {
+      tools: [
+        { name: "say" },
+        { name: "task" },
+        { name: "read_file" },
+        { name: "ls" },
+        { name: "glob" },
+        { name: "grep" },
+        { name: "open_ticket" },
+      ],
+    },
     (request) => {
       seenRequests.push(request);
       return "model-result";
@@ -407,6 +421,14 @@ test("the task exclusion hides `task` from the model and refuses a call to it", 
   assert.equal(refused.status, "error");
   assert.equal(refused.tool_call_id, "call_1");
   assert.equal(refused.name, "task");
+
+  const refusedRead = (await middleware.wrapToolCall(
+    { toolCall: { name: "read_file", id: "call_3", args: {} } },
+    handler,
+  )) as { status?: string; name?: string };
+  assert.equal(handler.mock.calls.length, 0);
+  assert.equal(refusedRead.status, "error");
+  assert.equal(refusedRead.name, "read_file");
 
   const passed = await middleware.wrapToolCall(
     { toolCall: { name: "say", id: "call_2", args: {} } },

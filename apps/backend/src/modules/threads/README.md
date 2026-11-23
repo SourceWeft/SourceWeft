@@ -115,7 +115,7 @@ a conversation the host created earlier instead of creating one, so another
 member can start the next run in it. A host equips turns in its conversations
 by registering an origin provider at worker startup
 (`agent/origin-providers.ts`): `replaceTools: true` binds the provider's tools
-only (no sub-agents, no `task`, read-only filesystem), `replaceTools: false`
+only (no sub-agents, no `task`, no `write_todos`, no filesystem tools), `replaceTools: false`
 adds them on top of the unattended allow-list; either can append a runtime
 prompt fragment. Threads never imports the host. `assistant_router`
 conversations are left out of the chat list.
