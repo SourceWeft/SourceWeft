@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "vitest";
 import { toObservationError } from "../../threads/stream/observability";
-import { resolveRouterToolsContext } from "./tools";
+import {
+  guarded,
+  isRouterToolError,
+  resolveRouterToolsContext,
+  ROUTER_TOOL_FAILED_MESSAGE,
+} from "./tools";
 import { resolveWorkerToolsContext } from "../worker/tools";
 
 const ctx = {
@@ -25,4 +30,14 @@ test("a Router or Worker turn that cannot be set up fails as CHAT_RUN_FAILED, ne
       },
     );
   }
+});
+
+test("a Router tool that throws gives the model a fixed message, never the raw error", async () => {
+  const result = await guarded("route_to_ticket", async () => {
+    throw new Error('duplicate key value violates unique constraint "secret_internal_name"');
+  });
+  assert.ok(isRouterToolError(result));
+  assert.equal(result.code, "ROUTER_TOOL_FAILED");
+  assert.equal(result.message, ROUTER_TOOL_FAILED_MESSAGE);
+  assert.doesNotMatch(result.message, /secret_internal_name/);
 });

@@ -22,8 +22,10 @@ import { turnSetupError } from "../errors";
 import { ASSISTANT_LIMITS } from "../limits";
 import { assistantPorts, type AssistantPorts } from "../ports";
 import {
+  countReportReroutesSinceMemberInput,
   findAssistantRow,
   findFeedItemRowsByIdPrefix,
+  findScopedTicketRow,
   findTicketRow,
   findTicketRowsByIdPrefix,
   findTriggerRowsByIdPrefix,
@@ -63,13 +65,18 @@ export function isRouterToolError(value: unknown): value is RouterToolError {
   );
 }
 
+/** What the model reads when a tool body throws. Fixed on purpose: a raw
+ * database or driver message is logged, never shown to the model. */
+export const ROUTER_TOOL_FAILED_MESSAGE =
+  "The tool failed and nothing was saved. Try it once more; if it fails again, leave these events undecided and say so in your final summary.";
+
 /**
  * Runs one Router tool body, turning any thrown error into a tool-error
  * result rather than letting it propagate — see the file header. Business
  * refusals do not throw at all (they `return toolError(...)` directly), so
  * this is really only a backstop for the unexpected (a DB error, say).
  */
-async function guarded<T>(
+export async function guarded<T>(
   toolName: string,
   run: () => Promise<T | RouterToolError>,
 ): Promise<T | RouterToolError> {
@@ -80,12 +87,7 @@ async function guarded<T>(
       toolName,
       error: error instanceof Error ? error.message : String(error),
     });
-    return toolError(
-      "ROUTER_TOOL_FAILED",
-      error instanceof Error && error.message
-        ? error.message
-        : "The tool failed.",
-    );
+    return toolError("ROUTER_TOOL_FAILED", ROUTER_TOOL_FAILED_MESSAGE);
   }
 }
 
@@ -171,6 +173,82 @@ async function markDecidedOrMismatch(
   if (updated.length !== triggers.length) {
     throw new DecisionCountMismatchError();
   }
+}
+
+/**
+ * Why `route_to_ticket` will not route these events to `ticket`, or null
+ * when it may. Each refusal is an ordinary tool result that decides
+ * nothing (the events stay the Router's to decide) and says what to do
+ * instead:
+ *
+ * - an ended ticket takes no more events: `create_ticket`;
+ * - another member's events would bill this ticket's payer for them:
+ *   `create_ticket` for that member (no cross-payer billing);
+ * - a ticket waiting for a person (`waiting_person`, which includes a
+ *   blocked one) restarts only on a member's input, so a report or any
+ *   other non-member event is refused: `ignore` it, and `say` to the payer;
+ * - a ticket's own report sent back for rework once it already was
+ *   `reworkWithoutMemberMax` times since a member last wrote: the same.
+ *   This bounds the report → rework → report loop a Router can otherwise
+ *   run on its own, billed to the payer each time.
+ */
+async function routeRefusal(
+  tx: AssistantTx,
+  ctx: RouterToolsContext,
+  ticket: AssistantTicketRow,
+  triggers: readonly AssistantTriggerRow[],
+): Promise<RouterToolError | null> {
+  if (ticket.stage === "ended") {
+    return toolError(
+      "TICKET_ENDED",
+      `Ticket '${ticket.id}' has ended and takes no more events. Nothing was routed. Use create_ticket for these events instead (or ignore them if nothing needs doing).`,
+    );
+  }
+
+  const otherPayer = triggers.filter(
+    (trigger) => trigger.payerUserId !== ticket.payerUserId,
+  );
+  if (otherPayer.length > 0) {
+    return toolError(
+      "TICKET_PAYER_MISMATCH",
+      `Ticket '${ticket.id}' is paid for by a different member than ${otherPayer.map((trigger) => trigger.id).join(", ")}. Nothing was routed: one member's events are never billed to another member's ticket. Use create_ticket for this member instead.`,
+    );
+  }
+
+  const nonMember = triggers.filter(
+    (trigger) => trigger.sourceKind !== "member_message",
+  );
+  if (ticket.stage === "waiting_person" && nonMember.length > 0) {
+    const state = ticket.outcome === "blocked" ? "blocked" : "waiting for a person";
+    return toolError(
+      "TICKET_WAITING_FOR_PERSON",
+      `Ticket '${ticket.id}' is ${state}; only a member's message can restart it. Nothing was routed. ignore ${nonMember.map((trigger) => trigger.id).join(", ")}, and use say to tell the payer if they need to know.`,
+    );
+  }
+
+  const ownReports = triggers.filter(
+    (trigger) =>
+      trigger.sourceKind === "worker_report" && trigger.ticketId === ticket.id,
+  );
+  const memberInput = triggers.some(
+    (trigger) => trigger.sourceKind === "member_message",
+  );
+  if (ownReports.length > 0 && !memberInput) {
+    const max = ASSISTANT_LIMITS.reworkWithoutMemberMax;
+    const already = await countReportReroutesSinceMemberInput(tx, {
+      assistantId: ctx.assistantId,
+      teamId: ctx.teamId,
+      workspaceId: ctx.workspaceId,
+      ticketId: ticket.id,
+    });
+    if (already + ownReports.length > max) {
+      return toolError(
+        "TICKET_REWORK_LIMIT_REACHED",
+        `Ticket '${ticket.id}' was already sent back for rework ${already} time(s) since a member last wrote, the most allowed (${max}). Nothing was routed. ignore ${ownReports.map((trigger) => trigger.id).join(", ")}, and use say to tell the payer what is still missing so they can decide. Do not write the deliverable yourself.`,
+      );
+    }
+  }
+  return null;
 }
 
 const createTicketSchema = z.object({
@@ -355,13 +433,34 @@ export function createRouterTools(
   const routeToTicket = tool(
     async (args: z.infer<typeof routeToTicketSchema>) =>
       guarded("route_to_ticket", async () => {
-        const ticket = await loadOwnTicket(ctx, args.ticketId);
-        if (isRouterToolError(ticket)) return ticket;
+        const found = await loadOwnTicket(ctx, args.ticketId);
+        if (isRouterToolError(found)) return found;
         const triggers = await loadBatchTriggers(ctx, args.triggerIds);
         if (isRouterToolError(triggers)) return triggers;
 
         try {
-          await db.transaction(async (tx) => {
+          return await db.transaction(async (tx) => {
+            // Re-read under a lock: a close or a report landing in between
+            // must not slip an event past the rules below.
+            const ticket = await findScopedTicketRow(
+              {
+                assistantId: ctx.assistantId,
+                teamId: ctx.teamId,
+                workspaceId: ctx.workspaceId,
+                ticketId: found.id,
+              },
+              tx,
+              { forUpdate: true },
+            );
+            if (!ticket) {
+              return toolError(
+                "TICKET_NOT_FOUND",
+                `No ticket '${found.id}' for this assistant.`,
+              );
+            }
+            const refusal = await routeRefusal(tx, ctx, ticket, triggers);
+            if (refusal) return refusal;
+
             for (const trigger of triggers) {
               await insertDecisionRow(tx, {
                 id: deterministicId(
@@ -380,6 +479,7 @@ export function createRouterTools(
               });
             }
             await markDecidedOrMismatch(tx, ctx, triggers, ticket.id);
+            return { ticketId: ticket.id };
           });
         } catch (error) {
           if (error instanceof DecisionCountMismatchError) {
@@ -390,12 +490,11 @@ export function createRouterTools(
           }
           throw error;
         }
-        return { ticketId: ticket.id };
       }),
     {
       name: "route_to_ticket",
       description:
-        "Route one or more events in this batch to an existing ticket, with a short note for whoever works it. 把事件路由到一个已有工单。triggerIds must all be from this batch; ticketId must belong to this assistant.",
+        "Route one or more events in this batch to an existing ticket, with a short note for whoever works it; the worker receives the note as your instruction for this delivery. Routing a worker_report back to its own ticket asks for rework. 把事件路由到一个已有工单，note 会作为你对这次交付的指示交给工作者。triggerIds must all be from this batch and paid for by the ticket's payer; ticketId must belong to this assistant and not be ended.",
       schema: routeToTicketSchema,
     },
   );

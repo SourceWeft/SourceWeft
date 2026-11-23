@@ -318,6 +318,9 @@ export async function createAssistantFixture(label: string) {
     payerUserId: string;
     title?: string;
     stage?: "queued" | "working" | "waiting_person" | "idle" | "ended";
+    outcome?: "ready" | "dropped" | "failed" | "blocked" | "waiting" | null;
+    blockedReason?: "credit_cap" | "insufficient_credits" | "repeated_failure" | null;
+    workerThreadId?: string;
     currentRunId?: string | null;
     consecutiveFailures?: number;
     creditCap?: number;
@@ -329,12 +332,14 @@ export async function createAssistantFixture(label: string) {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       assistantId: input.assistantId,
-      workerThreadId: randomUUID(),
+      workerThreadId: input.workerThreadId ?? randomUUID(),
       title: input.title ?? "Triage the inbox",
       goal: "Keep the inbox at zero",
       payerUserId: input.payerUserId,
       origin: "explicit",
       stage: input.stage ?? "working",
+      outcome: input.outcome ?? null,
+      blockedReason: input.blockedReason ?? null,
       creditCap: String(input.creditCap ?? 500),
       consecutiveFailures: input.consecutiveFailures ?? 0,
       currentRunId: input.currentRunId ?? null,

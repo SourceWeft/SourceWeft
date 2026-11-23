@@ -618,8 +618,8 @@ export async function insertTicketRow(
 }
 
 /**
- * Candidate tickets for one batch's "related tickets" render context, in
- * the spec's order: the batch's own payer first, then a ticket that has
+ * Candidate tickets for one batch's "related tickets" render context —
+ * every ticket that has not ended — in the spec's order: the batch's own payer first, then a ticket that has
  * ever been a `route_to_ticket` target, then most recently updated — each
  * tier newest-first. Ahead of all of them come `reportingTicketIds`, the
  * tickets whose `worker_report` is in the batch, so the cap never drops
@@ -661,6 +661,9 @@ export async function listRelatedTicketCandidateRows(input: {
         eq(assistantTickets.assistantId, input.assistantId),
         eq(assistantTickets.teamId, input.teamId),
         eq(assistantTickets.workspaceId, input.workspaceId),
+        // An ended ticket takes no more events (`route_to_ticket` refuses
+        // it), so offering it would only invite a refused call.
+        ne(assistantTickets.stage, "ended"),
       ),
     )
     .orderBy(
@@ -670,6 +673,53 @@ export async function listRelatedTicketCandidateRows(input: {
       desc(assistantTickets.updatedAt),
     )
     .limit(input.limit);
+}
+
+/**
+ * How many times a ticket's own `worker_report` was routed back to it
+ * (`route_to_ticket`) since a member's input last reached it: a member's
+ * message routed to it by the Router, or a member's retry (routed straight
+ * to the ticket with no decision row; its own creation time is when it was
+ * routed). Derived from the decisions and events alone, so the rework bound
+ * needs no counter column.
+ */
+export async function countReportReroutesSinceMemberInput(
+  executor: Executor,
+  input: AssistantScope & { ticketId: string },
+): Promise<number> {
+  const lastMemberInput = sql`(
+    select max(coalesce(member_decision.created_at, member_trigger.created_at))
+    from ${assistantTriggers} member_trigger
+    left join ${assistantDecisions} member_decision
+      on member_decision.trigger_id = member_trigger.id
+      and member_decision.ticket_id = ${input.ticketId}
+      and member_decision.action in ('create_ticket', 'route_to_ticket')
+    where member_trigger.assistant_id = ${input.assistantId}
+      and member_trigger.team_id = ${input.teamId}
+      and member_trigger.workspace_id = ${input.workspaceId}
+      and member_trigger.routed_ticket_id = ${input.ticketId}
+      and member_trigger.source_kind = 'member_message'
+  )`;
+  const [row] = await executor
+    .select({ value: count() })
+    .from(assistantDecisions)
+    .innerJoin(
+      assistantTriggers,
+      eq(assistantTriggers.id, assistantDecisions.triggerId),
+    )
+    .where(
+      and(
+        eq(assistantDecisions.assistantId, input.assistantId),
+        eq(assistantDecisions.teamId, input.teamId),
+        eq(assistantDecisions.workspaceId, input.workspaceId),
+        eq(assistantDecisions.ticketId, input.ticketId),
+        eq(assistantDecisions.action, "route_to_ticket"),
+        eq(assistantTriggers.sourceKind, "worker_report"),
+        eq(assistantTriggers.ticketId, input.ticketId),
+        sql`${assistantDecisions.createdAt} > coalesce(${lastMemberInput}, '-infinity'::timestamptz)`,
+      ),
+    );
+  return Number(row?.value ?? 0);
 }
 
 export async function findTicketRow(

@@ -24,6 +24,9 @@ export const ASSISTANT_LIMITS = {
   consecutiveFailuresToBlock: 3,
   ticketCreditCapDefault: 500,
   workerRunTimeoutMs: 45 * 60_000,
+  /** How many times the Router may send a ticket's own report back to it
+   * for rework before a member writes again. */
+  reworkWithoutMemberMax: 2,
 } as const satisfies Record<string, number>;
 
 // ── Enums ────────────────────────────────────────────────────────────────

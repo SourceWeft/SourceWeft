@@ -722,3 +722,262 @@ test("resolveRouterToolsContext loads batchTriggerIds from the database, not fro
   assert.equal(resolved.batchKey, batchKey);
   assert.deepEqual(new Set(resolved.batchTriggerIds), new Set([t1.id, t2.id]));
 });
+
+// ── route_to_ticket refusals (rework bound, payer, waiting, ended) ───────
+
+/** Claims one batch holding `triggerIds` for `payer` and routes all of them
+ * to `ticketId` in one `route_to_ticket` call; returns the tool's result. */
+async function routeBatch(
+  s: Awaited<ReturnType<typeof setupAssistant>>,
+  input: {
+    payer: string;
+    ticketId: string;
+    triggerIds: string[];
+    note?: string;
+  },
+) {
+  const batchKey = routerBatchKeyFn(input.triggerIds);
+  await claimBatchFn(
+    s.assistant.id,
+    { payerUserId: input.payer, triggerIds: input.triggerIds },
+    batchKey,
+    { teamId: s.teamId, workspaceId: s.workspaceId },
+  );
+  const tools = createRouterToolsFn(
+    routerCtx({
+      teamId: s.teamId,
+      workspaceId: s.workspaceId,
+      assistantId: s.assistant.id,
+      batchKey,
+      batchTriggerIds: input.triggerIds,
+    }),
+    f.ports,
+  );
+  const routeToTicket = tools.find((tool) => tool.name === "route_to_ticket")!;
+  return routeToTicket.invoke({
+    ticketId: input.ticketId,
+    triggerIds: input.triggerIds,
+    ...(input.note ? { note: input.note } : {}),
+  });
+}
+
+/** One pending event for `payer`: a member's message, or `ticketId`'s own
+ * report. */
+async function pendingEvent(
+  s: Awaited<ReturnType<typeof setupAssistant>>,
+  input: {
+    payer: string;
+    sourceKind: "member_message" | "worker_report";
+    ticketId?: string;
+  },
+) {
+  return f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: input.payer,
+    sourceKind: input.sourceKind,
+    authorUserId: input.sourceKind === "member_message" ? input.payer : null,
+    ticketId: input.ticketId ?? null,
+  });
+}
+
+function refusalCode(result: unknown): string | null {
+  return isRouterToolErrorFn(result) ? result.code : null;
+}
+
+test(`route_to_ticket sends a ticket's own report back at most reworkWithoutMemberMax (${ASSISTANT_LIMITS.reworkWithoutMemberMax}) times; a member's message resets the count`, async () => {
+  const s = await setupAssistant();
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.member,
+    stage: "idle",
+  });
+  const reroute = async () => {
+    const report = await pendingEvent(s, {
+      payer: s.member,
+      sourceKind: "worker_report",
+      ticketId: ticket.id,
+    });
+    const result = await routeBatch(s, {
+      payer: s.member,
+      ticketId: ticket.id,
+      triggerIds: [report.id],
+      note: "Put the full text in the report.",
+    });
+    return { report, result };
+  };
+
+  for (let i = 0; i < ASSISTANT_LIMITS.reworkWithoutMemberMax; i += 1) {
+    const { result } = await reroute();
+    assert.equal(refusalCode(result), null, `reroute ${i + 1} is accepted`);
+  }
+  const third = await reroute();
+  assert.equal(refusalCode(third.result), "TICKET_REWORK_LIMIT_REACHED");
+  const message = (third.result as { message: string }).message;
+  assert.match(message, /ignore/);
+  assert.match(message, /say/);
+  // Refused without deciding anything: the event is still the Router's.
+  assert.equal((await f.triggerRow(third.report.id))!.status, "in_eval");
+  assert.equal(
+    (await f.decisionRows(s.assistant.id)).filter(
+      (row) => row.triggerId === third.report.id,
+    ).length,
+    0,
+  );
+
+  // The member writes again: their message is routed, and the count starts over.
+  const memberMessage = await pendingEvent(s, {
+    payer: s.member,
+    sourceKind: "member_message",
+  });
+  assert.equal(
+    refusalCode(
+      await routeBatch(s, {
+        payer: s.member,
+        ticketId: ticket.id,
+        triggerIds: [memberMessage.id],
+      }),
+    ),
+    null,
+  );
+  const afterMember = await reroute();
+  assert.equal(refusalCode(afterMember.result), null);
+});
+
+test("route_to_ticket refuses a worker_report for a blocked ticket but still takes a member's message for it", async () => {
+  const s = await setupAssistant();
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.member,
+    stage: "waiting_person",
+    outcome: "blocked",
+    blockedReason: "repeated_failure",
+  });
+  const report = await pendingEvent(s, {
+    payer: s.member,
+    sourceKind: "worker_report",
+    ticketId: ticket.id,
+  });
+  const refused = await routeBatch(s, {
+    payer: s.member,
+    ticketId: ticket.id,
+    triggerIds: [report.id],
+  });
+  assert.equal(refusalCode(refused), "TICKET_WAITING_FOR_PERSON");
+  assert.match((refused as { message: string }).message, /ignore/);
+  assert.match((refused as { message: string }).message, /say/);
+  assert.equal((await f.triggerRow(report.id))!.status, "in_eval");
+
+  const message = await pendingEvent(s, {
+    payer: s.member,
+    sourceKind: "member_message",
+  });
+  const accepted = await routeBatch(s, {
+    payer: s.member,
+    ticketId: ticket.id,
+    triggerIds: [message.id],
+  });
+  assert.equal(refusalCode(accepted), null);
+  assert.equal((await f.triggerRow(message.id))!.routedTicketId, ticket.id);
+});
+
+test("route_to_ticket refuses an event paid for by a different member, leaving it undecided; the ticket's own payer is routed", async () => {
+  const s = await setupAssistant();
+  const other = randomUUID();
+  await f.user(other);
+  await f.addMember(s.teamId, other, "member");
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.member,
+    stage: "idle",
+  });
+
+  const foreign = await pendingEvent(s, {
+    payer: other,
+    sourceKind: "member_message",
+  });
+  const refused = await routeBatch(s, {
+    payer: other,
+    ticketId: ticket.id,
+    triggerIds: [foreign.id],
+  });
+  assert.equal(refusalCode(refused), "TICKET_PAYER_MISMATCH");
+  assert.match((refused as { message: string }).message, /create_ticket/);
+  const row = await f.triggerRow(foreign.id);
+  assert.equal(row!.status, "in_eval");
+  assert.equal(row!.routedTicketId, null);
+  assert.equal((await f.decisionRows(s.assistant.id)).length, 0);
+
+  const own = await pendingEvent(s, {
+    payer: s.member,
+    sourceKind: "member_message",
+  });
+  const accepted = await routeBatch(s, {
+    payer: s.member,
+    ticketId: ticket.id,
+    triggerIds: [own.id],
+  });
+  assert.equal(refusalCode(accepted), null);
+  assert.equal((await f.triggerRow(own.id))!.routedTicketId, ticket.id);
+});
+
+test("route_to_ticket refuses an ended ticket and points the Router at create_ticket", async () => {
+  const s = await setupAssistant();
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.member,
+    stage: "ended",
+  });
+  const message = await pendingEvent(s, {
+    payer: s.member,
+    sourceKind: "member_message",
+  });
+  const refused = await routeBatch(s, {
+    payer: s.member,
+    ticketId: ticket.id,
+    triggerIds: [message.id],
+  });
+  assert.equal(refusalCode(refused), "TICKET_ENDED");
+  assert.match((refused as { message: string }).message, /create_ticket/);
+  assert.equal((await f.triggerRow(message.id))!.status, "in_eval");
+});
+
+test("ended tickets are left out of a batch's related tickets", async () => {
+  const s = await setupAssistant();
+  const open = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.member,
+    stage: "idle",
+    title: "Still open",
+  });
+  const ended = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.member,
+    stage: "ended",
+    title: "Closed",
+  });
+  const { fetchRouterBatchContext } = await import("./render");
+  const context = await fetchRouterBatchContext({
+    assistantId: s.assistant.id,
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    payerUserId: s.member,
+    // Even a report from the ended ticket does not bring it back.
+    reportingTicketIds: [ended.id],
+  });
+  const ids = context.relatedTickets.map((ticket) => ticket.id);
+  assert.deepEqual(ids, [open.id]);
+});
