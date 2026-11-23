@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
@@ -12,11 +13,29 @@ import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { contentClient } from "../../../../lib/sdk";
 import { toast } from "sonner";
 import { useChatHubContext } from "./chat-hub-context";
-import { SourcesHub } from "./sources-hub";
-import { ArtifactPreviewPanel } from "./sources-hub";
 import { isEmbedMode } from "../../../../lib/thread-embed-params";
 import { SubagentPanel } from "../[threadId]/_thread/subagent-panel";
 import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
+
+// The hub (sources, connectors, the MCP and skill markets, artifacts) is the
+// largest part of the chat page and is not on screen at launch on a phone,
+// where it opens in a drawer. It loads in its own chunk: with the page when a
+// docked hub is rendered, otherwise once the page is idle or the drawer opens.
+const loadSourcesHub = () => import("./sources-hub");
+const SourcesHub = dynamic(() =>
+  loadSourcesHub().then((module) => module.SourcesHub),
+);
+const ArtifactPreviewPanel = dynamic(() =>
+  loadSourcesHub().then((module) => module.ArtifactPreviewPanel),
+);
+
+/** Fetches the hub after launch, so the drawer opens without waiting for it. */
+function usePreloadSourcesHub() {
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadSourcesHub(), 3_000);
+    return () => window.clearTimeout(timer);
+  }, []);
+}
 
 export function HubSlot() {
   const { previewWidth } = useWorkspaceLayout();
@@ -224,6 +243,7 @@ function ChatHubScaffold({
   const { sourcesVisible } = useDashboardChatState();
   const { canDockHub } = useWorkspaceLayout();
   const context = useChatHubContext();
+  usePreloadSourcesHub();
 
   // An embedded thread (the document inside a sub-agent panel) is just the
   // conversation: no hub beside it, no drawer over it.

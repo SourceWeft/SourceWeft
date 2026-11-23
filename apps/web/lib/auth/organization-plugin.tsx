@@ -1,4 +1,5 @@
 import { createAuthPlugin } from "@better-auth-ui/core"
+import dynamic from "next/dynamic"
 import {
   organizationPlugin as coreOrganizationPlugin,
   type OrganizationLocalization,
@@ -6,8 +7,18 @@ import {
 } from "@better-auth-ui/core/plugins/organization"
 import { Briefcase } from "lucide-react"
 
-import { AcceptInvitation } from "@/app/_components/auth/organization/accept-invitation"
-import { OrganizationsSettings } from "@/app/_components/auth/organization/organizations-settings"
+// Loaded when first shown: every page registers this plugin, but these views,
+// cards and tabs appear only once someone opens them.
+const AcceptInvitation = dynamic(() =>
+  import("@/app/_components/auth/organization/accept-invitation").then(
+    (module) => module.AcceptInvitation
+  )
+)
+const OrganizationsSettings = dynamic(() =>
+  import("@/app/_components/auth/organization/organizations-settings").then(
+    (module) => module.OrganizationsSettings
+  )
+)
 
 export const organizationPlugin = createAuthPlugin(
   coreOrganizationPlugin.id,

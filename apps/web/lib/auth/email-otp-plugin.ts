@@ -1,15 +1,39 @@
 import { createAuthPlugin } from "@better-auth-ui/core"
+import dynamic from "next/dynamic"
 import {
   emailOtpPlugin as coreEmailOtpPlugin,
   type EmailOtpPluginOptions
 } from "@better-auth-ui/core/plugins/email-otp"
 
-import { ChangeEmailOtp } from "@/app/_components/auth/email-otp/change-email-otp"
-import { EmailOtp } from "@/app/_components/auth/email-otp/email-otp"
 import { EmailOtpButton } from "@/app/_components/auth/email-otp/email-otp-button"
-import { ForgotPasswordOtp } from "@/app/_components/auth/email-otp/forgot-password-otp"
-import { ResetPasswordOtp } from "@/app/_components/auth/email-otp/reset-password-otp"
-import { VerifyEmailOtp } from "@/app/_components/auth/email-otp/verify-email-otp"
+
+// Loaded when first shown: every page registers this plugin, but these views,
+// cards and tabs appear only once someone opens them.
+const ChangeEmailOtp = dynamic(() =>
+  import("@/app/_components/auth/email-otp/change-email-otp").then(
+    (module) => module.ChangeEmailOtp
+  )
+)
+const EmailOtp = dynamic(() =>
+  import("@/app/_components/auth/email-otp/email-otp").then(
+    (module) => module.EmailOtp
+  )
+)
+const ForgotPasswordOtp = dynamic(() =>
+  import("@/app/_components/auth/email-otp/forgot-password-otp").then(
+    (module) => module.ForgotPasswordOtp
+  )
+)
+const ResetPasswordOtp = dynamic(() =>
+  import("@/app/_components/auth/email-otp/reset-password-otp").then(
+    (module) => module.ResetPasswordOtp
+  )
+)
+const VerifyEmailOtp = dynamic(() =>
+  import("@/app/_components/auth/email-otp/verify-email-otp").then(
+    (module) => module.VerifyEmailOtp
+  )
+)
 
 export const emailOtpPlugin = createAuthPlugin(
   coreEmailOtpPlugin.id,

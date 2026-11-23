@@ -1,11 +1,25 @@
 import { createAuthPlugin } from "@better-auth-ui/core"
+import dynamic from "next/dynamic"
 
 import { SsoButton } from "@/app/_components/auth/sso/sso-button"
-import { SsoSignIn } from "@/app/_components/auth/sso/sso-sign-in"
-import {
-  OrganizationSso,
-  SsoOrganizationTabLabel
-} from "@/app/_components/auth/organization/sso/organization-sso"
+
+// Loaded when first shown: every page registers this plugin, but these views,
+// cards and tabs appear only once someone opens them.
+const SsoSignIn = dynamic(() =>
+  import("@/app/_components/auth/sso/sso-sign-in").then(
+    (module) => module.SsoSignIn
+  )
+)
+const OrganizationSso = dynamic(() =>
+  import("@/app/_components/auth/organization/sso/organization-sso").then(
+    (module) => module.OrganizationSso
+  )
+)
+const SsoOrganizationTabLabel = dynamic(() =>
+  import("@/app/_components/auth/organization/sso/organization-sso").then(
+    (module) => module.SsoOrganizationTabLabel
+  )
+)
 
 /**
  * Localization contributed by the SSO UI plugin. Read at runtime via
