@@ -125,7 +125,12 @@ export async function updateAssistantRow(
  * workspace or team match, which tenant isolation never allows.
  */
 export async function findFeedItemRow(
-  input: { id: string; teamId: string; workspaceId: string; assistantId: string },
+  input: {
+    id: string;
+    teamId: string;
+    workspaceId: string;
+    assistantId: string;
+  },
   executor: Executor = db,
 ): Promise<AssistantFeedItemRow | null> {
   const [row] = await executor
@@ -224,7 +229,12 @@ export async function listFeedItemRows(input: {
 
 /** One trigger, scoped to its tenant and assistant — see `findFeedItemRow`. */
 export async function findTriggerRow(
-  input: { id: string; teamId: string; workspaceId: string; assistantId: string },
+  input: {
+    id: string;
+    teamId: string;
+    workspaceId: string;
+    assistantId: string;
+  },
   executor: Executor = db,
 ): Promise<AssistantTriggerRow | null> {
   const [row] = await executor
@@ -625,10 +635,16 @@ export async function listRelatedTicketCandidateRows(input: {
   reportingTicketIds: readonly string[];
   limit: number;
 }): Promise<AssistantTicketRow[]> {
-  const reporting =
+  // No tier at all when the batch has no report: `order by false` is a
+  // constant, which PostgreSQL rejects in ORDER BY.
+  const reportingFirst =
     input.reportingTicketIds.length > 0
-      ? sql`(${inArray(assistantTickets.id, [...input.reportingTicketIds])})`
-      : sql`false`;
+      ? [
+          desc(
+            sql`(${inArray(assistantTickets.id, [...input.reportingTicketIds])})`,
+          ),
+        ]
+      : [];
   const samePayer = sql`(${assistantTickets.payerUserId} = ${input.payerUserId})`;
   const wasRouted = sql`exists (
     select 1 from ${assistantDecisions}
@@ -648,7 +664,7 @@ export async function listRelatedTicketCandidateRows(input: {
       ),
     )
     .orderBy(
-      desc(reporting),
+      ...reportingFirst,
       desc(samePayer),
       desc(wasRouted),
       desc(assistantTickets.updatedAt),
