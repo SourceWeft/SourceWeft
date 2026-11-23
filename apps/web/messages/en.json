@@ -1820,6 +1820,7 @@
       "ASSISTANT_FORBIDDEN": "You do not have permission to do that.",
       "ASSISTANT_NOT_FOUND": "The assistant is not enabled in this workspace.",
       "ASSISTANT_TICKET_NOT_FOUND": "This ticket no longer exists.",
+      "ASSISTANT_TICKET_NOT_PAYER": "Only the member who pays for this ticket can retry it.",
       "ASSISTANT_PAUSED": "The assistant is paused.",
       "ASSISTANT_VERSION_CONFLICT": "Someone else changed the assistant just now. Try again.",
       "generic": "Something went wrong. Try again."

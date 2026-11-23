@@ -153,6 +153,7 @@ export function AssistantPage() {
                 tickets={tickets.data ?? []}
                 members={members}
                 canWrite={canWrite}
+                viewerId={viewerId}
                 highlightTicketId={params.get("ticket")}
               />
             )}

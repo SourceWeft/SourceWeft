@@ -1820,6 +1820,7 @@
       "ASSISTANT_FORBIDDEN": "你没有权限执行这个操作。",
       "ASSISTANT_NOT_FOUND": "这个工作区还没有启用助理。",
       "ASSISTANT_TICKET_NOT_FOUND": "这个工单已不存在。",
+      "ASSISTANT_TICKET_NOT_PAYER": "只有为这个工单付费的成员才能重试。",
       "ASSISTANT_PAUSED": "助理已暂停。",
       "ASSISTANT_VERSION_CONFLICT": "助理刚被别人修改过，请重试。",
       "generic": "出了点问题，请重试。"

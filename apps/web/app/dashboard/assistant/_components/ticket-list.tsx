@@ -38,6 +38,7 @@ export function TicketList({
   tickets,
   members,
   canWrite,
+  viewerId,
   highlightTicketId = null,
 }: {
   workspaceId: string | null;
@@ -45,6 +46,8 @@ export function TicketList({
   members: readonly WorkspaceMember[];
   /** Retry and Close are writes; a read-only member is not offered them. */
   canWrite: boolean;
+  /** Who is looking. Retry bills the ticket's payer, so only they get it. */
+  viewerId: string | null;
   /** The ticket a notification pointed at, scrolled to and marked. */
   highlightTicketId?: string | null;
 }) {
@@ -79,6 +82,7 @@ export function TicketList({
                 members={members}
                 workspaceId={workspaceId}
                 canWrite={canWrite}
+                viewerId={viewerId}
                 highlighted={ticket.id === highlightTicketId}
               />
             ))}
@@ -94,12 +98,14 @@ function TicketRow({
   members,
   workspaceId,
   canWrite,
+  viewerId,
   highlighted,
 }: {
   ticket: AssistantTicket;
   members: readonly WorkspaceMember[];
   workspaceId: string | null;
   canWrite: boolean;
+  viewerId: string | null;
   highlighted: boolean;
 }) {
   const t = useTranslations("dashboardAssistant");
@@ -109,6 +115,7 @@ function TicketRow({
   const payer = memberName(members, ticket.payerUserId);
   const needsPerson = ticket.stage === "waiting_person";
   const canAct = needsPerson && canWrite;
+  const canRetry = canAct && viewerId === ticket.payerUserId;
   const busy = retryTicket.isPending || closeTicket.isPending;
 
   React.useEffect(() => {
@@ -153,18 +160,20 @@ function TicketRow({
       ) : null}
       {canAct ? (
         <div className="flex gap-2 pt-1">
-          <Button
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              void run(
-                () => retryTicket.mutateAsync(ticket.id),
-                t("toasts.retried"),
-              )
-            }
-          >
-            {t("tickets.retry")}
-          </Button>
+          {canRetry ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  () => retryTicket.mutateAsync(ticket.id),
+                  t("toasts.retried"),
+                )
+              }
+            >
+              {t("tickets.retry")}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="outline"
