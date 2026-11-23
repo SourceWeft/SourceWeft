@@ -23,7 +23,7 @@ export async function meterBillableModelUsage(input: {
   feature: string;
   operation: string;
   modelKind: ModelProfileKind;
-  gatewayConfigId: string;
+  gatewayConfigId: string | null;
   profileAlias: string;
   modelAlias?: string | null;
   referenceId?: string;

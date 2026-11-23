@@ -137,6 +137,27 @@ test("our BYOK stays free whatever the provider reported", async () => {
   assert.equal(result.costSource, "byok");
 });
 
+test("a standalone provider (no gateway row) is billed at the reported cost, never looked up as BYOK", async () => {
+  let byokLookups = 0;
+  const result = await computeProviderCost({
+    gatewayConfigId: null,
+    modelKind: "vision",
+    profileAlias: "youtube-transcript",
+    usage: { inputTokens: 2000, outputTokens: 300 },
+    cost: reported(0.0011),
+    lookups: {
+      isGatewayByok: async () => {
+        byokLookups += 1;
+        return true;
+      },
+      getProfilePricing: async () => undefined,
+    },
+  });
+  assert.equal(byokLookups, 0);
+  assert.equal(result.providerCostUsd, 0.0011);
+  assert.equal(result.costSource, "provider_actual");
+});
+
 // 2) Prompt caching. inputTokens=1000 splits into cacheRead 800, cacheWrite 100,
 //    normal 100. 100·3e-6 + 800·0.3e-6 + 100·3.75e-6 + 200·15e-6
 //    = 0.0003 + 0.00024 + 0.000375 + 0.003 = 0.003915

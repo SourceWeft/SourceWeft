@@ -1097,29 +1097,21 @@ test("the shipped OrcaRouter key does not activate the Provider", async () => {
   }
 });
 
-test("shipped config declares a non-default youtube-transcript vision profile", async () => {
+test("shipped config offers no youtube-transcript model profile", async () => {
   const loaded = await loadGlobalModelGatewayConfig(
     resolve("config/model-gateway.global.json"),
   );
-  const visionDefault = loaded?.visionProfiles.find(
-    (entry) => entry.profileAlias === "vision-default",
+  // YouTube transcription runs on its own provider (sources/youtube/model-port.ts),
+  // never on a model profile that the chat model selector would offer.
+  const profiles = [
+    ...(loaded?.chatProfiles ?? []),
+    ...(loaded?.imageProfiles ?? []),
+    ...(loaded?.visionProfiles ?? []),
+  ];
+  assert.equal(
+    profiles.some((entry) => entry.profileAlias === "youtube-transcript"),
+    false,
   );
-  const youtubeTranscript = loaded?.visionProfiles.find(
-    (entry) => entry.profileAlias === "youtube-transcript",
-  );
-  assert.equal(visionDefault?.isDefault, true);
-  assert.equal(youtubeTranscript?.modelAlias, "youtube-transcript");
-  assert.equal(youtubeTranscript?.isDefault, false);
-  assert.equal(youtubeTranscript?.isActive, true);
-  assert.deepEqual(youtubeTranscript?.targets, [
-    {
-      gatewaySlug: "openrouter-default",
-      providerName: "openrouter",
-      targetModel: "google/gemini-2.5-flash",
-      priority: 1,
-      weight: 100,
-    },
-  ]);
 });
 
 test.each([

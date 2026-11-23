@@ -161,8 +161,8 @@ for (const kind of compatibleChatKinds) {
 // @langchain/openai Completions converter (`convertMessagesToCompletionsMessageParams`)
 // passes an unknown `{ type: "video_url", video_url: { url } }` content part
 // through unchanged onto the wire. This exercises the real SDK conversion —
-// not a mock of it — via the same openrouter/cloudflare-aig chat adapters the
-// `youtube-transcript` vision profile and other compat routes use.
+// not a mock of it — via the same openrouter/cloudflare-aig chat adapters that
+// YouTube transcription and other compat routes use.
 const videoContentMessages = [
   {
     role: "user" as const,

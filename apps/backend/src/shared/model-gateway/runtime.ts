@@ -46,6 +46,15 @@ const gatewayClientCache = new Map<
   }
 >();
 
+/** Clients for features' own provider snapshots; see getOrCreateStandaloneGatewayClient. */
+const standaloneGatewayClientCache = new Map<
+  string,
+  {
+    signature: string;
+    client: ModelGateway;
+  }
+>();
+
 export function normalizeDefaultHeaders(
   value: unknown,
 ): Record<string, string> {
@@ -616,6 +625,33 @@ export function getOrCreateRoutedGatewayClient(
     client,
   });
 
+  return client;
+}
+
+/**
+ * The client for a feature's own provider snapshot: a provider the feature
+ * declares itself (YouTube transcription), which is not part of any gateway
+ * config version, is never offered as a model and never enters GLOBAL routing.
+ *
+ * Kept apart from the routed cache, whose builder evicts every key but the
+ * active version's: sharing it would rebuild the global client after each
+ * feature call and the feature client after each global one. Keyed by the
+ * snapshot's id; a changed snapshot (a rotated credential) replaces it.
+ */
+export function getOrCreateStandaloneGatewayClient(
+  configInput: RoutedGatewayConfig,
+) {
+  const signature = getRoutedGatewayCacheSignature(configInput);
+  const cached = standaloneGatewayClientCache.get(configInput.versionId);
+  if (cached && cached.signature === signature) {
+    return cached.client;
+  }
+
+  const client = createModelGateway(buildRoutedModelGatewayConfig(configInput));
+  standaloneGatewayClientCache.set(configInput.versionId, {
+    signature,
+    client,
+  });
   return client;
 }
 
