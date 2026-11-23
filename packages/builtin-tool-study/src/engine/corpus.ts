@@ -3,6 +3,8 @@
  * generation package; they are re-exported here under the names the study
  * engine has always used. Only the study-specific item allocation stays.
  */
+import type { CorpusGroup } from "@sourceweft/grounded-generation";
+
 export {
   assembleCorpus,
   estimateTokens,
@@ -69,4 +71,68 @@ export function allocateGroupQuotas(
     assigned -= 1;
   }
   return quotas;
+}
+
+/**
+ * Splits chunks into `parts` consecutive runs of about equal tokens, each
+ * holding at least one chunk (fewer runs when there are fewer chunks).
+ */
+export function splitChunks<T extends { tokens: number }>(
+  chunks: readonly T[],
+  parts: number,
+): T[][] {
+  const runsWanted = Math.max(1, Math.min(parts, chunks.length));
+  const total = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
+  const runs: T[][] = [];
+  let current: T[] = [];
+  let tokens = 0;
+  chunks.forEach((chunk, index) => {
+    current.push(chunk);
+    tokens += chunk.tokens;
+    const closed = runs.length;
+    if (closed >= runsWanted - 1) return;
+    const chunksLeft = chunks.length - index - 1;
+    const runsLeftAfter = runsWanted - closed - 1;
+    if (tokens >= (total * (closed + 1)) / runsWanted || chunksLeft === runsLeftAfter) {
+      runs.push(current);
+      current = [];
+    }
+  });
+  if (current.length > 0) runs.push(current);
+  return runs;
+}
+
+/**
+ * Groups whose share is more than one call should write are split into
+ * consecutive runs of their chunks, each with its own share, so no single
+ * answer grows past what a call returns in time. Indices are renumbered.
+ */
+export function splitForCallSize(
+  groups: readonly CorpusGroup[],
+  quotas: readonly number[],
+  maxPerCall: number,
+): { groups: CorpusGroup[]; quotas: number[] } {
+  const split: { chunks: CorpusGroup["chunks"]; quota: number }[] = [];
+  groups.forEach((group, position) => {
+    const quota = quotas[position]!;
+    const parts = Math.min(Math.ceil(quota / maxPerCall), group.chunks.length);
+    if (parts <= 1) {
+      split.push({ chunks: group.chunks, quota });
+      return;
+    }
+    const runs = splitChunks(group.chunks, parts);
+    const shares = allocateGroupQuotas(
+      quota,
+      runs.map((run) => run.reduce((sum, chunk) => sum + chunk.tokens, 0)),
+    );
+    runs.forEach((run, index) => split.push({ chunks: run, quota: shares[index]! }));
+  });
+  return {
+    groups: split.map(({ chunks }, index) => ({
+      index,
+      chunks,
+      tokens: chunks.reduce((sum, chunk) => sum + chunk.tokens, 0),
+    })),
+    quotas: split.map(({ quota }) => quota),
+  };
 }

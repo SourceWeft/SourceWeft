@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { studyContentSchema } from "@sourceweft/contracts/study";
 import {
+  MAX_ITEMS_PER_CALL,
   OVERGENERATE_FACTOR,
   SINGLE_PASS_MAX_INPUT_TOKENS,
 } from "../src/engine/constants";
@@ -401,12 +402,13 @@ test("refused admission stops the generation without further calls", async () =>
 });
 
 test("too little surviving validation fails the whole generation", async () => {
-  // Ten requested, every second card unanchored: five survive, six are needed.
+  // Ten requested over two calls (7 and 6 chunks), only every third card
+  // anchored: five survive, six are needed.
   const model = stubModel((call) => {
     if (isVerify(call)) return { supported: true };
     const output = cardsFor(call.user);
-    output.cards = output.cards.slice(0, 10).map((card, index) =>
-      index % 2 === 0 ? card : { ...card, back: "Unsupported claim." },
+    output.cards = output.cards.map((card, index) =>
+      index % 3 === 0 ? card : { ...card, back: "Unsupported claim." },
     );
     return output;
   });
@@ -497,7 +499,7 @@ test("a quote too short to prove anything is not evidence", async () => {
   assert.ok(anchor.requests > 0);
 });
 
-test("a single pass asks the model for the whole over-generated request", async () => {
+test("a single pass asks for the whole over-generated request, at most one call's worth per call", async () => {
   for (const [kind, count] of [
     ["flashcards", 20],
     ["quiz", 10],
@@ -532,12 +534,22 @@ test("a single pass asks the model for the whole over-generated request", async 
       }),
     );
     const generations = calls.filter(isGenerate);
-    assert.equal(generations.length, 1, kind);
+    const asked = generations.map((call) => promptCount(call.user));
     assert.equal(
-      promptCount(generations[0]!.user),
+      asked.reduce((a, b) => a + b, 0),
       kind === "mindmap" ? count : Math.ceil(count * OVERGENERATE_FACTOR),
       kind,
     );
+    if (kind === "mindmap") {
+      assert.equal(generations.length, 1);
+      continue;
+    }
+    // Several calls, none asked for more than one call answers in time, each
+    // over its own consecutive run of the source, together all of it.
+    assert.ok(generations.length > 1, kind);
+    assert.ok(asked.every((n) => n <= MAX_ITEMS_PER_CALL[kind]), `${kind}: ${asked.join(",")}`);
+    const handles = generations.flatMap((call) => promptHandles(call.user));
+    assert.deepEqual(handles, Array.from({ length: 30 }, (_, i) => `c${i + 1}`));
   }
 });
 
