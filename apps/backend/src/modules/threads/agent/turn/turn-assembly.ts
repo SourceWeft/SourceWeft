@@ -1369,7 +1369,9 @@ export async function buildThreadAgentAssembly(
       fileImages.middleware(),
     ],
     unattended: restricted,
-    ...(replaceTools ? { todoList: false } : {}),
+    // A replace-tools turn's provider prompt is its whole instruction set:
+    // no to-do list and no chat base prompt (evidence, citations, files).
+    ...(replaceTools ? { todoList: false, chatBasePrompt: false } : {}),
     creditCap: prepared.creditCap,
     getBillingScope,
     contextCompressionReportKey: prepared.userMessage.id,

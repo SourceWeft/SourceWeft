@@ -78,6 +78,8 @@ export interface CreateThreadAgentParams {
   unattended?: boolean;
   /** False binds no `write_todos` tool (a Router). Default true. */
   todoList?: boolean;
+  /** False leaves the chat base prompt out; see `buildRuntimeSystemPrompt`. */
+  chatBasePrompt?: boolean;
   /**
    * Host-set credit ceiling for this run; undefined leaves the run uncapped.
    * See `StreamThreadEventInput.creditCap`.
@@ -144,6 +146,7 @@ export async function createThreadAgent(
     systemPrompt: buildRuntimeSystemPrompt(params.runtimePrompt, {
       mounts: filesystemMounts,
       personaPrompt: params.personaPrompt,
+      chatBasePrompt: params.chatBasePrompt,
     }),
     middleware,
     checkpointer,

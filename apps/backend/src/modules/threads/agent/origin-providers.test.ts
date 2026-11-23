@@ -14,6 +14,7 @@ type AgentParams = {
   permissions?: unknown;
   unattended?: boolean;
   todoList?: boolean;
+  chatBasePrompt?: boolean;
   extraMiddleware: Named[];
   runtimePrompt: string;
   subagents: Array<{
@@ -228,6 +229,8 @@ test("a replace-tools origin binds only its provider's tools, no sub-agents and 
     assert.equal(agent.unattended, true);
     // No `write_todos`: the todo middleware is not mounted.
     assert.equal(agent.todoList, false);
+    // Its system prompt is the runtime context alone, without the chat base.
+    assert.equal(agent.chatBasePrompt, false);
     // Deep Agents always mounts its filesystem middleware, so it stays the
     // read-only one of an unattended run and its tools are excluded too.
     const filesystem = agent.extraMiddleware.find((middleware) =>

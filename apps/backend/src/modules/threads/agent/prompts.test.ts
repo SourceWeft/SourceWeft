@@ -180,3 +180,14 @@ test("persona prompt is ignored when blank and composes with runtime context", (
   assert.match(prompt, /<persona>\nYou plan\.\n<\/persona>/);
   assert.match(prompt, /<runtime_context>\nTimezone: UTC\n<\/runtime_context>/);
 });
+
+test("chatBasePrompt: false keeps only the runtime context", () => {
+  const prompt = buildRuntimeSystemPrompt("Timezone: UTC\n<host>route</host>", {
+    chatBasePrompt: false,
+  });
+  assert.equal(prompt, "Timezone: UTC\n<host>route</host>");
+  assert.equal(
+    buildRuntimeSystemPrompt(undefined, { chatBasePrompt: false }),
+    "",
+  );
+});

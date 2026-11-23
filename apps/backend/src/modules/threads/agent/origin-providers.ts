@@ -11,7 +11,8 @@
  *
  * - `replaceTools: true` (a Router): the turn binds the provider's tools and
  *   nothing else — no business tools, no sub-agents, no `askUser`, no
- *   `write_todos` and no filesystem tools.
+ *   `write_todos` and no filesystem tools — and its system prompt is the
+ *   runtime context and the provider's prompt, without the chat base prompt.
  * - `replaceTools: false` (a Worker): the provider's tools are bound next to
  *   the turn's own; in an unattended run they are allowed on top of the
  *   unattended allow-list.

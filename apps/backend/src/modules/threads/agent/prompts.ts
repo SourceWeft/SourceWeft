@@ -120,10 +120,18 @@ export function buildRuntimeSystemPrompt(
   input?: {
     mounts?: AgentFilesystemMountCapability[];
     personaPrompt?: string;
+    /**
+     * False leaves out the chat base prompt (evidence, citation, filesystem
+     * and output rules) so the turn reads its runtime context alone — for a
+     * host's turn whose own prompt says everything it may do (a Router).
+     * Default true.
+     */
+    chatBasePrompt?: boolean;
   },
 ) {
-  const basePrompt = buildBaseSystemPrompt(input);
   const compactRuntimePrompt = runtimePrompt?.trim();
+  if (input?.chatBasePrompt === false) return compactRuntimePrompt ?? "";
+  const basePrompt = buildBaseSystemPrompt(input);
   if (!compactRuntimePrompt) {
     return basePrompt;
   }
