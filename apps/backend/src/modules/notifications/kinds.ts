@@ -164,9 +164,12 @@ export const NOTIFICATION_KINDS = {
     path: assistantPath,
     fallbackName: {
       en: "your messages to the assistant",
-      "zh-CN": "你发给助理的消息",
-      // Generated with toTaiwanTraditional from the zh-CN value.
-      "zh-TW": "你發給助理的訊息",
+      // Worded 传给 (as the web catalog's `assistant_messages_blocked`) so
+      // the generated zh-TW reads 傳給.
+      "zh-CN": "你传给助理的消息",
+      // Generated with toTaiwanTraditional (@sourceweft/i18n/hant, the web's
+      // i18n:hant converter and glossary) from the zh-CN value.
+      "zh-TW": "你傳給助理的訊息",
     },
   },
   // Messages the Router could not decide after every retry; sent to the

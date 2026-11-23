@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { toTaiwanTraditional } from "@sourceweft/i18n/hant";
 import { NOTIFICATION_KINDS, notificationPath } from "./kinds";
 
 test("a failed background generation leads to its conversation and is never mailed", () => {
@@ -60,4 +61,14 @@ test("a blocked-assistant mail about no ticket names the payer's messages, in ev
   ).fallbackName;
   assert.ok(fallback);
   for (const locale of ["en", "zh-CN", "zh-TW"]) assert.ok(fallback[locale]);
+});
+
+test("the blocked-assistant fallback's zh-TW is the generated Traditional of its zh-CN, reading 傳給", () => {
+  const fallback = (
+    NOTIFICATION_KINDS.assistant_ticket_blocked as {
+      fallbackName?: Record<string, string>;
+    }
+  ).fallbackName!;
+  assert.equal(fallback["zh-TW"], toTaiwanTraditional(fallback["zh-CN"]!));
+  assert.match(fallback["zh-TW"]!, /傳給/);
 });
