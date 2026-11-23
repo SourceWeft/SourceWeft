@@ -149,7 +149,15 @@ export async function fetchFeed(input: {
 
   const timeoutMs = input.timeoutMs ?? FEED_TIMEOUT_MS;
   const maxBytes = input.maxBytes ?? FEED_MAX_BODY_BYTES;
-  const signal = AbortSignal.timeout(timeoutMs);
+  // Not `AbortSignal.timeout`: its timer is unref'd, so a process with nothing
+  // else pending (a test runner, a short script) can exit while the abort is
+  // the only thing a pending read is waiting for. This timer is cleared in the
+  // `finally` below, so it never outlives the call.
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException("The operation timed out", "TimeoutError"));
+  }, timeoutMs);
 
   const headers: Record<string, string> = {
     "User-Agent": FEED_USER_AGENT,
@@ -164,6 +172,7 @@ export async function fetchFeed(input: {
   try {
     scope = input.publicFetch();
   } catch {
+    clearTimeout(timer);
     throw new RssAdapterError("feed_unreachable");
   }
   try {
@@ -193,6 +202,7 @@ export async function fetchFeed(input: {
   } catch (error) {
     throw toFetchError(error, signal);
   } finally {
+    clearTimeout(timer);
     try {
       await scope.close();
     } catch {
