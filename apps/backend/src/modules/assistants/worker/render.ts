@@ -23,10 +23,16 @@ export type WorkerDeliveryKind =
   /** Another try after a run that failed. */
   | "retry";
 
+/** One delivered event, with the note the Router routed it with (its
+ * `route_to_ticket` decision's `note`), when there is one. */
+export type WorkerDeliveryTrigger = RenderTrigger & {
+  routerNote?: string | null;
+};
+
 export type WorkerDeliveryInput = {
   kind: WorkerDeliveryKind;
   ticket: { id: string; title: string; goal: string };
-  triggers: readonly RenderTrigger[];
+  triggers: readonly WorkerDeliveryTrigger[];
   /** Failed runs in a row so far; shown on a retry. */
   consecutiveFailures: number;
 };
@@ -49,6 +55,17 @@ const HEADINGS: Record<WorkerDeliveryKind, string> = {
     "上一次运行没有完成，请从停下的地方继续，然后调用 `report`。The previous run did not finish; continue where it stopped, then call `report`.",
 };
 
+/**
+ * The Router's note for one delivered event: its instruction for this
+ * delivery (what to rework, say). Its own element right after the event's
+ * line, inside the same data block and escaped like everything else the
+ * model wrote — without it, a report routed back for rework reaches the
+ * worker as nothing but its own earlier report.
+ */
+function renderRouterNote(triggerId: string, note: string): string {
+  return `<router-note for=${triggerId}>${escapeTagText(note)}</router-note>`;
+}
+
 export function renderWorkerDelivery(input: WorkerDeliveryInput): string {
   const lines: string[] = [HEADINGS[input.kind]];
   if (input.kind === "retry") {
@@ -59,7 +76,10 @@ export function renderWorkerDelivery(input: WorkerDeliveryInput): string {
   lines.push("", DATA_NOT_INSTRUCTIONS_LINE, "", renderTicketTag(input.ticket));
   if (input.triggers.length > 0) {
     lines.push("");
-    for (const trigger of input.triggers) lines.push(renderTriggerLine(trigger));
+    for (const trigger of input.triggers) {
+      lines.push(renderTriggerLine(trigger));
+      if (trigger.routerNote) lines.push(renderRouterNote(trigger.id, trigger.routerNote));
+    }
   }
   return lines.join("\n");
 }

@@ -161,7 +161,7 @@ export function createReportTool(
     {
       name: "report",
       description:
-        "Report where this ticket stands. Call it when you finish or get stuck. status: ready (done), waiting (needs a person's answer; put it in question), blocked (stuck), failed, dropped (no longer needed). summary: what you did and where the result is (at most 2000 characters). question: one question for the member paying for this ticket (at most 500 characters); they are notified. 报告工单进展：完成或卡住时必须调用。",
+        "Report where this ticket stands. Call it when you finish or get stuck. status: ready (done), waiting (needs a person's answer; put it in question), blocked (stuck), failed, dropped (no longer needed). summary: the result itself when it fits in 2000 characters; otherwise a short abstract plus the /files path where the full result is. question: one question for the member paying for this ticket (at most 500 characters); they are notified. 报告工单进展：完成或卡住时必须调用。summary 放得下（2000 字符以内）时写结果本身，否则写简短摘要加完整结果所在的 /files 路径。",
       schema: reportSchema,
     },
   );

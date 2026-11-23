@@ -48,6 +48,7 @@ import {
   listAllInEvalTriggerRows,
   listDispatchableTicketRows,
   listPendingEvalTriggerRows,
+  listRouteNotes,
   listTicketRowsWithRun,
   listUndeliveredRoutedTriggerRows,
   markTriggersDeliveredRows,
@@ -602,10 +603,19 @@ async function dispatchTicket(
   }
 
   const delivery = await deliveryFor(scope, candidate);
+  // Each event goes with the note the Router routed it with: its
+  // instruction for this delivery (what to rework, say).
+  const notes = await listRouteNotes({
+    ...scope,
+    triggerIds: triggers.map((row) => row.id),
+  });
   const content = renderWorkerDelivery({
     kind: delivery.kind,
     ticket,
-    triggers: triggers.map(toRenderTrigger),
+    triggers: triggers.map((row) => ({
+      ...toRenderTrigger(row),
+      routerNote: notes.get(row.id) ?? null,
+    })),
     consecutiveFailures: ticket.consecutiveFailures,
   });
 

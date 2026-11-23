@@ -238,6 +238,62 @@ test("a new event routed to an idle ticket is delivered as an append, keyed by i
   assert.equal((await f.ticketRow(ticket.id))!.stage, "working");
 });
 
+test("a report the Router routed back for rework is delivered with the Router's note", async () => {
+  const s = await setup();
+  const now = new Date();
+  const ticket = await f.insertTicket({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    stage: "idle",
+  });
+  await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    status: "decided",
+    routedTicketId: ticket.id,
+    deliveredAt: minutesAgo(now, 60),
+    createdAt: minutesAgo(now, 61),
+  });
+  const report = await f.insertTrigger({
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    payerUserId: s.a,
+    authorUserId: null,
+    sourceKind: "worker_report",
+    ticketId: ticket.id,
+    text: "ready: Wrote the digest.",
+    status: "decided",
+    routedTicketId: ticket.id,
+    createdAt: minutesAgo(now, 2),
+  });
+  await f.schema.db.insert(f.schema.assistantDecisions).values({
+    id: randomUUID(),
+    teamId: s.teamId,
+    workspaceId: s.workspaceId,
+    assistantId: s.assistant.id,
+    triggerId: report.id,
+    routerBatchKey: "batch-1",
+    action: "route_to_ticket",
+    ticketId: ticket.id,
+    reason: "Put the digest itself in the report, not just where it is.",
+  });
+
+  await tick(now, f.ports);
+
+  const [start] = startsOf("assistant_ticket", s.workspaceId);
+  assert.ok(start);
+  assert.ok(
+    start.content.includes(
+      `<router-note for=${report.id}>Put the digest itself in the report, not just where it is.</router-note>`,
+    ),
+  );
+});
+
 // ── Worker runs that ended ──────────────────────────────────────────────
 
 /** Dispatches one queued ticket and returns it with its run id. */

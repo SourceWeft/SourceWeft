@@ -1098,6 +1098,32 @@ export async function ticketHasDeliveredTrigger(
   return Boolean(row);
 }
 
+/** The note each of these events was routed with (`route_to_ticket`'s
+ * `note`, kept as its decision's `reason`), by event id. Events routed
+ * without one are absent. */
+export async function listRouteNotes(
+  input: AssistantScope & { triggerIds: string[] },
+): Promise<Map<string, string>> {
+  if (input.triggerIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      triggerId: assistantDecisions.triggerId,
+      reason: assistantDecisions.reason,
+    })
+    .from(assistantDecisions)
+    .where(
+      and(
+        eq(assistantDecisions.assistantId, input.assistantId),
+        eq(assistantDecisions.teamId, input.teamId),
+        eq(assistantDecisions.workspaceId, input.workspaceId),
+        inArray(assistantDecisions.triggerId, input.triggerIds),
+        eq(assistantDecisions.action, "route_to_ticket"),
+        isNotNull(assistantDecisions.reason),
+      ),
+    );
+  return new Map(rows.map((row) => [row.triggerId, row.reason!]));
+}
+
 /** Marks events as handed to a worker run. Only ones still undelivered. */
 export async function markTriggersDeliveredRows(
   executor: Executor,
