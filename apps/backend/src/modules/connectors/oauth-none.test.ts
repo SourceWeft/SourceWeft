@@ -2,13 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   workspace: vi.fn(),
-  requireAvailable: vi.fn(),
   createState: vi.fn(),
 }));
 
-vi.mock("../preview", () => ({
-  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
-}));
 vi.mock("./permissions", () => ({
   requireConnectorWorkspace: mocks.workspace,
 }));
@@ -52,7 +48,6 @@ const noneAdapter: ConnectorAdapter = {
 
 const service = new ConnectorOAuthService(
   new ConnectorRegistry([noneAdapter]),
-  { requireAvailable: mocks.requireAvailable } as never,
 );
 
 beforeEach(() => {
@@ -60,7 +55,6 @@ beforeEach(() => {
   mocks.workspace.mockResolvedValue({
     workspace: { id: "workspace", organizationId: "team" },
   });
-  mocks.requireAvailable.mockResolvedValue(undefined);
 });
 
 describe("start for a none connector", () => {
