@@ -400,6 +400,21 @@ describe("checkConfigReadiness", () => {
     assert.equal(error.code, "CONNECTOR_CHECK_UNSUPPORTED");
     assert.equal(checkSyncReadiness.mock.calls.length, 0);
   });
+
+  test("rejects an unregistered connector type with a 4xx", async () => {
+    // Production state when RSS_CONNECTOR_ENABLED is unset: `rss` is not
+    // registered, so the registry serves no manifest for it and the check
+    // fails with a clear client error instead of a 500 or a silent pass.
+    const error = await rejection(
+      service(noneRegistry()).checkConfigReadiness({
+        ...input,
+        connectorType: "rss",
+      }),
+    );
+    assert.equal(error.statusCode, 404);
+    assert.equal(error.code, "CONNECTOR_ADAPTER_NOT_FOUND");
+    assert.equal(checkSyncReadiness.mock.calls.length, 0);
+  });
 });
 
 describe("updateConnector for a none connector", () => {
