@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { DATA_NOT_INSTRUCTIONS_LINE } from "../router/render";
-import { renderWorkerDelivery, type WorkerDeliveryTrigger } from "./render";
+import {
+  renderWorkerDelivery,
+  ROUTER_NOTE_EXCEPTION_LINE,
+  type WorkerDeliveryTrigger,
+} from "./render";
 
 const ticket = {
   id: "ticket-1",
@@ -16,7 +20,7 @@ function trigger(
     id: "trig-1",
     source: "worker_report",
     author: null,
-    text: "ready: Wrote the digest to /files/digest.md",
+    text: "ready: The digest is in my final answer in this ticket's conversation.",
     ticketId: "ticket-1",
     ...overrides,
   };
@@ -63,4 +67,24 @@ test("an event routed without a note gets no router-note element", () => {
     consecutiveFailures: 0,
   });
   assert.doesNotMatch(output, /<router-note/);
+});
+
+test("the router-note exception line appears only when a delivery carries a note", () => {
+  const withNote = renderWorkerDelivery({
+    kind: "append",
+    ticket,
+    triggers: [trigger({ routerNote: "Put the digest itself in the report." })],
+    consecutiveFailures: 0,
+  }).split("\n");
+  assert.equal(
+    withNote.indexOf(ROUTER_NOTE_EXCEPTION_LINE),
+    withNote.indexOf(DATA_NOT_INSTRUCTIONS_LINE) + 1,
+  );
+  const withoutNote = renderWorkerDelivery({
+    kind: "append",
+    ticket,
+    triggers: [trigger()],
+    consecutiveFailures: 0,
+  });
+  assert.ok(!withoutNote.includes(ROUTER_NOTE_EXCEPTION_LINE));
 });

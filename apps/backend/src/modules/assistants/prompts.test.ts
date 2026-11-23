@@ -22,10 +22,18 @@ test("each half of the Router prompt states the rework rule, its limit, and that
   assert.match(en, /never write the deliverable yourself/);
 });
 
-test("each half of the Router prompt accepts a ready report that points to /files", () => {
+test("each half of the Router prompt accepts a ready report whose full result is in the ticket's conversation, never a /files pointer", () => {
   const [zh, en] = halves(ROUTER_PROMPT);
-  assert.match(zh, /\/files/);
-  assert.match(en, /\/files/);
+  assert.match(zh, /完整结果在工单对话里/);
+  assert.match(en, /full result is in the ticket's conversation/);
+  // Ticket turns are read-only: a worker cannot write under /files.
+  assert.doesNotMatch(ROUTER_PROMPT, /\/files/);
+});
+
+test("each half of the Router prompt limits rework to ready or dropped reports", () => {
+  const [zh, en] = halves(ROUTER_PROMPT);
+  assert.match(zh, /ready 或 dropped/);
+  assert.match(en, /`ready` or `dropped`/);
 });
 
 test("the Router prompt no longer says undecided events take the whole assistant offline", () => {
@@ -35,9 +43,11 @@ test("the Router prompt no longer says undecided events take the whole assistant
 
 test("each half of the Worker prompt says a router note is the assistant's instruction and that the summary carries the result", () => {
   const [zh, en] = halves(WORKER_PROMPT);
+  assert.match(zh, /最终回答/);
+  assert.match(en, /final answer/);
   for (const half of [zh, en]) {
     assert.match(half, /<router-note>/);
-    assert.match(half, /\/files/);
     assert.match(half, /2000/);
+    assert.doesNotMatch(half, /\/files/);
   }
 });
