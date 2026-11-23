@@ -8,7 +8,8 @@ vi.mock("next/link", () => ({
 }));
 
 import { AssistantThreadNotice } from "./assistant-thread-notice";
-import { isHostOwnedChat, unlistedLookupState } from "./host-owned-thread";
+import { isHostOwnedChat } from "../../../_components/host-owned-chat";
+import { unlistedLookupState } from "./host-owned-thread";
 import { mountWithIntl, unmountAll } from "@/test/react";
 
 afterEach(unmountAll);

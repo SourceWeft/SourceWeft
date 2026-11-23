@@ -3,19 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { contentClient } from "../../../../../lib/sdk";
 import { mapThreadToChatItem } from "../../../_components/dashboard-chat-items";
-import type { ChatItem } from "../../../_components/dashboard-chat-types";
-
-/**
- * A workspace assistant's own conversations: its Router work log and its
- * tickets' worker conversations. The assistant runs every turn in them; a
- * member may read them, but the server refuses a member's send there
- * (403 `THREAD_HOST_OWNED`), so the page offers no composer.
- */
-export function isHostOwnedChat(item: Pick<ChatItem, "origin"> | undefined) {
-  return (
-    item?.origin === "assistant_router" || item?.origin === "assistant_ticket"
-  );
-}
+import { isHostOwnedChat } from "../../../_components/host-owned-chat";
 
 /**
  * When to look a thread up on its own: only once the chat lists have settled

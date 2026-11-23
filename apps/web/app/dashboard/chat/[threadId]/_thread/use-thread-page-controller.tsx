@@ -93,10 +93,8 @@ import {
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
 import { findChatItem } from "../../../_components/dashboard-chat-items";
-import {
-  isHostOwnedChat,
-  useUnlistedHostOwnedThread,
-} from "./host-owned-thread";
+import { isHostOwnedChat } from "../../../_components/host-owned-chat";
+import { useUnlistedHostOwnedThread } from "./host-owned-thread";
 import {
   isEmbedMode,
   joinPathAndQuery,

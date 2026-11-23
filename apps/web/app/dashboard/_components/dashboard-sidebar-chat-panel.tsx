@@ -92,6 +92,7 @@ import {
 } from "./dashboard-shortcuts";
 import { contentClient } from "../../../lib/sdk";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
+import { isHostOwnedChat } from "./host-owned-chat";
 import { DashboardPersonaManager } from "./dashboard-persona-manager";
 import { ShareChatDialog } from "./share-chat-dialog";
 import { DeleteChatDialog } from "./delete-chat-dialog";
@@ -539,6 +540,9 @@ function ChatListRow({
   const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt, locale);
   const shared = isSharedChat(item);
   const parentThreadId = item.parentThreadId;
+  // The assistant depends on its own conversations: the server refuses
+  // deleting, archiving or re-scoping them, so they are not offered.
+  const hostOwned = isHostOwnedChat(item);
 
   const handleToggleVisibility = async () => {
     if (!onSetVisibility) return;
@@ -770,13 +774,13 @@ function ChatListRow({
                 <span>{t("chats.export")}</span>
               </DropdownMenuItem>
             ) : null}
-            {!nested && onShare ? (
+            {!nested && onShare && !hostOwned ? (
               <DropdownMenuItem onSelect={() => onShare(item.id, item.title)}>
                 <Share className="size-4" />
                 <span>{t("chats.share")}</span>
               </DropdownMenuItem>
             ) : null}
-            {onSetVisibility ? (
+            {onSetVisibility && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleToggleVisibility()}>
                 {shared ? (
                   <>
@@ -813,25 +817,27 @@ function ChatListRow({
                 <span>{t("chats.openInNewWindow")}</span>
               </DropdownMenuItem>
             ) : null}
-            {canArchive ? (
+            {canArchive && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleArchive()}>
                 <Archive className="size-4" />
                 <span>{t("chats.archive")}</span>
               </DropdownMenuItem>
             ) : null}
-            {onUnarchive ? (
+            {onUnarchive && !hostOwned ? (
               <DropdownMenuItem onSelect={() => void handleUnarchive()}>
                 <ArchiveRestore className="size-4" />
                 <span>{t("chats.unarchive")}</span>
               </DropdownMenuItem>
             ) : null}
-            <DropdownMenuItem
-              onSelect={() => setConfirmingDelete(true)}
-              variant="destructive"
-            >
-              <Trash2 className="size-4" />
-              <span>{t("chats.delete")}</span>
-            </DropdownMenuItem>
+            {hostOwned ? null : (
+              <DropdownMenuItem
+                onSelect={() => setConfirmingDelete(true)}
+                variant="destructive"
+              >
+                <Trash2 className="size-4" />
+                <span>{t("chats.delete")}</span>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

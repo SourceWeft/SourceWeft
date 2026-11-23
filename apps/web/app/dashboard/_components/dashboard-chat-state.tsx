@@ -44,6 +44,7 @@ import {
 } from "./dashboard-chat-items";
 import { subscribeDashboardChatChildRefresh } from "./dashboard-chat-children-refresh";
 import { isSharedChat, type ChatItem } from "./dashboard-chat-types";
+import { isHostOwnedChat } from "./host-owned-chat";
 
 type ThreadModelSettingsInput = {
   llmProfileAlias?: string | null;
@@ -1261,8 +1262,11 @@ export function DashboardChatStateProvider({
   );
 
   const clearPrivateChats = useCallback(async () => {
+    // The assistant's own conversations cannot be deleted (the server
+    // refuses), so clearing leaves them in place.
+    const clearable = privateChats.filter((item) => !isHostOwnedChat(item));
     const privateIds = new Set(
-      privateChats.flatMap((item) => [
+      clearable.flatMap((item) => [
         item.id,
         ...delegatedChildChatIds(privateChats, item.id),
       ]),
@@ -1273,9 +1277,7 @@ export function DashboardChatStateProvider({
     if (!workspaceId) return;
 
     await Promise.all(
-      privateChats.map((item) =>
-        contentClient.deleteThread(workspaceId, item.id),
-      ),
+      clearable.map((item) => contentClient.deleteThread(workspaceId, item.id)),
     );
 
     privateIds.forEach(removeChatFromState);
@@ -1323,8 +1325,11 @@ export function DashboardChatStateProvider({
   ]);
 
   const clearArchivedChats = useCallback(async () => {
+    const clearable = visibleArchivedChats.filter(
+      (item) => !isHostOwnedChat(item),
+    );
     const archivedIds = new Set(
-      visibleArchivedChats.flatMap((item) => [
+      clearable.flatMap((item) => [
         item.id,
         ...delegatedChildChatIds(visibleArchivedChats, item.id),
       ]),
@@ -1335,9 +1340,7 @@ export function DashboardChatStateProvider({
     if (!workspaceId) return;
 
     await Promise.all(
-      visibleArchivedChats.map((item) =>
-        contentClient.deleteThread(workspaceId, item.id),
-      ),
+      clearable.map((item) => contentClient.deleteThread(workspaceId, item.id)),
     );
 
     archivedIds.forEach(removeChatFromState);
