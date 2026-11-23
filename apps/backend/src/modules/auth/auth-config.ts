@@ -221,6 +221,36 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                 const { revokeAppleTokensBeforeDelete } =
                   await import("./apple-account-tokens");
                 await revokeAppleTokensBeforeDelete(user.id);
+                // Connectors in the user's personal organization would outlive
+                // the account with live provider grants (a Composio-brokered
+                // Gmail connection can read the whole mailbox), because nothing
+                // cascades from the user to them. Revoke every grant at its
+                // provider, then delete the connectors and their indexed
+                // content; a failed revocation aborts here with nothing local
+                // deleted, so deleting can be retried. Connectors the user added
+                // to team workspaces stay: the team shares and manages them.
+                const { workspaceService } = await import("../workspace");
+                const personal =
+                  await workspaceService.findPersonalOrganizationMembershipByUser(
+                    user.id,
+                  );
+                if (personal) {
+                  const { connectorTeamDataRemoval } = await import(
+                    "../connectors"
+                  );
+                  try {
+                    await connectorTeamDataRemoval.removeTeams([
+                      personal.organizationId,
+                    ]);
+                  } catch (error) {
+                    logger.error("connector_user_cleanup_failed", {
+                      userId: user.id,
+                      error:
+                        error instanceof Error ? error.message : String(error),
+                    });
+                    throw error;
+                  }
+                }
                 // Artifact page records carry the owner as plain text (the auth
                 // tables live outside the drizzle schema), so a viewer's own
                 // records and consents are erased here rather than by FK. This
@@ -519,6 +549,16 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
                       message: "Personal workspace cannot be deleted.",
                     });
                   }
+                  // Revoke every connector grant of the team at its provider,
+                  // then delete its connectors and their indexed content:
+                  // workspaces are not foreign-keyed to the organization, so
+                  // nothing else removes them and the grants would stay live.
+                  // Runs first because it is the step that can fail (a provider
+                  // error aborts the delete with nothing local changed).
+                  const { connectorTeamDataRemoval } = await import(
+                    "../connectors"
+                  );
+                  await connectorTeamDataRemoval.removeTeams([organization.id]);
                   // Remove the team's SSO providers and their linked `account`
                   // rows: otherwise a verified provider keeps blocking its domain
                   // for every other team, and no one can delete it once its org

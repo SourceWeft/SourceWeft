@@ -110,6 +110,21 @@ export async function findOAuthAccountRecord(input: {
 }
 
 /**
+ * Every stored authorization of one team, across all its workspaces, with its
+ * encrypted secrets: what has to be revoked at the providers before the team's
+ * connector data is deleted.
+ */
+export async function listTeamOAuthAccountSecretRecords(teamId: string) {
+  const rows = await db
+    .select()
+    .from(connectorOAuthAccounts)
+    .where(eq(connectorOAuthAccounts.teamId, teamId))
+    .orderBy(asc(connectorOAuthAccounts.createdAt));
+
+  return rows.map(mapOAuthAccountWithSecret);
+}
+
+/**
  * The stored authorization that a fresh authorization for the same provider
  * account should replace, in any status. A provider account may have several
  * rows from before authorizations were refreshed in place, so prefer the one a
