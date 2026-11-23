@@ -83,7 +83,7 @@ export const STUDY_JOB_TIMEOUT_MS = {
 } as const;
 
 export const STUDY_PROMPT_VERSIONS: Record<StudyKind, string> = {
-  flashcards: "flashcards-v2",
-  quiz: "quiz-v2",
+  flashcards: "flashcards-v3",
+  quiz: "quiz-v3",
   mindmap: "mindmap-v2",
 };

@@ -129,6 +129,13 @@ describe("heading coverage", () => {
     assert.deepEqual(result?.missing, ["Article I > Section 2"]);
   });
 
+  test("reachable coverage counts at most one section per item", () => {
+    const one = headingCoverageOf({ chunks: rows, items: items.slice(0, 1) });
+    assert.deepEqual(one?.covered, ratio(1, 3));
+    assert.deepEqual(one?.reachable, ratio(1, 1));
+    assert.deepEqual(headingCoverageOf({ chunks: rows, items })?.reachable, ratio(2, 2));
+  });
+
   test("top level folds sections into their first heading", () => {
     assert.deepEqual(headingCoverageOf({ chunks: rows, items, level: "top" })?.covered, ratio(2, 2));
   });

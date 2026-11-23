@@ -111,6 +111,7 @@ export function summarizeStudyEval(input: {
   const crossAnchoring: Ratio[] = [];
   const duplicates: Ratio[] = [];
   const coverage: Ratio[] = [];
+  const coverageOfAll: Ratio[] = [];
   const mindmapCoverage: Ratio[] = [];
   const language: Ratio[] = [];
   let nodesWithoutEvidence = 0;
@@ -132,7 +133,11 @@ export function summarizeStudyEval(input: {
       items,
       level: content.kind === "mindmap" ? "top" : "path",
     });
-    if (covered) (content.kind === "mindmap" ? mindmapCoverage : coverage).push(covered.covered);
+    if (covered && content.kind === "mindmap") mindmapCoverage.push(covered.covered);
+    if (covered && content.kind !== "mindmap") {
+      coverage.push(covered.reachable);
+      coverageOfAll.push(covered.covered);
+    }
     const lang = languageCorrectnessOf(items, content.language);
     if (lang) language.push(lang);
     if (fixture.injection) {
@@ -300,10 +305,11 @@ export function summarizeStudyEval(input: {
     },
     {
       id: "coverage",
-      metric: "Heading coverage, flashcards + quiz (headed sources)",
+      metric: "Heading coverage, flashcards + quiz (headed sources; of the sections a set's item count can reach)",
       value: show(sum(coverage)),
       gate: "≥ 70%",
       pass: gateAtLeast(sum(coverage), 0.7),
+      note: `of all sections: ${show(sum(coverageOfAll))}`,
     },
     {
       id: "coverage-mindmap",
