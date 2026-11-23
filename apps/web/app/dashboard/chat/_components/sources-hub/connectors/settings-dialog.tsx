@@ -72,6 +72,8 @@ import {
   getConnectorDisplayName,
   getConnectorReadinessFromConfig,
 } from "./components";
+import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
+import { needsGmailBrokerNotice } from "./gmail-mode";
 import { SelectionItems } from "./selection-items";
 import { commitSelection } from "./selection";
 import { selectionPresenterFor } from "./selection-presenters";
@@ -170,6 +172,21 @@ export function ConnectorSettingsDialog({
   const connectorType = connector?.raw.connectorType ?? "connector";
   const catalogItem =
     connectorCatalog.find((item) => item.id === connectorType) ?? null;
+  // Reconnecting a Composio-brokered Gmail shows the same notice as the first
+  // connect: Google's consent screen names Composio, not SourceWeft.
+  const [isBrokerNoticeOpen, setIsBrokerNoticeOpen] = useState(false);
+  function requestReconnect(target: ConnectorItem) {
+    if (
+      needsGmailBrokerNotice(
+        target.raw.connectorType,
+        connectorManifestInfoByType[target.raw.connectorType],
+      )
+    ) {
+      setIsBrokerNoticeOpen(true);
+      return;
+    }
+    onReconnect(target);
+  }
   const providerName = connector
     ? getConnectorDisplayName(connector)
     : connectorType;
@@ -908,7 +925,7 @@ export function ConnectorSettingsDialog({
                             <Button
                               className="h-6 shrink-0 px-2 text-[11px]"
                               disabled={isBusy}
-                              onClick={() => onReconnect(connector)}
+                              onClick={() => requestReconnect(connector)}
                               size="xs"
                               title={t("connectors.reconnect", {
                                 name: providerName,
@@ -1103,6 +1120,16 @@ export function ConnectorSettingsDialog({
           </ScrollArea>
         </Tabs>
       </DialogContent>
+      <GmailBrokerNoticeDialog
+        item={isBrokerNoticeOpen ? catalogItem : null}
+        onContinue={() => {
+          setIsBrokerNoticeOpen(false);
+          if (connector) onReconnect(connector);
+        }}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setIsBrokerNoticeOpen(false);
+        }}
+      />
     </Dialog>
   );
 }

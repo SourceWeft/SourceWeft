@@ -313,3 +313,68 @@ test("an RSS connector's custom interval cannot go below 30 minutes", async () =
   );
   expect(input?.min).toBe("30");
 });
+
+test("reconnecting a Composio-brokered Gmail shows the Composio notice before going to Google", async () => {
+  listGmailLabels.mockResolvedValue({ labels: [] });
+  const connector = gmailConnector({ liveSearchEnabled: true });
+  const { props, handlers } = baseProps(connector, {
+    gmail: { supportsIndexing: false, broker: "composio" },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+  await act(async () => button("Reconnect").click());
+  await flush(2);
+
+  expect(document.body.textContent ?? "").toContain(
+    "Connect Gmail through Composio",
+  );
+  expect(handlers.onReconnect).not.toHaveBeenCalled();
+
+  await act(async () => button("Continue to Google").click());
+  await flush(2);
+
+  expect(handlers.onReconnect).toHaveBeenCalledTimes(1);
+  expect(handlers.onReconnect).toHaveBeenCalledWith(connector);
+});
+
+test("cancelling the Composio notice does not reconnect", async () => {
+  listGmailLabels.mockResolvedValue({ labels: [] });
+  const connector = gmailConnector({ liveSearchEnabled: true });
+  const { props, handlers } = baseProps(connector, {
+    gmail: { supportsIndexing: false, broker: "composio" },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+  await act(async () => button("Reconnect").click());
+  await flush(2);
+  await act(async () => button("Cancel").click());
+  await flush(2);
+
+  expect(document.body.textContent ?? "").not.toContain(
+    "Connect Gmail through Composio",
+  );
+  expect(handlers.onReconnect).not.toHaveBeenCalled();
+});
+
+test("reconnecting a Gmail authorized directly with Google goes straight to Google", async () => {
+  listGmailLabels.mockResolvedValue({ labels: [] });
+  const connector = gmailConnector({ liveSearchEnabled: true });
+  const { props, handlers } = baseProps(connector, {
+    gmail: { supportsIndexing: true, broker: null },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+  await act(async () => button("Reconnect").click());
+  await flush(2);
+
+  expect(document.body.textContent ?? "").not.toContain(
+    "Connect Gmail through Composio",
+  );
+  expect(handlers.onReconnect).toHaveBeenCalledWith(connector);
+});

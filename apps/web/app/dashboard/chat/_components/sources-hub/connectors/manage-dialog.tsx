@@ -40,7 +40,7 @@ import {
 } from "./catalog";
 import { AddFeedDialog } from "./add-feed-dialog";
 import { GmailBrokerNoticeDialog } from "./gmail-broker-notice-dialog";
-import type { GmailUsageMode } from "./gmail-mode";
+import { needsGmailBrokerNotice, type GmailUsageMode } from "./gmail-mode";
 import {
   ActiveConnectorCard,
   ConnectorCatalogCard,
@@ -193,7 +193,7 @@ export function ManageConnectorsDialog({
       // A Composio-brokered authorization still needs the notice below before
       // redirecting; any other tools-only broker (none exists today) connects
       // directly, same as it would for any other non-indexable connector.
-      if (gmailManifestInfo.broker === "composio") {
+      if (needsGmailBrokerNotice(item.id, gmailManifestInfo)) {
         setPendingGmailBrokerNotice(item);
         return;
       }
