@@ -179,6 +179,62 @@ test("search is metadata-first and read fetches only the selected body", async (
   );
 });
 
+test("an ID Gmail rejects is reported as an invalid ID, not a bare 400", async () => {
+  const gmail = adapter(async (url) => {
+    const value = String(url);
+    if (value.includes("/profile"))
+      return json({ emailAddress: "reader@example.com", historyId: "100" });
+    if (value.includes("/messages/me?") || value.includes("/threads/me?"))
+      return json(
+        {
+          error: {
+            code: 400,
+            message: "Invalid id value",
+            status: "INVALID_ARGUMENT",
+          },
+        },
+        400,
+      );
+    throw new Error("Unexpected request");
+  });
+  for (const [actionType, request, kind] of [
+    ["gmail.message.read", { messageId: "me" }, "message"],
+    ["gmail.thread.read", { threadId: "me" }, "thread"],
+  ] as const) {
+    await assert.rejects(
+      gmail.executeAction({
+        ...context,
+        actionType,
+        request,
+        idempotencyKey: actionType,
+      }),
+      (error: { statusCode?: number; code?: string; message?: string }) =>
+        error.statusCode === 400 &&
+        error.code === "GMAIL_INVALID_ID" &&
+        error.message ===
+          `Gmail did not accept this ${kind} ID. Use a ${kind} ID returned by search_gmail_messages.`,
+    );
+  }
+});
+
+test("a missing message keeps its not-found error", async () => {
+  const gmail = adapter(async (url) => {
+    const value = String(url);
+    if (value.includes("/profile"))
+      return json({ emailAddress: "reader@example.com", historyId: "100" });
+    return json({ error: { code: 404 } }, 404);
+  });
+  await assert.rejects(
+    gmail.executeAction({
+      ...context,
+      actionType: "gmail.message.read",
+      request: { messageId: "msg_gone" },
+      idempotencyKey: "read",
+    }),
+    (error: { code?: string }) => error.code === "GMAIL_NOT_FOUND",
+  );
+});
+
 test("send formats one plain-text message and returns no body", async () => {
   let sentRaw = "";
   let sendCalls = 0;
