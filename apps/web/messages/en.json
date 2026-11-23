@@ -3717,6 +3717,7 @@
       "deleteOption": "Delete connector and all indexed content",
       "deleteOptionDesc": "Permanently deletes this connector, its local authorization, and all content imported by it. This cannot be undone.",
       "disconnectNote": "SourceWeft will not revoke access in the third-party provider.",
+      "disconnectNoteComposio": "Deleting also removes the connection at Composio, which ends access to this account. Disabling keeps the connection.",
       "deleting": "Deleting...",
       "disabling": "Disabling...",
       "deleteConfirm": "Delete connector and content",

@@ -3717,6 +3717,7 @@
       "deleteOption": "删除连接器及其所有已索引内容",
       "deleteOptionDesc": "永久删除此连接器、其本地授权，以及它导入的所有内容。此操作无法撤销。",
       "disconnectNote": "SourceWeft 不会撤销第三方提供方中的访问权限。",
+      "disconnectNoteComposio": "删除会同时移除 Composio 上的连接，从而结束对此账号的访问。停用会保留该连接。",
       "deleting": "删除中…",
       "disabling": "停用中…",
       "deleteConfirm": "删除连接器及内容",

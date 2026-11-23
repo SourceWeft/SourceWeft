@@ -1699,6 +1699,13 @@ export function SourcesHub({
       />
 
       <ConnectorDisconnectDialog
+        broker={
+          pendingDisconnectConnector
+            ? (connectorManifestInfoByType[
+                pendingDisconnectConnector.raw.connectorType
+              ]?.broker ?? null)
+            : null
+        }
         connector={pendingDisconnectConnector}
         hardDelete={disconnectConnectorHardDelete}
         isBusy={Boolean(
