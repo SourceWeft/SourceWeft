@@ -9,6 +9,7 @@ vi.mock("./analytics/events", () => ({
 
 import {
   SHELL_CACHE_TIMING,
+  launchPhases,
   registerMobileServiceWorker,
   reportMobileLaunch,
   setMobileSessionHint,
@@ -37,10 +38,16 @@ function installServiceWorker() {
   return register;
 }
 
-function navigationTiming(serverTiming: { name: string }[]) {
-  vi.spyOn(performance, "getEntriesByType").mockReturnValue([
-    { startTime: 0, responseStart: 42.4, serverTiming },
-  ] as unknown as PerformanceEntryList);
+function navigationTiming(
+  serverTiming: { name: string }[],
+  resources: { name: string; responseEnd: number }[] = [],
+) {
+  vi.spyOn(performance, "getEntriesByType").mockImplementation(
+    (type) =>
+      (type === "navigation"
+        ? [{ startTime: 0, responseStart: 42.4, responseEnd: 60, serverTiming }]
+        : resources) as unknown as PerformanceEntryList,
+  );
   vi.spyOn(performance, "getEntriesByName").mockReturnValue([]);
 }
 
@@ -77,7 +84,16 @@ describe("reportMobileLaunch", () => {
       "ios",
       vi.fn(async () => 830),
     );
-    navigationTiming([{ name: SHELL_CACHE_TIMING }]);
+    navigationTiming(
+      [{ name: SHELL_CACHE_TIMING }],
+      [
+        {
+          name: "https://sourceweft.com/_next/static/chunks/a.js",
+          responseEnd: 210,
+        },
+      ],
+    );
+    vi.spyOn(performance, "now").mockReturnValue(500);
     await reportMobileLaunch();
     expect(invoke).toHaveBeenCalledWith("take_launch_elapsed_ms", undefined);
     expect(state.trackMobileLaunch).toHaveBeenCalledWith({
@@ -85,6 +101,10 @@ describe("reportMobileLaunch", () => {
       surface: "other",
       launchMs: 830,
       ttfbMs: 42,
+      startMs: 330,
+      pageMs: 60,
+      scriptsMs: 150,
+      runMs: 290,
     });
   });
 
@@ -107,6 +127,43 @@ describe("reportMobileLaunch", () => {
     );
     await reportMobileLaunch();
     expect(state.trackMobileLaunch).not.toHaveBeenCalled();
+  });
+});
+
+describe("launchPhases", () => {
+  const navigation = {
+    startTime: 0,
+    responseEnd: 100,
+  } as PerformanceNavigationTiming;
+  const resource = (name: string, responseEnd: number) =>
+    ({ name, responseEnd }) as PerformanceResourceTiming;
+
+  test("splits the launch into phases that add up to it", () => {
+    const phases = launchPhases(2000, 1500, navigation, [
+      resource("https://sourceweft.com/_next/static/chunks/a.js", 300),
+      resource("https://sourceweft.com/_next/static/chunks/b.js", 900),
+      resource("https://sourceweft.com/_next/static/chunks/c.css", 1200),
+      resource("https://api.sourceweft.com/v1/me", 1400),
+      // Loaded after hydration: not part of the launch.
+      resource("https://sourceweft.com/_next/static/chunks/late.js", 1800),
+    ]);
+    expect(phases).toEqual({
+      startMs: 500,
+      pageMs: 100,
+      scriptsMs: 800,
+      runMs: 600,
+    });
+  });
+
+  test("counts no script time when every script arrived with the page", () => {
+    expect(launchPhases(900, 400, navigation, [])).toMatchObject({
+      scriptsMs: 0,
+      runMs: 300,
+    });
+  });
+
+  test("reports no phases without the page's timing", () => {
+    expect(launchPhases(900, 400, undefined, [])).toEqual({});
   });
 });
 

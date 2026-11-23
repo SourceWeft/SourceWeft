@@ -42,6 +42,46 @@ function launchSurface(pathname: string) {
   return "other" as const;
 }
 
+export type LaunchPhases = {
+  /** Native process start until this page's navigation started (app, web view, splash). */
+  startMs: number;
+  /** Navigation start until the page's HTML had fully arrived. */
+  pageMs: number;
+  /** HTML arrived until the last of the build's scripts had loaded. */
+  scriptsMs: number;
+  /** Last script loaded until the page hydrated: running the scripts and React. */
+  runMs: number;
+};
+
+const BUILD_SCRIPT = /\/_next\/static\/.+\.js(\?|$)/;
+
+/**
+ * Splits a launch into consecutive phases that add up to `launchMs`, so a slow
+ * launch shows whether it waited on the app, the page, loading the scripts or
+ * running them. Times on the page are relative to its navigation start.
+ */
+export function launchPhases(
+  launchMs: number,
+  hydratedAt: number,
+  navigation: PerformanceNavigationTiming | undefined,
+  resources: PerformanceResourceTiming[],
+): LaunchPhases | Record<string, never> {
+  if (!navigation || !(navigation.responseEnd > 0)) return {};
+  const pageEnd = navigation.responseEnd;
+  const scriptsEnd = resources
+    .filter(
+      (entry) =>
+        BUILD_SCRIPT.test(entry.name) && entry.responseEnd <= hydratedAt,
+    )
+    .reduce((latest, entry) => Math.max(latest, entry.responseEnd), pageEnd);
+  return {
+    startMs: Math.max(0, Math.round(launchMs - hydratedAt)),
+    pageMs: Math.round(pageEnd - navigation.startTime),
+    scriptsMs: Math.round(scriptsEnd - pageEnd),
+    runMs: Math.max(0, Math.round(hydratedAt - scriptsEnd)),
+  };
+}
+
 /**
  * Reports how long the launch took, once per app start: native start to this
  * hydrated page, and where the page came from. Logged for the simulator and
@@ -49,11 +89,16 @@ function launchSurface(pathname: string) {
  */
 export async function reportMobileLaunch() {
   if (!nativeBridge.isAvailable("mobile")) return;
+  // Taken before asking the native side, so both clocks stop at about the same time.
+  const hydratedAt = performance.now();
   const launchMs = await nativeBridge.takeLaunchElapsedMs().catch(() => null);
   if (typeof launchMs !== "number") return;
 
   const navigation = performance.getEntriesByType("navigation")[0] as
     PerformanceNavigationTiming | undefined;
+  const resources = performance.getEntriesByType(
+    "resource",
+  ) as PerformanceResourceTiming[];
   const fromCache = Boolean(
     navigation?.serverTiming?.some(
       (entry) => entry.name === SHELL_CACHE_TIMING,
@@ -70,6 +115,7 @@ export async function reportMobileLaunch() {
     surface: launchSurface(window.location.pathname),
     launchMs,
     ttfbMs,
+    ...launchPhases(launchMs, hydratedAt, navigation, resources),
   };
   console.info("[launch]", {
     ...report,

@@ -31,6 +31,10 @@ export const ANALYTICS_PARAMS = {
   tool_count: { kind: "metric" },
   launch_ms: { kind: "metric" },
   ttfb_ms: { kind: "metric" },
+  start_ms: { kind: "metric" },
+  page_ms: { kind: "metric" },
+  scripts_ms: { kind: "metric" },
+  run_ms: { kind: "metric" },
   // GA4 recommended ecommerce parameters: no registration needed.
   value: { kind: "ga4_standard" },
   currency: { kind: "ga4_standard" },
@@ -115,8 +119,20 @@ export const ANALYTICS_EVENTS = {
   // The iOS app finished starting: `launch_ms` from process start until the
   // page hydrated, `ttfb_ms` the page's own wait for its first byte, `source`
   // network | cache (served by the app's service worker), `surface` the page.
+  // `launch_ms` splits into consecutive phases: `start_ms` native start until
+  // the page's navigation, `page_ms` until its HTML arrived, `scripts_ms` until
+  // the last build script loaded, `run_ms` until hydrated.
   mobile_launch: {
-    params: ["source", "surface", "launch_ms", "ttfb_ms"],
+    params: [
+      "source",
+      "surface",
+      "launch_ms",
+      "ttfb_ms",
+      "start_ms",
+      "page_ms",
+      "scripts_ms",
+      "run_ms",
+    ],
     keyEvent: false,
   },
 } as const satisfies Record<string, EventDefinition>;
