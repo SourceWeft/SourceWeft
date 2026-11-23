@@ -3644,12 +3644,15 @@
         "reason": "原因",
         "requestPreview": "请求",
         "riskLevel": "风险",
+        "skippedCount": "已跳过",
         "source": "来源",
         "targetExternalIds": "目标",
         "targetExternalIdCount": "目标数量",
         "targeted": "已定向",
         "syncRunId": "关联同步",
-        "triggerType": "触发方式"
+        "triggerType": "触发方式",
+        "unchangedCount": "未变化",
+        "updatedCount": "已更新"
       }
     },
     "sourceGuide": {

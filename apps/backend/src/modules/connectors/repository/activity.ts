@@ -87,7 +87,14 @@ function isActivityBeforeCursor(
   return itemKey < cursorKey;
 }
 
-function toSyncActivityItem(
+/** Counts recorded in a run's metadata; absent on runs from before they existed. */
+function countFromMetadata(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+export function toSyncActivityItem(
   run: ReturnType<typeof mapSyncRun>,
 ): ConnectorActivityItemRecord {
   const summaryJson = {
@@ -95,6 +102,9 @@ function toSyncActivityItem(
     eventType: run.metadataJson.eventType ?? null,
     discoveredCount: run.discoveredCount,
     indexedCount: run.indexedCount,
+    updatedCount: countFromMetadata(run.metadataJson.updatedCount),
+    unchangedCount: countFromMetadata(run.metadataJson.unchangedCount),
+    skippedCount: countFromMetadata(run.metadataJson.skippedCount),
     failedCount: run.failedCount,
     oversizedCount: Array.isArray(run.metadataJson.oversizedItems)
       ? run.metadataJson.oversizedItems.length
