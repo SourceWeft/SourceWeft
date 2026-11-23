@@ -85,12 +85,48 @@ function jsonSchemaWithConnectorId(schema: Record<string, unknown>) {
 function actionDescription(input: {
   action: ConnectorActionSpec;
   manifest: ConnectorManifest;
+  accountNote?: string;
 }) {
   const base = input.action.description ?? input.action.displayName;
   const approval = input.action.requiresApproval
     ? " This action requires user approval before execution."
     : "";
-  return `${base} Connector: ${input.manifest.displayName}.${approval}`;
+  const account = input.accountNote ? ` ${input.accountNote}` : "";
+  return `${base} Connector: ${input.manifest.displayName}.${account}${approval}`;
+}
+
+/**
+ * Names the mailbox each Gmail tool acts as. Without it the model cannot tell
+ * the user's own address ("send it to me") and probes for it with a read call
+ * that Gmail rejects.
+ */
+async function gmailMailboxNote(input: {
+  connectors: SourceConnectorRecord[];
+  context: ConnectorActionToolContext;
+}) {
+  const mailboxes: Array<{ connectorId: string; email: string }> = [];
+  for (const connector of input.connectors) {
+    if (!connector.oauthAccountId) continue;
+    const account = await findOAuthAccountRecord({
+      teamId: input.context.teamId,
+      workspaceId: input.context.workspaceId,
+      accountId: connector.oauthAccountId,
+    });
+    if (account?.providerAccountEmail) {
+      mailboxes.push({
+        connectorId: connector.id,
+        email: account.providerAccountEmail,
+      });
+    }
+  }
+  if (mailboxes.length === 0) return undefined;
+  if (mailboxes.length === 1) {
+    return `Connected mailbox: ${mailboxes[0]!.email}; this is the user's own address and the sender of any email sent.`;
+  }
+  const list = mailboxes
+    .map((mailbox) => `${mailbox.email} (connectorId ${mailbox.connectorId})`)
+    .join(", ");
+  return `Connected mailboxes: ${list}; each is the user's own address and the sender of email sent through it.`;
 }
 
 function activeConnectorsByType(connectors: SourceConnectorRecord[]) {
@@ -511,6 +547,10 @@ export async function createConnectorActionTools(
     if (activeConnectors.length === 0) {
       continue;
     }
+    const accountNote =
+      manifest.type === "gmail"
+        ? await gmailMailboxNote({ connectors: activeConnectors, context })
+        : undefined;
     for (const action of manifest.actions) {
       if (action.visibility !== "agent" || !action.agentToolName) {
         continue;
@@ -740,7 +780,7 @@ export async function createConnectorActionTools(
             ),
           {
             name: agentToolName,
-            description: actionDescription({ action, manifest }),
+            description: actionDescription({ action, manifest, accountNote }),
             schema: jsonSchemaWithConnectorId(action.inputSchema),
           },
         ),

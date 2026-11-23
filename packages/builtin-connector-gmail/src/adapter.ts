@@ -40,6 +40,20 @@ const MESSAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export { GmailAdapterError };
 
+// Gmail answers 400 to a message or thread ID it does not recognise (for
+// example "me", which is a user ID, not a message ID). Say so plainly so the
+// agent searches for a real ID instead of reporting a bare request failure.
+function rethrowInvalidId(error: unknown, kind: "message" | "thread"): never {
+  if (error instanceof GmailAdapterError && error.statusCode === 400) {
+    throw new GmailAdapterError(
+      400,
+      "GMAIL_INVALID_ID",
+      `Gmail did not accept this ${kind} ID. Use a ${kind} ID returned by search_gmail_messages.`,
+    );
+  }
+  throw error;
+}
+
 type GmailHeader = { name?: string; value?: string };
 type GmailPart = {
   mimeType?: string;
@@ -595,7 +609,7 @@ export function createGmailConnectorAdapter(
         input.accessToken,
         assertId(input.request.messageId, "message ID"),
         "full",
-      );
+      ).catch((error: unknown) => rethrowInvalidId(error, "message"));
       return {
         result: {
           ...messageMetadata(message, identity.email),
@@ -608,7 +622,7 @@ export function createGmailConnectorAdapter(
       const thread = await providerRequest<{ messages?: GmailMessage[] }>(
         `${API}/threads/${encodeURIComponent(id)}?format=full`,
         input.accessToken,
-      );
+      ).catch((error: unknown) => rethrowInvalidId(error, "thread"));
       return {
         result: {
           threadId: id,

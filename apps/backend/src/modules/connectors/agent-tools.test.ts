@@ -40,13 +40,17 @@ import {
 } from "./agent-tools";
 import { ConnectorError } from "./errors";
 import { connectorRegistry } from "./registry";
-import { listSourceConnectorRecords } from "./repository";
+import {
+  findOAuthAccountRecord,
+  listSourceConnectorRecords,
+} from "./repository";
 import type { ConnectorAdapter, ConnectorManifest } from "./types";
 
 vi.mock("./repository", async (importOriginal) => {
   const original = await importOriginal<typeof import("./repository")>();
   return {
     ...original,
+    findOAuthAccountRecord: vi.fn().mockResolvedValue(null),
     listSourceConnectorRecords: vi.fn(),
   };
 });
@@ -245,6 +249,89 @@ test("disabled Gmail live search removes read tools but keeps per-message send a
     }),
     null,
   );
+});
+
+test("Gmail tools name the connected mailbox so the agent knows the user's address", async () => {
+  const gmailManifest: ConnectorManifest = {
+    ...manifest,
+    type: "gmail",
+    displayName: "Gmail",
+    actions: [
+      {
+        ...manifest.actions[1]!,
+        type: "gmail.message.search",
+        agentToolName: "search_gmail_messages",
+      },
+      {
+        ...manifest.actions[0]!,
+        type: "gmail.message.send",
+        agentToolName: "send_gmail_message",
+        riskLevel: "high",
+        allowStandingApproval: false,
+        requestPrivacy: "encrypted",
+      },
+    ],
+  };
+  connectorRegistry.register({ ...adapter, getManifest: () => gmailManifest });
+  const gmailConnector = (id: string, oauthAccountId: string) =>
+    ({
+      id,
+      connectorType: "gmail",
+      name: "Gmail",
+      status: "active",
+      oauthAccountId,
+      configJson: { liveSearchEnabled: true },
+    }) as never;
+  const emails: Record<string, string> = {
+    "account-1": "owner@example.com",
+    "account-2": "second@example.com",
+  };
+  vi.mocked(findOAuthAccountRecord).mockImplementation(
+    async (input) =>
+      ({ providerAccountEmail: emails[input.accountId] ?? null }) as never,
+  );
+
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([
+    gmailConnector("gmail-1", "account-1"),
+  ]);
+  const single = await createConnectorActionTools(context);
+  for (const name of ["search_gmail_messages", "send_gmail_message"]) {
+    assert.match(
+      single.find((entry) => entry.name === name)?.description ?? "",
+      /Connected mailbox: owner@example\.com; this is the user's own address/,
+    );
+  }
+
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([
+    gmailConnector("gmail-1", "account-1"),
+    gmailConnector("gmail-2", "account-2"),
+  ]);
+  const multiple = await createConnectorActionTools(context);
+  assert.match(
+    multiple.find((entry) => entry.name === "send_gmail_message")
+      ?.description ?? "",
+    /Connected mailboxes: owner@example\.com \(connectorId gmail-1\), second@example\.com \(connectorId gmail-2\)/,
+  );
+
+  // Other connector types are not looked up or annotated.
+  vi.mocked(findOAuthAccountRecord).mockClear();
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([
+    {
+      id: "connector-1",
+      connectorType: manifest.type,
+      name: "Test",
+      status: "active",
+      oauthAccountId: "account-1",
+      configJson: {},
+    } as never,
+  ]);
+  const others = await createConnectorActionTools(context);
+  assert.equal(vi.mocked(findOAuthAccountRecord).mock.calls.length, 0);
+  assert.equal(
+    others.some((entry) => /Connected mailbox/.test(entry.description)),
+    false,
+  );
+  vi.mocked(findOAuthAccountRecord).mockResolvedValue(null);
 });
 
 test("an approved connector action's result says the user approved it", () => {
