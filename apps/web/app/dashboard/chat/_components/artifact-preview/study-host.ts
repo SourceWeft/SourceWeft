@@ -103,6 +103,10 @@ export const webStudyHost: StudyHost = {
       answers: { ...answers },
       ...(finish ? { finish: true } : {}),
     }),
+  async deriveCardsFromMistakes({ workspaceId, attemptId }) {
+    const deck = await contentClient.deriveStudyCardsFromAttempt(workspaceId, attemptId);
+    return { artifactId: deck.artifactId, versionId: deck.versionId, itemCount: deck.itemCount };
+  },
   openEvidence: openGroundedEvidenceSource,
   currentQuoteHash: () =>
     Promise.reject(new Error("Checking a quote against its source is not available yet")),

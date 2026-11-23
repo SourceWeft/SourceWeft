@@ -70,6 +70,10 @@ export function createRecordingStudyHost(
       attempts.set(attempt.id, attempt);
       return attempt;
     },
+    async deriveCardsFromMistakes(input) {
+      record("deriveCardsFromMistakes", input);
+      return { artifactId: "artifact-cards-1", versionId: "version-cards-1", itemCount: 1 };
+    },
     async saveQuizAnswers(input) {
       record("saveQuizAnswers", input);
       const previous = attempts.get(input.attemptId);

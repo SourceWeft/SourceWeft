@@ -1,6 +1,8 @@
 "use client";
 
-import { CircleCheck, CircleX, RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { CircleCheck, CircleX, Layers, RotateCcw } from "lucide-react";
+import { buildArtifactPreviewUrl } from "@sourceweft/contracts/artifact-urls";
 import type { QuizAnswer, QuizItem } from "@sourceweft/contracts/study";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { EvidencePopover } from "@sourceweft/grounded-generation/ui";
@@ -11,7 +13,8 @@ import { isAnswerCorrect, type QuizScore } from "./scoring";
 /**
  * The end of an attempt: the auto score, short answers' self grades counted
  * apart, and every question with its verdict, the correct answer, the
- * explanation and the evidence. "Practise mistakes" re-runs only the wrong ones.
+ * explanation and the evidence. "Practise mistakes" re-runs only the wrong ones
+ * in the quiz; "Make flashcards from mistakes" turns them into a new deck.
  */
 export function QuizResultSummary({
   items,
@@ -21,6 +24,7 @@ export function QuizResultSummary({
   interactive,
   onPracticeMistakes,
   onRestart,
+  onMakeCards,
   t,
 }: {
   items: readonly QuizItem[];
@@ -30,8 +34,34 @@ export function QuizResultSummary({
   interactive: boolean;
   onPracticeMistakes: () => void;
   onRestart: () => void;
+  /** Present when the attempt can become a deck (saved, and the host writes). */
+  onMakeCards?: () => Promise<{ artifactId: string; versionId: string | null; itemCount: number }>;
   t: StudyTranslate;
 }) {
+  const [cards, setCards] = useState<
+    | { status: "idle" | "pending" | "failed" }
+    | { status: "done"; href: string; itemCount: number }
+  >({ status: "idle" });
+
+  async function makeCards() {
+    if (!onMakeCards || cards.status === "pending") return;
+    setCards({ status: "pending" });
+    try {
+      const deck = await onMakeCards();
+      setCards({
+        status: "done",
+        itemCount: deck.itemCount,
+        href: buildArtifactPreviewUrl({
+          workspaceId: version.workspaceId,
+          artifactId: deck.artifactId,
+          ...(deck.versionId ? { artifactVersionId: deck.versionId } : {}),
+        }),
+      });
+    } catch {
+      setCards({ status: "failed" });
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="space-y-1 rounded-xl border bg-card p-4">
@@ -57,11 +87,42 @@ export function QuizResultSummary({
               {t("study.quiz.practiceMistakes")}
             </Button>
           ) : null}
+          {score.wrongItemIds.length > 0 && onMakeCards && cards.status !== "done" ? (
+            <Button
+              data-make-cards
+              disabled={cards.status === "pending"}
+              onClick={() => void makeCards()}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <Layers aria-hidden />
+              {t("study.quiz.mistakesToCards")}
+            </Button>
+          ) : null}
           <Button onClick={onRestart} size="sm" type="button" variant="outline">
             <RotateCcw aria-hidden />
             {t("study.quiz.restart")}
           </Button>
         </div>
+        {cards.status === "done" ? (
+          <p className="pt-1 text-sm" data-made-cards role="status">
+            {t("study.quiz.mistakesToCardsDone", { count: cards.itemCount })}{" "}
+            <a
+              className="font-medium underline underline-offset-2"
+              href={cards.href}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              {t("study.quiz.mistakesToCardsOpen")}
+            </a>
+          </p>
+        ) : null}
+        {cards.status === "failed" ? (
+          <p className="pt-1 text-sm text-destructive" role="alert">
+            {t("study.quiz.mistakesToCardsFailed")}
+          </p>
+        ) : null}
       </div>
 
       <ol className="flex flex-col gap-3">

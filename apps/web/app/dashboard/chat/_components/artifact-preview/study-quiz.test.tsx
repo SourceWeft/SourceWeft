@@ -118,6 +118,57 @@ describe("QuizViewer", () => {
     expect(text()).toContain("study.quiz.questionOf current=1 total=1");
   });
 
+  it("turns the mistakes of a finished attempt into a deck and links to it", async () => {
+    const host = createRecordingStudyHost();
+    await renderQuiz(host);
+    await press("study.quiz.start");
+    await flush(3);
+    await answerAll({ multiRight: false });
+    await press("study.quiz.submit");
+    await flush(4);
+
+    await press("study.quiz.mistakesToCards");
+    await flush(3);
+    expect(host.callsTo("deriveCardsFromMistakes")).toEqual([
+      { workspaceId: version.workspaceId, attemptId: "attempt-1" },
+    ]);
+    const made = document.querySelector("[data-made-cards]");
+    expect(made?.textContent).toContain("study.quiz.mistakesToCardsDone count=1");
+    expect(made?.querySelector("a")?.getAttribute("href")).toBe(
+      `/artifact-preview?artifactId=artifact-cards-1&workspaceId=${version.workspaceId}&artifactVersionId=version-cards-1`,
+    );
+    // Made once: the button gives way to the link.
+    expect(document.querySelector("[data-make-cards]")).toBeNull();
+  });
+
+  it("says so when the deck cannot be made, and lets the person try again", async () => {
+    const host = createRecordingStudyHost({
+      deriveCardsFromMistakes: () => Promise.reject(new Error("offline")),
+    });
+    await renderQuiz(host);
+    await press("study.quiz.start");
+    await flush(3);
+    await answerAll({ multiRight: false });
+    await press("study.quiz.submit");
+    await flush(4);
+    await press("study.quiz.mistakesToCards");
+    await flush(3);
+    expect(text()).toContain("study.quiz.mistakesToCardsFailed");
+    expect(document.querySelector("[data-make-cards]")).not.toBeNull();
+  });
+
+  it("offers no deck where the host cannot write one", async () => {
+    const host = createRecordingStudyHost({ deriveCardsFromMistakes: undefined });
+    await renderQuiz(host);
+    await press("study.quiz.start");
+    await flush(3);
+    await answerAll({ multiRight: false });
+    await press("study.quiz.submit");
+    await flush(4);
+    expect(button("study.quiz.practiceMistakes")).toBeDefined();
+    expect(document.querySelector("[data-make-cards]")).toBeNull();
+  });
+
   it("a fully right attempt offers no mistakes to practise", async () => {
     const host = createRecordingStudyHost();
     await renderQuiz(host);
@@ -128,6 +179,7 @@ describe("QuizViewer", () => {
     await flush(4);
     expect(text()).toContain("study.quiz.result.score correct=3 total=3");
     expect(button("study.quiz.practiceMistakes")).toBeUndefined();
+    expect(document.querySelector("[data-make-cards]")).toBeNull();
   });
 
   it("submitting waits for an autosave on its way, and its late refusal is not a failed save", async () => {

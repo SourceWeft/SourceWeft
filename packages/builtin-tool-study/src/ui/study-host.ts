@@ -74,6 +74,16 @@ export type StudyHost = {
     answers: Readonly<Record<string, QuizAnswer>>;
     finish?: boolean;
   }): Promise<QuizAttemptView>;
+  /**
+   * Turns the missed questions of a finished attempt into a new flashcards
+   * deck on the quiz's conversation. No model is called and nothing is
+   * billed; asking twice returns the same deck. Absent where nothing may be
+   * written (public pages), which hides the button.
+   */
+  readonly deriveCardsFromMistakes?: (input: {
+    workspaceId: string;
+    attemptId: string;
+  }) => Promise<{ artifactId: string; versionId: string | null; itemCount: number }>;
   /** Opens the source at the quote (the app's source preview). */
   openEvidence(
     evidence: StudyEvidence,
@@ -180,6 +190,10 @@ export const STUDY_TRANSLATION_KEYS = [
   "study.quiz.result.score",
   "study.quiz.result.selfGraded",
   "study.quiz.practiceMistakes",
+  "study.quiz.mistakesToCards",
+  "study.quiz.mistakesToCardsDone",
+  "study.quiz.mistakesToCardsOpen",
+  "study.quiz.mistakesToCardsFailed",
   "study.quiz.restart",
   "study.quiz.verdict.correct",
   "study.quiz.verdict.wrong",
