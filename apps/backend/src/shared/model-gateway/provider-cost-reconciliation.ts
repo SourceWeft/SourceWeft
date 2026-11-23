@@ -80,12 +80,15 @@ export async function enqueueProviderCostReconciliation(input: {
   workspaceId?: string;
   actorUserId?: string;
   feature: string;
-  gatewayConfigId: string;
+  /** Null for a feature's own provider snapshot: there is no gateway row to reconcile against. */
+  gatewayConfigId: string | null;
   originalBillingIdempotencyKey?: string;
 }) {
   const observation = input.observation;
   const requestId = observation?.identity.providerRequestId;
+  const gatewayConfigId = input.gatewayConfigId;
   if (
+    !gatewayConfigId ||
     !observation?.traceId ||
     !observation.spanId ||
     !requestId ||
@@ -105,7 +108,7 @@ export async function enqueueProviderCostReconciliation(input: {
     feature: input.feature,
     traceId: observation.traceId,
     spanId: observation.spanId,
-    gatewayConfigId: input.gatewayConfigId,
+    gatewayConfigId,
     provider: observation.identity.provider,
     providerRequestId: requestId,
     originalBillingIdempotencyKey: input.originalBillingIdempotencyKey,

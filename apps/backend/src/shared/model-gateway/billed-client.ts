@@ -36,7 +36,10 @@ import type {
 import { openBillingScope, type BillingScope } from "./billing/scope";
 import type { MeterUsageFn } from "./billing/settle";
 import { createBilledAgentChatModel } from "./billing/langchain-proxy";
-import { getRawModelGatewayClient } from "./internal/raw";
+import {
+  getRawModelGatewayClient,
+  getRawStandaloneGatewayClient,
+} from "./internal/raw";
 import { enqueueProviderCostReconciliation } from "./provider-cost-reconciliation";
 import type { ThinkingConfig } from "@sourceweft/model-gateway";
 import { logger } from "../logger";
@@ -237,6 +240,13 @@ export type OpenBilledModelGatewayInput = {
   gatewayConfigId?: string | null;
   /** Trusted snapshot prepared with the embedding profile; never user input. */
   routedConfig?: RoutedGatewayConfig;
+  /**
+   * A feature's own provider snapshot (built in code from a provider the
+   * feature declares, never user input), in place of the global gateway
+   * config. Its calls carry `gatewayConfigId: null`. Exclusive with
+   * `gatewayConfigId` and `routedConfig`.
+   */
+  standaloneConfig?: RoutedGatewayConfig;
   /** Injected for tests; production uses the real metering funnel. */
   meterUsage?: MeterUsageFn;
 };
@@ -295,10 +305,14 @@ async function openBilledGateway(
     scheduleReconciliation: enqueueProviderCostReconciliation,
   });
 
-  const raw = await getRawModelGatewayClient(
-    input.gatewayConfigId,
-    input.routedConfig,
-  );
+  if (input.standaloneConfig && (input.gatewayConfigId || input.routedConfig)) {
+    throw new Error(
+      "A standalone provider snapshot cannot be combined with a gateway config",
+    );
+  }
+  const raw = input.standaloneConfig
+    ? getRawStandaloneGatewayClient(input.standaloneConfig)
+    : await getRawModelGatewayClient(input.gatewayConfigId, input.routedConfig);
 
   async function settled<
     R extends {

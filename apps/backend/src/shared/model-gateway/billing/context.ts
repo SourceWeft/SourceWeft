@@ -53,7 +53,12 @@ export type ModelCallBillingOptions = {
   modelKind: ModelProfileKind;
   profileAlias: string;
   modelAlias?: string | null;
-  gatewayConfigId: string;
+  /**
+   * The gateway config row the call ran on. Null only for a feature that
+   * calls its own provider snapshot, which has no gateway config row and is
+   * never BYOK (see `standaloneConfig` on the billed gateway).
+   */
+  gatewayConfigId: string | null;
   llm?: LlmExecutionConfig;
   /**
    * Pins the idempotency key. Every migrated call site must pass the key it
@@ -73,7 +78,7 @@ export type MeteredModelCallTrace = {
   modelKind: ModelProfileKind;
   modelAlias: string | null;
   profileAlias: string | null;
-  gatewayConfigId: string;
+  gatewayConfigId: string | null;
   usage?: UsageInfo;
   observation?: ModelCallObservation;
   billingStatus: "metered" | "skipped" | "covered" | "meter_failed";

@@ -23,7 +23,7 @@ export type ScheduleProviderCostReconciliationFn = (input: {
   workspaceId?: string;
   actorUserId?: string;
   feature: string;
-  gatewayConfigId: string;
+  gatewayConfigId: string | null;
   originalBillingIdempotencyKey?: string;
 }) => Promise<unknown>;
 

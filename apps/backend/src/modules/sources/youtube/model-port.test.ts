@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { beforeEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 import { BillingAdmissionError } from "../../../shared/model-gateway/billing/admission";
 import { ModelGatewayError } from "../../../shared/model-gateway/errors";
 import { ContentError } from "../../content/errors";
 
 const mocks = vi.hoisted(() => ({
-  resolveProfile: vi.fn(),
-  ensureConfig: vi.fn(),
+  buildStandalone: vi.fn(),
   complete: vi.fn(),
   withBilled: vi.fn(),
   audit: vi.fn(),
@@ -18,8 +17,7 @@ vi.mock("../../../shared/model-gateway/index", async () => ({
       typeof import("../../../shared/model-gateway/billing/admission")
     >("../../../shared/model-gateway/billing/admission")
   ).BillingAdmissionError,
-  ensureModelConfigAvailable: mocks.ensureConfig,
-  resolveModelGatewayProfile: mocks.resolveProfile,
+  buildStandaloneGatewayConfig: mocks.buildStandalone,
   withBilledModelGateway: mocks.withBilled,
 }));
 vi.mock("../../content/model-gateway-audit", () => ({
@@ -31,11 +29,7 @@ import {
   createBilledVideoModelPort,
 } from "./model-port";
 
-const PROFILE = {
-  gatewayConfigId: "gw-1",
-  profileAlias: "youtube-transcript",
-  modelAlias: "gemini-flash",
-};
+const SNAPSHOT = { versionId: "standalone:youtube-transcript" };
 const billing = { id: "billing-port" } as never;
 const portInput = {
   billing,
@@ -52,8 +46,8 @@ const call = {
 };
 
 beforeEach(() => {
-  mocks.resolveProfile.mockReset().mockResolvedValue(PROFILE);
-  mocks.ensureConfig.mockReset().mockResolvedValue(undefined);
+  vi.stubEnv("OPENROUTER_API_KEY", "  test-openrouter-key  ");
+  mocks.buildStandalone.mockReset().mockReturnValue(SNAPSHOT);
   mocks.audit.mockReset().mockResolvedValue(undefined);
   mocks.complete.mockReset().mockResolvedValue({
     raw: { content: "LANGUAGE: en\n[0:00] hi" },
@@ -69,13 +63,30 @@ beforeEach(() => {
     );
 });
 
-test("resolves the youtube-transcript vision profile", async () => {
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+test("runs on its own OpenRouter Gemini provider with the deployment's OpenRouter key", async () => {
   await createBilledVideoModelPort(portInput);
-  assert.deepEqual(mocks.resolveProfile.mock.calls[0]![0], {
-    kind: "vision",
-    requestedProfileAlias: "youtube-transcript",
-    defaultRequired: false,
+  assert.deepEqual(mocks.buildStandalone.mock.calls[0]![0], {
+    id: "youtube-transcript",
+    providerKind: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "google/gemini-2.5-flash",
+    apiKey: "test-openrouter-key",
+    supports: ["chat"],
+    timeoutMs: 900_000,
+    maxRetries: 0,
   });
+});
+
+test("does not depend on OPENROUTER_ENABLED", async () => {
+  vi.stubEnv("OPENROUTER_ENABLED", "false");
+  await assertYouTubeTranscriptionConfigured();
+  const port = await createBilledVideoModelPort(portInput);
+  await port.complete(call);
+  assert.equal(mocks.complete.mock.calls.length, 1);
 });
 
 test("bills ingestion.youtube with the youtube-transcript idempotency key", async () => {
@@ -84,7 +95,9 @@ test("bills ingestion.youtube with the youtube-transcript idempotency key", asyn
 
   const [options] = mocks.withBilled.mock.calls[0]!;
   assert.equal(options.billing, billing);
-  assert.equal(options.gatewayConfigId, "gw-1");
+  assert.equal(options.standaloneConfig, SNAPSHOT);
+  assert.equal(options.gatewayConfigId, undefined);
+  assert.equal(options.routedConfig, undefined);
   assert.deepEqual(options.context, {
     teamId: "team-1",
     workspaceId: "ws-1",
@@ -106,8 +119,9 @@ test("bills ingestion.youtube with the youtube-transcript idempotency key", asyn
     requestOptions.idempotencyKey,
     "source_parse_source-1_1:youtube-transcript",
   );
+  assert.equal(requestOptions.gatewayConfigId, null);
   assert.equal(requestOptions.profileAlias, "youtube-transcript");
-  assert.equal(requestOptions.modelAlias, "gemini-flash");
+  assert.equal(requestOptions.modelAlias, "youtube-transcript");
 });
 
 test("gives the transcription call a 15-minute timeout and no SDK retries", async () => {
@@ -124,7 +138,8 @@ test("sends a video_url part with thinking off and the output token budget", asy
   const result = await port.complete(call);
 
   const [request] = mocks.complete.mock.calls[0]!;
-  assert.equal(request.model, "gemini-flash");
+  assert.equal(request.model, "youtube-transcript");
+  assert.equal(request.profileAlias, "youtube-transcript");
   assert.equal(request.maxTokens, 65_536);
   assert.deepEqual(request.thinking, {
     mode: "off",
@@ -184,19 +199,23 @@ test("refuses to run without a billing port or payer", async () => {
   assert.equal(mocks.withBilled.mock.calls.length, 0);
 });
 
-test("an unconfigured profile is YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED", async () => {
-  mocks.resolveProfile.mockResolvedValue(null);
-  for (const run of [
-    () => assertYouTubeTranscriptionConfigured(),
-    () => createBilledVideoModelPort(portInput),
-  ]) {
-    await assert.rejects(run(), (error: unknown) => {
-      assert.ok(error instanceof ContentError);
-      assert.equal(error.statusCode, 503);
-      assert.equal(error.code, "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED");
-      return true;
-    });
+test("a missing or blank OpenRouter key is YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED", async () => {
+  for (const value of [undefined, "", "   "]) {
+    vi.stubEnv("OPENROUTER_API_KEY", value);
+    for (const run of [
+      () => assertYouTubeTranscriptionConfigured(),
+      () => createBilledVideoModelPort(portInput),
+    ]) {
+      await assert.rejects(run(), (error: unknown) => {
+        assert.ok(error instanceof ContentError);
+        assert.equal(error.statusCode, 503);
+        assert.equal(error.code, "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED");
+        return true;
+      });
+    }
   }
+  assert.equal(mocks.buildStandalone.mock.calls.length, 0);
+  assert.equal(mocks.withBilled.mock.calls.length, 0);
 });
 
 test("a provider 4xx saying the video is private is YOUTUBE_VIDEO_UNAVAILABLE", async () => {

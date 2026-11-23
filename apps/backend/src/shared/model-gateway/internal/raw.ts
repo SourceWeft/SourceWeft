@@ -10,3 +10,4 @@ export {
   getModelGatewayClient as getRawModelGatewayClient,
   createAgentChatModel as createRawAgentChatModel,
 } from "../client";
+export { getOrCreateStandaloneGatewayClient as getRawStandaloneGatewayClient } from "../runtime";

@@ -6,13 +6,26 @@ import { recordGatewayOperationEvent } from "../../content/model-gateway-audit";
 import { toContentError } from "../../content/model-gateway-error";
 import {
   BillingAdmissionError,
-  ensureModelConfigAvailable,
-  resolveModelGatewayProfile,
+  buildStandaloneGatewayConfig,
   withBilledModelGateway,
 } from "../../../shared/model-gateway/index";
 
-/** The vision profile YouTube transcription runs on; never the default vision profile. */
-export const YOUTUBE_TRANSCRIPT_PROFILE_ALIAS = "youtube-transcript";
+/**
+ * The service YouTube transcription runs on. It belongs to the YouTube
+ * feature, not to the model gateway configuration: it is never offered as a
+ * model, never enters GLOBAL routing and does not follow OPENROUTER_ENABLED.
+ * Moving transcription to another API changes this declaration (and, for an
+ * API that is not a chat model, the package's transcript provider), never the
+ * model configuration.
+ */
+export const YOUTUBE_TRANSCRIPT_SERVICE = {
+  id: "youtube-transcript",
+  providerKind: "openrouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  model: "google/gemini-2.5-flash",
+  /** The deployment's OpenRouter credential; its presence is the only switch. */
+  apiKeyEnv: "OPENROUTER_API_KEY",
+} as const;
 
 const AUDIT_FEATURE = "ingestion";
 const BILLING_FEATURE = "ingestion.youtube";
@@ -29,28 +42,25 @@ export const YOUTUBE_TRANSCRIPT_TIMEOUT_MS = 900_000;
  */
 export const YOUTUBE_TRANSCRIPT_MAX_RETRIES = 0;
 
-async function resolveYouTubeTranscriptProfile() {
-  const profile = await resolveModelGatewayProfile({
-    kind: "vision",
-    requestedProfileAlias: YOUTUBE_TRANSCRIPT_PROFILE_ALIAS,
-    defaultRequired: false,
-  });
-  if (!profile) {
+function readYouTubeTranscriptApiKey(): string {
+  const apiKey = process.env[YOUTUBE_TRANSCRIPT_SERVICE.apiKeyEnv]?.trim();
+  if (!apiKey) {
     throw new ContentError(
       503,
       "YOUTUBE_TRANSCRIPTION_NOT_CONFIGURED",
       "YouTube transcription is not configured for this deployment.",
     );
   }
-  return profile;
+  return apiKey;
 }
 
 /**
- * Fails fast, before a source is created, when the deployment has no active
- * `youtube-transcript` profile: the source could never be transcribed.
+ * Fails fast, before a source is created, when the deployment has no
+ * credential for the transcription service: the source could never be
+ * transcribed.
  */
 export async function assertYouTubeTranscriptionConfigured(): Promise<void> {
-  await resolveYouTubeTranscriptProfile();
+  readYouTubeTranscriptApiKey();
 }
 
 /**
@@ -151,9 +161,9 @@ function toYouTubeTranscriptError(
 }
 
 /**
- * `VideoModelPort` over the billed model gateway: the `youtube-transcript`
- * vision profile, billed to the parse job's user under its own ledger key,
- * thinking off, audited like ASR transcription.
+ * `VideoModelPort` over the billed model gateway: the YouTube transcription
+ * service as a standalone provider, billed to the parse job's user under its
+ * own ledger key, thinking off, audited like ASR transcription.
  */
 export async function createBilledVideoModelPort(input: {
   billing: ContentBillingPort;
@@ -178,8 +188,17 @@ export async function createBilledVideoModelPort(input: {
     );
   }
 
-  await ensureModelConfigAvailable();
-  const profile = await resolveYouTubeTranscriptProfile();
+  const service = YOUTUBE_TRANSCRIPT_SERVICE;
+  const standaloneConfig = buildStandaloneGatewayConfig({
+    id: service.id,
+    providerKind: service.providerKind,
+    baseUrl: service.baseUrl,
+    model: service.model,
+    apiKey: readYouTubeTranscriptApiKey(),
+    supports: ["chat"],
+    timeoutMs: YOUTUBE_TRANSCRIPT_TIMEOUT_MS,
+    maxRetries: YOUTUBE_TRANSCRIPT_MAX_RETRIES,
+  });
 
   return {
     async complete(call) {
@@ -191,8 +210,8 @@ export async function createBilledVideoModelPort(input: {
         feature: AUDIT_FEATURE,
         operation: OPERATION,
         modelKind: "vision" as const,
-        modelAlias: profile.modelAlias,
-        profileAlias: profile.profileAlias,
+        modelAlias: service.id,
+        profileAlias: service.id,
         traceId: sourceId,
       };
       const attributes = { sourceId, videoUrl: call.videoUrl };
@@ -202,7 +221,7 @@ export async function createBilledVideoModelPort(input: {
         result = await withBilledModelGateway(
           {
             billing,
-            gatewayConfigId: profile.gatewayConfigId,
+            standaloneConfig,
             context: {
               teamId,
               workspaceId,
@@ -216,8 +235,8 @@ export async function createBilledVideoModelPort(input: {
           (gateway) =>
             gateway.chat.complete(
               {
-                model: profile.modelAlias,
-                profileAlias: profile.profileAlias,
+                model: service.id,
+                profileAlias: service.id,
                 messages: [
                   {
                     role: "user",
@@ -238,9 +257,9 @@ export async function createBilledVideoModelPort(input: {
                 traceId: sourceId,
                 operation: OPERATION,
                 modelKind: "vision",
-                gatewayConfigId: profile.gatewayConfigId,
-                profileAlias: profile.profileAlias,
-                modelAlias: profile.modelAlias,
+                gatewayConfigId: null,
+                profileAlias: service.id,
+                modelAlias: service.id,
                 referenceId: `source:${sourceId}:youtube-transcript`,
                 idempotencyKey: `${idempotencyKey}:youtube-transcript`,
                 timeoutMs: YOUTUBE_TRANSCRIPT_TIMEOUT_MS,
