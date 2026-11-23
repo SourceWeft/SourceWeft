@@ -1069,6 +1069,14 @@
       "exportError": "无法导出此对话。",
       "share": "分享",
       "delete": "删除",
+      "deleteDialog": {
+        "title": "删除这个对话？",
+        "description": "“{title}”将被永久删除，包括其中的消息和它创建的子智能体对话。如果它有公开链接，链接将失效。此操作无法撤销。",
+        "cancel": "取消",
+        "confirm": "删除",
+        "deleting": "正在删除…",
+        "error": "无法删除此对话。"
+      },
       "nowPrivate": "对话已设为私密",
       "nowVisible": "对话现在对工作区可见",
       "visibilityError": "无法更改此对话的可见性。",
