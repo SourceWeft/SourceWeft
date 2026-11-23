@@ -84,12 +84,18 @@ export function buildGenerationPrompt(input: {
         ? `Write ${input.count} flashcards. ${DIFFICULTY_TEXT[input.difficulty]}`
         : `Write ${input.count} quiz questions. ${DIFFICULTY_TEXT[input.difficulty]}`;
 
-  const headings = new Set(
-    input.chunks.flatMap((chunk) => (chunk.headingPath ? [chunk.headingPath] : [])),
-  );
+  // Distinct sections in source order. Naming them keeps a call from spending
+  // its whole count on the first few sections of its chunks.
+  const headings = [
+    ...new Set(
+      input.chunks.flatMap((chunk) => (chunk.headingPath ? [chunk.headingPath] : [])),
+    ),
+  ];
   const spread =
-    input.kind !== "mindmap" && headings.size > 1
-      ? " Spread them over the sections named by the chunks' heading attributes: give every section one before giving any section a second, as far as the count allows."
+    input.kind !== "mindmap" && headings.length > 1
+      ? ` Spread them over the sections below, which match the chunks' heading attributes: give every section one before giving any section a second, as far as the count allows.\nSections:\n${headings
+          .map((heading, index) => `${index + 1}. ${quoteAttribute(heading)}`)
+          .join("\n")}\n`
       : "";
 
   const focus = input.focus?.trim()
