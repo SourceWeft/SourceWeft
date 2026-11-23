@@ -37,6 +37,7 @@ async function card(input: {
   supportsIndexing?: boolean;
 }) {
   const handlers = {
+    onAddFeed: vi.fn(),
     onCancelConnector: vi.fn(),
     onConfigure: vi.fn(),
     onConnectConnector: vi.fn(),
@@ -155,4 +156,37 @@ test("a tools-only Gmail card description does not mention indexing", async () =
 
   expect(container.textContent).not.toContain("optionally index");
   expect(container.textContent).toContain("send messages you approve");
+});
+
+test("an add-only RSS card offers Add feed and never starts OAuth", async () => {
+  const rss = connectorCatalog.find((entry) => entry.id === "rss")!;
+  const onAddFeed = vi.fn();
+  const handlers = {
+    onCancelConnector: vi.fn(),
+    onConfigure: vi.fn(),
+    onConnectConnector: vi.fn(),
+    onCreateConnector: vi.fn(),
+    onDisconnect: vi.fn(),
+    onReconnectConnector: vi.fn(),
+  };
+  const mounted = await mountWithIntl(
+    createElement(ConnectorCatalogCard, {
+      item: rss,
+      connector: null,
+      status: { kind: "available", label: "Available", detail: "Ready" },
+      onAddFeed,
+      ...handlers,
+    }),
+  );
+  const buttons = Array.from(mounted.container.querySelectorAll("button"));
+  const action = buttons[buttons.length - 1]!;
+
+  expect(action.textContent).toBe("Add feed");
+  expect(action.disabled).toBe(false);
+  await act(async () => action.click());
+
+  expect(onAddFeed).toHaveBeenCalledWith(rss);
+  expect(handlers.onConnectConnector).not.toHaveBeenCalled();
+  expect(handlers.onCreateConnector).not.toHaveBeenCalled();
+  expect(handlers.onReconnectConnector).not.toHaveBeenCalled();
 });

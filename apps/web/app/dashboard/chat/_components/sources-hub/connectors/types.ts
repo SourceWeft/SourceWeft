@@ -39,6 +39,10 @@ export type ConnectorCatalogItem = {
   /** Hidden from the catalog until the backend reports the type as available.
    * Set for connectors that depend on backend rollout registration. */
   requiresBackendRegistration?: boolean;
+  /** Add-only connector: there is no account to authorize, and each feed is
+   * its own connector, so the card never reads as connected and its action
+   * adds another one (`feed_url` asks for a feed URL). */
+  addMode?: "feed_url";
   isIndexable: boolean;
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
@@ -68,6 +72,14 @@ export type ConnectorCatalogStatus = {
 export type ConnectorReadinessState = {
   reason: string;
   message: string;
+};
+
+/** Outcome of the pre-create feed check: the readiness verdict plus, when the
+ * feed was read, its title and item count (both from the check metadata). */
+export type FeedCheckResult = ConnectorReadinessState & {
+  ready: boolean;
+  title: string | null;
+  itemCount: number | null;
 };
 
 /**

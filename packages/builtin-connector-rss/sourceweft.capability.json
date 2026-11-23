@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/rss",
+  "kind": "connector",
+  "name": "RSS / Atom Connector",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "connectors": [
+    {
+      "id": "rss",
+      "title": "RSS / Atom feed",
+      "auth": {
+        "kind": "none"
+      },
+      "sync": {
+        "supportsIncremental": true,
+        "defaultFrequencyMinutes": 360,
+        "minFrequencyMinutes": 30,
+        "resources": [
+          {
+            "type": "feed_item",
+            "title": "Feed item",
+            "supportsDeleteDetection": false
+          }
+        ]
+      },
+      "actions": [],
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feedUrl"],
+        "properties": {
+          "feedUrl": {
+            "type": "string",
+            "pattern": "^https://[^/?#@\\s]{1,253}([/?#]\\S{0,2040})?$"
+          }
+        }
+      }
+    }
+  ]
+}

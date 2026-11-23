@@ -22,8 +22,7 @@ function normalizeJsonComparable(value: unknown): unknown {
     const entries = Object.entries(value as Record<string, unknown>)
       .map(([key, item]) => [key, normalizeJsonComparable(item)] as const)
       .filter(
-        (entry): entry is readonly [string, unknown] =>
-          entry[1] !== undefined,
+        (entry): entry is readonly [string, unknown] => entry[1] !== undefined,
       )
       .sort(([left], [right]) => left.localeCompare(right));
     return Object.fromEntries(entries);
@@ -52,4 +51,23 @@ export function stableJsonStringify(value: unknown): string {
 
 export function jsonValuesEqual(left: unknown, right: unknown) {
   return stableJsonStringify(left) === stableJsonStringify(right);
+}
+
+/** Recursively trims every string value so equivalent configs compare equal. */
+export function trimStrings(value: unknown): unknown {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return value.map(trimStrings);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        trimStrings(item),
+      ]),
+    );
+  }
+  return value;
+}
+
+export function comparableConfig(configJson: Record<string, unknown>) {
+  return stableJsonStringify(trimStrings(configJson));
 }

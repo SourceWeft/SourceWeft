@@ -22,6 +22,7 @@ const {
   deleteConnector,
   deleteAccount,
   create,
+  checkConfig,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   listAccounts: vi.fn(),
@@ -34,6 +35,7 @@ const {
   deleteConnector: vi.fn(),
   deleteAccount: vi.fn(),
   create: vi.fn(),
+  checkConfig: vi.fn(),
 }));
 
 const sessionState = vi.hoisted(() => ({ userId: "user-1" }));
@@ -57,6 +59,7 @@ vi.mock("../../../../../../lib/sdk", () => ({
     delete: deleteConnector,
     deleteAccount,
     create,
+    checkConfig,
   },
 }));
 
@@ -254,6 +257,7 @@ beforeEach(() => {
     deleteConnector,
     deleteAccount,
     create,
+    checkConfig,
     toastError,
     toastSuccess,
     toastInfo,
@@ -1400,4 +1404,157 @@ test("handleReconnectConnector starts authorization for the connector's provider
       value: original,
     });
   }
+});
+
+test("handleCheckFeed checks the rss config and maps title and item count", async () => {
+  checkConfig.mockResolvedValue({
+    ready: true,
+    metadata: { title: "Example Blog", itemCount: 42 },
+  });
+  await mountHook(baseInput("ws-feed"));
+
+  const result = await api().handleCheckFeed(
+    "https://example.com/feed.xml?token=SECRET-TOKEN-123",
+  );
+
+  expect(checkConfig).toHaveBeenCalledWith("ws-feed", {
+    connectorType: "rss",
+    configJson: { feedUrl: "https://example.com/feed.xml?token=SECRET-TOKEN-123" },
+  });
+  expect(result).toEqual({
+    ready: true,
+    reason: "",
+    message: "",
+    title: "Example Blog",
+    itemCount: 42,
+  });
+});
+
+test("handleCheckFeed passes the not-ready reason through without a title", async () => {
+  checkConfig.mockResolvedValue({
+    ready: false,
+    reason: "feed_timeout",
+    message: "The feed request timed out.",
+  });
+  await mountHook(baseInput("ws-feed"));
+
+  const result = await api().handleCheckFeed("https://example.com/feed.xml");
+
+  expect(result).toEqual({
+    ready: false,
+    reason: "feed_timeout",
+    message: "The feed request timed out.",
+    title: null,
+    itemCount: null,
+  });
+});
+
+test("handleCheckFeed with no workspace toasts and does not call the API", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  const result = await api().handleCheckFeed("https://example.com/feed.xml");
+
+  expect(checkConfig).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
+  expect(result.ready).toBe(false);
+});
+
+test("handleAddFeed creates the connector with the exact body, refreshes, then syncs once", async () => {
+  const created = fakeConnector({
+    id: "feed-1",
+    connectorType: "rss",
+    name: "Example Blog",
+    configJson: { feedUrl: "https://example.com/feed.xml" },
+  });
+  create.mockResolvedValue({ connector: created });
+  sync.mockResolvedValue({
+    run: {
+      id: "run1",
+      connectorId: "feed-1",
+      discoveredCount: 0,
+      indexedCount: 0,
+      failedCount: 0,
+    },
+    skipped: false,
+    alreadyRunning: false,
+  });
+  await mountHook(baseInput("ws-feed"));
+  const listCallsBefore = list.mock.calls.length;
+
+  await act(async () => {
+    await api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(create).toHaveBeenCalledWith("ws-feed", {
+    connectorType: "rss",
+    name: "Example Blog",
+    configJson: { feedUrl: "https://example.com/feed.xml" },
+    periodicIndexingEnabled: true,
+    indexingFrequencyMinutes: 360,
+  });
+  expect("oauthAccountId" in create.mock.calls[0]![1]).toBe(false);
+  expect(list.mock.calls.length).toBeGreaterThan(listCallsBefore);
+  expect(sync).toHaveBeenCalledTimes(1);
+  expect(sync).toHaveBeenCalledWith("ws-feed", "feed-1");
+});
+
+test("handleAddFeed keeps the connector and tells the person when the first sync fails to start", async () => {
+  create.mockResolvedValue({
+    connector: fakeConnector({ id: "feed-2", connectorType: "rss" }),
+  });
+  sync.mockRejectedValue(new Error("queue down"));
+  await mountHook(baseInput("ws-feed"));
+
+  await act(async () => {
+    await api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    });
+  });
+  await flush(25);
+
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(toastError).toHaveBeenCalledWith("queue down");
+});
+
+test("handleAddFeed rethrows a 409 without toasting, syncing or treating it as connected", async () => {
+  create.mockRejectedValue(
+    new HttpClientError({
+      message: "exists",
+      status: 409,
+      statusText: "Conflict",
+      code: "CONNECTOR_ALREADY_EXISTS",
+    }),
+  );
+  await mountHook(baseInput("ws-feed"));
+
+  await expect(
+    api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    }),
+  ).rejects.toMatchObject({ code: "CONNECTOR_ALREADY_EXISTS" });
+
+  expect(sync).not.toHaveBeenCalled();
+  expect(toastError).not.toHaveBeenCalled();
+  expect(toastSuccess).not.toHaveBeenCalled();
+});
+
+test("handleAddFeed with no workspace toasts and does not create", async () => {
+  await mountHook(baseInput("", { workspaceId: null }));
+
+  await expect(
+    api().handleAddFeed({
+      name: "Example Blog",
+      feedUrl: "https://example.com/feed.xml",
+    }),
+  ).rejects.toThrow("No workspace selected yet.");
+
+  expect(create).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith("No workspace selected yet.");
 });

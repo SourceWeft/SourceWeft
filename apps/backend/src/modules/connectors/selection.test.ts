@@ -36,6 +36,7 @@ function connector(
 function manifest(
   overrides: Partial<{
     selection: ConnectorManifest["selection"];
+    auth: ConnectorManifest["auth"];
   }> = {},
 ): ConnectorManifest {
   return {
@@ -637,4 +638,23 @@ test("validates describe and search results with their own schemas", async () =>
   } finally {
     warn.mockRestore();
   }
+});
+
+test("a none connector runs the action with an empty token and never reads an account", async () => {
+  const d = deps({
+    manifest: manifest({ auth: { kind: "none" } }),
+    getRuntimeToken: vi.fn().mockRejectedValue(new Error("must not be called")),
+  });
+
+  await runConnectorSelectionAction({
+    connector: connector({ oauthAccountId: null }),
+    teamId: "team_1",
+    workspaceId: "workspace_1",
+    action: "browse",
+    request: {},
+    deps: d,
+  });
+
+  assert.equal(d.getRuntimeTokenMock.mock.calls.length, 0);
+  assert.equal(d.executeAction.mock.calls[0]?.[0].accessToken, "");
 });

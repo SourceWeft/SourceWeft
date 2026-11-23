@@ -7,6 +7,7 @@ import {
   type ConnectorSelectionSearchResult,
 } from "@sourceweft/contracts";
 import { logger } from "../../shared/logger";
+import { resolveCredential } from "./credential";
 import { ConnectorError, isConnectorError } from "./errors";
 import type {
   ConnectorAdapter,
@@ -240,11 +241,10 @@ export async function runConnectorSelectionAction(input: {
   // so provider text never escapes.
   let accessToken: string;
   try {
-    accessToken = await deps.getRuntimeToken({
+    accessToken = await resolveCredential(deps, {
       teamId,
       workspaceId,
-      accountId: connector.oauthAccountId,
-      connectorType: connector.connectorType,
+      connector,
     });
   } catch (error: unknown) {
     throw toSelectionBoundaryError(error, errorContext);

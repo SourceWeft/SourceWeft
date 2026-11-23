@@ -446,7 +446,7 @@ test("composio mode refreshOAuthToken is a terminal reauthorization (401), not a
   // (isRetryableOAuthRefreshError retries only 429 and >= 500), so the account
   // is marked for reconnection instead of retried forever.
   await assert.rejects(
-    adapter.refreshOAuthToken({ refreshToken: "refresh", scopes: [] }),
+    adapter.refreshOAuthToken!({ refreshToken: "refresh", scopes: [] }),
     { statusCode: 401, code: "GMAIL_REAUTH_REQUIRED" },
   );
 });
@@ -526,7 +526,7 @@ test("revokeAuthorization resolves without calling the broker when the credentia
 test("composio mode refuses the standard OAuth2 flow and mailbox indexing", async () => {
   const adapter = composioAdapter(fakeBroker());
   await assert.rejects(
-    adapter.exchangeOAuthCode({
+    adapter.exchangeOAuthCode!({
       code: "code",
       redirectUri: "https://sourceweft.example/callback",
       scopes: [],

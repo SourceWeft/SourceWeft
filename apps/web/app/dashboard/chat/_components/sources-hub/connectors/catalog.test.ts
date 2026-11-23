@@ -5,7 +5,11 @@ import {
   connectorCatalogCapabilities,
   connectorCatalogForAvailableTypes,
 } from "./catalog";
-import { getCatalogStatus } from "./components";
+import {
+  formatConnectorReadinessSummary,
+  getCatalogConnector,
+  getCatalogStatus,
+} from "./components";
 import en from "../../../../../../messages/en.json";
 import zhCN from "../../../../../../messages/zh-CN.json";
 
@@ -401,4 +405,127 @@ describe("reconnect status", () => {
       detail: "connectors.detail.disabled",
     });
   });
+});
+
+describe("rss catalog entry", () => {
+  const rss = connectorCatalog.find((item) => item.id === "rss")!;
+  const t = ((key: string, values?: Record<string, unknown>) =>
+    values ? `${key} ${JSON.stringify(values)}` : key) as never;
+
+  test("is hidden until the backend registers the type", () => {
+    expect(
+      connectorCatalogForAvailableTypes(["notion"]).map((i) => i.id),
+    ).not.toContain("rss");
+    expect(
+      connectorCatalogForAvailableTypes(["notion", "rss"]).map((i) => i.id),
+    ).toContain("rss");
+  });
+
+  test("matches the add-only feed entry", () => {
+    expect(rss).toMatchObject({
+      id: "rss",
+      name: "RSS / Atom",
+      category: "Knowledge & Docs",
+      description:
+        "Index posts from any public RSS or Atom feed and keep them in sync.",
+      capabilities: ["Feeds", "Scheduled sync"],
+      requiresBackendRegistration: true,
+      isIndexable: true,
+      supportsActions: false,
+      supportsPeriodicSync: true,
+      supportsWebhook: false,
+      addMode: "feed_url",
+    });
+    expect(rss.icon).toBeDefined();
+    expect(rss.postOAuthMode).toBeUndefined();
+  });
+
+  test("never shows as connected, however many feeds exist", () => {
+    const feeds = ["f1", "f2"].map((id) => ({
+      id,
+      name: `Feed ${id}`,
+      status: "active" as const,
+      meta: "",
+      raw: {
+        id,
+        connectorType: "rss",
+        status: "active",
+        configJson: { feedUrl: "https://example.com/feed.xml" },
+        lastError: null,
+        lastIndexedAt: null,
+      } as unknown as SourceConnector,
+    }));
+    expect(getCatalogConnector(rss, feeds)).toBeNull();
+    expect(
+      getCatalogStatus(
+        {
+          item: rss,
+          connectors: feeds,
+          accounts: [],
+          connectorBusyById: { f1: false },
+          connectorWaitingByType: {},
+          webhookConfigsById: {},
+          t,
+        },
+        "en",
+      ),
+    ).toEqual({
+      kind: "available",
+      label: "connectors.status.available",
+      detail: "connectors.detail.availableAddFeed",
+    });
+  });
+
+  test("OAuth cards still resolve their connector", () => {
+    const notion = connectorCatalog.find((item) => item.id === "notion")!;
+    const connector = {
+      id: "n1",
+      name: "Notion",
+      status: "active" as const,
+      meta: "",
+      raw: { id: "n1", connectorType: "notion" } as SourceConnector,
+    };
+    expect(getCatalogConnector(notion, [connector])).toBe(connector);
+  });
+
+  const READINESS_REASONS = [
+    "feed_blocked_address",
+    "feed_timeout",
+    "feed_too_large",
+    "feed_not_a_feed",
+    "feed_http_error",
+    "feed_unreachable",
+    "feed_https_required",
+  ];
+
+  test("each feed failure reason maps to its localized summary", () => {
+    for (const reason of READINESS_REASONS) {
+      expect(formatConnectorReadinessSummary({ reason, message: "x" }, t)).toBe(
+        `connectors.readiness.${reason}`,
+      );
+    }
+  });
+
+  for (const catalogName of ["en", "zh-CN"] as const) {
+    const messages = (catalogName === "en" ? en : zhCN) as unknown as {
+      dashboardSourcesHub: {
+        connectors: {
+          cta: Record<string, string>;
+          detail: Record<string, string>;
+          readiness: Record<string, string>;
+          rss: Record<string, string>;
+        };
+      };
+    };
+
+    test(`${catalogName} has the RSS copy keys`, () => {
+      const { connectors } = messages.dashboardSourcesHub;
+      expect(connectors.cta.addFeed?.trim()).toBeTruthy();
+      expect(connectors.detail.availableAddFeed?.trim()).toBeTruthy();
+      expect(connectors.rss.feedUrl?.trim()).toBeTruthy();
+      for (const reason of READINESS_REASONS) {
+        expect(connectors.readiness[reason]?.trim(), reason).toBeTruthy();
+      }
+    });
+  }
 });

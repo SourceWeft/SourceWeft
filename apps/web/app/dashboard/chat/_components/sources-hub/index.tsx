@@ -487,6 +487,8 @@ export function SourcesHub({
     handleCancelConnector,
     handleCopyWebhook,
     handleSyncConnector,
+    handleCheckFeed,
+    handleAddFeed,
     handleToggleConnectorStatus,
     handleSaveConnectorSettings,
     handleConfirmDisconnectConnector,
@@ -1467,12 +1469,14 @@ export function SourcesHub({
         isLoading={isLoadingConnectors}
         loadingError={connectorsLoadingError}
         onCancelConnector={handleCancelConnector}
+        onCheckFeed={handleCheckFeed}
         onConnectConnector={handleConnectConnector}
         onCopyWebhook={handleCopyWebhook}
         onCreateConnector={(item) => void handleCreateConnector(item)}
         onDisconnectConnector={setPendingDisconnectConnector}
         onOpenChange={setIsManageConnectorsOpen}
         onOpenSettings={openConnectorSettings}
+        onSubmitFeed={handleAddFeed}
         onSyncConnector={(connector) => void handleSyncConnector(connector)}
         onToggleConnectorStatus={(connector) =>
           void handleToggleConnectorStatus(connector)

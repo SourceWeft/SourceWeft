@@ -18,6 +18,7 @@
     "@sourceweft/builtin-connector-gmail": "workspace:*",
     "@sourceweft/builtin-connector-google-drive": "workspace:*",
     "@sourceweft/builtin-connector-dropbox": "workspace:*",
+    "@sourceweft/builtin-connector-rss": "workspace:*",
     "@sourceweft/builtin-connector-github": "workspace:*",
     "@sourceweft/builtin-connector-linear": "workspace:*",
     "@sourceweft/builtin-connector-jira": "workspace:*",

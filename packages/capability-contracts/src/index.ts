@@ -402,7 +402,7 @@ export const documentParserContributionSchema = z.object({
   command: capabilityCommandSchema.optional(),
 });
 
-export const connectorAuthSchema = z.object({
+const oauth2ConnectorAuthSchema = z.object({
   kind: z.literal("oauth2"),
   authorizationUrl: z.string().min(1),
   tokenUrl: z.string().min(1),
@@ -410,6 +410,15 @@ export const connectorAuthSchema = z.object({
   authorizationParams: z.record(z.string(), z.string()).default({}),
   sendScope: z.boolean().default(true),
 });
+
+const noneConnectorAuthSchema = z.object({
+  kind: z.literal("none"),
+});
+
+export const connectorAuthSchema = z.discriminatedUnion("kind", [
+  oauth2ConnectorAuthSchema,
+  noneConnectorAuthSchema,
+]);
 
 export const connectorResourceSchema = z.object({
   type: z.string().min(1),

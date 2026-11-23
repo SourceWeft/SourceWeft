@@ -129,7 +129,7 @@ test("exchange maps the Atlassian account", async () => {
     redirectUri: CALLBACK,
     scopes: ["read:page:confluence"],
   };
-  const token = await confluence.exchangeOAuthCode(input);
+  const token = await confluence.exchangeOAuthCode!(input);
 
   assert.equal(token.accessToken, "access-token");
   assert.equal(token.refreshToken, "refresh-token");
@@ -155,7 +155,7 @@ test("exchange falls back displayName to email, then account id", async () => {
   }) as typeof fetch;
 
   const confluence = adapter(fetcher);
-  const token = await confluence.exchangeOAuthCode({
+  const token = await confluence.exchangeOAuthCode!({
     code: "auth-code",
     redirectUri: CALLBACK,
     scopes: [],
@@ -186,7 +186,7 @@ test("refresh delegates and returns the rotated token", async () => {
     refreshToken: "old-refresh-token",
     scopes: [],
   };
-  const token = await confluence.refreshOAuthToken(input);
+  const token = await confluence.refreshOAuthToken!(input);
   assert.equal(token.accessToken, "new-access-token");
   assert.equal(token.refreshToken, "new-refresh-token");
   // Refresh delegates verbatim: it does not call /me or add identity fields.
@@ -196,7 +196,7 @@ test("refresh delegates and returns the rotated token", async () => {
 test("refresh without a configured secret makes no request", async () => {
   const confluence = adapter(neverCalledFetcher(), { clientSecret: "" });
   await assert.rejects(
-    confluence.refreshOAuthToken({ refreshToken: "old-refresh-token", scopes: [] }),
+    confluence.refreshOAuthToken!({ refreshToken: "old-refresh-token", scopes: [] }),
     (error: unknown) =>
       error instanceof AtlassianApiError &&
       error.statusCode === 503 &&
@@ -207,7 +207,7 @@ test("refresh without a configured secret makes no request", async () => {
 test("exchange without a configured client id makes no request", async () => {
   const confluence = adapter(neverCalledFetcher(), { clientId: "" });
   await assert.rejects(
-    confluence.exchangeOAuthCode({
+    confluence.exchangeOAuthCode!({
       code: "auth-code",
       redirectUri: CALLBACK,
       scopes: [],
@@ -222,7 +222,7 @@ test("exchange without a configured client id makes no request", async () => {
 test("exchange without a configured secret makes no request", async () => {
   const confluence = adapter(neverCalledFetcher(), { clientSecret: "" });
   await assert.rejects(
-    confluence.exchangeOAuthCode({
+    confluence.exchangeOAuthCode!({
       code: "auth-code",
       redirectUri: CALLBACK,
       scopes: [],
@@ -240,8 +240,8 @@ test("a wrong secret is a retryable 503, never a reauth", async () => {
   const confluence = adapter(fetcher);
   for (const run of [
     () =>
-      confluence.exchangeOAuthCode({ code: "auth-code", redirectUri: CALLBACK, scopes: [] }),
-    () => confluence.refreshOAuthToken({ refreshToken: "old-refresh-token", scopes: [] }),
+      confluence.exchangeOAuthCode!({ code: "auth-code", redirectUri: CALLBACK, scopes: [] }),
+    () => confluence.refreshOAuthToken!({ refreshToken: "old-refresh-token", scopes: [] }),
   ]) {
     await assert.rejects(
       run(),
@@ -257,7 +257,7 @@ test("an unusable token response is a retryable 503, never a reauth", async () =
   const fetcher = (async () => json({ expires_in: 3600 })) as typeof fetch;
   const confluence = adapter(fetcher);
   await assert.rejects(
-    confluence.refreshOAuthToken({ refreshToken: "old-refresh-token", scopes: [] }),
+    confluence.refreshOAuthToken!({ refreshToken: "old-refresh-token", scopes: [] }),
     (error: unknown) =>
       error instanceof AtlassianApiError &&
       error.statusCode === 503 &&

@@ -22,6 +22,7 @@ import {
   connectorActionApprovalPayload,
 } from "./agent-tool-payload";
 import { connectorToolResult } from "./agent-tool-errors";
+import { resolveCredential } from "./credential";
 import { ConnectorError, toConnectorError } from "./errors";
 import {
   resolveConnectorActionExecutionRef,
@@ -625,12 +626,16 @@ export async function createConnectorActionTools(
                   );
                 }
 
-                const accessToken = await connectorOAuthService.getRuntimeToken(
+                const accessToken = await resolveCredential(
+                  {
+                    getRuntimeToken: (input) =>
+                      connectorOAuthService.getRuntimeToken(input),
+                    getManifest: (type) => connectorRegistry.getManifest(type),
+                  },
                   {
                     teamId: context.teamId,
                     workspaceId: context.workspaceId,
-                    accountId: connector.oauthAccountId,
-                    connectorType: connector.connectorType,
+                    connector,
                   },
                 );
                 const adapter = connectorRegistry.getAdapter(

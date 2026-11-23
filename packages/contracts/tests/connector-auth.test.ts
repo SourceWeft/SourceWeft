@@ -56,3 +56,17 @@ test("rejects an oauth2 manifest without a tokenUrl", () => {
   );
   assert.equal(result.success, false);
 });
+
+test("accepts a none auth manifest", () => {
+  const result = connectorManifestSchema.safeParse(
+    baseManifest({ kind: "none" }),
+  );
+  assert.equal(result.success, true);
+});
+
+test("rejects an unknown auth kind", () => {
+  const result = connectorManifestSchema.safeParse(
+    baseManifest({ kind: "other" }),
+  );
+  assert.equal(result.success, false);
+});

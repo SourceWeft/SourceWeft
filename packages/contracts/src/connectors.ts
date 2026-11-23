@@ -112,9 +112,19 @@ const brokeredAuthManifestSchema = z.object({
   scopes: z.array(z.string().min(1)),
 });
 
+/**
+ * A connector that needs no account authorization (e.g. a public feed). It
+ * has no OAuth exchange or refresh; its source is read with the connector's
+ * own configuration alone.
+ */
+const noneAuthManifestSchema = z.object({
+  kind: z.literal("none"),
+});
+
 const connectorAuthManifestSchema = z.discriminatedUnion("kind", [
   oauth2AuthManifestSchema,
   brokeredAuthManifestSchema,
+  noneAuthManifestSchema,
 ]);
 
 export const connectorResourceSpecSchema = z.object({
@@ -455,6 +465,18 @@ export const createConnectorRequestSchema = z.object({
   indexingFrequencyMinutes: z.number().int().positive().optional(),
 });
 
+export const checkConnectorConfigRequestSchema = z.object({
+  connectorType: z.string().trim().min(1),
+  configJson: jsonObjectSchema,
+});
+
+export const checkConnectorConfigResponseSchema = z.object({
+  ready: z.boolean(),
+  reason: z.string().optional(),
+  message: z.string().optional(),
+  metadata: jsonObjectSchema.optional(),
+});
+
 export const updateConnectorRequestSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   oauthAccountId: z.string().trim().min(1).optional(),
@@ -647,6 +669,12 @@ export type ListConnectorOAuthAccountsResponse = z.infer<
 >;
 export type CreateConnectorRequest = z.infer<
   typeof createConnectorRequestSchema
+>;
+export type CheckConnectorConfigRequest = z.infer<
+  typeof checkConnectorConfigRequestSchema
+>;
+export type CheckConnectorConfigResponse = z.infer<
+  typeof checkConnectorConfigResponseSchema
 >;
 export type CreateConnectorResponse = z.infer<
   typeof createConnectorResponseSchema
@@ -1030,8 +1058,10 @@ export interface ConnectorPersonalDataSupport {
 export interface ConnectorAdapter {
   capabilityId?: string;
   getManifest(): ConnectorManifest;
-  exchangeOAuthCode(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
-  refreshOAuthToken(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
+  /** Standard OAuth2 only; absent on `none` and brokered adapters. */
+  exchangeOAuthCode?(input: OAuthCodeExchangeInput): Promise<OAuthTokenSet>;
+  /** Standard OAuth2 only; absent on `none` and brokered adapters. */
+  refreshOAuthToken?(input: OAuthRefreshInput): Promise<OAuthTokenSet>;
   /**
    * Brokered auth only: start a broker-hosted authorization attempt and
    * return the URL to send the owner to.

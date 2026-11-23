@@ -233,7 +233,7 @@ test("exchange maps the account", async () => {
       throw new Error(`Unexpected request: ${value}`);
     }) as typeof fetch,
   });
-  const token = await dbx.exchangeOAuthCode({
+  const token = await dbx.exchangeOAuthCode!({
     code: "auth-code",
     redirectUri: "https://sourceweft.example/v1/connectors/oauth/dropbox/callback",
     scopes: ["account_info.read"],
@@ -260,7 +260,7 @@ test("exchange falls back to email when display name is absent", async () => {
       throw new Error(`Unexpected request: ${value}`);
     }) as typeof fetch,
   });
-  const token = await dbx.exchangeOAuthCode({
+  const token = await dbx.exchangeOAuthCode!({
     code: "auth-code",
     redirectUri: "https://sourceweft.example/v1/connectors/oauth/dropbox/callback",
     scopes: [],
@@ -276,7 +276,7 @@ test("refresh delegates to the client", async () => {
     fetcher: (async () =>
       json({ access_token: "new-access-token", expires_in: 3600 })) as typeof fetch,
   });
-  const token = await dbx.refreshOAuthToken({ refreshToken: "stored-refresh-token", scopes: [] });
+  const token = await dbx.refreshOAuthToken!({ refreshToken: "stored-refresh-token", scopes: [] });
   assert.equal(token.accessToken, "new-access-token");
   assert.equal(token.refreshToken, undefined);
 });

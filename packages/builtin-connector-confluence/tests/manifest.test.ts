@@ -44,8 +44,8 @@ test("backend manifest exposes the five scopes, auth params, empty sync resource
   const manifest = backendManifest();
 
   assert.equal(manifest.type, "confluence");
-  assert.deepEqual(manifest.auth.scopes, [...CONFLUENCE_SCOPES]);
-  assert.deepEqual(manifest.auth.scopes, [
+  assert.deepEqual(oauth2Auth(manifest).scopes, [...CONFLUENCE_SCOPES]);
+  assert.deepEqual(oauth2Auth(manifest).scopes, [
     "read:space:confluence",
     "read:page:confluence",
     "read:content-details:confluence",

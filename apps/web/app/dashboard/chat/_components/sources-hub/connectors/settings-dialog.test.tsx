@@ -256,6 +256,64 @@ test("today's indexable Gmail is advertised as indexable in the settings dialog"
   expect(text).toContain("Periodic sync");
 });
 
+function rssConnector(
+  configJson: Record<string, unknown>,
+  indexingFrequencyMinutes: number | null = 360,
+): ConnectorItem {
+  const item = gmailConnector(configJson);
+  return {
+    ...item,
+    id: "rss-1",
+    name: "Example feed",
+    raw: {
+      ...item.raw,
+      id: "rss-1",
+      connectorType: "rss",
+      name: "Example feed",
+      oauthAccountId: null,
+      periodicIndexingEnabled: true,
+      indexingFrequencyMinutes,
+    } as SourceConnector,
+  };
+}
+
+test("an RSS connector shows the feed URL without its token query", async () => {
+  const connector = rssConnector({
+    feedUrl: "https://feeds.example.com/feed.xml?token=SECRET-TOKEN-123",
+  });
+  const { props } = baseProps(connector, {
+    rss: { supportsIndexing: true, broker: null },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+
+  const text = document.body.textContent ?? "";
+  expect(text).toContain("https://feeds.example.com/feed.xml");
+  expect(text).not.toContain("SECRET-TOKEN-123");
+  expect(text).not.toContain("token=");
+});
+
+test("an RSS connector's custom interval cannot go below 30 minutes", async () => {
+  const connector = rssConnector(
+    { feedUrl: "https://example.com/feed.xml" },
+    45,
+  );
+  const { props } = baseProps(connector, {
+    rss: { supportsIndexing: true, broker: null },
+  });
+
+  await mountWithIntl(createElement(ConnectorSettingsDialog, props));
+  await flush(5);
+  await selectTab("Configuration");
+
+  const input = document.querySelector<HTMLInputElement>(
+    'input[type="number"]',
+  );
+  expect(input?.min).toBe("30");
+});
+
 test("reconnecting a Composio-brokered Gmail shows the Composio notice before going to Google", async () => {
   listGmailLabels.mockResolvedValue({ labels: [] });
   const connector = gmailConnector({ liveSearchEnabled: true });

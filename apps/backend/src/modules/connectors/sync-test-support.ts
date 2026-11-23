@@ -171,6 +171,8 @@ export function fakeAdapter(
       actions: [],
       configSchema: { type: "object" },
     }),
+    exchangeOAuthCode: async () => ({ accessToken: "unused" }),
+    refreshOAuthToken: async () => ({ accessToken: "unused" }),
     async *discover() {},
     discoverPages,
     extract,
@@ -270,6 +272,8 @@ export function makeSetup(ctx: ConnectorTestContext) {
     /** Stored as the connector's `configJson`, read back by the adapter as
      * `discoverPages`/`extract`'s `config` input. */
     configJson?: Record<string, unknown>;
+    /** Replaces the default `async () => "token"` runtime-token lookup. */
+    getRuntimeToken?: (input: never) => Promise<string>;
   }) {
     const teamId = randomUUID();
     const workspaceId = randomUUID();
@@ -302,7 +306,7 @@ export function makeSetup(ctx: ConnectorTestContext) {
       billing.port,
       new connectorRuntime.ConnectorRegistry([fake.adapter]),
       {
-        getRuntimeToken: async () => "token",
+        getRuntimeToken: input.getRuntimeToken ?? (async () => "token"),
       } as unknown as InstanceType<
         typeof connectorRuntime.ConnectorOAuthService
       >,

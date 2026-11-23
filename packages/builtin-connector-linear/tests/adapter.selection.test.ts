@@ -146,7 +146,7 @@ test("exchange maps organization and viewer to the account", async () => {
       ],
     ]),
   });
-  const token = await adapter(fetcher).exchangeOAuthCode({
+  const token = await adapter(fetcher).exchangeOAuthCode!({
     code: "auth-code",
     redirectUri: "https://sourceweft.example/v1/connectors/oauth/linear/callback",
     scopes: ["read"],
@@ -166,7 +166,7 @@ test("refresh without a configured secret is LINEAR_UNAVAILABLE and makes no req
     fetcher,
   });
   await assert.rejects(
-    noSecret.refreshOAuthToken({ refreshToken: "stored-refresh-token", scopes: ["read"] }),
+    noSecret.refreshOAuthToken!({ refreshToken: "stored-refresh-token", scopes: ["read"] }),
     (error: unknown) =>
       error instanceof LinearAdapterError &&
       error.statusCode === 503 &&

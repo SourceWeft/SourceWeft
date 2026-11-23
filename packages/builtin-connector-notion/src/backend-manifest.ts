@@ -18,20 +18,26 @@ export function toBackendNotionConnectorManifest(
   contribution: ConnectorContribution,
   config: BackendNotionConnectorRuntimeConfig,
 ): ConnectorManifest {
+  const auth = contribution.auth;
+  if (auth.kind !== "oauth2") {
+    throw new Error(
+      `Notion connector contribution must use oauth2 auth, got ${auth.kind}`,
+    );
+  }
   return {
     type: contribution.id,
     displayName: contribution.title,
     auth: {
-      kind: contribution.auth.kind,
-      authorizationUrl: contribution.auth.authorizationUrl,
-      tokenUrl: contribution.auth.tokenUrl,
-      scopes: [...contribution.auth.scopes],
+      kind: auth.kind,
+      authorizationUrl: auth.authorizationUrl,
+      tokenUrl: auth.tokenUrl,
+      scopes: [...auth.scopes],
       redirectUri: config.redirectUri,
       authorizationParams: {
-        ...contribution.auth.authorizationParams,
+        ...auth.authorizationParams,
         client_id: config.clientId,
       },
-      sendScope: contribution.auth.sendScope,
+      sendScope: auth.sendScope,
     },
     sync: {
       supportsIncremental: contribution.sync.supportsIncremental,

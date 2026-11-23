@@ -98,7 +98,7 @@ test("OAuth records actual read and send grants and mailbox identity", async () 
     }
     throw new Error("Unexpected request");
   });
-  const token = await gmail.exchangeOAuthCode({
+  const token = await gmail.exchangeOAuthCode!({
     code: "code",
     redirectUri: "https://sourceweft.example/callback",
     scopes: [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE],
@@ -114,7 +114,7 @@ test("OAuth records a declined send grant without assuming requested scopes", as
       ? json({ emailAddress: "reader@example.com", historyId: "100" })
       : json({ access_token: "access-token", scope: GMAIL_READ_SCOPE }),
   );
-  const token = await gmail.exchangeOAuthCode({
+  const token = await gmail.exchangeOAuthCode!({
     code: "code",
     redirectUri: "https://sourceweft.example/callback",
     scopes: [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE],

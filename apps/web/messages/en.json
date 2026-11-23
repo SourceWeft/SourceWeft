@@ -3243,12 +3243,22 @@
       "readinessNoPages": "Connected · No pages shared",
       "readinessSetupRequired": "Connected · Setup required",
       "readinessNotReady": "Connector is not ready to sync.",
+      "readiness": {
+        "feed_blocked_address": "This feed points to an address SourceWeft cannot fetch from. Use a public https feed URL.",
+        "feed_timeout": "The feed server took too long to respond.",
+        "feed_too_large": "The feed is too large to index.",
+        "feed_not_a_feed": "This address does not serve an RSS or Atom feed.",
+        "feed_http_error": "The feed server returned an error.",
+        "feed_unreachable": "The feed server could not be reached.",
+        "feed_https_required": "Feed URLs must start with https://."
+      },
       "cta": {
         "connecting": "Connecting...",
         "connected": "Connected",
         "configure": "Configure",
         "connect": "Connect",
-        "reconnect": "Reconnect"
+        "reconnect": "Reconnect",
+        "addFeed": "Add feed"
       },
       "detail": {
         "syncing": "A connector operation is running.",
@@ -3260,7 +3270,8 @@
         "lastSync": "Last sync {date}",
         "connectedAutoCreate": "Authorization exists without an active connector. Reconnect to create a connector.",
         "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
-        "available": "Ready to connect with {name} OAuth."
+        "available": "Ready to connect with {name} OAuth.",
+        "availableAddFeed": "Add the URL of a public RSS or Atom feed."
       },
       "syncBlock": {
         "pagesLimit": "Ingestion pages are used up. The last run indexed {count} items before pausing; syncing resumes automatically when pages are available.",
@@ -3289,6 +3300,21 @@
         "Communication": "Communication"
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
+      "rss": {
+        "feedUrl": "Feed URL",
+        "dialog": {
+          "description": "Enter the URL of a public RSS or Atom feed. SourceWeft checks it first, then indexes its posts and keeps them in sync.",
+          "nameLabel": "Name (optional)",
+          "check": "Check feed",
+          "checking": "Checking...",
+          "found": "Feed found",
+          "itemCount": "{count, plural, one {# item} other {# items}}",
+          "invalidUrl": "Enter an https:// feed URL without a username or password.",
+          "checkFailed": "Could not check this feed. Try again.",
+          "nameConflict": "A connector with this name or this feed already exists in this workspace. Change the name, or use the existing one.",
+          "addFailed": "Failed to add the feed."
+        }
+      },
       "gmail": {
         "modeTitle": "Choose how to use Gmail",
         "modeDescription": "Choose a starting mode before connecting. You can change it later in connector settings.",

@@ -643,6 +643,8 @@ test("expired provider cursor resets durable progress before the next full scan"
   };
   const adapter = {
     getManifest: () => manifest,
+    exchangeOAuthCode: async () => ({ accessToken: "unused" }),
+    refreshOAuthToken: async () => ({ accessToken: "unused" }),
     async *discover() {},
     async *discoverPages() {
       if (discoveryMode === "item-failure") {

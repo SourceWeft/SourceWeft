@@ -7,11 +7,24 @@ import {
   type EndpointPolicy,
 } from "./endpoint-policy";
 
-/** One auth operation or MCP connection owns this scope and closes its agents. */
+/**
+ * One auth operation or MCP connection owns this scope and closes its agents.
+ *
+ * `allowCrossOriginRedirects` (default false) is for credential-free public
+ * fetches only. When true, a cross-origin redirect is followed only if the
+ * target passes the endpoint policy and the pinned-DNS socket check, and the
+ * credential headers are dropped from that hop. A request body is NOT
+ * dropped: it is still forwarded on a cross-origin 307/308, so this option is
+ * only for body-less (GET) callers.
+ */
 export function createControlledFetch(
   policyInput: EndpointPolicy,
-  options: { lookup?: EndpointLookup } = {},
+  options: {
+    lookup?: EndpointLookup;
+    allowCrossOriginRedirects?: boolean;
+  } = {},
 ) {
+  const allowCrossOriginRedirects = options.allowCrossOriginRedirects ?? false;
   const policy = {
     enforceAddressChecks: policyInput.enforceAddressChecks,
     allowedInternalOrigins: [...policyInput.allowedInternalOrigins],
@@ -87,7 +100,10 @@ export function createControlledFetch(
           // The caller follows redirects itself (the MCP SDK does since 1.32).
           // Apply the same target policy we apply when following, so a hostile
           // redirect still aborts the scope instead of being returned
-          // unfollowed and silently ignored by the caller.
+          // unfollowed and silently ignored by the caller. This branch is
+          // intentionally NOT affected by allowCrossOriginRedirects: a caller
+          // that follows redirects itself would re-send its own headers, so a
+          // cross-origin hop stays rejected here.
           let resolved: string;
           try {
             resolved = new URL(location, url).toString();
@@ -125,7 +141,11 @@ export function createControlledFetch(
         );
         // Reject rather than guessing which custom headers or body fields hold
         // credentials. OAuth may still make separate requests to its issuer.
-        if (next.origin !== url.origin)
+        // Opt-in callers hold no credentials of their own; for them a
+        // cross-origin hop is allowed and the known credential headers are
+        // stripped below.
+        const crossOrigin = next.origin !== url.origin;
+        if (crossOrigin && !allowCrossOriginRedirects)
           throw new EndpointPolicyError(
             "redirect",
             "Cross-origin endpoint redirects are not allowed; configure the destination endpoint directly.",
@@ -134,6 +154,10 @@ export function createControlledFetch(
           (response.status === 303 && request.method !== "HEAD") ||
           ([301, 302].includes(response.status) && request.method === "POST");
         const headers = new Headers(request.headers);
+        if (crossOrigin) {
+          for (const name of ["authorization", "cookie", "proxy-authorization"])
+            headers.delete(name);
+        }
         if (becomesGet) {
           for (const name of [
             "content-type",

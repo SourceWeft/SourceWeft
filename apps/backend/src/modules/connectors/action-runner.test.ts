@@ -167,6 +167,7 @@ test("ConnectorActionRunner logs raw adapter responses on approved execution", a
   } as unknown as ConnectorAdapter;
   const registry = {
     getAdapter: vi.fn(() => adapter),
+    getManifest: vi.fn(() => ({ auth: { kind: "oauth2" } })),
   };
   const oauthService = {
     getRuntimeToken: vi.fn().mockResolvedValue("runtime-token"),
@@ -223,7 +224,10 @@ test("ConnectorActionRunner marks the account for reauthorization when the provi
   const adapter = {
     executeAction: vi.fn().mockRejectedValue(refused),
   } as unknown as ConnectorAdapter;
-  const registry = { getAdapter: vi.fn(() => adapter) };
+  const registry = {
+    getAdapter: vi.fn(() => adapter),
+    getManifest: vi.fn(() => ({ auth: { kind: "oauth2" } })),
+  };
   const oauthService = {
     getRuntimeToken: vi.fn().mockResolvedValue("runtime-token"),
     markBrokeredAccountReauthRequired: vi.fn().mockResolvedValue(undefined),

@@ -3243,12 +3243,22 @@
       "readinessNoPages": "已连接 · 未共享任何页面",
       "readinessSetupRequired": "已连接 · 需要设置",
       "readinessNotReady": "连接器尚未就绪，无法同步。",
+      "readiness": {
+        "feed_blocked_address": "该订阅源指向 SourceWeft 无法访问的网络地址。请使用公开的 https 订阅源网址。",
+        "feed_timeout": "订阅源服务器响应超时。",
+        "feed_too_large": "订阅源过大，无法建立索引。",
+        "feed_not_a_feed": "该网址提供的不是 RSS 或 Atom 订阅源。",
+        "feed_http_error": "订阅源服务器返回了错误。",
+        "feed_unreachable": "无法连接到订阅源服务器。",
+        "feed_https_required": "订阅源网址必须以 https:// 开头。"
+      },
       "cta": {
         "connecting": "连接中…",
         "connected": "已连接",
         "configure": "配置",
         "connect": "连接",
-        "reconnect": "重新连接"
+        "reconnect": "重新连接",
+        "addFeed": "添加订阅源"
       },
       "detail": {
         "syncing": "连接器操作正在运行。",
@@ -3260,7 +3270,8 @@
         "lastSync": "上次同步 {date}",
         "connectedAutoCreate": "已存在授权但没有活跃的连接器。重新连接以创建连接器。",
         "connectedConfigure": "OAuth 已连接。配置此连接器以启用同步。",
-        "available": "可通过 {name} OAuth 进行连接。"
+        "available": "可通过 {name} OAuth 进行连接。",
+        "availableAddFeed": "添加公开 RSS 或 Atom 订阅源的网址。"
       },
       "syncBlock": {
         "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
@@ -3289,6 +3300,21 @@
         "Communication": "沟通协作"
       },
       "settingsDescription": "连接器设置、执行历史和提供方事件。",
+      "rss": {
+        "feedUrl": "订阅源网址",
+        "dialog": {
+          "description": "输入公开 RSS 或 Atom 订阅源的网址。SourceWeft 会先检查订阅源，再为其中的文章建立索引并保持同步。",
+          "nameLabel": "名称（可选）",
+          "check": "检查订阅源",
+          "checking": "检查中…",
+          "found": "已找到订阅源",
+          "itemCount": "{count, plural, other {# 篇文章}}",
+          "invalidUrl": "请输入以 https:// 开头的订阅源网址，且不要包含用户名或密码。",
+          "checkFailed": "无法检查此订阅源，请重试。",
+          "nameConflict": "此工作区中已存在同名连接器，或已添加过相同的订阅源。请更改名称，或使用已有的连接器。",
+          "addFailed": "添加订阅源失败。"
+        }
+      },
       "gmail": {
         "modeTitle": "选择 Gmail 用途",
         "modeDescription": "连接前选择初始模式，之后仍可在连接器设置中修改。",
