@@ -241,12 +241,18 @@ test("a feed cursor naming another tenant's item is ignored, not a cross-tenant 
   const page = await f.service.listFeed(tenantA.ownerCaller, {
     before: itemB.id,
   });
-  assert.deepEqual(page.items.map((item) => item.id), [itemA.id]);
+  assert.deepEqual(
+    page.items.map((item) => item.id),
+    [itemA.id],
+  );
 
   const otherPage = await f.service.listFeed(tenantB.ownerCaller, {
     before: itemA.id,
   });
-  assert.deepEqual(otherPage.items.map((item) => item.id), [itemB.id]);
+  assert.deepEqual(
+    otherPage.items.map((item) => item.id),
+    [itemB.id],
+  );
 });
 
 test("a paused assistant refuses a new member message", async () => {
@@ -403,9 +409,13 @@ test("closing a ticket ends it, and closing again is a no-op", async () => {
     payerUserId: ownerCaller.userId,
   });
 
-  const { ticket: closed } = await f.service.closeTicket(ownerCaller, ticket.id, {
-    idempotencyKey: randomUUID(),
-  });
+  const { ticket: closed } = await f.service.closeTicket(
+    ownerCaller,
+    ticket.id,
+    {
+      idempotencyKey: randomUUID(),
+    },
+  );
   assert.equal(closed.stage, "ended");
   assert.ok(closed.endedAt);
 
@@ -479,9 +489,13 @@ test("the steward closes a ticket whose run belongs to another payer: the run is
     payer: memberCaller.userId,
   });
 
-  const { ticket: closed } = await f.service.closeTicket(ownerCaller, ticket.id, {
-    idempotencyKey: randomUUID(),
-  });
+  const { ticket: closed } = await f.service.closeTicket(
+    ownerCaller,
+    ticket.id,
+    {
+      idempotencyKey: randomUUID(),
+    },
+  );
 
   assert.equal(closed.stage, "ended");
   assert.equal(f.stopped.length, 1);
@@ -544,11 +558,9 @@ test("a non-member gets a 404 for a ticket action, not a 403", async () => {
   // non-member lookup in this module, same as `get`.
   assert.equal(
     await refusal(() =>
-      f.service.closeTicket(
-        { workspaceId, userId: outsider },
-        ticket.id,
-        { idempotencyKey: randomUUID() },
-      ),
+      f.service.closeTicket({ workspaceId, userId: outsider }, ticket.id, {
+        idempotencyKey: randomUUID(),
+      }),
     ),
     "404 ASSISTANT_NOT_FOUND",
   );

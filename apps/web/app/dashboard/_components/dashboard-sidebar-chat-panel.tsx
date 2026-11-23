@@ -960,7 +960,15 @@ function ChatList({
         pinnedIds,
         filter,
       ),
-    [privateChats, sharedChats, archivedChats, filter, search, searchState, pinnedIds],
+    [
+      privateChats,
+      sharedChats,
+      archivedChats,
+      filter,
+      search,
+      searchState,
+      pinnedIds,
+    ],
   );
   const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
   const canLoadMore = isArchived ? hasMoreArchived : hasMore;

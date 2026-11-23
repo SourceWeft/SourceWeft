@@ -34,13 +34,8 @@ export const ASSISTANT_LIMITS = {
 export const assistantStatusSchema = z.enum(["active", "paused"]);
 export type AssistantStatus = z.infer<typeof assistantStatusSchema>;
 
-export const assistantStatusReasonSchema = z.enum([
-  "steward_left",
-  "by_admin",
-]);
-export type AssistantStatusReason = z.infer<
-  typeof assistantStatusReasonSchema
->;
+export const assistantStatusReasonSchema = z.enum(["steward_left", "by_admin"]);
+export type AssistantStatusReason = z.infer<typeof assistantStatusReasonSchema>;
 
 /** What put an event on the router's batch. */
 export const assistantTriggerSourceSchema = z.enum([
@@ -198,9 +193,7 @@ export const assistantFeedResponseSchema = z.object({
   items: z.array(assistantFeedItemSchema),
   nextCursor: z.string().nullable(),
 });
-export type AssistantFeedResponse = z.infer<
-  typeof assistantFeedResponseSchema
->;
+export type AssistantFeedResponse = z.infer<typeof assistantFeedResponseSchema>;
 
 export const assistantTicketsResponseSchema = z.object({
   tickets: z.array(assistantTicketSchema),

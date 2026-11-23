@@ -72,7 +72,11 @@ test("a ticket action request is just the idempotency key", () => {
     ticketActionRequestSchema.safeParse({ idempotencyKey: "key_1" }).success,
     true,
   );
-  for (const invalid of [{}, { idempotencyKey: "" }, { idempotencyKey: "key_1", extra: 1 }])
+  for (const invalid of [
+    {},
+    { idempotencyKey: "" },
+    { idempotencyKey: "key_1", extra: 1 },
+  ])
     assert.equal(
       ticketActionRequestSchema.safeParse(invalid).success,
       false,
@@ -81,8 +85,14 @@ test("a ticket action request is just the idempotency key", () => {
 });
 
 test("the thread origin vocabulary accepts the two new assistant origins", () => {
-  assert.equal(threadOriginSchema.parse("assistant_router"), "assistant_router");
-  assert.equal(threadOriginSchema.parse("assistant_ticket"), "assistant_ticket");
+  assert.equal(
+    threadOriginSchema.parse("assistant_router"),
+    "assistant_router",
+  );
+  assert.equal(
+    threadOriginSchema.parse("assistant_ticket"),
+    "assistant_ticket",
+  );
   assert.equal(threadOriginSchema.safeParse("assistant").success, false);
 });
 
@@ -145,13 +155,11 @@ const ticket = {
 test("a ticket record round-trips and does not expose router bookkeeping", () => {
   assert.deepEqual(assistantTicketSchema.parse(ticket), ticket);
   assert.equal(
-    assistantTicketSchema.safeParse({ ...ticket, origin: "inferred" })
-      .success,
+    assistantTicketSchema.safeParse({ ...ticket, origin: "inferred" }).success,
     true,
   );
   assert.equal(
-    assistantTicketSchema.safeParse({ ...ticket, origin: "automatic" })
-      .success,
+    assistantTicketSchema.safeParse({ ...ticket, origin: "automatic" }).success,
     false,
   );
   assert.equal(

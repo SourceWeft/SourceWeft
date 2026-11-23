@@ -19,7 +19,10 @@ type CreateRun = typeof import("./durable/repository").createChatThreadRun;
 const createRunHook = vi.hoisted(() => ({
   current: null as
     | null
-    | ((real: CreateRun, input: Parameters<CreateRun>[0]) => ReturnType<CreateRun>),
+    | ((
+        real: CreateRun,
+        input: Parameters<CreateRun>[0],
+      ) => ReturnType<CreateRun>),
 }));
 vi.mock("./durable/repository", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable/repository")>();
@@ -458,10 +461,7 @@ test("two starts of the same turn that both reach the insert: the loser's violat
     routerStart(router.id, idempotencyKey),
   ]);
 
-  assert.deepEqual(
-    [first.created, second.created].sort(),
-    [false, true],
-  );
+  assert.deepEqual([first.created, second.created].sort(), [false, true]);
   assert.equal(first.run.id, second.run.id);
   assert.equal(first.thread.id, router.id);
   assert.equal(second.thread.id, router.id);
@@ -480,9 +480,15 @@ test("two starts of the same turn released at the same instant: both resolve to 
       routerStart(router.id, idempotencyKey),
       routerStart(router.id, idempotencyKey),
     ]);
-    assert.deepEqual([first.created, second.created].sort(), [false, true], `round ${round}`);
+    assert.deepEqual(
+      [first.created, second.created].sort(),
+      [false, true],
+      `round ${round}`,
+    );
     assert.equal(first.run.id, second.run.id, `round ${round}`);
-    const forKey = (await runs()).filter((run) => run.idempotencyKey === idempotencyKey);
+    const forKey = (await runs()).filter(
+      (run) => run.idempotencyKey === idempotencyKey,
+    );
     assert.equal(forKey.length, 1, `round ${round}`);
   }
 });
@@ -504,7 +510,10 @@ test("a new conversation started twice at once: one conversation, one run", asyn
     return real({ ...run, idempotencyKey: `${run.idempotencyKey}:loser` });
   });
 
-  const [first, second] = await Promise.all([startHostTurn(input), startHostTurn(input)]);
+  const [first, second] = await Promise.all([
+    startHostTurn(input),
+    startHostTurn(input),
+  ]);
 
   assert.deepEqual([first.created, second.created].sort(), [false, true]);
   assert.equal(first.run.id, second.run.id);
@@ -512,7 +521,10 @@ test("a new conversation started twice at once: one conversation, one run", asyn
     .select()
     .from(schema.threads)
     .where(eq(schema.threads.workspaceId, workspaceId));
-  assert.deepEqual(threads.map((thread) => thread.id), [input.threadId]);
+  assert.deepEqual(
+    threads.map((thread) => thread.id),
+    [input.threadId],
+  );
   assert.equal((await runs()).length, 1);
 });
 
@@ -545,7 +557,8 @@ test("a run of another key holding the conversation is still a 409, not a replay
       error.statusCode === 409 && error.code === "CHAT_RUN_ALREADY_ACTIVE",
   );
   assert.equal(
-    (await runs()).filter((run) => run.idempotencyKey === idempotencyKey).length,
+    (await runs()).filter((run) => run.idempotencyKey === idempotencyKey)
+      .length,
     0,
   );
 });

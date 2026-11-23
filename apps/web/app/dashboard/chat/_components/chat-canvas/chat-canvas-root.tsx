@@ -541,9 +541,7 @@ export function ChatCanvas({
       if (onReloadMessages) {
         void Promise.resolve(onReloadMessages()).catch((error) => {
           const message =
-            error instanceof Error
-              ? error.message
-              : t("errors.reloadFailed");
+            error instanceof Error ? error.message : t("errors.reloadFailed");
           toast.error(message);
         });
       }
@@ -563,9 +561,7 @@ export function ChatCanvas({
           assistantMessageId: toolConfirmationLookup.assistantMessageId,
         },
       );
-      toast.error(
-        t("errors.confirmationMissing"),
-      );
+      toast.error(t("errors.confirmationMissing"));
       return;
     }
 
@@ -578,17 +574,13 @@ export function ChatCanvas({
           assistantMessageId: toolConfirmationLookup.assistantMessageId,
         },
       );
-      toast.error(
-        t("errors.confirmationMissing"),
-      );
+      toast.error(t("errors.confirmationMissing"));
       return;
     }
 
     void Promise.resolve(onReloadMessages()).catch((error) => {
       const message =
-        error instanceof Error
-          ? error.message
-          : t("errors.reloadFailed");
+        error instanceof Error ? error.message : t("errors.reloadFailed");
       toast.error(message);
     });
   }, [
@@ -857,9 +849,7 @@ export function ChatCanvas({
           }
           void Promise.resolve(onReloadMessages()).catch((error) => {
             const message =
-              error instanceof Error
-                ? error.message
-                : t("errors.reloadFailed");
+              error instanceof Error ? error.message : t("errors.reloadFailed");
             toast.error(message);
           });
         }}
@@ -877,9 +867,7 @@ export function ChatCanvas({
           }
           void Promise.resolve(onReloadMessages()).catch((error) => {
             const message =
-              error instanceof Error
-                ? error.message
-                : t("errors.reloadFailed");
+              error instanceof Error ? error.message : t("errors.reloadFailed");
             toast.error(message);
           });
         }}

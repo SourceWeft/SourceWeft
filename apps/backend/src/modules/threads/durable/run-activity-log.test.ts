@@ -27,7 +27,9 @@ const THREAD_ID = "thread-1234567890";
 const TEAM_ID = "team-1234567890";
 const WORKSPACE_ID = "workspace-1234567890";
 
-function createRun(input: Partial<ChatThreadRunRecord> = {}): ChatThreadRunRecord {
+function createRun(
+  input: Partial<ChatThreadRunRecord> = {},
+): ChatThreadRunRecord {
   return {
     id: RUN_ID,
     teamId: TEAM_ID,
@@ -114,7 +116,8 @@ test("chat_run.finished logs status, duration and error code with truncated ids"
 
 test("chat_run.finished omits errorCode for completed runs and records metrics", () => {
   const before = metrics.snapshot();
-  const completedBefore = before.counters["chat_run.finished{status=completed}"] ?? 0;
+  const completedBefore =
+    before.counters["chat_run.finished{status=completed}"] ?? 0;
 
   logChatRunFinished(
     createRun({

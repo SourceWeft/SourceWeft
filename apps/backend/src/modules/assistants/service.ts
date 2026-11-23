@@ -185,9 +185,8 @@ export class AssistantService {
     teamId: string,
   ): Promise<"workspace" | undefined> {
     const { workspaceService } = await import("../workspace");
-    const { isPersonalOrganizationMetadata } = await import(
-      "../auth/organization-metadata"
-    );
+    const { isPersonalOrganizationMetadata } =
+      await import("../auth/organization-metadata");
     const organization = await workspaceService.getOrganization(teamId);
     if (organization && isPersonalOrganizationMetadata(organization.metadata)) {
       // Personal workspace: leave visibility unset so createThreadRecord's
@@ -226,7 +225,9 @@ export class AssistantService {
   async enable(caller: Caller): Promise<Assistant> {
     const access = await this.requireAccess(caller);
     if (!access.isContainerAdmin) {
-      throw forbidden("Only a workspace administrator can enable the assistant");
+      throw forbidden(
+        "Only a workspace administrator can enable the assistant",
+      );
     }
 
     const existing = await findAssistantRow({
@@ -235,11 +236,16 @@ export class AssistantService {
     });
     if (existing) throw alreadyEnabled();
 
-    const routerThreadId = deterministicId("assistant-router", caller.workspaceId);
-    const { createThreadRecord, findThreadRecord } = await import(
-      "../threads/thread/repository"
+    const routerThreadId = deterministicId(
+      "assistant-router",
+      caller.workspaceId,
     );
-    const threadScope = { teamId: access.teamId, workspaceId: caller.workspaceId };
+    const { createThreadRecord, findThreadRecord } =
+      await import("../threads/thread/repository");
+    const threadScope = {
+      teamId: access.teamId,
+      workspaceId: caller.workspaceId,
+    };
     const priorThread = await findThreadRecord({
       ...threadScope,
       threadId: routerThreadId,
@@ -361,7 +367,9 @@ export class AssistantService {
 
       if (input.stewardUserId !== undefined) {
         if (!access.isContainerAdmin) {
-          throw forbidden("Only a workspace administrator can change the steward");
+          throw forbidden(
+            "Only a workspace administrator can change the steward",
+          );
         }
         if (input.stewardUserId !== row.stewardUserId) {
           const stewardAccess = await this.ports.workspaceAccess({
@@ -683,10 +691,13 @@ export const assistantService = new AssistantService(
       const { kickAssistant } = await import("./dispatch");
       await kickAssistant(assistant);
     } catch (error) {
-      logger.error("Assistant kick could not run; the next tick will pick it up", {
-        assistantId: assistant.assistantId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      logger.error(
+        "Assistant kick could not run; the next tick will pick it up",
+        {
+          assistantId: assistant.assistantId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
     }
   },
 );

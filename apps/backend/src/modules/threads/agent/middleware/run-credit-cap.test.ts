@@ -14,9 +14,9 @@ function fakeScope(consumedCredits: number[]): BillingScope {
   return { meteredCalls: () => calls } as unknown as BillingScope;
 }
 
-async function runBeforeModel(middleware: ReturnType<
-  typeof createRunCreditCapMiddleware
->) {
+async function runBeforeModel(
+  middleware: ReturnType<typeof createRunCreditCapMiddleware>,
+) {
   const hook = middleware.beforeModel as unknown as (
     state: unknown,
     runtime: unknown,
@@ -40,10 +40,7 @@ test("throws RUN_CREDIT_CAP_EXCEEDED once settled credits reach the cap", async 
   await assert.rejects(
     () => runBeforeModel(middleware),
     (error: unknown) => {
-      assert.equal(
-        (error as { code?: string }).code,
-        RUN_CREDIT_CAP_EXCEEDED,
-      );
+      assert.equal((error as { code?: string }).code, RUN_CREDIT_CAP_EXCEEDED);
       return true;
     },
   );

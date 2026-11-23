@@ -295,7 +295,11 @@ async function hostTurnReplay(
   scope: { teamId: string; workspaceId: string },
   input: StartHostTurnInput,
   existingRun: ChatThreadRunRecord,
-): Promise<{ thread: ThreadRecord; run: ChatThreadRunRecord; created: false } | null> {
+): Promise<{
+  thread: ThreadRecord;
+  run: ChatThreadRunRecord;
+  created: false;
+} | null> {
   const existingThread = await findThreadRecord({
     ...scope,
     threadId: existingRun.threadId,

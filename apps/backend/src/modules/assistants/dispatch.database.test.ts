@@ -123,7 +123,10 @@ async function routeEvent(
   });
 }
 
-function startsOf(origin: "assistant_router" | "assistant_ticket", workspaceId?: string) {
+function startsOf(
+  origin: "assistant_router" | "assistant_ticket",
+  workspaceId?: string,
+) {
   return f.started.filter(
     (input) =>
       input.origin === origin &&
@@ -140,9 +143,21 @@ async function assistantRow(s: Setup) {
 test("three queued tickets and two slots: the first tick starts two; the third takes the reserved slot only for a member's input", async () => {
   const s = await setup();
   const now = new Date();
-  const t1 = await queuedTicket(s, { payer: s.a, at: minutesAgo(now, 30), title: "One" });
-  const t2 = await queuedTicket(s, { payer: s.a, at: minutesAgo(now, 20), title: "Two" });
-  const t3 = await queuedTicket(s, { payer: s.b, at: minutesAgo(now, 10), title: "Three" });
+  const t1 = await queuedTicket(s, {
+    payer: s.a,
+    at: minutesAgo(now, 30),
+    title: "One",
+  });
+  const t2 = await queuedTicket(s, {
+    payer: s.a,
+    at: minutesAgo(now, 20),
+    title: "Two",
+  });
+  const t3 = await queuedTicket(s, {
+    payer: s.b,
+    at: minutesAgo(now, 10),
+    title: "Three",
+  });
 
   await tick(now, f.ports);
   const first = startsOf("assistant_ticket", s.workspaceId);
@@ -180,22 +195,37 @@ test("three queued tickets and two slots: the first tick starts two; the third t
 
   // A worker's report routed to the third ticket does not get the reserved
   // slot...
-  await routeEvent(s, t3.id, { payer: s.b, sourceKind: "worker_report", at: now });
+  await routeEvent(s, t3.id, {
+    payer: s.b,
+    sourceKind: "worker_report",
+    at: now,
+  });
   f.reset();
   await tick(new Date(now.getTime() + 60_000), f.ports);
   assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
   assert.equal((await f.ticketRow(t3.id))!.stage, "queued");
 
   // ...a member's message does.
-  await routeEvent(s, t3.id, { payer: s.b, sourceKind: "member_message", at: now });
+  await routeEvent(s, t3.id, {
+    payer: s.b,
+    sourceKind: "member_message",
+    at: now,
+  });
   f.reset();
   await tick(new Date(now.getTime() + 120_000), f.ports);
   const third = startsOf("assistant_ticket", s.workspaceId);
-  assert.deepEqual(third.map((input) => input.hostContext?.ticketId), [t3.id]);
+  assert.deepEqual(
+    third.map((input) => input.hostContext?.ticketId),
+    [t3.id],
+  );
   assert.equal((await f.ticketRow(t3.id))!.stage, "working");
 
   // All three slots are now taken: nothing more starts, member input or not.
-  const t4 = await queuedTicket(s, { payer: s.a, sourceKind: "member_message", at: now });
+  const t4 = await queuedTicket(s, {
+    payer: s.a,
+    sourceKind: "member_message",
+    at: now,
+  });
   f.reset();
   await tick(new Date(now.getTime() + 180_000), f.ports);
   assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
@@ -223,15 +253,29 @@ test("a new event routed to an idle ticket is delivered as an append, keyed by i
     deliveredAt: minutesAgo(now, 60),
     createdAt: minutesAgo(now, 61),
   });
-  const e2 = await routeEvent(s, ticket.id, { payer: s.a, sourceKind: "member_message", at: minutesAgo(now, 2), text: "Also cover pricing" });
-  const e1 = await routeEvent(s, ticket.id, { payer: s.a, sourceKind: "member_message", at: minutesAgo(now, 1), text: "And the FAQ" });
+  const e2 = await routeEvent(s, ticket.id, {
+    payer: s.a,
+    sourceKind: "member_message",
+    at: minutesAgo(now, 2),
+    text: "Also cover pricing",
+  });
+  const e1 = await routeEvent(s, ticket.id, {
+    payer: s.a,
+    sourceKind: "member_message",
+    at: minutesAgo(now, 1),
+    text: "And the FAQ",
+  });
 
   await tick(now, f.ports);
   const [start] = startsOf("assistant_ticket", s.workspaceId);
   assert.ok(start);
   assert.equal(
     start.idempotencyKey,
-    deterministicId("assistant-ticket-run", ticket.id, [e1.id, e2.id].sort().join(",")),
+    deterministicId(
+      "assistant-ticket-run",
+      ticket.id,
+      [e1.id, e2.id].sort().join(","),
+    ),
   );
   assert.match(start.content, /Also cover pricing/);
   assert.match(start.content, /And the FAQ/);
@@ -318,7 +362,8 @@ test("a run that completed without a report leaves the ticket waiting for a pers
   assert.equal(row.stage, "waiting_person");
   assert.equal(row.currentRunId, null);
   const reports = (await f.triggerRows(s.assistant.id)).filter(
-    (trigger) => trigger.sourceKind === "worker_report" && trigger.ticketId === ticket.id,
+    (trigger) =>
+      trigger.sourceKind === "worker_report" && trigger.ticketId === ticket.id,
   );
   assert.equal(reports.length, 1);
   assert.equal(reports[0]!.text, "ended_without_report");
@@ -328,7 +373,9 @@ test("a run that completed without a report leaves the ticket waiting for a pers
   await tick(new Date(), f.ports);
   assert.equal(
     (await f.triggerRows(s.assistant.id)).filter(
-      (trigger) => trigger.sourceKind === "worker_report" && trigger.ticketId === ticket.id,
+      (trigger) =>
+        trigger.sourceKind === "worker_report" &&
+        trigger.ticketId === ticket.id,
     ).length,
     1,
   );
@@ -349,7 +396,9 @@ test("a run that completed after the worker reported only clears the run", async
   assert.equal(row.stage, "idle");
   assert.equal(row.currentRunId, null);
   assert.equal(
-    (await f.triggerRows(s.assistant.id)).filter((t) => t.sourceKind === "worker_report").length,
+    (await f.triggerRows(s.assistant.id)).filter(
+      (t) => t.sourceKind === "worker_report",
+    ).length,
     1, // only the one the ticket was created from
   );
 });
@@ -357,7 +406,10 @@ test("a run that completed after the worker reported only clears the run", async
 test("RUN_CREDIT_CAP_EXCEEDED blocks the ticket on its credit cap and notifies the payer", async () => {
   const s = await setup();
   const { ticket, runId } = await workingTicket(s);
-  await f.setRunStatus(runId, { status: "failed", errorCode: "RUN_CREDIT_CAP_EXCEEDED" });
+  await f.setRunStatus(runId, {
+    status: "failed",
+    errorCode: "RUN_CREDIT_CAP_EXCEEDED",
+  });
 
   await tick(new Date(), f.ports);
 
@@ -367,7 +419,9 @@ test("RUN_CREDIT_CAP_EXCEEDED blocks the ticket on its credit cap and notifies t
   assert.equal(row.blockedReason, "credit_cap");
   assert.equal(row.currentRunId, null);
   assert.equal(row.consecutiveFailures, 0);
-  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  const blocked = f.notifications.filter(
+    (n) => n.kind === "assistant_ticket_blocked",
+  );
   assert.equal(blocked.length, 1);
   assert.equal(blocked[0]!.userId, s.a);
   assert.equal(blocked[0]!.payload?.ticketId, ticket.id);
@@ -432,7 +486,10 @@ async function ticketWithSpentRuns(
 
 test("the credit cap covers the whole ticket: earlier runs that spent it block the ticket on credit_cap, and no run starts", async () => {
   const s = await setup();
-  const ticket = await ticketWithSpentRuns(s, { creditCap: 100, spent: [60, 40] });
+  const ticket = await ticketWithSpentRuns(s, {
+    creditCap: 100,
+    spent: [60, 40],
+  });
 
   await tick(new Date(), f.ports);
 
@@ -442,7 +499,9 @@ test("the credit cap covers the whole ticket: earlier runs that spent it block t
   assert.equal(row.outcome, "blocked");
   assert.equal(row.blockedReason, "credit_cap");
   assert.equal(row.currentRunId, null);
-  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  const blocked = f.notifications.filter(
+    (n) => n.kind === "assistant_ticket_blocked",
+  );
   assert.equal(blocked.length, 1);
   assert.equal(blocked[0]!.payload?.reason, "credit_cap");
 
@@ -471,7 +530,10 @@ test("a worker run gets only what is left of the ticket's credit cap", async () 
 test("a run refused for credits blocks the ticket on insufficient credits", async () => {
   const s = await setup();
   const { ticket, runId } = await workingTicket(s);
-  await f.setRunStatus(runId, { status: "failed", errorCode: "BILLING_ADMISSION_DENIED" });
+  await f.setRunStatus(runId, {
+    status: "failed",
+    errorCode: "BILLING_ADMISSION_DENIED",
+  });
 
   await tick(new Date(), f.ports);
 
@@ -489,7 +551,10 @@ test("a run that failed with a generic code while its payer has no credits block
   const s = await setup();
   const { ticket, runId } = await workingTicket(s);
   // Refused for credits mid-run: the turn's error mapping stores a generic code.
-  await f.setRunStatus(runId, { status: "failed", errorCode: "CHAT_RUN_FAILED" });
+  await f.setRunStatus(runId, {
+    status: "failed",
+    errorCode: "CHAT_RUN_FAILED",
+  });
   f.state.noCreditsFor.add(s.a);
 
   await tick(new Date(), f.ports);
@@ -500,7 +565,9 @@ test("a run that failed with a generic code while its payer has no credits block
   assert.equal(row.blockedReason, "insufficient_credits");
   assert.equal(row.consecutiveFailures, 0);
   assert.equal(row.currentRunId, null);
-  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  const blocked = f.notifications.filter(
+    (n) => n.kind === "assistant_ticket_blocked",
+  );
   assert.equal(blocked.length, 1);
   assert.equal(blocked[0]!.payload?.reason, "insufficient_credits");
   assert.equal(startsOf("assistant_ticket", s.workspaceId).length, 0);
@@ -513,7 +580,10 @@ test("three failed runs in a row block the ticket for repeated failure; each fai
   const keys = new Set<string>();
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    await f.setRunStatus(runIds[runIds.length - 1]!, { status: "failed", errorCode: "MODEL_UPSTREAM_ERROR" });
+    await f.setRunStatus(runIds[runIds.length - 1]!, {
+      status: "failed",
+      errorCode: "MODEL_UPSTREAM_ERROR",
+    });
     f.reset();
     await tick(new Date(), f.ports);
     const row = (await f.ticketRow(ticket.id))!;
@@ -531,7 +601,9 @@ test("three failed runs in a row block the ticket for repeated failure; each fai
       assert.equal(row.outcome, "blocked");
       assert.equal(row.blockedReason, "repeated_failure");
       assert.equal(row.currentRunId, null);
-      const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+      const blocked = f.notifications.filter(
+        (n) => n.kind === "assistant_ticket_blocked",
+      );
       assert.equal(blocked.length, 1);
       assert.equal(blocked[0]!.payload?.reason, "repeated_failure");
     }
@@ -543,7 +615,10 @@ test("a run past its time limit is stopped and cleared once it ends", async () =
   const s = await setup();
   const { ticket, runId } = await workingTicket(s);
   const now = new Date();
-  await f.setRunStatus(runId, { status: "running", startedAt: minutesAgo(now, 46) });
+  await f.setRunStatus(runId, {
+    status: "running",
+    startedAt: minutesAgo(now, 46),
+  });
 
   await tick(now, f.ports);
   assert.deepEqual(f.stopped, [
@@ -558,7 +633,10 @@ test("a run past its time limit is stopped and cleared once it ends", async () =
 
   // A run still within its limit is left alone.
   f.reset();
-  await f.setRunStatus(runId, { status: "running", startedAt: minutesAgo(now, 44) });
+  await f.setRunStatus(runId, {
+    status: "running",
+    startedAt: minutesAgo(now, 44),
+  });
   await tick(now, f.ports);
   assert.equal(f.stopped.length, 0);
 });
@@ -583,7 +661,9 @@ test("a payer without credits: their ticket is blocked and notified without taki
     startsOf("assistant_ticket", s.workspaceId).map((input) => input.userId),
     [s.b],
   );
-  const blocked = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  const blocked = f.notifications.filter(
+    (n) => n.kind === "assistant_ticket_blocked",
+  );
   assert.equal(blocked.length, 1);
   assert.equal(blocked[0]!.userId, s.a);
   assert.equal(blocked[0]!.payload?.reason, "insufficient_credits");
@@ -598,7 +678,9 @@ test("a payer without credits: their ticket is blocked and notified without taki
   f.reset();
   await tick(now, f.ports);
   assert.deepEqual(
-    startsOf("assistant_ticket", s.workspaceId).map((input) => input.hostContext?.ticketId),
+    startsOf("assistant_ticket", s.workspaceId).map(
+      (input) => input.hostContext?.ticketId,
+    ),
     [ofA.id],
   );
 });
@@ -623,7 +705,9 @@ test("A without credits: A's batch stays pending with no attempt counted, and B'
   assert.equal(triggerA.routerBatchKey, null);
 
   // A is told their messages wait for credits; the events stay pending.
-  const toldA = f.notifications.filter((n) => n.kind === "assistant_ticket_blocked");
+  const toldA = f.notifications.filter(
+    (n) => n.kind === "assistant_ticket_blocked",
+  );
   assert.equal(toldA.length, 1);
   assert.equal(toldA[0]!.userId, s.a);
   assert.deepEqual(toldA[0]!.ref, { kind: "assistant", id: s.assistant.id });
@@ -643,8 +727,16 @@ test("A without credits: A's batch stays pending with no attempt counted, and B'
     hostContext: { assistantId: s.assistant.id, batchKey },
   });
   // B's event is the batch; A's appears at most as recent feed context.
-  assert.ok(routerStarts[0]!.content.includes(`<assistant-trigger id=${fromB.item.id} `));
-  assert.ok(!routerStarts[0]!.content.includes(`<assistant-trigger id=${fromA.item.id} `));
+  assert.ok(
+    routerStarts[0]!.content.includes(
+      `<assistant-trigger id=${fromB.item.id} `,
+    ),
+  );
+  assert.ok(
+    !routerStarts[0]!.content.includes(
+      `<assistant-trigger id=${fromA.item.id} `,
+    ),
+  );
 
   const triggerB = (await f.triggerRow(fromB.item.id))!;
   assert.equal(triggerB.status, "in_eval");
@@ -722,7 +814,10 @@ test("A and B write while the Router is busy: nothing starts; then A's batch, th
     content: "earlier",
   });
   await f.setRunStatus(earlier.run.id, { status: "running" });
-  await f.setCurrentRouterRun(s.assistant.id, { runId: earlier.run.id, batchKey: "earlier-batch" });
+  await f.setCurrentRouterRun(s.assistant.id, {
+    runId: earlier.run.id,
+    batchKey: "earlier-batch",
+  });
 
   const fromA = await f.service.postMessage(
     { workspaceId: s.workspaceId, userId: s.a },
@@ -743,7 +838,10 @@ test("A and B write while the Router is busy: nothing starts; then A's batch, th
   await f.setRunStatus(earlier.run.id, { status: "completed" });
   await tick(new Date(), f.ports);
   let starts = startsOf("assistant_router", s.workspaceId);
-  assert.deepEqual(starts.map((input) => input.userId), [s.a]);
+  assert.deepEqual(
+    starts.map((input) => input.userId),
+    [s.a],
+  );
   const runA = (await assistantRow(s)).currentRouterRunId!;
   assert.notEqual(runA, earlier.run.id);
   assert.equal((await f.triggerRow(fromA.item.id))!.status, "in_eval");
@@ -758,7 +856,10 @@ test("A and B write while the Router is busy: nothing starts; then A's batch, th
   f.reset();
   await tick(new Date(), f.ports);
   starts = startsOf("assistant_router", s.workspaceId);
-  assert.deepEqual(starts.map((input) => input.userId), [s.b]);
+  assert.deepEqual(
+    starts.map((input) => input.userId),
+    [s.b],
+  );
   assert.equal((await f.triggerRow(fromA.item.id))!.status, "decided");
   assert.equal((await f.triggerRow(fromB.item.id))!.status, "in_eval");
 });
@@ -770,7 +871,11 @@ test("a 409 from starting the Router puts the batch back to pending_eval without
     { text: "Hello", idempotencyKey: "m-1" },
   );
   f.state.startErrors.push(
-    new ContentError(409, "CHAT_RUN_ALREADY_ACTIVE", "A chat run is already active for this thread"),
+    new ContentError(
+      409,
+      "CHAT_RUN_ALREADY_ACTIVE",
+      "A chat run is already active for this thread",
+    ),
   );
 
   await tick(new Date(), f.ports);
@@ -812,7 +917,11 @@ test("a kick's 409 while a run is already recorded under its own batch key leave
   });
   f.reset();
   f.state.startErrors.push(
-    new ContentError(409, "CHAT_RUN_ALREADY_ACTIVE", "A chat run is already active for this thread"),
+    new ContentError(
+      409,
+      "CHAT_RUN_ALREADY_ACTIVE",
+      "A chat run is already active for this thread",
+    ),
   );
 
   await kick(kickInput(s), f.ports);
@@ -830,7 +939,13 @@ test("any other failure to start the Router counts as an evaluation attempt", as
     { workspaceId: s.workspaceId, userId: s.a },
     { text: "Hello", idempotencyKey: "m-1" },
   );
-  f.state.startErrors.push(new ContentError(503, "HOST_TURN_START_FAILED", "The run could not be queued"));
+  f.state.startErrors.push(
+    new ContentError(
+      503,
+      "HOST_TURN_START_FAILED",
+      "The run could not be queued",
+    ),
+  );
 
   await tick(new Date(), f.ports);
 
@@ -921,7 +1036,10 @@ test("a Router run that finished before its id was recorded is reconciled by the
   // Requeued, and started again in the same tick as a fresh batch.
   assert.equal(trigger.status, "in_eval");
   assert.equal(startsOf("assistant_router", s.workspaceId).length, 1);
-  assert.notEqual((await assistantRow(s)).currentRouterRunId, assistant.currentRouterRunId);
+  assert.notEqual(
+    (await assistantRow(s)).currentRouterRunId,
+    assistant.currentRouterRunId,
+  );
 });
 
 // ── Steward left (Review Focus 4) ───────────────────────────────────────
@@ -951,7 +1069,10 @@ test("a steward who lost access pauses the assistant; nothing new starts and run
   assert.ok(audit);
   assert.equal(audit.actorUserId, null);
   assert.equal(audit.targetId, s.assistant.id);
-  assert.deepEqual(audit.metadata, { reason: "steward_left", stewardUserId: s.steward });
+  assert.deepEqual(audit.metadata, {
+    reason: "steward_left",
+    stewardUserId: s.steward,
+  });
 
   // Paused: later ticks start nothing either.
   await tick(new Date(), f.ports);
@@ -964,7 +1085,10 @@ test("one assistant failing mid-tick does not stop the others", async () => {
   const first = await setup();
   const second = await setup();
   const stuck = await queuedTicket(first, { payer: first.a, at: new Date() });
-  const queued = await queuedTicket(second, { payer: second.a, at: new Date() });
+  const queued = await queuedTicket(second, {
+    payer: second.a,
+    at: new Date(),
+  });
   // The first assistant's Router conversation is gone: dispatching its
   // workers throws.
   await f.schema.db
@@ -984,7 +1108,10 @@ test("one assistant failing mid-tick does not stop the others", async () => {
 test("a notification that fails is logged; the block it was about still stands", async () => {
   const s = await setup();
   const { runId, ticket } = await workingTicket(s);
-  await f.setRunStatus(runId, { status: "failed", errorCode: "RUN_CREDIT_CAP_EXCEEDED" });
+  await f.setRunStatus(runId, {
+    status: "failed",
+    errorCode: "RUN_CREDIT_CAP_EXCEEDED",
+  });
   const failingNotify: AssistantPorts = {
     ...f.ports,
     async notify() {
@@ -1056,7 +1183,9 @@ test("kickAssistant starts the Router's batch right away, and nothing while the 
   assert.equal((await f.triggerRow(other.item.id))!.status, "pending_eval");
 
   // Even once that run has ended: settling it is the tick's job, not the kick's.
-  await f.setRunStatus((await assistantRow(s)).currentRouterRunId!, { status: "completed" });
+  await f.setRunStatus((await assistantRow(s)).currentRouterRunId!, {
+    status: "completed",
+  });
   await kick(kickInput(s), f.ports);
   assert.equal(f.started.length, 0);
 });
@@ -1088,7 +1217,10 @@ test("kickAssistant only logs when it cannot start, and leaves an unrecorded bat
     .where(eq(f.schema.assistantTriggers.id, message.item.id));
   await kick(kickInput(s), f.ports);
   assert.equal(f.started.length, 0);
-  assert.equal((await f.triggerRow(message.item.id))!.routerBatchKey, "in-progress");
+  assert.equal(
+    (await f.triggerRow(message.item.id))!.routerBatchKey,
+    "in-progress",
+  );
 });
 
 test("a Router run is recorded only over an empty slot: a second run waits until the first is settled", async () => {
@@ -1104,7 +1236,10 @@ test("a Router run is recorded only over an empty slot: a second run waits until
     title: "Workspace assistant",
     content: "x",
   });
-  await f.setCurrentRouterRun(s.assistant.id, { runId: x.run.id, batchKey: "x-batch" });
+  await f.setCurrentRouterRun(s.assistant.id, {
+    runId: x.run.id,
+    batchKey: "x-batch",
+  });
   const message = await f.insertTrigger({
     teamId: s.teamId,
     workspaceId: s.workspaceId,
@@ -1133,10 +1268,12 @@ test("a Router run is recorded only over an empty slot: a second run waits until
   await tick(new Date(), f.ports);
   assistant = await assistantRow(s);
   assert.equal(assistant.currentRouterBatchKey, y.idempotencyKey);
-  const yRun = (await f.schema.db
-    .select()
-    .from(f.schema.chatThreadRuns)
-    .where(eq(f.schema.chatThreadRuns.idempotencyKey, y.idempotencyKey)))[0]!;
+  const yRun = (
+    await f.schema.db
+      .select()
+      .from(f.schema.chatThreadRuns)
+      .where(eq(f.schema.chatThreadRuns.idempotencyKey, y.idempotencyKey))
+  )[0]!;
   assert.equal(assistant.currentRouterRunId, yRun.id);
   assert.equal((await f.triggerRow(message.id))!.status, "in_eval");
 });

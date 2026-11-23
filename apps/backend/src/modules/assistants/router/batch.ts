@@ -90,10 +90,7 @@ export function selectNextBatch(
  * decisions and `assistants.current_router_batch_key` are keyed by this.
  */
 export function routerBatchKey(triggerIds: readonly string[]): string {
-  return deterministicId(
-    "assistant-router-batch",
-    ...[...triggerIds].sort(),
-  );
+  return deterministicId("assistant-router-batch", ...[...triggerIds].sort());
 }
 
 /**

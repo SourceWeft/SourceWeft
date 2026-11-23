@@ -46,7 +46,9 @@ test("a read-only viewer gets no Edit prompt pencil at all", async () => {
 });
 
 test("an ordinary conversation that cannot restart right now keeps the pencil, disabled", async () => {
-  const { container } = await mountWithIntl(<MessageList messageGroups={groups} />);
+  const { container } = await mountWithIntl(
+    <MessageList messageGroups={groups} />,
+  );
   const [pencil] = editPrompt(container);
   assert.ok(pencil, "the pencil is rendered");
   assert.equal(pencil.disabled, true);

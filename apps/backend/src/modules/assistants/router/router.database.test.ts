@@ -137,14 +137,17 @@ test("create_ticket writes the ticket, one decision per trigger, and one feed it
   assert.equal(decisions.length, 2);
   assert.ok(
     decisions.every(
-      (row) => row.action === "create_ticket" && row.ticketId === result.ticketId,
+      (row) =>
+        row.action === "create_ticket" && row.ticketId === result.ticketId,
     ),
   );
 
   const feed = await f.feedItemRows(assistant.id);
   assert.equal(
-    feed.filter((item) => item.kind === "ticket_update" && item.ticketId === result.ticketId)
-      .length,
+    feed.filter(
+      (item) =>
+        item.kind === "ticket_update" && item.ticketId === result.ticketId,
+    ).length,
     1,
   );
 
@@ -478,9 +481,24 @@ test("recall returns a tool error for an id that matches nothing", async () => {
 
 test("triggers left in_eval are requeued with eval_attempts += 1, then marked unavailable after evalMaxAttempts with exactly one steward notification", async () => {
   const { teamId, workspaceId, assistant, member } = await setupAssistant();
-  const t1 = await f.insertTrigger({ teamId, workspaceId, assistantId: assistant.id, payerUserId: member });
-  const t2 = await f.insertTrigger({ teamId, workspaceId, assistantId: assistant.id, payerUserId: member });
-  const t3 = await f.insertTrigger({ teamId, workspaceId, assistantId: assistant.id, payerUserId: member });
+  const t1 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+  });
+  const t2 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+  });
+  const t3 = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+  });
 
   // Cycle 1: claim all three, decide only t1 (`ignore`), leave t2/t3 in_eval.
   let batchKey = routerBatchKeyFn([t1.id, t2.id, t3.id]);
@@ -651,7 +669,8 @@ test("resolveRouterToolsContext throws when the assistant does not exist in this
 
 test("resolveRouterToolsContext throws when no in_eval triggers exist for the given batchKey — a turn-setup failure, not an upstream model error", async () => {
   const { teamId, workspaceId, assistant } = await setupAssistant();
-  const { toObservationError } = await import("../../threads/stream/observability");
+  const { toObservationError } =
+    await import("../../threads/stream/observability");
   await assert.rejects(
     () =>
       resolveRouterToolsContextFn({
@@ -666,7 +685,10 @@ test("resolveRouterToolsContext throws when no in_eval triggers exist for the gi
         },
       }),
     (error: unknown) => {
-      assert.match(String((error as Error).message), /No in_eval triggers found for batch/);
+      assert.match(
+        String((error as Error).message),
+        /No in_eval triggers found for batch/,
+      );
       // What the failed run is labelled with (the stream's error event).
       assert.equal(toObservationError(error).code, "CHAT_RUN_FAILED");
       return true;

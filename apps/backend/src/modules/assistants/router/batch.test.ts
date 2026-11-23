@@ -50,7 +50,11 @@ test("without any member_message, the oldest group's events go first", () => {
 test("one payer with 25 pending events yields a batch of only 20", () => {
   const payer = "payer-a";
   const rows: PendingTrigger[] = Array.from({ length: 25 }, (_, i) =>
-    row({ payerUserId: payer, sourceKind: "worker_report", minutesAgo: 25 - i }),
+    row({
+      payerUserId: payer,
+      sourceKind: "worker_report",
+      minutesAgo: 25 - i,
+    }),
   );
 
   const batch = selectNextBatch(rows);
@@ -65,8 +69,18 @@ test("different payers' events never end up in the same batch", () => {
   const aId = randomUUID();
   const bId = randomUUID();
   const rows: PendingTrigger[] = [
-    row({ payerUserId: payerA, sourceKind: "member_message", minutesAgo: 1, id: aId }),
-    row({ payerUserId: payerB, sourceKind: "member_message", minutesAgo: 1, id: bId }),
+    row({
+      payerUserId: payerA,
+      sourceKind: "member_message",
+      minutesAgo: 1,
+      id: aId,
+    }),
+    row({
+      payerUserId: payerB,
+      sourceKind: "member_message",
+      minutesAgo: 1,
+      id: bId,
+    }),
   ];
 
   const batch = selectNextBatch(rows);
@@ -94,7 +108,11 @@ test("excludePayers skips a whole group, not just trims it", () => {
 test("no pending rows (or every payer excluded) yields null", () => {
   assert.equal(selectNextBatch([]), null);
   const rows: PendingTrigger[] = [
-    row({ payerUserId: "payer-a", sourceKind: "member_message", minutesAgo: 1 }),
+    row({
+      payerUserId: "payer-a",
+      sourceKind: "member_message",
+      minutesAgo: 1,
+    }),
   ];
   assert.equal(selectNextBatch(rows, new Set(["payer-a"])), null);
 });

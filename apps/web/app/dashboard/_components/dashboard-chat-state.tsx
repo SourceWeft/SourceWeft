@@ -257,9 +257,9 @@ export function DashboardChatStateProvider({
   const [archivedChatsWorkspaceId, setArchivedChatsWorkspaceId] = useState<
     string | null
   >(null);
-  const [archivedChatsCursor, setArchivedChatsCursor] = useState<
-    string | null
-  >(null);
+  const [archivedChatsCursor, setArchivedChatsCursor] = useState<string | null>(
+    null,
+  );
   const [isLoadingArchivedChats, setIsLoadingArchivedChats] = useState(false);
   const [privateChatsCursor, setPrivateChatsCursor] = useState<string | null>(
     null,
@@ -395,7 +395,10 @@ export function DashboardChatStateProvider({
         }
         setPrivateChats(threads.private);
         setSharedChats(threads.shared);
-        setPinnedState({ workspaceId: active.id, ids: threads.pinnedIds ?? [] });
+        setPinnedState({
+          workspaceId: active.id,
+          ids: threads.pinnedIds ?? [],
+        });
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
       } finally {
@@ -722,7 +725,10 @@ export function DashboardChatStateProvider({
         setStoredDashboardWorkspaceId(organizationId, target.id);
         setPrivateChats(threads.private);
         setSharedChats(threads.shared);
-        setPinnedState({ workspaceId: target.id, ids: threads.pinnedIds ?? [] });
+        setPinnedState({
+          workspaceId: target.id,
+          ids: threads.pinnedIds ?? [],
+        });
         setPrivateChatsCursor(threads.nextCursor);
         setHasMorePrivateChats(Boolean(threads.nextCursor));
         setInitialChatPreferences(preferences.initialChatPreferences);
@@ -1171,18 +1177,21 @@ export function DashboardChatStateProvider({
     [pinnedState, workspaceId],
   );
 
-  const removeChatFromState = useCallback((id: string) => {
-    setSharedChats((value) => removeChatItem(value, id));
-    setPrivateChats((value) => removeChatItem(value, id));
-    setArchivedChats((value) => removeChatItem(value, id));
+  const removeChatFromState = useCallback(
+    (id: string) => {
+      setSharedChats((value) => removeChatItem(value, id));
+      setPrivateChats((value) => removeChatItem(value, id));
+      setArchivedChats((value) => removeChatItem(value, id));
 
-    setActiveChatId((value) => {
-      if (value !== id) return value;
-      setMode("new");
-      setThreadTitle(t("newChat.title"));
-      return "";
-    });
-  }, [t]);
+      setActiveChatId((value) => {
+        if (value !== id) return value;
+        setMode("new");
+        setThreadTitle(t("newChat.title"));
+        return "";
+      });
+    },
+    [t],
+  );
 
   const deleteChat = useCallback(
     async (id: string) => {

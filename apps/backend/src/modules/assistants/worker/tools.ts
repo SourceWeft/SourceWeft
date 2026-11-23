@@ -87,7 +87,9 @@ export async function resolveWorkerToolsContext(
     ticketId,
   });
   if (!ticket) {
-    throw turnSetupError(`No ticket '${ticketId}' for assistant '${assistantId}'.`);
+    throw turnSetupError(
+      `No ticket '${ticketId}' for assistant '${assistantId}'.`,
+    );
   }
   return { ...ctx, assistantId, ticketId, ticket };
 }

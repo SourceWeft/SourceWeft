@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import type { AssistantNotifyInput, AssistantPorts } from "../modules/assistants";
+import type {
+  AssistantNotifyInput,
+  AssistantPorts,
+} from "../modules/assistants";
 import type { StartHostTurnInput } from "../modules/threads";
 import type { TeamAuditEntry } from "../modules/team-audit/types";
 import { createIsolatedTestDatabase } from "./isolated-database";
@@ -21,9 +24,8 @@ export async function createAssistantFixture(label: string) {
   process.env.DATABASE_URL = isolated.url;
   const schema = await import("@sourceweft/db");
   const assistants = await import("../modules/assistants");
-  const { createThreadRecord, findThreadRecord } = await import(
-    "../modules/threads/thread/repository"
-  );
+  const { createThreadRecord, findThreadRecord } =
+    await import("../modules/threads/thread/repository");
 
   const notifications: AssistantNotifyInput[] = [];
   const audits: TeamAuditEntry[] = [];
@@ -68,7 +70,9 @@ export async function createAssistantFixture(label: string) {
           threadId: input.threadId,
         });
         if (!existing || existing.origin !== input.origin) {
-          throw new Error(`Test startTurn: no ${input.origin} thread ${input.threadId}`);
+          throw new Error(
+            `Test startTurn: no ${input.origin} thread ${input.threadId}`,
+          );
         }
       } else {
         await createThreadRecord({
@@ -215,7 +219,10 @@ export async function createAssistantFixture(label: string) {
       .insert(schema.workspaceMemberships)
       .values({ workspaceId, userId, role, source: "direct" })
       .onConflictDoUpdate({
-        target: [schema.workspaceMemberships.workspaceId, schema.workspaceMemberships.userId],
+        target: [
+          schema.workspaceMemberships.workspaceId,
+          schema.workspaceMemberships.userId,
+        ],
         set: { role },
       });
   }
@@ -315,10 +322,12 @@ export async function createAssistantFixture(label: string) {
         currentRouterBatchKey: input.batchKey,
       })
       .where(eq(schema.assistants.id, assistantId));
-    return (await schema.db
-      .select()
-      .from(schema.assistants)
-      .where(eq(schema.assistants.id, assistantId)))[0]!;
+    return (
+      await schema.db
+        .select()
+        .from(schema.assistants)
+        .where(eq(schema.assistants.id, assistantId))
+    )[0]!;
   }
 
   /** Inserts a ticket directly: ticket creation is Task 6-7's Router, not this task's. */
@@ -331,7 +340,8 @@ export async function createAssistantFixture(label: string) {
     title?: string;
     stage?: "queued" | "working" | "waiting_person" | "idle" | "ended";
     outcome?: "ready" | "dropped" | "failed" | "blocked" | "waiting" | null;
-    blockedReason?: "credit_cap" | "insufficient_credits" | "repeated_failure" | null;
+    blockedReason?:
+      "credit_cap" | "insufficient_credits" | "repeated_failure" | null;
     workerThreadId?: string;
     currentRunId?: string | null;
     consecutiveFailures?: number;
@@ -386,12 +396,7 @@ export async function createAssistantFixture(label: string) {
   async function setRunStatus(
     runId: string,
     input: {
-      status:
-        | "queued"
-        | "running"
-        | "completed"
-        | "failed"
-        | "cancelled";
+      status: "queued" | "running" | "completed" | "failed" | "cancelled";
       errorCode?: string | null;
       startedAt?: Date | null;
     },
@@ -401,7 +406,9 @@ export async function createAssistantFixture(label: string) {
       .set({
         status: input.status,
         errorCode: input.errorCode ?? null,
-        ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+        ...(input.startedAt !== undefined
+          ? { startedAt: input.startedAt }
+          : {}),
         ...(["completed", "failed", "cancelled"].includes(input.status)
           ? { finishedAt: new Date() }
           : {}),
@@ -466,4 +473,6 @@ export async function createAssistantFixture(label: string) {
   };
 }
 
-export type AssistantFixture = Awaited<ReturnType<typeof createAssistantFixture>>;
+export type AssistantFixture = Awaited<
+  ReturnType<typeof createAssistantFixture>
+>;

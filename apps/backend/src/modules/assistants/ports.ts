@@ -22,10 +22,7 @@ export type AssistantNotifyInput = NotifyInput;
  */
 export interface AssistantPorts {
   /** The caller's standing in the workspace, or null when they have none. */
-  workspaceAccess(input: {
-    workspaceId: string;
-    userId: string;
-  }): Promise<{
+  workspaceAccess(input: { workspaceId: string; userId: string }): Promise<{
     teamId: string;
     canWrite: boolean;
     isContainerAdmin: boolean;
@@ -69,9 +66,8 @@ export const assistantPorts: AssistantPorts = {
 
   async hasCredits(input) {
     const { billingRuntime } = await import("../../billing-host/bindings");
-    const { billingAdmission } = await import(
-      "../../shared/model-gateway/billing/admission"
-    );
+    const { billingAdmission } =
+      await import("../../shared/model-gateway/billing/admission");
     const decision = await billingAdmission.admit({
       billing: billingRuntime,
       teamId: input.teamId,
@@ -86,9 +82,8 @@ export const assistantPorts: AssistantPorts = {
   },
 
   async stopRun(input) {
-    const { durableChatRunService, findChatThreadRunById } = await import(
-      "../threads"
-    );
+    const { durableChatRunService, findChatThreadRunById } =
+      await import("../threads");
     const run = await findChatThreadRunById({
       runId: input.runId,
       workspaceId: input.workspaceId,

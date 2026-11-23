@@ -134,7 +134,10 @@ async function loadOwnTicket(
   ctx: RouterToolsContext,
   ticketId: string,
 ): Promise<AssistantTicketRow | RouterToolError> {
-  const ticket = await findTicketRow({ ticketId, assistantId: ctx.assistantId });
+  const ticket = await findTicketRow({
+    ticketId,
+    assistantId: ctx.assistantId,
+  });
   if (!ticket) {
     return toolError(
       "TICKET_NOT_FOUND",
@@ -219,7 +222,8 @@ async function routeRefusal(
     (trigger) => trigger.sourceKind !== "member_message",
   );
   if (ticket.stage === "waiting_person" && nonMember.length > 0) {
-    const state = ticket.outcome === "blocked" ? "blocked" : "waiting for a person";
+    const state =
+      ticket.outcome === "blocked" ? "blocked" : "waiting for a person";
     return toolError(
       "TICKET_WAITING_FOR_PERSON",
       `Ticket '${ticket.id}' is ${state}; only a member's message can restart it. Nothing was routed. ignore ${nonMember.map((trigger) => trigger.id).join(", ")}, and use say to tell the payer if they need to know.`,
@@ -357,7 +361,10 @@ export function createRouterTools(
         if (isRouterToolError(triggers)) return triggers;
 
         const payerUserId = triggers[0]!.payerUserId;
-        if (!payerUserId || triggers.some((t) => t.payerUserId !== payerUserId)) {
+        if (
+          !payerUserId ||
+          triggers.some((t) => t.payerUserId !== payerUserId)
+        ) {
           return toolError(
             "TRIGGER_PAYER_MISMATCH",
             "These triggers do not share one payer; create_ticket needs triggers from a single payer's batch.",
@@ -700,8 +707,10 @@ async function recallById(
 
   const feedItem = feedItems[0]!;
   const related: Array<{ id: string; summary: string }> = [];
-  if (feedItem.ticketId) related.push({ id: feedItem.ticketId, summary: "ticket" });
-  if (feedItem.triggerId) related.push({ id: feedItem.triggerId, summary: "trigger" });
+  if (feedItem.ticketId)
+    related.push({ id: feedItem.ticketId, summary: "ticket" });
+  if (feedItem.triggerId)
+    related.push({ id: feedItem.triggerId, summary: "trigger" });
   return {
     kind: "feed_item",
     id: feedItem.id,

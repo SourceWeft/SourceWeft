@@ -80,12 +80,17 @@ async function refusal(run: () => Promise<unknown>) {
     await run();
     return null;
   } catch (error) {
-    const { statusCode, code } = error as { statusCode?: number; code?: string };
+    const { statusCode, code } = error as {
+      statusCode?: number;
+      code?: string;
+    };
     return `${statusCode} ${code}`;
   }
 }
 
-async function hostOwnedThread(origin: "assistant_router" | "assistant_ticket") {
+async function hostOwnedThread(
+  origin: "assistant_router" | "assistant_ticket",
+) {
   const thread = await createThreadRecord({
     teamId,
     workspaceId,
@@ -110,7 +115,9 @@ for (const origin of ["assistant_router", "assistant_ticket"] as const) {
     const threadId = await hostOwnedThread(origin);
     for (const userId of [creator, admin]) {
       assert.equal(
-        await refusal(() => service.deleteThread({ workspaceId, threadId, userId })),
+        await refusal(() =>
+          service.deleteThread({ workspaceId, threadId, userId }),
+        ),
         "403 THREAD_HOST_OWNED",
       );
     }
@@ -122,7 +129,12 @@ for (const origin of ["assistant_router", "assistant_ticket"] as const) {
     for (const userId of [creator, admin]) {
       assert.equal(
         await refusal(() =>
-          service.setThreadArchived({ workspaceId, threadId, userId, archived: true }),
+          service.setThreadArchived({
+            workspaceId,
+            threadId,
+            userId,
+            archived: true,
+          }),
         ),
         "403 THREAD_HOST_OWNED",
       );
@@ -198,6 +210,10 @@ test("an ordinary conversation is still deleted, archived and re-scoped as befor
     userId: creator,
     archived: true,
   });
-  await service.deleteThread({ workspaceId, threadId: thread.id, userId: creator });
+  await service.deleteThread({
+    workspaceId,
+    threadId: thread.id,
+    userId: creator,
+  });
   assert.equal(await threadRow(thread.id), null);
 });

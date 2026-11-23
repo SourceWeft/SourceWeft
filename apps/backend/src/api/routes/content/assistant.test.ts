@@ -109,7 +109,10 @@ beforeEach(() => {
   service.postMessage.mockResolvedValue({ item: feedItem, created: true });
   service.listTickets.mockResolvedValue({ tickets: [ticketEntity] });
   service.closeTicket.mockResolvedValue({ ticket: ticketEntity });
-  service.retryTicket.mockResolvedValue({ ticket: ticketEntity, created: true });
+  service.retryTicket.mockResolvedValue({
+    ticket: ticketEntity,
+    created: true,
+  });
 });
 
 test("every route refuses a request without a session and touches nothing", async () => {
@@ -183,10 +186,7 @@ test("GET /assistant/feed parses before/limit from the query", async () => {
   assert.deepEqual(service.listFeed.mock.calls[0]!.slice(1), [
     { before: "item_5", limit: 10 },
   ]);
-  assert.equal(
-    (await app().request(`${BASE}/feed?limit=0`)).status,
-    400,
-  );
+  assert.equal((await app().request(`${BASE}/feed?limit=0`)).status, 400);
 });
 
 test("postMessage answers 201 when new and 200 on replay", async () => {
@@ -208,10 +208,7 @@ test("postMessage answers 201 when new and 200 on replay", async () => {
 
 test("postMessage requires text and idempotencyKey", async () => {
   assert.equal((await request("POST", "/messages", {})).status, 400);
-  assert.equal(
-    (await request("POST", "/messages", { text: "" })).status,
-    400,
-  );
+  assert.equal((await request("POST", "/messages", { text: "" })).status, 400);
   assert.equal(service.postMessage.mock.calls.length, 0);
 });
 

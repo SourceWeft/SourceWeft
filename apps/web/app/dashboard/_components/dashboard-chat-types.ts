@@ -15,11 +15,7 @@ export type ChatItem = {
    * workspace assistant's router/ticket worker thread.
    */
   origin?:
-    | "user"
-    | "subagent"
-    | "scheduled"
-    | "assistant_router"
-    | "assistant_ticket";
+    "user" | "subagent" | "scheduled" | "assistant_router" | "assistant_ticket";
   /** The persona driving the thread; null for an ordinary chat. */
   personaId?: string | null;
   /** One visible level: the sub-agent conversations nested under this chat. */

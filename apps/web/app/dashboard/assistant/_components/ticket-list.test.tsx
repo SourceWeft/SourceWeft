@@ -156,7 +156,9 @@ test("only the ticket's payer is offered Retry; another member with write access
   const { container } = await mountWithIntl(
     <TicketList
       workspaceId="ws_1"
-      tickets={[ticket({ id: "t_wait", stage: "waiting_person", payerUserId: "u1" })]}
+      tickets={[
+        ticket({ id: "t_wait", stage: "waiting_person", payerUserId: "u1" }),
+      ]}
       members={[]}
       canWrite
       viewerId="u2"

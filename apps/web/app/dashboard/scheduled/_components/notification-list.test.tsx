@@ -241,14 +241,22 @@ test("a failed background generation names what failed and leads to its conversa
               id: "n2",
               kind: "artifact_generation_failed",
               ref: { kind: "artifact", id: "a1" },
-              payload: { title: "Flashcards: Cedar Beacon", threadId: "th1", regeneration: false },
+              payload: {
+                title: "Flashcards: Cedar Beacon",
+                threadId: "th1",
+                regeneration: false,
+              },
               path: "/dashboard/chat/th1",
             }),
             item({
               id: "n3",
               kind: "artifact_generation_failed",
               ref: { kind: "artifact", id: "a2" },
-              payload: { title: "Quiz: Orchid", threadId: "th1", regeneration: true },
+              payload: {
+                title: "Quiz: Orchid",
+                threadId: "th1",
+                regeneration: true,
+              },
               path: "/dashboard/chat/th1",
             }),
           ],
@@ -264,10 +272,10 @@ test("a failed background generation names what failed and leads to its conversa
     <NotificationList workspaceId="ws_1" />,
   );
   expect(container.textContent).toContain(
-    "\"Flashcards: Cedar Beacon\" could not be generated.",
+    '"Flashcards: Cedar Beacon" could not be generated.',
   );
   expect(container.textContent).toContain(
-    "\"Quiz: Orchid\" could not be regenerated. The previous version is kept",
+    '"Quiz: Orchid" could not be regenerated. The previous version is kept',
   );
   container.querySelector("button")!.click();
   expect(nav.push).toHaveBeenCalledWith("/dashboard/chat/th1");

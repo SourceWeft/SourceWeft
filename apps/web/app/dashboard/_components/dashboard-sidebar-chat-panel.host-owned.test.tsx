@@ -9,27 +9,30 @@ import messages from "../../../messages/en.json";
 
 // Every menu rendered inline, so the test sees which actions a chat row
 // offers without driving Radix's pointer handling.
-vi.mock("@sourceweft/ui-web/components/ui/dropdown-menu", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  DropdownMenu: ({ children }: { children: ReactNode }) => children,
-  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => children,
-  DropdownMenuContent: ({ children }: { children: ReactNode }) => (
-    <div role="menu">{children}</div>
-  ),
-  DropdownMenuItem: ({ children }: { children: ReactNode }) => (
-    <div role="menuitem">{children}</div>
-  ),
-  DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuRadioGroup: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuRadioItem: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  DropdownMenuSeparator: () => null,
-}));
+vi.mock(
+  "@sourceweft/ui-web/components/ui/dropdown-menu",
+  async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    DropdownMenu: ({ children }: { children: ReactNode }) => children,
+    DropdownMenuTrigger: ({ children }: { children: ReactNode }) => children,
+    DropdownMenuContent: ({ children }: { children: ReactNode }) => (
+      <div role="menu">{children}</div>
+    ),
+    DropdownMenuItem: ({ children }: { children: ReactNode }) => (
+      <div role="menuitem">{children}</div>
+    ),
+    DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuRadioGroup: ({ children }: { children: ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuRadioItem: ({ children }: { children: ReactNode }) => (
+      <div>{children}</div>
+    ),
+    DropdownMenuSeparator: () => null,
+  }),
+);
 
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 
@@ -56,7 +59,9 @@ function menus(sharedChats: Props["sharedChats"]) {
   const html = renderToStaticMarkup(
     <NextIntlClientProvider
       locale="en"
-      messages={messages as ComponentProps<typeof NextIntlClientProvider>["messages"]}
+      messages={
+        messages as ComponentProps<typeof NextIntlClientProvider>["messages"]
+      }
       timeZone="UTC"
     >
       {createElement(
@@ -110,7 +115,8 @@ function menus(sharedChats: Props["sharedChats"]) {
   return (title: string) => {
     const row = [...document.querySelectorAll("li")].find(
       (item) =>
-        item.querySelector('[role="menu"]') && item.textContent?.includes(title),
+        item.querySelector('[role="menu"]') &&
+        item.textContent?.includes(title),
     );
     assert.ok(row, `a row for ${title}`);
     return [...row.querySelectorAll('[role="menuitem"]')].map(

@@ -158,12 +158,16 @@ export function isStaleActiveRun(run: ChatThreadRunRecord, nowMs = Date.now()) {
  * `cause`, so both the error and its cause are checked.
  */
 export function isUniqueConstraintError(error: unknown, constraint: string) {
-  for (const candidate of [error, (error as { cause?: unknown } | null)?.cause]) {
+  for (const candidate of [
+    error,
+    (error as { cause?: unknown } | null)?.cause,
+  ]) {
     const record =
       candidate && typeof candidate === "object" && !Array.isArray(candidate)
         ? (candidate as Record<string, unknown>)
         : null;
-    if (record?.code === "23505" && record.constraint === constraint) return true;
+    if (record?.code === "23505" && record.constraint === constraint)
+      return true;
   }
   return false;
 }

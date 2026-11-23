@@ -207,10 +207,7 @@ test("assistant columns only accept the documented vocabulary and bounds", async
   for (const status of ["active", "paused"] as const)
     assert.equal(await attempt({ status }), null);
   for (const statusReason of ["steward_left", "by_admin"] as const)
-    assert.equal(
-      await attempt({ status: "paused", statusReason }),
-      null,
-    );
+    assert.equal(await attempt({ status: "paused", statusReason }), null);
 });
 
 test("a trigger defaults to pending_eval with zero eval attempts", async () => {
@@ -279,11 +276,7 @@ test("a decision's action is limited to the documented vocabulary", async () => 
     ),
     "assistant_decisions_action_check",
   );
-  for (const action of [
-    "create_ticket",
-    "route_to_ticket",
-    "ignore",
-  ] as const)
+  for (const action of ["create_ticket", "route_to_ticket", "ignore"] as const)
     assert.equal(
       await violation(() =>
         decision(owner, triggerRow, {
@@ -302,7 +295,9 @@ test("a trigger may have only one decision per router batch", async () => {
   const batchKey = randomUUID();
   await decision(owner, triggerRow, { routerBatchKey: batchKey });
   assert.equal(
-    await violation(() => decision(owner, triggerRow, { routerBatchKey: batchKey })),
+    await violation(() =>
+      decision(owner, triggerRow, { routerBatchKey: batchKey }),
+    ),
     "assistant_decisions_trigger_batch_uq",
   );
   // A different batch for the same trigger is fine.

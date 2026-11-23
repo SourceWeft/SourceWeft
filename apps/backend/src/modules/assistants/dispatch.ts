@@ -72,7 +72,11 @@ import {
   type RouterBatch,
 } from "./router/batch";
 import { reconcileRouterRun } from "./router/reconcile";
-import { fetchRouterBatchContext, renderBatch, type RenderTrigger } from "./router/render";
+import {
+  fetchRouterBatchContext,
+  renderBatch,
+  type RenderTrigger,
+} from "./router/render";
 import { ASSISTANT_TICKET_REF } from "./worker/tools";
 import { renderWorkerDelivery, type WorkerDeliveryKind } from "./worker/render";
 
@@ -138,7 +142,11 @@ async function pauseForStewardLeft(
 ): Promise<void> {
   const paused = await db.transaction(async (tx) => {
     const current = await findAssistantRowById(
-      { id: assistant.id, teamId: assistant.teamId, workspaceId: assistant.workspaceId },
+      {
+        id: assistant.id,
+        teamId: assistant.teamId,
+        workspaceId: assistant.workspaceId,
+      },
       tx,
       { forUpdate: true },
     );
@@ -151,10 +159,13 @@ async function pauseForStewardLeft(
     });
   });
   if (!paused) return;
-  logger.warn("Assistant paused: its steward can no longer reach the workspace", {
-    assistantId: assistant.id,
-    stewardUserId: assistant.stewardUserId,
-  });
+  logger.warn(
+    "Assistant paused: its steward can no longer reach the workspace",
+    {
+      assistantId: assistant.id,
+      stewardUserId: assistant.stewardUserId,
+    },
+  );
   try {
     await ports.audit({
       teamId: assistant.teamId,
@@ -162,7 +173,10 @@ async function pauseForStewardLeft(
       action: "assistant.paused",
       targetType: "assistant",
       targetId: assistant.id,
-      metadata: { reason: "steward_left", stewardUserId: assistant.stewardUserId },
+      metadata: {
+        reason: "steward_left",
+        stewardUserId: assistant.stewardUserId,
+      },
     });
   } catch (error) {
     logger.error("Failed to audit an assistant pause", {
@@ -287,7 +301,10 @@ async function settleWorkerRun(
 
   if (run && !TERMINAL_RUN_STATUSES.has(run.status)) {
     const startedAt = run.startedAt ?? run.createdAt;
-    if (now.getTime() - startedAt.getTime() > ASSISTANT_LIMITS.workerRunTimeoutMs) {
+    if (
+      now.getTime() - startedAt.getTime() >
+      ASSISTANT_LIMITS.workerRunTimeoutMs
+    ) {
       logger.warn("Assistant worker run ran past its time limit; stopping it", {
         assistantId: assistant.id,
         ticketId: ticket.id,
@@ -520,7 +537,12 @@ async function deliveryFor(
   if (triggers.length > 0) {
     return {
       kind: "append",
-      keyParts: [triggers.map((row) => row.id).sort().join(",")],
+      keyParts: [
+        triggers
+          .map((row) => row.id)
+          .sort()
+          .join(","),
+      ],
     };
   }
   return {
@@ -554,18 +576,32 @@ async function dispatchTicket(
     userId: ticket.payerUserId,
   });
   if (!hasCredits) {
-    if (ticket.outcome === "blocked" && ticket.blockedReason === "insufficient_credits") {
+    if (
+      ticket.outcome === "blocked" &&
+      ticket.blockedReason === "insufficient_credits"
+    ) {
       return "blocked";
     }
     const changed = await db.transaction(async (tx) => {
-      const current = await findScopedTicketRow(ticketScope, tx, { forUpdate: true });
-      if (!current || current.stage === "working" || current.stage === "ended") {
+      const current = await findScopedTicketRow(ticketScope, tx, {
+        forUpdate: true,
+      });
+      if (
+        !current ||
+        current.stage === "working" ||
+        current.stage === "ended"
+      ) {
         return false;
       }
-      await updateScopedTicketRow(tx, ticketScope, blockedValues("insufficient_credits", now));
+      await updateScopedTicketRow(
+        tx,
+        ticketScope,
+        blockedValues("insufficient_credits", now),
+      );
       return true;
     });
-    if (changed) await notifyBlocked(ports, assistant, ticket, "insufficient_credits");
+    if (changed)
+      await notifyBlocked(ports, assistant, ticket, "insufficient_credits");
     return "blocked";
   }
 
@@ -583,20 +619,33 @@ async function dispatchTicket(
       return "blocked";
     }
     const changed = await db.transaction(async (tx) => {
-      const current = await findScopedTicketRow(ticketScope, tx, { forUpdate: true });
-      if (!current || current.stage === "working" || current.stage === "ended") {
+      const current = await findScopedTicketRow(ticketScope, tx, {
+        forUpdate: true,
+      });
+      if (
+        !current ||
+        current.stage === "working" ||
+        current.stage === "ended"
+      ) {
         return false;
       }
-      await updateScopedTicketRow(tx, ticketScope, blockedValues("credit_cap", now));
+      await updateScopedTicketRow(
+        tx,
+        ticketScope,
+        blockedValues("credit_cap", now),
+      );
       return true;
     });
     if (changed) {
-      logger.warn("Assistant ticket has spent its credit cap; not starting a run", {
-        assistantId: assistant.id,
-        ticketId: ticket.id,
-        creditCap: Number(ticket.creditCap),
-        spent,
-      });
+      logger.warn(
+        "Assistant ticket has spent its credit cap; not starting a run",
+        {
+          assistantId: assistant.id,
+          ticketId: ticket.id,
+          creditCap: Number(ticket.creditCap),
+          spent,
+        },
+      );
       await notifyBlocked(ports, assistant, ticket, "credit_cap");
     }
     return "blocked";
@@ -654,14 +703,21 @@ async function dispatchTicket(
       error: errorMessage(error),
     });
     const blocked = await db.transaction(async (tx) => {
-      const current = await findScopedTicketRow(ticketScope, tx, { forUpdate: true });
-      if (!current || current.stage === "working" || current.stage === "ended") {
+      const current = await findScopedTicketRow(ticketScope, tx, {
+        forUpdate: true,
+      });
+      if (
+        !current ||
+        current.stage === "working" ||
+        current.stage === "ended"
+      ) {
         return false;
       }
       const failures = current.consecutiveFailures + 1;
       if (failures >= ASSISTANT_LIMITS.consecutiveFailuresToBlock) {
         const alreadyBlocked =
-          current.outcome === "blocked" && current.blockedReason === "repeated_failure";
+          current.outcome === "blocked" &&
+          current.blockedReason === "repeated_failure";
         await updateScopedTicketRow(tx, ticketScope, {
           ...blockedValues("repeated_failure", now),
           consecutiveFailures: failures,
@@ -674,7 +730,8 @@ async function dispatchTicket(
       });
       return false;
     });
-    if (blocked) await notifyBlocked(ports, assistant, ticket, "repeated_failure");
+    if (blocked)
+      await notifyBlocked(ports, assistant, ticket, "repeated_failure");
     return "skipped";
   }
 
@@ -683,7 +740,9 @@ async function dispatchTicket(
   // only the run is recorded, and step 3 settles it without overriding the
   // report.
   await db.transaction(async (tx) => {
-    const current = await findScopedTicketRow(ticketScope, tx, { forUpdate: true });
+    const current = await findScopedTicketRow(ticketScope, tx, {
+      forUpdate: true,
+    });
     if (!current) return;
     const untouched =
       current.updatedAt.getTime() === ticket.updatedAt.getTime() &&
@@ -798,13 +857,16 @@ async function startRouterTurn(
   const scope = scopeOf(assistant);
   const payerUserId = rows[0]!.payerUserId!;
   const ordered = [...rows].sort(
-    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
+    (a, b) =>
+      a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
   );
   const context = await fetchRouterBatchContext({
     ...scope,
     payerUserId,
     reportingTicketIds: [
-      ...new Set(ordered.flatMap((row) => (row.ticketId ? [row.ticketId] : []))),
+      ...new Set(
+        ordered.flatMap((row) => (row.ticketId ? [row.ticketId] : [])),
+      ),
     ],
   });
   const content = renderBatch({
@@ -839,11 +901,14 @@ async function startRouterTurn(
           ids: rows.map((row) => row.id),
         });
       }
-      logger.info("Assistant Router conversation is busy; retrying the batch later", {
-        assistantId: assistant.id,
-        batchKey,
-        released: release,
-      });
+      logger.info(
+        "Assistant Router conversation is busy; retrying the batch later",
+        {
+          assistantId: assistant.id,
+          batchKey,
+          released: release,
+        },
+      );
       return "busy";
     }
     logger.error("Failed to start the assistant Router", {
@@ -883,11 +948,14 @@ async function startRouterTurn(
     now: new Date(),
   });
   if (!recorded) {
-    logger.warn("Assistant Router run started while another was recorded; left for a later tick", {
-      assistantId: assistant.id,
-      batchKey,
-      runId,
-    });
+    logger.warn(
+      "Assistant Router run started while another was recorded; left for a later tick",
+      {
+        assistantId: assistant.id,
+        batchKey,
+        runId,
+      },
+    );
   }
   return "started";
 }
@@ -911,21 +979,29 @@ export async function claimAndStartRouterBatch(
     assistantId: assistant.id,
   });
   const batchKey = batchKeyFor(selected);
-  const { claimedTriggerIds } = await claimBatch(assistant.id, batch, batchKey, {
-    teamId: assistant.teamId,
-    workspaceId: assistant.workspaceId,
-  });
+  const { claimedTriggerIds } = await claimBatch(
+    assistant.id,
+    batch,
+    batchKey,
+    {
+      teamId: assistant.teamId,
+      workspaceId: assistant.workspaceId,
+    },
+  );
   if (claimedTriggerIds.length !== batch.triggerIds.length) {
     await releaseInEvalTriggerRows(db, {
       ...scope,
       routerBatchKey: batchKey,
       ids: claimedTriggerIds,
     });
-    logger.warn("Assistant Router batch claim came up short; retrying next tick", {
-      assistantId: assistant.id,
-      selected: batch.triggerIds.length,
-      claimed: claimedTriggerIds.length,
-    });
+    logger.warn(
+      "Assistant Router batch claim came up short; retrying next tick",
+      {
+        assistantId: assistant.id,
+        selected: batch.triggerIds.length,
+        claimed: claimedTriggerIds.length,
+      },
+    );
     return "claim_short";
   }
   const claimed = await findTriggerRowsByIds({
@@ -934,9 +1010,15 @@ export async function claimAndStartRouterBatch(
     workspaceId: assistant.workspaceId,
     assistantId: assistant.id,
   });
-  return startRouterTurn(assistant, batchKey, claimed, withLoggedNotify(ports), {
-    recovering: false,
-  });
+  return startRouterTurn(
+    assistant,
+    batchKey,
+    claimed,
+    withLoggedNotify(ports),
+    {
+      recovering: false,
+    },
+  );
 }
 
 /**
@@ -964,7 +1046,11 @@ async function startNextRouterBatch(
     teamId: scopeHint.teamId,
     workspaceId: scopeHint.workspaceId,
   });
-  if (!assistant || assistant.status !== "active" || assistant.currentRouterRunId) {
+  if (
+    !assistant ||
+    assistant.status !== "active" ||
+    assistant.currentRouterRunId
+  ) {
     return;
   }
   const scope = scopeOf(assistant);
@@ -974,11 +1060,16 @@ async function startNextRouterBatch(
     if (!options.recoverOrphans) return;
     const batchKey = inEval[0]!.routerBatchKey!;
     const rows = inEval.filter((row) => row.routerBatchKey === batchKey);
-    logger.warn("Assistant Router batch was claimed but never recorded; starting it again", {
-      assistantId,
-      batchKey,
+    logger.warn(
+      "Assistant Router batch was claimed but never recorded; starting it again",
+      {
+        assistantId,
+        batchKey,
+      },
+    );
+    await startRouterTurn(assistant, batchKey, rows, ports, {
+      recovering: true,
     });
-    await startRouterTurn(assistant, batchKey, rows, ports, { recovering: true });
     return;
   }
 
@@ -1059,7 +1150,9 @@ async function tickAssistant(
   await settleRouterRun(assistant, ports);
   await settleWorkerRuns(assistant, now, ports);
   await dispatchWorkers(assistant, now, ports);
-  await startNextRouterBatch(assistant.id, scope, ports, { recoverOrphans: true });
+  await startNextRouterBatch(assistant.id, scope, ports, {
+    recoverOrphans: true,
+  });
 }
 
 /** Set while a tick runs in this process; ticks never overlap. */

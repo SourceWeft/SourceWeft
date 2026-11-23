@@ -78,7 +78,8 @@ export function renderWorkerDelivery(input: WorkerDeliveryInput): string {
     lines.push("");
     for (const trigger of input.triggers) {
       lines.push(renderTriggerLine(trigger));
-      if (trigger.routerNote) lines.push(renderRouterNote(trigger.id, trigger.routerNote));
+      if (trigger.routerNote)
+        lines.push(renderRouterNote(trigger.id, trigger.routerNote));
     }
   }
   return lines.join("\n");

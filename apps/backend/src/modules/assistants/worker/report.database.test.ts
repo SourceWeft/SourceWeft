@@ -76,7 +76,10 @@ test("report ready: the ticket goes idle, with one worker_report event and one f
   const { assistant, ticket, member, ctx } = await setupWorkingTicket();
   const report = await reportTool(ctx);
 
-  const result = await report.invoke({ status: "ready", summary: "Draft is in the doc." });
+  const result = await report.invoke({
+    status: "ready",
+    summary: "Draft is in the doc.",
+  });
   assert.ok(!isWorkerToolErrorFn(result), JSON.stringify(result));
 
   const updated = (await f.ticketRow(ticket.id))!;
@@ -138,7 +141,10 @@ test("report waiting with a question waits for a person and notifies the payer",
   assert.equal(notification.kind, "assistant_question");
   assert.equal(notification.userId, member);
   assert.equal(notification.teamId, teamId);
-  assert.deepEqual(notification.ref, { kind: "assistant_ticket", id: ticket.id });
+  assert.deepEqual(notification.ref, {
+    kind: "assistant_ticket",
+    id: ticket.id,
+  });
   assert.equal(notification.payload?.ticketId, ticket.id);
   assert.equal(notification.payload?.taskName, "Draft the launch post");
 
@@ -165,11 +171,9 @@ test("a report from a run that is no longer the ticket's is refused as a tool er
 test("a report on an ended ticket is refused as a tool error", async () => {
   const { ticket, ctx, workspaceId, member } = await setupWorkingTicket();
   const report = await reportTool(ctx);
-  await f.service.closeTicket(
-    { workspaceId, userId: member },
-    ticket.id,
-    { idempotencyKey: "close" },
-  );
+  await f.service.closeTicket({ workspaceId, userId: member }, ticket.id, {
+    idempotencyKey: "close",
+  });
 
   const result = await report.invoke({ status: "ready", summary: "Done" });
   assert.ok(isWorkerToolErrorFn(result));
@@ -179,10 +183,12 @@ test("a report on an ended ticket is refused as a tool error", async () => {
 test("report arguments out of bounds come back as a tool error, never a throw", async () => {
   const { ctx, assistant } = await setupWorkingTicket();
   const report = await reportTool(ctx);
-  const result = await report.invoke({
-    status: "ready",
-    summary: "x".repeat(2001),
-  } as never).catch((error: unknown) => error);
+  const result = await report
+    .invoke({
+      status: "ready",
+      summary: "x".repeat(2001),
+    } as never)
+    .catch((error: unknown) => error);
   // LangChain validates the schema before the body runs; whatever it does,
   // the 2000-character cap must hold and nothing must be written.
   assert.ok(result instanceof Error || isWorkerToolErrorFn(result));
@@ -192,11 +198,17 @@ test("report arguments out of bounds come back as a tool error, never a throw", 
 test("the worker's tools refuse to start without a complete hostContext or for an unknown ticket", async () => {
   const { ctx, assistant } = await setupWorkingTicket();
   await assert.rejects(
-    resolveWorkerToolsContextFn({ ...ctx, hostContext: { assistantId: assistant.id } }),
+    resolveWorkerToolsContextFn({
+      ...ctx,
+      hostContext: { assistantId: assistant.id },
+    }),
     /hostContext/,
   );
   await assert.rejects(
-    resolveWorkerToolsContextFn({ ...ctx, hostContext: { ticketId: randomUUID() } }),
+    resolveWorkerToolsContextFn({
+      ...ctx,
+      hostContext: { ticketId: randomUUID() },
+    }),
     /hostContext/,
   );
   await assert.rejects(
@@ -217,37 +229,54 @@ test("the worker's tools refuse to start without a complete hostContext or for a
 
 test("registerAssistantTurnProviders equips Router and Worker turns, and fails a turn whose hostContext does not resolve", async () => {
   const { ctx, ticket } = await setupWorkingTicket();
-  const { registerAssistantTurnProviders } = await import(
-    "../register-turn-providers"
-  );
+  const { registerAssistantTurnProviders } =
+    await import("../register-turn-providers");
   const origins = await import("../../threads/agent/origin-providers");
   registerAssistantTurnProviders(f.ports);
   try {
     // A second registration is a wiring error, not a silent replacement.
-    assert.throws(() => registerAssistantTurnProviders(f.ports), /already registered/);
+    assert.throws(
+      () => registerAssistantTurnProviders(f.ports),
+      /already registered/,
+    );
 
     const worker = origins.getOriginTurnProvider("assistant_ticket")!;
     assert.equal(worker.replaceTools, false);
     const tools = await worker.tools(ctx);
-    assert.deepEqual(tools.map((t) => t.name), ["report"]);
+    assert.deepEqual(
+      tools.map((t) => t.name),
+      ["report"],
+    );
     const prompt = await worker.prompt(ctx);
     assert.match(prompt, /No person is present/);
     assert.match(prompt, /report/);
     assert.ok(prompt.includes(`<assistant-ticket id=${ticket.id}>`));
     assert.ok(prompt.includes("Title: Draft the launch post"));
-    await assert.rejects(worker.tools({ ...ctx, hostContext: {} }), /hostContext/);
-    await assert.rejects(worker.prompt({ ...ctx, hostContext: {} }), /hostContext/);
+    await assert.rejects(
+      worker.tools({ ...ctx, hostContext: {} }),
+      /hostContext/,
+    );
+    await assert.rejects(
+      worker.prompt({ ...ctx, hostContext: {} }),
+      /hostContext/,
+    );
 
     const router = origins.getOriginTurnProvider("assistant_router")!;
     assert.equal(router.replaceTools, true);
     await assert.rejects(
-      router.tools({ ...ctx, hostContext: { assistantId: ctx.hostContext.assistantId! } }),
+      router.tools({
+        ...ctx,
+        hostContext: { assistantId: ctx.hostContext.assistantId! },
+      }),
       /hostContext/,
     );
     await assert.rejects(
       router.prompt({
         ...ctx,
-        hostContext: { assistantId: ctx.hostContext.assistantId!, batchKey: "no-such-batch" },
+        hostContext: {
+          assistantId: ctx.hostContext.assistantId!,
+          batchKey: "no-such-batch",
+        },
       }),
       /No in_eval triggers/,
     );

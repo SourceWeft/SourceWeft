@@ -15,7 +15,10 @@ test("a failed background generation leads to its conversation and is never mail
   );
   assert.equal(notificationPath(item({ title: "Quiz" })), "/dashboard/chat");
   assert.equal(NOTIFICATION_KINDS.artifact_generation_failed.template, null);
-  assert.equal(NOTIFICATION_KINDS.artifact_generation_failed.defaultEmail, false);
+  assert.equal(
+    NOTIFICATION_KINDS.artifact_generation_failed.defaultEmail,
+    false,
+  );
 });
 
 test("assistant notifications lead to the assistant, on the ticket when there is one", () => {

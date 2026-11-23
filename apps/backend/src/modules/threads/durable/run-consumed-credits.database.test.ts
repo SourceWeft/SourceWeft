@@ -56,7 +56,12 @@ beforeEach(async () => {
   });
   await schema.db
     .insert(schema.threads)
-    .values({ id: threadId, workspaceId, teamId, title: "Consumed credits test" });
+    .values({
+      id: threadId,
+      workspaceId,
+      teamId,
+      title: "Consumed credits test",
+    });
   const created = await repository.createChatThreadRun({
     teamId,
     workspaceId,
@@ -131,9 +136,7 @@ test("a run that settles three model calls records their summed credits on compl
       content: "question",
       createdBy: null,
     });
-    const placeholder = await options.onPrepared(
-      preparedTurn({ userMessage }),
-    );
+    const placeholder = await options.onPrepared(preparedTurn({ userMessage }));
     assistantId = placeholder.assistantMessageId;
     yield `data: ${JSON.stringify({ type: "text-delta", delta: "answer" })}\n\n`;
     const calls = [0, 1, 2].map((index) => ({
@@ -199,7 +202,10 @@ test("a run that settles once and then fails records only what was settled", asy
       "model call failed after one settlement",
     );
     await options.createErrorMessage({
-      prepared: { ...prepared, assistantMessageId: placeholder.assistantMessageId },
+      prepared: {
+        ...prepared,
+        assistantMessageId: placeholder.assistantMessageId,
+      },
       contentError,
       partialState: {
         meteredLlmCalls: [
@@ -227,7 +233,11 @@ test("a run that settles once and then fails records only what was settled", asy
 });
 
 test("a run that pauses for approval keeps its pre-pause spend through to completion", async () => {
-  await repository.markChatThreadRunRunning({ runId: run.id, teamId, workspaceId });
+  await repository.markChatThreadRunRunning({
+    runId: run.id,
+    teamId,
+    workspaceId,
+  });
   const assistantMessageId = randomUUID();
   await messages.createMessageRecord({
     id: assistantMessageId,

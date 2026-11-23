@@ -39,7 +39,10 @@ export function createRunCreditCapMiddleware(input: {
         402,
         RUN_CREDIT_CAP_EXCEEDED,
         `This run reached its credit cap of ${input.capCredits}; ${spent} credits were already consumed.`,
-        { recoverable: false, details: { capCredits: input.capCredits, spent } },
+        {
+          recoverable: false,
+          details: { capCredits: input.capCredits, spent },
+        },
       );
     },
   });

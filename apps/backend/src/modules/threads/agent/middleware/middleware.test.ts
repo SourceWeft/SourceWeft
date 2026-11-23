@@ -187,7 +187,9 @@ test("subagent stack mounts the credit-cap middleware only when a host-set credi
     toolObservabilityContext: { subagentType: "explore" },
   });
   assert.ok(
-    !withoutCap.some((middleware) => middleware.name === "SourceWeftRunCreditCap"),
+    !withoutCap.some(
+      (middleware) => middleware.name === "SourceWeftRunCreditCap",
+    ),
     "no creditCap → the subagent stack must not gate model calls on a cap",
   );
 

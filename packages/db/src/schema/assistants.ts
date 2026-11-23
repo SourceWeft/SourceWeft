@@ -52,10 +52,7 @@ export const assistants = pgTable(
     workspaceId: text("workspace_id").notNull(),
     routerThreadId: text("router_thread_id").notNull(),
     stewardUserId: text("steward_user_id").notNull(),
-    status: text("status")
-      .$type<AssistantStatus>()
-      .notNull()
-      .default("active"),
+    status: text("status").$type<AssistantStatus>().notNull().default("active"),
     statusReason: text("status_reason").$type<AssistantStatusReason>(),
     // The router run and batch currently in flight, if any; both null when
     // the router is idle. At most one router run per assistant at a time.
