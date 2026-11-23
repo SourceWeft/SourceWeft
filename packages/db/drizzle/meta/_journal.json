@@ -596,6 +596,13 @@
       "when": 1795365548470,
       "tag": "0084_thread_share_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1795408360135,
+      "tag": "0085_assistants",
+      "breakpoints": true
     }
   ]
 }
