@@ -138,6 +138,12 @@ test("Gmail send approval shows the complete message and requires it before appr
   assert.match(element.textContent ?? "", /Exact subject/);
   assert.match(element.textContent ?? "", /including the final sentence/);
   assert.equal(clickButton(element, "Approve").disabled, false);
+  // The action row is a full-width footer on the card surface, not a
+  // button-sized box with its own background.
+  const actions = clickButton(element, "Approve").parentElement;
+  assert.ok(actions?.classList.contains("self-stretch"));
+  assert.ok(!actions?.classList.contains("self-end"));
+  assert.ok(!actions?.classList.contains("bg-background"));
 });
 
 test("Gmail send approval cannot proceed when exact message is unavailable", async () => {
