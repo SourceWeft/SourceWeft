@@ -153,6 +153,7 @@ export function ManageConnectorsDialog({
     username: string;
     secret: string;
     roots: string[];
+    periodicIndexingEnabled: boolean;
   }) => Promise<void>;
   onSubmitFeed: (input: { name: string; feedUrl: string }) => Promise<void>;
   onSyncConnector: (connector: ConnectorItem) => void;

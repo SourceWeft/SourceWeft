@@ -503,7 +503,12 @@ test("handleConnectConnector omits gmail_mode for a tools-only Gmail manifest", 
   const original = window.location;
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...original, href: original.href, origin: original.origin, assign },
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
   });
   try {
     await mountHook(baseInput("ws-brokered-start"));
@@ -532,7 +537,12 @@ test("handleConnectConnector still carries gmail_mode for today's indexable Gmai
   const original = window.location;
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...original, href: original.href, origin: original.origin, assign },
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
   });
   try {
     await mountHook(baseInput("ws-indexable-start"));
@@ -1429,7 +1439,12 @@ test("handleReconnectConnector opens the rotate dialog for a credential connecto
   const original = window.location;
   Object.defineProperty(window, "location", {
     configurable: true,
-    value: { ...original, href: original.href, origin: original.origin, assign },
+    value: {
+      ...original,
+      href: original.href,
+      origin: original.origin,
+      assign,
+    },
   });
   try {
     await mountHook(baseInput("ws-rotate"));
@@ -1478,6 +1493,8 @@ test("handleAddCredential creates the webdav connector with the credential and c
       username: "alice",
       secret: "app-pass",
       roots: ["/Documents/"],
+      // Opt-in scheduled sync: the dialog forwards the member's choice.
+      periodicIndexingEnabled: false,
     });
   });
 
@@ -1486,8 +1503,29 @@ test("handleAddCredential creates the webdav connector with the credential and c
     name: "My WebDAV",
     configJson: { endpoint: "https://dav.example.com", roots: ["/Documents/"] },
     credential: { username: "alice", secret: "app-pass" },
-    periodicIndexingEnabled: true,
+    periodicIndexingEnabled: false,
     indexingFrequencyMinutes: 360,
+  });
+});
+
+test("handleAddCredential forwards an enabled scheduled sync", async () => {
+  create.mockResolvedValue({ connector: webdavConnector() });
+  sync.mockResolvedValue({});
+  await mountHook(baseInput("ws-add2"));
+
+  await act(async () => {
+    await api().handleAddCredential({
+      name: "My WebDAV",
+      endpoint: "https://dav.example.com",
+      username: "alice",
+      secret: "app-pass",
+      roots: ["/Documents/"],
+      periodicIndexingEnabled: true,
+    });
+  });
+
+  expect(create.mock.calls[0]?.[1]).toMatchObject({
+    periodicIndexingEnabled: true,
   });
 });
 
@@ -1531,7 +1569,9 @@ test("handleCheckFeed checks the rss config and maps title and item count", asyn
 
   expect(checkConfig).toHaveBeenCalledWith("ws-feed", {
     connectorType: "rss",
-    configJson: { feedUrl: "https://example.com/feed.xml?token=SECRET-TOKEN-123" },
+    configJson: {
+      feedUrl: "https://example.com/feed.xml?token=SECRET-TOKEN-123",
+    },
   });
   expect(result).toEqual({
     ready: true,

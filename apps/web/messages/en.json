@@ -3440,6 +3440,8 @@
           "checking": "Testing...",
           "connected": "Connection verified",
           "add": "Add connection",
+          "autoSync": "Sync automatically",
+          "autoSyncHint": "Check for new and changed files on a schedule. Off by default; you can sync manually anytime.",
           "invalidEndpoint": "Enter an http:// or https:// server URL without a username, password or query string.",
           "invalidUsername": "Enter a username without a colon.",
           "passwordRequired": "Enter the app password.",

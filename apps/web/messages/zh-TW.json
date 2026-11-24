@@ -3440,6 +3440,8 @@
           "checking": "測試中…",
           "connected": "連接已驗證",
           "add": "新增連接",
+          "autoSync": "自動同步",
+          "autoSyncHint": "定期檢查新增和變更的檔案。預設關閉；你隨時可以手動同步。",
           "invalidEndpoint": "請輸入以 http:// 或 https:// 開頭的伺服器網址，且不要包含使用者名稱、密碼或查詢字串。",
           "invalidUsername": "請輸入不含冒號的使用者名稱。",
           "passwordRequired": "請輸入應用專用密碼。",

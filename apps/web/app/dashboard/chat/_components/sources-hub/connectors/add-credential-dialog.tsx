@@ -8,6 +8,7 @@ import {
   AlertDescription,
 } from "@sourceweft/ui-web/components/ui/alert";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -62,8 +63,11 @@ function isAcceptableEndpoint(value: string) {
 /** A username the server would accept: 1..200 after trimming and no colon (a
  * colon is the Basic-auth separator). */
 function isAcceptableUsername(value: string) {
-  return value.length > 0 && value.length <= USERNAME_MAX_LENGTH
-    && !value.includes(":");
+  return (
+    value.length > 0 &&
+    value.length <= USERNAME_MAX_LENGTH &&
+    !value.includes(":")
+  );
 }
 
 function hostOf(endpoint: string) {
@@ -97,6 +101,9 @@ function AddCredentialForm({
   const [secret, setSecret] = useState("");
   const [name, setName] = useState("");
   const [roots, setRoots] = useState("/");
+  // Scheduled reconciliation is opt-in: the connector indexes once on create
+  // and only keeps syncing on a schedule when the member asks.
+  const [autoSync, setAutoSync] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [checked, setChecked] = useState<Checked | null>(null);
@@ -192,6 +199,7 @@ function AddCredentialForm({
         username: trimmedUsername,
         secret,
         roots: parsedRoots.roots,
+        periodicIndexingEnabled: autoSync,
       });
       // The create succeeded; the dialog is closing, but drop the secret from
       // state immediately so it never lingers after the submit.
@@ -374,6 +382,23 @@ function AddCredentialForm({
                 {t("connectors.webdav.foldersHint")}
               </p>
             </div>
+
+            <div className="flex items-start gap-2">
+              <Checkbox
+                checked={autoSync}
+                className="mt-0.5"
+                id="add-webdav-autosync"
+                onCheckedChange={(value) => setAutoSync(value === true)}
+              />
+              <div className="space-y-0.5">
+                <Label className="font-normal" htmlFor="add-webdav-autosync">
+                  {t("connectors.webdav.dialog.autoSync")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("connectors.webdav.dialog.autoSyncHint")}
+                </p>
+              </div>
+            </div>
           </>
         ) : null}
 
@@ -435,6 +460,7 @@ export function AddCredentialDialog({
     username: string;
     secret: string;
     roots: string[];
+    periodicIndexingEnabled: boolean;
   }) => Promise<void>;
 }) {
   return (

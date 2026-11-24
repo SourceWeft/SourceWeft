@@ -14,6 +14,16 @@ import {
 } from "@/test/react";
 import { AddCredentialDialog } from "./add-credential-dialog";
 
+// The Radix Checkbox renders a hidden form input that measures itself with a
+// ResizeObserver, which jsdom does not provide.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as { ResizeObserver?: unknown }).ResizeObserver ??=
+  ResizeObserverStub;
+
 afterEach(unmountAll);
 
 type CheckResult = Awaited<
@@ -172,8 +182,41 @@ test("Add submits the endpoint, credential and default root, then closes", async
     username: "alice",
     secret: "app-pass",
     roots: ["/"],
+    // Scheduled reconciliation is opt-in; the checkbox is off by default.
+    periodicIndexingEnabled: false,
   });
   expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+test("Sync automatically is off by default", async () => {
+  const { onAdd } = await mountDialog();
+
+  await fillCredential();
+  await testConnection();
+  await click(button("Add connection"));
+  await flush(5);
+
+  expect(onAdd).toHaveBeenCalledWith(
+    expect.objectContaining({ periodicIndexingEnabled: false }),
+  );
+});
+
+test("checking Sync automatically sends periodicIndexingEnabled true", async () => {
+  const { onAdd } = await mountDialog();
+
+  await fillCredential();
+  await testConnection();
+  const checkbox = document.querySelector<HTMLButtonElement>(
+    "#add-webdav-autosync",
+  )!;
+  await click(checkbox);
+  await flush(3);
+  await click(button("Add connection"));
+  await flush(5);
+
+  expect(onAdd).toHaveBeenCalledWith(
+    expect.objectContaining({ periodicIndexingEnabled: true }),
+  );
 });
 
 test("typed folder paths are normalized into roots", async () => {

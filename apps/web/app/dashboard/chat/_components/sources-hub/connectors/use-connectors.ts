@@ -303,9 +303,7 @@ export function useConnectors(input: {
     ? selectionSpecsSnapshot.byType
     : EMPTY_SELECTION_SPEC_MAP;
   const connectorManifestInfoByType =
-    availableManifests.actorId === actorId
-      ? availableManifests.infoByType
-      : {};
+    availableManifests.actorId === actorId ? availableManifests.infoByType : {};
   // `ensureConnector` and `handleConnectConnector` read this inside async
   // callbacks that can outlive the render that created them (an OAuth return
   // is handled by an effect that fires before `refreshConnectors()`'s
@@ -712,8 +710,7 @@ export function useConnectors(input: {
       // `gmail_mode` is carried through the redirect.
       if (
         item.id === "gmail" &&
-        connectorManifestInfoByTypeRef.current.gmail?.supportsIndexing !==
-          false
+        connectorManifestInfoByTypeRef.current.gmail?.supportsIndexing !== false
       ) {
         returnTo.searchParams.set("gmail_mode", gmailMode);
       }
@@ -1028,7 +1025,7 @@ export function useConnectors(input: {
           }
           const effectiveGmailMode =
             item.id === "gmail" && gmailSupportsIndexing
-              ? options.gmailMode ?? "tools"
+              ? (options.gmailMode ?? "tools")
               : "tools";
           const created = await connectorsClient.create(workspaceId, {
             connectorType: item.id,
@@ -1512,6 +1509,7 @@ export function useConnectors(input: {
       username: string;
       secret: string;
       roots: string[];
+      periodicIndexingEnabled: boolean;
     }) => {
       if (!workspaceId) {
         const message = t("toasts.connectors.noWorkspace");
@@ -1523,7 +1521,9 @@ export function useConnectors(input: {
         name: input.name,
         configJson: { endpoint: input.endpoint, roots: input.roots },
         credential: { username: input.username, secret: input.secret },
-        periodicIndexingEnabled: true,
+        // Scheduled reconciliation is opt-in: default off unless the member
+        // ticked "Sync automatically" in the add dialog.
+        periodicIndexingEnabled: input.periodicIndexingEnabled,
         indexingFrequencyMinutes: 360,
       });
       trackConnectorConnected({ connectorType: WEBDAV_CONNECTOR_TYPE });
