@@ -17,6 +17,8 @@ export type WorkNode = {
   refs: string[];
   evidence: StudyEvidence[];
   children: WorkNode[];
+  /** Built by the engine to hold groups (root, branches, buckets), not by the model. */
+  structural?: boolean;
 };
 
 /** Turns one group's flat node list into a forest under the group's root. */
@@ -113,6 +115,7 @@ function groupNode(
     refs: [],
     evidence: [],
     children,
+    structural: true,
   };
 }
 
@@ -182,45 +185,113 @@ function truncateLabel(label: string) {
 }
 
 /**
- * Enforces depth, fan-out and node count (breadth first, so parents are kept
- * before their children), then removes categories that lost every child.
- * Returns the number of nodes kept below the root.
+ * Drops levels past the depth limit and, past the fan-out, keeps the children
+ * with the most beneath them (in their original order), so a wide level loses
+ * as little of the map as it can.
+ */
+function limitShape(node: WorkNode, depth: number, dropped: DropCounts): void {
+  if (depth + 1 > STUDY_LIMITS.mindmapMaxDepth) {
+    for (const child of node.children) addDrop(dropped, "depth", subtreeSize(child));
+    node.children = [];
+    return;
+  }
+  const fanout = STUDY_LIMITS.mindmapMaxFanout;
+  if (node.children.length > fanout) {
+    const largest = new Set(
+      node.children
+        .map((child, index) => ({ child, index, size: subtreeSize(child) }))
+        .sort((a, b) => b.size - a.size || a.index - b.index)
+        .slice(0, fanout)
+        .map(({ child }) => child),
+    );
+    for (const child of node.children) {
+      if (!largest.has(child)) addDrop(dropped, "fanout", subtreeSize(child));
+    }
+    node.children = node.children.filter((child) => largest.has(child));
+  }
+  for (const child of node.children) limitShape(child, depth + 1, dropped);
+}
+
+/**
+ * The model's nodes, one breadth-first list per group: the content under
+ * each structural node, parents before their children.
+ */
+function contentUnits(root: WorkNode): WorkNode[][] {
+  const units: WorkNode[][] = [];
+  const visit = (holder: WorkNode) => {
+    const unit: WorkNode[] = [];
+    const queue = holder.children.filter((child) => !child.structural);
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      unit.push(node);
+      queue.push(...node.children);
+    }
+    if (unit.length > 0) units.push(unit);
+    for (const child of holder.children) if (child.structural) visit(child);
+  };
+  visit(root);
+  return units;
+}
+
+function structuralBelow(node: WorkNode): number {
+  return node.children.reduce(
+    (sum, child) => sum + (child.structural ? 1 + structuralBelow(child) : 0),
+    0,
+  );
+}
+
+/**
+ * Enforces depth, fan-out and node count, then removes categories that lost
+ * every child. The count limits the model's nodes, not the branches that
+ * hold groups, and is shared round-robin: every group keeps a node before any
+ * keeps a second, and within a group parents come before children. Returns
+ * the number of the model's nodes kept.
  */
 export function enforceMindmapLimits(
   root: WorkNode,
   maxNodesBelowRoot: number,
   dropped: DropCounts,
 ): number {
-  const budget = Math.min(maxNodesBelowRoot, STUDY_LIMITS.mindmapMaxNodes - 1);
-  let kept = 0;
-  const queue: { node: WorkNode; depth: number }[] = [{ node: root, depth: 0 }];
-  while (queue.length > 0) {
-    const { node, depth } = queue.shift()!;
-    const children: WorkNode[] = [];
-    for (const [index, child] of node.children.entries()) {
-      if (depth + 1 > STUDY_LIMITS.mindmapMaxDepth) {
-        addDrop(dropped, "depth", subtreeSize(child));
-      } else if (index >= STUDY_LIMITS.mindmapMaxFanout) {
-        addDrop(dropped, "fanout", subtreeSize(child));
-      } else if (kept >= budget) {
-        addDrop(dropped, "surplus", subtreeSize(child));
-      } else {
-        kept += 1;
-        children.push(child);
-        queue.push({ node: child, depth: depth + 1 });
-      }
+  limitShape(root, 0, dropped);
+  const budget = Math.max(
+    0,
+    Math.min(maxNodesBelowRoot, STUDY_LIMITS.mindmapMaxNodes - 1 - structuralBelow(root)),
+  );
+  const units = contentUnits(root);
+  const keep = new Set<WorkNode>();
+  for (let round = 0; keep.size < budget; round += 1) {
+    let added = false;
+    for (const unit of units) {
+      const node = unit[round];
+      if (!node || keep.size >= budget) continue;
+      keep.add(node);
+      added = true;
     }
-    node.children = children;
+    if (!added) break;
   }
+
+  let kept = keep.size;
+  const trim = (node: WorkNode): void => {
+    node.children = node.children.filter((child) => {
+      if (!child.structural && !keep.has(child)) {
+        addDrop(dropped, "surplus", subtreeSize(child));
+        return false;
+      }
+      trim(child);
+      return true;
+    });
+  };
+  trim(root);
+
   const removeEmptyCategories = (node: WorkNode): void => {
     node.children = node.children.filter((child) => {
       removeEmptyCategories(child);
-      if (child.children.length === 0 && child.evidence.length === 0) {
+      if (child.children.length > 0 || child.evidence.length > 0) return true;
+      if (!child.structural) {
         kept -= 1;
         addDrop(dropped, "unanchored");
-        return false;
       }
-      return true;
+      return false;
     });
   };
   removeEmptyCategories(root);
