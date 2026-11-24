@@ -802,7 +802,38 @@ describe("a server whose README many servers show", () => {
         locale: "en",
       }),
     });
-    expect(actual.robots).toBeUndefined();
+    expect(actual.robots).toEqual({ follow: true, index: true, "max-image-preview": "large" });
+  });
+});
+
+describe("public MCP detail page locale metadata (#745)", () => {
+  it.each([
+    ["en", "en_US", ["zh_CN", "zh_TW"]],
+    ["zh-CN", "zh_CN", ["en_US", "zh_TW"]],
+    ["zh-TW", "zh_TW", ["en_US", "zh_CN"]],
+  ])("declares %s as %s with the others as alternates", async (locale, ogLocale, alternates) => {
+    market.getPublicMcpManifest.mockResolvedValue(manifestResponse);
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      versions: [],
+      overviewLocales: [],
+      searchIndexable: true,
+    });
+    const actual = await generateMetadata({
+      params: Promise.resolve({
+        identifier: encodeURIComponent(IDENTIFIER),
+        locale,
+      }),
+    });
+    expect(actual.openGraph).toMatchObject({
+      alternateLocale: alternates,
+      locale: ogLocale,
+    });
+    expect(actual.robots).toEqual({
+      follow: true,
+      index: true,
+      "max-image-preview": "large",
+    });
   });
 });
 
@@ -852,7 +883,7 @@ describe("Lupa English search description experiment", () => {
     expect(actual.alternates?.canonical).toBe(
       `${SITE_URL}/mcp/${encodeURIComponent(lupaIdentifier)}`,
     );
-    expect(actual.robots).toBeUndefined();
+    expect(actual.robots).toEqual({ follow: true, index: true, "max-image-preview": "large" });
     expect(actual.openGraph?.description).toBe(originalDescription);
     expect(actual.twitter?.description).toBe(originalDescription);
     expect(market.getPublicMcpManifest).toHaveBeenCalledWith(lupaIdentifier);
@@ -1400,13 +1431,26 @@ describe("public MCP detail page related servers", () => {
     expect(html).toContain("More servers like Weather");
   });
 
-  it("has no related section when nothing shares meaningful words", async () => {
+  it("links same-category servers as plain links when nothing shares meaningful words (#745)", async () => {
     withCategory();
     market.listPublicMcp.mockResolvedValue({
       items: [candidate("a/db", "Postgres MCP Server", "Cloud API tools")],
     });
     const html = await render();
     expect(html).not.toContain("More servers like");
+    expect(html).toContain("More in");
+    expect(html).toContain('href="/mcp/a%2Fdb"');
+    expect(navLabels(html)).toContain("related");
+  });
+
+
+  it("has no related section when no server shares its category", async () => {
+    withCategory();
+    market.listPublicMcp.mockResolvedValue({
+      items: [{ ...candidate("a/db", "Postgres", "Databases"), categories: ["y"] }],
+    });
+    const html = await render();
+    expect(html).not.toContain('id="related"');
     expect(navLabels(html)).not.toContain("related");
   });
 

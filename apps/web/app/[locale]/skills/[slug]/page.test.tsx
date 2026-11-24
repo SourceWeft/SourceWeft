@@ -552,6 +552,28 @@ describe("public skill detail page", () => {
   });
 });
 
+describe("generateMetadata locale and robots (#745)", () => {
+  it.each([
+    ["en", "en_US", ["zh_CN", "zh_TW"]],
+    ["zh-CN", "zh_CN", ["en_US", "zh_TW"]],
+    ["zh-TW", "zh_TW", ["en_US", "zh_CN"]],
+  ])("declares %s as %s with the others as alternates", async (locale, ogLocale, alternates) => {
+    const actual = await generateMetadata({
+      params: Promise.resolve({ locale, slug: "pdf-forms" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(actual.openGraph).toMatchObject({
+      alternateLocale: alternates,
+      locale: ogLocale,
+    });
+    expect(actual.robots).toEqual({
+      follow: true,
+      index: true,
+      "max-image-preview": "large",
+    });
+  });
+});
+
 describe("generateMetadata", () => {
   it("canonicalises every tab to the bare skill URL and indexes only the default", async () => {
     const base = await generateMetadata({
@@ -560,7 +582,7 @@ describe("generateMetadata", () => {
     });
     expect(base.title).toBe("PDF Forms Agent Skill");
     expect(String(base.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
-    expect(base.robots).toBeUndefined();
+    expect(base.robots).toEqual({ follow: true, index: true, "max-image-preview": "large" });
 
     const files = await generateMetadata({
       params: Promise.resolve({ locale: "en", slug: "pdf-forms" }),
@@ -609,7 +631,7 @@ describe("generateMetadata", () => {
     );
     expect(JSON.stringify(zhCN.alternates?.languages)).not.toContain(duplicate);
     // Canonicalised, not noindexed: search engines merge it into the primary.
-    expect(zhCN.robots).toBeUndefined();
+    expect(zhCN.robots).toEqual({ follow: true, index: true, "max-image-preview": "large" });
 
     const en = await generateMetadata({
       params: Promise.resolve({ locale: "en", slug: duplicate }),

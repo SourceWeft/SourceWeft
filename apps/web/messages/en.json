@@ -654,6 +654,7 @@
       "published": "Published",
       "securityHeading": "Security note",
       "relatedHeading": "More servers like {name}",
+      "relatedSameCategoryHeading": "More in {category}",
       "integrationsHeading": "Other {brand} integrations",
       "officialPointer": "The publisher's own server: <link>{name}</link>",
       "breadcrumb": "Breadcrumb",
