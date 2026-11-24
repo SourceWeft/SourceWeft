@@ -1284,6 +1284,28 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
+  packages/builtin-connector-webdav:
+    dependencies:
+      '@sourceweft/capability-contracts':
+        specifier: workspace:*
+        version: link:../capability-contracts
+      '@sourceweft/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      fast-xml-parser:
+        specifier: 5.7.3
+        version: 5.7.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
   packages/builtin-document-parsers:
     dependencies:
       '@langchain/classic':

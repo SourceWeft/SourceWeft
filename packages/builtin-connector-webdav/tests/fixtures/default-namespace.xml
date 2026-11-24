@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<multistatus xmlns="DAV:">
+  <response>
+    <href>http://dav.example.com/dav/a%20b.txt</href>
+    <propstat>
+      <prop>
+        <getcontentlength>5</getcontentlength>
+        <getlastmodified>not a date</getlastmodified>
+      </prop>
+      <status>HTTP/1.1 200 OK</status>
+    </propstat>
+  </response>
+  <response>
+    <href>/dav/gone.txt</href>
+    <status>HTTP/1.1 404 Not Found</status>
+  </response>
+</multistatus>
