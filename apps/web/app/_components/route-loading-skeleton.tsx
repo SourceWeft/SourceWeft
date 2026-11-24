@@ -223,16 +223,29 @@ export function DashboardContentRouteSkeleton({
   return <div className="min-h-0 flex-1">{children}</div>;
 }
 
+/**
+ * The home toolbar's team switcher before the session's teams load: the
+ * switcher's h-10 button at the width a short team name takes. The route
+ * skeleton and the page both use it, so the toolbar does not change when the
+ * page replaces the route skeleton.
+ */
+export function DashboardHomeTeamSwitcherSkeleton() {
+  return <SkeletonBlock className="h-10 w-32 rounded-lg" />;
+}
+
 function DashboardHomeHeaderSkeleton() {
   return (
     <header className="sticky top-0 z-10 shrink-0 border-b border-border/70 bg-background/95 backdrop-blur">
       <div className="flex min-h-16 items-center justify-between gap-2 px-3 py-2 md:h-16 md:gap-3 md:px-6 md:py-0 xl:px-8">
         <div className="flex min-w-0 items-center gap-2 md:gap-3">
-          <SkeletonBlock className="h-9 w-36 max-w-[48vw] rounded-xl md:w-48" />
+          <DashboardHomeTeamSwitcherSkeleton />
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2 md:gap-3">
-          <SkeletonBlock className="h-10 w-full max-w-[42vw] rounded-xl md:max-w-72" />
+          {/* Same box as the page's search field. */}
+          <div className="relative w-full min-w-0 max-w-[42vw] md:max-w-72">
+            <SkeletonBlock className="h-10 w-full rounded-xl" />
+          </div>
         </div>
       </div>
     </header>
@@ -341,13 +354,19 @@ function DashboardHomeWorkspaceCardSkeleton({ create }: { create?: boolean }) {
         )}
       </div>
 
+      {/* Line boxes match the card's 24px title and 18.75px subtitle, so the
+          card keeps its height when the workspaces arrive. */}
       <div className="flex items-start justify-between gap-3 px-1.5 pb-1 pt-3.5">
-        <div className="min-w-0 flex-1 space-y-2">
-          <SkeletonLine className="h-4 w-36" />
-          <SkeletonLine className="w-24" />
+        <div className="min-w-0 flex-1">
+          <div className="flex h-6 items-center">
+            <SkeletonLine className="h-4 w-36" />
+          </div>
+          <div className="mt-1 flex h-[18.75px] items-center">
+            <SkeletonLine className="w-24" />
+          </div>
         </div>
         {!create ? (
-          <SkeletonBlock className="h-6 w-16 shrink-0 rounded-full" />
+          <SkeletonBlock className="h-[24.5px] w-12 shrink-0 rounded-full" />
         ) : null}
       </div>
     </div>
