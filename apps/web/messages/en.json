@@ -3852,7 +3852,8 @@
         "YOUTUBE_NO_SPEECH": "No speech was found in this video, so there is no transcript.",
         "YOUTUBE_TRANSCRIPT_FAILED": "The video could not be transcribed. Try again later.",
         "YOUTUBE_LISTING_FAILED": "The videos could not be listed. Try again in a moment.",
-        "YOUTUBE_CHANNEL_NOT_FOUND": "This channel could not be found."
+        "YOUTUBE_CHANNEL_NOT_FOUND": "This channel could not be found.",
+        "YOUTUBE_PLAYLIST_NOT_FOUND": "This playlist could not be found."
       }
     },
     "noteOrigin": {

@@ -3852,7 +3852,8 @@
         "YOUTUBE_NO_SPEECH": "這部影片中沒有偵測到語音，因此沒有轉錄文字。",
         "YOUTUBE_TRANSCRIPT_FAILED": "無法轉錄這部影片，請稍後再試。",
         "YOUTUBE_LISTING_FAILED": "無法列出影片，請稍後再試。",
-        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到這個頻道。"
+        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到這個頻道。",
+        "YOUTUBE_PLAYLIST_NOT_FOUND": "找不到這個播放清單。"
       }
     },
     "noteOrigin": {

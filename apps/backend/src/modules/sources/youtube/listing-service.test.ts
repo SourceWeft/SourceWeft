@@ -149,3 +149,19 @@ test("a catalog error becomes a ContentError with the same code", async () => {
     },
   );
 });
+
+test("a missing playlist keeps its playlist code", async () => {
+  listCollection.mockRejectedValue(
+    new YouTubeSourceError(404, "YOUTUBE_PLAYLIST_NOT_FOUND", "not found"),
+  );
+
+  await assert.rejects(
+    listYouTubeCollection(baseInput, deps()),
+    (error: unknown) => {
+      assert.ok(error instanceof ContentError);
+      assert.equal(error.statusCode, 404);
+      assert.equal(error.code, "YOUTUBE_PLAYLIST_NOT_FOUND");
+      return true;
+    },
+  );
+});

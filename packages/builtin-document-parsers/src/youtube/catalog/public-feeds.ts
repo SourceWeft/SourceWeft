@@ -20,6 +20,12 @@ import type {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_COLLECTION_ENTRIES = 15;
 const FEEDS_BASE_URL = "https://www.youtube.com/feeds/videos.xml";
+/**
+ * YouTube's public feed now and then answers 404 for a playlist or channel
+ * that exists, and the next request succeeds. A feed 404 is therefore
+ * fetched once more after this pause before it is reported as not found.
+ */
+const DEFAULT_FEED_RETRY_DELAY_MS = 1_000;
 
 /** Hosts a channel page may finish on; anything else (a consent wall) is not the page. */
 const CHANNEL_PAGE_HOSTS = new Set(["www.youtube.com", "youtube.com", "m.youtube.com"]);
@@ -36,6 +42,8 @@ const CHANNEL_ID_EXTERNAL_ID_RE = /"externalId":"(UC[A-Za-z0-9_-]{22})"/;
 export type PublicFeedsCatalogProviderDeps = {
   fetch: typeof fetch;
   timeoutMs?: number;
+  /** Pause before the single retry of a feed 404; tests pass 0. */
+  feedRetryDelayMs?: number;
 };
 
 function fallbackVideoInfo(videoId: string): YouTubeVideoInfo {
@@ -60,10 +68,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function delay(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
 export function createPublicFeedsCatalogProvider(
   deps: PublicFeedsCatalogProviderDeps,
 ): YouTubeCatalogProvider {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const feedRetryDelayMs = deps.feedRetryDelayMs ?? DEFAULT_FEED_RETRY_DELAY_MS;
   // Feed text stays text (a title "2024" or an all-digit video id must not
   // become a number), and HTML entities such as `&#39;` are decoded.
   const xmlParser = new XMLParser({
@@ -235,14 +248,9 @@ export function createPublicFeedsCatalogProvider(
     });
   }
 
-  async function listCollection(
-    target: Extract<YouTubeUrlTarget, { kind: "playlist" | "channel" }>,
-  ): Promise<YouTubeCollection> {
-    const feedUrl = await resolveFeedUrl(target);
-
-    let response: Response;
+  async function fetchFeed(feedUrl: string): Promise<Response> {
     try {
-      response = await fetchWithTimeout(feedUrl);
+      return await fetchWithTimeout(feedUrl);
     } catch (error) {
       throw new YouTubeSourceError(
         502,
@@ -250,13 +258,33 @@ export function createPublicFeedsCatalogProvider(
         `Failed to fetch feed ${feedUrl}: ${errorMessage(error)}`,
       );
     }
+  }
+
+  async function listCollection(
+    target: Extract<YouTubeUrlTarget, { kind: "playlist" | "channel" }>,
+  ): Promise<YouTubeCollection> {
+    const feedUrl = await resolveFeedUrl(target);
+
+    let response = await fetchFeed(feedUrl);
+    if (response.status === 404) {
+      // One bounded retry: the feed's 404s for real collections are transient.
+      await response.body?.cancel();
+      await delay(feedRetryDelayMs);
+      response = await fetchFeed(feedUrl);
+    }
 
     if (response.status === 404) {
-      throw new YouTubeSourceError(
-        404,
-        "YOUTUBE_CHANNEL_NOT_FOUND",
-        `Feed not found: ${feedUrl}`,
-      );
+      throw target.kind === "playlist"
+        ? new YouTubeSourceError(
+            404,
+            "YOUTUBE_PLAYLIST_NOT_FOUND",
+            `Playlist feed not found: ${feedUrl}`,
+          )
+        : new YouTubeSourceError(
+            404,
+            "YOUTUBE_CHANNEL_NOT_FOUND",
+            `Channel feed not found: ${feedUrl}`,
+          );
     }
 
     if (!response.ok) {
