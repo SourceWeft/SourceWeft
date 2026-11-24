@@ -6,20 +6,17 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import {
-  createDavClient,
-  WebDavError,
-} from "@sourceweft/builtin-connector-webdav";
 import { afterEach, test } from "vitest";
+import { EndpointPolicyError } from "../../shared/security/endpoint-policy";
 import { createCredentialedFetchScope } from "./public-fetch";
 
 /**
- * Proves the real credentialed controlled-fetch scope (the one the WebDAV
- * adapter runs against in production) follows a same-origin redirect with the
- * Authorization header intact and refuses a cross-origin one — the behaviour
- * that the adapter's own dav-client relies on now that it no longer forces
- * redirect:"manual" (finding F5). The package cannot import backend code, so
- * the proof lives here, driving `createDavClient` over `scope.fetch`.
+ * Proves the real credentialed controlled-fetch scope (the one a credentialed
+ * connector runs against in production) follows a same-origin redirect with the
+ * Authorization header intact and refuses a cross-origin one. The WebDAV
+ * dav-client relies on this now that it no longer forces redirect:"manual"
+ * (finding F5). The backend must not import a capability package, so the
+ * requests are made directly through `scope.fetch` with the WebDAV methods.
  */
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
@@ -50,8 +47,8 @@ const COLLECTION_207 =
   `<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>` +
   `<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`;
 
-const credential = { username: "alice", secret: "app-password" };
 const expectedAuth = `Basic ${Buffer.from("alice:app-password", "utf8").toString("base64")}`;
+const headers = { authorization: expectedAuth, depth: "1" };
 
 test("a same-origin PROPFIND redirect is followed and still carries Authorization", async () => {
   let authOnFinal: string | undefined;
@@ -69,13 +66,12 @@ test("a same-origin PROPFIND redirect is followed and still carries Authorizatio
   });
   const scope = createCredentialedFetchScope([origin]);
   try {
-    const client = createDavClient({
-      fetch: scope.fetch,
-      endpoint: new URL(`${origin}/dav/`),
-      credential,
+    const response = await scope.fetch(`${origin}/dav/`, {
+      method: "PROPFIND",
+      headers,
     });
-    const entries = await client.propfind("/", 1);
-    assert.equal(entries.length, 1);
+    assert.equal(response.status, 207);
+    assert.match(await response.text(), /dav2/);
     assert.equal(authOnFinal, expectedAuth);
   } finally {
     await scope.close();
@@ -97,13 +93,12 @@ test("a same-origin GET redirect is followed and still carries Authorization", a
   });
   const scope = createCredentialedFetchScope([origin]);
   try {
-    const client = createDavClient({
-      fetch: scope.fetch,
-      endpoint: new URL(`${origin}/dav/`),
-      credential,
+    const response = await scope.fetch(`${origin}/dav/a.txt`, {
+      method: "GET",
+      headers,
     });
-    const result = await client.get("/a.txt", { maxBytes: 1000 });
-    assert.equal(new TextDecoder().decode(result.body), "hello");
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "hello");
     assert.equal(authOnFinal, expectedAuth);
   } finally {
     await scope.close();
@@ -123,16 +118,10 @@ test("a cross-origin redirect is refused with zero requests at the target", asyn
   });
   const scope = createCredentialedFetchScope([origin, target]);
   try {
-    const client = createDavClient({
-      fetch: scope.fetch,
-      endpoint: new URL(`${origin}/dav/`),
-      credential,
-    });
-    await assert.rejects(client.propfind("/", 1), (error: unknown) => {
-      assert.ok(error instanceof WebDavError);
-      assert.equal(error.code, "WEBDAV_BLOCKED_ENDPOINT");
-      return true;
-    });
+    await assert.rejects(
+      scope.fetch(`${origin}/dav/`, { method: "PROPFIND", headers }),
+      (error: unknown) => error instanceof EndpointPolicyError,
+    );
     assert.equal(targetHits, 0);
   } finally {
     await scope.close();
