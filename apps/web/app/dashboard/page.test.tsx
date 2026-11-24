@@ -48,6 +48,9 @@ vi.mock("./_components/dashboard-chat-state", () => ({
   useDashboardChatState: () => ({
     organizationId: "org-1",
     isWorkspaceHydrating: false,
+    workspaceId: null,
+    workspaces: [],
+    workspaceRecords: [],
     switchWorkspace: chatState.switchWorkspace,
   }),
 }));

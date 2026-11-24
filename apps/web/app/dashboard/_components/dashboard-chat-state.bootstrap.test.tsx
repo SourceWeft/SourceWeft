@@ -192,3 +192,42 @@ test("a session organization other than the one bootstrapped bootstraps again", 
   expect(getChatBootstrap).toHaveBeenCalledTimes(2);
   expect(shownWorkspace()).toBe("ws-1");
 });
+
+function WorkspaceRecords() {
+  const { workspaceRecords } = useDashboardChatState();
+  return (
+    <output data-testid="workspace-records">
+      {JSON.stringify(workspaceRecords)}
+    </output>
+  );
+}
+
+test("keeps the bootstrap's full workspace records for pages that need them", async () => {
+  const records = WORKSPACES.map((workspace) => ({
+    ...workspace,
+    organizationId: "org-1",
+    slug: workspace.id,
+    createdBy: null,
+    createdAt: "2026-10-01T00:00:00.000Z",
+  }));
+  const respond = getChatBootstrap.getMockImplementation()!;
+  getChatBootstrap.mockImplementation(async (input) => ({
+    ...(await respond(input)),
+    workspaces: records,
+  }));
+  await mount(
+    withIntl(
+      <DashboardChatStateProvider>
+        <WorkspaceRecords />
+      </DashboardChatStateProvider>,
+    ),
+  );
+  await flush(4);
+
+  expect(
+    JSON.parse(
+      document.querySelector('[data-testid="workspace-records"]')
+        ?.textContent ?? "[]",
+    ),
+  ).toEqual(records);
+});
