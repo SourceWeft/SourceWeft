@@ -96,9 +96,12 @@ starting a run.
   the ticket (`ready`/`dropped` → `idle`, `waiting`/`blocked`/`failed` →
   `waiting_person`, `outcome` = the status), stores the summary, adds a
   `worker_report` event (`status: summary`) for the Router and a
-  `ticket_update` feed item; a `question` then notifies the payer
-  (`assistant_question`). Refusals and failures come back as tool results,
-  never thrown.
+  `ticket_update` feed item (`ticket_event` = the status, text = the summary
+  and question; the web shows the status as a label); a `question` then
+  notifies the payer (`assistant_question`). `[citation:…]` markers are
+  removed from the summary first: they only resolve inside the ticket's
+  conversation (`worker/report-text.ts`). Refusals and failures come back as
+  tool results, never thrown.
 - `worker/prompt.ts`, `worker/render.ts`: the Worker's fixed instructions
   (the system started the turn, no person is there) and the message each
   worker run starts with, framed as data like the Router's batch.

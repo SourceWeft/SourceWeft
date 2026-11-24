@@ -17,8 +17,12 @@ import type { OriginTurnContext } from "../../threads/agent/origin-providers";
 import { deterministicId } from "../../agent-tasks/runs";
 import { logger } from "../../../shared/logger";
 import { turnSetupError } from "../errors";
-import { ASSISTANT_LIMITS } from "../limits";
 import { assistantPorts, type AssistantPorts } from "../ports";
+import {
+  stripCitationMarkers,
+  workerReportFeedText,
+  workerReportText,
+} from "./report-text";
 import {
   findAssistantRow,
   findScopedTicketRow,
@@ -117,21 +121,6 @@ function stageAfterReport(status: WorkerReportStatus) {
   return status === "ready" || status === "dropped" ? "idle" : "waiting_person";
 }
 
-/** The `worker_report` event's text: `status: summary`, plus the question. */
-export function workerReportText(input: {
-  status: WorkerReportStatus;
-  summary: string;
-  question?: string;
-}): string {
-  const base = `${input.status}: ${input.summary}`;
-  return input.question ? `${base}\nQuestion: ${input.question}` : base;
-}
-
-function capFeedText(text: string): string {
-  const max = ASSISTANT_LIMITS.feedMessageMax;
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-}
-
 function toolCallIdOf(config: unknown): string | null {
   const id = (config as { toolCall?: { id?: unknown } } | undefined)?.toolCall
     ?.id;
@@ -189,7 +178,11 @@ async function report(
     ctx.runId,
     toolCallId ?? randomUUID(),
   );
-  const text = workerReportText(args);
+  const summary = stripCitationMarkers(args.summary);
+  const question = args.question
+    ? stripCitationMarkers(args.question)
+    : undefined;
+  const text = workerReportText({ status: args.status, summary, question });
   const now = new Date();
 
   let written: AssistantTicketRow | WorkerToolError;
@@ -231,7 +224,7 @@ async function report(
         stage: stageAfterReport(args.status),
         outcome: args.status,
         blockedReason: null,
-        lastReportSummary: args.summary,
+        lastReportSummary: summary,
         updatedAt: now,
       });
       await insertFeedItemRow(tx, {
@@ -240,7 +233,8 @@ async function report(
         workspaceId: ctx.workspaceId,
         assistantId: ctx.assistantId,
         kind: "ticket_update",
-        text: capFeedText(`${ticket.title}: ${text}`),
+        ticketEvent: args.status,
+        text: workerReportFeedText({ summary, question }),
         triggerId,
         ticketId: ticket.id,
       });

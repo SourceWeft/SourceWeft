@@ -8,10 +8,21 @@ import type { WorkspaceMember } from "@sourceweft/contracts";
 import type {
   AssistantFeedItem,
   AssistantTicket,
+  FeedTicketEvent,
 } from "@sourceweft/contracts/assistants";
+import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { memberName } from "./member-name";
+
+const EVENT_VARIANT = {
+  created: "outline",
+  ready: "secondary",
+  waiting: "destructive",
+  blocked: "destructive",
+  failed: "destructive",
+  dropped: "outline",
+} as const satisfies Record<FeedTicketEvent, string>;
 
 /**
  * The shared timeline: member messages, the assistant's replies and ticket
@@ -87,6 +98,10 @@ export function FeedList({
                   ? t("feed.ticket", { title: ticket.title })
                   : t("feed.assistant");
           const Icon = item.kind === "ticket_update" ? ListChecks : Bot;
+          const event = item.kind === "ticket_update" ? item.ticketEvent : null;
+          // A new ticket's text is its title, already in the header when the
+          // ticket is known; older items (no event) keep their full text.
+          const text = event === "created" && ticket ? null : item.text;
           const at = new Date(item.createdAt);
           return (
             <li
@@ -106,13 +121,20 @@ export function FeedList({
                   <Icon className="size-3.5" aria-hidden />
                 )}
                 <span className="font-medium text-foreground">{author}</span>
+                {event ? (
+                  <Badge variant={EVENT_VARIANT[event]}>
+                    {t(`feed.event.${event}`)}
+                  </Badge>
+                ) : null}
                 {Number.isNaN(at.getTime()) ? null : (
                   <time dateTime={item.createdAt}>{format.format(at)}</time>
                 )}
               </div>
-              <p className="whitespace-pre-wrap break-words text-sm">
-                {item.text}
-              </p>
+              {text ? (
+                <p className="whitespace-pre-wrap break-words text-sm">
+                  {text}
+                </p>
+              ) : null}
               {item.kind === "ticket_update" && ticket ? (
                 <Link
                   href={`/dashboard/chat/${encodeURIComponent(ticket.workerThreadId)}`}

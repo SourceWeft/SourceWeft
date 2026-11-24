@@ -97,6 +97,15 @@ export const feedItemKindSchema = z.enum([
 ]);
 export type FeedItemKind = z.infer<typeof feedItemKindSchema>;
 
+/** What a `ticket_update` feed item records: the ticket being opened, or the
+ * status of the report a worker filed. The web shows it as a label, so the
+ * item's text carries only the title or the report itself. */
+export const feedTicketEventSchema = z.enum([
+  "created",
+  ...ticketOutcomeSchema.options,
+]);
+export type FeedTicketEvent = z.infer<typeof feedTicketEventSchema>;
+
 // ── Entities ─────────────────────────────────────────────────────────────
 
 export const assistantSchema = z.object({
@@ -144,6 +153,9 @@ export const assistantFeedItemSchema = z.object({
   authorUserId: z.string().nullable(),
   text: z.string(),
   ticketId: z.string().nullable(),
+  /** Set on a `ticket_update`; null on messages and on items written before
+   * it existed, whose text still carries the old `title: status:` prefix. */
+  ticketEvent: feedTicketEventSchema.nullable(),
   replyToItemId: z.string().nullable(),
   createdAt: z.string(),
 });
