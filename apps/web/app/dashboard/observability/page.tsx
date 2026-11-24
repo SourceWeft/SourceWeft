@@ -3104,7 +3104,9 @@ export default function ObservabilityPage() {
     DEFAULT_TRACE_PAGE_SIZE,
   );
   const [mcpNextCursor, setMcpNextCursor] = React.useState<string | null>(null);
-  const [loadingList, setLoadingList] = React.useState(false);
+  // Starts loading: the first request goes out in an effect after the first
+  // paint, and "No traces" must not flash before it.
+  const [loadingList, setLoadingList] = React.useState(true);
   const [loadingMcpRuns, setLoadingMcpRuns] = React.useState(false);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
   const [loadingMoreObservations, setLoadingMoreObservations] =

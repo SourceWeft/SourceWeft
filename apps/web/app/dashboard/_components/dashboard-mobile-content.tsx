@@ -23,13 +23,19 @@ export function DashboardMobileContent({
   const t = useTranslations("dashboardNav");
   const { openMe, view } = useDashboardMobileNav();
 
+  // Observe is one tap away on Me: fetch its code while Me is showing, so
+  // opening it goes straight to the page instead of waiting on the download.
+  React.useEffect(() => {
+    if (view === "me") {
+      void import("../observability/page");
+    }
+  }, [view]);
+
   if (view === "me") {
     return (
       <>
         <DashboardMobileMe />
-        <div className="hidden min-h-0 flex-1 flex-col md:flex">
-          {children}
-        </div>
+        <div className="hidden min-h-0 flex-1 flex-col md:flex">{children}</div>
       </>
     );
   }
@@ -63,9 +69,7 @@ export function DashboardMobileContent({
             <ObservabilityPage />
           </div>
         </div>
-        <div className="hidden min-h-0 flex-1 flex-col md:flex">
-          {children}
-        </div>
+        <div className="hidden min-h-0 flex-1 flex-col md:flex">{children}</div>
       </>
     );
   }
