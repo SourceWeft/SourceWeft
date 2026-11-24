@@ -51,6 +51,25 @@ function credentialAccessToken(credential: ConnectorCredentialInput): string {
   });
 }
 
+/**
+ * Rejects a username the stored credential could not be parsed back out of. A
+ * ':' separates the username from the secret in a Basic `Authorization` header,
+ * so a username containing one makes the stored credential ambiguous and the
+ * account would get stuck `reauth_required` on the first sync. The web already
+ * blocks this; this guard closes the direct-API path. The contract schema is
+ * left as-is (a `trim().min(1).max(200)` string) and the check lives here so
+ * create, check and rotate all raise the same fixed code with no input echoed.
+ */
+function assertCredentialUsername(credential: ConnectorCredentialInput): void {
+  if (credential.username.includes(":")) {
+    throw new ConnectorError(
+      400,
+      "CONNECTOR_CREDENTIAL_USERNAME_INVALID",
+      "The username cannot contain a colon",
+    );
+  }
+}
+
 export class ConnectorService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
@@ -202,6 +221,7 @@ export class ConnectorService {
           "This connector requires a username and secret",
         );
       }
+      assertCredentialUsername(input.credential);
       accessToken = credentialAccessToken(input.credential);
     }
     return this.evaluateConfigReadiness({
@@ -404,6 +424,7 @@ export class ConnectorService {
     if (isCredential) {
       // input.credential is guaranteed present by the early check above.
       const credential = input.credential as ConnectorCredentialInput;
+      assertCredentialUsername(credential);
       const adapter = this.registry.getAdapter(input.connectorType);
       if (!adapter.credentialIdentity) {
         throw new ConnectorError(
@@ -430,6 +451,20 @@ export class ConnectorService {
           "A connector for this endpoint and user already exists in this workspace",
         );
       }
+      // Verify the entered credential against the endpoint before writing the
+      // account, so a wrong password or unreachable server fails fast rather
+      // than creating a connector that is immediately reauth_required. Mirrors
+      // the `none` kind's readiness gate, but runs with the supplied credential
+      // and is NOT applied to rotate.
+      await this.requireConfigReady({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorType: input.connectorType,
+        connectorId: "pending",
+        connectorName: input.name,
+        configJson,
+        accessToken: credentialAccessToken(credential),
+      });
       const accessTokenEncrypted = await encryptTeamSecret(
         credentialAccessToken(credential),
         workspace.organizationId,
@@ -776,6 +811,7 @@ export class ConnectorService {
         "This connector has no stored credential to replace",
       );
     }
+    assertCredentialUsername(input.credential);
     const adapter = this.registry.getAdapter(connector.connectorType);
     if (!adapter.credentialIdentity) {
       throw new ConnectorError(
