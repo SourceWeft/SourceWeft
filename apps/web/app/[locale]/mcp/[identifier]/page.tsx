@@ -357,6 +357,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             ? await listPublicMcp({
                 category: loaded.item.categories.join(","),
                 includeDesktopOnly: true,
+                // Only pages that stay in search: a link to a noindex page
+                // passes nothing on.
+                indexableOnly: true,
                 limit: 24,
                 locale: overviewLocale,
               })

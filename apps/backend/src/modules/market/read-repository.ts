@@ -655,6 +655,9 @@ export async function listMcp(input: {
   runtime?: McpRuntime;
   includeDesktopOnly?: boolean;
   desktopOnly?: boolean;
+  // Skip servers whose page is noindex (`mcpReadmeSharedOf`), so a list of
+  // crawlable links never points at one.
+  indexableOnly?: boolean;
   limit?: number;
   cursor?: string;
   // Language of each item's `aiSummary`; English when not given.
@@ -687,6 +690,13 @@ export async function listMcp(input: {
   }
   if (input.runtime) {
     conditions.push(eq(mcpServers.runtime, input.runtime));
+  }
+  if (input.indexableOnly) {
+    // Per row, over the few rows a limited query reads: the README hash
+    // index finds the sharers and counting stops at the threshold.
+    conditions.push(
+      sql`not ${mcpReadmeSharedOf(latestPublishedVersionOf(mcpServers.id))}`,
+    );
   }
   if (categories.length > 0) {
     conditions.push(

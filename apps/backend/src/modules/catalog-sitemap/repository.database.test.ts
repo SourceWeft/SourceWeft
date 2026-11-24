@@ -544,6 +544,25 @@ describe("catalog sitemap public boundary on PostgreSQL", () => {
         expect(keys).toContain(identifier);
         expect((await reads.findMcp(identifier))?.searchIndexable).toBe(true);
       }
+
+      // The related-servers read asks for pages that stay in search only.
+      const identifiersOf = async (indexableOnly: boolean) =>
+        (
+          await reads.listMcp({
+            includeDesktopOnly: true,
+            indexableOnly,
+            limit: 100,
+          })
+        ).items.map((item) => item.identifier);
+      const all = await identifiersOf(false);
+      const indexable = await identifiersOf(true);
+      for (const identifier of batch) {
+        expect(all).toContain(identifier);
+        expect(indexable).not.toContain(identifier);
+      }
+      for (const identifier of [...monorepo, moved]) {
+        expect(indexable).toContain(identifier);
+      }
     });
   });
 });

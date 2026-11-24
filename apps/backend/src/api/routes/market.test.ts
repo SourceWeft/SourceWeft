@@ -397,6 +397,15 @@ test("the list passes the locale of its AI summaries", async () => {
   assert.equal(invalid.status, 400);
 });
 
+test("the list passes indexableOnly through, and leaves it unset by default", async () => {
+  mocks.listMcp.mockResolvedValue({ items: [], nextCursor: null });
+  const app = createTestApp();
+  assert.equal((await app.request("/v1/mcp?indexableOnly=true")).status, 200);
+  assert.equal(mocks.listMcp.mock.calls.at(-1)?.[0].indexableOnly, true);
+  assert.equal((await app.request("/v1/mcp")).status, 200);
+  assert.equal(mocks.listMcp.mock.calls.at(-1)?.[0].indexableOnly, undefined);
+});
+
 test("overview admin endpoints are for market admins only", async () => {
   mocks.requireSession.mockResolvedValue(null);
   for (const [path, method] of [

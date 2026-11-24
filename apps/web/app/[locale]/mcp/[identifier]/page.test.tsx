@@ -1444,6 +1444,26 @@ describe("public MCP detail page related servers", () => {
   });
 
 
+  it("asks the market only for servers whose pages stay in search (#745)", async () => {
+    withCategory();
+    market.listPublicMcp.mockResolvedValue({ items: [] });
+    await render();
+    expect(market.listPublicMcp).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "x", indexableOnly: true }),
+    );
+  });
+
+  it("tops the related list up to six from the indexable candidates", async () => {
+    withCategory();
+    market.listPublicMcp.mockResolvedValue({
+      items: Array.from({ length: 9 }, (_, i) =>
+        candidate(`a/s${i}`, `Server ${i}`, "Something unrelated"),
+      ),
+    });
+    const html = await render();
+    expect((html.match(/href="\/mcp\/a%2Fs\d"/g) ?? []).length).toBe(6);
+  });
+
   it("has no related section when no server shares its category", async () => {
     withCategory();
     market.listPublicMcp.mockResolvedValue({
