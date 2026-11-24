@@ -405,8 +405,14 @@ export function createWebdavAdapter(
           throw invalidRequestError();
         }
         let exists = true;
+        let isFile = false;
         try {
-          await client.propfind(path, 0);
+          const entries = await client.propfind(path, 0);
+          // A depth-0 PROPFIND describes the resource itself. Trust the
+          // server's resourcetype rather than the trailing slash we appended:
+          // a file answered here (as some servers do) is a file, not a folder.
+          const self = entries[0];
+          if (self && !self.isCollection) isFile = true;
         } catch (error) {
           if (
             error instanceof WebDavError &&
@@ -421,7 +427,7 @@ export function createWebdavAdapter(
         const id = stripTrailingSlash(path);
         items.push({
           id,
-          kind: exists ? "folder" : null,
+          kind: exists ? (isFile ? "file" : "folder") : null,
           name: exists ? lastSegment(id) || "/" : null,
           detail: exists ? truncateDetail(id) : null,
           exists,
@@ -499,8 +505,6 @@ export function createWebdavAdapter(
       if (!isConnectorIndexableFile(fileName, item.mimeType)) {
         throw new ConnectorItemSkipError("unsupported_type");
       }
-      const discoveredEtag =
-        typeof metadata.etag === "string" ? metadata.etag : null;
       return {
         item,
         file: {
@@ -516,28 +520,31 @@ export function createWebdavAdapter(
                 credential,
               });
               const result = await client.get(path, { maxBytes });
-              if (
-                discoveredEtag !== null &&
-                result.etag !== null &&
-                result.etag !== discoveredEtag
-              ) {
-                // The file changed between discovery and download; index the
-                // new version on the next run rather than a mismatched one.
-                throw new ConnectorItemSkipError("unreadable");
-              }
+              // The freshly fetched bytes are always indexed. If the file
+              // changed since discovery the next run sees the new etag and
+              // re-extracts; a quoting/content-coding difference in the etag is
+              // normalised for the content hash, so it never forces a skip.
               return Buffer.from(result.body);
             } catch (error) {
-              if (
-                error instanceof WebDavError &&
-                error.code === "WEBDAV_TOO_LARGE"
-              ) {
-                throw new ConnectorItemSkipError("too_large");
-              }
-              if (
-                error instanceof WebDavError &&
-                error.code === "WEBDAV_UNAUTHORIZED"
-              ) {
-                throw reauthError();
+              if (error instanceof WebDavError) {
+                if (error.code === "WEBDAV_TOO_LARGE") {
+                  throw new ConnectorItemSkipError("too_large");
+                }
+                if (error.code === "WEBDAV_UNAUTHORIZED") {
+                  throw reauthError();
+                }
+                // One file the account cannot read right now (403), that is
+                // gone (404/410) or locked (423) must not fail the run and
+                // block every later collection: skip just this item. A 5xx or
+                // network error (WEBDAV_UNREACHABLE) and a malformed response
+                // (WEBDAV_BAD_RESPONSE) still fail so the run is retried.
+                if (
+                  error.code === "WEBDAV_FORBIDDEN" ||
+                  error.code === "WEBDAV_NOT_FOUND" ||
+                  error.code === "WEBDAV_LOCKED"
+                ) {
+                  throw new ConnectorItemSkipError("unreadable");
+                }
               }
               throw error;
             } finally {

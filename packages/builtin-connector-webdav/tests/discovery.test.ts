@@ -21,6 +21,10 @@ async function run(
     status?: Record<string, number>;
     limits?: Partial<DiscoveryLimits>;
     rogueChildren?: Record<string, string[]>;
+    omitSelf?: Record<string, boolean>;
+    rawResponses?: Record<string, string[]>;
+    now?: () => number;
+    onPage?: () => void;
   },
 ): Promise<{
   pages: ConnectorDiscoveryPage[];
@@ -34,6 +38,8 @@ async function run(
     collections,
     status: options.status,
     rogueChildren: options.rogueChildren,
+    omitSelf: options.omitSelf,
+    rawResponses: options.rawResponses,
   });
   const recordingFetch = (async (
     input: RequestInfo | URL,
@@ -53,9 +59,11 @@ async function run(
     endpoint,
     roots: options.roots,
     limits: options.limits,
+    now: options.now,
     logger: { warn: (message, meta) => warnings.push({ message, meta }) },
   })) {
     pages.push(page);
+    options.onPage?.();
   }
   return { pages, warnings, requests };
 }
@@ -97,7 +105,8 @@ test("walks the whole tree and emits every file, then a complete reconcile page"
   assert.equal(root.title, "root.txt");
   assert.equal(root.mimeType, "text/plain");
   assert.equal(root.sizeBytes, 3);
-  assert.equal(root.contentHash, '"r"');
+  // The etag is normalised (quotes stripped) for the content hash.
+  assert.equal(root.contentHash, "r");
   assert.equal(root.externalUri, "https://dav.example.com/dav/root.txt");
   assert.equal(root.metadata.path, "/root.txt");
   // Only intermediate pages carry items; none of them reconciles.
@@ -126,7 +135,8 @@ test("the depth cap stops the descent and refuses to reconcile", async () => {
   assert.ok(ids.includes("/root.txt"));
   assert.ok(ids.includes("/Docs/a.txt"));
   assert.ok(!ids.includes("/Docs/Sub/b.md"));
-  assert.equal(finalPage(pages).complete, false);
+  // Incomplete but run-compatible: the run succeeds and archives nothing.
+  assert.equal(finalPage(pages).complete, true);
   assert.equal(finalPage(pages).reconcileMissing, false);
 });
 
@@ -145,7 +155,7 @@ test("the entry cap stops the walk and refuses to reconcile", async () => {
     },
     { roots: ["/"], limits: { maxEntries: 2 } },
   );
-  assert.equal(finalPage(pages).complete, false);
+  assert.equal(finalPage(pages).complete, true);
   assert.equal(finalPage(pages).reconcileMissing, false);
   assert.ok(itemsOf(pages).length < 4);
 });
@@ -166,7 +176,7 @@ test("a 403 on a subcollection marks the scan incomplete but still emits the res
   assert.ok(ids.includes("/root.txt"));
   assert.ok(ids.includes("/Docs/a.txt"));
   assert.ok(!ids.includes("/Secret/secret.txt"));
-  assert.equal(finalPage(pages).complete, false);
+  assert.equal(finalPage(pages).complete, true);
   assert.equal(finalPage(pages).reconcileMissing, false);
   assert.ok(warnings.some((w) => w.meta?.reason === "WEBDAV_FORBIDDEN"));
 });
@@ -183,7 +193,7 @@ test("a 404 on a subcollection is tolerated the same way", async () => {
   );
   // "/Gone/" is advertised as a child folder but absent from the tree (404).
   assert.ok(idsOf(pages).includes("/root.txt"));
-  assert.equal(finalPage(pages).complete, false);
+  assert.equal(finalPage(pages).complete, true);
   assert.equal(finalPage(pages).reconcileMissing, false);
 });
 
@@ -232,7 +242,8 @@ test("an unchanged etag yields an identical contentHash across runs", async () =
   const b = await run(tree, { roots: ["/"] });
   const hashA = itemsOf(a.pages)[0]!.contentHash;
   const hashB = itemsOf(b.pages)[0]!.contentHash;
-  assert.equal(hashA, '"same"');
+  // Normalised: the surrounding quotes are stripped.
+  assert.equal(hashA, "same");
   assert.equal(hashA, hashB);
 });
 
@@ -321,4 +332,177 @@ test("drops any server entry outside the listed collection and never requests it
   );
   assert.ok(warn, "an out-of-scope warning is logged");
   assert.equal(warn!.meta?.count, 4);
+});
+
+// --- F2: etag normalisation and content hash --------------------------------
+
+test("a quoted and an unquoted etag for the same bytes hash the same", async () => {
+  const quoted = await run(
+    { "/": { files: { "a.txt": { size: 5, etag: '"abc123"' } } } },
+    { roots: ["/"] },
+  );
+  const unquoted = await run(
+    { "/": { files: { "a.txt": { size: 5, etag: "abc123" } } } },
+    { roots: ["/"] },
+  );
+  const h1 = itemsOf(quoted.pages)[0]!.contentHash;
+  const h2 = itemsOf(unquoted.pages)[0]!.contentHash;
+  assert.equal(h1, "abc123");
+  assert.equal(h1, h2);
+});
+
+test("a weak and a -gzip-suffixed etag normalise to the strong bare tag", async () => {
+  const weak = await run(
+    { "/": { files: { "a.txt": { size: 5, etag: 'W/"abc123"' } } } },
+    { roots: ["/"] },
+  );
+  const gzip = await run(
+    { "/": { files: { "a.txt": { size: 5, etag: '"abc123-gzip"' } } } },
+    { roots: ["/"] },
+  );
+  assert.equal(itemsOf(weak.pages)[0]!.contentHash, "abc123");
+  assert.equal(itemsOf(gzip.pages)[0]!.contentHash, "abc123");
+});
+
+test("with no etag, size or last-modified the content hash is null", async () => {
+  const { pages } = await run(
+    { "/": { files: { "a.txt": {} } } },
+    { roots: ["/"] },
+  );
+  const item = itemsOf(pages)[0]!;
+  assert.equal(item.contentHash, null);
+});
+
+// --- F3: an incomplete listing is not treated as authoritative --------------
+
+test("a 207 that omits the collection's own entry is incomplete and archives nothing", async () => {
+  const { pages, warnings } = await run(
+    {
+      "/": {
+        folders: ["Docs"],
+        files: { "root.txt": { size: 1, etag: '"r"' } },
+      },
+      "/Docs/": { files: { "a.txt": { size: 1, etag: '"a"' } } },
+    },
+    { roots: ["/"], omitSelf: { "/": true } },
+  );
+  // Files still surface; nothing is reconciled away.
+  assert.ok(idsOf(pages).includes("/root.txt"));
+  assert.ok(idsOf(pages).includes("/Docs/a.txt"));
+  assert.equal(finalPage(pages).complete, true);
+  assert.equal(finalPage(pages).reconcileMissing, false);
+  assert.ok(
+    warnings.some((w) => w.message === "webdav_scan_self_missing"),
+    "a self-missing warning is logged",
+  );
+});
+
+test("a per-resource error inside a listing marks the scan incomplete", async () => {
+  const { pages, warnings } = await run(
+    { "/": { files: { "ok.txt": { size: 1, etag: '"o"' } } } },
+    {
+      roots: ["/"],
+      rawResponses: {
+        "/": [
+          "<d:response><d:href>/dav/locked.txt</d:href>" +
+            "<d:status>HTTP/1.1 423 Locked</d:status></d:response>",
+        ],
+      },
+    },
+  );
+  assert.ok(idsOf(pages).includes("/ok.txt"));
+  assert.equal(finalPage(pages).complete, true);
+  assert.equal(finalPage(pages).reconcileMissing, false);
+  const warn = warnings.find(
+    (w) => w.message === "webdav_scan_dropped_responses",
+  );
+  assert.ok(warn, "a dropped-response warning is logged");
+  assert.equal(warn!.meta?.count, 1);
+});
+
+test("a listing whose only children fall out of scope is incomplete", async () => {
+  const { pages, warnings } = await run(
+    { "/Docs/": {} },
+    {
+      roots: ["/Docs/"],
+      // The server echoes a lower-cased child that is not a descendant of
+      // the requested /Docs/ (a case mismatch), and nothing in scope.
+      rogueChildren: { "/Docs/": ["/dav/docs/a.txt"] },
+    },
+  );
+  assert.equal(finalPage(pages).complete, true);
+  assert.equal(finalPage(pages).reconcileMissing, false);
+  assert.ok(
+    warnings.some((w) => w.message === "webdav_scan_unmatched_listings"),
+    "an unmatched-listing warning is logged",
+  );
+});
+
+test("an empty collection is still a clean, reconcilable scan", async () => {
+  const { pages } = await run({ "/": {} }, { roots: ["/"] });
+  assert.equal(finalPage(pages).complete, true);
+  assert.equal(finalPage(pages).reconcileMissing, true);
+});
+
+// --- F4: the scan time budget counts only PROPFIND time ---------------------
+
+test("the scan budget trips on accumulated PROPFIND time, cutting the walk", async () => {
+  // Each PROPFIND advances the clock by 200ms; the budget is 300ms, so the
+  // walk stops after the first couple of collections.
+  const clock = { t: 0 };
+  const endpointForClock = endpoint;
+  const collections: FakeDavSpec["collections"] = {
+    "/": { folders: ["b"], files: { "a.txt": { size: 1, etag: '"a"' } } },
+    "/b/": { folders: ["c"], files: { "b.txt": { size: 1, etag: '"b"' } } },
+    "/b/c/": { files: { "c.txt": { size: 1, etag: '"c"' } } },
+  };
+  const base = buildFakeDav({ endpoint: endpointForClock, collections });
+  const slowFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    clock.t += 200; // time spent inside the request
+    return base(input, init);
+  }) as typeof fetch;
+  const client = createDavClient({
+    fetch: slowFetch,
+    endpoint: endpointForClock,
+    credential,
+  });
+  const pages: ConnectorDiscoveryPage[] = [];
+  for await (const page of discoverWebDavPages({
+    client,
+    endpoint: endpointForClock,
+    roots: ["/"],
+    limits: { scanTimeoutMs: 300 },
+    now: () => clock.t,
+  })) {
+    pages.push(page);
+  }
+  const last = pages[pages.length - 1]!;
+  assert.equal(last.complete, true);
+  assert.equal(last.reconcileMissing, false);
+  assert.ok(!idsOf(pages).includes("/b/c/c.txt"), "the deep file is cut off");
+});
+
+test("time spent between pulls (extract/embed) does not count against the budget", async () => {
+  // PROPFIND is instant; the consumer burns ten minutes between pages. With a
+  // wall-clock budget that would trip, the scan still completes because only
+  // request time counts.
+  const clock = { t: 0 };
+  const { pages } = await run(
+    {
+      "/": { folders: ["b"], files: { "a.txt": { size: 1, etag: '"a"' } } },
+      "/b/": { files: { "b.txt": { size: 1, etag: '"b"' } } },
+    },
+    {
+      roots: ["/"],
+      limits: { scanTimeoutMs: 10 * 60_000 },
+      now: () => clock.t,
+      onPage: () => {
+        clock.t += 20 * 60_000; // far past the budget, but not request time
+      },
+    },
+  );
+  assert.ok(idsOf(pages).includes("/a.txt"));
+  assert.ok(idsOf(pages).includes("/b/b.txt"));
+  assert.equal(finalPage(pages).complete, true);
+  assert.equal(finalPage(pages).reconcileMissing, true);
 });

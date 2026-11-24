@@ -43,9 +43,22 @@ export type DavDownload = {
 
 export type DavServerInfo = { dav: string | null; allow: string | null };
 
+/** An optional out-parameter a PROPFIND fills in with counts the caller needs
+ * to judge a listing's completeness, without changing the returned entries.
+ * `dropped` is the number of `<response>` elements that named a resource (an
+ * href) but carried no usable property set — a per-resource error such as a
+ * 403 or 423, which means the listing did not fully describe the collection. */
+export type PropfindStats = { dropped: number };
+
 export type DavClient = {
-  /** PROPFIND of `path` (decoded, under the endpoint) at depth 0 or 1. */
-  propfind(path: string, depth: 0 | 1): Promise<DavEntry[]>;
+  /** PROPFIND of `path` (decoded, under the endpoint) at depth 0 or 1. When
+   * `stats` is given it is filled with per-resource drop counts for the
+   * listing (see {@link PropfindStats}). */
+  propfind(
+    path: string,
+    depth: 0 | 1,
+    stats?: PropfindStats,
+  ): Promise<DavEntry[]>;
   /** GET of a file, capped at `maxBytes` (declared length and streamed). */
   get(
     path: string,
@@ -193,6 +206,7 @@ function statusError(status: number): WebDavError {
   if (status === 403) return new WebDavError("WEBDAV_FORBIDDEN");
   if (status === 404 || status === 410)
     return new WebDavError("WEBDAV_NOT_FOUND");
+  if (status === 423) return new WebDavError("WEBDAV_LOCKED");
   if (RETRY_STATUSES.has(status) || status >= 500) {
     return new WebDavError("WEBDAV_UNREACHABLE");
   }
@@ -256,10 +270,10 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
               ...options.headers,
             },
             ...(options.body === undefined ? {} : { body: options.body }),
-            // Defence in depth: the credentialed scope already refuses a
-            // cross-origin redirect, and a 3xx that still reaches here is a bad
-            // response, never followed.
-            redirect: "manual",
+            // Redirects are the injected credentialed scope's business: it
+            // follows a same-origin hop (re-validating each) and refuses a
+            // cross-origin one, so the Authorization header never leaves the
+            // endpoint's origin. This client does not override that policy.
             signal,
           }),
           signal,
@@ -292,7 +306,7 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
   }
 
   return {
-    async propfind(path, depth) {
+    async propfind(path, depth, stats) {
       const url = toRequestUrl(endpoint, path);
       return request(
         "PROPFIND",
@@ -316,7 +330,10 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
             signal,
             () => new WebDavError("WEBDAV_BAD_RESPONSE"),
           );
-          return parseMultistatus(new TextDecoder("utf-8").decode(bytes));
+          return parseMultistatus(
+            new TextDecoder("utf-8").decode(bytes),
+            stats,
+          );
         },
       );
     },
@@ -326,7 +343,13 @@ export function createDavClient(input: CreateDavClientInput): DavClient {
       return request(
         "GET",
         url,
-        { headers: { Accept: "*/*" }, signal: options.signal },
+        {
+          // `identity` keeps the server from weakening or content-coding the
+          // ETag (e.g. `W/"x"` or `"x-gzip"`) so the downloaded bytes and their
+          // tag match what discovery recorded.
+          headers: { Accept: "*/*", "Accept-Encoding": "identity" },
+          signal: options.signal,
+        },
         async (response, signal) => {
           if (response.status !== 200) {
             await discard(response);

@@ -116,6 +116,20 @@ test("a response without an href is skipped", () => {
   assert.deepEqual(parseMultistatus(xml), []);
 });
 
+test("a named resource with only a bare status (no propstat) is counted as dropped", () => {
+  const xml =
+    `<d:multistatus xmlns:d="DAV:">` +
+    `<d:response><d:href>/ok.txt</d:href><d:propstat><d:prop><d:getcontentlength>1</d:getcontentlength></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>` +
+    `<d:response><d:href>/locked.txt</d:href><d:status>HTTP/1.1 423 Locked</d:status></d:response>` +
+    `</d:multistatus>`;
+  const stats = { dropped: 0 };
+  const entries = parseMultistatus(xml, stats);
+  // The locked resource yields no entry but is counted.
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]?.href, "/ok.txt");
+  assert.equal(stats.dropped, 1);
+});
+
 test("malformed XML, wrong root and HTML fail with a fixed error", () => {
   for (const xml of [
     fixture("malformed.xml"),

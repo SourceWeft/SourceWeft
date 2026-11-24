@@ -263,7 +263,7 @@ test("extract's download skips a file over the cap", async () => {
   );
 });
 
-test("extract's download skips a file whose etag changed since discovery", async () => {
+test("extract's download returns the fresh bytes even when the etag changed since discovery", async () => {
   const { adapter } = adapterFor({
     "/Docs/": { files: { "a.txt": { size: 5, etag: '"v2"', body: "hello" } } },
   });
@@ -276,11 +276,45 @@ test("extract's download skips a file whose etag changed since discovery", async
     ),
   );
   assert.ok(isConnectorExtractedFile(extracted));
+  // No skip: the new content is indexed; the next run sees the new etag.
+  const bytes = await extracted.file.download({ maxBytes: 1000 });
+  assert.equal(bytes.toString("utf8"), "hello");
+});
+
+test("extract's download skips a file that is forbidden, gone or locked", async () => {
+  for (const status of [403, 404, 410, 423]) {
+    const { adapter } = adapterFor(
+      { "/Docs/": { files: { "a.txt": { size: 5, body: "hi" } } } },
+      { status: { "/Docs/a.txt": status } },
+    );
+    const extracted = await adapter.extract(
+      extractInput(fileItem({ path: "/Docs/a.txt" })),
+    );
+    assert.ok(isConnectorExtractedFile(extracted));
+    await assert.rejects(
+      extracted.file.download({ maxBytes: 1000 }),
+      (error: unknown) => {
+        assert.ok(isConnectorItemSkipError(error), String(status));
+        assert.equal(error.reason, "unreadable", String(status));
+        return true;
+      },
+    );
+  }
+});
+
+test("extract's download still fails the run on a 500 (not a per-file skip)", async () => {
+  const { adapter } = adapterFor(
+    { "/Docs/": { files: { "a.txt": { size: 5, body: "hi" } } } },
+    { status: { "/Docs/a.txt": 500 } },
+  );
+  const extracted = await adapter.extract(
+    extractInput(fileItem({ path: "/Docs/a.txt" })),
+  );
+  assert.ok(isConnectorExtractedFile(extracted));
   await assert.rejects(
     extracted.file.download({ maxBytes: 1000 }),
     (error: unknown) => {
-      assert.ok(isConnectorItemSkipError(error));
-      assert.equal(error.reason, "unreadable");
+      assert.ok(!isConnectorItemSkipError(error), "a 500 is not a skip");
       return true;
     },
   );
@@ -396,6 +430,21 @@ test("describe reports existence and display names of roots", async () => {
   });
   assert.equal(describe.items[1]!.exists, false);
   assert.equal(describe.items[1]!.kind, null);
+});
+
+test("describe reports a file path as a file, not a folder", async () => {
+  const { adapter } = adapterFor({
+    "/Docs/": {
+      files: { "a.txt": { size: 5, etag: '"v1"', contentType: "text/plain" } },
+    },
+  });
+  const { result } = await adapter.executeAction(
+    actionInput("webdav.describe", { ids: ["/Docs/a.txt"] }),
+  );
+  const describe = result as unknown as ConnectorSelectionDescribeResult;
+  assert.equal(describe.items.length, 1);
+  assert.equal(describe.items[0]!.exists, true);
+  assert.equal(describe.items[0]!.kind, "file");
 });
 
 // --- executeAction: unsupported ---------------------------------------------

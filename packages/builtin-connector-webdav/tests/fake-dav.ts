@@ -32,6 +32,13 @@ export type FakeDavSpec = {
    * collection entry exactly as written — used to list parents, siblings, paths
    * outside the root, lookalikes and encoded traversal. */
   rogueChildren?: Record<string, string[]>;
+  /** Collection keys whose own self entry the server omits from its listing,
+   * so the 207 does not describe the listed collection itself. */
+  omitSelf?: Record<string, boolean>;
+  /** Raw `<d:response>…</d:response>` XML appended verbatim to a collection's
+   * depth-1 listing, keyed by collection key — used for a per-resource error
+   * (an href with a bare `<d:status>` and no propstat). */
+  rawResponses?: Record<string, string[]>;
 };
 
 const escapeXml = (value: string): string =>
@@ -133,9 +140,28 @@ export function buildFakeDav(spec: FakeDavSpec): typeof fetch {
     if (method === "PROPFIND") {
       const key = collectionKey(canonicalPath);
       const collection = collections[key];
-      if (!collection) return new Response("not found", { status: 404 });
+      if (!collection) {
+        // A PROPFIND on a file path (as a describe on a file issues, trailing
+        // slash and all): answer with the file's own non-collection response.
+        const parts = canonicalPath.split("/").filter((s) => s !== "");
+        const name = parts.pop();
+        const parentKey = parts.length === 0 ? "/" : `/${parts.join("/")}/`;
+        const file = name ? collections[parentKey]?.files?.[name] : undefined;
+        if (file) {
+          return new Response(
+            multistatus([fileResponse(endpoint, parentKey, name!, file)]),
+            {
+              status: 207,
+              headers: { "content-type": "application/xml; charset=utf-8" },
+            },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      }
       const depth = new Headers(init?.headers).get("depth") ?? "0";
-      const responses = [collectionResponse(endpoint, canonicalPath)];
+      const responses = spec.omitSelf?.[key]
+        ? []
+        : [collectionResponse(endpoint, canonicalPath)];
       if (depth === "1") {
         for (const folder of collection.folders ?? []) {
           responses.push(collectionResponse(endpoint, `${key}${folder}`));
@@ -145,6 +171,9 @@ export function buildFakeDav(spec: FakeDavSpec): typeof fetch {
         }
         for (const href of spec.rogueChildren?.[key] ?? []) {
           responses.push(rawCollectionResponse(href));
+        }
+        for (const raw of spec.rawResponses?.[key] ?? []) {
+          responses.push(raw);
         }
       }
       return new Response(multistatus(responses), {

@@ -437,6 +437,11 @@ test("get returns the bytes with etag, last-modified and content type", async ()
       ?.startsWith("Basic "),
     true,
   );
+  // A GET asks for no transfer coding so the ETag is not weakened/suffixed.
+  assert.equal(
+    new Headers(h.requests[0]!.init.headers).get("accept-encoding"),
+    "identity",
+  );
 });
 
 test("get enforces the byte cap by declared length and while streaming", async () => {

@@ -18,6 +18,7 @@ export {
   type DiscoveryOptions,
 } from "./discovery";
 export { webDavCredentialIdentity, parseStoredCredential } from "./identity";
+export { normalizeEtag } from "./etag";
 export { WebDavError, type WebDavErrorCode } from "./errors";
 export { parseEndpoint, redactEndpoint } from "./endpoint";
 export {

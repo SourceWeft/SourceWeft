@@ -128,11 +128,17 @@ function propertiesOf(response: Node): Node {
 /**
  * Parses a WebDAV 207 multistatus into entries. Properties a server could not
  * supply (404 propstat, missing, malformed) read as null. A response without
- * an href or without any propstat (a bare status) is skipped; duplicate hrefs
- * keep the first. Malformed, oversized, hostile or non-multistatus documents
- * throw a fixed `WEBDAV_BAD_RESPONSE`.
+ * an href is skipped; duplicate hrefs keep the first. A response that names a
+ * resource (an href) but carries no propstat at all is an RFC 4918 per-resource
+ * error (a bare `<status>` such as 403 or 423): it yields no entry and, when a
+ * {@link PropfindStats}-shaped `stats` is passed, increments `stats.dropped` so
+ * the caller can tell the listing was not fully described. Malformed, oversized,
+ * hostile or non-multistatus documents throw a fixed `WEBDAV_BAD_RESPONSE`.
  */
-export function parseMultistatus(xml: string): DavEntry[] {
+export function parseMultistatus(
+  xml: string,
+  stats?: { dropped: number },
+): DavEntry[] {
   const document = parseDocument(xml);
   if (!("multistatus" in document))
     throw new WebDavError("WEBDAV_BAD_RESPONSE");
@@ -149,7 +155,12 @@ export function parseMultistatus(xml: string): DavEntry[] {
     if (!isNode(response)) continue;
     const href = text(response["href"]);
     if (href === null || seen.has(href)) continue;
-    if (!Array.isArray(response["propstat"])) continue;
+    if (!Array.isArray(response["propstat"])) {
+      // A named resource the server reported but did not describe: a
+      // per-resource error (403/423) the listing could not fully cover.
+      if (stats) stats.dropped += 1;
+      continue;
+    }
     seen.add(href);
     const props = propertiesOf(response);
     const resourcetype = props["resourcetype"];

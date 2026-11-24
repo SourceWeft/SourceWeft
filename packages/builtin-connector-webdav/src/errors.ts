@@ -2,6 +2,7 @@ export type WebDavErrorCode =
   | "WEBDAV_UNAUTHORIZED"
   | "WEBDAV_FORBIDDEN"
   | "WEBDAV_NOT_FOUND"
+  | "WEBDAV_LOCKED"
   | "WEBDAV_UNREACHABLE"
   | "WEBDAV_BLOCKED_ENDPOINT"
   | "WEBDAV_BAD_RESPONSE"
@@ -24,6 +25,10 @@ const FAILURES: Record<
   WEBDAV_NOT_FOUND: {
     statusCode: 404,
     message: "The WebDAV location was not found.",
+  },
+  WEBDAV_LOCKED: {
+    statusCode: 423,
+    message: "The WebDAV location is locked.",
   },
   WEBDAV_UNREACHABLE: {
     statusCode: 502,
