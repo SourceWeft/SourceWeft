@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Bot } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { useAssistantMutations } from "../../../../lib/assistant";
 import { useAssistantAction } from "./use-assistant-actions";
@@ -23,10 +22,9 @@ export function EnableCard({
   const { run } = useAssistantAction();
 
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border p-10 text-center">
-      <Bot className="size-8 text-muted-foreground" aria-hidden />
-      <p className="font-medium">{t("enable.title")}</p>
-      <p className="max-w-md text-sm text-muted-foreground">
+    <div className="flex max-w-md flex-col items-start gap-3 py-6 md:py-10">
+      <h2 className="text-base font-semibold">{t("enable.title")}</h2>
+      <p className="text-sm leading-relaxed text-muted-foreground">
         {t("enable.body")}
       </p>
       {isAdmin ? (

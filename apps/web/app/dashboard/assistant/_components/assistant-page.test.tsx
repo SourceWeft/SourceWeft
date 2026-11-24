@@ -45,7 +45,7 @@ vi.mock("./ticket-list", () => ({
 vi.mock("./assistant-menu", () => ({ AssistantMenu: () => null }));
 
 import { AssistantPage } from "./assistant-page";
-import { mountWithIntl, unmountAll } from "@/test/react";
+import { click, mountWithIntl, unmountAll } from "@/test/react";
 
 function assistant(over: Record<string, unknown> = {}) {
   return {
@@ -116,6 +116,34 @@ test("an enabled assistant shows its feed, composer and tickets, opened on the l
       ?.getAttribute("data-highlight"),
   ).toBe("t9");
   expect(container.textContent).toContain("Me");
+});
+
+test("on a phone the activity and the tickets are two tabs, opened on the tickets when a notification linked one", async () => {
+  hooks.useAssistant.mockReturnValue({
+    data: assistant(),
+    isPending: false,
+    isError: false,
+  });
+  hooks.useAssistantTickets.mockReturnValue({
+    data: [
+      { id: "t1", stage: "waiting_person" },
+      { id: "t2", stage: "working" },
+      { id: "t3", stage: "ended" },
+    ],
+    isPending: false,
+    isError: false,
+  });
+  const { container } = await mountWithIntl(<AssistantPage />);
+  const tabs = [...container.querySelectorAll('[role="tab"]')];
+  expect(tabs.map((tab) => tab.getAttribute("aria-selected"))).toEqual([
+    "false",
+    "true",
+  ]);
+  // The badge counts the tickets that need a person; ended ones are not open.
+  expect(tabs[1]?.textContent).toContain("1");
+
+  await click(tabs[0] as HTMLElement);
+  expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
 });
 
 test("a paused assistant says why and its composer takes no messages", async () => {

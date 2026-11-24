@@ -4,9 +4,9 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { SendHorizontal } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ASSISTANT_LIMITS } from "@sourceweft/contracts/assistants";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
-import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import {
   assistantErrorCode,
   useAssistantMutations,
@@ -37,11 +37,20 @@ export function FeedComposer({
   const [sending, setSending] = React.useState(false);
   const [shortcut, setShortcut] = React.useState("Ctrl+Enter");
   const pending = React.useRef<{ text: string; key: string } | null>(null);
+  const field = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
     // Only known in the browser; the server render keeps the default.
     if (/Mac|iPhone|iPad/.test(navigator.userAgent)) setShortcut("⌘+Enter");
   }, []);
+
+  React.useLayoutEffect(() => {
+    // Grows with the draft up to a cap, then scrolls inside.
+    const node = field.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
+  }, [draft]);
 
   const text = draft.trim();
   const tooLong = text.length > ASSISTANT_LIMITS.feedMessageMax;
@@ -73,7 +82,7 @@ export function FeedComposer({
 
   return (
     <form
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-1.5 pt-2 pb-3 md:pb-6"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
@@ -84,44 +93,59 @@ export function FeedComposer({
           {disabledReason}
         </p>
       ) : null}
-      <Textarea
-        aria-label={t("composer.label")}
-        className="min-h-20 resize-y"
-        disabled={disabled}
-        placeholder={t("composer.placeholder")}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (
-            event.key === "Enter" &&
-            (event.metaKey || event.ctrlKey) &&
-            !event.nativeEvent.isComposing
-          ) {
-            event.preventDefault();
-            void send();
-          }
-        }}
-      />
-      <div className="flex items-center justify-between gap-3">
+      <div
+        className={cn(
+          "flex items-end gap-2 rounded-2xl border border-border bg-card py-1.5 pr-1.5 pl-3.5 transition-colors focus-within:border-ring/60",
+          disabled && "opacity-60",
+        )}
+      >
+        <textarea
+          ref={field}
+          rows={1}
+          aria-label={t("composer.label")}
+          className="max-h-40 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-base leading-snug outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed md:text-sm"
+          disabled={disabled}
+          placeholder={t("composer.placeholder")}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              (event.metaKey || event.ctrlKey) &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+        />
+        <Button
+          type="submit"
+          size="icon"
+          className="size-9 shrink-0 rounded-xl"
+          disabled={!canSend}
+        >
+          <SendHorizontal className="size-4" aria-hidden />
+          <span className="sr-only">
+            {sending ? t("composer.sending") : t("composer.send")}
+          </span>
+        </Button>
+      </div>
+      {tooLong || (!disabled && shortcut) ? (
         <p
-          className={
+          className={cn(
+            "px-1 text-xs",
             tooLong
-              ? "text-xs text-destructive"
-              : "text-xs text-muted-foreground"
-          }
+              ? "text-destructive"
+              : "text-muted-foreground max-md:hidden",
+          )}
           role={tooLong ? "alert" : undefined}
         >
           {tooLong
             ? t("composer.tooLong", { max: ASSISTANT_LIMITS.feedMessageMax })
-            : disabled
-              ? null
-              : t("composer.hint", { shortcut })}
+            : t("composer.hint", { shortcut })}
         </p>
-        <Button type="submit" size="sm" disabled={!canSend}>
-          <SendHorizontal className="size-4" aria-hidden />
-          {sending ? t("composer.sending") : t("composer.send")}
-        </Button>
-      </div>
+      ) : null}
     </form>
   );
 }

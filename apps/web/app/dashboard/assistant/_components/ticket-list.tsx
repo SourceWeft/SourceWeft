@@ -8,7 +8,6 @@ import type {
   AssistantTicket,
   TicketStage,
 } from "@sourceweft/contracts/assistants";
-import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { useAssistantMutations } from "../../../../lib/assistant";
@@ -25,13 +24,17 @@ const GROUPS = [
   stages: readonly TicketStage[];
 }>;
 
-const STAGE_VARIANT = {
-  queued: "outline",
-  working: "default",
-  waiting_person: "destructive",
-  idle: "secondary",
-  ended: "outline",
-} as const satisfies Record<TicketStage, string>;
+/** A stage's dot and label colour; the dot carries the state, the label names it. */
+const STAGE_TONE = {
+  queued: { dot: "bg-muted-foreground/60", text: "text-muted-foreground" },
+  working: { dot: "bg-primary", text: "text-foreground" },
+  waiting_person: {
+    dot: "bg-amber-500",
+    text: "text-amber-600 dark:text-amber-400",
+  },
+  idle: { dot: "bg-muted-foreground/40", text: "text-muted-foreground" },
+  ended: { dot: "bg-muted-foreground/30", text: "text-muted-foreground" },
+} as const satisfies Record<TicketStage, { dot: string; text: string }>;
 
 export function TicketList({
   workspaceId,
@@ -61,24 +64,25 @@ export function TicketList({
 
   if (groups.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-        {t("tickets.empty")}
-      </p>
+      <p className="py-2 text-sm text-muted-foreground">{t("tickets.empty")}</p>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-6">
       {groups.map((group) => (
         <section
           key={group.key}
           data-group={group.key}
-          className="flex min-w-0 flex-col gap-2"
+          className="flex min-w-0 flex-col gap-1"
         >
-          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <h3 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             {t(`tickets.groups.${group.key}`)}
+            <span className="tabular-nums text-muted-foreground/70">
+              {group.tickets.length}
+            </span>
           </h3>
-          <ul className="flex min-w-0 flex-col gap-2">
+          <ul className="flex min-w-0 flex-col divide-y divide-border/60">
             {group.tickets.map((ticket) => (
               <TicketRow
                 key={ticket.id}
@@ -126,39 +130,42 @@ function TicketRow({
     if (highlighted) ref.current?.scrollIntoView?.({ block: "nearest" });
   }, [highlighted]);
 
+  const tone = STAGE_TONE[ticket.stage];
+
   return (
     <li
       ref={ref}
       data-ticket-id={ticket.id}
       className={cn(
-        "flex min-w-0 flex-col gap-1.5 rounded-xl border border-border bg-card p-3",
-        highlighted && "ring-2 ring-primary",
+        "flex min-w-0 flex-col gap-1.5 py-3 first:pt-2",
+        highlighted && "-mx-2 rounded-lg bg-muted/60 px-2",
       )}
     >
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <Link
-          href={`/dashboard/chat/${encodeURIComponent(ticket.workerThreadId)}`}
-          className="min-w-0 break-words font-medium hover:underline line-clamp-2"
-          title={t("tickets.openConversation")}
-        >
-          {ticket.title}
-        </Link>
-        <Badge variant={STAGE_VARIANT[ticket.stage]} className="shrink-0">
+      <Link
+        href={`/dashboard/chat/${encodeURIComponent(ticket.workerThreadId)}`}
+        className="line-clamp-2 break-words text-sm font-medium leading-snug hover:underline"
+        title={t("tickets.openConversation")}
+      >
+        {ticket.title}
+      </Link>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+        <span className={cn("inline-flex items-center gap-1.5", tone.text)}>
+          <span className={cn("size-1.5 rounded-full", tone.dot)} aria-hidden />
           {t(`tickets.stage.${ticket.stage}`)}
-        </Badge>
+        </span>
+        {payer ? (
+          <span className="text-muted-foreground">
+            {t("tickets.requestedBy", { name: payer })}
+          </span>
+        ) : null}
       </div>
-      {payer ? (
-        <p className="text-xs text-muted-foreground">
-          {t("tickets.requestedBy", { name: payer })}
-        </p>
-      ) : null}
       {ticket.blockedReason ? (
         <p className="text-xs text-destructive" role="status">
           {t(`tickets.blockedReason.${ticket.blockedReason}`)}
         </p>
       ) : null}
       {ticket.lastReportSummary ? (
-        <p className="line-clamp-3 break-words text-sm text-muted-foreground">
+        <p className="line-clamp-2 break-words text-xs leading-relaxed text-muted-foreground">
           {ticket.lastReportSummary}
         </p>
       ) : null}
@@ -167,6 +174,7 @@ function TicketRow({
           {canRetry ? (
             <Button
               size="sm"
+              className="max-md:h-10 max-md:px-4"
               disabled={busy}
               onClick={() =>
                 void run(
@@ -181,6 +189,7 @@ function TicketRow({
           <Button
             size="sm"
             variant="outline"
+            className="max-md:h-10 max-md:px-4"
             disabled={busy}
             onClick={() =>
               void run(

@@ -1751,6 +1751,8 @@
       "empty": "還沒有訊息。在下方向助理提出請求吧。",
       "loadError": "無法載入動態。",
       "loadOlder": "載入更早的訊息",
+      "showMore": "展開",
+      "showLess": "收起",
       "you": "你",
       "assistant": "助理",
       "formerMember": "已離開的成員",
