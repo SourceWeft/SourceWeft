@@ -110,7 +110,7 @@ export function AssistantPage() {
       ) : !assistant ? (
         <EnableCard workspaceId={workspaceId} isAdmin={isAdmin} />
       ) : (
-        <div className="grid min-h-0 gap-6 md:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="grid min-h-0 grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_18rem]">
           <section className="flex min-w-0 flex-col gap-3">
             <h2 className="text-sm font-medium">{t("page.feedHeading")}</h2>
             {feed.isError ? (
