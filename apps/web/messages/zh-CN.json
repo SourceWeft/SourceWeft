@@ -1751,6 +1751,8 @@
       "empty": "还没有消息。在下方向助理提出请求吧。",
       "loadError": "无法加载动态。",
       "loadOlder": "加载更早的消息",
+      "showMore": "展开",
+      "showLess": "收起",
       "you": "你",
       "assistant": "助理",
       "formerMember": "已离开的成员",

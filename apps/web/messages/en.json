@@ -1751,6 +1751,8 @@
       "empty": "No messages yet. Ask the assistant for something below.",
       "loadError": "Could not load the activity.",
       "loadOlder": "Load earlier messages",
+      "showMore": "Show more",
+      "showLess": "Show less",
       "you": "You",
       "assistant": "Assistant",
       "formerMember": "A former member",
