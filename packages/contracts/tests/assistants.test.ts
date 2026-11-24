@@ -186,6 +186,7 @@ const feedItem = {
   authorUserId: "user_1",
   text: "Please check the invoice totals",
   ticketId: null,
+  ticketEvent: null,
   replyToItemId: null,
   createdAt: "2026-11-22T00:00:00.000Z",
 };
@@ -202,6 +203,34 @@ test("a feed item round-trips and allows a null author for router/ticket updates
   );
   assert.equal(
     assistantFeedItemSchema.safeParse({ ...feedItem, kind: "something_else" })
+      .success,
+    false,
+  );
+});
+
+test("a ticket update records what happened: a new ticket or a report status", () => {
+  const update = {
+    ...feedItem,
+    kind: "ticket_update",
+    authorUserId: null,
+    ticketId: "ticket_1",
+  };
+  for (const ticketEvent of [
+    "created",
+    "ready",
+    "waiting",
+    "blocked",
+    "failed",
+    "dropped",
+  ]) {
+    assert.equal(
+      assistantFeedItemSchema.safeParse({ ...update, ticketEvent }).success,
+      true,
+      ticketEvent,
+    );
+  }
+  assert.equal(
+    assistantFeedItemSchema.safeParse({ ...update, ticketEvent: "closed" })
       .success,
     false,
   );
