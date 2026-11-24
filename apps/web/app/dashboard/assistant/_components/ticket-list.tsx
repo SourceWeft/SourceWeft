@@ -70,11 +70,15 @@ export function TicketList({
   return (
     <div className="flex flex-col gap-4">
       {groups.map((group) => (
-        <section key={group.key} data-group={group.key} className="grid gap-2">
+        <section
+          key={group.key}
+          data-group={group.key}
+          className="flex min-w-0 flex-col gap-2"
+        >
           <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t(`tickets.groups.${group.key}`)}
           </h3>
-          <ul className="grid gap-2">
+          <ul className="flex min-w-0 flex-col gap-2">
             {group.tickets.map((ticket) => (
               <TicketRow
                 key={ticket.id}
@@ -127,19 +131,19 @@ function TicketRow({
       ref={ref}
       data-ticket-id={ticket.id}
       className={cn(
-        "grid gap-1.5 rounded-xl border border-border bg-card p-3",
+        "flex min-w-0 flex-col gap-1.5 rounded-xl border border-border bg-card p-3",
         highlighted && "ring-2 ring-primary",
       )}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 items-start justify-between gap-2">
         <Link
           href={`/dashboard/chat/${encodeURIComponent(ticket.workerThreadId)}`}
-          className="min-w-0 truncate font-medium hover:underline"
+          className="min-w-0 break-words font-medium hover:underline line-clamp-2"
           title={t("tickets.openConversation")}
         >
           {ticket.title}
         </Link>
-        <Badge variant={STAGE_VARIANT[ticket.stage]}>
+        <Badge variant={STAGE_VARIANT[ticket.stage]} className="shrink-0">
           {t(`tickets.stage.${ticket.stage}`)}
         </Badge>
       </div>
@@ -154,7 +158,7 @@ function TicketRow({
         </p>
       ) : null}
       {ticket.lastReportSummary ? (
-        <p className="line-clamp-3 text-sm text-muted-foreground">
+        <p className="line-clamp-3 break-words text-sm text-muted-foreground">
           {ticket.lastReportSummary}
         </p>
       ) : null}
