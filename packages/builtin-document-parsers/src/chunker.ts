@@ -1,4 +1,5 @@
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+import { labelChunkLanguages } from "./chunk-language";
 import { headingPathOf, markdownSections } from "./heading-paths";
 import type { ChunkSpec, ParsingConfig } from "./types";
 
@@ -154,16 +155,21 @@ export async function chunkSourceContent(
   const splitTexts = await splitter.splitText(normalized);
   const ranges = mergeShortChunks(normalized, toRanges(normalized, splitTexts));
   const sections = markdownSections(normalized);
-  return ranges.map((range) => {
+  const texts = ranges.map((range) =>
+    normalized.slice(range.startIndex, range.endIndex),
+  );
+  const languages = await labelChunkLanguages(texts);
+  return ranges.map((range, index) => {
+    const text = texts[index]!;
     const headingPath = headingPathOf(sections, range.startIndex, range.endIndex);
+    const language = languages[index];
     return {
-      text: normalized.slice(range.startIndex, range.endIndex),
+      text,
       startIndex: range.startIndex,
       endIndex: range.endIndex,
-      tokenCount: estimateTokenCount(
-        normalized.slice(range.startIndex, range.endIndex),
-      ),
+      tokenCount: estimateTokenCount(text),
       ...(headingPath ? { headingPath } : {}),
+      ...(language ? { language } : {}),
     };
   });
 }

@@ -22,6 +22,8 @@ export type ChunkSpec = {
   readonly embedding?: readonly number[];
   /** Markdown section the chunk mostly belongs to, as "Guide > Install". */
   readonly headingPath?: string | null;
+  /** Language tag, as the app offers output in: "zh-CN", "zh-TW", "ja", "en", … */
+  readonly language?: string | null;
 };
 
 export type SourceMetadata = {
