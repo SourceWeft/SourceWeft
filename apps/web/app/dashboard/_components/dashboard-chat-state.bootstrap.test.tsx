@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { flush, mountWithIntl, unmountAll } from "@/test/react";
+import {
+  flush,
+  mount,
+  mountWithIntl,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
 
 const STORAGE_KEY = "sourceweft.dashboard.workspace-context.v1";
 const WORKSPACES = [
@@ -11,7 +17,6 @@ const WORKSPACES = [
 
 const auth = vi.hoisted(() => ({
   activeOrg: null as { id: string; name: string } | null,
-  // One stable list: the provider re-runs its bootstrap when the list changes.
   organizations: [] as Array<{ id: string }>,
 }));
 const getChatBootstrap = vi.hoisted(() => vi.fn());
@@ -110,4 +115,80 @@ test("a first visit opens the default workspace and remembers it", async () => {
   expect(await loadDashboard()).toBe("ws-1");
   expect(getChatBootstrap).toHaveBeenCalledTimes(1);
   expect(rememberedWorkspaces()).toEqual({ "org-1": "ws-1" });
+});
+
+function tree() {
+  return withIntl(
+    <DashboardChatStateProvider>
+      <ActiveWorkspace />
+    </DashboardChatStateProvider>,
+  );
+}
+
+function shownWorkspace() {
+  return document.querySelector('[data-testid="active-workspace"]')
+    ?.textContent;
+}
+
+test("the session's organization arriving after the bootstrap does not bootstrap again", async () => {
+  // On a real load the auth hooks resolve after the first bootstrap is out.
+  auth.activeOrg = null;
+  const page = await mount(tree());
+  await flush(4);
+  expect(shownWorkspace()).toBe("ws-1");
+
+  auth.activeOrg = { id: "org-1", name: "Acme" };
+  auth.organizations = [{ id: "org-1" }];
+  await page.render(tree());
+  await flush(4);
+
+  expect(getChatBootstrap).toHaveBeenCalledTimes(1);
+  expect(shownWorkspace()).toBe("ws-1");
+});
+
+test("the session's organization arriving while the bootstrap is in flight keeps that request", async () => {
+  auth.activeOrg = null;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const respond = getChatBootstrap.getMockImplementation()!;
+  getChatBootstrap.mockImplementation(async (input) => {
+    await gate;
+    return respond(input);
+  });
+  const page = await mount(tree());
+  await flush(2);
+  expect(shownWorkspace()).toBe("loading");
+
+  auth.activeOrg = { id: "org-1", name: "Acme" };
+  auth.organizations = [{ id: "org-1" }];
+  await page.render(tree());
+  await flush(2);
+  release();
+  await flush(4);
+
+  expect(getChatBootstrap).toHaveBeenCalledTimes(1);
+  expect(shownWorkspace()).toBe("ws-1");
+});
+
+test("a session organization other than the one bootstrapped bootstraps again", async () => {
+  auth.activeOrg = null;
+  const page = await mount(tree());
+  await flush(4);
+  expect(getChatBootstrap).toHaveBeenCalledTimes(1);
+
+  // A team switch: the session now names another organization.
+  const respond = getChatBootstrap.getMockImplementation()!;
+  getChatBootstrap.mockImplementation(async (input) => ({
+    ...(await respond(input)),
+    activeOrganizationId: "org-2",
+    activeOrganizationName: "Beta",
+  }));
+  auth.activeOrg = { id: "org-2", name: "Beta" };
+  await page.render(tree());
+  await flush(4);
+
+  expect(getChatBootstrap).toHaveBeenCalledTimes(2);
+  expect(shownWorkspace()).toBe("ws-1");
 });

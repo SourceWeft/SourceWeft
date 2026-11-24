@@ -412,10 +412,73 @@ export function DashboardChatStateProvider({
     [fetchChatsPage, t],
   );
 
+  // The session's organizations, for code that runs after an await.
+  const sessionRef = useRef({ activeOrg, orgs });
   useEffect(() => {
-    let cancelled = false;
+    sessionRef.current = { activeOrg, orgs };
+  });
+  const sessionOrganizationId = activeOrg?.id ?? null;
+  // The organization the latest bootstrap is for: null while it is in flight
+  // without a known organization, then the one it resolved to.
+  const bootstrapTargetRef = useRef<{
+    organizationId: string | null;
+    settled: boolean;
+  } | null>(null);
+  // Bumped when a finished bootstrap turns out to be for another organization
+  // than the session's, so the effect below runs again.
+  const [bootstrapRetry, setBootstrapRetry] = useState(0);
+
+  useEffect(
+    () => () => {
+      // Unmounting supersedes any bootstrap still in flight, and a remount
+      // (React's dev double mount included) starts from scratch.
+      hydrateGenerationRef.current += 1;
+      bootstrapTargetRef.current = null;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    // The session's organization loads after the first bootstrap has gone
+    // out, and usually names the organization that bootstrap is already
+    // fetching. Bootstrap again only when it names a different one.
+    // A bootstrap in flight for an organization not known yet is checked
+    // against the session when it finishes (see settle()).
+    const target = bootstrapTargetRef.current;
+    if (
+      target &&
+      (sessionOrganizationId === null ||
+        sessionOrganizationId === target.organizationId ||
+        (!target.settled && target.organizationId === null))
+    ) {
+      return;
+    }
+
     const generation = ++hydrateGenerationRef.current;
+    const isCurrent = () => hydrateGenerationRef.current === generation;
+    const { activeOrg, orgs } = sessionRef.current;
+    // Without an active organization the server uses the personal one.
+    const organizationIdHint =
+      activeOrg?.id ?? (orgs ?? []).find(isPersonalOrganization)?.id ?? null;
+    bootstrapTargetRef.current = {
+      organizationId: activeOrg?.id ?? null,
+      settled: false,
+    };
     setIsWorkspaceHydrating(true);
+
+    function settle(resolvedOrganizationId: string | null) {
+      bootstrapTargetRef.current = {
+        organizationId: resolvedOrganizationId,
+        settled: true,
+      };
+      const sessionOrganization = sessionRef.current.activeOrg?.id ?? null;
+      if (
+        sessionOrganization !== null &&
+        sessionOrganization !== resolvedOrganizationId
+      ) {
+        setBootstrapRetry((count) => count + 1);
+      }
+    }
 
     function resetForOrganizationChange(resolvedOrganizationId: string) {
       const organizationChanged =
@@ -451,15 +514,10 @@ export function DashboardChatStateProvider({
 
       try {
         const result = await loadDashboardChatBootstrap({
-          // Without an active organization the server uses the personal one.
-          organizationIdHint:
-            activeOrg?.id ??
-            (orgs ?? []).find(isPersonalOrganization)?.id ??
-            null,
-          isSuperseded: () =>
-            cancelled || hydrateGenerationRef.current !== generation,
+          organizationIdHint,
+          isSuperseded: () => !isCurrent(),
         });
-        if (cancelled || hydrateGenerationRef.current !== generation) {
+        if (!isCurrent()) {
           return;
         }
 
@@ -499,15 +557,17 @@ export function DashboardChatStateProvider({
         setIsLoadingPrivateChats(false);
         setHasWorkspaceHydrated(true);
         setIsWorkspaceHydrating(false);
+        settle(result.activeOrganizationId);
         return;
       } catch {
         shouldUseFallback = true;
       }
 
-      if (!shouldUseFallback || cancelled) {
-        if (!cancelled && hydrateGenerationRef.current === generation) {
+      if (!shouldUseFallback || !isCurrent()) {
+        if (isCurrent()) {
           setHasWorkspaceHydrated(true);
           setIsWorkspaceHydrating(false);
+          settle(null);
         }
         return;
       }
@@ -530,21 +590,26 @@ export function DashboardChatStateProvider({
           orgList.find((org) => org.id === resolvedOrganizationId)?.name ??
           "SourceWeft";
 
-        if (cancelled || hydrateGenerationRef.current !== generation) {
+        if (!isCurrent()) {
           return;
         }
 
         if (!resolvedOrganizationId) {
           setHasWorkspaceHydrated(true);
           setIsWorkspaceHydrating(false);
+          settle(null);
           return;
         }
 
-        if (!cancelled) {
-          resetForOrganizationChange(resolvedOrganizationId);
-          setOrganizationId(resolvedOrganizationId);
-          setOrganizationName(resolvedOrganizationName);
-        }
+        resetForOrganizationChange(resolvedOrganizationId);
+        setOrganizationId(resolvedOrganizationId);
+        setOrganizationName(resolvedOrganizationName);
+        // Known now; a session organization that arrives naming it needs no
+        // second bootstrap.
+        bootstrapTargetRef.current = {
+          organizationId: resolvedOrganizationId,
+          settled: false,
+        };
 
         if (!activeOrg?.id) {
           try {
@@ -556,25 +621,34 @@ export function DashboardChatStateProvider({
           }
         }
 
-        if (!cancelled) {
+        if (isCurrent()) {
           await hydrateWorkspace(resolvedOrganizationId, generation);
+          if (isCurrent()) {
+            settle(resolvedOrganizationId);
+          }
         }
       } catch {
         // keep UI usable; sidebar still renders local state
-        if (!cancelled && hydrateGenerationRef.current === generation) {
+        if (isCurrent()) {
           setIsLoadingPrivateChats(false);
           setHasWorkspaceHydrated(true);
           setIsWorkspaceHydrating(false);
+          settle(null);
         }
       }
     }
 
     void bootstrap();
+    // hydrateWorkspace and t are listed for completeness: when only they
+    // change, the check above returns early.
+  }, [bootstrapRetry, hydrateWorkspace, sessionOrganizationId, t]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeOrg?.id, activeOrg?.name, hydrateWorkspace, orgs, t]);
+  // A renamed team shows its new name without a second bootstrap.
+  useEffect(() => {
+    if (activeOrg?.id && activeOrg.id === organizationId && activeOrg.name) {
+      setOrganizationName(activeOrg.name);
+    }
+  }, [activeOrg?.id, activeOrg?.name, organizationId]);
 
   const createWorkspace = useCallback(
     async (name?: string) => {
