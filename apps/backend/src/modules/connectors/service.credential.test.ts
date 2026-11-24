@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   listConnectorScheduleStatuses: vi.fn(),
   updateOAuthAccountCredentialRecord: vi.fn(),
   updateSourceConnectorRecord: vi.fn(),
+  putConnectorSchedule: vi.fn(),
+  archiveConnectorSources: vi.fn(),
 }));
 
 vi.mock("./permissions", () => ({
@@ -38,6 +40,8 @@ vi.mock("./repository", () => ({
   listConnectorScheduleStatuses: mocks.listConnectorScheduleStatuses,
   updateOAuthAccountCredentialRecord: mocks.updateOAuthAccountCredentialRecord,
   updateSourceConnectorRecord: mocks.updateSourceConnectorRecord,
+  putConnectorSchedule: mocks.putConnectorSchedule,
+  archiveConnectorSources: mocks.archiveConnectorSources,
 }));
 
 import { logger } from "../../shared/logger";
@@ -231,7 +235,17 @@ beforeEach(() => {
     connector: createdConnector,
     accountId: "acc_cred",
   });
-  mocks.encryptTeamSecret.mockImplementation(async (plain: string) => `enc:${plain}`);
+  mocks.encryptTeamSecret.mockImplementation(
+    async (plain: string) => `enc:${plain}`,
+  );
+  mocks.updateSourceConnectorRecord.mockImplementation(
+    async (input: { configJson?: Record<string, unknown> }) => ({
+      ...createdConnector,
+      ...(input.configJson ? { configJson: input.configJson } : {}),
+    }),
+  );
+  mocks.putConnectorSchedule.mockResolvedValue(undefined);
+  mocks.archiveConnectorSources.mockResolvedValue(undefined);
   checkSyncReadiness.mockResolvedValue({ ready: true });
 });
 
@@ -344,6 +358,78 @@ describe("checkConfigReadiness for a credential connector", () => {
       connectorType: "public-feed",
     });
     assert.equal(checkSyncReadiness.mock.calls[0]?.[0].accessToken, "");
+  });
+});
+
+describe("updateConnector locks a credential connector's endpoint origin", () => {
+  const patch = (
+    svc: ConnectorService,
+    configJson: Record<string, unknown>,
+    overrides: Partial<Parameters<ConnectorService["updateConnector"]>[0]> = {},
+  ) =>
+    svc.updateConnector({
+      workspaceId: "workspace",
+      userId: "user",
+      connectorId: "conn_cred",
+      configJson,
+      ...overrides,
+    });
+
+  test("rejects a different endpoint origin and persists nothing", async () => {
+    const error = await rejection(
+      patch(service(), {
+        endpoint: "https://evil.example.com/",
+        roots: ["/Docs/"],
+      }),
+    );
+    assert.equal(error.statusCode, 400);
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED");
+    // The message echoes no input (no endpoint, path or credential).
+    assert.ok(!error.message.includes("evil.example.com"));
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+    assert.equal(mocks.putConnectorSchedule.mock.calls.length, 0);
+  });
+
+  test("rejects an unparsable endpoint", async () => {
+    const error = await rejection(
+      patch(service(), { endpoint: "not a url", roots: ["/Docs/"] }),
+    );
+    assert.equal(error.code, "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED");
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+  });
+
+  test("allows a same-origin base-path change", async () => {
+    await patch(service(), {
+      endpoint: "https://dav.example.com/dav2/",
+      roots: ["/Docs/"],
+    });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    assert.equal(
+      mocks.updateSourceConnectorRecord.mock.calls[0]?.[0].configJson.endpoint,
+      "https://dav.example.com/dav2/",
+    );
+  });
+
+  test("allows a roots-only change", async () => {
+    await patch(service(), { endpoint: ENDPOINT, roots: ["/Other/"] });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    assert.deepEqual(
+      mocks.updateSourceConnectorRecord.mock.calls[0]?.[0].configJson.roots,
+      ["/Other/"],
+    );
+  });
+
+  test("does not lock a non-credential (oauth2) connector's endpoint", async () => {
+    mocks.findSourceConnectorRecord.mockResolvedValue({
+      ...createdConnector,
+      connectorType: "oauth-test",
+      oauthAccountId: null,
+    });
+    await patch(service(oauth2Adapter()), {
+      endpoint: "https://elsewhere.example.com/",
+      roots: ["/x/"],
+    });
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
   });
 });
 

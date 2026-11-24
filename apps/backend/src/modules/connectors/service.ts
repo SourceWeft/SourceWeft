@@ -118,7 +118,10 @@ export class ConnectorService {
     workspaceId: string,
     connector: T,
   ): Promise<
-    T & { credentialConfigured?: boolean; credentialDisplayName?: string | null }
+    T & {
+      credentialConfigured?: boolean;
+      credentialDisplayName?: string | null;
+    }
   > {
     if (this.safeManifestAuthKind(connector.connectorType) !== "credential") {
       return connector;
@@ -610,6 +613,40 @@ export class ConnectorService {
         value: nextConfig,
         label: "configJson",
       });
+    }
+    // A credential connector's endpoint is bound to its stored secret: the
+    // account identity and the Authorization target are fixed at create time.
+    // A member with connector.manage who never knew the password must not be
+    // able to point that credential at another origin by editing the config
+    // (which would send `Authorization: Basic` to an attacker on the next sync
+    // or browse). Same-origin path changes and `roots` edits stay allowed; a
+    // different or unparsable endpoint origin is rejected with a fixed message
+    // that echoes no input.
+    if (
+      input.configJson !== undefined &&
+      manifest.auth?.kind === "credential"
+    ) {
+      const endpointOrigin = (value: unknown): string | null => {
+        if (typeof value !== "string") return null;
+        try {
+          return new URL(value).origin;
+        } catch {
+          return null;
+        }
+      };
+      const storedOrigin = endpointOrigin(current.configJson.endpoint);
+      const nextOrigin = endpointOrigin(nextConfig.endpoint);
+      if (
+        storedOrigin === null ||
+        nextOrigin === null ||
+        storedOrigin !== nextOrigin
+      ) {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_CREDENTIAL_ENDPOINT_LOCKED",
+          "This connector's server address cannot be changed",
+        );
+      }
     }
 
     const periodicIndexingEnabled =
