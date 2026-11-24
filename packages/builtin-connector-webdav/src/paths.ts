@@ -50,6 +50,29 @@ export function samePath(a: string, b: string): boolean {
   return trim(a) === trim(b);
 }
 
+/**
+ * True when `candidate` is a strict, deeper descendant of the collection
+ * `ancestor`. Both are compared segment by segment, never by string prefix, so
+ * `/a/bc` is NOT a descendant of `/a/b`. A path equal to the ancestor (a
+ * collection's own self entry) is not a descendant of itself, and a parent,
+ * sibling or any path outside the ancestor is rejected. The trailing slash on
+ * either side is irrelevant. This is how the walk and the browse action keep a
+ * hostile or buggy server from pulling entries outside the listed collection
+ * (and therefore outside the selected roots) into scope.
+ */
+export function isStrictDescendant(
+  ancestor: string,
+  candidate: string,
+): boolean {
+  const a = ancestor.split("/").filter((segment) => segment !== "");
+  const c = candidate.split("/").filter((segment) => segment !== "");
+  if (c.length <= a.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (c[i] !== a[i]) return false;
+  }
+  return true;
+}
+
 /** Decodes one raw path segment exactly once. Null when it cannot be a single
  * safe segment (bad escape, NUL or other control, separator, `.`/`..`). */
 function decodeSegment(raw: string): string | null {

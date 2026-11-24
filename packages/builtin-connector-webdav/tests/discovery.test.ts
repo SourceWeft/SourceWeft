@@ -20,11 +20,30 @@ async function run(
     roots: string[];
     status?: Record<string, number>;
     limits?: Partial<DiscoveryLimits>;
+    rogueChildren?: Record<string, string[]>;
   },
-): Promise<{ pages: ConnectorDiscoveryPage[]; warnings: Warn[] }> {
+): Promise<{
+  pages: ConnectorDiscoveryPage[];
+  warnings: Warn[];
+  requests: string[];
+}> {
   const warnings: Warn[] = [];
+  const requests: string[] = [];
+  const fakeFetch = buildFakeDav({
+    endpoint,
+    collections,
+    status: options.status,
+    rogueChildren: options.rogueChildren,
+  });
+  const recordingFetch = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    requests.push(String(input));
+    return fakeFetch(input, init);
+  }) as typeof fetch;
   const client = createDavClient({
-    fetch: buildFakeDav({ endpoint, collections, status: options.status }),
+    fetch: recordingFetch,
     endpoint,
     credential,
   });
@@ -38,7 +57,7 @@ async function run(
   })) {
     pages.push(page);
   }
-  return { pages, warnings };
+  return { pages, warnings, requests };
 }
 
 const itemsOf = (pages: ConnectorDiscoveryPage[]): ConnectorItem[] =>
@@ -248,4 +267,58 @@ test("multiple roots are each walked", async () => {
   assert.deepEqual(ids.sort(), ["/One/1.txt", "/Two/2.txt"]);
   assert.equal(finalPage(pages).complete, true);
   assert.equal(finalPage(pages).reconcileMissing, true);
+});
+
+test("drops any server entry outside the listed collection and never requests it", async () => {
+  const { pages, warnings, requests } = await run(
+    {
+      "/a/b/": {
+        folders: ["child"],
+        files: { "f.txt": { size: 1, etag: '"f"' } },
+      },
+      "/a/b/child/": { files: { "g.txt": { size: 1, etag: '"g"' } } },
+    },
+    {
+      roots: ["/a/b/"],
+      rogueChildren: {
+        "/a/b/": [
+          "/dav/a/", // the parent
+          "/dav/a/bc/", // a /a/bc lookalike of root /a/b
+          "/dav/a/sibling/", // a sibling collection
+          "/dav/zzz/outside/", // outside the root entirely
+          "/dav/a/b/%2E%2E/escape/", // encoded traversal
+        ],
+      },
+    },
+  );
+  const ids = idsOf(pages);
+  // Legitimate descendants are still discovered.
+  assert.ok(ids.includes("/a/b/f.txt"));
+  assert.ok(ids.includes("/a/b/child/g.txt"));
+  // Not one rogue path is emitted as an item.
+  for (const rogue of [
+    "/a",
+    "/a/bc",
+    "/a/sibling",
+    "/zzz/outside",
+    "/a/b/../escape",
+  ]) {
+    assert.ok(!ids.includes(rogue), `${rogue} must not be an item`);
+  }
+  // The only collections ever requested are the root and its real child; no
+  // rogue collection was queued, so none was fetched.
+  assert.deepEqual(requests.sort(), [
+    "https://dav.example.com/dav/a/b/",
+    "https://dav.example.com/dav/a/b/child/",
+  ]);
+  // The scan still completes and reconciles: a sibling/parent echo is common.
+  assert.equal(finalPage(pages).complete, true);
+  assert.equal(finalPage(pages).reconcileMissing, true);
+  // One fixed-message warning with only a count; the encoded-traversal href is
+  // rejected by toExternalId earlier and so is not counted (4, not 5).
+  const warn = warnings.find(
+    (w) => w.message === "webdav_scan_out_of_scope_entries",
+  );
+  assert.ok(warn, "an out-of-scope warning is logged");
+  assert.equal(warn!.meta?.count, 4);
 });

@@ -22,12 +22,17 @@ const ACCESS_TOKEN = JSON.stringify({ username: USERNAME, secret: SECRET });
 
 function adapterFor(
   collections: FakeDavSpec["collections"],
-  options: { status?: Record<string, number>; methods?: string[] } = {},
+  options: {
+    status?: Record<string, number>;
+    methods?: string[];
+    rogueChildren?: Record<string, string[]>;
+  } = {},
 ) {
   let fetchImpl = buildFakeDav({
     endpoint: new URL(ENDPOINT),
     collections,
     status: options.status,
+    rogueChildren: options.rogueChildren,
   });
   if (options.methods) {
     const inner = fetchImpl;
@@ -342,6 +347,33 @@ test("browse of a nested folder reports container and breadcrumbs", async () => 
   assert.deepEqual(
     browse.entries.map((e) => e.id),
     ["/Docs/Sub/Leaf"],
+  );
+});
+
+test("browse returns only strict descendants, dropping parents, siblings and lookalikes", async () => {
+  const { adapter } = adapterFor(
+    {
+      "/a/b/": { folders: ["child"] },
+      "/a/b/child/": {},
+    },
+    {
+      rogueChildren: {
+        "/a/b/": [
+          "/dav/a/", // the parent
+          "/dav/a/bc/", // a /a/bc lookalike of container /a/b
+          "/dav/a/sibling/", // a sibling collection
+          "/dav/zzz/outside/", // outside the container entirely
+        ],
+      },
+    },
+  );
+  const { result } = await adapter.executeAction(
+    actionInput("webdav.browse", { containerId: "/a/b" }),
+  );
+  const browse = result as unknown as ConnectorSelectionBrowseResult;
+  assert.deepEqual(
+    browse.entries.map((e) => e.id),
+    ["/a/b/child"],
   );
 });
 

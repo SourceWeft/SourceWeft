@@ -32,7 +32,13 @@ import { parseEndpoint } from "./endpoint";
 import { WebDavError } from "./errors";
 import { parseStoredCredential, webDavCredentialIdentity } from "./identity";
 import { MAX_ROOTS } from "./limits";
-import { normalizePath, normalizeRoot, samePath, toExternalId } from "./paths";
+import {
+  isStrictDescendant,
+  normalizePath,
+  normalizeRoot,
+  samePath,
+  toExternalId,
+} from "./paths";
 
 export type WebDavAdapterInput = {
   /** A credentialed controlled-fetch scope: public HTTPS plus the deployment's
@@ -338,7 +344,10 @@ export function createWebdavAdapter(
         if (!entry.isCollection) continue;
         const externalId = toExternalId(endpoint, entry.href);
         if (externalId === null) continue;
-        if (samePath(externalId, containerPath)) continue;
+        // Only strict descendants of the requested container: the container's
+        // own self entry, a parent, a sibling or any path the server lists
+        // outside it (including a `/a/bc` lookalike of `/a/b`) is dropped.
+        if (!isStrictDescendant(containerPath, externalId)) continue;
         if (externalId.length > SELECTION_ID_MAX) continue;
         if (seen.has(externalId)) continue;
         seen.add(externalId);

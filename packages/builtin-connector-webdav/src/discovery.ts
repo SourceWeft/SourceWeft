@@ -7,7 +7,12 @@ import type {
 import type { DavClient, DavEntry } from "./dav-client";
 import { WebDavError } from "./errors";
 import { MAX_DEPTH, MAX_ENTRIES, SCAN_TIMEOUT_MS } from "./limits";
-import { samePath, toExternalId, toRequestUrl } from "./paths";
+import {
+  isStrictDescendant,
+  samePath,
+  toExternalId,
+  toRequestUrl,
+} from "./paths";
 
 export type DiscoveryLimits = {
   /** Deepest collection level below a root the walk descends into. */
@@ -131,6 +136,7 @@ export async function* discoverWebDavPages(
 
   let entryCount = 0;
   let incomplete = false;
+  let outOfScope = 0;
   const start = now();
 
   while (queue.length > 0) {
@@ -163,7 +169,15 @@ export async function* discoverWebDavPages(
     for (const entry of entries) {
       const externalId = toExternalId(endpoint, entry.href);
       if (externalId === null) continue;
-      if (samePath(externalId, current.path)) continue;
+      if (!isStrictDescendant(current.path, externalId)) {
+        // Only entries strictly below the listed collection (and therefore
+        // below a selected root) are in scope. The collection's own self entry
+        // is expected and ignored; a parent, sibling or any path the server
+        // lists outside the collection is dropped and counted, so a hostile or
+        // buggy server cannot pull files outside the chosen roots into scope.
+        if (!samePath(externalId, current.path)) outOfScope += 1;
+        continue;
+      }
       entryCount += 1;
       if (entryCount > limits.maxEntries) {
         incomplete = true;
@@ -196,6 +210,13 @@ export async function* discoverWebDavPages(
       };
     }
     if (capped) break;
+  }
+
+  if (outOfScope > 0) {
+    // Common and not an error (self entries, servers that echo parents): one
+    // fixed-message warning with only a count, and the scan is still treated
+    // as authoritative for the roots it did cover.
+    logger?.warn?.("webdav_scan_out_of_scope_entries", { count: outOfScope });
   }
 
   if (incomplete) {

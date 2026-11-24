@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WebDavError } from "../src/errors";
 import {
+  isStrictDescendant,
   normalizePath,
   normalizeRoot,
   samePath,
@@ -150,4 +151,21 @@ test("toRequestUrl round-trips through toExternalId", () => {
 
 test("toRequestUrl refuses a path that escapes the endpoint", () => {
   assert.throws(() => toRequestUrl(base, "/a/../../etc"), WebDavError);
+});
+
+test("isStrictDescendant matches segment-wise, never by string prefix", () => {
+  // Strict descendants (trailing slash on the ancestor is irrelevant).
+  assert.equal(isStrictDescendant("/a/b/", "/a/b/c"), true);
+  assert.equal(isStrictDescendant("/a/b", "/a/b/c/d"), true);
+  assert.equal(isStrictDescendant("/", "/x"), true);
+  // The collection's own self entry is not its descendant.
+  assert.equal(isStrictDescendant("/a/b/", "/a/b"), false);
+  assert.equal(isStrictDescendant("/a/b/", "/a/b/"), false);
+  // Parent, sibling and an outside path are rejected.
+  assert.equal(isStrictDescendant("/a/b/", "/a"), false);
+  assert.equal(isStrictDescendant("/a/b/", "/a/sibling"), false);
+  assert.equal(isStrictDescendant("/a/b/", "/zzz/x"), false);
+  // A prefix lookalike is rejected: /a/bc is not under /a/b.
+  assert.equal(isStrictDescendant("/a/b/", "/a/bc"), false);
+  assert.equal(isStrictDescendant("/a/b/", "/a/bc/d"), false);
 });

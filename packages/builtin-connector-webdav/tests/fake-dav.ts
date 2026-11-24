@@ -27,6 +27,11 @@ export type FakeDavSpec = {
   endpoint: URL;
   collections: Record<string, CollectionSpec>;
   status?: Record<string, number>;
+  /** Raw hrefs a (possibly hostile) server appends to a collection's depth-1
+   * listing, keyed by collection key ("/", "/a/b/"). Each is returned as a
+   * collection entry exactly as written — used to list parents, siblings, paths
+   * outside the root, lookalikes and encoded traversal. */
+  rogueChildren?: Record<string, string[]>;
 };
 
 const escapeXml = (value: string): string =>
@@ -85,6 +90,15 @@ function fileResponse(
   );
 }
 
+/** A collection response for a raw href exactly as supplied (hostile input). */
+function rawCollectionResponse(href: string): string {
+  return (
+    `<d:response><d:href>${escapeXml(href)}</d:href><d:propstat><d:prop>` +
+    `<d:resourcetype><d:collection/></d:resourcetype>` +
+    `</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
+  );
+}
+
 function multistatus(responses: string[]): string {
   return (
     `<?xml version="1.0" encoding="utf-8"?>` +
@@ -128,6 +142,9 @@ export function buildFakeDav(spec: FakeDavSpec): typeof fetch {
         }
         for (const [name, file] of Object.entries(collection.files ?? {})) {
           responses.push(fileResponse(endpoint, key, name, file));
+        }
+        for (const href of spec.rogueChildren?.[key] ?? []) {
+          responses.push(rawCollectionResponse(href));
         }
       }
       return new Response(multistatus(responses), {

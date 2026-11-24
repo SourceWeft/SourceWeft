@@ -20,6 +20,7 @@ export { webDavCredentialIdentity, parseStoredCredential } from "./identity";
 export { WebDavError, type WebDavErrorCode } from "./errors";
 export { parseEndpoint, redactEndpoint } from "./endpoint";
 export {
+  isStrictDescendant,
   normalizePath,
   normalizeRoot,
   samePath,
