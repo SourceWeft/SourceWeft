@@ -844,6 +844,23 @@ export class ConnectorService {
         "Connector credential account not found",
       );
     }
+    // The oauth2 reconnect path returns only the ACCOUNT to `active` with its
+    // error cleared (reauthorizeOAuthAccountRecord); it does not re-enable a
+    // schedule that a reauth failure disabled, and it leaves the connector row
+    // to recover on its next sync. `updateOAuthAccountCredentialRecord` already
+    // mirrors that account reset. A reauth failure also leaves the connector
+    // itself in `error`, so — so the reconnected connector is not left showing
+    // a stale error — clear that one error here (to `active`, lastError null).
+    // Scheduling is deliberately NOT re-enabled, matching the oauth2 path.
+    if (connector.status === "error") {
+      await updateSourceConnectorRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: connector.id,
+        status: "active",
+        lastError: null,
+      });
+    }
     return {
       credentialConfigured: account.status === "active",
       displayName: account.displayName,

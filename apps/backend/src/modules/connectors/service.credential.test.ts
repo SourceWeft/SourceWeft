@@ -567,6 +567,33 @@ describe("rotateConnectorCredential", () => {
     await rotate(service());
     assert.equal(checkSyncReadiness.mock.calls.length, 0);
   });
+
+  test("clears the connector's error state after a successful rotate", async () => {
+    mocks.findSourceConnectorRecord.mockResolvedValue({
+      ...createdConnector,
+      status: "error",
+      lastError: "Reconnect the provider account to resume scheduled sync",
+    });
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue({
+      ...credentialAccountRow,
+      status: "active",
+    });
+    await rotate(service());
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 1);
+    const reset = mocks.updateSourceConnectorRecord.mock.calls[0]?.[0];
+    assert.equal(reset.connectorId, "conn_cred");
+    assert.equal(reset.status, "active");
+    assert.equal(reset.lastError, null);
+  });
+
+  test("does not touch a connector that is not in error", async () => {
+    mocks.updateOAuthAccountCredentialRecord.mockResolvedValue({
+      ...credentialAccountRow,
+      status: "active",
+    });
+    await rotate(service());
+    assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+  });
 });
 
 describe("a credential sent to a non-credential connector is rejected", () => {
