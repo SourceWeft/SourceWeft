@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { documentLanguage } from "@sourceweft/builtin-document-parsers";
 import {
   chunkEmbeddings,
   chunks,
@@ -1153,7 +1154,7 @@ export async function createSourceDocumentChunksAndEmbeddings(
       sourceId: input.sourceId,
       sourceRevisionId: input.sourceRevisionId ?? null,
       title: baseTitle,
-      language: null,
+      language: documentLanguage(segments),
       contentText: normalizedText,
       tokenCount: Math.max(0, Math.ceil(normalizedText.length / 4)),
       charCount: normalizedText.length,
@@ -1186,7 +1187,7 @@ export async function createSourceDocumentChunksAndEmbeddings(
           headingPath: segment.headingPath ?? null,
           startOffset: segment.startIndex,
           endOffset: segment.endIndex,
-          language: null,
+          language: segment.language ?? null,
           searchParts: buildSearchParts(segment.text),
           chunkMetadata: {
             tokenCount: segment.tokenCount,

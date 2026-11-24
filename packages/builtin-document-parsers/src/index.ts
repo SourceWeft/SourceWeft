@@ -5,6 +5,7 @@ export const builtinDocumentParsersCapability = {
 export { builtinDocumentParsersCapabilityManifest } from "./manifest";
 export { buildParsedDocument } from "./build-parsed-document";
 export { chunkSourceContent } from "./chunker";
+export { documentLanguage } from "./chunk-language";
 export { ParserContentError } from "./errors";
 export { createDocumentProviderRegistry } from "./providers";
 export { withTempFile } from "./file-buffer";

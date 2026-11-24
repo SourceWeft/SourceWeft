@@ -316,6 +316,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0)
+      eld:
+        specifier: 2.1.1
+        version: 2.1.1
       fast-xml-parser:
         specifier: 5.7.3
         version: 5.7.3
@@ -1301,6 +1304,9 @@ importers:
       '@sourceweft/capability-contracts':
         specifier: workspace:*
         version: link:../capability-contracts
+      eld:
+        specifier: 2.1.1
+        version: 2.1.1
       fast-xml-parser:
         specifier: 5.7.3
         version: 5.7.3
@@ -7530,6 +7536,10 @@ packages:
 
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
+
+  eld@2.1.1:
+    resolution: {integrity: sha512-+WPgDcsV5rAuZR3BTW3rnnv03YvlP2JoHnFGDMLAp13XrDt7n58TBIL9hTmFs4VBVcozGxG/GC5WQILqRqd1pw==}
+    engines: {node: '>=14.17.0'}
 
   electron-to-chromium@1.5.405:
     resolution: {integrity: sha512-bNglH7lPH5l+yHOes7Zr4VqxhOy4BQ9ZBUX4VdoFgxMpzJk7W1ZoO3Vgd9Pxa9PyjQ76sfm2aKH/nzEcCNRlew==}
@@ -16979,6 +16989,8 @@ snapshots:
       '@floating-ui/dom': 1.8.0
 
   ee-first@1.1.1: {}
+
+  eld@2.1.1: {}
 
   electron-to-chromium@1.5.405: {}
 

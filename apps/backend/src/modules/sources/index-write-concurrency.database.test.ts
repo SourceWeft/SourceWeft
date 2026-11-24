@@ -388,3 +388,34 @@ test("each chunk keeps the heading path the chunker gave it", async () => {
     { chunkNo: 1, headingPath: null },
   ]);
 });
+
+test("chunks keep their language and the document takes the majority", async () => {
+  const text = "我们认为这个国家的经济发展还会继续。\nOK";
+  const split = text.indexOf("\n");
+  await createSourceDocumentChunksAndEmbeddings({
+    ...input(null, text),
+    embeddings: [
+      [0.25, 0.75],
+      [0.5, 0.5],
+    ],
+    chunks: [
+      { text: text.slice(0, split), startIndex: 0, endIndex: split, tokenCount: 4, language: "zh-CN" },
+      { text: text.slice(split), startIndex: split, endIndex: text.length, tokenCount: 1 },
+    ],
+  });
+
+  const stored = await db
+    .select({ chunkNo: chunks.chunkNo, language: chunks.language })
+    .from(chunks)
+    .where(eq(chunks.sourceId, sourceId))
+    .orderBy(chunks.chunkNo);
+  assert.deepEqual(stored, [
+    { chunkNo: 0, language: "zh-CN" },
+    { chunkNo: 1, language: null },
+  ]);
+  const [document] = await db
+    .select({ language: documents.language })
+    .from(documents)
+    .where(eq(documents.sourceId, sourceId));
+  assert.equal(document?.language, "zh-CN");
+});
