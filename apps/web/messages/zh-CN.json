@@ -4338,7 +4338,9 @@
       "sessionPrefix": "会话：{value}",
       "emptyNoTraces": "未找到追踪。",
       "emptyNoMatch": "没有符合当前搜索条件的追踪。",
-      "loadOlder": "加载更早的追踪",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "pageNumber": "第 {page} 页",
       "columns": {
         "timestamp": "时间戳",
         "name": "名称",
