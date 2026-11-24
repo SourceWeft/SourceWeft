@@ -210,6 +210,9 @@ export class MarketClient {
     if (typeof input.includeDesktopOnly === "boolean") {
       params.set("includeDesktopOnly", String(input.includeDesktopOnly));
     }
+    if (typeof input.indexableOnly === "boolean") {
+      params.set("indexableOnly", String(input.indexableOnly));
+    }
     if (input.limit) {
       params.set("limit", String(input.limit));
     }

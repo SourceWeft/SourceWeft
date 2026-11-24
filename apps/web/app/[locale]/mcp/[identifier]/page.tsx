@@ -19,6 +19,10 @@ import {
 import { MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED } from "@sourceweft/market-contracts";
 import type { MarketMcpProductGroup } from "@sourceweft/market-sdk";
 
+import {
+  INDEXABLE_DETAIL_ROBOTS,
+  openGraphLocales,
+} from "../../../../lib/seo-detail-meta";
 import { fitSeoTitle } from "../../../../lib/seo-title";
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
@@ -27,7 +31,11 @@ import {
   mcpGithubAccount,
   publicMcpFacts,
 } from "../../../../lib/mcp-facts";
-import { relatedMcpItems } from "../../../../lib/mcp-related";
+import {
+  fillRelatedMcpItems,
+  mcpRealSummary,
+  relatedMcpItems,
+} from "../../../../lib/mcp-related";
 import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -262,13 +270,16 @@ export async function generateMetadata({
       openGraph: {
         description,
         images: [OG_IMAGE],
+        ...openGraphLocales(pageLocale),
         siteName: SITE_NAME,
         title,
         type: "article",
         url,
       },
       // The README is one file many servers show (left out of the sitemap too).
-      ...(detail.searchIndexable === false ? NO_INDEX_FOLLOW_METADATA : {}),
+      ...(detail.searchIndexable === false
+        ? NO_INDEX_FOLLOW_METADATA
+        : INDEXABLE_DETAIL_ROBOTS),
       title,
       twitter: {
         card: "summary_large_image",
@@ -346,7 +357,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             ? await listPublicMcp({
                 category: loaded.item.categories.join(","),
                 includeDesktopOnly: true,
-                limit: 12,
+                // Only pages that stay in search: a link to a noindex page
+                // passes nothing on.
+                indexableOnly: true,
+                limit: 24,
                 locale: overviewLocale,
               })
             : { items: [] },
@@ -381,6 +395,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const relatedItems = relatedMcpItems({
     candidates: relatedMarket.items,
     current: item,
+  });
+  // Servers sharing words lead as cards; same-category servers fill the rest
+  // as plain links, so a page with no word match still links to its siblings.
+  const relatedFill = fillRelatedMcpItems({
+    candidates: relatedMarket.items,
+    current: item,
+    matched: relatedItems,
   });
   // Delivery: a hosted-only service (a remote endpoint with nothing to
   // install or read) has no license or language to declare; the score
@@ -435,7 +456,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     ...(productGroup && showIntegrations
       ? [["integrations", t("nav.integrations", { brand: productGroup.brand })]]
       : []),
-    ...(relatedItems.length > 0 ? [["related", t("nav.related")]] : []),
+    ...(relatedItems.length + relatedFill.length > 0
+      ? [["related", t("nav.related")]]
+      : []),
   ];
   const softwareJsonLd = {
     "@context": "https://schema.org",
@@ -1080,16 +1103,55 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         </div>
       </div>
 
-      {relatedItems.length > 0 ? (
+      {relatedItems.length + relatedFill.length > 0 ? (
         <section
           className={`mx-auto scroll-mt-32 pb-16 ${marketingContainerClassName}`}
           id="related"
         >
           <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
-            <h2 className="mb-6 text-2xl font-semibold tracking-tight">
-              {t("relatedHeading", { name: item.name })}
-            </h2>
-            <McpCardGrid categoryNames={categoryNames} items={relatedItems} />
+            {relatedItems.length > 0 ? (
+              <>
+                <h2 className="mb-6 text-2xl font-semibold tracking-tight">
+                  {t("relatedHeading", { name: item.name })}
+                </h2>
+                <McpCardGrid
+                  categoryNames={categoryNames}
+                  items={relatedItems}
+                />
+              </>
+            ) : null}
+            {relatedFill.length > 0 ? (
+              <>
+                <h2
+                  className={`text-2xl font-semibold tracking-tight ${relatedItems.length > 0 ? "mt-10" : ""} mb-4`}
+                >
+                  {t("relatedSameCategoryHeading", {
+                    category: mcpCategoryLabel(
+                      primaryCategory ?? item.categories[0] ?? "other",
+                      categoryNames,
+                    ),
+                  })}
+                </h2>
+                <ul className="grid grid-cols-1 gap-x-8 gap-y-2 md:grid-cols-2">
+                  {relatedFill.map((related) => (
+                    <li key={related.identifier}>
+                      <LocaleLink
+                        className="font-medium text-zinc-900 hover:underline dark:text-white"
+                        href={mcpPath(related.identifier)}
+                      >
+                        {related.name}
+                      </LocaleLink>
+                      {mcpRealSummary(related.summary) ? (
+                        <span className="text-zinc-600 dark:text-zinc-400">
+                          {" — "}
+                          {shortSeoText(mcpRealSummary(related.summary), 80)}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </div>
         </section>
       ) : null}

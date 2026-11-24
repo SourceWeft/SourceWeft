@@ -28,6 +28,11 @@ export const MCP_RELATED_MIN_SHARED_TERMS = 2;
  */
 const PLACEHOLDER_SUMMARY = /^\s*MCP server \S+ from the MCP registry\.?\s*$/i;
 
+/** The registry summary, or "" for federation's placeholder sentence. */
+export function mcpRealSummary(summary: string | null | undefined) {
+  return summary && !PLACEHOLDER_SUMMARY.test(summary) ? summary : "";
+}
+
 export function mcpMeaningfulTerms(...texts: Array<string | null | undefined>) {
   const terms = new Set<string>();
   for (const text of texts) {
@@ -60,7 +65,10 @@ export function relatedMcpItems<T extends RelatedSubject>(input: {
     .filter((candidate) => candidate.identifier !== input.current.identifier)
     .map((candidate) => {
       let shared = 0;
-      for (const term of mcpMeaningfulTerms(candidate.name, candidate.summary)) {
+      for (const term of mcpMeaningfulTerms(
+        candidate.name,
+        candidate.summary,
+      )) {
         if (own.has(term)) shared += 1;
       }
       return {
@@ -77,5 +85,67 @@ export function relatedMcpItems<T extends RelatedSubject>(input: {
         right.shared - left.shared || right.sameCategory - left.sameCategory,
     )
     .slice(0, input.limit ?? 3)
+    .map((entry) => entry.candidate);
+}
+
+/** Servers a detail page names under "related": the keyword matches, then the fill. */
+export const MCP_RELATED_TOTAL = 6;
+
+type FillSubject = RelatedSubject &
+  Partial<Pick<MarketItemSummary, "providerName" | "runtime">>;
+
+/**
+ * Same-category servers that fill the "related" block up to `total` when too
+ * few share meaningful words (#745). Deterministic, no model: a candidate must
+ * share a category with `current`; ranked by the same publisher, then the same
+ * runtime, then the most shared categories, then identifier, so the list never
+ * changes between renders. Skips the page itself, the keyword `matched` ones
+ * and repeated identifiers. Empty when the page has no category.
+ */
+export function fillRelatedMcpItems<T extends FillSubject>(input: {
+  current: FillSubject;
+  candidates: readonly T[];
+  matched?: readonly { identifier: string }[];
+  total?: number;
+}): T[] {
+  const categories = new Set(input.current.categories);
+  const taken = new Set([
+    input.current.identifier,
+    ...(input.matched ?? []).map((item) => item.identifier),
+  ]);
+  const room =
+    (input.total ?? MCP_RELATED_TOTAL) - (input.matched?.length ?? 0);
+  if (room <= 0 || categories.size === 0) return [];
+  const provider = input.current.providerName?.trim().toLowerCase() || null;
+  return input.candidates
+    .filter((candidate) => {
+      if (taken.has(candidate.identifier)) return false;
+      taken.add(candidate.identifier);
+      return candidate.categories.some((category) => categories.has(category));
+    })
+    .map((candidate) => ({
+      candidate,
+      sameProvider:
+        provider !== null &&
+        candidate.providerName?.trim().toLowerCase() === provider
+          ? 1
+          : 0,
+      sameRuntime:
+        input.current.runtime !== undefined &&
+        candidate.runtime === input.current.runtime
+          ? 1
+          : 0,
+      shared: candidate.categories.filter((category) =>
+        categories.has(category),
+      ).length,
+    }))
+    .sort(
+      (left, right) =>
+        right.sameProvider - left.sameProvider ||
+        right.sameRuntime - left.sameRuntime ||
+        right.shared - left.shared ||
+        left.candidate.identifier.localeCompare(right.candidate.identifier),
+    )
+    .slice(0, room)
     .map((entry) => entry.candidate);
 }

@@ -15,6 +15,10 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { routing } from "../../../../i18n/routing";
+import {
+  INDEXABLE_DETAIL_ROBOTS,
+  openGraphLocales,
+} from "../../../../lib/seo-detail-meta";
 import { fitSeoTitle } from "../../../../lib/seo-title";
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { CatalogBadgeSnippet } from "../../../_components/market/catalog-badge-snippet";
@@ -205,6 +209,7 @@ export async function generateMetadata({
       openGraph: {
         description,
         images: [OG_IMAGE],
+        ...openGraphLocales(locale),
         siteName: SITE_NAME,
         title,
         type: "article",
@@ -212,7 +217,7 @@ export async function generateMetadata({
       },
       // The Files / Versions / Install tabs are views of the same page.
       ...(parseSkillDetailTab(rawSearchParams.tab) === "skill"
-        ? {}
+        ? INDEXABLE_DETAIL_ROBOTS
         : NO_INDEX_METADATA),
       title,
       twitter: {

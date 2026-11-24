@@ -654,6 +654,7 @@
       "published": "發布於",
       "securityHeading": "安全提示",
       "relatedHeading": "更多類似 {name} 的服務",
+      "relatedSameCategoryHeading": "更多{category}服務",
       "integrationsHeading": "其他 {brand} 整合",
       "officialPointer": "發布方自己的服務：<link>{name}</link>",
       "breadcrumb": "麵包屑導覽",

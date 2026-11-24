@@ -73,6 +73,7 @@ export function registerMarketRoutes(app: Hono) {
       runtime: c.req.query("runtime"),
       includeDesktopOnly: booleanQuery(c.req.query("includeDesktopOnly")),
       desktopOnly: booleanQuery(c.req.query("desktopOnly")),
+      indexableOnly: booleanQuery(c.req.query("indexableOnly")),
       limit: numberQuery(c.req.query("limit")),
       cursor: c.req.query("cursor"),
       locale: c.req.query("locale") || undefined,

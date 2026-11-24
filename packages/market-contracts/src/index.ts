@@ -440,6 +440,11 @@ export const listMarketMcpRequestSchema = z.object({
   runtime: mcpRuntimeSchema.optional(),
   includeDesktopOnly: z.boolean().optional(),
   desktopOnly: z.boolean().optional(),
+  /**
+   * Leave out servers whose page stays out of search (`searchIndexable` false
+   * on the detail), for a list of links meant to be crawled.
+   */
+  indexableOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
   // Language of `aiSummary`; English when omitted.
