@@ -390,13 +390,104 @@ test("feed 500 throws YOUTUBE_LISTING_FAILED", async () => {
   );
 });
 
-test("feed 404 throws YOUTUBE_CHANNEL_NOT_FOUND", async () => {
+/** Answers each call to `url` with the next response, in order. */
+function createSequenceFetch(url: string, responses: (() => Response)[]): {
+  fetch: typeof fetch;
+  calls: () => number;
+} {
+  let calls = 0;
+  const fetchFn = (async (input: unknown) => {
+    const requested = typeof input === "string" ? input : String(input);
+    assert.equal(requested, url);
+    const factory = responses[calls];
+    calls += 1;
+    if (!factory) throw new Error(`Unexpected fetch #${calls} of ${url}`);
+    return factory();
+  }) as typeof fetch;
+  return { fetch: fetchFn, calls: () => calls };
+}
+
+test("a feed 404 followed by a 200 is retried once and the listing succeeds", async () => {
+  const feedUrl = "https://www.youtube.com/feeds/videos.xml?playlist_id=PLxyz12345";
+  const xml = atomFeed({
+    title: "Retried playlist",
+    entries: [{ videoId: "aaaaaaaaaaa", title: "First" }],
+  });
+  const sequence = createSequenceFetch(feedUrl, [
+    textResponse(404, "Not Found"),
+    textResponse(200, xml, "application/atom+xml"),
+  ]);
+  const provider = createPublicFeedsCatalogProvider({
+    fetch: sequence.fetch,
+    feedRetryDelayMs: 0,
+  });
+
+  const collection = await provider.listCollection({
+    kind: "playlist",
+    playlistId: "PLxyz12345",
+  });
+
+  assert.equal(collection.title, "Retried playlist");
+  assert.deepEqual(
+    collection.videos.map((video) => video.videoId),
+    ["aaaaaaaaaaa"],
+  );
+  assert.equal(sequence.calls(), 2);
+});
+
+test("the feed retry waits before fetching again", async () => {
+  const feedUrl = "https://www.youtube.com/feeds/videos.xml?playlist_id=PLxyz12345";
+  const xml = atomFeed({ title: "Late playlist", entries: [] });
+  const sequence = createSequenceFetch(feedUrl, [
+    textResponse(404, "Not Found"),
+    textResponse(200, xml, "application/atom+xml"),
+  ]);
+  const provider = createPublicFeedsCatalogProvider({
+    fetch: sequence.fetch,
+    feedRetryDelayMs: 40,
+  });
+
+  const startedAt = performance.now();
+  await provider.listCollection({ kind: "playlist", playlistId: "PLxyz12345" });
+
+  assert.ok(performance.now() - startedAt >= 35);
+  assert.equal(sequence.calls(), 2);
+});
+
+test("a playlist feed 404 twice throws YOUTUBE_PLAYLIST_NOT_FOUND after exactly two fetches", async () => {
+  const feedUrl = "https://www.youtube.com/feeds/videos.xml?playlist_id=PLxyz12345";
+  const sequence = createSequenceFetch(feedUrl, [
+    textResponse(404, "Not Found"),
+    textResponse(404, "Not Found"),
+  ]);
+  const provider = createPublicFeedsCatalogProvider({
+    fetch: sequence.fetch,
+    feedRetryDelayMs: 0,
+  });
+
+  await assert.rejects(
+    () => provider.listCollection({ kind: "playlist", playlistId: "PLxyz12345" }),
+    (error: unknown) => {
+      assert.ok(error instanceof YouTubeSourceError);
+      assert.equal(error.statusCode, 404);
+      assert.equal(error.code, "YOUTUBE_PLAYLIST_NOT_FOUND");
+      return true;
+    },
+  );
+  assert.equal(sequence.calls(), 2);
+});
+
+test("a channel feed 404 twice throws YOUTUBE_CHANNEL_NOT_FOUND after exactly two fetches", async () => {
   const channelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
   const feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
-  const fetchFn = createFakeFetch({
-    [feedUrl]: textResponse(404, "Not Found"),
+  const sequence = createSequenceFetch(feedUrl, [
+    textResponse(404, "Not Found"),
+    textResponse(404, "Not Found"),
+  ]);
+  const provider = createPublicFeedsCatalogProvider({
+    fetch: sequence.fetch,
+    feedRetryDelayMs: 0,
   });
-  const provider = createPublicFeedsCatalogProvider({ fetch: fetchFn });
 
   await assert.rejects(
     () =>
@@ -411,6 +502,26 @@ test("feed 404 throws YOUTUBE_CHANNEL_NOT_FOUND", async () => {
       return true;
     },
   );
+  assert.equal(sequence.calls(), 2);
+});
+
+test("a feed 500 is not retried", async () => {
+  const feedUrl = "https://www.youtube.com/feeds/videos.xml?playlist_id=PLxyz12345";
+  const sequence = createSequenceFetch(feedUrl, [textResponse(500, "Internal Server Error")]);
+  const provider = createPublicFeedsCatalogProvider({
+    fetch: sequence.fetch,
+    feedRetryDelayMs: 0,
+  });
+
+  await assert.rejects(
+    () => provider.listCollection({ kind: "playlist", playlistId: "PLxyz12345" }),
+    (error: unknown) => {
+      assert.ok(error instanceof YouTubeSourceError);
+      assert.equal(error.code, "YOUTUBE_LISTING_FAILED");
+      return true;
+    },
+  );
+  assert.equal(sequence.calls(), 1);
 });
 
 test("channel id type resolves feed directly, without a page lookup", async () => {

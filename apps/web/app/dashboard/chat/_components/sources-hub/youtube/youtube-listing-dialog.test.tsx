@@ -205,6 +205,22 @@ test("a listing error is localized", async () => {
   assert.ok(buttonNamed("Try again"));
 });
 
+test("a missing playlist is reported as a playlist, not a channel", async () => {
+  listYouTubeCollection.mockRejectedValue(
+    new HttpClientError({
+      message: "raw",
+      status: 404,
+      statusText: "Not Found",
+      code: "YOUTUBE_PLAYLIST_NOT_FOUND",
+    }),
+  );
+  await mountOpen();
+
+  assert.ok(text().includes("This playlist could not be found."));
+  assert.ok(!text().includes("channel"));
+  assert.ok(buttonNamed("Try again"));
+});
+
 test("a refused listing says when it can be tried again", async () => {
   listYouTubeCollection.mockRejectedValue(
     new HttpClientError({

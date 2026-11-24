@@ -3852,7 +3852,8 @@
         "YOUTUBE_NO_SPEECH": "这个视频中没有检测到语音，因此没有转写文本。",
         "YOUTUBE_TRANSCRIPT_FAILED": "无法转写这个视频，请稍后再试。",
         "YOUTUBE_LISTING_FAILED": "无法列出视频，请稍后再试。",
-        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到这个频道。"
+        "YOUTUBE_CHANNEL_NOT_FOUND": "找不到这个频道。",
+        "YOUTUBE_PLAYLIST_NOT_FOUND": "找不到这个播放列表。"
       }
     },
     "noteOrigin": {
