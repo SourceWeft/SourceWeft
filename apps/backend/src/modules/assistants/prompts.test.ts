@@ -36,6 +36,17 @@ test("each half of the Router prompt limits rework to ready or dropped reports",
   assert.match(en, /`ready` or `dropped`/);
 });
 
+test("each half of the Router prompt keeps tool names, ids and errors out of say, and does not recall what the batch already holds", () => {
+  const [zh, en] = halves(ROUTER_PROMPT);
+  assert.match(zh, /不要提工具名、id、错误码/);
+  assert.match(zh, /本批事件的全文就在本批里，不用再查/);
+  assert.match(en, /never mention tool names, ids, error codes/);
+  assert.match(
+    en,
+    /already holds each event's full text, so do not look it up again/,
+  );
+});
+
 test("the Router prompt no longer says undecided events take the whole assistant offline", () => {
   assert.doesNotMatch(ROUTER_PROMPT, /offline/);
   assert.doesNotMatch(ROUTER_PROMPT, /整个助理停摆/);

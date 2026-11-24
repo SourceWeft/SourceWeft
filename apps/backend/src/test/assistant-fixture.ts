@@ -136,6 +136,7 @@ export async function createAssistantFixture(label: string) {
     async audit(entry) {
       audits.push(entry);
     },
+    workspaceSourceIds: assistants.assistantPorts.workspaceSourceIds,
   };
 
   async function kickAssistant(input: { assistantId: string }) {

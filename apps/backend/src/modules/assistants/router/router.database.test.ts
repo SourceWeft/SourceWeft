@@ -461,6 +461,48 @@ test("recall finds a ticket by id prefix and returns its full text plus routed t
   assert.ok(result.related.some((r) => r.id === t1.id));
 });
 
+test("recall resolves a member's message to its trigger, not ambiguously with the message's own feed item", async () => {
+  const { teamId, workspaceId, assistant, member } = await setupAssistant();
+  // A posted message is stored as a trigger and a feed item under one id.
+  const message = await f.insertTrigger({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    payerUserId: member,
+    text: "Summarize the Node.js LTS doc",
+  });
+  await f.schema.db.insert(f.schema.assistantFeedItems).values({
+    id: message.id,
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    kind: "member_message",
+    authorUserId: member,
+    text: "Summarize the Node.js LTS doc",
+    triggerId: message.id,
+  });
+  const ctx = routerCtx({
+    teamId,
+    workspaceId,
+    assistantId: assistant.id,
+    batchKey: "batch-key",
+    batchTriggerIds: [],
+  });
+  const recall = createRouterToolsFn(ctx, f.ports).find(
+    (tool) => tool.name === "recall",
+  )!;
+
+  const result = (await recall.invoke({ id: message.id })) as {
+    kind?: string;
+    id?: string;
+    text?: string;
+  };
+  assert.equal(isRouterToolErrorFn(result), false);
+  assert.equal(result.kind, "trigger");
+  assert.equal(result.id, message.id);
+  assert.equal(result.text, "Summarize the Node.js LTS doc");
+});
+
 test("recall returns a tool error for an id that matches nothing", async () => {
   const { teamId, workspaceId, assistant } = await setupAssistant();
   const ctx = routerCtx({

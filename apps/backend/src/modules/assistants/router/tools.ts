@@ -662,7 +662,14 @@ async function recallById(
     }),
   ]);
 
-  const totalMatches = tickets.length + triggers.length + feedItems.length;
+  // A member's message is stored twice under one id: its trigger and its
+  // feed item (`triggerId` = that id). Count it once, as the trigger, or
+  // recalling any member message would always be ambiguous.
+  const triggerIds = new Set(triggers.map((trigger) => trigger.id));
+  const ownFeedItems = feedItems.filter(
+    (item) => !(item.triggerId && triggerIds.has(item.triggerId)),
+  );
+  const totalMatches = tickets.length + triggers.length + ownFeedItems.length;
   if (totalMatches === 0) {
     return toolError("RECALL_NOT_FOUND", `Nothing matches id '${idPrefix}'.`);
   }
@@ -705,7 +712,7 @@ async function recallById(
     };
   }
 
-  const feedItem = feedItems[0]!;
+  const feedItem = ownFeedItems[0]!;
   const related: Array<{ id: string; summary: string }> = [];
   if (feedItem.ticketId)
     related.push({ id: feedItem.ticketId, summary: "ticket" });
